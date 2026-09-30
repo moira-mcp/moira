@@ -354,8 +354,15 @@ version, execution revision, execution status and diagnostics, plus:
   definition the projection used;
 - `projectedAt`: epoch ms the projection was made at, the moment open passes are measured to;
 - `waitingFor`: who the run waits for while it pauses — `"user"` when the paused node is a `lock`
-  (a gate a person clears with the PIN), `"agent"` on any other paused node (a directive,
-  teleport or materialize wait), `null` when the run is not waiting;
+  (a gate a person clears with the PIN) or an `agent-directive` marked with `humanGate` whose
+  condition held as the run arrived, or while the agent's question (`session await-user`) is open
+  on the node the run stands on; `"agent"` on any other paused node (a directive, teleport or
+  materialize wait), `null` when the run is not waiting;
+- `waitingForUser`: what the person is asked — `{ source: "agent", question, options, since }` while
+  the agent's question is open (it takes precedence), else `{ source: "gate", label }` while the run
+  waits at a step marked with `humanGate` (`label` is the gate's label, else the block label, never a
+  node id); `null` otherwise, including at a `lock`. A projection at a route cursor (`?at=`) never
+  carries the agent's question, which is not part of the route;
 - `statistics`: the typical durations of `executionWorkflowVersion` over the run owner's completed
   runs, the run itself excluded — the same object `GET /api/workflows/:id/statistics` returns for
   that owner — or `null` when the run carries no version stamp;
@@ -364,7 +371,9 @@ version, execution revision, execution status and diagnostics, plus:
 Statuses are projected from the route the engine recorded, never inferred from block order: a
 visited block is done or repeated, the block of the last visit is active or waiting, a block whose
 work never ran or that the run bypassed is skipped, everything else pending; a finished run has no
-active block unless it stopped on an open wait. An execution without a recorded route reports only
+active block unless it stopped on an open wait. An explicitly stopped run retains that unfinished
+frontier and its duration is measured only up to its stop time. Stopped runs are excluded from typical
+duration statistics. An execution without a recorded route reports only
 its current block as active or waiting, everything else pending, and `routeRecorded: false`.
 Pending and skipped blocks suppress `content.outcome` while retaining summary, details, and next
 guidance, preventing a result from an earlier revision or unit from appearing current.
@@ -845,6 +854,7 @@ The home page's work area for the signed-in user. Requires a session.
       workflowId: string;
       workflowName: string | null;
       note?: string;
+      stopReason: string | null; // explicit stop explanation; null for ordinary completion
       status: string;
       hasActiveLock: boolean;
       errorCount: number;
@@ -2545,6 +2555,162 @@ Response:
 Authentication: Required
 Admin users see all executions unless `mine=true`; regular users see only their own.
 
+### GET /api/executions/overview
+
+The signed-in user's runs as trees of a root run and its child runs, for the overview page. Only the
+caller's own runs are returned, administrators included.
+
+Query parameters:
+
+- `status`: `active` (default: every unfinished run), `waiting-user`, `waiting-agent`, `locked`,
+  `completed`, `stopped` or `all`. A run's status is `stopped` when an agent explicitly stopped it
+  with a reason, `completed` when it ended without an explicit stop, `locked` when it runs with an
+  active execution lock, `waiting-user` when it is paused on a step marked `humanGate` whose condition
+  held or the agent's question is open, and `waiting-agent` otherwise.
+- `refusals`: `true` shows only runs with refusals.
+- `workflowId`: runs of one workflow.
+- `search`: matched against the note, the run id and the workflow name (at most 200 characters).
+- `idle`: `1h`, `1d`, `3d`, `7d` or `30d` — trees without activity for longer than that.
+- `activeFrom`, `activeTo`: epoch ms or ISO date — trees whose latest activity lies within.
+- `sort`: `activity` (latest activity first, default), `idle` (longest without activity first) or
+  `created` (newest first). In every sort, trees holding a run that waits for its person come first.
+- `limit`: trees per page (1–100). Default: 50
+- `offset`: trees to skip. Default: 0
+- `ids`: comma-separated run ids (at most 100) — returns those runs' rows only (`data.runs`), without
+  nesting or paging, for refreshing single cards: `childRuns` is empty and `parent` null, while
+  `children` and `subtreeActivityAt` still describe each run's whole subtree; other users' ids are
+  left out.
+
+The status filter decides the candidate runs; a root is a candidate with no ancestor among the
+candidates — a running child of a finished parent is a root under the default filter and names its
+parent in `parent`. The default `active` view excludes stopped runs everywhere, including descendants;
+an active child of a stopped parent becomes a root and retains its parent link. Other status filters
+keep all descendants under a root, including muted runs outside the selected status, so each run
+appears once. `refusals`, `workflowId`, `search` and the activity filters apply to a tree: it is
+shown when some candidate run of it matches, and its other runs come back with `matches: false`
+(shown muted). Activity filters read `subtreeActivityAt`, the latest activity of the root and all its
+descendants. `total` counts trees.
+
+Response:
+
+```typescript
+{
+  success: boolean;
+  data: {
+    total: number;
+    limit: number;
+    offset: number;
+    runs: OverviewRun[];
+  }
+}
+
+interface OverviewRun {
+  executionId: string;
+  workflowId: string;
+  workflowName: string | null;
+  workflowVersion: string | null;
+  title: string; // the run's task title: its note, else the flow's progress title or name
+  status: "waiting-user" | "waiting-agent" | "locked" | "completed" | "stopped";
+  stopReason: string | null;
+  matches: boolean;
+  waitingForUser:
+    | { source: "gate"; label: string; notification: NotificationMark | null }
+    | {
+        source: "agent";
+        question: string;
+        options: string[];
+        since: number;
+        notification: NotificationMark | null;
+      }
+    | null; // present while status is "waiting-user"
+  refusalCount: number;
+  note: string | null;
+  current: { stepName: string | null; directiveShownAt: number | null } | null; // null once ended
+  stages: { labels: string[]; activeIndex: number | null; doneCount: number } | null; // null without progress blocks
+  list: {
+    title: string; // the active block's label
+    done: number | null;
+    total: number | null;
+    items: Array<{ index: number; title: string; done: boolean; current: boolean; durationMs: number | null }>; // up to five around the current item
+  } | null;
+  lastActivityAt: number | null; // the run's last event of work
+  subtreeActivityAt: number | null; // the latest over the run and its descendants
+  createdAt: number;
+  completedAt: number | null;
+  parentExecutionId: string | null;
+  parent: { executionId: string; title: string } | null; // for a root that continues another run
+  children: { total: number; unfinished: number };
+  childRuns: OverviewRun[]; // unfinished first, then by latest activity
+}
+// NotificationMark: as `waitingNotification` of GET /api/executions/:id, without createdAt
+```
+
+The step is named as the run page names it (the node's active label or display name, else its
+block's label) and never by a node id. Invalid parameters return 400.
+
+Authentication: Required
+
+### GET /api/executions/overview/stream
+
+Live changes of the signed-in user's runs as Server-Sent Events, for keeping the overview current.
+An event carries the run id and the kind of change only; the client refetches the affected rows
+through `GET /api/executions/overview?ids=`.
+
+Headers:
+
+- `Last-Event-ID` (or the `after` query parameter): the number of the last event the client saw. The
+  stream first sends the user's events after it, then `ready`, then the live ones. When 1000 or more
+  events were missed, it sends `reset` instead.
+
+Events:
+
+- `ready` — the stream is live: sent first by a stream opened without a cursor, and after the
+  catch-up by a resumed one; its `id` is the position to resume from. A client that sees no `ready`
+  soon after opening can treat the stream as not working (a proxy buffering or cutting it).
+- `change` — `id` is the event number, `data` is `{ executionId, kind }` with `kind` one of `created`,
+  `activity`, `status`, `lock`, `meta` and `deleted`: `status` when what the run waits for or how it
+  stands changed, `activity` when its last event of work moved, `lock` for a lock's status, `meta`
+  for a note, reminders, a new parent or another write that changes neither.
+- `reset` — the stream cannot replay what happened after the cursor: those events are no longer kept
+  (the feed keeps 24 hours), there were 1000 or more of them, or the cursor lies ahead of the feed
+  (the database was restored from an older copy). The client reloads the whole list; the event's `id`
+  is the position to resume from.
+- `close` — the session ended or the user was blocked; the server closes the stream.
+- A `: heartbeat` comment every 25 seconds.
+
+The session and the user's standing are re-checked every `OVERVIEW_STREAM_RECHECK_MS` (default two
+minutes). A user may hold five open streams; the sixth gets `429` with code `TOO_MANY_STREAMS`. The
+stream's opening and each reconnect count once against the shared API rate limit, before
+authentication. Events on an established stream do not count as requests. A stream that fails to read its catch-up ends, and the
+client reconnects with its cursor.
+
+Authentication: Required
+
+### GET /api/executions/overview/changes
+
+The same changes for a client that cannot hold the stream.
+
+Query parameters:
+
+- `after`: the number of the last event seen. Without it the response has no events, only `lastSeq`:
+  the position to poll from, as a new stream's `ready`.
+
+Response:
+
+```typescript
+{
+  success: boolean;
+  data:
+    | { reset: false; events: Array<{ seq: number; executionId: string; kind: string }>; lastSeq: number }
+    | { reset: true; lastSeq: number }; // the cursor cannot be replayed: reload the list and poll from lastSeq
+}
+```
+
+`lastSeq` is the cursor for the next poll. At most 1000 events are returned per call; when that many
+come back, `lastSeq` is the last of them and the next poll continues from there.
+
+Authentication: Required
+
 ### GET /api/executions/:id
 
 Get execution details with full context.
@@ -2564,6 +2730,7 @@ Response:
       currentNodeId: string | null;
       waitingForInputNodeId: string | null;
       note?: string | null;
+      stopReason: string | null; // status stays completed after an explicit stop
       parentExecutionId: string | null; // null for a standalone execution
       revision: number; // expectedRevision source for step-generation guards
       metadataRevisions: {
@@ -2602,6 +2769,18 @@ Response:
         reason: string;
         status: "active";
         createdAt: string; // ISO timestamp
+      } | null;
+      // The latest notification about the wait the run stands in for its person (a humanGate step
+      // or the agent's question); a reminder not due yet is skipped, a held first notification is
+      // returned as pending; null when the run does not wait for its person or nothing was queued —
+      // also for a `notify: "off"` step until its reminder is sent (its flow sent the first message)
+      waitingNotification: {
+        kind: "first" | "remind";
+        state: "pending" | "sent" | "superseded";
+        createdAt: number;       // epoch ms, queued
+        sentAt: number | null;   // epoch ms, delivered or attempted
+        deliveryStatus: "delivered" | "partial" | "no_configured_channels" | "all_failed" | null;
+        deliveredChannels: string[]; // channel ids that took it
       } | null;
     }
   }

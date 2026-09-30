@@ -4,6 +4,7 @@
  * Replaces: get_current_user, list_active_executions, get_execution_context, get_current_step
  */
 
+import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { getSessionInfoHandlerSchema, getSessionInfoSchema } from "./tool-schemas.js";
 export { getSessionInfoSchema };
@@ -75,6 +76,7 @@ interface ExecutionItem {
   status: ExecutionStatusResponse | "waiting" | "failed";
   currentNodeId: string | null;
   note?: string | null;
+  stopReason: string | null;
   parentExecutionId?: string | null;
   createdAt: string;
   updatedAt: string;
@@ -98,7 +100,10 @@ interface ExecutionContextData {
   currentNodeId: string | null;
   waitingForInputNodeId: string | null;
   note?: string | null;
+  stopReason: string | null;
   parentExecutionId?: string | null;
+  /** The agent's open question to the person (`await-user`), or null. */
+  awaitingUser: import("@mcp-moira/workflow-engine").ExecutionAwaitingUser | null;
   revision: number;
   metadataRevisions: {
     parent: string;
@@ -130,6 +135,12 @@ interface NoteUpdateResult {
   message: string;
 }
 
+interface AwaitUserResult {
+  executionId: string;
+  awaitingUser: import("@mcp-moira/workflow-engine").ExecutionAwaitingUser | null;
+  message: string;
+}
+
 interface ParentUpdateResult {
   executionId: string;
   parentExecutionId: string | null;
@@ -142,8 +153,10 @@ type SessionInfoData =
   | ExecutionsResponse
   | ExecutionContextData
   | NoteUpdateResult
+  | AwaitUserResult
   | ParentUpdateResult
   | { executionId: string; cancelled: true; revision: number }
+  | { executionId: string; stopped: true; stopReason: string; revision: number }
   | {
       reminders: import("@mcp-moira/workflow-engine").ExecutionReminder[];
       revision: number;
@@ -307,6 +320,7 @@ export async function getSessionInfo(
               status: isLocked ? "locked" : exec.status,
               currentNodeId: exec.currentNodeId,
               note: exec.note,
+              stopReason: exec.stopReason ?? null,
               parentExecutionId: exec.parentExecutionId,
               createdAt: new Date(exec.createdAt).toISOString(),
               updatedAt: new Date(exec.updatedAt).toISOString(),
@@ -416,7 +430,9 @@ export async function getSessionInfo(
           currentNodeId: execution.currentNodeId,
           waitingForInputNodeId: execution.waitingForInputNodeId || null,
           note: execution.note,
+          stopReason: execution.stopReason ?? null,
           parentExecutionId: execution.parentExecutionId,
+          awaitingUser: execution.awaitingUser ?? null,
           revision: execution.revision,
           metadataRevisions: {
             parent: metadataRevision(execution.parentExecutionId ?? null),
@@ -638,6 +654,46 @@ export async function getSessionInfo(
         });
 
         return { success: true, data: recovery.result };
+      }
+
+      case "stop-execution": {
+        const reason = params.reason?.trim();
+        if (
+          !executionId ||
+          params.expectedRevision === undefined ||
+          !reason ||
+          reason.length > 500
+        ) {
+          return {
+            success: false,
+            error:
+              "executionId, expectedRevision and reason (1–500 characters) are required for stop-execution",
+          };
+        }
+        const repository = MCPEngine.getInstance().repository;
+        const result = await repository.stopExecution(
+          executionId,
+          userId,
+          params.expectedRevision,
+          reason,
+        );
+        if (result.changed) {
+          const execution = await repository.getExecution(executionId);
+          activeExecutionsGauge.dec();
+          workflowExecutionsTotal.inc({ status: "stopped", workflow_id: execution!.workflowId });
+          await logAuditEventDirect(repository as DatabaseRepository, {
+            userId,
+            action: AuditAction.EXECUTION_CANCEL,
+            resource: "execution",
+            resourceId: executionId,
+            source: "mcp",
+            metadata: { reason, outcome: "stopped" },
+          });
+        }
+        return {
+          success: true,
+          data: { executionId, stopped: true, stopReason: reason, revision: result.revision },
+        };
       }
 
       case "cancel-execution": {
@@ -972,6 +1028,66 @@ export async function getSessionInfo(
             value: params.variableValue,
             revision: updated.revision,
             contextRevision: metadataRevision(updated.globalContext),
+          },
+        };
+      }
+
+      case "await-user": {
+        if (!executionId) {
+          return { success: false, error: ERRORS.execution_id_required("await-user") };
+        }
+        const resolving = params.resolve === true;
+        if (resolving && (params.question !== undefined || params.options !== undefined)) {
+          return {
+            success: false,
+            error: "await-user with resolve: true clears the question; omit question and options",
+          };
+        }
+        if (!resolving && params.question === undefined) {
+          return {
+            success: false,
+            error: "question is required for await-user (or pass resolve: true to clear it)",
+          };
+        }
+        const repository = MCPEngine.getInstance().repository;
+        const execution = await repository.getExecution(executionId);
+        if (!execution || !(await mayUseExecution(userId, execution))) {
+          return { success: false, error: ERRORS.execution_not_found(executionId) };
+        }
+        if (execution.status === "completed" || execution.status === "failed") {
+          return {
+            success: false,
+            error: "The execution is already finished; there is no one to wait for",
+          };
+        }
+        const updated = await repository.setExecutionAwaitingUser(
+          executionId,
+          execution.userId,
+          resolving
+            ? null
+            : {
+                id: randomUUID(),
+                question: params.question!,
+                ...(params.options ? { options: params.options } : {}),
+                since: Date.now(),
+              },
+        );
+        await logAuditEventDirect(repository as DatabaseRepository, {
+          userId,
+          action: AuditAction.EXECUTION_UPDATE_CONTEXT,
+          resource: "execution",
+          resourceId: executionId,
+          source: "mcp",
+          metadata: { action: "await-user", resolved: resolving },
+        });
+        return {
+          success: true,
+          data: {
+            executionId,
+            awaitingUser: updated.awaitingUser ?? null,
+            message: resolving
+              ? "The question is cleared; the run no longer waits for the person"
+              : "The run now shows that it waits for the person. Ask the question in the chat too: the person answers you there, and your next step clears it",
           },
         };
       }

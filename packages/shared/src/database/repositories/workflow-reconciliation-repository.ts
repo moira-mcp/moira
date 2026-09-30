@@ -1,6 +1,11 @@
 import { createHash, randomUUID } from "node:crypto";
 import type Database from "better-sqlite3";
 import { migrateWorkflowGraph } from "@mcp-moira/workflow-engine/migration";
+import type { WorkflowGraph } from "@mcp-moira/workflow-engine";
+import { drizzle } from "drizzle-orm/better-sqlite3";
+import * as schema from "../schema.js";
+import { recomputeGateWaiting, storedGraphNodes } from "../gate-waiting.js";
+import { recordExecutionsDeleted } from "../execution-change.js";
 import type { ManagedResourceState } from "../../services/managed-resource-reconciler.js";
 import { AuditAction } from "../../audit/actions.js";
 
@@ -717,9 +722,32 @@ export class WorkflowReconciliationRepository {
     }
   }
 
+  /** The definition about to be replaced, read before the UPDATE overwrites it. */
+  private previousGraph(workflowId: string): Pick<WorkflowGraph, "nodes"> | null {
+    return storedGraphNodes(drizzle(this.sqlite, { schema }), workflowId);
+  }
+
+  /** Paused runs whose gate the replaced definition changed are re-decided inside the apply transaction. */
+  private recomputeGateWaiting(
+    workflowId: string,
+    previous: Pick<WorkflowGraph, "nodes"> | null,
+    graph: Record<string, unknown>,
+  ): void {
+    recomputeGateWaiting(
+      drizzle(this.sqlite, { schema }),
+      workflowId,
+      previous,
+      graph as unknown as Pick<WorkflowGraph, "nodes">,
+    );
+  }
+
   private applyWorkflow(operation: WorkflowApplyOperation, now: number): void {
     if (operation.state.lifecycle === "absent") {
       if (operation.workflowId) {
+        // The workflow's runs go with it (cascade): record them as deleted first, in this transaction.
+        recordExecutionsDeleted(drizzle(this.sqlite, { schema }), {
+          workflowId: operation.workflowId,
+        });
         const result = this.sqlite
           .prepare("DELETE FROM workflow WHERE id = ? AND userId = ?")
           .run(operation.workflowId, operation.owner);
@@ -732,6 +760,7 @@ export class WorkflowReconciliationRepository {
     if (operation.state.lifecycle === "deleted") {
       if (operation.workflowId) {
         const graph = operation.state.content.graph;
+        const previous = this.previousGraph(operation.workflowId);
         const storedGraph = JSON.stringify({ ...graph, id: operation.workflowId });
         const metadata = (graph.metadata ?? {}) as Record<string, unknown>;
         const result = this.sqlite
@@ -757,6 +786,7 @@ export class WorkflowReconciliationRepository {
         if (result.changes !== 1) {
           throw new Error(`Workflow ${operation.owner}/${operation.slug} changed during apply`);
         }
+        this.recomputeGateWaiting(operation.workflowId, previous, graph);
       }
       return;
     }
@@ -767,6 +797,7 @@ export class WorkflowReconciliationRepository {
     const metadata = (graph.metadata ?? {}) as Record<string, unknown>;
     const validation = operation.validation ?? { isValid: true, errors: [] };
     if (operation.workflowId) {
+      const previous = this.previousGraph(operation.workflowId);
       const result = this.sqlite
         .prepare(
           `UPDATE workflow SET slug = ?, name = ?, description = ?, version = ?, graph = ?,
@@ -792,6 +823,7 @@ export class WorkflowReconciliationRepository {
       if (result.changes !== 1) {
         throw new Error(`Workflow ${operation.owner}/${operation.slug} changed during apply`);
       }
+      this.recomputeGateWaiting(workflowId, previous, graph);
       return;
     }
     this.sqlite

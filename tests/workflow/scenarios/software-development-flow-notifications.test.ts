@@ -131,6 +131,13 @@ function expectClean(run: NotificationScenarioResult) {
   );
 }
 
+/** The stored «waiting for you» mark at each visit of a step, in order. */
+const gateMarks = (run: NotificationScenarioResult, nodeId: string) =>
+  run.pauses.filter((pause) => pause.nodeId === nodeId).map((pause) => pause.gateWaiting);
+
+/** A message sent right before a step the person decides ends by saying the run waits for them. */
+const WAITING_FOR_YOU = /🙋 waiting for you: [^\n]+$/u;
+
 const ALL_DONE = "📝 2/2\n✓ 1. Add the export endpoint\n✓ 2. Add the export button";
 const unitTwoPlan = (overrides: Answer) => [
   { preparation_outcome: "ready", visual_mode: "disabled", approval_required: false },
@@ -175,6 +182,14 @@ describe("Software Development Flow notifications", () => {
     expect(finished).toContain("No commits were made; the changes are in the working tree.");
     expect(finished).toContain(`Final report: ${FINAL}`);
     expect(finished).toContain(ALL_DONE);
+    // Every decision here is the person's.
+    expect(gateMarks(run, "confirm-requirements")).toEqual([true]);
+    expect(gateMarks(run, "approve-plan")).toEqual([true]);
+    expect(gateMarks(run, "review-plan-unit-with-user")).toEqual([true, true]);
+    expect(gateMarks(run, "report-and-accept-feature")).toEqual([true]);
+    for (const message of [plan, unitOne, unitTwo, finalApproval]) {
+      expect(message).toMatch(WAITING_FOR_YOU);
+    }
   });
 
   test("autonomous: the work goes ahead with the goal, a report without stopping for approval, the finish with the commits — nothing asks", async () => {
@@ -203,6 +218,7 @@ describe("Software Development Flow notifications", () => {
     );
     expect(finished).toContain("The work is committed locally.");
     expect(finished).toContain(ALL_DONE);
+    expect(run.pauses.filter((pause) => pause.gateWaiting)).toEqual([]);
   });
 
   test.each([
@@ -278,6 +294,11 @@ describe("Software Development Flow notifications", () => {
         expect(message).toContain(
           "Choose: fix it and let the agent try again, or end the whole run — the work done so far stays.",
         );
+        // An external blocker waits for the person in both modes: the agent may retry on its own
+        // only once the state has changed, and only the person can change it or end the run.
+        const waitStep = `wait-for-${nodeId.replace("notify-", "").replace("-blocker", "")}-state-change`;
+        expect(gateMarks(run, waitStep)).toEqual([true]);
+        expect(message).toMatch(WAITING_FOR_YOU);
         expectClean(run);
       }
     },
@@ -311,6 +332,33 @@ describe("Software Development Flow notifications", () => {
     );
     expect(closed).toContain("committing the remaining changes is left to you");
     expect(closed).toContain(ALL_DONE);
+    expect(gateMarks(run, "resolve-finalization-blocker")).toEqual([true]);
+    expectClean(run);
+  });
+
+  test("autonomous: a blocked finish still waits for the person, and the agent retries once it changed", async () => {
+    const run = await runNotificationScenario(workflow, {
+      mockInputs: answers("autonomous", {
+        "activate-reviewed-plan": { current_step_index: 1, vcs_commits_authorized: true },
+        "prepare-plan-unit-implementation": unitTwoPlan({
+          visual_mode: "disabled",
+          approval_required: false,
+        }),
+        "finalize-feature": [
+          {
+            finalization_outcome: "external_blocker",
+            blocker_summary: "The repository is locked by another process",
+          },
+          { finalization_outcome: "pass" },
+        ],
+        "resolve-finalization-blocker": { blocker_decision: "retry" },
+      }),
+    });
+    expect(ids(run).slice(-2)).toEqual(["notify-finalization-blocker", "notify-workflow-complete"]);
+    // Only the person can clear the external state or end the run, so the autonomous run is shown
+    // as waiting for them while it stands there.
+    expect(gateMarks(run, "resolve-finalization-blocker")).toEqual([true]);
+    expect(text(run, "notify-finalization-blocker")).toMatch(WAITING_FOR_YOU);
     expectClean(run);
   });
 
@@ -410,6 +458,8 @@ describe("Software Development Flow notifications", () => {
     );
     // The revised plan is put to the person again.
     expect(ids(interactive).filter((id) => id === "notify-plan-approval")).toHaveLength(2);
+    expect(gateMarks(interactive, "approve-current-unit-closure")).toEqual([true]);
+    expect(text(interactive, "notify-unit-closure")).toMatch(WAITING_FOR_YOU);
     expectClean(interactive);
 
     const autonomous = await runNotificationScenario(workflow, {
@@ -424,6 +474,9 @@ describe("Software Development Flow notifications", () => {
       autonomous.route.indexOf("approve-current-unit-closure"),
     );
     expect(ids(autonomous).filter((id) => id === "notify-implementation-started")).toHaveLength(2);
+    // The autonomous run decides the closure itself: nobody is waited for.
+    expect(gateMarks(autonomous, "approve-current-unit-closure")).toEqual([false]);
+    expect(text(autonomous, "notify-unit-closure-agent")).not.toContain("waiting for you");
     expectClean(autonomous);
   });
 

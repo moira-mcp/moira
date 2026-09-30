@@ -171,9 +171,34 @@ export interface ExecutionProgress {
   /** Epoch ms the projection was made at; open passes are measured to it. */
   projectedAt: number;
   /**
-   * Who the run waits for while it pauses: `user` at a gate a person clears (a lock's PIN),
-   * `agent` on a step the agent must complete (a directive, teleport or materialize wait),
-   * `null` when the run is not waiting.
+   * Who the run waits for while it pauses: `user` at a gate a person clears (a lock's PIN), on a
+   * directive marked `humanGate` whose condition holds, or while the agent's own question
+   * (`session await-user`) is open; `agent` on any other step the agent must complete (a directive,
+   * teleport or materialize wait); `null` when the run is not waiting.
    */
   waitingFor: "agent" | "user" | null;
+  /**
+   * What the person is waited for: the agent's open question (`source: "agent"`), which takes
+   * precedence as the more specific ask, or the step its workflow marks as waiting for a person
+   * (`source: "gate"`); null otherwise. A lock's PIN is reported by `waitingFor` alone. The agent's
+   * question is not part of the route, so a projection at a route cursor never carries it.
+   */
+  waitingForUser: ExecutionWaitingForUser | null;
 }
+
+/** Why a run waits for a person, worded for them. */
+export type ExecutionWaitingForUser =
+  | {
+      source: "gate";
+      /** What the person is asked to do; never a node id. */
+      label: string;
+    }
+  | {
+      source: "agent";
+      /** The agent's question, as it asked it. */
+      question: string;
+      /** The choices it offered, when the question is a choice. */
+      options: string[];
+      /** Epoch ms the question was raised. */
+      since: number;
+    };

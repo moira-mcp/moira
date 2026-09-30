@@ -583,30 +583,103 @@ export const workflowReconciliationResolution = sqliteTable(
   }),
 );
 
-export const workflowExecution = sqliteTable("workflowExecution", {
-  executionId: text("executionId").primaryKey(),
-  workflowId: text("workflowId")
-    .notNull()
-    .references(() => workflow.id, { onDelete: "cascade" }),
-  userId: text("userId")
-    .notNull()
-    .references(() => user.id, { onDelete: "cascade" }),
-  state: text("state").notNull(), // 'running' | 'completed' (simplified from 4 to 2 statuses, Issue #386)
-  currentNodeId: text("currentNodeId"),
-  waitingForInputNodeId: text("waitingForInputNodeId"),
-  context: text("context").notNull(), // JSON
-  error: text("error"), // DEPRECATED: kept for migration, use errors array instead
-  errors: text("errors"), // JSON array of ExecutionError (Issue #386)
-  note: text("note"), // User-provided note for identification (max 500 chars)
-  parentExecutionId: text("parentExecutionId"), // Links to parent execution for continuation
-  revision: integer("revision").notNull().default(0), // Workflow-step generation
-  reminders: text("reminders").notNull().default("[]"), // JSON ExecutionReminder[]
-  visits: text("visits").notNull().default("[]"), // JSON ExecutionVisit[]: the append-only route log
-  workflowVersion: text("workflowVersion"), // metadata.version of the definition the run started on
-  createdAt: integer("createdAt", { mode: "timestamp_ms" }),
-  updatedAt: integer("updatedAt", { mode: "timestamp_ms" }),
-  completedAt: integer("completedAt", { mode: "timestamp_ms" }),
-});
+export const workflowExecution = sqliteTable(
+  "workflowExecution",
+  {
+    executionId: text("executionId").primaryKey(),
+    workflowId: text("workflowId")
+      .notNull()
+      .references(() => workflow.id, { onDelete: "cascade" }),
+    userId: text("userId")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    state: text("state").notNull(), // 'running' | 'completed' (simplified from 4 to 2 statuses, Issue #386)
+    currentNodeId: text("currentNodeId"),
+    waitingForInputNodeId: text("waitingForInputNodeId"),
+    context: text("context").notNull(), // JSON
+    error: text("error"), // DEPRECATED: kept for migration, use errors array instead
+    errors: text("errors"), // JSON array of ExecutionError (Issue #386)
+    note: text("note"), // User-provided note for identification (max 500 chars)
+    parentExecutionId: text("parentExecutionId"), // Links to parent execution for continuation
+    revision: integer("revision").notNull().default(0), // Workflow-step generation
+    reminders: text("reminders").notNull().default("[]"), // JSON ExecutionReminder[]
+    visits: text("visits").notNull().default("[]"), // JSON ExecutionVisit[]: the append-only route log
+    // Paused on a step the workflow marks as waiting for a person (`humanGate`); set by the engine
+    gateWaiting: integer("gateWaiting", { mode: "boolean" }).notNull().default(false),
+    // JSON ExecutionAwaitingUser: the agent's open question (`session await-user`), null when none
+    awaitingUser: text("awaitingUser"),
+    workflowVersion: text("workflowVersion"), // metadata.version of the definition the run started on
+    // Epoch ms of the last event of work (visits' enteredAt/leftAt, completedAt); see execution-activity.ts
+    lastActivityAt: integer("lastActivityAt"),
+    // How many journal entries are refusals (countRefusals over `errors`)
+    refusalCount: integer("refusalCount").notNull().default(0),
+    createdAt: integer("createdAt", { mode: "timestamp_ms" }),
+    updatedAt: integer("updatedAt", { mode: "timestamp_ms" }),
+    completedAt: integer("completedAt", { mode: "timestamp_ms" }),
+    stopReason: text("stopReason"),
+  },
+  (table) => ({
+    userStateActivityIdx: index("workflow_execution_user_state_activity_idx").on(
+      table.userId,
+      table.state,
+      table.lastActivityAt,
+    ),
+    parentIdx: index("workflow_execution_parent_idx").on(table.parentExecutionId),
+  }),
+);
+
+/**
+ * The change feed of execution rows (see execution-change.ts): every write of a run records one event
+ * here in its own transaction; readers follow `seq`. No foreign key — a `deleted` event outlives its
+ * run. Kept for a fixed 24 hours.
+ */
+export const executionChange = sqliteTable(
+  "executionChange",
+  {
+    seq: integer("seq").primaryKey({ autoIncrement: true }),
+    executionId: text("executionId").notNull(),
+    userId: text("userId").notNull(),
+    kind: text("kind").notNull(), // created | activity | status | lock | meta | deleted
+    at: integer("at").notNull(), // epoch ms
+  },
+  (table) => ({
+    userSeqIdx: index("execution_change_user_seq_idx").on(table.userId, table.seq),
+    atIdx: index("execution_change_at_idx").on(table.at),
+  }),
+);
+
+/**
+ * Notifications that a run waits for its person. A row is written in the same transaction that puts
+ * the run into the wait, keyed by the wait (`gate:<visit seq>` or `agent:<question id>`) and kind, so
+ * a repeated or rolled-back transition never sends twice or for nothing. The MCP server's sender is
+ * the only process that delivers them and records the result here.
+ */
+export const executionNotification = sqliteTable(
+  "executionNotification",
+  {
+    id: text("id").primaryKey(),
+    executionId: text("executionId")
+      .notNull()
+      .references(() => workflowExecution.executionId, { onDelete: "cascade" }),
+    userId: text("userId").notNull(),
+    waitKey: text("waitKey").notNull(), // gate:<visit seq> | agent:<question id>
+    kind: text("kind").notNull(), // first | remind
+    state: text("state").notNull(), // pending | sent | superseded
+    notBefore: integer("notBefore").notNull(), // epoch ms; the sender holds the row until then
+    createdAt: integer("createdAt").notNull(),
+    sentAt: integer("sentAt"),
+    deliveryStatus: text("deliveryStatus"), // delivered | partial | no_configured_channels | all_failed
+    deliveredChannels: text("deliveredChannels"), // JSON string[] of channel ids that took it
+  },
+  (table) => ({
+    waitIdx: uniqueIndex("execution_notification_wait_idx").on(
+      table.executionId,
+      table.waitKey,
+      table.kind,
+    ),
+    pendingIdx: index("execution_notification_pending_idx").on(table.state, table.notBefore),
+  }),
+);
 
 /** Durable replay and ownership state for state-changing MCP workflow operations. */
 export const executionMutationAttempt = sqliteTable(

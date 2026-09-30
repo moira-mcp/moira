@@ -127,6 +127,10 @@ function everyReferenceKind(): WorkflowGraph {
         directive: "Confirm the answer {{ask.answer}} with the user.",
         completionCondition: "The user confirmed {{ask.answer}}.",
         progressActiveContent: { summary: "Confirming {{ask.answer}}" },
+        humanGate: {
+          label: "Confirm the answer",
+          when: { operator: "eq", left: { contextPath: "ask.answer" }, right: "yes" },
+        },
         connections: { success: "save" },
       },
       {
@@ -190,6 +194,10 @@ describe("renameNode", () => {
       items: "clarify.items",
       title: "name",
       current: "clarify.index",
+    });
+    expect(node(next, "confirm").humanGate).toEqual({
+      label: "Confirm the answer",
+      when: { operator: "eq", left: { contextPath: "clarify.answer" }, right: "yes" },
     });
     expect(node(next, "sub").inputMapping).toEqual({ "clarify.answer": "question" });
     expect(node(next, "sub").outputMapping).toEqual({ result: "clarify.result" });
@@ -260,12 +268,16 @@ describe("reference and prose lookup", () => {
     expect(paths).toContain("nodes[notify].message");
     expect(paths).toContain("variableRegistry.note.default");
     expect(paths).toContain("nodes[sub].inputMapping");
+    expect(paths).toContain("nodes[confirm].humanGate.when.left.contextPath");
   });
 
   test("finds prose that mentions the id outside a reference", () => {
     const prose = findProseMentions(everyReferenceKind(), "ask");
     expect(prose).toEqual(expect.arrayContaining([{ path: "nodes[notify].message", count: 2 }]));
     expect(prose.map((p) => p.path)).not.toContain("nodes[route].cases");
+    expect(
+      prose.map((p) => p.path).some((path) => path.startsWith("nodes[confirm].humanGate")),
+    ).toBe(false);
   });
 
   test("finds prose outside the nodes too, and never a reference there", () => {

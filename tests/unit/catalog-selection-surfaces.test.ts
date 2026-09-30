@@ -198,6 +198,12 @@ describe("public workflow selection surfaces", () => {
     expect(packagedPrompt).toBe(configPrompt);
     expect(configPrompt).toContain("complete current `list()` result");
     expect(configPrompt).toContain('session({ action: "add-reminder", ... })');
+    expect(configPrompt).toContain(
+      'call `session({ action: "await-user", executionId, question, options })`',
+    );
+    expect(russianPrompt).toContain(
+      'вызовите `session({ action: "await-user", executionId, question, options })`',
+    );
     expect(configPrompt).toContain("active reminders only when that workflow completes");
     expect(configPrompt).toContain("neither performs nor authorizes it");
     expect(configPrompt).not.toContain(

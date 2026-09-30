@@ -1,6 +1,6 @@
 /**
- * E2E: the screen tours of the home page, the flow list, the runs list, notes, playbooks and
- * artifacts, as a new reader meets them.
+ * E2E: the screen tours of the home page, the overview, the flow list, the runs list, notes,
+ * playbooks and artifacts, as a new reader meets them.
  *
  * Each tour is opened with its page's "What is this?" and walked to its end. At every step the card
  * names the step, the spotlight lands on the element the step explains, and that element is on
@@ -149,6 +149,18 @@ const TOURS: readonly (readonly [
       ["filters", "flows.filters"],
     ],
     true,
+  ],
+  [
+    "overview",
+    "/overview",
+    [
+      ["intro", "overview.header"],
+      ["status", "overview.status"],
+      ["idle", "overview.idle"],
+      ["board", "overview.board"],
+      ["live", "overview.live"],
+    ],
+    [],
   ],
   [
     "runs",

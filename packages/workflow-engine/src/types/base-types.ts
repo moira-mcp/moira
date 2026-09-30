@@ -100,17 +100,51 @@ export interface WorkflowExecution {
   globalContext: ExecutionContext;
   status: LegacyExecutionStatus; // TODO(#386): Change to ExecutionStatus after migration
   note?: string | null; // User-provided note for identification (max 500 chars)
+  /** Required explanation of an explicit stop; null for ordinary completion. */
+  stopReason?: string | null;
   parentExecutionId?: string | null; // Links to parent execution for continuation
   revision: number; // Workflow-step generation; metadata targets use independent revisions
   /** `metadata.version` of the definition the run started on; absent for runs recorded before it was stamped. */
   workflowVersion?: string | null;
   reminders?: ExecutionReminder[]; // Durable caller follow-ups returned at completion
   visits?: ExecutionVisit[]; // Append-only route log written by the executor on every node transition
+  /**
+   * The run is paused on a step its workflow marks as waiting for a person (`humanGate`), and the
+   * gate's condition held when the run entered it. Set by the engine where it sets the waiting node.
+   */
+  gateWaiting?: boolean;
+  /**
+   * Epoch ms of the run's last event of work (its visits' `enteredAt`/`leftAt`, `completedAt`), and
+   * how many journal entries are refusals — derived by `executionActivity` and stored by every writer
+   * that changes the facts they come from. Read-only for callers.
+   */
+  lastActivityAt?: number | null;
+  refusalCount?: number;
+  /**
+   * The agent's open question to the person (`session await-user`), or null. It is cleared by the
+   * agent's own next action and when the run leaves the node the question was asked on — never by a
+   * person's edits — so it names what the person is asked while the agent stands there.
+   */
+  awaitingUser?: ExecutionAwaitingUser | null;
   createdAt: number;
   updatedAt: number;
   completedAt?: number;
   error?: string; // DEPRECATED: kept for migration, use errors array instead
   errors?: ExecutionError[]; // Persistent error log (Issue #386)
+}
+
+/** An agent's open question to the person, raised with `session await-user`. */
+export interface ExecutionAwaitingUser {
+  /** Fresh for every raise; a replaced question gets a new id. */
+  id: string;
+  /** The node the run stood on when the question was raised; leaving it clears the question. */
+  nodeId: string;
+  /** What the agent needs from the person, 1–500 characters. */
+  question: string;
+  /** The choices, when the question is a choice (at most four). */
+  options?: string[];
+  /** Epoch ms of the raise. */
+  since: number;
 }
 
 /** Who produced a runtime adjustment: the agent through MCP, or a person through the web UI. */

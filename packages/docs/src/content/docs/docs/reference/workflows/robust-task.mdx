@@ -176,6 +176,15 @@ decision. Because the flow notifies, starting it for a user with no configured c
 with an instruction; an agent that wants to run without notifications prepares the start again with
 `skipNotificationCheck: true`. A failed notification does not stop the workflow.
 
+### Waiting for you
+
+The plan approval and the three decisions above — a step that exhausts its repairs, and the plan and
+final review bounds — are marked as steps that wait for you. While an interactive run stands on one,
+the run page and the run's progress say **waiting for you** with what you are asked, and the message
+that asks ends with `🙋 waiting for you`. The flow's own message is the first notification about the
+wait; if nobody answers for a day, Moira sends one reminder with a link to the run. An autonomous run
+takes the three decisions itself, so on those steps it is not shown as waiting for you.
+
 ## Use cases
 
 - complex implementation or refactoring with several dependent stages;

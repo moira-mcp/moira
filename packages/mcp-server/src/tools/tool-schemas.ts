@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { zodToJsonSchema } from "zod-to-json-schema";
+import { AWAITING_USER_LIMITS } from "@mcp-moira/workflow-engine/awaiting-user";
 import { progressAuthoringSchema } from "../schemas/progress-authoring.js";
 
 export const listWorkflowsSchema = z.object({
@@ -228,6 +229,7 @@ export const getSessionInfoHandlerSchema = z.object({
       "diagnose",
       "recover",
       "cancel-execution",
+      "stop-execution",
       "update-note",
       "set-parent",
       "add-reminder",
@@ -236,6 +238,7 @@ export const getSessionInfoHandlerSchema = z.object({
       "remove-reminder",
       "variables",
       "set-variable",
+      "await-user",
       "progress",
       "progress-image-token",
       "materialize",
@@ -276,6 +279,13 @@ export const getSessionInfoHandlerSchema = z.object({
     .optional()
     .describe('Parent execution UUID or "none" for set-parent'),
   expectedRevision: z.number().int().min(0).optional().describe("Expected workflow-step revision"),
+  reason: z
+    .string()
+    .trim()
+    .min(1)
+    .max(500)
+    .optional()
+    .describe("Required explanation for stop-execution (1–500 characters)"),
   expectedParentRevision: z
     .string()
     .length(64)
@@ -302,6 +312,23 @@ export const getSessionInfoHandlerSchema = z.object({
   writePhase: z.enum(["current", "other"]).optional(),
   variableName: z.string().optional(),
   variableValue: z.unknown().optional(),
+  question: z
+    .string()
+    .trim()
+    .min(1)
+    .max(AWAITING_USER_LIMITS.question)
+    .optional()
+    .describe("await-user: what you need from the person, in a sentence or two"),
+  options: z
+    .array(z.string().trim().min(1).max(AWAITING_USER_LIMITS.option))
+    .min(1)
+    .max(AWAITING_USER_LIMITS.options)
+    .optional()
+    .describe("await-user: the choices, when the question is a choice"),
+  resolve: z
+    .literal(true)
+    .optional()
+    .describe("await-user: clear your open question instead of raising one"),
   theme: z.enum(["light", "dark"]).optional(),
   viewportWidth: z.number().int().min(480).max(4096).optional(),
   view: z

@@ -81,7 +81,7 @@ moira-workflow ./workflows/production/flows/<flow>.json rename review-plan indep
 ```
 
 Gives a node a new id and rewrites every reference to it: connection targets, `{{node.name}}`
-templates and block-helper arguments in any template text, routing case `contextPath` operands,
+templates and block-helper arguments in any template text, routing case and `humanGate.when` `contextPath` operands,
 progress list bindings, subgraph mappings, end `finalOutput`, batch write-note sources, expression
 identifiers and `runtimePolicy` write allowances. Connection keys, case outputs and block ids are
 not node references and stay as they are, and so does prose that mentions the id outside a
@@ -145,7 +145,11 @@ moira-workflow ./workflows/production/flows/<flow>.json move node-to-move
 `--attach-progress-image` accepts `true` or `false` and is rejected for every node type except
 `user-notification` or deprecated `telegram-notification`. `--plan-list <full|progress|none>` sets
 how much of the run's plan a `user-notification` carries; `progress` is the default and removes the
-field, and every other node type is rejected. These update options persist the requested fields; they do not derive the
+field, and every other node type is rejected. `--human-gate <json|none>` sets or removes an
+`agent-directive`'s `humanGate` (`label`, `when`, `notify`, `remindAfter`); the value's fields and
+forms are checked before writing, the condition's structure by `validate`, and every other node type is
+rejected. `get`, `schema` (a `HUMAN_GATE` line under the node), `structure` and `diff` show the mark.
+These update options persist the requested fields; they do not derive the
 process or validate its meaning — run `derive` afterwards.
 
 `--progress-active-label` is valid only for a node that pauses the run and belongs to a block. It

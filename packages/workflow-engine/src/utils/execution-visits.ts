@@ -8,6 +8,8 @@
  */
 
 import type { ExecutionVisit, WorkflowExecution } from "../types/base-types.js";
+import type { WorkflowGraph } from "../interfaces/core-interfaces.js";
+import { humanGateWaiting } from "./human-gate.js";
 
 /** One node visit as the engine loop reports it, before it is numbered on the execution. */
 export interface EngineVisit {
@@ -190,8 +192,9 @@ export function withInFlightVisit(execution: WorkflowExecution, nodeId: string):
 }
 
 /**
- * The node types a run pauses on, by who is waited for there: a `lock` gate waits for a person,
- * every other pausing node for the agent. Continuation recovery resumes at these same types.
+ * The node types a run pauses on, by who is waited for there by default: a `lock` gate waits for a
+ * person, every other pausing node for the agent. A directive marked `humanGate` overrides its
+ * default per run (`humanGateWaiting`). Continuation recovery resumes at these same types.
  */
 export const PAUSE_ACTOR_BY_NODE_TYPE: Readonly<Record<string, "agent" | "user">> = {
   "agent-directive": "agent",
@@ -210,7 +213,8 @@ export const PAUSING_NODE_TYPES: ReadonlySet<string> = new Set(
  * node the run pauses on — that node as the one the run waits on, with a synthetic open visit that
  * carries no timestamp (the run has not entered it yet, so its pass has no duration). A projection
  * of this copy names the block and the actor the message's reader is about to wait for or on: a
- * `lock` gate reads as a person, a directive, teleport, materialize or subgraph wait as the agent. A
+ * `lock` gate reads as a person, and so does a directive marked `humanGate` whose condition holds;
+ * any other directive, teleport, materialize or subgraph wait reads as the agent. A
  * successor that pauses nowhere (a routing node, an end) leaves the copy as `withInFlightVisit`
  * makes it. The returned copy is never persisted.
  */
@@ -227,7 +231,7 @@ export function withInFlightPause(
   if (!next || !PAUSING_NODE_TYPES.has(next.type)) return inFlight;
   const visits = inFlight.visits ?? [];
   // The visit is a wait, so the projection marks the block `waiting` and words the actor.
-  return {
+  const paused: WorkflowExecution = {
     ...inFlight,
     currentNodeId: next.id,
     waitingForInputNodeId: next.id,
@@ -235,6 +239,11 @@ export function withInFlightPause(
       ...visits,
       { seq: visits.length, nodeId: next.id, exitKey: null, changes: {}, waited: true },
     ],
+  };
+  // Who is waited for at the next step is decided as the engine will decide it on arrival.
+  return {
+    ...paused,
+    gateWaiting: humanGateWaiting(graph as Pick<WorkflowGraph, "nodes">, paused),
   };
 }
 

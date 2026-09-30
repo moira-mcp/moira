@@ -16,6 +16,7 @@ import {
   Component,
   setGlobalService,
   getDatabase,
+  ExecutionNotificationRepository,
   closeDatabase,
   user,
   oauthAccessToken,
@@ -65,6 +66,7 @@ import {
   DatabaseRepository,
   ExecutionAttemptMaintenance,
   getActiveUserCommunicationService,
+  WaitingNotificationSender,
 } from "@mcp-moira/workflow-engine";
 import { runWithMCPContext } from "./core/request-context.js";
 import { auth } from "./auth.js";
@@ -612,6 +614,13 @@ async function main() {
         reason: extensionState.reason,
       });
     }
+    // This process is the only sender of «waiting for you» notifications; every writer queues them.
+    // It starts after the extension channels are registered, so a notification due at startup is
+    // not recorded as having no channel for a person whose channel comes from an extension.
+    const stopWaitingNotifications = new WaitingNotificationSender(
+      new DatabaseRepository(),
+      new ExecutionNotificationRepository(getDatabase()),
+    ).start();
     const reconciliationNotice = formatWorkflowReconciliationNotice(getSqliteInstance());
     if (reconciliationNotice) {
       logger.error(
@@ -637,6 +646,7 @@ async function main() {
     process.on("SIGINT", () => {
       logger.info("Received SIGINT, shutting down HTTP server");
       stopAttemptMaintenance();
+      stopWaitingNotifications();
       getCodespaceObservabilityService().stop();
       httpServer.close(() => {
         try {
@@ -654,6 +664,7 @@ async function main() {
     process.on("SIGTERM", () => {
       logger.info("Received SIGTERM, shutting down HTTP server");
       stopAttemptMaintenance();
+      stopWaitingNotifications();
       getCodespaceObservabilityService().stop();
       httpServer.close(() => {
         try {

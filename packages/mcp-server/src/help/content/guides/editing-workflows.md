@@ -82,7 +82,7 @@ per case plus an `EDGE` line per connection, `structure --detailed` lists each c
 change is reviewable without reading the raw JSON.
 
 Structure is changed with `rename` and `delete`. `rename` gives a node a new kebab-case id and
-rewrites every reference to it — connection targets, `{{node.name}}` templates, routing case paths,
+rewrites every reference to it — connection targets, `{{node.name}}` templates, routing case and human-gate condition paths,
 expressions, list bindings, subgraph mappings and write allowances — and prints each location it
 changed. Prose that mentions the id outside a reference stays as it is. `delete` refuses while
 another node still leads to the node being removed and names each such edge; decide every one with
@@ -113,7 +113,12 @@ moira-workflow ./workflow.json set-progress --file ./progress.json
 moira-workflow ./workflow.json update implement --progress-node-id implementation
 moira-workflow ./workflow.json update implement --progress-active-label "Implement {{unit}}/{{total}}"
 moira-workflow ./workflow.json update notify --progress-node-id review --attach-progress-image true
+moira-workflow ./workflow.json update approve --human-gate '{"label":"Approve the plan","notify":"off","remindAfter":"1d"}'
 ```
+
+`--human-gate` marks an `agent-directive` as a step that waits for a person's decision (see
+`humanGate` in the node reference) and `--human-gate none` removes the mark; `schema`, `structure` and
+`diff` show it.
 
 The block contract has its own commands: own a node by a block, add or edit a block with its
 description, bind a block to the list its steps work through, label a connection that leaves a

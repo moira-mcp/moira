@@ -26,6 +26,7 @@ export function parseStoredGraph(json: string): WorkflowGraph {
 }
 import { createLogger } from "../../logging/logger.js";
 import type * as schema from "../schema.js";
+import { recordExecutionsDeleted } from "../execution-change.js";
 import { randomUUID } from "node:crypto";
 import {
   generateSlugFromName,
@@ -35,6 +36,7 @@ import {
 } from "../../validation/slug-handle.js";
 import { executeListQuery, type ListQueryConfig } from "../list-query-builder.js";
 import { WorkflowRevisionConflictError } from "../../errors/domain-errors.js";
+import { recomputeGateWaiting, storedGraphNodes } from "../gate-waiting.js";
 
 const DELETED_WORKFLOW_LIST_CONFIG: ListQueryConfig<"name" | "deletedAt"> = {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -674,6 +676,39 @@ export class WorkflowRepository {
   // ===== Get Operations =====
 
   /**
+   * The definitions with these ids the user may view, with their names, in one query (the access
+   * decision is `mayView`, as for `get`); deleted and inaccessible workflows are left out.
+   */
+  async getManyForUser(
+    workflowIds: string[],
+    userId: string,
+  ): Promise<Map<string, { name: string; graph: WorkflowGraph }>> {
+    const result = new Map<string, { name: string; graph: WorkflowGraph }>();
+    if (workflowIds.length === 0) return result;
+    const rows = await this.db
+      .select({
+        id: workflow.id,
+        userId: workflow.userId,
+        visibility: workflow.visibility,
+        name: workflow.name,
+        graph: workflow.graph,
+      })
+      .from(workflow)
+      .where(
+        and(
+          inArray(workflow.id, [...new Set(workflowIds)]),
+          or(eq(workflow.deleted, false), isNull(workflow.deleted)),
+        ),
+      );
+    for (const row of rows) {
+      if (await this.mayView(userId, row)) {
+        result.set(row.id, { name: row.name, graph: parseStoredGraph(row.graph) });
+      }
+    }
+    return result;
+  }
+
+  /**
    * Get workflow by ID
    * Checks access: owner OR public OR shared (via sharedAccessChecker)
    */
@@ -934,27 +969,37 @@ export class WorkflowRepository {
       }
 
       // Update - only owner can update. With an expected revision the check and the write are one
-      // statement, so two writers that read the same revision cannot both succeed.
-      const updated = await this.db
-        .update(workflow)
-        .set({
-          name: graph.metadata.name,
-          description: graph.metadata.description || null,
-          version: graph.metadata.version,
-          graph: graphJson,
-          visibility,
-          deleted: false,
-          deletedAt: null,
-          deletedBy: null,
-          updatedAt: now,
-          revision: sql`${workflow.revision} + 1`,
-        })
-        .where(
-          options.expectedRevision === undefined
-            ? eq(workflow.id, existingId)
-            : and(eq(workflow.id, existingId), eq(workflow.revision, options.expectedRevision)),
-        )
-        .returning({ id: workflow.id });
+      // statement, so two writers that read the same revision cannot both succeed. The paused runs
+      // of the workflow whose gate the new definition changes are re-decided in the same transaction.
+      const updated = this.db.transaction(
+        (tx) => {
+          const previous = storedGraphNodes(tx, existingId);
+          const rows = tx
+            .update(workflow)
+            .set({
+              name: graph.metadata.name,
+              description: graph.metadata.description || null,
+              version: graph.metadata.version,
+              graph: graphJson,
+              visibility,
+              deleted: false,
+              deletedAt: null,
+              deletedBy: null,
+              updatedAt: now,
+              revision: sql`${workflow.revision} + 1`,
+            })
+            .where(
+              options.expectedRevision === undefined
+                ? eq(workflow.id, existingId)
+                : and(eq(workflow.id, existingId), eq(workflow.revision, options.expectedRevision)),
+            )
+            .returning({ id: workflow.id })
+            .all();
+          if (rows.length > 0) recomputeGateWaiting(tx, existingId, previous, graph);
+          return rows;
+        },
+        { behavior: "immediate" },
+      );
 
       if (updated.length === 0) {
         const [current] = await this.db
@@ -1053,10 +1098,23 @@ export class WorkflowRepository {
   // ===== Delete Operations =====
 
   async delete(workflowId: string, userId: string): Promise<void> {
-    // Hard delete - only owner can delete
-    await this.db
-      .delete(workflow)
-      .where(and(eq(workflow.id, workflowId), eq(workflow.userId, userId)));
+    // Hard delete - only owner can delete. Its runs go with it (cascade): the change feed records
+    // them as deleted in the same transaction, before the delete.
+    this.db.transaction(
+      (tx) => {
+        const owned = tx
+          .select({ id: workflow.id })
+          .from(workflow)
+          .where(and(eq(workflow.id, workflowId), eq(workflow.userId, userId)))
+          .get();
+        if (!owned) return;
+        recordExecutionsDeleted(tx, { workflowId });
+        tx.delete(workflow)
+          .where(and(eq(workflow.id, workflowId), eq(workflow.userId, userId)))
+          .run();
+      },
+      { behavior: "immediate" },
+    );
   }
 
   async softDelete(workflowId: string, userId: string): Promise<boolean> {

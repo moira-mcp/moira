@@ -109,9 +109,18 @@ amber count says how many steps ran without a playbook they name), and a `!` bad
 ## Who is waited for
 
 A paused run says who it waits for. _Waiting for you_ appears only when a person must act — a
-PIN gate (a `lock` step). While an agent is on a step, the card, the legend and the panel say
-_agent on the step_; the run is not waiting for you, even though you may answer the step from the
-variables tab in the agent's place.
+PIN gate (a `lock` step), a step the workflow marks as waiting for a person's decision
+(`humanGate`), or a question the agent raised because it cannot go on without you. For a marked step
+a banner under the header says what you are asked to do; for the agent's question it shows the
+question and the choices the agent offered. Either way the answer goes to the agent in the chat. The
+agent's question goes away when the agent acts again or the run leaves the step, not when you edit a
+variable here. A line under the banner says whether you were notified about the wait — sent through
+which channels and how long ago, a reminder sent, still on its way, that no notification channel
+is set up, that it could not be delivered, or that none was sent because the wait changed first. For a
+step whose workflow sends its own message about the wait, the line appears only once Moira's reminder
+has gone out. While an agent is on a step, the card, the legend and the
+panel say _agent on the step_; the run is not waiting for you, even though you may answer the step
+from the variables tab in the agent's place.
 
 ## Answering a waiting step
 

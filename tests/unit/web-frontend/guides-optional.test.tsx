@@ -280,8 +280,10 @@ describe("an optional step", () => {
     late.textContent = "late";
     try {
       fireEvent.click(screen.getByTestId("guide-open"));
-      elapseGuideTimers(500);
       await act(async () => {});
+      // The card waits for its element, which the runner looks for on its timer.
+      elapseGuideTimers(500);
+      await Promise.resolve(); // let the observer see the committed card
       expect(screen.getByTestId("guide-card")).toHaveAttribute("data-guide-step", "page");
       fireEvent.click(screen.getByTestId("guide-next"));
 
@@ -458,5 +460,32 @@ describe("an optional step", () => {
     fireEvent.click(screen.getByTestId("guide-next"));
     elapseGuideTimers(4000);
     expect(screen.getByTestId("guide-card")).toHaveAttribute("data-guide-step", "end");
+  });
+});
+
+describe("a required step", () => {
+  test("shows its card first beside its element, never in the corner while the element is looked for", async () => {
+    jest.useFakeTimers();
+    renderPage();
+    // Every place the card ever takes, in order.
+    const docks: string[] = [];
+    const observer = new MutationObserver(() => {
+      const dock = document
+        .querySelector('[data-testid="guide-card"]')
+        ?.getAttribute("data-guide-dock");
+      if (dock && docks[docks.length - 1] !== dock) docks.push(dock);
+    });
+    observer.observe(document.body, { subtree: true, childList: true, attributes: true });
+    try {
+      fireEvent.click(screen.getByTestId("guide-open"));
+      await act(async () => {});
+      // The card waits for its element, which the runner looks for on its timer.
+      elapseGuideTimers(500);
+      await Promise.resolve(); // let the observer see the committed card
+      expect(screen.getByTestId("guide-card")).toHaveAttribute("data-guide-step", "page");
+      expect(docks).toEqual(["beside"]);
+    } finally {
+      observer.disconnect();
+    }
   });
 });

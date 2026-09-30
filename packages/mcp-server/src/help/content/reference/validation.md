@@ -46,6 +46,10 @@ Graph structure is analyzed for correctness:
   path — and `title` is a path inside one item, so it is an error without `items`
 - **Routing cases** - Each case of a `condition` or `agent-directive` node is checked as described
   under _Routing Diagnostics_ below
+- **Human gates** - An `agent-directive`'s `humanGate` is a closed object: `label` is 1–120
+  characters, `notify` is `auto` or `off`, and `remindAfter` is a positive number followed by `m`,
+  `h` or `d`; an unknown field is an error. Its `when` gets the same structure check and the same
+  declared-variable check as a routing case's `when`
 - **Extension node types** - Types found in the live extension registry or a published registry
   snapshot validate their declared configuration schema. A live registry that does not contain a
   type reports an error; a type absent from a snapshot, or validation without usable registry data,
@@ -127,12 +131,13 @@ Validation returns structured results:
 
 ### Warning Types
 
-| Type          | Description                          | Threshold                                                |
-| ------------- | ------------------------------------ | -------------------------------------------------------- |
-| `performance` | Large workflow                       | >20 agent-directive nodes                                |
-| `complexity`  | Complex conditions                   | Deeply nested conditions                                 |
-| `context`     | Large context                        | >100KB context size                                      |
-| `node`        | Notification shows an internal value | A path, a bare counter or a raw step output in `message` |
+| Type          | Description                          | Threshold                                                                          |
+| ------------- | ------------------------------------ | ---------------------------------------------------------------------------------- |
+| `performance` | Large workflow                       | >20 agent-directive nodes                                                          |
+| `complexity`  | Complex conditions                   | Deeply nested conditions                                                           |
+| `context`     | Large context                        | >100KB context size                                                                |
+| `node`        | Notification shows an internal value | A path, a bare counter or a raw step output in `message`                           |
+| `node`        | Two messages about one wait          | A notification node leading straight into a `humanGate` step with `notify: "auto"` |
 
 ## Validation Examples
 
@@ -319,6 +324,19 @@ workflow upload and the web editor all show the warning, and none of them refuse
 ```text
 ⚠ 1 warning(s):
   • Notification notify-completion shows {{delivery_file}}, a file or path: the reader cannot open it from a message. Say what it contains in words, or link a URL.
+```
+
+## Notification Before a Gate Warning
+
+A step marked `humanGate` with `notify: "auto"` (the default) makes Moira notify the person as the run
+starts waiting there. A `user-notification` or `telegram-notification` node whose connection leads
+straight into such a step sends a second message about the same wait, so it gets a warning — never an
+error — naming the gate: keep the workflow's message and set `humanGate.notify` to `"off"` on the gate
+(the usual choice when the message carries what the person decides on), or remove the node.
+
+```text
+⚠ 1 warning(s):
+  • Node notify-plan-approval: leads straight into "approve-plan", whose humanGate notifies the person itself (notify: auto); the person gets two messages about one wait (gate-notified-twice). Set humanGate.notify to "off" on "approve-plan" to keep this message, or remove this node
 ```
 
 ## Playbook Reference Validation

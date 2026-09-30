@@ -32,7 +32,7 @@ import {
 } from "@mcp-moira/shared";
 import { IDataRepository, WorkflowInfo, SettingDefinition } from "../interfaces/data-repository.js";
 import { WorkflowGraph } from "../interfaces/core-interfaces.js";
-import { WorkflowExecution } from "../types/base-types.js";
+import { WorkflowExecution, type ExecutionAwaitingUser } from "../types/base-types.js";
 import type {
   ExecutionVisit,
   ReminderMutation,
@@ -297,6 +297,14 @@ export class DatabaseRepository implements IDataRepository {
     await this.executionRepo.updateNote(executionId, note);
   }
 
+  async setExecutionAwaitingUser(
+    executionId: string,
+    userId: string,
+    question: Omit<ExecutionAwaitingUser, "nodeId"> | null,
+  ): Promise<WorkflowExecution> {
+    return this.executionRepo.setAwaitingUser(executionId, userId, question);
+  }
+
   async appendError(executionId: string, error: ExecutionError): Promise<boolean> {
     return await this.executionRepo.appendError(executionId, error);
   }
@@ -310,6 +318,15 @@ export class DatabaseRepository implements IDataRepository {
 
   async findActiveChildExecutions(parentExecutionId: string): Promise<string[]> {
     return await this.executionRepo.findActiveChildExecutions(parentExecutionId);
+  }
+
+  async stopExecution(
+    executionId: string,
+    userId: string,
+    expectedRevision: number,
+    reason: string,
+  ): Promise<{ changed: boolean; revision: number }> {
+    return this.executionAttemptRepo.stopExecution(executionId, userId, expectedRevision, reason);
   }
 
   async setExecutionParent(

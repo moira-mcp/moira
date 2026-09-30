@@ -114,6 +114,20 @@ const ASKING = new Set([
   "notify-upload-error",
 ]);
 
+/** The steps where the flow waits for the person's decision (`humanGate`). */
+const GATES = new Set([
+  "approve-structure",
+  "present-edit-plan",
+  "user-final-review",
+  "ask-full-antipattern-audit",
+  "ask-upload",
+  "handle-upload-error",
+]);
+
+/** The stored «waiting for you» mark at each visit of a step, in order. */
+const gateMarks = (run: NotificationScenarioResult, nodeId: string) =>
+  run.pauses.filter((pause) => pause.nodeId === nodeId).map((pause) => pause.gateWaiting);
+
 function expectClean(run: NotificationScenarioResult, mode: Mode) {
   for (const { text } of run.notifications) {
     expect(text.startsWith(heading(run))).toBe(true);
@@ -124,6 +138,16 @@ function expectClean(run: NotificationScenarioResult, mode: Mode) {
   expect(
     run.notifications.filter((message) => QUESTION.test(message.text)).map((m) => m.nodeId),
   ).toEqual(mode === "autonomous" ? [] : sent.filter((id) => ASKING.has(id)));
+  // An interactive run waits for the person at every decision step, and each question ends by
+  // saying so; an autonomous run decides every step it enters and never waits for the person.
+  const atGates = run.pauses.filter((pause) => GATES.has(pause.nodeId));
+  expect(atGates.map((pause) => [pause.nodeId, pause.gateWaiting])).toEqual(
+    atGates.map((pause) => [pause.nodeId, mode === "interactive"]),
+  );
+  if (mode === "autonomous") expect(run.pauses.filter((pause) => pause.gateWaiting)).toEqual([]);
+  for (const message of run.notifications.filter((m) => ASKING.has(m.nodeId))) {
+    expect(message.text).toMatch(/🙋 waiting for you: [^\n]+$/u);
+  }
 }
 
 const ids = (run: NotificationScenarioResult) => run.notifications.map((message) => message.nodeId);
@@ -231,6 +255,14 @@ describe("Workflow Management Flow notifications", () => {
       });
       expect(ids(run)).toEqual(sequence);
       expectClean(run, mode);
+      // The autonomous run enters the save question itself, and the audit question in a standard
+      // edit, and answers them without the person.
+      if (mode === "autonomous") {
+        expect(gateMarks(run, "ask-upload")).toEqual([false]);
+        if (action === "edit" && tier === "standard") {
+          expect(gateMarks(run, "ask-full-antipattern-audit")).toEqual([false]);
+        }
+      }
       // The plan when it is announced: nothing done yet, every stage or change listed.
       const plan = run.notifications.find((message) => PLAN_READY.has(message.nodeId))!;
       expect(plan.text).toContain(LIST_PENDING);
@@ -485,6 +517,7 @@ describe("Workflow Management Flow notifications", () => {
       "⏹ *Cancelled* — “Release checklist” version 1.2.0 was built but not saved: The server was unavailable",
     );
     expect(cancelled).toContain(LIST_DONE);
+    expect(gateMarks(run, "handle-upload-error")).toEqual([true]);
     expectClean(run, "interactive");
   });
 
@@ -525,6 +558,7 @@ describe("Workflow Management Flow notifications", () => {
         "keeping the workflow unsaved. The server stays unavailable",
       );
       expect(text(run, "notify-finished")).toContain("not saved to the catalogue.");
+      expect(gateMarks(run, "handle-upload-error")).toEqual([false, false]);
       expectClean(run, "autonomous");
     },
   );

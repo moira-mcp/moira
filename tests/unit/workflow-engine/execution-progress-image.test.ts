@@ -73,6 +73,7 @@ function progress(active = 1): ExecutionProgress {
     executionWorkflowVersion: "1.0.0",
     projectedAt: 0,
     waitingFor: null,
+    waitingForUser: null,
     executionRevision: 3,
     executionStatus: "running",
     diagnostics: [],

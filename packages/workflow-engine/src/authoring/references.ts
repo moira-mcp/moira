@@ -7,7 +7,7 @@
  *    `{{#if|unless|each|eq|neq <id>.<name>}}`, in any template-bearing text of a node, of a
  *    registry default or of the process definition;
  *  - a bare context path whose head is the id (`<id>.<name>` or `<id>[…]`): a routing case's
- *    `contextPath`, a progress list binding, a subgraph mapping, an end node's `finalOutput`, a
+ *    `contextPath` and a human gate's `when` condition, a progress list binding, a subgraph mapping, an end node's `finalOutput`, a
  *    batch write-note's `source`, and an identifier inside an expression;
  *  - an entry of `runtimePolicy.externalVariableWrites.*.allowedNodeIds`.
  *
@@ -150,6 +150,7 @@ const NON_TEMPLATE_FIELDS = new Set([
   "graphId",
   "outputVariable",
   "cases",
+  "humanGate",
   "expressions",
   "inputMapping",
   "outputMapping",
@@ -173,6 +174,12 @@ function rewriteNode(node: Json, walk: Walk): Json {
       const entry = routingCase as Json;
       return { ...entry, when: conditionPaths(entry.when, `${at}.cases[${i}].when`, walk) };
     });
+  }
+  if (node.humanGate && typeof node.humanGate === "object") {
+    const gate = node.humanGate as Json;
+    if (gate.when !== undefined) {
+      out.humanGate = { ...gate, when: conditionPaths(gate.when, `${at}.humanGate.when`, walk) };
+    }
   }
   if (Array.isArray(node.expressions)) {
     out.expressions = node.expressions.map((expression, i) =>

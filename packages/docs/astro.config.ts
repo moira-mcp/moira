@@ -268,6 +268,11 @@ export default defineConfig({
               slug: "docs/guides/run-page",
             },
             {
+              label: "The overview of your runs",
+              translations: { ru: "Сводка ваших запусков" },
+              slug: "docs/guides/run-overview",
+            },
+            {
               label: "Writing Extensions",
               translations: { ru: "Написание расширений" },
               slug: "docs/guides/writing-extensions",

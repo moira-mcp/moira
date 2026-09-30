@@ -49,6 +49,7 @@ export {
   // Telegram
   getTelegramEncryptionKey,
   getTelegramApiTimeout,
+  getOverviewStreamRecheckMs,
   // Email
   getBrevoApiKey,
   getSmtpConfig,

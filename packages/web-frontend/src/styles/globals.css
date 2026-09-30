@@ -30,6 +30,9 @@
   --warning-foreground: oklch(0.24 0.02 40);
   --info: oklch(0.55 0.15 240);
   --info-foreground: oklch(0.985 0 0);
+  /* The move is the person's: a run waits for their decision or answer. Readable as text on the
+     background and under its own 10% tint. */
+  --your-move: oklch(0.52 0.2 300);
   --border: oklch(0.9 0.01 264);
   --input: oklch(0.9 0.01 264);
   --ring: oklch(0.488 0.2 264);
@@ -78,6 +81,7 @@
   --warning-foreground: oklch(0.78 0.1 70);
   --info: oklch(0.4 0.1 240);
   --info-foreground: oklch(0.72 0.15 240);
+  --your-move: oklch(0.74 0.15 300);
   --border: oklch(0.34 0.015 260);
   --input: oklch(0.34 0.015 260);
   --ring: oklch(0.65 0.22 264);
@@ -128,6 +132,7 @@
   --color-warning-foreground: var(--warning-foreground);
   --color-info: var(--info);
   --color-info-foreground: var(--info-foreground);
+  --color-your-move: var(--your-move);
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);

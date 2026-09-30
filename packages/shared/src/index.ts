@@ -88,6 +88,9 @@ export * from "./utils/api-token.js";
 // Execution-lock PIN hashing
 export * from "./utils/pin-hash.js";
 
+// Human gate reminder durations
+export * from "./utils/human-gate-duration.js";
+
 // Errors (master's unified error architecture)
 export * from "./errors/index.js";
 

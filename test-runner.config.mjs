@@ -52,7 +52,7 @@ const apiEnvironments = {
   // saas. It exists so a contributor can reproduce CI's API and MCP runs without overwriting
   // their own `.env.local`, which is what CI itself does to the runner's checkout.
   "ci-saas": {
-    envFile: ".env.ci",
+    envFile: process.env.MOIRA_VERIFY_ENV_FILE ?? ".env.ci",
     urlExtractor: (content) => {
       const port = parseEnvVar(content, "DOCKER_PORT");
       return port ? `http://localhost:${port}` : undefined;
@@ -63,12 +63,12 @@ const apiEnvironments = {
     },
   },
   ci: {
-    envFile: ".env.ci",
-    urlExtractor: () => "http://localhost:3031",
+    envFile: process.env.MOIRA_VERIFY_ENV_FILE ?? ".env.ci",
+    urlExtractor: () => `http://localhost:${process.env.MOIRA_TEST_SELF_HOST_PORT ?? "3031"}`,
     env: {
       REMOTE_DOCKER_CONTEXT: "",
-      DOCKER_PORT: "3031",
-      DOCKER_CONTAINER_NAME: "mcp-moira-ci-self-host",
+      DOCKER_PORT: process.env.MOIRA_TEST_SELF_HOST_PORT ?? "3031",
+      DOCKER_CONTAINER_NAME: `${process.env.DOCKER_CONTAINER_NAME ?? "mcp-moira-ci"}-self-host`,
     },
   },
   remote: {

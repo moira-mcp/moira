@@ -20,6 +20,7 @@ import type {
 } from "../services/agent-message-queue.js";
 import { GraphExecutionEngine } from "./graph-execution-engine.js";
 import { appendEngineVisits } from "../utils/execution-visits.js";
+import { humanGateWaiting } from "../utils/human-gate.js";
 import {
   createLogger,
   WorkflowLogger,
@@ -321,6 +322,22 @@ export class UniversalGraphExecutor implements IGraphExecutor {
           operation: "step" | "start";
         }
       | undefined = mutation?.preclaimedAttempt;
+    // Run-page answers and recovery presentations execute handlers too. Give them the same durable
+    // ownership fence as MCP steps, while retiring the presentation the agent was holding.
+    if (!claimed && !mutation?.attemptId && mutation?.createPresentation) {
+      const internalAttempt = this.mutationCoordinator.newPresentedAttempt(execution, graph, null);
+      await this.repository.supersedePresentedExecutionAttempt(internalAttempt);
+      const outcome = await this.mutationCoordinator.claimStep(
+        internalAttempt.attemptId,
+        execution,
+        graph,
+        attemptInput,
+        teleportTo,
+        execution.userId,
+      );
+      if (outcome.kind === "replay") return outcome.response;
+      claimed = { attemptId: internalAttempt.attemptId, ...outcome, operation: "step" };
+    }
     if (mutation?.attemptId && !claimed) {
       const outcome = await this.mutationCoordinator.claimStep(
         mutation.attemptId,
@@ -416,11 +433,18 @@ export class UniversalGraphExecutor implements IGraphExecutor {
         case "pause":
           execution.status = "running";
           execution.waitingForInputNodeId = executionResult.nextNodeId || null;
+          // Decided as the run arrives at the step, with the context it has then. A pause that only
+          // continues the wait the run was already in (a refused answer keeps the same open visit)
+          // is not an arrival, so it keeps the decision taken then.
+          execution.gateWaiting = continuesOpenWait(loadedExecution, execution)
+            ? Boolean(loadedExecution.gateWaiting)
+            : humanGateWaiting(graph, execution);
           break;
         case "complete":
           execution.status = "completed";
           execution.completedAt = Date.now();
           execution.currentNodeId = null;
+          execution.gateWaiting = false;
           break;
       }
 
@@ -476,6 +500,7 @@ export class UniversalGraphExecutor implements IGraphExecutor {
           expectedExecution: loadedExecution,
           response,
           nextAttempt,
+          answeredByUser: mutation?.answeredBy?.role === "user",
         });
         if (!completed) {
           throw new ConflictError(
@@ -810,4 +835,22 @@ export class UniversalGraphExecutor implements IGraphExecutor {
       workflowExecutionsTotal.inc({ status: "cancelled", workflow_id: workflowId });
     }
   }
+}
+
+/**
+ * Whether the run pauses on the same open wait it was loaded in: the same waiting node and the same
+ * last visit, still open. A refused answer pauses this way; an arrival, including a loop back to the
+ * same step, records a new visit.
+ */
+function continuesOpenWait(loaded: WorkflowExecution, next: WorkflowExecution): boolean {
+  const before = loaded.visits?.[loaded.visits.length - 1];
+  const after = next.visits?.[next.visits.length - 1];
+  return (
+    Boolean(loaded.waitingForInputNodeId) &&
+    loaded.waitingForInputNodeId === next.waitingForInputNodeId &&
+    before !== undefined &&
+    after !== undefined &&
+    before.seq === after.seq &&
+    after.exitKey === null
+  );
 }

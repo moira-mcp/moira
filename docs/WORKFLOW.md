@@ -136,7 +136,8 @@ node, `current_step` returns the authoritative current Step attempt ID. When a p
 no persisted attempt, `current_step` creates a bound presentation without executing the node. A
 presented revision-only stale attempt is repaired in place; a mismatched node or continuation
 surface is not. The continuation surface is everything the paused node declares except its display
-fields — its authoring metadata, progress block, active label and content, and connection labels —
+fields — its authoring metadata, progress block, active label and content, connection labels, and
+an `agent-directive`'s `humanGate` —
 plus the `variableRegistry` entries for the global names it declares as inputs. A redeploy that
 changes only workflow metadata, the system reminder, another node, or the paused node's appearance
 therefore leaves the run continuable.
@@ -530,8 +531,33 @@ toward the item its `current` path pointed at when the pass began, which is how 
 duration. The projection reports `executionWorkflowVersion` (the version stamped on the run,
 `null` without one) beside `workflowVersion` (the definition it projected), `projectedAt`, the
 epoch ms it was made at, and `waitingFor` — who the run waits for while it pauses: `user` when the
-paused node is a `lock` (a gate a person clears with the PIN), `agent` on any other paused node (a
-directive, teleport or materialize wait), `null` when the run is not waiting.
+paused node is a `lock` (a gate a person clears with the PIN) or a directive marked with
+`humanGate` whose `when` held as the run arrived, `agent` on any other paused node (a directive,
+teleport or materialize wait), `null` when the run is not waiting; the agent's own open question
+(`WorkflowExecution.awaitingUser`, raised with `session await-user`) also makes it `user`.
+`waitingForUser` is `{ source: "agent", question, options, since }` for that question (it takes
+precedence), `{ source: "gate", label }` at a marked directive (`label` is `humanGate.label`, else
+the block label), and `null` otherwise.
+
+The agent's question is stored as `{ id, nodeId, question, options?, since }`, bound to the node the
+run stood on when it was raised, and written without advancing the step revision. It ends by who
+acts: the agent's own claimed step (accepted or refused), a context write whose adjustment actor is
+`agent`, recovery, cancellation and completion clear it; the ordinary save (a run-page answer) keeps
+it while the run stays on its node and clears it when the run leaves or finishes — decided in the
+same SQL statement against the stored value (`awaitingUserAfterWrite`), so a writer holding an older
+copy cannot erase it; a person's context edit keeps it. The in-memory repository applies the same
+rule (`awaitingUserAfterMove`). A projection at a route cursor never shows it.
+
+For a live run the gate decision is the engine's stored one, `WorkflowExecution.gateWaiting`: the
+executor sets it where it sets the waiting node, evaluating `humanGate.when` against the context the
+run has as it arrives (a pause that only continues the open wait, such as a refused answer, keeps the
+decision taken on arrival), completion and cancellation clear it, recovery decides it for the node it
+moves the run to, and storing a new version of the workflow (an ordinary save or catalog
+reconciliation) re-decides it in the same transaction for the paused runs whose current node's gate
+the new definition changes (`humanGateChanged`: the mark added, removed or different, or the node's
+type changed); every other paused run keeps the decision taken on arrival, even if its variables have
+moved since. A projection at a route cursor (against the variables as they stood at the cursor), and the in-flight projection a notification uses for the step the run is about to
+pause on, decide it with the same rule (`humanGateWaiting`).
 
 `computeVersionStatistics` and the caching `ProgressStatisticsService` aggregate those timings
 across the runs of one definition version: per block, a `DurationSample`
@@ -550,8 +576,9 @@ and note are persisted. The executor therefore hands every handler the live run 
 persisted run with the visits recorded so far folded in exactly as they will be saved, the
 engine's current variables and a note set by this step's `execution_note` — and the notification
 handlers project it (`withInFlightPause`) with an open visit of the notification node and, when the node's single
-forward connection leads straight to a node the run pauses on — a `lock` (a person's gate) or an
-`agent-directive`, `teleport`, `materialize` or `subgraph` wait (the agent's) — that node as the one waited on,
+forward connection leads straight to a node the run pauses on — a `lock` (a person's gate), an
+`agent-directive` marked `humanGate` whose `when` holds against the run's context (also a person's), or
+any other `agent-directive`, `teleport`, `materialize` or `subgraph` wait (the agent's) — that node as the one waited on,
 with a synthetic open visit that carries no timestamp. The image and the message text read the
 same copy: the picture marks the block about to wait with the actor's wording, and the message
 ends with the plan lines and then `⏳ agent on the step: <block>` or `🙋 waiting for you: <block>`
@@ -874,7 +901,10 @@ the same heading in plain text.
 
 The validator warns (never blocks) when a notification's `message` would show the reader a file or
 path, a bare counter with nothing naming what it counts, or a step's raw output; see the
-notification content warning in the public Validation reference.
+notification content warning in the public Validation reference. It also warns
+(`gate-notified-twice`, `GraphValidator.validateGateNotifications`) when a notification node leads
+straight into an `agent-directive` marked `humanGate` with `notify: "auto"`: the person would get the
+workflow's message and Moira's about the same wait.
 
 `telegram-notification` is deprecated but remains executable for existing Telegram-specific
 workflows. Its explicit `chatId`, `parseMode`, and `replyMarkup` keep their original meanings and

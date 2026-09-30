@@ -12,6 +12,7 @@ import { flowEditorGuide } from "../pages/flowEditor.guide";
 import { flowsGuide } from "../pages/flows.guide";
 import { homeGuide } from "../pages/home.guide";
 import { notesGuide } from "../pages/notes.guide";
+import { overviewGuide } from "../pages/overview.guide";
 import { playbooksGuide } from "../pages/playbooks.guide";
 import { runsEmptyGuide, runsGuide } from "../pages/runs.guide";
 import {
@@ -25,6 +26,7 @@ import type { GuideDefinition } from "./types";
 /** In the order "Show me around" lists the screens: the way a reader meets them. */
 export const GUIDES: readonly GuideDefinition[] = [
   homeGuide,
+  overviewGuide,
   flowsGuide,
   flowGuide,
   runsGuide,

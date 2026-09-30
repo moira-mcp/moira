@@ -76,7 +76,8 @@
       "settings": "Settings",
       "docs": "Documentation",
       "admin": "Admin",
-      "playbooks": "Playbooks"
+      "playbooks": "Playbooks",
+      "overview": "Overview"
     },
     "adminNav": {
       "dashboard": "Dashboard",
@@ -531,6 +532,20 @@
         "pending": "pending",
         "loading": "Loading execution progress...",
         "error": "Progress is temporarily unavailable. The execution details remain available below."
+      },
+      "waitingForUser": {
+        "title": "Waiting for you:",
+        "agentTitle": "The agent is asking you:",
+        "hint": "answer the agent in the chat",
+        "options": "Choices the agent offered",
+        "notification": {
+          "pending": "The notification is on its way",
+          "sent": "Notification sent via {{channels}} {{ago}} ago",
+          "reminded": "Reminder sent via {{channels}} {{ago}} ago",
+          "noChannels": "No notification channels are set up — you were not notified. Set them up in Settings",
+          "failed": "The notification could not be delivered ({{ago}} ago)",
+          "superseded": "No notification: the wait changed before it was sent"
+        }
       },
       "locks": {
         "noHistory": "No lock history for this execution",
@@ -1711,6 +1726,184 @@
       "linked": {
         "readOnly": "Published by another account. You can reference it, not change it.",
         "missing": "Playbook {{reference}} is not available to you."
+      }
+    },
+    "overview": {
+      "title": "Overview",
+      "subtitle": "Your runs in progress: what each one waits for and how far it got.",
+      "total": "Tasks shown: {{count}}",
+      "error": "The overview could not be loaded.",
+      "retry": "Try again",
+      "board": "Tasks",
+      "status": {
+        "label": "Status",
+        "active": "In progress",
+        "waiting-user": "Waiting for you",
+        "waiting-agent": "Waiting for the agent",
+        "locked": "Locked",
+        "completed": "Completed",
+        "stopped": "Stopped",
+        "all": "All"
+      },
+      "runStatus": {
+        "waiting-user": "Waiting for you",
+        "waiting-agent": "Waiting for the agent",
+        "locked": "Locked",
+        "completed": "Completed",
+        "stopped": "Stopped"
+      },
+      "runStatusHint": {
+        "waiting-user": "The move is yours: the flow waits for your decision, or the agent asked you something. Answer the agent in the chat.",
+        "waiting-agent": "The agent has a directive to work on; the move is the agent's.",
+        "locked": "The run stands on a lock and waits for a person to enter its PIN.",
+        "completed": "The flow reached its end.",
+        "stopped": "The agent stopped this run with a recorded reason. It did not complete the flow."
+      },
+      "stale": {
+        "chip": "No movement > 7 days",
+        "hint": "Unfinished tasks where neither the run nor any of its child runs took a step for more than 7 days. Their status does not change with age."
+      },
+      "search": {
+        "placeholder": "Search",
+        "label": "Search by note, flow name or run id"
+      },
+      "filters": {
+        "button": "Filters",
+        "idle": "No movement",
+        "idleAny": "any time",
+        "idleOptions": {
+          "1h": "for more than 1 hour",
+          "1d": "for more than 1 day",
+          "3d": "for more than 3 days",
+          "7d": "for more than 7 days",
+          "30d": "for more than 30 days"
+        },
+        "range": "Last step between",
+        "from": "From",
+        "to": "To",
+        "flow": "Flow",
+        "allFlows": "all flows",
+        "sort": "Order",
+        "sortOptions": {
+          "activity": "latest step first",
+          "idle": "longest without movement first",
+          "created": "newest first"
+        },
+        "refusals": "only with refusals",
+        "reset": "Reset"
+      },
+      "layout": {
+        "label": "View",
+        "grid": "Grid",
+        "lanes": "Lanes"
+      },
+      "live": {
+        "connecting": "Connecting…",
+        "live": "Live",
+        "reconnecting": "Reconnecting…",
+        "polling": "Every 15 s",
+        "hint": {
+          "connecting": "Opening the live connection.",
+          "live": "Changes arrive by themselves.",
+          "liveLast": "Changes arrive by themselves. The last one: {{ago}}.",
+          "reconnecting": "The connection dropped. What was missed is caught up after reconnecting.",
+          "polling": "The live stream is not available here; the page checks for changes every 15 seconds."
+        }
+      },
+      "age": {
+        "now": "just now",
+        "min": "{{count}} min",
+        "h": "{{count}} h",
+        "d": "{{count}} d",
+        "ago": "{{age}} ago"
+      },
+      "ageHint": {
+        "last": "Last step: {{at}}",
+        "subtree": "In child runs: {{at}}",
+        "stale": "No movement for {{days}} d",
+        "none": "No step recorded yet"
+      },
+      "card": {
+        "childOf": "↳ child of “{{title}}”",
+        "flowHint": "Flow: {{name}}",
+        "stage": "Stage {{number}} of {{total}}",
+        "stagesDone": "all stages passed",
+        "stages": "Stages",
+        "plan": "Plan",
+        "doneOf": "{{done}} of {{total}}",
+        "above": "↑ {{count}} more above",
+        "below": "↓ {{count}} more ahead",
+        "current": "(current)",
+        "noPlan": "The flow keeps no stages or list — no progress to show.",
+        "now": "Now:",
+        "shown": "directive shown {{ago}}",
+        "shownUnknown": "no directive shown",
+        "completed": "completed {{ago}}",
+        "stopped": "stopped {{ago}}",
+        "stepHint": "Current step: {{step}}",
+        "gateHint": "The flow waits for your decision on this step. Answer the agent in the chat.",
+        "agentAsks": "Agent asks: {{question}}",
+        "agentHint": "The agent said it cannot go on without you. Answer it in the chat.",
+        "notification": {
+          "sent": "{{channels}} · {{ago}}",
+          "reminded": "reminder via {{channels}} · {{ago}}",
+          "pending": "notification on its way",
+          "noChannels": "no notification channels",
+          "failed": "notification failed",
+          "none": "not notified"
+        },
+        "childrenFlag": "Child runs: {{total}}, in progress: {{unfinished}}",
+        "refusalsFlag": "Refusals: {{count}}. The engine refused a handed-in step; the run goes on.",
+        "noteFlag": "Note: {{note}}",
+        "muted": "Shown because another run of this group matches the filters"
+      },
+      "group": {
+        "children": "child runs: {{count}}",
+        "tree": "in the tree: {{count}}",
+        "level": "level {{level}}",
+        "nested": "child runs of “{{title}}”: {{count}}",
+        "show": "show {{count}}",
+        "fold": "fold",
+        "label": "{{title}} and its child runs"
+      },
+      "panel": {
+        "parents": "Parent runs",
+        "thisRun": "this run",
+        "gateTitle": "Waiting for your decision: {{label}}",
+        "agentTitle": "The agent is waiting for you",
+        "agentSince": "The agent said it cannot go on without you, {{ago}}.",
+        "gateSince": "The flow reached a step that needs your decision, {{ago}}.",
+        "answerInChat": "Answer the agent in the chat — it waits for you there.",
+        "clearsItself": "When the agent goes on, “Waiting for you” clears by itself.",
+        "options": "Choices the agent offered",
+        "now": "Now",
+        "noStep": "—",
+        "refusals": "Refusals · {{count}}",
+        "refusalsText": "The engine refused a handed-in step {{count}} time(s); the run goes on. The details are on the run page.",
+        "list": "Plan",
+        "stages": "Stages",
+        "children": "Child runs · {{count}}",
+        "facts": "Details",
+        "flow": "Flow",
+        "started": "Started",
+        "lastStep": "Last step",
+        "inChildren": "In child runs",
+        "completedAt": "Completed",
+        "stoppedAt": "Stopped",
+        "stopReason": "Reason for stopping",
+        "id": "Run id",
+        "open": "Open run",
+        "stale": "No movement for {{days}} d. The status does not change with age — the run can go on from where it stopped.",
+        "note": "Note",
+        "progressLoading": "Loading the plan…",
+        "progressError": "The plan could not be loaded.",
+        "notFound": "This run is not on the overview any more.",
+        "close": "Close"
+      },
+      "empty": {
+        "filtered": "Nothing matches the filters",
+        "none": "No runs in progress",
+        "noneHint": "When your agent starts a flow, it appears here."
       }
     }
   },
@@ -3663,6 +3856,31 @@
       "body": "Want to try building a small flow yourself? The tutorial walks you through it in the editor, on your own copy.",
       "start": "Start the tutorial",
       "later": "Not now"
+    },
+    "overview": {
+      "title": "The overview",
+      "steps": {
+        "intro": {
+          "title": "Everything in progress",
+          "body": "Each card is one of your runs that has not finished: where it stands, what it waits for and how far it got. Child runs stand in a group with their parent."
+        },
+        "status": {
+          "title": "Who has the move",
+          "body": "Waiting for you means a flow waits for your decision or the agent asked you something — answer the agent in the chat. Waiting for the agent, Locked (a PIN), Completed and Stopped are the other states. Stopped runs have a reason in their panel and are hidden from In progress. Runs waiting for you always come first."
+        },
+        "idle": {
+          "title": "Find what stalled",
+          "body": "No movement > 7 days shows unfinished tasks where nothing, not even a child run, took a step for a week. Filters holds other intervals, a date range, the flow, the order and runs with refusals. What you set stays in the address, so a saved link keeps it."
+        },
+        "board": {
+          "title": "Open a card",
+          "body": "A card shows the stage and the plan around the current item. Its title opens a panel with everything else and a link to the run. The last step is when the run last did work: a step handed in, a directive shown, a variable changed."
+        },
+        "live": {
+          "title": "Live updates",
+          "body": "The page updates itself. The indicator says whether changes arrive live, the connection is being restored, or the page checks for changes every 15 seconds."
+        }
+      }
     }
   }
 }

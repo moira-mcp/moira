@@ -7,6 +7,7 @@
 import { WorkflowGraph } from "./core-interfaces.js";
 import {
   WorkflowExecution,
+  type ExecutionAwaitingUser,
   type ExecutionVisit,
   type ReminderMutation,
   type ReminderMutationResult,
@@ -273,6 +274,18 @@ export interface IDataRepository {
   updateExecutionNote(executionId: string, note: string): Promise<void>;
 
   /**
+   * Raise, replace or clear (null) the agent's open question on a running run it owns. Raising binds
+   * the question to the node the run stands on. The step generation is not advanced, so the agent's
+   * presented Step attempt stays valid.
+   * Used by: session(action: "await-user")
+   */
+  setExecutionAwaitingUser(
+    executionId: string,
+    userId: string,
+    question: Omit<ExecutionAwaitingUser, "nodeId"> | null,
+  ): Promise<WorkflowExecution>;
+
+  /**
    * Append error to execution's errors array
    * Used by: workflow engine to log errors without failing execution
    * @returns true if error was appended, false if execution not found
@@ -282,6 +295,13 @@ export interface IDataRepository {
     executionId: string,
     error: ExecutionError,
   ): Promise<{ changed: boolean; execution: WorkflowExecution | null }>;
+  /** Stop an owned active run; an exact retry replays without another mutation. */
+  stopExecution(
+    executionId: string,
+    userId: string,
+    expectedRevision: number,
+    reason: string,
+  ): Promise<{ changed: boolean; revision: number }>;
 
   /**
    * Find active (running/waiting) child executions for a parent execution

@@ -9,6 +9,7 @@ import { eq, inArray } from "drizzle-orm";
 import { asyncHandler, createApiError } from "../middleware/error-middleware.js";
 import { DatabaseRepository, WorkflowExecution } from "@mcp-moira/workflow-engine";
 import { countRefusals, getDatabase, getLockService, user, workflow } from "@mcp-moira/shared";
+import { currentStep } from "../utils/current-step.js";
 
 const router = Router();
 const repository = new DatabaseRepository();
@@ -25,48 +26,6 @@ interface FlowRow {
   slug: string;
   deleted: boolean | null;
   ownerHandle: string | null;
-}
-
-interface StepGraph {
-  nodes?: Array<{
-    id: string;
-    metadata?: { displayName?: string };
-    progressNodeId?: string;
-    progressActiveLabel?: string;
-  }>;
-  progress?: { nodes?: Array<{ id: string; label?: string }> };
-}
-
-/**
- * The step a run is on, named in the run page's order: the node's active progress label (when it
- * is plain text, not a template), else its display name; where the run page would fall back to the
- * node id, the label of the progress block the node belongs to comes first. The step is the node
- * the run waits at, else its current node.
- */
-function currentStep(
-  execution: WorkflowExecution,
-  graphJson: string | undefined,
-): { stepId: string | null; stepName: string | null } {
-  const stepId = execution.waitingForInputNodeId ?? execution.currentNodeId ?? null;
-  if (!stepId || !graphJson) return { stepId, stepName: null };
-  let graph: StepGraph;
-  try {
-    graph = JSON.parse(graphJson) as StepGraph;
-  } catch {
-    // A graph that does not parse names no step; the id still identifies it
-    return { stepId, stepName: null };
-  }
-  const node = graph.nodes?.find((candidate) => candidate.id === stepId);
-  const activeLabel = node?.progressActiveLabel?.includes("{{")
-    ? undefined
-    : node?.progressActiveLabel;
-  const blockLabel = graph.progress?.nodes?.find(
-    (block) => block.id === node?.progressNodeId,
-  )?.label;
-  const stepName = [activeLabel, node?.metadata?.displayName, blockLabel]
-    .map((name) => name?.trim())
-    .find((name) => !!name);
-  return { stepId, stepName: stepName ?? null };
 }
 
 /**

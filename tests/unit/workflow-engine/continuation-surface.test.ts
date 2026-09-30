@@ -153,6 +153,19 @@ describe("continuation surface of a paused node", () => {
         withNode((node) => (node.connectionLabels = { success: "relabelled for the diagram" })),
     ],
     [
+      "marking the paused step as waiting for a person",
+      (): WorkflowGraph =>
+        withNode(
+          (node) =>
+            (node.humanGate = {
+              label: "Approve the work",
+              when: { operator: "exists", value: { contextPath: "target" } },
+              notify: "auto",
+              remindAfter: "4h",
+            }),
+        ),
+    ],
+    [
       "a new node added elsewhere",
       (): WorkflowGraph => {
         const next = structuredClone(graph());

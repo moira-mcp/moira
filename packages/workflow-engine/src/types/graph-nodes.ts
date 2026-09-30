@@ -110,10 +110,37 @@ export interface AgentDirectiveNode extends BaseNode {
   expressions?: string[];
   /** Routing on the node's own validated answer; `success` is taken when no case holds. */
   cases?: RoutingCase[];
+  /**
+   * Marks the step as one where the run waits for a person's decision: while a run is paused here
+   * (and `when` held when it arrived) its status is "waiting for you" instead of "waiting for the
+   * agent". The directive, its input and its routing are unchanged by the mark.
+   */
+  humanGate?: HumanGate;
 
   // `success` is the default output; `error`/`timeout` are control outputs; every other key is an
   // authored output named by `cases`.
   connections: { success: string; error?: string; timeout?: string } & Record<string, string>;
+}
+
+/** How a step that waits for a person is shown and announced. */
+export interface HumanGate {
+  /** What the person is asked to do, in a few words; defaults to the step's progress label. */
+  label?: string;
+  /**
+   * The step waits for a person only when this condition holds as the run arrives at it; without
+   * it, always. Same syntax as a routing case's `when`.
+   */
+  when?: StructuredCondition;
+  /**
+   * `auto` (default): the person is notified when the run arrives; `off`: the flow sends its own first
+   * message, and the engine sends only the reminder of `remindAfter`, if set.
+   */
+  notify?: "auto" | "off";
+  /**
+   * How long an unanswered wait lasts before one reminder, e.g. `30m`, `4h`, `1d` — counted from when
+   * the run started waiting here, or, for a run already here when the step was marked, from that update.
+   */
+  remindAfter?: string;
 }
 
 // 4. Condition Node - ordered cases routing to N outputs

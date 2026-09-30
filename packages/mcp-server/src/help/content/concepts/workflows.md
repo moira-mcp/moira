@@ -9,7 +9,11 @@ A workflow in Moira is a directed graph of nodes that defines a multi-step proce
 
 ### Static execution progress
 
-A workflow may declare an optional top-level `progress` graph for a concise user-facing view. Its
+A workflow may declare an optional top-level `progress` graph for a concise user-facing view. A
+workflow of more than one stage should declare it, and mark with `humanGate` every step where it
+waits for a person's decision: a run is shown to people through exactly what the workflow declares,
+and a workflow without blocks is shown as a run with no progress to report. The Workflow Management
+Flow applies this by default and asks for a recorded reason to leave progress out. Its
 definition may include a template-enabled title, goal, bounded generic facts, and ordered nodes.
 Nodes contain `id`, template-enabled `label`, optional structured plain-text `content` (`summary`,
 `details`, `outcome`, and `next`), an optional `list` binding, and an optional static
@@ -77,7 +81,12 @@ pass, a whole run through a block and each list position typically take across t
 completed runs of that version — the median with quartiles and range — so a run can be read
 against what is usual; one user's runs are never another's statistics. The projection also says
 who a paused run waits for (`waitingFor`): `user` at a gate a person clears (a `lock` step's
-PIN), `agent` on any other paused step, `null` when the run is not waiting.
+PIN) or on a step the workflow marks with `humanGate` whose condition held as the run arrived,
+or while the agent's own question (`session await-user`) is open, `agent` on any other paused step,
+`null` when the run is not waiting. It also says what is asked of the person (`waitingForUser`):
+`{ source: "agent", question, options, since }` for the agent's question — which takes precedence —
+or `{ source: "gate", label }` for a marked step. A projection at a route cursor never carries the
+agent's question, which is not part of the route.
 `GET /api/workflows/:id/statistics?version=` returns the same aggregate for any version over the
 caller's completed runs.
 
@@ -115,7 +124,8 @@ status and, for a block with a bound list, `done/total: current item`; it is 390
 shrunk, and grows downwards for a long flow. Below the message come the bound list's plan lines (see `planList` on the
 node) and then who the run waits for after it — `⏳ agent on the step: <block>` or
 `🙋 waiting for you: <block>` when the node leads straight to a step that pauses (a lock gate is a
-person's; a directive, teleport, materialize or subgraph wait is the agent's); the attached image
+person's, and so is a directive marked `humanGate` whose `when` holds; any other directive,
+teleport, materialize or subgraph wait is the agent's); the attached image
 shows the same state. The deprecated `telegram-notification` compatibility node supports
 the same attachment for existing provider-specific workflows.
 

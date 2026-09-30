@@ -73,6 +73,13 @@ const incomplete = {
   },
 };
 
+/** The stored «waiting for you» mark at each visit of a step, in order. */
+const gateMarks = (run: NotificationScenarioResult, nodeId: string) =>
+  run.pauses.filter((pause) => pause.nodeId === nodeId).map((pause) => pause.gateWaiting);
+
+/** A message sent right before a step the person decides ends by saying the run waits for them. */
+const WAITING_FOR_YOU = /🙋 waiting for you: [^\n]+$/u;
+
 function expectClean(run: NotificationScenarioResult) {
   for (const { text } of run.notifications) {
     expect(
@@ -105,6 +112,8 @@ describe("Robust Task notifications", () => {
     expect(finished).toContain("🏁 *Completed* — The September ledger is reconciled");
     expect(finished).toContain("📝 2/2\n✓ 1. Parse the ledger\n✓ 2. Reconcile the entries");
     expect(finished).not.toContain("delivery");
+    expect(gateMarks(run, "approve-plan")).toEqual([true]);
+    expect(ready).toMatch(WAITING_FOR_YOU);
   });
 
   test("autonomous: work goes ahead with the plan, and nothing asks for a decision", async () => {
@@ -119,6 +128,7 @@ describe("Robust Task notifications", () => {
     expect(run.notifications[0].text).toContain(
       "🎯 Goal: Every September ledger entry matches the bank statement",
     );
+    expect(run.pauses.filter((pause) => pause.gateWaiting)).toEqual([]);
   });
 
   test("a replan announces the new plan in the next message", async () => {
@@ -225,6 +235,8 @@ describe("Robust Task notifications", () => {
     expect(escalation).toContain(
       "Choose: try it again, change the plan, or finish with this step incomplete.",
     );
+    expect(gateMarks(run, "ask-retry-decision")).toEqual([true]);
+    expect(escalation).toMatch(WAITING_FOR_YOU);
     expect(run.notifications[2].text).toContain("🏁 *Completed with open items*");
     // The run has ended: the step it stopped at reads as open, not in progress.
     expect(run.notifications[2].text).toContain(
@@ -251,6 +263,9 @@ describe("Robust Task notifications", () => {
     expect(decided).toContain("finishing with this step incomplete");
     expect(decided).toContain("the bank statement itself is missing two entries");
     for (const { text } of run.notifications) expect(text).not.toMatch(QUESTION);
+    // The autonomous run enters the decision step itself and decides it: nobody is waited for.
+    expect(gateMarks(run, "ask-retry-decision")).toEqual([false]);
+    expect(run.pauses.filter((pause) => pause.gateWaiting)).toEqual([]);
   });
 
   // The plan keeps failing review until the review bound (five rounds by default).
@@ -296,6 +311,9 @@ describe("Robust Task notifications", () => {
     expectClean(run);
     expect(run.notifications[0].text).toContain(words);
     expect(run.notifications[0].text).toContain(detail);
+    expect(gateMarks(run, "ask-plan-review-limit")).toEqual([mode === "interactive"]);
+    if (mode === "interactive") expect(run.notifications[0].text).toMatch(WAITING_FOR_YOU);
+    else expect(run.notifications[0].text).not.toContain("waiting for you");
     // Execution never started, and the run has ended: nothing reads as in progress.
     expect(run.notifications[1].text).toContain(
       "📝 0/2\n○ 1. Parse the ledger\n○ 2. Reconcile the entries",
@@ -333,6 +351,9 @@ describe("Robust Task notifications", () => {
     expect(ids.filter((id) => id === node)).toHaveLength(1);
     expectClean(run);
     expect(run.notifications.at(-2)!.text).toContain(words);
+    expect(gateMarks(run, "ask-final-review-limit")).toEqual([mode === "interactive"]);
+    if (mode === "interactive") expect(run.notifications.at(-2)!.text).toMatch(WAITING_FOR_YOU);
+    else expect(run.notifications.at(-2)!.text).not.toContain("waiting for you");
   });
 
   // A review fails until the decision has been taken, then passes — so every decision value is

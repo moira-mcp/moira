@@ -14,6 +14,18 @@ export type { ListQueryConfig, ListQueryParams, ListQueryResult } from "./list-q
 export { WorkflowRepository, MAX_WORKFLOW_SIZE_BYTES } from "./repositories/workflow-repository.js";
 export { ExecutionRepository } from "./repositories/execution-repository.js";
 export { ExecutionAttemptRepository } from "./repositories/execution-attempt-repository.js";
+export {
+  ExecutionNotificationRepository,
+  type ExecutionNotificationRow,
+  type ExecutionNotificationKind,
+  type ExecutionNotificationState,
+} from "./repositories/execution-notification-repository.js";
+export {
+  currentPersonWait,
+  personWaitKeys,
+  enqueueWaitingNotification,
+  type CurrentPersonWait,
+} from "./execution-notification.js";
 export type { ExecutionFilter, ExecutionListResult } from "./repositories/execution-repository.js";
 export { SettingsRepository } from "./repositories/settings-repository.js";
 export { ExtensionSettingsRepository } from "./repositories/extension-settings-repository.js";
@@ -164,3 +176,26 @@ export type {
   PlaybookVisibility,
   SavePlaybookOptions,
 } from "./repositories/playbook-repository.js";
+export { executionActivity } from "./execution-activity.js";
+export type { ExecutionActivity, ExecutionActivitySource } from "./execution-activity.js";
+export { ExecutionOverviewRepository } from "./repositories/execution-overview-repository.js";
+export type {
+  OverviewNode,
+  OverviewPage,
+  OverviewQuery,
+  OverviewRowFacts,
+  OverviewSort,
+  OverviewStatus,
+  OverviewStatusFilter,
+} from "./repositories/execution-overview-repository.js";
+export {
+  EXECUTION_CHANGE_RETENTION_MS,
+  executionChangeKind,
+  recordExecutionChange,
+  recordExecutionsDeleted,
+  trackExecutionChange,
+} from "./execution-change.js";
+export type { ExecutionChangeFacts, ExecutionChangeKind } from "./execution-change.js";
+export { deleteUserAccount } from "./user-deletion.js";
+export { ExecutionChangeRepository } from "./repositories/execution-change-repository.js";
+export type { ExecutionChangeEvent } from "./repositories/execution-change-repository.js";

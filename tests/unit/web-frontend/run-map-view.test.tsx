@@ -119,6 +119,7 @@ function projectionOf(slug: string): ExecutionProgress {
     executionWorkflowVersion: graph.metadata.version,
     projectedAt: 130_000,
     waitingFor: null,
+    waitingForUser: null,
     executionRevision: 3,
     executionStatus: "running",
     diagnostics: [],

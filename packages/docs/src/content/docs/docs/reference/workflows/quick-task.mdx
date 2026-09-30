@@ -138,6 +138,14 @@ messages are in English. Nothing sent in an autonomous run asks for a decision. 
 it for a user with no configured channel is refused with an instruction; an agent that wants to run
 without notifications prepares the start again with `skipNotificationCheck: true`.
 
+### Waiting for you
+
+The plan approval and the result review are marked as steps that wait for you: while an interactive
+run stands on one, the run page and the run's progress say **waiting for you** with what you are
+asked, and the message that asks ends with `🙋 waiting for you`. The flow's own message is the first
+notification about the wait; if nobody answers for a day, Moira sends one reminder with a link to the
+run. Autonomous runs go around both steps and never wait for you.
+
 ## Guarantees and limits
 
 - Complete plans, reviews, decisions, feedback, changes, and evidence have one durable source on disk instead of duplicated context payloads.

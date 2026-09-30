@@ -1,7 +1,7 @@
 import type Database from "better-sqlite3";
 import { createHash } from "node:crypto";
 import { canonicalJson } from "../../utils/canonical-json.js";
-import { ConflictError } from "../../errors/index.js";
+import { ConflictError, ValidationError } from "../../errors/index.js";
 import type {
   ClaimStartExecutionAttemptInput,
   CompleteExecutionAttemptInput,
@@ -13,13 +13,19 @@ import type {
   RecoverExecutionToNodeInput,
   RecoverExecutionToNodeResult,
   StartPreconditionCompletionResult,
-  WorkflowExecution,
 } from "@mcp-moira/workflow-engine";
 import type { ExecutionError } from "../../types/execution-error.js";
 import {
   stepAttemptBindingMatches,
   stepAttemptContinuationMatches,
 } from "../../types/step-attempt-binding.js";
+import { drizzle } from "drizzle-orm/better-sqlite3";
+import { executionRowFields } from "../execution-row.js";
+import { enqueueWaitingNotification } from "../execution-notification.js";
+import { recordExecutionChange, trackExecutionChange } from "../execution-change.js";
+import { executionActivity, parseStoredVisits } from "../execution-activity.js";
+
+import * as schema from "../schema.js";
 
 type AttemptRow = {
   attemptId: string;
@@ -58,25 +64,23 @@ function asAttempt(row: AttemptRow): ExecutionAttempt {
   return { ...row };
 }
 
-function serializeExecution(execution: WorkflowExecution) {
-  return {
-    state: execution.status,
-    currentNodeId: execution.currentNodeId,
-    waitingForInputNodeId: execution.waitingForInputNodeId ?? null,
-    context: JSON.stringify(execution.globalContext),
-    error: execution.error ?? null,
-    errors: execution.errors?.length ? JSON.stringify(execution.errors) : null,
-    note: execution.note ?? null,
-    parentExecutionId: execution.parentExecutionId ?? null,
-    reminders: JSON.stringify(execution.reminders ?? []),
-    visits: JSON.stringify(execution.visits ?? []),
-    updatedAt: execution.updatedAt,
-    completedAt: execution.completedAt ?? null,
-  };
-}
-
 export class ExecutionAttemptRepository {
   constructor(private readonly sqlite: Database.Database) {}
+
+  /** Run a write of one existing row and record its change in the feed (same transaction). */
+  private tracked<T extends { changes: number }>(executionId: string, write: () => T): T {
+    return trackExecutionChange(
+      drizzle(this.sqlite, { schema }),
+      executionId,
+      write,
+      (written) => written.changes > 0,
+    );
+  }
+
+  /** Queue the person's notification if the run just written waits for them (same transaction). */
+  private enqueueNotification(executionId: string): void {
+    enqueueWaitingNotification(drizzle(this.sqlite, { schema }), executionId);
+  }
 
   prepareStart(attempt: PreparedStartExecutionAttempt): void {
     this.sqlite
@@ -194,14 +198,15 @@ export class ExecutionAttemptRepository {
         )
           return { kind: "stale" };
 
-        const execution = serializeExecution(input.execution);
+        const execution = executionRowFields(input.execution);
         this.sqlite
           .prepare(
             `INSERT INTO workflowExecution (
               executionId, workflowId, userId, state, currentNodeId, waitingForInputNodeId,
               context, error, errors, note, parentExecutionId, revision, reminders, visits,
-              workflowVersion, createdAt, updatedAt, completedAt
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+              gateWaiting, lastActivityAt, refusalCount, workflowVersion, createdAt, updatedAt,
+              completedAt
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           )
           .run(
             input.execution.executionId,
@@ -218,11 +223,20 @@ export class ExecutionAttemptRepository {
             input.execution.revision,
             execution.reminders,
             execution.visits,
+            execution.gateWaiting,
+            execution.lastActivityAt,
+            execution.refusalCount,
             input.execution.workflowVersion ?? null,
             input.execution.createdAt,
             execution.updatedAt,
             execution.completedAt,
           );
+        recordExecutionChange(drizzle(this.sqlite, { schema }), {
+          executionId: input.execution.executionId,
+          userId: input.execution.userId,
+          kind: "created",
+        });
+        this.enqueueNotification(input.execution.executionId);
         const fence = row.fence + 1;
         const changed = this.sqlite
           .prepare(
@@ -318,7 +332,7 @@ export class ExecutionAttemptRepository {
       .transaction(() => {
         const row = this.sqlite
           .prepare(
-            `SELECT errors, currentNodeId FROM workflowExecution
+            `SELECT errors, visits, currentNodeId FROM workflowExecution
              WHERE executionId = ? AND userId = ? AND state = 'running' AND revision = ?
                AND EXISTS (
                  SELECT 1 FROM executionMutationAttempt
@@ -327,25 +341,35 @@ export class ExecutionAttemptRepository {
                )`,
           )
           .get(executionId, userId, expectedRevision, executionId, userId) as
-          { errors: string | null; currentNodeId: string | null } | undefined;
+          { errors: string | null; visits: string; currentNodeId: string | null } | undefined;
         if (!row) return false;
         const errors = row.errors ? (JSON.parse(row.errors) as ExecutionError[]) : [];
         errors.push(error);
-        const changed = this.sqlite
-          .prepare(
-            `UPDATE workflowExecution SET state = 'completed', error = ?, errors = ?, completedAt = ?,
-             updatedAt = ?
+        const activity = executionActivity({
+          visits: parseStoredVisits(row.visits),
+          completedAt: error.timestamp,
+          errors,
+        });
+        const changed = this.tracked(executionId, () =>
+          this.sqlite
+            .prepare(
+              `UPDATE workflowExecution SET state = 'completed', gateWaiting = 0, awaitingUser = NULL,
+             error = ?, errors = ?, lastActivityAt = ?, refusalCount = ?,
+             completedAt = ?, updatedAt = ?
              WHERE executionId = ? AND userId = ? AND state = 'running' AND revision = ?`,
-          )
-          .run(
-            error.message,
-            JSON.stringify(errors),
-            error.timestamp,
-            error.timestamp,
-            executionId,
-            userId,
-            expectedRevision,
-          );
+            )
+            .run(
+              error.message,
+              JSON.stringify(errors),
+              activity.lastActivityAt,
+              activity.refusalCount,
+              error.timestamp,
+              error.timestamp,
+              executionId,
+              userId,
+              expectedRevision,
+            ),
+        );
         if (changed.changes !== 1) return false;
         this.sqlite
           .prepare(
@@ -355,6 +379,77 @@ export class ExecutionAttemptRepository {
           )
           .run(executionId, userId);
         return true;
+      })
+      .immediate();
+  }
+
+  /** Stop and fence the run and its pending attempts in one ownership-guarded transaction. */
+  stopExecution(
+    executionId: string,
+    userId: string,
+    expectedRevision: number,
+    reason: string,
+  ): { changed: boolean; revision: number } {
+    reason = reason.trim();
+    if (!reason || reason.length > 500)
+      throw new ValidationError("Stop reason must contain 1–500 characters");
+    return this.sqlite
+      .transaction(() => {
+        const row = this.sqlite
+          .prepare(
+            "SELECT state, revision, stopReason FROM workflowExecution WHERE executionId = ? AND userId = ?",
+          )
+          .get(executionId, userId) as
+          { state: string; revision: number; stopReason: string | null } | undefined;
+        if (!row) throw new ValidationError("Execution must belong to the authenticated user");
+        if (
+          row.state === "completed" &&
+          row.stopReason === reason &&
+          row.revision === expectedRevision + 1
+        )
+          return { changed: false, revision: row.revision };
+        if (row.revision !== expectedRevision)
+          throw new ConflictError(
+            "Execution state changed; reload execution_context before stopping",
+          );
+        if (!["running", "waiting"].includes(row.state))
+          throw new ValidationError("Execution is already finished");
+        if (
+          this.sqlite
+            .prepare(
+              "SELECT 1 FROM executionMutationAttempt WHERE executionId = ? AND userId = ? AND state = 'executing'",
+            )
+            .get(executionId, userId)
+        )
+          throw new ConflictError(
+            "An agent operation is executing; wait for it to finish before stopping",
+          );
+        const now = Date.now();
+        this.tracked(executionId, () =>
+          this.sqlite
+            .prepare(
+              `UPDATE workflowExecution SET state = 'completed', stopReason = ?, revision = revision + 1,
+         waitingForInputNodeId = NULL, gateWaiting = 0, awaitingUser = NULL,
+         completedAt = ?, updatedAt = ?, lastActivityAt = ?
+         WHERE executionId = ? AND userId = ? AND revision = ? AND state IN ('running', 'waiting')`,
+            )
+            .run(reason, now, now, now, executionId, userId, expectedRevision),
+        );
+        this.sqlite
+          .prepare(
+            `UPDATE executionMutationAttempt SET state = 'superseded', response = NULL,
+         ownerId = NULL, heartbeatAt = NULL, leaseExpiresAt = NULL, fence = fence + 1,
+         completedAt = ?, updatedAt = ? WHERE executionId = ? AND userId = ?
+         AND state IN ('presented', 'outcome_unknown')`,
+          )
+          .run(now, now, executionId, userId);
+        this.sqlite
+          .prepare(
+            `UPDATE executionNotification SET state = 'superseded'
+           WHERE executionId = ? AND userId = ? AND state = 'pending'`,
+          )
+          .run(executionId, userId);
+        return { changed: true, revision: expectedRevision + 1 };
       })
       .immediate();
   }
@@ -521,6 +616,13 @@ export class ExecutionAttemptRepository {
           return { kind: "outcome_unknown", attempt: asAttempt(row) };
         if (row.state === "executing") return { kind: "processing", attempt: asAttempt(row) };
 
+        const execution = this.sqlite
+          .prepare(
+            `SELECT 1 FROM workflowExecution WHERE executionId = ? AND userId = ?
+           AND state IN ('running', 'waiting') AND revision = ? AND currentNodeId = ?`,
+          )
+          .get(input.executionId, input.userId, input.executionRevision, input.nodeId);
+        if (!execution) return { kind: "stale" };
         const fence = row.fence + 1;
         const result = this.sqlite
           .prepare(
@@ -593,30 +695,37 @@ export class ExecutionAttemptRepository {
         const current = this.getCurrent(input.execution.executionId, input.execution.userId);
         if (current && current.state !== "presented") return "attempt_in_progress";
 
-        const execution = serializeExecution(input.execution);
-        const expected = serializeExecution(input.expectedExecution);
+        const execution = executionRowFields(input.execution);
+        const expected = executionRowFields(input.expectedExecution);
         const now = Date.now();
-        const update = this.sqlite
-          .prepare(
-            `UPDATE workflowExecution SET state = ?, currentNodeId = ?, waitingForInputNodeId = ?,
-               context = ?, updatedAt = ?, revision = revision + 1
+        const update = this.tracked(input.execution.executionId, () =>
+          this.sqlite
+            .prepare(
+              `UPDATE workflowExecution SET state = ?, currentNodeId = ?, waitingForInputNodeId = ?,
+               context = ?, visits = ?, gateWaiting = ?, awaitingUser = NULL, updatedAt = ?,
+               lastActivityAt = ?, revision = revision + 1
              WHERE executionId = ? AND revision = ? AND state = ?
                AND currentNodeId IS ? AND waitingForInputNodeId IS ? AND context = ?`,
-          )
-          .run(
-            execution.state,
-            execution.currentNodeId,
-            execution.waitingForInputNodeId,
-            execution.context,
-            now,
-            input.execution.executionId,
-            input.expectedExecution.revision,
-            expected.state,
-            expected.currentNodeId,
-            expected.waitingForInputNodeId,
-            expected.context,
-          );
+            )
+            .run(
+              execution.state,
+              execution.currentNodeId,
+              execution.waitingForInputNodeId,
+              execution.context,
+              execution.visits,
+              execution.gateWaiting,
+              now,
+              execution.lastActivityAt,
+              input.execution.executionId,
+              input.expectedExecution.revision,
+              expected.state,
+              expected.currentNodeId,
+              expected.waitingForInputNodeId,
+              expected.context,
+            ),
+        );
         if (update.changes !== 1) return "execution_changed";
+        this.enqueueNotification(input.execution.executionId);
 
         if (current) {
           this.sqlite
@@ -645,38 +754,51 @@ export class ExecutionAttemptRepository {
           { executionRevision: number } | undefined;
         if (!current) return false;
 
-        const execution = serializeExecution(input.execution);
-        const expectedExecution = serializeExecution(input.expectedExecution);
+        const execution = executionRowFields(input.execution);
+        const expectedExecution = executionRowFields(input.expectedExecution);
         const noteChanged = input.execution.note !== input.expectedExecution.note;
-        const update = this.sqlite
-          .prepare(
-            `UPDATE workflowExecution SET state = ?, currentNodeId = ?, waitingForInputNodeId = ?,
+        const update = this.tracked(input.execution.executionId, () =>
+          this.sqlite
+            .prepare(
+              `UPDATE workflowExecution SET state = ?, currentNodeId = ?, waitingForInputNodeId = ?,
              context = ?, visits = ?, note = CASE WHEN ? = 1 THEN ? ELSE note END,
-             updatedAt = ?, completedAt = ?, revision = revision + 1
+             gateWaiting = ?, awaitingUser = CASE
+               WHEN ? = 0 OR ? IN ('completed', 'failed') THEN NULL
+               WHEN json_valid(awaitingUser) = 0 THEN NULL
+               WHEN json_extract(awaitingUser, '$.nodeId') IS ? THEN awaitingUser
+               ELSE NULL END, updatedAt = ?, completedAt = ?,
+             lastActivityAt = ?, revision = revision + 1
            WHERE executionId = ? AND revision = ? AND state = ?
              AND currentNodeId IS ? AND waitingForInputNodeId IS ? AND context = ?
              AND (? = 0 OR note IS ?)`,
-          )
-          .run(
-            execution.state,
-            execution.currentNodeId,
-            execution.waitingForInputNodeId,
-            execution.context,
-            execution.visits,
-            noteChanged ? 1 : 0,
-            execution.note,
-            execution.updatedAt,
-            execution.completedAt,
-            input.execution.executionId,
-            input.execution.revision,
-            expectedExecution.state,
-            expectedExecution.currentNodeId,
-            expectedExecution.waitingForInputNodeId,
-            expectedExecution.context,
-            noteChanged ? 1 : 0,
-            expectedExecution.note,
-          );
+            )
+            .run(
+              execution.state,
+              execution.currentNodeId,
+              execution.waitingForInputNodeId,
+              execution.context,
+              execution.visits,
+              noteChanged ? 1 : 0,
+              execution.note,
+              execution.gateWaiting,
+              input.answeredByUser ? 1 : 0,
+              execution.state,
+              execution.currentNodeId,
+              execution.updatedAt,
+              execution.completedAt,
+              execution.lastActivityAt,
+              input.execution.executionId,
+              input.execution.revision,
+              expectedExecution.state,
+              expectedExecution.currentNodeId,
+              expectedExecution.waitingForInputNodeId,
+              expectedExecution.context,
+              noteChanged ? 1 : 0,
+              expectedExecution.note,
+            ),
+        );
         if (update.changes !== 1) return false;
+        this.enqueueNotification(input.execution.executionId);
         const now = Date.now();
         const completed = this.sqlite
           .prepare(
@@ -696,6 +818,19 @@ export class ExecutionAttemptRepository {
             input.inputFingerprint,
           );
         if (completed.changes !== 1) throw new Error("Attempt ownership changed during completion");
+        // An internal claim used by a person's answer replaces the agent's presentation before
+        // dispatch. Link that superseded presentation directly to the final next step as before.
+        this.sqlite
+          .prepare(
+            `UPDATE executionMutationAttempt SET nextAttemptId = ? WHERE executionId = ?
+           AND userId = ? AND state = 'superseded' AND nextAttemptId = ?`,
+          )
+          .run(
+            input.nextAttempt?.attemptId ?? null,
+            input.execution.executionId,
+            input.execution.userId,
+            input.attemptId,
+          );
         if (input.nextAttempt) {
           const next = { ...input.nextAttempt, executionRevision: nextRevision };
           this.createPresented(next);

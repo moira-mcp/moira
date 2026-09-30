@@ -4,7 +4,8 @@ description: Справочник по всем операторам услов�
 ---
 
 Структурированное условие — это объект, который решает, срабатывает ли case маршрутизации. Он
-находится в поле `when` у case узла `condition` или `agent-directive`:
+находится в поле `when` у case узла `condition` или `agent-directive`, а также в поле `when`
+пометки `humanGate` у `agent-directive`, где решает, ждёт ли шаг человека:
 
 ```json
 {

@@ -31,6 +31,26 @@
     "revision": 1,
     "fingerprint": "1cf41460"
   },
+  "overview.intro": {
+    "revision": 1,
+    "fingerprint": "a911cbc8"
+  },
+  "overview.status": {
+    "revision": 2,
+    "fingerprint": "9284df0d"
+  },
+  "overview.idle": {
+    "revision": 1,
+    "fingerprint": "e0d4ba59"
+  },
+  "overview.board": {
+    "revision": 1,
+    "fingerprint": "ebe757a8"
+  },
+  "overview.live": {
+    "revision": 1,
+    "fingerprint": "6502c308"
+  },
   "flows.intro": {
     "revision": 1,
     "fingerprint": "c7fd5476"

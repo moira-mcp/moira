@@ -29,7 +29,8 @@ const TAB_CLASS = "h-8 flex-none gap-1.5 px-2 text-xs";
 const TAB_ICON = "hidden size-3.5 @[520px]:inline";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { apiClient } from "../../services/api-client";
+import { apiClient, type WaitingNotificationMark } from "../../services/api-client";
+import { waitingNotificationText } from "./waitingNotification";
 import type { WorkflowGraph as WorkflowGraphType } from "../../types";
 import {
   ExecutionErrorHistory,
@@ -49,6 +50,7 @@ import {
   Unlock,
   Boxes,
   Variable,
+  OctagonPause,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -110,6 +112,8 @@ export interface ExecutionData {
   workflowName?: string | null; // Issue #421: Resolved from workflow table
   userId: string;
   status: string;
+  /** Present when the agent stopped the execution before reaching the flow's end. */
+  stopReason?: string | null;
   currentNodeId: string | null;
   waitingForInputNodeId: string | null;
   revision: number;
@@ -126,6 +130,8 @@ export interface ExecutionData {
   // Optional owner info (available in admin view); null when the owner's account can no longer be found
   userEmail?: string | null;
   userName?: string | null;
+  /** The latest notification about the run's current wait for its person (execution detail route). */
+  waitingNotification?: WaitingNotificationMark | null;
 }
 
 export interface ExecutionInspectorProps {
@@ -642,6 +648,8 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
         return <AlertTriangle className="h-3 w-3" />;
       case "locked":
         return <Lock className="h-3 w-3" />;
+      case "stopped":
+        return <OctagonPause className="h-3 w-3" />;
       default:
         return null;
     }
@@ -675,6 +683,7 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
   const journal = execution.errors ?? [];
   const errorsCount = journal.filter(isRefusalEntry).length;
   const degradationsCount = journal.length - errorsCount;
+  const displayedStatus = execution.stopReason ? "stopped" : execution.status;
   // The run's own controls live in the diagram toolbar with the map's and the graph's, so the
   // page has one row above the diagram: view tabs and route cursor first, legend and guide last.
   const runModes = progress ? (
@@ -825,9 +834,18 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
           <TooltipContent>{execution.workflowName || execution.workflowId}</TooltipContent>
         </Tooltip>
 
-        <Badge variant={getStatusBadgeVariant(execution.status)} className="gap-1">
-          {getStatusIcon(execution.status)}
-          {t(`common.status.${execution.status}`)}
+        <Badge
+          variant={getStatusBadgeVariant(displayedStatus)}
+          className="gap-1"
+          data-testid="run-status"
+          data-status={displayedStatus}
+        >
+          {getStatusIcon(displayedStatus)}
+          {t(
+            displayedStatus === "stopped"
+              ? "pages.overview.runStatus.stopped"
+              : `common.status.${displayedStatus}`,
+          )}
         </Badge>
 
         {currentNode && (
@@ -905,6 +923,17 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
         </div>
       </PageHeader>
 
+      {execution.stopReason ? (
+        <div
+          className="border-b bg-secondary px-4 py-3 text-sm"
+          role="note"
+          data-testid="run-stop-reason"
+        >
+          <span className="font-semibold">{t("pages.overview.panel.stopReason")}: </span>
+          <span className="whitespace-pre-wrap break-words">{execution.stopReason}</span>
+        </div>
+      ) : null}
+
       {!progress && progressLoading ? (
         <div
           className="border-b bg-muted/20 px-4 py-3 text-xs text-muted-foreground"
@@ -916,6 +945,60 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
       ) : !progress && progressError ? (
         <div className="border-b bg-destructive/5 px-4 py-2 text-xs text-destructive" role="status">
           {t("pages.executionInspector.progress.error")}
+        </div>
+      ) : null}
+
+      {/* The move is the person's: the run stands on a step its workflow marks as theirs, or the
+          agent asked them a question it cannot go on without. The answer goes to the agent. */}
+      {shownProgress?.waitingForUser ? (
+        <div
+          className="border-b border-your-move/30 bg-your-move/10 px-4 py-2 text-sm"
+          role="status"
+          data-testid="run-waiting-for-user"
+          data-source={shownProgress.waitingForUser.source}
+        >
+          <span className="font-medium text-your-move">
+            {shownProgress.waitingForUser.source === "agent"
+              ? t("pages.executionInspector.waitingForUser.agentTitle")
+              : t("pages.executionInspector.waitingForUser.title")}
+          </span>{" "}
+          <span className="break-words">
+            {shownProgress.waitingForUser.source === "agent"
+              ? shownProgress.waitingForUser.question
+              : shownProgress.waitingForUser.label}
+          </span>
+          <span className="text-muted-foreground">
+            {" — "}
+            {t("pages.executionInspector.waitingForUser.hint")}
+          </span>
+          {shownProgress.waitingForUser.source === "agent" &&
+          shownProgress.waitingForUser.options.length > 0 ? (
+            <ul
+              className="mt-1 flex flex-wrap gap-1.5"
+              aria-label={t("pages.executionInspector.waitingForUser.options")}
+              data-testid="run-waiting-for-user-options"
+            >
+              {shownProgress.waitingForUser.options.map((option) => (
+                <li
+                  key={option}
+                  className="rounded-full border border-your-move/30 bg-background px-2 py-0.5 text-xs"
+                >
+                  {option}
+                </li>
+              ))}
+            </ul>
+          ) : null}
+          {execution?.waitingNotification ? (
+            <div
+              className="mt-1 text-xs text-muted-foreground"
+              data-testid="run-waiting-notification"
+              data-state={
+                execution.waitingNotification.deliveryStatus ?? execution.waitingNotification.state
+              }
+            >
+              {waitingNotificationText(execution.waitingNotification, t)}
+            </div>
+          ) : null}
         </div>
       ) : null}
 

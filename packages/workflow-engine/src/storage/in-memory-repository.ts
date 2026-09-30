@@ -13,6 +13,7 @@ import {
 import { WorkflowGraph } from "../interfaces/core-interfaces.js";
 import {
   WorkflowExecution,
+  type ExecutionAwaitingUser,
   type ExecutionVisit,
   type ReminderMutation,
   type ReminderMutationResult,
@@ -29,6 +30,8 @@ import {
   stepAttemptContinuationMatches,
 } from "@mcp-moira/shared";
 import { encryptValue, decryptValue } from "../utils/encryption.js";
+import { humanGateChanged, humanGateWaiting } from "../utils/human-gate.js";
+import { awaitingUserAfterMove } from "../utils/awaiting-user.js";
 import type {
   ExecutionFilter,
   ExecutionListResult,
@@ -48,6 +51,7 @@ import type {
   ReconciledExecutionAttemptCounts,
   StartPreconditionCompletionResult,
 } from "../types/execution-attempt.js";
+import { executionActivity } from "@mcp-moira/shared/database/execution-activity";
 
 export class InMemoryRepository implements IDataRepository {
   private workflows = new Map<
@@ -274,6 +278,15 @@ export class InMemoryRepository implements IDataRepository {
       updatedAt: now,
       revision: existing ? existing.revision + 1 : 0,
     });
+    // A new definition can mark, unmark or change the gate of the step a paused run stands on; only
+    // those runs are re-decided, the rest keep the decision taken on arrival.
+    if (existing) {
+      for (const execution of this.executions.values()) {
+        if (execution.workflowId !== workflowId) continue;
+        if (!humanGateChanged(existing.graph, storedGraph, execution.currentNodeId)) continue;
+        execution.gateWaiting = humanGateWaiting(storedGraph, execution);
+      }
+    }
 
     this.logger.debug("Workflow saved in memory", {
       workflowId,
@@ -349,6 +362,8 @@ export class InMemoryRepository implements IDataRepository {
         });
       }
       execution.revision += 1;
+      // The agent's question is not the saver's to write (as in the database's save).
+      execution.awaitingUser = awaitingUserAfterMove(current.awaitingUser, execution);
     }
     this.executions.set(execution.executionId, structuredClone(execution));
 
@@ -359,17 +374,20 @@ export class InMemoryRepository implements IDataRepository {
 
   async getExecution(executionId: string): Promise<WorkflowExecution | null> {
     const execution = this.executions.get(executionId);
-    return execution ? structuredClone(execution) : null;
+    if (!execution) return null;
+    // The database stores these two on every write; derived on read here, from the same function.
+    const copy = structuredClone(execution);
+    return { ...copy, ...executionActivity(copy) };
   }
 
   async listExecutions(): Promise<WorkflowExecution[]> {
-    return Array.from(this.executions.values()).map((e) => ({ ...e }));
+    return Array.from(this.executions.values()).map((e) => ({ ...e, ...executionActivity(e) }));
   }
 
   async listUserExecutions(userId: string): Promise<WorkflowExecution[]> {
     return Array.from(this.executions.values())
       .filter((e) => e.userId === userId)
-      .map((e) => ({ ...e }));
+      .map((e) => ({ ...e, ...executionActivity(e) }));
   }
 
   async listExecutionsByWorkflowVersion(
@@ -383,9 +401,10 @@ export class InMemoryRepository implements IDataRepository {
           e.workflowId === workflowId &&
           e.userId === userId &&
           e.status === "completed" &&
+          !e.stopReason &&
           e.workflowVersion === workflowVersion,
       )
-      .map((e) => ({ ...e }));
+      .map((e) => ({ ...e, ...executionActivity(e) }));
   }
 
   async summarizeExecutionsByWorkflowVersion(
@@ -394,7 +413,11 @@ export class InMemoryRepository implements IDataRepository {
     userId: string,
   ): Promise<{ count: number; lastCompletedAt: number | null; unstamped: number }> {
     const completed = Array.from(this.executions.values()).filter(
-      (e) => e.workflowId === workflowId && e.userId === userId && e.status === "completed",
+      (e) =>
+        e.workflowId === workflowId &&
+        e.userId === userId &&
+        e.status === "completed" &&
+        !e.stopReason,
     );
     const stamped = completed.filter((e) => e.workflowVersion === workflowVersion);
     const completedAt = (e: WorkflowExecution) => e.completedAt ?? e.updatedAt;
@@ -483,7 +506,7 @@ export class InMemoryRepository implements IDataRepository {
     executions = executions.slice(effectiveOffset, effectiveOffset + effectiveLimit);
 
     return {
-      executions: executions.map((e) => ({ ...e })),
+      executions: executions.map((e) => ({ ...e, ...executionActivity(e) })),
       total,
     };
   }
@@ -502,6 +525,28 @@ export class InMemoryRepository implements IDataRepository {
       execution.note = note;
       execution.updatedAt = Date.now();
     }
+  }
+
+  async setExecutionAwaitingUser(
+    executionId: string,
+    userId: string,
+    question: Omit<ExecutionAwaitingUser, "nodeId"> | null,
+  ): Promise<WorkflowExecution> {
+    const execution = this.executions.get(executionId);
+    if (!execution || execution.userId !== userId) {
+      throw new ValidationError("Execution must belong to the authenticated user");
+    }
+    if (execution.status === "completed" || execution.status === "failed") {
+      throw new ValidationError("Execution is already finished");
+    }
+    if (question && !execution.currentNodeId) {
+      throw new ValidationError("Execution is not standing on a step");
+    }
+    execution.awaitingUser = question
+      ? { ...structuredClone(question), nodeId: execution.currentNodeId! }
+      : null;
+    execution.updatedAt = Date.now();
+    return structuredClone(execution);
   }
 
   async appendError(executionId: string, error: ExecutionError): Promise<boolean> {
@@ -541,6 +586,8 @@ export class InMemoryRepository implements IDataRepository {
     execution.errors ??= [];
     execution.errors.push(error);
     execution.status = "completed";
+    execution.gateWaiting = false;
+    execution.awaitingUser = null;
     execution.updatedAt = Date.now();
     execution.completedAt = execution.updatedAt;
     return { changed: true, execution: structuredClone(execution) };
@@ -557,6 +604,63 @@ export class InMemoryRepository implements IDataRepository {
       }
     }
     return result;
+  }
+
+  async stopExecution(
+    executionId: string,
+    userId: string,
+    expectedRevision: number,
+    reason: string,
+  ): Promise<{ changed: boolean; revision: number }> {
+    reason = reason.trim();
+    if (!reason || reason.length > 500)
+      throw new ValidationError("Stop reason must contain 1–500 characters");
+    const execution = this.executions.get(executionId);
+    if (!execution || execution.userId !== userId)
+      throw new ValidationError("Execution must belong to the authenticated user");
+    if (
+      execution.status === "completed" &&
+      execution.stopReason === reason &&
+      execution.revision === expectedRevision + 1
+    )
+      return { changed: false, revision: execution.revision };
+    if (execution.revision !== expectedRevision)
+      throw new ConflictError("Execution state changed; reload execution_context before stopping");
+    if (!["running", "waiting"].includes(execution.status))
+      throw new ValidationError("Execution is already finished");
+    const attempts = [...this.executionAttempts.values()].filter(
+      (attempt) => attempt.executionId === executionId && attempt.userId === userId,
+    );
+    if (attempts.some((attempt) => attempt.state === "executing"))
+      throw new ConflictError(
+        "An agent operation is executing; wait for it to finish before stopping",
+      );
+    const now = Date.now();
+    Object.assign(execution, {
+      status: "completed",
+      stopReason: reason,
+      revision: expectedRevision + 1,
+      waitingForInputNodeId: null,
+      gateWaiting: false,
+      awaitingUser: null,
+      completedAt: now,
+      updatedAt: now,
+      lastActivityAt: now,
+    });
+    for (const attempt of attempts) {
+      if (!["presented", "outcome_unknown"].includes(attempt.state)) continue;
+      Object.assign(attempt, {
+        state: "superseded",
+        response: null,
+        ownerId: null,
+        heartbeatAt: null,
+        leaseExpiresAt: null,
+        fence: attempt.fence + 1,
+        completedAt: now,
+        updatedAt: now,
+      });
+    }
+    return { changed: true, revision: execution.revision };
   }
 
   async setExecutionParent(
@@ -692,6 +796,7 @@ export class InMemoryRepository implements IDataRepository {
       const visits = (execution.visits ??= []);
       visits.push({ seq: visits.length, ...structuredClone(visit) });
     }
+    if (visit?.actor?.role === "agent") execution.awaitingUser = null;
     execution.updatedAt = Date.now();
     return true;
   }
@@ -949,6 +1054,8 @@ export class InMemoryRepository implements IDataRepository {
       return false;
     const updated = structuredClone(execution);
     updated.status = "completed";
+    updated.gateWaiting = false;
+    updated.awaitingUser = null;
     updated.error = error.message;
     updated.errors = [...(updated.errors ?? []), error];
     updated.completedAt = error.timestamp;
@@ -1027,6 +1134,15 @@ export class InMemoryRepository implements IDataRepository {
       return { kind: "outcome_unknown", attempt: structuredClone(attempt) };
     if (attempt.state === "executing")
       return { kind: "processing", attempt: structuredClone(attempt) };
+    const execution = this.executions.get(input.executionId);
+    if (
+      !execution ||
+      execution.userId !== input.userId ||
+      !["running", "waiting"].includes(execution.status) ||
+      execution.revision !== input.executionRevision ||
+      execution.currentNodeId !== input.nodeId
+    )
+      return { kind: "stale" };
     attempt.state = "executing";
     attempt.inputFingerprint = input.inputFingerprint;
     attempt.ownerId = input.ownerId;
@@ -1082,6 +1198,7 @@ export class InMemoryRepository implements IDataRepository {
     this.executions.set(input.execution.executionId, {
       ...structuredClone(input.execution),
       revision: stored.revision + 1,
+      awaitingUser: null,
       updatedAt: Date.now(),
     });
     if (current) {
@@ -1126,6 +1243,9 @@ export class InMemoryRepository implements IDataRepository {
     updatedExecution.errors = structuredClone(current.errors);
     updatedExecution.reminders = structuredClone(current.reminders);
     updatedExecution.parentExecutionId = current.parentExecutionId;
+    updatedExecution.awaitingUser = input.answeredByUser
+      ? awaitingUserAfterMove(current.awaitingUser, updatedExecution)
+      : null;
     if (!noteChanged) updatedExecution.note = current.note;
     const now = Date.now();
     const completedAttempt: ExecutionAttempt = {
@@ -1161,6 +1281,15 @@ export class InMemoryRepository implements IDataRepository {
 
     this.executions.set(input.execution.executionId, updatedExecution);
     this.executionAttempts.set(input.attemptId, completedAttempt);
+    for (const prior of this.executionAttempts.values()) {
+      if (
+        prior.executionId === input.execution.executionId &&
+        prior.userId === input.execution.userId &&
+        prior.state === "superseded" &&
+        prior.nextAttemptId === input.attemptId
+      )
+        prior.nextAttemptId = input.nextAttempt?.attemptId ?? null;
+    }
     if (presentedAttempt) this.executionAttempts.set(presentedAttempt.attemptId, presentedAttempt);
     input.execution.revision = nextRevision;
     return true;

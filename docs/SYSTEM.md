@@ -84,16 +84,18 @@ Materialize and progress-image grants bind context-derived content to an indepen
 revision as well as their execution/node or workflow-step constraints. Metadata changes therefore
 do not masquerade as step transitions, while a URL cannot render different context after issuance.
 
-The execution revision is the workflow-step generation. It advances only when an original `step`
-persists workflow state; receipt replay and session mutations such as note, parent, reminder, or
+The execution revision is the workflow-step generation. It advances when an original `step`
+persists workflow state or an explicit stop ends the run; receipt replay and session mutations such as note, parent, reminder, or
 runtime-variable changes do not advance it or invalidate the presented attempt. Those mutations
 guard the field or stored snapshot they actually change with independent opaque parent, context,
 and reminder revisions returned by the corresponding read and mutation surfaces.
 
 A person may answer the waiting step from the run page (`POST /api/executions/:id/answer`). That
-runs the step without an attempt: the execution's compare-and-set save guards it, the accepted
-values are recorded as an adjustment visit with the acting user, and the presented attempt the
-agent was holding is marked `superseded` and linked to the presentation created for the new node.
+runs the step through an internal durable attempt: the agent's presentation is superseded before
+the internal attempt claims ownership, the execution's revision and active state are checked before
+handlers run, and its completion is committed through the same fenced transaction as an MCP step.
+The accepted values are recorded as an adjustment visit with the acting user, and the superseded
+agent attempt is linked to the presentation created for the new node.
 A superseded attempt is stale on `step` (never replayed), is not the current attempt, and is
 evicted with old receipts; the answer is refused while an attempt is executing or outcome-unknown.
 
@@ -134,8 +136,11 @@ causes.
 must be one a run can wait on — `agent-directive`, `teleport`, `materialize`, `lock` or `subgraph`;
 any other node is refused, because resuming "at" a node that never holds a presentation would mean
 running the workflow forward from there and calling it a repair. It moves the execution to
-that node, merges the supplied variable values into the context, and installs a fresh attempt bound
-to the current definition — so the caller's next call is an ordinary `step()`. The run then comes to
+that node, records the arrival there as an open waited visit in the route (in the same guarded write;
+recovered onto the step it already waits on, it keeps that open visit instead — the same wait, not a
+second pass; the presentation that follows continues the open visit), merges the supplied variable values into the
+context, and installs a fresh attempt bound to the current definition — so the caller's next call is an
+ordinary `step()`. The run then comes to
 rest on the named node and never advances past it. That is not the same as nothing running: the
 target node's own presentation path executes, which is inert for an `agent-directive`, a `teleport`
 and a `materialize` node but not for the other two — resuming at a `lock` node creates the lock and
@@ -168,7 +173,8 @@ A paused step attempt is bound to its execution revision, its node, its workflow
 run's **continuation surface**: everything the paused node declares, minus the inherited fields that
 describe how it is displayed rather than what it does — `metadata` (display name, description, icon,
 colour, tags, estimated duration), `progressNodeId`, `progressActiveLabel`, `progressActiveContent`
-and `connectionLabels` — together with the `variableRegistry` entries for the global names that node
+and `connectionLabels`, plus an `agent-directive`'s `humanGate`, which changes who the run is shown
+as waiting for and never the directive, input or route — together with the `variableRegistry` entries for the global names that node
 declares as inputs, which the engine inlines into the schema the agent is validated against.
 
 The surface is defined by exclusion because any node type can be the one a run is paused on:
@@ -214,6 +220,65 @@ workflow input or response content.
 Recurring reconciliation returns separate bounded Start and Step counts. Maintenance maps them to
 the corresponding `operation` label, so an expired Start lease is never reported as a Step outcome.
 
+### Waiting-for-you notifications
+
+`session({ action: "stop-execution", executionId, expectedRevision, reason })` ends an owned active
+execution. The trimmed reason is required and contains 1–500 characters. In one immediate transaction,
+`ExecutionAttemptRepository.stopExecution` stores lifecycle state `completed` with `stopReason`,
+advances the step revision, clears input, gate and question waits, retires presented and
+outcome-unknown attempts with a new fence, and records a status change in the feed. An executing
+Start or Step attempt refuses the stop until it finishes. Repeating the original revision and reason
+returns the same result without another write. Stopping does not roll back external effects or stop
+separately running child executions. `cancel-execution` remains the recovery action for an unknown
+Start outcome. Terminal guards prevent either stopped or ordinarily completed runs from resuming.
+The stop transaction supersedes pending waiting notifications. The sender rechecks the stored wait
+after loading and before beginning delivery; a stopped run cannot queue another reminder. A delivery
+already begun may still reach its external channel after the stop.
+
+When a run starts waiting for its person — it arrives at a step marked `humanGate` whose condition
+held, or the agent raises `session await-user` — a row is written to `executionNotification` in the
+same transaction as the write that put the run there. For a gate with `notify: "auto"` (the default)
+and for the agent's question it is the `first` row; a gate with `notify: "off"` is one whose flow
+sends its own first message, so it gets only its single `remind` row, due `remindAfter` after that
+write — the moment the queue first records the wait: the arrival, or the recompute when a new version
+marks a step a run already stands on — and nothing without `remindAfter`. The duration form is parsed
+by `humanGateDurationMs` (`packages/shared/src/utils/human-gate-duration.ts`), shared by the queue, the
+sender and the CLI.
+Every execution writer that can start such a wait does it through `enqueueWaitingNotification`
+(`packages/shared/src/database/execution-notification.ts`): the attempt repository's `complete`,
+`recoverToNode` and `claimStart`, `ExecutionRepository.save` and `setAwaitingUser`, and the
+`gateWaiting` recompute on a new workflow version. The row is keyed `UNIQUE(executionId, waitKey,
+kind)` with `waitKey` = `gate:<seq of the open waited visit>` (for a run with no open waited visit in its route,
+`gate:@<number of engine visits>`, which adjustments do not change) or `agent:<question id>`, so a repeated
+or replayed step, a re-presentation or a reconnect finds it already there, and a write refused by
+its guard queues nothing. `WorkflowRepository.save` and, in `ExecutionRepository`, `save`, `setAwaitingUser`, `updateContext`,
+`appendError` and `cancelExecution` begin their transactions `IMMEDIATE` (the attempt repository's transactions already did): with the web backend and
+the sender both writing, a transaction that reads before it writes must hold the write lock from the
+start so SQLite's `busy_timeout` applies instead of failing with «database is locked». Catalog
+reconciliation's apply transaction is still deferred.
+
+The MCP server process is the only sender: `WaitingNotificationSender`
+(`packages/workflow-engine/src/services/waiting-notification-sender.ts`), started in `main()` after the
+extension channels are registered (so a notification due at startup sees every channel), ticks every
+five seconds. It drops (`superseded`) a row whose wait is no
+longer the run's current one, holds an agent-question row until ten minutes after the run's previous
+agent-question notification, and otherwise delivers a plain-text message — the run heading (flow ·
+task, run link) and «🙋 Waiting for your decision: <label>» or «🙋 The agent is asking you:
+<question>» with the choices — through the active `UserCommunicationService`, storing the status,
+the channels that took it and the time in the row. The run's visit log is not touched. When it
+sends a gate's first notification and the gate has `humanGate.remindAfter`, it queues the gate's
+single `remind` row due that long after; if the wait ends first, the reminder is dropped when it
+comes due, like any row whose wait is gone. A gate beneath an open agent question still counts as a
+current wait, so its notification is not lost to the question. A notification refused only by the
+communication service's per-person limits (`rate_limited`: the per-minute budget or the concurrency
+limits) is held for a minute and tried again; any other failed delivery is recorded, not retried. A
+row whose handling throws (for example, a definition that cannot be read) is logged and set aside for
+five minutes, so it never blocks the rows behind it. When a run holds two waits at once — a gate marked
+beneath an open agent question — each gets its own row. `GET /api/executions/:id` returns the
+latest row of the run's current wait, skipping a reminder that is not due yet (a held first
+notification is shown as on its way) as `waitingNotification`, which the run page shows under its
+banner.
+
 An indeterminate start stays attached to its reserved Process ID and appears through session
 inspection instead of becoming an orphan. Only its owner can cancel it, and cancellation requires
 the current execution revision so a stale recovery action cannot remove newer work.
@@ -236,6 +301,36 @@ while it remains active, and driving it to the changed behavior. Assert ordinary
 complete diagnosis, recovery, and subsequent-step path on the same execution, including its recorded
 earlier route and the next required step. When a change cannot affect an in-flight execution, explain
 why in the pull request. Workflow version pinning and blanket migration do not replace this check.
+
+### Run activity and the overview
+
+Two columns of `workflowExecution` feed the overview's filters and order. `lastActivityAt` is the
+run's last event of work — the latest `enteredAt` or `leftAt` of its visits (a step handed in, a
+directive shown, a variable adjustment by the agent or a person) or `completedAt`; a note, reminders,
+a new parent, a journal entry, a lock or the agent's `await-user` do not move it. `refusalCount` is
+`countRefusals` over the journal. One function, `executionActivity`
+(`packages/shared/src/database/execution-activity.ts`), derives both, and every writer that stores the
+facts they come from stores them in the same write: the cursor writers through `executionRowFields`,
+`updateContext` with its adjustment visit, `appendError`, `clearErrors`, `cancelExecution` and the
+cancellation of a run whose start outcome is unknown. The in-memory repository derives them on read
+with the same function. Migration `0047_execution_activity` fills existing rows with the same formula
+in SQL and adds the indexes `(userId, state, lastActivityAt)` and `(parentExecutionId)`.
+
+`ExecutionOverviewRepository` (`packages/shared/src/database/repositories/execution-overview-repository.ts`)
+decides the overview's membership, nesting and order in SQL: the status predicate, the candidate set,
+roots (candidates with no candidate ancestor, found by a recursive CTE), each root's tree, the subtree
+facts (a match anywhere, the latest activity, a run waiting for its person) and paging over roots.
+`packages/web-backend/src/services/execution-overview.ts` projects the page's runs into rows in batch —
+the runs in one query, each flow's definition once (`WorkflowRepository.getManyForUser`), the
+notification marks in two (`ExecutionNotificationRepository.latestForCurrentWaits`) — so the number of
+queries does not grow with the page; the projection is `projectExecutionRun`.
+
+The overview derives `stopped` from a non-null `stopReason` (migration `0049_execution_stop`),
+separately from `completed`. Its default `active` filter removes stopped roots and descendants;
+their active children remain discoverable as roots carrying the parent link. Other filters can show
+stopped runs and their reason. The run projection preserves unfinished route history and freezes a
+stopped run's open duration at its completion timestamp; stopped runs do not enter typical-duration
+statistics.
 
 ### Bundled Workflow Reconciliation
 
@@ -809,6 +904,7 @@ interface WorkflowExecution {
   status: "running" | "completed";
   errors?: ExecutionError[]; // Persistent error log
   note?: string | null; // User-provided note for identification (max 500 chars)
+  stopReason?: string | null; // Explicit stop explanation; null for ordinary completion
   createdAt: number;
   updatedAt: number;
 }
@@ -874,6 +970,14 @@ interface AgentDirectiveNode {
   expressions?: string[];
   // Routing on the node's own validated answer; `success` is taken when no case holds.
   cases?: RoutingCase[];
+  // Marks the step as waiting for a person while `when` holds (unconditionally without `when`);
+  // display and notification only — excluded from the continuation surface.
+  humanGate?: {
+    label?: string;
+    when?: StructuredCondition;
+    notify?: "auto" | "off";
+    remindAfter?: string;
+  };
   // `success` is the default output; `error`/`timeout` are reserved control outputs; every other
   // key is an authored output named by a case.
   connections: { success: string; error?: string; timeout?: string } & Record<string, string>;
@@ -1064,6 +1168,45 @@ Per-node-type checks that AJV schema cannot perform:
 - **Output-scope declaration (AgentDirectiveNode / TeleportNode)** — Blocking errors. Every name in `inputSchema.globalInputs` must exist in the workflow `variableRegistry` (`declares global write '<name>' which is not in the workflow variableRegistry`); a name must not be both a declared global write and a node-local output, i.e. a `globalInputs` name cannot also appear in `inputSchema.properties` (`local output '<name>' shadows the declared global write of the same name`). Non-string `globalInputs` entries are rejected.
 - **ExpressionNode** — each expression is parsed before execution; targets must be safe bare names, and member reads support own-property paths plus bounded fixed or variable array indexes.
 
+### Change feed and live updates
+
+The overview learns about changes from the table `executionChange` (migration
+`0048_execution_change`): one row per change of a run — `seq` (autoincrement), `executionId`,
+`userId`, `kind`, `at` — indexed by `(userId, seq)` and `at`, without a foreign key, so a `deleted`
+event outlives its run. `packages/shared/src/database/execution-change.ts` owns the kinds and the
+decision between them (`executionChangeKind`: a change of state, gate flag, agent question or refusal
+count is `status`; else a moved `lastActivityAt` is `activity`; else `meta`) and three writers, all
+called inside the writer's own transaction so the row and its event commit together:
+
+- `recordExecutionChange` — one event; an insert of a run records `created`;
+- `trackExecutionChange` — wraps a write of an existing row, reads its facts before and after and
+  records the decided kind only when the write changed the row (a write refused by its guard records
+  nothing);
+- `recordExecutionsDeleted` — records `deleted` for the runs a delete is about to remove, by workflow,
+  by user (their own runs and everyone's runs of the workflows they own) or by ids.
+
+Every writer of `workflowExecution` goes through them: the cursor writers, `updateContext`,
+`setAwaitingUser`, `appendError`, `clearErrors`, note, parent and reminder writes, both cancellations
+and the `gateWaiting` recompute; `ExecutionRepository.delete`, the retention cleanup,
+`WorkflowRepository.delete`, catalog reconciliation's workflow removal and `deleteUserAccount`
+(`packages/shared/src/database/user-deletion.ts`, used by the admin's user deletion) record `deleted`
+before their cascade. `LockRepository.create` and `updateStatus` record `lock` in their own small
+transaction. `ExecutionChangeRepository` reads the feed (`since`, `forUserAfter`, `latestSeq`,
+`isExpired`) and trims it.
+
+In the web backend, `packages/web-backend/src/services/execution-change-stream.ts` holds one
+`ExecutionChangeHub` per process, started with the server: every second it reads the events after
+the last one it handed out and passes each only to its owner's open streams; every hour it trims the
+feed to 24 hours. A failed read or trim is logged and retried on the next tick.
+`openExecutionChangeStream` serves `GET /api/executions/overview/stream` (catch-up from the cursor, then `ready`;
+`reset` when the cursor is expired — older than the kept events or ahead of the latest one — or when
+1000 or more events were missed; heartbeat, session re-check through `isSessionStillValid`, five
+streams per user) and `changesAfter` serves the poll, reading the latest position before the events
+and returning events only up to it, so an event committed in between comes with the next poll;
+without a cursor it answers only that position, and a `reset` carries it too. The stream route is mounted before the `/api/executions` router with the same `apiLimiter` before authentication;
+each opening or reconnect consumes one request, while events on an established stream do not. Both nginx configs route
+`location ^~ /api/executions/overview/stream` with buffering off, HTTP/1.1 and hour-long timeouts.
+
 ## Web UI Architecture
 
 ### Backend (Express - internal port 4201, accessed via nginx proxy)
@@ -1200,8 +1343,9 @@ interface ValidationError {
   node's `default` connection leads straight to an `end` node, the run's last message, no item is
   in progress: unfinished items read `○` and the `progress` line names no current item), then
   `⏳ agent on the step: <block>` or `🙋 waiting for you: <block>` when the node's single forward
-  connection leads to a node the run pauses on (`lock` → a person; `agent-directive`, `teleport`,
-  `materialize`, `subgraph` → the agent). Values substituted into a Markdown or HTML message, list
+  connection leads to a node the run pauses on (`lock` → a person, and so is an `agent-directive`
+  marked `humanGate` whose `when` holds; any other `agent-directive`, `teleport`, `materialize`,
+  `subgraph` → the agent). Values substituted into a Markdown or HTML message, list
   titles and block labels are escaped for the format. The text is fitted to the communication
   service's `maxTextLength`: the plan takes the room left, and an over-long message is cut at a
   line with `…`, so delivery never fails for length
@@ -1596,11 +1740,16 @@ Action-based tool for session-related information.
 // Parameters
 {
   action: 'user' | 'executions' | 'execution_context' | 'current_step' | 'diagnose' | 'recover'
-        | 'update-note';
-  executionId?: string;  // Required for execution_context, current_step, diagnose, recover, update-note
+        | 'update-note' | 'await-user' | 'stop-execution';
+  executionId?: string;  // Required for execution_context, current_step, diagnose, recover, update-note, await-user
   nodeId?: string;       // Required for recover: the node the run must resume from
   variableValues?: Record<string, unknown>; // recover: values written into the execution context
   note?: string;         // Required for update-note (max 500 chars)
+  question?: string;     // await-user: what the agent needs from the person (1-500 chars)
+  options?: string[];    // await-user: up to 4 choices (1-200 chars each)
+  resolve?: true;        // await-user: clear the open question instead of raising one
+  expectedRevision?: number; // stop-execution: required step revision from execution_context
+  reason?: string;       // stop-execution: required trimmed explanation, 1-500 chars
 }
 
 // action: 'user' - Returns authenticated user information
@@ -1620,6 +1769,7 @@ Action-based tool for session-related information.
     status: 'running' | 'completed' | 'locked';  // "locked" = running + active lock
     currentNodeId: string;
     note?: string | null;
+    stopReason: string | null;
     parentExecutionId?: string | null;
     createdAt: string;   // ISO 8601
     updatedAt: string;   // ISO 8601
@@ -1640,6 +1790,7 @@ Action-based tool for session-related information.
   waitingForInputNodeId: string | null;
   errors?: ExecutionError[]; // Persistent error log
   note?: string | null;
+  stopReason: string | null;
   context: {
     variables: Record<string, unknown>;
     nodeStates: Record<string, unknown>;
@@ -1652,6 +1803,14 @@ Action-based tool for session-related information.
 
 // action: 'current_step' - Returns the authoritative current presentation
 string  // Formatted directive including Process ID and Step attempt ID
+
+// action: 'stop-execution' - Ends an owned active run; exact repeats return the same data
+{
+  executionId: string;
+  stopped: true;
+  stopReason: string;
+  revision: number;
+}
 
 // action: 'diagnose' - Reports whether a paused run can still continue, and why not
 {
@@ -1684,6 +1843,14 @@ string  // Formatted directive including Process ID and Step attempt ID
   success: boolean;
   executionId: string;
   note: string;
+}
+
+// action: 'await-user' - Raises, replaces (new id) or clears (resolve: true) the agent's question.
+// Owner-only, running runs only; bound to the node the run stands on; the step revision is unchanged.
+{
+  executionId: string;
+  awaitingUser: { id: string; nodeId: string; question: string; options?: string[]; since: number } | null;
+  message: string;
 }
 ```
 

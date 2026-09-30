@@ -57,6 +57,16 @@ export const REQUIRED_TOPICS: Readonly<Record<string, Readonly<Record<string, st
     "answer-waiting-step": "answer",
     "notification-link": "notifications",
   },
+  overview: {
+    "runs-in-progress": "intro",
+    "waiting-for-you-first": "status",
+    "answer-in-chat": "status",
+    "find-stalled": "idle",
+    "filters-in-url": "idle",
+    "last-step-meaning": "board",
+    "open-details": "board",
+    "live-updates": "live",
+  },
   runs: {
     "what-is-a-run": "intro",
     "status-filter": "status",

@@ -70,6 +70,7 @@ export const STANDALONE_ROUTES = [
 /** The app's screens, for every signed-in reader, inside the main layout. */
 export const MAIN_ROUTES = [
   { id: "home", path: "/", coverage: { screen: "home" } },
+  { id: "overview", path: "/overview", coverage: { screen: "overview" } },
   { id: "flows", path: "/workflows", coverage: { screen: "flows" } },
   { id: "flow-by-name", path: "/workflows/:handle/:slug", coverage: { screen: "flow" } },
   { id: "flow-by-id", path: "/workflows/:id", coverage: { screen: "flow" } },

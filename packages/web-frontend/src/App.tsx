@@ -43,6 +43,7 @@ import {
 
 // Lazy-loaded heavy pages
 const FlowPage = lazy(() => import("./pages/FlowPage").then((m) => ({ default: m.FlowPage })));
+const Overview = lazy(() => import("./pages/Overview").then((m) => ({ default: m.Overview })));
 const Executions = lazy(() =>
   import("./pages/Executions").then((m) => ({ default: m.Executions })),
 );
@@ -112,6 +113,7 @@ const STANDALONE_PAGES: Record<StandaloneRouteId, React.ReactNode> = {
 
 const MAIN_PAGES: Record<MainRouteId, React.ReactNode> = {
   home: <Dashboard />,
+  overview: <Overview />,
   flows: <Workflows />,
   "flow-by-name": <FlowPage />,
   "flow-by-id": <FlowPage />,

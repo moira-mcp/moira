@@ -236,6 +236,9 @@ describe("recovering a run that cannot continue", () => {
     expect(afterRecovery.visits?.slice(0, beforeRecovery.visits?.length)).toEqual(
       beforeRecovery.visits,
     );
+    // Recovered onto the step it already stood on: the open visit continues — no second visit, no
+    // loop in the route.
+    expect(afterRecovery.visits).toHaveLength(beforeRecovery.visits!.length);
     const finished = await requestContext.run({ userId: USER_ID }, () =>
       engine.executeStep(
         executionId,

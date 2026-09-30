@@ -67,6 +67,7 @@ function projectionOfGraph(graph: WorkflowGraph): ExecutionProgress {
     executionWorkflowVersion: null,
     projectedAt: 0,
     waitingFor: null,
+    waitingForUser: null,
     executionRevision: 0,
     executionStatus: "running",
     diagnostics: [],

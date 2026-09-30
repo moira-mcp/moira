@@ -230,6 +230,13 @@ class ConfigSingleton {
     return timeout ? parseInt(timeout, 10) : 30000;
   }
 
+  /** How often an open overview stream re-checks its session (ms); the test environment shortens it. */
+  getOverviewStreamRecheckMs(): number {
+    this.ensureInitialized();
+    const configured = Number(process.env.OVERVIEW_STREAM_RECHECK_MS);
+    return Number.isInteger(configured) && configured > 0 ? configured : 2 * 60 * 1000;
+  }
+
   // ============================================================================
   // Email
   // ============================================================================
@@ -732,6 +739,9 @@ export function getTelegramEncryptionKey(): string | undefined {
 }
 export function getTelegramApiTimeout(): number {
   return config.getTelegramApiTimeout();
+}
+export function getOverviewStreamRecheckMs(): number {
+  return config.getOverviewStreamRecheckMs();
 }
 export function getBrevoApiKey(): string | undefined {
   return config.getBrevoApiKey();
