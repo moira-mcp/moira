@@ -2680,7 +2680,8 @@ Events:
 
 The session and the user's standing are re-checked every `OVERVIEW_STREAM_RECHECK_MS` (default two
 minutes). A user may hold five open streams; the sixth gets `429` with code `TOO_MANY_STREAMS`. The
-stream is not counted by the `/api` rate limit. A stream that fails to read its catch-up ends, and the
+stream's opening and each reconnect count once against the shared API rate limit, before
+authentication. Events on an established stream do not count as requests. A stream that fails to read its catch-up ends, and the
 client reconnects with its cursor.
 
 Authentication: Required

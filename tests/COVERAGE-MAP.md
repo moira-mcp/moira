@@ -783,6 +783,7 @@ The graph canvas checks in `flow-page.spec.ts` use separate private copies for b
 
 **integration**
 
+- `tests/integration/execution-stream-admission.test.ts` — production overview stream registration places the shared API limiter before authentication; the enabled limiter permits the bounded anonymous requests through authentication, then refuses the next reconnect with 429 before another authentication call
 - `tests/integration/client-ip-trust.test.ts` — client address resolved only through TRUST_PROXY: spoofed X-Forwarded-For entries share one limiter budget and cannot claim a whitelisted address (default nginx-only trust, private-network client, `TRUST_PROXY=2` behind an outer proxy, MCP limiter), audit context and the Better Auth client-address header equal req.ip, and a Better Auth sign-up records the server-written address for the session and the audit entry
 - `tests/integration/cors-rate-limit-middleware.test.ts` — CORS origin allowlist: allowlisted/localhost reflected, disallowed/no-origin; rate-limit IPv6 key fallback via ipKeyGenerator avoids ERR_ERL_KEY_GEN_IPV6 on the shipped artifact-view limiter with limits on
 

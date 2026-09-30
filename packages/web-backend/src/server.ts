@@ -407,9 +407,9 @@ class MoiraApiServer {
     this.app.use("/api/workflows", apiLimiter, requireAuth, workflowSharingRoutes);
     this.app.use("/api/workflows", apiLimiter, requireAuth, workflowRoutes);
     this.app.use("/api/invites", apiLimiter, optionalAuth, inviteAcceptRoutes); // Auth optional for GET, checked inside for POST
-    // The live stream of the overview is one long request per open page; it is kept out of the
-    // `/api` rate limit, which counts requests, and is limited per user by the stream itself.
-    this.app.get("/api/executions/overview/stream", requireAuth, (req, res) => {
+    // Limit stream admission before authentication: each open or reconnect consumes one API request.
+    // The stream also limits simultaneous authenticated connections per user.
+    this.app.get("/api/executions/overview/stream", apiLimiter, requireAuth, (req, res) => {
       openExecutionChangeStream(req, res, (req as AuthenticatedRequest).userId, {
         hub: getExecutionChangeHub(),
         feed: new ExecutionChangeRepository(getSqliteInstance()),

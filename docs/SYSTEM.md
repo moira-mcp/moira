@@ -1203,7 +1203,8 @@ feed to 24 hours. A failed read or trim is logged and retried on the next tick.
 1000 or more events were missed; heartbeat, session re-check through `isSessionStillValid`, five
 streams per user) and `changesAfter` serves the poll, reading the latest position before the events
 and returning events only up to it, so an event committed in between comes with the next poll;
-without a cursor it answers only that position, and a `reset` carries it too. The stream route is mounted before the rate-limited `/api/executions` router. Both nginx configs route
+without a cursor it answers only that position, and a `reset` carries it too. The stream route is mounted before the `/api/executions` router with the same `apiLimiter` before authentication;
+each opening or reconnect consumes one request, while events on an established stream do not. Both nginx configs route
 `location ^~ /api/executions/overview/stream` with buffering off, HTTP/1.1 and hour-long timeouts.
 
 ## Web UI Architecture
