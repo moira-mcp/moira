@@ -11,8 +11,10 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-if [ ! -f .env.ci ]; then
-  echo "❌ .env.ci not found — it is the environment CI builds and tests in" >&2
+CI_ENV_FILE="${MOIRA_VERIFY_ENV_FILE:-.env.ci}"
+export MOIRA_VERIFY_ENV_FILE="$CI_ENV_FILE"
+if [ ! -f "$CI_ENV_FILE" ]; then
+  echo "❌ $CI_ENV_FILE not found — select a CI-shaped environment for validation" >&2
   exit 1
 fi
 
@@ -26,13 +28,14 @@ while IFS= read -r line || [ -n "$line" ]; do
   key=${line%%=*}
   case "$key" in *[!A-Za-z0-9_]*) continue ;; esac
   export "$key=${line#*=}"
-done < .env.ci
+done < "$CI_ENV_FILE"
 
 IMAGE="${DOCKER_IMAGE_NAME:-mcp-moira-ci}"
 PRIMARY="${DOCKER_CONTAINER_NAME:-mcp-moira-ci}"
 PRIMARY_PORT="${DOCKER_PORT:-3030}"
 SELF_HOST="${PRIMARY}-self-host"
-SELF_HOST_PORT=3031
+SELF_HOST_PORT="${MOIRA_TEST_SELF_HOST_PORT:-3031}"
+export MOIRA_TEST_SELF_HOST_PORT="$SELF_HOST_PORT"
 
 cleanup() {
   docker rm -f "$PRIMARY" "$SELF_HOST" >/dev/null 2>&1 || true
@@ -43,7 +46,7 @@ echo "🧹 Removing containers left by an earlier run"
 cleanup
 
 echo "🔨 Building the image CI builds, from the environment CI uses"
-./scripts/docker-build-and-run.sh --local --env-file .env.ci
+./scripts/docker-build-and-run.sh --local --env-file "$CI_ENV_FILE"
 
 echo "🔁 Self-host reconciliation lifecycle"
 MOIRA_TEST_IMAGE="$IMAGE:latest" npm run test:docker-reconciliation
@@ -60,7 +63,7 @@ echo "🏠 Self-host container on port $SELF_HOST_PORT for the two self-host-onl
 # the change under test.
 rm -rf data-self-host
 mkdir -p data-self-host
-docker run --name "$SELF_HOST" -p "$SELF_HOST_PORT:80" --env-file .env.ci \
+docker run --name "$SELF_HOST" -p "$SELF_HOST_PORT:80" --env-file "$CI_ENV_FILE" \
   -v "$(pwd)/workflows:/app/workflows" -v "$(pwd)/data-self-host:/app/data" \
   -e DEPLOYMENT_MODE=self-host -e MOIRA_HOST="localhost:$SELF_HOST_PORT" \
   -e STATIC_ARTIFACTS_DOMAIN="static.localhost:$SELF_HOST_PORT" \

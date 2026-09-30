@@ -93,6 +93,7 @@ export class ExecutionRepository {
                   error: row.error,
                   errors: row.errors,
                   note: row.note,
+                  stopReason: row.stopReason,
                   updatedAt,
                   completedAt,
                   revision: expectedRevision + 1,
@@ -144,6 +145,7 @@ export class ExecutionRepository {
               error: row.error,
               errors: row.errors,
               note: row.note,
+              stopReason: row.stopReason,
               parentExecutionId: row.parentExecutionId,
               revision: execution.revision,
               reminders: row.reminders,
@@ -257,6 +259,7 @@ export class ExecutionRepository {
       globalContext,
       status: row.state as LegacyExecutionStatus,
       note: row.note ?? undefined,
+      stopReason: row.stopReason ?? null,
       parentExecutionId: row.parentExecutionId ?? undefined,
       revision: row.revision,
       reminders,
@@ -297,6 +300,7 @@ export class ExecutionRepository {
           eq(workflowExecution.workflowId, workflowId),
           eq(workflowExecution.userId, userId),
           eq(workflowExecution.state, "completed"),
+          isNull(workflowExecution.stopReason),
           eq(workflowExecution.workflowVersion, workflowVersion),
         ),
       )
@@ -317,6 +321,7 @@ export class ExecutionRepository {
       eq(workflowExecution.workflowId, workflowId),
       eq(workflowExecution.userId, userId),
       eq(workflowExecution.state, "completed"),
+      isNull(workflowExecution.stopReason),
     );
     const [stamped] = await this.db
       .select({

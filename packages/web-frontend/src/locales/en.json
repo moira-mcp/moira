@@ -1742,19 +1742,22 @@
         "waiting-agent": "Waiting for the agent",
         "locked": "Locked",
         "completed": "Completed",
+        "stopped": "Stopped",
         "all": "All"
       },
       "runStatus": {
         "waiting-user": "Waiting for you",
         "waiting-agent": "Waiting for the agent",
         "locked": "Locked",
-        "completed": "Completed"
+        "completed": "Completed",
+        "stopped": "Stopped"
       },
       "runStatusHint": {
         "waiting-user": "The move is yours: the flow waits for your decision, or the agent asked you something. Answer the agent in the chat.",
         "waiting-agent": "The agent has a directive to work on; the move is the agent's.",
         "locked": "The run stands on a lock and waits for a person to enter its PIN.",
-        "completed": "The flow reached its end or was cancelled."
+        "completed": "The flow reached its end.",
+        "stopped": "The agent stopped this run with a recorded reason. It did not complete the flow."
       },
       "stale": {
         "chip": "No movement > 7 days",
@@ -1836,6 +1839,7 @@
         "shown": "directive shown {{ago}}",
         "shownUnknown": "no directive shown",
         "completed": "completed {{ago}}",
+        "stopped": "stopped {{ago}}",
         "stepHint": "Current step: {{step}}",
         "gateHint": "The flow waits for your decision on this step. Answer the agent in the chat.",
         "agentAsks": "Agent asks: {{question}}",
@@ -1885,6 +1889,8 @@
         "lastStep": "Last step",
         "inChildren": "In child runs",
         "completedAt": "Completed",
+        "stoppedAt": "Stopped",
+        "stopReason": "Reason for stopping",
         "id": "Run id",
         "open": "Open run",
         "stale": "No movement for {{days}} d. The status does not change with age — the run can go on from where it stopped.",
@@ -3860,7 +3866,7 @@
         },
         "status": {
           "title": "Who has the move",
-          "body": "Waiting for you means a flow waits for your decision or the agent asked you something — answer the agent in the chat. Waiting for the agent, Locked (a PIN) and Completed are the other states. Runs waiting for you always come first."
+          "body": "Waiting for you means a flow waits for your decision or the agent asked you something — answer the agent in the chat. Waiting for the agent, Locked (a PIN), Completed and Stopped are the other states. Stopped runs have a reason in their panel and are hidden from In progress. Runs waiting for you always come first."
         },
         "idle": {
           "title": "Find what stalled",

@@ -90,6 +90,20 @@ If completion is impossible, report the verified cause, completed partial work, 
 
 When you cannot continue without the user's answer — a requirement you do not understand, access you lack, a choice only they can make — call `session({ action: "await-user", executionId, question, options })` on the active execution, and ask the same question in the chat. The run is then shown and announced as waiting for the user, instead of looking like it waits for you. The user answers you in the chat, not in Moira; your next step clears the question, or clear it with `resolve: true`.
 
+## Stopping a workflow
+
+When the user cancels the workflow or asks to continue outside it, read
+`session({ action: "execution_context", executionId })` for its current `revision`, then call
+`session({ action: "stop-execution", executionId, expectedRevision: revision, reason })`.
+The reason is required, trimmed, and limited to 500 characters. Only the execution owner may stop it.
+This permanently ends the run with its recorded reason; it does not certify successful completion
+or undo work already performed. Do not submit fictitious step results to finish it. If an execution
+operation is still running, including recovery or a run-page answer, wait for it to finish and read
+the current revision before stopping.
+After a lost response, repeating the same revision and reason returns the same stopped outcome.
+Continue the user's task outside this run when they requested that. A stopped run is hidden from
+the default overview; use the Stopped or All status filter to find it.
+
 ## Follow-up reminders
 
 When the user requests an action after the current workflow completes, preserve it on the active execution with `session({ action: "add-reminder", ... })`. Use the existing `reminders`, `update-reminder`, and `remove-reminder` session actions to inspect, revise, or cancel it. Moira returns active reminders only when that workflow completes; a reminder preserves requested follow-up work but neither performs nor authorizes it.

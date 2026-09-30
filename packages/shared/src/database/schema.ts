@@ -616,6 +616,7 @@ export const workflowExecution = sqliteTable(
     createdAt: integer("createdAt", { mode: "timestamp_ms" }),
     updatedAt: integer("updatedAt", { mode: "timestamp_ms" }),
     completedAt: integer("completedAt", { mode: "timestamp_ms" }),
+    stopReason: text("stopReason"),
   },
   (table) => ({
     userStateActivityIdx: index("workflow_execution_user_state_activity_idx").on(

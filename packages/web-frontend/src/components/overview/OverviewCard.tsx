@@ -15,6 +15,7 @@ import {
   GitBranch,
   Hourglass,
   MessageCircleQuestion,
+  OctagonPause,
   StickyNote,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -43,6 +44,7 @@ export const STATUS_DOT: Record<OverviewStatus, string> = {
   "waiting-agent": "bg-info",
   locked: "bg-warning",
   completed: "bg-success",
+  stopped: "bg-muted-foreground",
 };
 
 export function StatusLabel({
@@ -177,6 +179,26 @@ function PlanRowView({ row, t }: { row: PlanRow; t: TFunction }): React.JSX.Elem
 
 function StripRow({ run }: { run: OverviewRun }): React.JSX.Element | null {
   const { t } = useTranslation();
+  if (run.status === "stopped") {
+    return (
+      <Hint
+        content={run.stopReason ?? t("pages.overview.runStatusHint.stopped")}
+        width="md"
+        className="whitespace-pre-line"
+      >
+        <div
+          className="flex h-[26px] min-w-0 items-center gap-1.5 rounded-lg bg-secondary px-2 text-[12.5px] text-muted-foreground"
+          data-testid="overview-stop-reason"
+          tabIndex={0}
+        >
+          <OctagonPause className="h-3.5 w-3.5 flex-none" aria-hidden="true" />
+          <span className="truncate">
+            {run.stopReason ?? t("pages.overview.runStatus.stopped")}
+          </span>
+        </div>
+      </Hint>
+    );
+  }
   const waiting = run.status === "waiting-user" ? run.waitingForUser : null;
   if (waiting) {
     const agent = waiting.source === "agent";
@@ -263,7 +285,7 @@ function PlanArea({ run }: { run: OverviewRun }): React.JSX.Element {
           className="grid content-center gap-1.5 text-[13px] text-muted-foreground"
           data-testid="overview-no-plan"
         >
-          {run.status !== "completed" && run.current?.stepName ? (
+          {run.status !== "completed" && run.status !== "stopped" && run.current?.stepName ? (
             <span>
               {t("pages.overview.card.now")}{" "}
               <b className="font-medium text-foreground">{run.current.stepName}</b>
@@ -317,8 +339,8 @@ function Footer({ run, now }: { run: OverviewRun; now: number }): React.JSX.Elem
     text = note.text;
     notified = note.ok;
     hint = "";
-  } else if (run.status === "completed") {
-    text = t("pages.overview.card.completed", {
+  } else if (run.status === "completed" || run.status === "stopped") {
+    text = t(`pages.overview.card.${run.status}`, {
       ago: agoText(now - (run.completedAt ?? activityOf(run)), t),
     });
     hint = "";

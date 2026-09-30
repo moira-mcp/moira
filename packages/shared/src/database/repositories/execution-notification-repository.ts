@@ -132,20 +132,27 @@ export class ExecutionNotificationRepository {
    * wait has ended by then, the sender drops it like any row whose wait is gone.
    */
   enqueueReminder(first: ExecutionNotificationRow, notBefore: number, now: number): void {
-    this.db
-      .insert(executionNotification)
-      .values({
-        id: randomUUID(),
-        executionId: first.executionId,
-        userId: first.userId,
-        waitKey: first.waitKey,
-        kind: "remind",
-        state: "pending",
-        notBefore,
-        createdAt: now,
-      })
-      .onConflictDoNothing()
-      .run();
+    this.db.transaction(
+      () => {
+        // A stop either supersedes this reminder or commits first and prevents its insertion.
+        if (!this.holdsWait(first.executionId, first.waitKey)) return;
+        this.db
+          .insert(executionNotification)
+          .values({
+            id: randomUUID(),
+            executionId: first.executionId,
+            userId: first.userId,
+            waitKey: first.waitKey,
+            kind: "remind",
+            state: "pending",
+            notBefore,
+            createdAt: now,
+          })
+          .onConflictDoNothing()
+          .run();
+      },
+      { behavior: "immediate" },
+    );
   }
 
   /** The stored fields a wait is decided from. */

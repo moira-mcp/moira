@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "@jest/globals";
+import { afterEach, describe, expect, jest, test } from "@jest/globals";
 import { InMemoryRepository, type WorkflowGraph } from "@mcp-moira/workflow-engine";
 import { MCPEngine } from "../../packages/mcp-server/src/core/mcp-engine.js";
 import { requestContext } from "../../packages/mcp-server/src/core/request-context.js";
@@ -7,7 +7,10 @@ import { executeStep } from "../../packages/mcp-server/src/tools/execute-step.js
 const USER_ID = "replay-boundary-user";
 
 describe("replay-safe step MCP boundary", () => {
-  afterEach(() => MCPEngine.resetInstance());
+  afterEach(() => {
+    jest.restoreAllMocks();
+    MCPEngine.resetInstance();
+  });
 
   test("parses input, carries the attempt, replays exactly, and formats conflicts as MCP errors", async () => {
     const repository = new InMemoryRepository();
@@ -35,12 +38,19 @@ describe("replay-safe step MCP boundary", () => {
     await repository.saveWorkflow(graph, USER_ID);
     const engine = MCPEngine.getInstance(repository);
     const executionId = await engine.executor.startWorkflow(graph, undefined, USER_ID);
+    const claims = jest.spyOn(repository, "claimExecutionAttempt");
     const presentation = await engine.executor.executeStep(executionId, undefined, undefined, {
       userId: USER_ID,
       createPresentation: true,
     });
     const attemptId = presentation.match(/Step attempt ID:\s*([a-f0-9-]+)/i)?.[1];
     expect(attemptId).toBeDefined();
+    const initialAttemptId = claims.mock.calls[0][0].attemptId;
+    expect(await repository.getExecutionAttempt(initialAttemptId)).toMatchObject({
+      state: "completed",
+      nodeId: "start",
+      nextAttemptId: attemptId,
+    });
 
     const preHotfixMetadataState = (await repository.getExecution(executionId))!;
     preHotfixMetadataState.note = "metadata changed by an older server";
@@ -85,9 +95,11 @@ describe("replay-safe step MCP boundary", () => {
     expect(conflict.error?.toLowerCase()).not.toContain("wait for user guidance");
 
     const stateBeforeEvictedRetry = await repository.getExecution(executionId);
+    // Initial presentation and the accepted answer each own a completed durable attempt.
     expect(await repository.cleanupExecutionAttempts(Date.now() + 8 * 24 * 60 * 60 * 1_000)).toBe(
-      1,
+      2,
     );
+    expect(await repository.getExecutionAttempt(initialAttemptId)).toBeNull();
     expect(await repository.getExecutionAttempt(attemptId!)).toBeNull();
     const expired = await requestContext.run({ userId: USER_ID }, () =>
       executeStep({ processId: executionId, attemptId: attemptId!, input: { answer: "ok" } }),

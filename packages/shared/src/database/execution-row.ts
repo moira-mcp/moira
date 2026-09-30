@@ -21,6 +21,7 @@ export interface ExecutionRowFields {
   error: string | null;
   errors: string | null;
   note: string | null;
+  stopReason: string | null;
   parentExecutionId: string | null;
   reminders: string;
   visits: string;
@@ -44,6 +45,7 @@ export function executionRowFields(execution: WorkflowExecution): ExecutionRowFi
     errors:
       execution.errors && execution.errors.length > 0 ? JSON.stringify(execution.errors) : null,
     note: execution.note || null,
+    stopReason: execution.stopReason ?? null,
     parentExecutionId: execution.parentExecutionId || null,
     reminders: JSON.stringify(execution.reminders ?? []),
     visits: JSON.stringify(execution.visits ?? []),

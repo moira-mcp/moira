@@ -11,11 +11,13 @@ import {
   cardPlan,
   DEFAULT_FILTERS,
   filtersFromParams,
+  isStale,
   flattenRuns,
   paramsWithFilters,
   planLines,
   planRows,
   planSlots,
+  stageItems,
   replaceRows,
   withoutRun,
   type BoardNode,
@@ -60,6 +62,7 @@ function run(id: string, overrides: Partial<OverviewRun> = {}): OverviewRun {
     workflowVersion: "1.0.0",
     title: `Import ${id}`,
     status: "waiting-agent",
+    stopReason: null,
     matches: true,
     waitingForUser: null,
     refusalCount: 0,
@@ -229,6 +232,15 @@ describe("a run tree on the board", () => {
 });
 
 describe("the filters in the URL", () => {
+  test("stopped is an explicit filter and the default remains in progress", () => {
+    expect(filtersFromParams(new URLSearchParams()).status).toBe("active");
+    expect(filtersFromParams(new URLSearchParams("status=stopped")).status).toBe("stopped");
+    expect(
+      paramsWithFilters(new URLSearchParams(), { ...DEFAULT_FILTERS, status: "stopped" }).get(
+        "status",
+      ),
+    ).toBe("stopped");
+  });
   test("every filter survives a trip through the URL, and defaults stay out of it", () => {
     const filters = {
       ...DEFAULT_FILTERS,
@@ -259,5 +271,37 @@ describe("the filters in the URL", () => {
         ),
       ),
     ).toEqual(DEFAULT_FILTERS);
+  });
+});
+
+describe("stopped runs", () => {
+  test("preserve completed stages without marking the remaining stages current or done", () => {
+    const stopped = run("stopped", {
+      status: "stopped",
+      stopReason: "The user changed the task",
+      stages: { labels: ["Plan", "Work", "Check"], activeIndex: 1, doneCount: 1 },
+    });
+    expect(stageItems(stopped).map(({ done, current }) => [done, current])).toEqual([
+      [true, false],
+      [false, false],
+      [false, false],
+    ]);
+    expect(isStale(stopped, 30 * 24 * 60 * 60_000)).toBe(false);
+    expect(stageItems({ ...stopped, status: "completed" }).every((item) => item.done)).toBe(true);
+  });
+
+  test("a stopped checklist retains its results but no longer has a current item", () => {
+    const plan = cardPlan(
+      run("stopped", {
+        status: "stopped",
+        list: { title: "Plan", done: 1, total: 3, items: items(3, 1, 1) },
+      }),
+    );
+    expect(plan).toMatchObject({ kind: "list", done: 1, total: 3 });
+    expect(plan.kind === "list" && plan.items.map(({ done, current }) => [done, current])).toEqual([
+      [true, false],
+      [false, false],
+      [false, false],
+    ]);
   });
 });

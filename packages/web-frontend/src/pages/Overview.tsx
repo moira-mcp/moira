@@ -107,21 +107,12 @@ export const Overview: React.FC = () => {
 
   // The trees on the page: the last page fetched, with rows refreshed in place since.
   const fetchRows = useCallback((ids: string[]) => apiClient.getOverviewRows(ids), []);
-  const { runs, refreshRows, removeRun } = useOverviewRows(page.data?.runs, fetchRows);
-  const runsRef = useRef(runs);
-  runsRef.current = runs;
+  const { runs, removeRun } = useOverviewRows(page.data?.runs, fetchRows);
 
   const refreshPage = page.refresh;
   const live = useLiveOverview({
-    refreshRows: (ids) => void refreshRows(ids),
-    refetchPage: () => void refreshPage(),
+    refetchPage: refreshPage,
     removeRun,
-    touchedBy: (id) => {
-      const ancestors = ancestorsOf(runsRef.current, id);
-      return ancestors ? [...ancestors.map((run) => run.executionId), id] : [];
-    },
-    activityFiltered:
-      filters.idle !== null || filters.activeFrom !== null || filters.activeTo !== null,
   });
 
   const openRunId = params.get(RUN_PARAM);
@@ -193,7 +184,11 @@ export const Overview: React.FC = () => {
                 type="button"
                 variant="ghost"
                 size="sm"
-                className={cn(segmentItem(filters.status === status), "px-2.5")}
+                className={cn(
+                  segmentItem(filters.status === status),
+                  "px-2.5",
+                  status === "all" && "col-span-2 @lg:col-span-3",
+                )}
                 aria-pressed={filters.status === status}
                 data-testid={`overview-status-${status}`}
                 onClick={() => setFilters({ status, page: 1 })}
@@ -217,7 +212,7 @@ export const Overview: React.FC = () => {
             onClick={() =>
               setFilters({
                 idle: stale ? null : STALE_IDLE,
-                ...(!stale && filters.status === "completed"
+                ...(!stale && (filters.status === "completed" || filters.status === "stopped")
                   ? { status: DEFAULT_FILTERS.status }
                   : {}),
                 page: 1,

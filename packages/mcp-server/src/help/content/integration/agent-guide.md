@@ -240,6 +240,30 @@ user answers you in the chat, not in Moira. A new call replaces the question; yo
 variable you set with `set-variable`, or `resolve: true` clears it, and so does the run leaving the
 step. The call does not change the step revision, so your current Step attempt stays valid.
 
+## Stopping a Workflow
+
+When the user cancels the run or asks to continue outside it, read its `revision` with
+`session({ action: "execution_context", executionId })`, then stop that owned run:
+
+```json
+session({
+  action: "stop-execution",
+  executionId: "abc-123",
+  expectedRevision: 4,
+  reason: "The user cancelled this workflow and asked to continue directly."
+})
+```
+
+Use the actual returned revision. The reason is required and contains 1–500 characters after
+trimming. Stopping permanently ends the run, records `stopReason`, clears its waits and advances
+the revision once; it does not certify successful task completion. Do not invent step results to
+finish a cancelled workflow. If an execution operation, including recovery or a run-page answer,
+is still in progress, stopping is refused:
+wait for it to finish and read the context again. A stale revision or an already finished run is
+also refused. After a lost response, repeat the original revision and reason to receive the same
+stopped result without another change. Stopped runs are hidden in the default overview, including
+children; use **Stopped** or **All** to find them. Their active child runs continue independently.
+
 ## Finding Workflows
 
 ### List the First Page

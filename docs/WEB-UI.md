@@ -873,13 +873,21 @@ PreferencesSettings.tsx
 own runs from `GET /api/executions/overview`, 50 trees a page, runs waiting for the person first.
 
 - **Filters in the URL** (`components/overview/model.ts`, `filtersFromParams` / `paramsWithFilters`):
-  `status` (`active` by default, `waiting-user`, `waiting-agent`, `locked`, `completed`, `all`),
+  `status` (`active` by default, `waiting-user`, `waiting-agent`, `locked`, `completed`, `stopped`, `all`),
   `idle` (`1h`…`30d`), `activeFrom` / `activeTo` (epoch ms), `workflowId`, `sort` (`activity`,
   `idle`, `created`), `refusals`, `q` (search: the note, the flow's name, the run id), `layout`
   (`grid`, `lanes`), `page`, and `run` for the open panel. Defaults are left out of the URL; a
   malformed value reads as its default. The status switch and the «No movement > 7 days» chip
   (`idle=7d`) sit in the toolbar, the rest in the Filters popover; the search box follows the URL
   when a link or the browser changes it.
+- **Stopped runs**: `session stop-execution` records a reason and stops further execution. The
+  overview distinguishes `stopped` from `completed`; the default **In progress** and the
+  **Completed** filter exclude stopped runs. **Stopped** and **All** include them. Their neutral
+  status, reason strip (`overview-stop-reason`, full text in its hint), and stopped timestamp
+  distinguish them from successful completion. The panel shows the complete reason
+  (`overview-panel-stop-reason`) and a **Stopped** date. Stopped runs are never stale, show no
+  current-step or waiting prompt, and preserve completed stages and checklist results without
+  marking the remaining work complete.
 - **Card** (`OverviewCard.tsx`, `data-testid="overview-card"`, `data-run-id`, `data-status`): a
   constant 340 px height with fixed rows — status (its meaning in a hint) and the age of the subtree's
   last step (dates in the hint), the two-line title as the button that opens the panel
@@ -902,11 +910,15 @@ own runs from `GET /api/executions/overview`, 50 trees a page, runs waiting for 
   browser leads through Web Locks (`moira-overview-stream`) and holds the `EventSource` on
   `/api/executions/overview/stream`; the others receive changes and the connection state over the
   `BroadcastChannel` `moira-overview`, which also carries the stream's position from `ready`, so the
-  next leader resumes from it. `activity` (unless the page filters by time without movement or by
-  date) and `meta` changes refresh the run and its ancestors on the page with one batched `ids=`
-  request per 300 ms, keeping each row's place in the tree (whether it matches, the parent it names);
-  `created`, `deleted`, `status`, `lock`, `reset`, and `activity` under an activity filter refetch the
-  page (debounced); a row refresh begun before a newer page is dropped. With every tab hidden the
+  next leader resumes from it. Every change refetches the ordered, filtered page: activity and
+  metadata can change order, search membership, or parent grouping even when the changed run
+  is outside the current page. Bursts coalesce into one refresh after 700 ms; continuous changes
+  cannot postpone it indefinitely. Only one page request runs at a time. Events arriving while
+  that request is pending mark the page dirty; when it finishes, one follow-up refresh reads
+  their changes. This prevents repeatedly superseded requests from leaving old data on screen
+  when requests take longer than the event interval. A deletion also removes its visible tree immediately. These
+  page refreshes avoid the single-row API's 100-id limit for large bursts. A row refresh begun
+  before a newer page is dropped. With every tab hidden the
   stream is closed and resumes with `after=`. A stream counts as working only once the server sends
   `ready` (or a change) within 10 s; three failures in a row — never opening, or opening without
   confirming, as behind a buffering proxy — switch to polling `/api/executions/overview/changes` every
@@ -1265,6 +1277,9 @@ live URL so a duplicate change pushes no history entry.
   screen (the "unavailable" banner is a first-load state only). The Locks tab holds its history in a
   `useResource` store: opening it again refreshes behind the list (`locks-panel` with
   `data-pending`), the spinner (`locks-loading`) shows only before the first list.
+- A detail response with `stopReason` displays **Stopped** in the neutral header badge
+  (`run-status`, `data-status="stopped"`) and the full reason below it (`run-stop-reason`), in
+  the run view. The recorded route and partial progress remain available.
 - Under the header, while the shown projection carries `waitingForUser`, a banner
   (`run-waiting-for-user`, `role="status"`, `data-source` = `gate` or `agent`) reads "Waiting for
   you: <label> — answer the agent in the chat" for a step marked `humanGate`, or "The agent is asking

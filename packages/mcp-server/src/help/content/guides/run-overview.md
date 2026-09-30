@@ -18,7 +18,10 @@ Each card starts with the run's status:
   answers, and the status clears by itself once the agent goes on.
 - **Waiting for the agent** — the agent has a directive to work on.
 - **Locked** — the run stands on a lock and waits for someone to enter its PIN.
-- **Completed** — the flow reached its end or was cancelled.
+- **Completed** — the run ended without an explicit stop, including a failed run or a retired
+  blocked start.
+- **Stopped** — the agent permanently ended the run with `session stop-execution` and a recorded
+  reason. The card and side panel show that reason; it does not mean the task was completed.
 
 Runs waiting for you always come first, whatever the order you chose.
 
@@ -49,12 +52,16 @@ group's heading and the child's subtitle say who belongs to whom. Each run appea
 filter admits a child but not its parent, the child stands on its own and names the parent; when a
 filter admits only one run of a group, the others stay in the group, dimmed.
 
+The default active view hides stopped runs wherever they occur in a tree. Active children of a
+stopped parent still appear independently and name that parent.
+
 **Grid** packs single tasks and gives a group the full width; **Lanes** puts every task on its own
 horizontal strip.
 
 ## Finding what stalled
 
-- The status switch shows what is in progress (the default), one status, the completed runs or all.
+- The status switch shows what is in progress (the default), one status, the completed runs,
+  stopped runs or all. Select **Stopped** or **All** to find a stopped run.
 - **No movement > 7 days** keeps the unfinished tasks where nothing — not even a child run — took a
   step for a week. The status does not change with age; such a task can go on from where it stopped.
 - **Filters** holds other intervals without movement, a range of the last step's date, the flow, the
@@ -67,8 +74,11 @@ week» — opens the same view. An open panel is in the address too.
 
 ## Live updates
 
-The page updates itself: a step handed in, a new run, a wait that starts or ends shows without a
-reload, and an open panel stays open. The indicator at the start of the toolbar says how: **Live** when changes
+The page updates itself: steps, notes, parent links and status changes refresh the current trees
+without a browser reload, including their search membership, order and pagination. An open panel
+stays open. Changes arriving together share a refresh. One request runs at a time, and changes
+received while it is pending trigger one follow-up when it finishes, so continuous activity does
+not prevent slow responses from updating the page. The indicator in the page header says how: **Live** when changes
 arrive as they happen, **Reconnecting…** after the connection dropped (what was missed is caught up),
 or **Every 15 s** when the live connection cannot be held — for example behind a proxy that cuts
 long-lived responses — and the page checks for changes instead. With several tabs open, one tab holds

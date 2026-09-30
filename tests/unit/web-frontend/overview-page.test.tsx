@@ -30,7 +30,6 @@ import { OverviewCard } from "../../../packages/web-frontend/src/components/over
 import {
   useLiveOverview,
   PAGE_REFETCH_MS,
-  ROW_BATCH_MS,
 } from "../../../packages/web-frontend/src/components/overview/useLiveOverview";
 import { useOverviewRows } from "../../../packages/web-frontend/src/components/overview/useOverviewRows";
 import type {
@@ -48,6 +47,7 @@ function run(overrides: Partial<OverviewRun> = {}): OverviewRun {
     workflowVersion: "1.0.0",
     title: "Import March orders",
     status: "waiting-user",
+    stopReason: null,
     matches: true,
     waitingForUser: {
       source: "agent",
@@ -239,6 +239,69 @@ describe("a card's hints", () => {
   });
 });
 
+describe("stopped runs in the overview", () => {
+  const reason = "The user cancelled the import and asked for a different task.";
+  const stopped = () =>
+    run({
+      status: "stopped",
+      stopReason: reason,
+      completedAt: NOW - 60_000,
+      lastActivityAt: NOW - 30 * 24 * 60 * 60_000,
+      subtreeActivityAt: NOW - 30 * 24 * 60 * 60_000,
+      stages: { labels: ["Plan", "Work", "Check"], activeIndex: 1, doneCount: 1 },
+    });
+
+  test("the card identifies a stopped run, shows its reason and preserves unfinished stages", () => {
+    wrap(<OverviewCard run={stopped()} parentTitle={null} now={NOW} onOpen={() => undefined} />);
+    expect(screen.getByTestId("overview-status")).toHaveTextContent("Stopped");
+    expect(screen.getByTestId("overview-stop-reason")).toHaveTextContent(reason);
+    expect(screen.getByTestId("overview-footer")).toHaveTextContent("stopped");
+    expect(screen.getByTestId("overview-age")).not.toHaveAttribute("data-stale");
+    expect(
+      screen.getAllByTestId("overview-plan-item").map((item) => item.getAttribute("data-done")),
+    ).toEqual(["true", null, null]);
+    expect(
+      screen
+        .getAllByTestId("overview-plan-item")
+        .every((item) => !item.hasAttribute("data-current")),
+    ).toBe(true);
+    expect(screen.queryByTestId("overview-waiting")).toBeNull();
+  });
+
+  test.each([
+    ["en", "Reason for stopping", "Stopped", "Completed", "Now"],
+    ["ru", "Причина остановки", "Остановлен", "Завершён", "Сейчас"],
+  ])(
+    "the %s panel shows the full reason and stop time without claiming completion",
+    async (language, label, status, completed, nowLabel) => {
+      jest.spyOn(apiClient, "getExecutionProgress").mockResolvedValue(null);
+      await i18n.changeLanguage(language);
+      try {
+        wrap(
+          <OverviewPanel
+            runId="run-1"
+            run={stopped()}
+            ancestors={[]}
+            now={NOW}
+            onOpen={() => undefined}
+            onClose={() => undefined}
+          />,
+        );
+        const dialog = await screen.findByRole("dialog");
+        expect(screen.getByTestId("overview-panel-stop-reason")).toHaveTextContent(label);
+        expect(screen.getByTestId("overview-panel-stop-reason")).toHaveTextContent(reason);
+        expect(screen.getByTestId("overview-panel-facts")).toHaveTextContent(status);
+        expect(screen.getByTestId("overview-panel-facts")).not.toHaveTextContent(completed);
+        expect(screen.queryByTestId("overview-panel-step")).toBeNull();
+        expect(dialog.querySelector("h3")?.textContent).not.toBe(nowLabel);
+        expect(screen.queryByTestId("overview-panel-waiting")).toBeNull();
+      } finally {
+        await i18n.changeLanguage("en");
+      }
+    },
+  );
+});
+
 describe("the live hook", () => {
   /** A stream the test feeds, in a tab that leads alone. */
   function dependencies(): { deps: LiveDependencies; stream: () => FakeStream } {
@@ -280,22 +343,16 @@ describe("the live hook", () => {
   }
 
   function hook() {
-    const calls = { rows: [] as string[][], refetches: 0 };
+    const calls = { refetches: 0 };
     const { deps, stream } = dependencies();
-    const onPage: Record<string, string[]> = {
-      "child-1": ["root", "child-1"],
-      "child-2": ["root", "child-2"],
-    };
     renderHook(() =>
       useLiveOverview(
         {
-          refreshRows: (ids) => calls.rows.push([...ids].sort()),
           refetchPage: () => {
             calls.refetches += 1;
+            return Promise.resolve();
           },
           removeRun: () => undefined,
-          touchedBy: (id) => onPage[id] ?? [],
-          activityFiltered: false,
         },
         () => deps,
       ),
@@ -316,11 +373,8 @@ describe("the live hook", () => {
     renderHook(() =>
       useLiveOverview(
         {
-          refreshRows: () => undefined,
-          refetchPage: () => undefined,
+          refetchPage: () => Promise.resolve(),
           removeRun: () => undefined,
-          touchedBy: () => [],
-          activityFiltered: false,
         },
         () => counted,
       ),
@@ -335,7 +389,7 @@ describe("the live hook", () => {
     expect(opened).toHaveLength(2);
   });
 
-  test("a burst of activity refreshes the touched runs in one request", () => {
+  test("a burst of activity refreshes the ordered page in one request", () => {
     jest.useFakeTimers();
     const { calls, stream } = hook();
     act(() => {
@@ -343,10 +397,9 @@ describe("the live hook", () => {
       stream().change(2, "child-2", "meta");
       stream().change(3, "child-1", "activity");
     });
-    expect(calls.rows).toEqual([]);
-    act(() => jest.advanceTimersByTime(ROW_BATCH_MS));
-    expect(calls.rows).toEqual([["child-1", "child-2", "root"]]);
     expect(calls.refetches).toBe(0);
+    act(() => jest.advanceTimersByTime(PAGE_REFETCH_MS));
+    expect(calls.refetches).toBe(1);
   });
 
   test("a change of status refetches the page once instead of refreshing rows", () => {
@@ -359,7 +412,6 @@ describe("the live hook", () => {
     });
     act(() => jest.advanceTimersByTime(PAGE_REFETCH_MS));
     expect(calls.refetches).toBe(1);
-    expect(calls.rows).toEqual([]);
   });
 });
 

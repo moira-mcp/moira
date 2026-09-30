@@ -320,6 +320,15 @@ export class DatabaseRepository implements IDataRepository {
     return await this.executionRepo.findActiveChildExecutions(parentExecutionId);
   }
 
+  async stopExecution(
+    executionId: string,
+    userId: string,
+    expectedRevision: number,
+    reason: string,
+  ): Promise<{ changed: boolean; revision: number }> {
+    return this.executionAttemptRepo.stopExecution(executionId, userId, expectedRevision, reason);
+  }
+
   async setExecutionParent(
     executionId: string,
     parentExecutionId: string | null,

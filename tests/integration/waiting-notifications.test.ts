@@ -744,6 +744,49 @@ describe("waiting-for-you notifications", () => {
     expect(rows(executionId)[0].state).toBe("superseded");
   });
 
+  test.each(["execution", "definition"] as const)(
+    "an explicit stop during async %s loading supersedes waits and prevents delivery",
+    async (phase) => {
+      const { repository, stored, executionId } = await runAtGate(`notify-stopped-load-${phase}`, {
+        gate: { label: "Approve", remindAfter: "30m" },
+      });
+      await session({ action: "await-user", executionId, question: "Proceed?" });
+      const run = (await repository.getExecution(executionId))!;
+      let injected = false;
+      const stop = async () => {
+        if (injected) return;
+        injected = true;
+        expect(
+          await repository.stopExecution(executionId, USER_ID, run.revision, "User cancelled"),
+        ).toEqual({
+          changed: true,
+          revision: run.revision + 1,
+        });
+        expect(rows(executionId).map((row) => row.state)).toEqual(["superseded", "superseded"]);
+      };
+      const loading = new (class extends DatabaseRepository {
+        override async getExecution(id: string) {
+          if (phase === "execution" && id === executionId) await stop();
+          return super.getExecution(id);
+        }
+        override async getWorkflowGraph(workflowId: string, userId: string) {
+          if (phase === "definition" && workflowId === stored.id) await stop();
+          return super.getWorkflowGraph(workflowId, userId);
+        }
+      })();
+      at(0);
+      await new WaitingNotificationSender(loading, queue(), {
+        now: () => clock,
+        communication,
+      }).tick();
+      expect(injected).toBe(true);
+      expect(deliveredFor(executionId)).toEqual([]);
+      const first = rows(executionId).find((row) => row.waitKey.startsWith("gate:"))!;
+      queue().enqueueReminder(first, clock + 30 * MINUTE, clock);
+      expect(rows(executionId)).toHaveLength(2);
+    },
+  );
+
   test("a question replaced before it was sent is dropped; only the current one is delivered", async () => {
     const { executionId } = await runAtGate("notify-question-replaced", { gate: null });
     await session({ action: "await-user", executionId, question: "Old question?" });

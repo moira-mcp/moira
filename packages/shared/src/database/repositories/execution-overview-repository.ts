@@ -22,7 +22,7 @@
 
 import type Database from "better-sqlite3";
 
-export type OverviewStatus = "waiting-user" | "waiting-agent" | "locked" | "completed";
+export type OverviewStatus = "waiting-user" | "waiting-agent" | "locked" | "completed" | "stopped";
 export type OverviewStatusFilter = "active" | OverviewStatus | "all";
 export type OverviewSort = "activity" | "idle" | "created";
 
@@ -73,6 +73,7 @@ export interface OverviewPage {
 
 /** SQL for the status of the run aliased `r`. */
 const STATUS_SQL = `CASE
+  WHEN r.stopReason IS NOT NULL THEN 'stopped'
   WHEN r.state IN ('completed', 'failed') THEN 'completed'
   WHEN EXISTS (
     SELECT 1 FROM executionLock l WHERE l.executionId = r.executionId AND l.status = 'active'
@@ -89,7 +90,7 @@ function statusPredicate(filter: OverviewStatusFilter): string {
     case "all":
       return "1";
     case "active":
-      return "m.status <> 'completed'";
+      return "m.status NOT IN ('completed', 'stopped')";
     default:
       return "m.status = @status";
   }
@@ -140,7 +141,7 @@ export class ExecutionOverviewRepository {
           SELECT r.executionId, r.parentExecutionId, r.workflowId, r.note, r.refusalCount,
                  r.lastActivityAt, r.createdAt, ${STATUS_SQL} AS status
           FROM workflowExecution r
-          WHERE r.userId = @userId
+          WHERE r.userId = @userId ${query.status === "active" ? "AND r.stopReason IS NULL" : ""}
         ),
         candidate AS (
           SELECT m.executionId FROM mine m WHERE ${statusPredicate(query.status)}
@@ -212,7 +213,7 @@ export class ExecutionOverviewRepository {
              SELECT r.executionId, r.parentExecutionId, r.workflowId, r.note, r.refusalCount,
                     r.lastActivityAt, ${STATUS_SQL} AS status
              FROM workflowExecution r
-             WHERE r.userId = @userId
+             WHERE r.userId = @userId ${query.status === "active" ? "AND r.stopReason IS NULL" : ""}
            ),
            tree(rootId, executionId, depth) AS (
              SELECT value, value, 0 FROM json_each(@roots)
@@ -278,7 +279,7 @@ export class ExecutionOverviewRepository {
          SELECT root.executionId, root.status, root.lastActivityAt,
                 MAX(m.lastActivityAt) AS subtreeActivityAt,
                 SUM(CASE WHEN t.depth = 1 THEN 1 ELSE 0 END) AS childrenTotal,
-                SUM(CASE WHEN t.depth = 1 AND m.status <> 'completed' THEN 1 ELSE 0 END)
+                SUM(CASE WHEN t.depth = 1 AND m.status NOT IN ('completed', 'stopped') THEN 1 ELSE 0 END)
                   AS childrenUnfinished
          FROM tree t
            JOIN mine m ON m.executionId = t.executionId

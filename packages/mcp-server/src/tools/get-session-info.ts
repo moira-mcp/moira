@@ -76,6 +76,7 @@ interface ExecutionItem {
   status: ExecutionStatusResponse | "waiting" | "failed";
   currentNodeId: string | null;
   note?: string | null;
+  stopReason: string | null;
   parentExecutionId?: string | null;
   createdAt: string;
   updatedAt: string;
@@ -99,6 +100,7 @@ interface ExecutionContextData {
   currentNodeId: string | null;
   waitingForInputNodeId: string | null;
   note?: string | null;
+  stopReason: string | null;
   parentExecutionId?: string | null;
   /** The agent's open question to the person (`await-user`), or null. */
   awaitingUser: import("@mcp-moira/workflow-engine").ExecutionAwaitingUser | null;
@@ -154,6 +156,7 @@ type SessionInfoData =
   | AwaitUserResult
   | ParentUpdateResult
   | { executionId: string; cancelled: true; revision: number }
+  | { executionId: string; stopped: true; stopReason: string; revision: number }
   | {
       reminders: import("@mcp-moira/workflow-engine").ExecutionReminder[];
       revision: number;
@@ -317,6 +320,7 @@ export async function getSessionInfo(
               status: isLocked ? "locked" : exec.status,
               currentNodeId: exec.currentNodeId,
               note: exec.note,
+              stopReason: exec.stopReason ?? null,
               parentExecutionId: exec.parentExecutionId,
               createdAt: new Date(exec.createdAt).toISOString(),
               updatedAt: new Date(exec.updatedAt).toISOString(),
@@ -426,6 +430,7 @@ export async function getSessionInfo(
           currentNodeId: execution.currentNodeId,
           waitingForInputNodeId: execution.waitingForInputNodeId || null,
           note: execution.note,
+          stopReason: execution.stopReason ?? null,
           parentExecutionId: execution.parentExecutionId,
           awaitingUser: execution.awaitingUser ?? null,
           revision: execution.revision,
@@ -649,6 +654,46 @@ export async function getSessionInfo(
         });
 
         return { success: true, data: recovery.result };
+      }
+
+      case "stop-execution": {
+        const reason = params.reason?.trim();
+        if (
+          !executionId ||
+          params.expectedRevision === undefined ||
+          !reason ||
+          reason.length > 500
+        ) {
+          return {
+            success: false,
+            error:
+              "executionId, expectedRevision and reason (1–500 characters) are required for stop-execution",
+          };
+        }
+        const repository = MCPEngine.getInstance().repository;
+        const result = await repository.stopExecution(
+          executionId,
+          userId,
+          params.expectedRevision,
+          reason,
+        );
+        if (result.changed) {
+          const execution = await repository.getExecution(executionId);
+          activeExecutionsGauge.dec();
+          workflowExecutionsTotal.inc({ status: "stopped", workflow_id: execution!.workflowId });
+          await logAuditEventDirect(repository as DatabaseRepository, {
+            userId,
+            action: AuditAction.EXECUTION_CANCEL,
+            resource: "execution",
+            resourceId: executionId,
+            source: "mcp",
+            metadata: { reason, outcome: "stopped" },
+          });
+        }
+        return {
+          success: true,
+          data: { executionId, stopped: true, stopReason: reason, revision: result.revision },
+        };
       }
 
       case "cancel-execution": {

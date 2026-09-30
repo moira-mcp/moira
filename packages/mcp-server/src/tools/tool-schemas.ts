@@ -229,6 +229,7 @@ export const getSessionInfoHandlerSchema = z.object({
       "diagnose",
       "recover",
       "cancel-execution",
+      "stop-execution",
       "update-note",
       "set-parent",
       "add-reminder",
@@ -278,6 +279,13 @@ export const getSessionInfoHandlerSchema = z.object({
     .optional()
     .describe('Parent execution UUID or "none" for set-parent'),
   expectedRevision: z.number().int().min(0).optional().describe("Expected workflow-step revision"),
+  reason: z
+    .string()
+    .trim()
+    .min(1)
+    .max(500)
+    .optional()
+    .describe("Required explanation for stop-execution (1–500 characters)"),
   expectedParentRevision: z
     .string()
     .length(64)

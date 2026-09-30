@@ -371,7 +371,9 @@ version, execution revision, execution status and diagnostics, plus:
 Statuses are projected from the route the engine recorded, never inferred from block order: a
 visited block is done or repeated, the block of the last visit is active or waiting, a block whose
 work never ran or that the run bypassed is skipped, everything else pending; a finished run has no
-active block unless it stopped on an open wait. An execution without a recorded route reports only
+active block unless it stopped on an open wait. An explicitly stopped run retains that unfinished
+frontier and its duration is measured only up to its stop time. Stopped runs are excluded from typical
+duration statistics. An execution without a recorded route reports only
 its current block as active or waiting, everything else pending, and `routeRecorded: false`.
 Pending and skipped blocks suppress `content.outcome` while retaining summary, details, and next
 guidance, preventing a result from an earlier revision or unit from appearing current.
@@ -852,6 +854,7 @@ The home page's work area for the signed-in user. Requires a session.
       workflowId: string;
       workflowName: string | null;
       note?: string;
+      stopReason: string | null; // explicit stop explanation; null for ordinary completion
       status: string;
       hasActiveLock: boolean;
       errorCount: number;
@@ -2560,7 +2563,8 @@ caller's own runs are returned, administrators included.
 Query parameters:
 
 - `status`: `active` (default: every unfinished run), `waiting-user`, `waiting-agent`, `locked`,
-  `completed` or `all`. A run's status is `completed` when it ended, `locked` when it runs with an
+  `completed`, `stopped` or `all`. A run's status is `stopped` when an agent explicitly stopped it
+  with a reason, `completed` when it ended without an explicit stop, `locked` when it runs with an
   active execution lock, `waiting-user` when it is paused on a step marked `humanGate` whose condition
   held or the agent's question is open, and `waiting-agent` otherwise.
 - `refusals`: `true` shows only runs with refusals.
@@ -2579,8 +2583,10 @@ Query parameters:
 
 The status filter decides the candidate runs; a root is a candidate with no ancestor among the
 candidates — a running child of a finished parent is a root under the default filter and names its
-parent in `parent`. Under a root, `childRuns` hold all its descendants, whatever their status, so each
-run appears once. `refusals`, `workflowId`, `search` and the activity filters apply to a tree: it is
+parent in `parent`. The default `active` view excludes stopped runs everywhere, including descendants;
+an active child of a stopped parent becomes a root and retains its parent link. Other status filters
+keep all descendants under a root, including muted runs outside the selected status, so each run
+appears once. `refusals`, `workflowId`, `search` and the activity filters apply to a tree: it is
 shown when some candidate run of it matches, and its other runs come back with `matches: false`
 (shown muted). Activity filters read `subtreeActivityAt`, the latest activity of the root and all its
 descendants. `total` counts trees.
@@ -2604,7 +2610,8 @@ interface OverviewRun {
   workflowName: string | null;
   workflowVersion: string | null;
   title: string; // the run's task title: its note, else the flow's progress title or name
-  status: "waiting-user" | "waiting-agent" | "locked" | "completed";
+  status: "waiting-user" | "waiting-agent" | "locked" | "completed" | "stopped";
+  stopReason: string | null;
   matches: boolean;
   waitingForUser:
     | { source: "gate"; label: string; notification: NotificationMark | null }
@@ -2722,6 +2729,7 @@ Response:
       currentNodeId: string | null;
       waitingForInputNodeId: string | null;
       note?: string | null;
+      stopReason: string | null; // status stays completed after an explicit stop
       parentExecutionId: string | null; // null for a standalone execution
       revision: number; // expectedRevision source for step-generation guards
       metadataRevisions: {

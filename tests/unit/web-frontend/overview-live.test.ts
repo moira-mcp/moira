@@ -353,43 +353,40 @@ describe("the live connection behind proxies and between tabs", () => {
 });
 
 describe("a change turned into a page update", () => {
-  const onPage = new Map([
-    ["child", ["root", "child"]],
-    ["root", ["root"]],
-  ]);
   const removed: string[] = [];
   const handlers = {
     removeRun: (id: string) => removed.push(id),
-    touchedBy: (id: string) => onPage.get(id) ?? [],
-    activityFiltered: false,
   };
 
   test.each([
     [
-      "activity of a child refreshes it and its ancestors",
+      "activity of a child can reorder its tree and refetches the page",
       "activity",
       "child",
-      ["root", "child"],
-      false,
+      [],
+      true,
     ],
-    ["a note refreshes the run in place", "meta", "root", ["root"], false],
+    [
+      "metadata can change search membership or nesting and refetches the page",
+      "meta",
+      "root",
+      [],
+      true,
+    ],
     ["a lock can change the status, so it refetches the page", "lock", "root", [], true],
-    ["activity of a run not on the page changes nothing", "activity", "elsewhere", [], false],
+    [
+      "activity of a run outside the page can move it into the page",
+      "activity",
+      "elsewhere",
+      [],
+      true,
+    ],
     ["a new run refetches the page", "created", "elsewhere", [], true],
     ["a change of status refetches the page", "status", "child", [], true],
   ] as const)("%s", (_name, kind, executionId, rows, refetch) => {
     expect(
       routeLiveMessage({ type: "change", change: { seq: 1, executionId, kind } }, handlers),
     ).toEqual({ rows, refetch });
-  });
-
-  test("under a filter by activity, activity refetches the page, since it can move a run in or out", () => {
-    expect(
-      routeLiveMessage(
-        { type: "change", change: { seq: 3, executionId: "child", kind: "activity" } },
-        { ...handlers, activityFiltered: true },
-      ),
-    ).toEqual({ rows: [], refetch: true });
   });
 
   test("a deleted run leaves the page at once and the page is refetched; so does a reset", () => {

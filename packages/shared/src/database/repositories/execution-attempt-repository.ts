@@ -1,7 +1,7 @@
 import type Database from "better-sqlite3";
 import { createHash } from "node:crypto";
 import { canonicalJson } from "../../utils/canonical-json.js";
-import { ConflictError } from "../../errors/index.js";
+import { ConflictError, ValidationError } from "../../errors/index.js";
 import type {
   ClaimStartExecutionAttemptInput,
   CompleteExecutionAttemptInput,
@@ -383,6 +383,77 @@ export class ExecutionAttemptRepository {
       .immediate();
   }
 
+  /** Stop and fence the run and its pending attempts in one ownership-guarded transaction. */
+  stopExecution(
+    executionId: string,
+    userId: string,
+    expectedRevision: number,
+    reason: string,
+  ): { changed: boolean; revision: number } {
+    reason = reason.trim();
+    if (!reason || reason.length > 500)
+      throw new ValidationError("Stop reason must contain 1–500 characters");
+    return this.sqlite
+      .transaction(() => {
+        const row = this.sqlite
+          .prepare(
+            "SELECT state, revision, stopReason FROM workflowExecution WHERE executionId = ? AND userId = ?",
+          )
+          .get(executionId, userId) as
+          { state: string; revision: number; stopReason: string | null } | undefined;
+        if (!row) throw new ValidationError("Execution must belong to the authenticated user");
+        if (
+          row.state === "completed" &&
+          row.stopReason === reason &&
+          row.revision === expectedRevision + 1
+        )
+          return { changed: false, revision: row.revision };
+        if (row.revision !== expectedRevision)
+          throw new ConflictError(
+            "Execution state changed; reload execution_context before stopping",
+          );
+        if (!["running", "waiting"].includes(row.state))
+          throw new ValidationError("Execution is already finished");
+        if (
+          this.sqlite
+            .prepare(
+              "SELECT 1 FROM executionMutationAttempt WHERE executionId = ? AND userId = ? AND state = 'executing'",
+            )
+            .get(executionId, userId)
+        )
+          throw new ConflictError(
+            "An agent operation is executing; wait for it to finish before stopping",
+          );
+        const now = Date.now();
+        this.tracked(executionId, () =>
+          this.sqlite
+            .prepare(
+              `UPDATE workflowExecution SET state = 'completed', stopReason = ?, revision = revision + 1,
+         waitingForInputNodeId = NULL, gateWaiting = 0, awaitingUser = NULL,
+         completedAt = ?, updatedAt = ?, lastActivityAt = ?
+         WHERE executionId = ? AND userId = ? AND revision = ? AND state IN ('running', 'waiting')`,
+            )
+            .run(reason, now, now, now, executionId, userId, expectedRevision),
+        );
+        this.sqlite
+          .prepare(
+            `UPDATE executionMutationAttempt SET state = 'superseded', response = NULL,
+         ownerId = NULL, heartbeatAt = NULL, leaseExpiresAt = NULL, fence = fence + 1,
+         completedAt = ?, updatedAt = ? WHERE executionId = ? AND userId = ?
+         AND state IN ('presented', 'outcome_unknown')`,
+          )
+          .run(now, now, executionId, userId);
+        this.sqlite
+          .prepare(
+            `UPDATE executionNotification SET state = 'superseded'
+           WHERE executionId = ? AND userId = ? AND state = 'pending'`,
+          )
+          .run(executionId, userId);
+        return { changed: true, revision: expectedRevision + 1 };
+      })
+      .immediate();
+  }
+
   createPresented(attempt: PresentedExecutionAttempt): void {
     this.sqlite
       .prepare(
@@ -545,6 +616,13 @@ export class ExecutionAttemptRepository {
           return { kind: "outcome_unknown", attempt: asAttempt(row) };
         if (row.state === "executing") return { kind: "processing", attempt: asAttempt(row) };
 
+        const execution = this.sqlite
+          .prepare(
+            `SELECT 1 FROM workflowExecution WHERE executionId = ? AND userId = ?
+           AND state IN ('running', 'waiting') AND revision = ? AND currentNodeId = ?`,
+          )
+          .get(input.executionId, input.userId, input.executionRevision, input.nodeId);
+        if (!execution) return { kind: "stale" };
         const fence = row.fence + 1;
         const result = this.sqlite
           .prepare(
@@ -684,7 +762,11 @@ export class ExecutionAttemptRepository {
             .prepare(
               `UPDATE workflowExecution SET state = ?, currentNodeId = ?, waitingForInputNodeId = ?,
              context = ?, visits = ?, note = CASE WHEN ? = 1 THEN ? ELSE note END,
-             gateWaiting = ?, awaitingUser = NULL, updatedAt = ?, completedAt = ?,
+             gateWaiting = ?, awaitingUser = CASE
+               WHEN ? = 0 OR ? IN ('completed', 'failed') THEN NULL
+               WHEN json_valid(awaitingUser) = 0 THEN NULL
+               WHEN json_extract(awaitingUser, '$.nodeId') IS ? THEN awaitingUser
+               ELSE NULL END, updatedAt = ?, completedAt = ?,
              lastActivityAt = ?, revision = revision + 1
            WHERE executionId = ? AND revision = ? AND state = ?
              AND currentNodeId IS ? AND waitingForInputNodeId IS ? AND context = ?
@@ -699,6 +781,9 @@ export class ExecutionAttemptRepository {
               noteChanged ? 1 : 0,
               execution.note,
               execution.gateWaiting,
+              input.answeredByUser ? 1 : 0,
+              execution.state,
+              execution.currentNodeId,
               execution.updatedAt,
               execution.completedAt,
               execution.lastActivityAt,
@@ -733,6 +818,19 @@ export class ExecutionAttemptRepository {
             input.inputFingerprint,
           );
         if (completed.changes !== 1) throw new Error("Attempt ownership changed during completion");
+        // An internal claim used by a person's answer replaces the agent's presentation before
+        // dispatch. Link that superseded presentation directly to the final next step as before.
+        this.sqlite
+          .prepare(
+            `UPDATE executionMutationAttempt SET nextAttemptId = ? WHERE executionId = ?
+           AND userId = ? AND state = 'superseded' AND nextAttemptId = ?`,
+          )
+          .run(
+            input.nextAttempt?.attemptId ?? null,
+            input.execution.executionId,
+            input.execution.userId,
+            input.attemptId,
+          );
         if (input.nextAttempt) {
           const next = { ...input.nextAttempt, executionRevision: nextRevision };
           this.createPresented(next);

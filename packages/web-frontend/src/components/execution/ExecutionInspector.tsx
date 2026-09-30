@@ -50,6 +50,7 @@ import {
   Unlock,
   Boxes,
   Variable,
+  OctagonPause,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -111,6 +112,8 @@ export interface ExecutionData {
   workflowName?: string | null; // Issue #421: Resolved from workflow table
   userId: string;
   status: string;
+  /** Present when the agent stopped the execution before reaching the flow's end. */
+  stopReason?: string | null;
   currentNodeId: string | null;
   waitingForInputNodeId: string | null;
   revision: number;
@@ -645,6 +648,8 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
         return <AlertTriangle className="h-3 w-3" />;
       case "locked":
         return <Lock className="h-3 w-3" />;
+      case "stopped":
+        return <OctagonPause className="h-3 w-3" />;
       default:
         return null;
     }
@@ -678,6 +683,7 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
   const journal = execution.errors ?? [];
   const errorsCount = journal.filter(isRefusalEntry).length;
   const degradationsCount = journal.length - errorsCount;
+  const displayedStatus = execution.stopReason ? "stopped" : execution.status;
   // The run's own controls live in the diagram toolbar with the map's and the graph's, so the
   // page has one row above the diagram: view tabs and route cursor first, legend and guide last.
   const runModes = progress ? (
@@ -828,9 +834,18 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
           <TooltipContent>{execution.workflowName || execution.workflowId}</TooltipContent>
         </Tooltip>
 
-        <Badge variant={getStatusBadgeVariant(execution.status)} className="gap-1">
-          {getStatusIcon(execution.status)}
-          {t(`common.status.${execution.status}`)}
+        <Badge
+          variant={getStatusBadgeVariant(displayedStatus)}
+          className="gap-1"
+          data-testid="run-status"
+          data-status={displayedStatus}
+        >
+          {getStatusIcon(displayedStatus)}
+          {t(
+            displayedStatus === "stopped"
+              ? "pages.overview.runStatus.stopped"
+              : `common.status.${displayedStatus}`,
+          )}
         </Badge>
 
         {currentNode && (
@@ -907,6 +922,17 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
           {errorsCount > 0 && <ErrorCountBadge count={errorsCount} />}
         </div>
       </PageHeader>
+
+      {execution.stopReason ? (
+        <div
+          className="border-b bg-secondary px-4 py-3 text-sm"
+          role="note"
+          data-testid="run-stop-reason"
+        >
+          <span className="font-semibold">{t("pages.overview.panel.stopReason")}: </span>
+          <span className="whitespace-pre-wrap break-words">{execution.stopReason}</span>
+        </div>
+      ) : null}
 
       {!progress && progressLoading ? (
         <div

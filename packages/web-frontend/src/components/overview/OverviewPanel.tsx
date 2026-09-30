@@ -64,13 +64,19 @@ function Section({
   );
 }
 
-function StageList({ blocks }: { blocks: RunBlock[] }): React.JSX.Element {
+function StageList({
+  blocks,
+  stopped,
+}: {
+  blocks: RunBlock[];
+  stopped: boolean;
+}): React.JSX.Element {
   const { t } = useTranslation();
   return (
     <ol className="grid gap-1 text-sm" data-testid="overview-panel-stages">
       {blocks.map((block) => {
         const done = block.status === "done" || block.status === "repeated";
-        const active = block.status === "active" || block.status === "waiting";
+        const active = !stopped && (block.status === "active" || block.status === "waiting");
         return (
           <li
             key={block.id}
@@ -117,10 +123,17 @@ function PanelBody({
   const current = blocks.find((block) => block.id === currentId) ?? null;
   const listBlock = current?.list ? current : (blocks.find((block) => block.list) ?? null);
   const waiting = run.status === "waiting-user" ? run.waitingForUser : null;
-  const unfinished = run.status !== "completed";
+  const unfinished = run.status !== "completed" && run.status !== "stopped";
   const since = activityOf(run);
   return (
     <div className="grid gap-5 px-4 pb-4">
+      {run.status === "stopped" ? (
+        <Section title={t("pages.overview.panel.stopReason")} testId="overview-panel-stop-reason">
+          <p className="whitespace-pre-wrap break-words rounded-lg bg-secondary p-3 text-sm">
+            {run.stopReason ?? t("pages.overview.runStatusHint.stopped")}
+          </p>
+        </Section>
+      ) : null}
       {run.note && run.note !== run.title ? (
         <div
           className="rounded-md bg-secondary px-2.5 py-2 text-sm"
@@ -226,7 +239,7 @@ function PanelBody({
       ) : null}
       {blocks.length > 0 ? (
         <Section title={t("pages.overview.panel.stages")}>
-          <StageList blocks={blocks} />
+          <StageList blocks={blocks} stopped={run.status === "stopped"} />
         </Section>
       ) : null}
       {run.childRuns.length > 0 ? (
@@ -281,7 +294,13 @@ function PanelBody({
           ) : null}
           {run.completedAt !== null ? (
             <>
-              <dt className="text-muted-foreground">{t("pages.overview.panel.completedAt")}</dt>
+              <dt className="text-muted-foreground">
+                {t(
+                  run.status === "stopped"
+                    ? "pages.overview.panel.stoppedAt"
+                    : "pages.overview.panel.completedAt",
+                )}
+              </dt>
               <dd>{dateText(run.completedAt, i18n.language)}</dd>
             </>
           ) : null}

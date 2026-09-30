@@ -11,7 +11,11 @@
  * by the writer.) Time comes from the injected clock, so tests drive it.
  */
 
-import { createLogger, type ExecutionNotificationRepository } from "@mcp-moira/shared";
+import {
+  createLogger,
+  personWaitKeys,
+  type ExecutionNotificationRepository,
+} from "@mcp-moira/shared";
 import type { ExecutionNotificationRow } from "@mcp-moira/shared";
 import type { IDataRepository } from "../interfaces/data-repository.js";
 import type { WorkflowGraph } from "../interfaces/core-interfaces.js";
@@ -122,6 +126,11 @@ export class WaitingNotificationSender {
       this.queue.markSuperseded(row.id);
       return;
     }
+    // Loading yields to other writers. The stored wait must still hold immediately before delivery.
+    if (!this.queue.holdsWait(row.executionId, row.waitKey)) {
+      this.queue.markSuperseded(row.id);
+      return;
+    }
     let status = "all_failed";
     let channels: string[] = [];
     try {
@@ -194,6 +203,16 @@ export function waitingNotificationText(
   execution: WorkflowExecution,
   row: Pick<ExecutionNotificationRow, "waitKey" | "kind">,
 ): string | null {
+  if (
+    !personWaitKeys({
+      state: execution.status,
+      currentNodeId: execution.currentNodeId,
+      gateWaiting: Boolean(execution.gateWaiting),
+      awaitingUser: execution.awaitingUser ? JSON.stringify(execution.awaitingUser) : null,
+      visits: JSON.stringify(execution.visits ?? []),
+    }).includes(row.waitKey)
+  )
+    return null;
   const heading = notificationHeading(
     graph.metadata.name,
     execution.note,

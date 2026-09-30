@@ -158,6 +158,99 @@ test.describe("The overview", () => {
     }
   });
 
+  test("an agent-stopped run leaves In progress live and remains distinct from Completed", async ({
+    page,
+  }, testInfo) => {
+    const me = await person(page, "stopped");
+    const reason =
+      "The user cancelled this import and asked the agent to investigate a different task. The completed import stage remains recorded; checking was not completed.";
+    try {
+      const run = await me.start("Import stopped orders");
+      await advanceWorkflowExecution(me.client, run, {});
+      await page.goto(`${BASE_URL}/overview`);
+      await expect(page.getByTestId("overview-connection")).toHaveAttribute("data-state", "live");
+      const shown = card(page, run.processId);
+      await expect(shown).toBeVisible();
+      await expect(shown.locator('[data-current="true"]')).toContainText("Check");
+      await page.evaluate(() => {
+        (window as unknown as { overviewMarker: boolean }).overviewMarker = true;
+      });
+      const context = await callMCPTool<{ revision: number }>(me.client, "session", {
+        action: "execution_context",
+        executionId: run.processId,
+      });
+      expect(context.revision).toEqual(expect.any(Number));
+      await callMCPTool(me.client, "session", {
+        action: "stop-execution",
+        executionId: run.processId,
+        expectedRevision: context.revision,
+        reason,
+      });
+      await expect(shown).toHaveCount(0);
+      expect(
+        await page.evaluate(
+          () => (window as unknown as { overviewMarker?: boolean }).overviewMarker,
+        ),
+      ).toBe(true);
+      await page.getByTestId("overview-status-stopped").click();
+      await expect(shown).toBeVisible();
+      await expect(shown).toHaveAttribute("data-status", "stopped");
+      await expect(shown.getByTestId("overview-status")).toHaveText("Stopped");
+      await expect(shown.getByTestId("overview-stop-reason")).toHaveText(reason);
+      await expect(shown.locator('[data-done="true"]')).toContainText("Import");
+      await expect(shown.locator('[data-current="true"]')).toHaveCount(0);
+      await expect(
+        shown.getByTestId("overview-plan-item").filter({ hasText: "Check" }),
+      ).not.toHaveAttribute("data-done", "true");
+      await page.screenshot({
+        path: testInfo.outputPath("overview-stopped-desktop.png"),
+        fullPage: true,
+      });
+      await page.getByTestId("overview-status-completed").click();
+      await expect(shown).toHaveCount(0);
+      await page.getByTestId("overview-status-stopped").click();
+      await shown.getByTestId("overview-card-open").click();
+      const panel = page.getByRole("dialog");
+      await expect(panel.getByTestId("overview-panel-stop-reason")).toContainText(reason);
+      await expect(panel.getByTestId("overview-panel-facts")).toContainText("Stopped");
+      await expect(panel.getByTestId("overview-panel-facts")).not.toContainText("Completed");
+      await expect(panel.getByTestId("overview-panel-step")).toHaveCount(0);
+      // Text is present before the sheet finishes sliding in; capture only its settled position.
+      await panel.evaluate((element) =>
+        Promise.all(element.getAnimations().map((animation) => animation.finished)),
+      );
+      await expect(panel).toBeInViewport({ ratio: 1 });
+      await expect(panel.getByTestId("overview-panel-stop-reason")).toBeInViewport({ ratio: 1 });
+      await page.screenshot({
+        path: testInfo.outputPath("overview-stopped-panel-desktop.png"),
+        fullPage: true,
+      });
+      await page.setViewportSize({ width: 390, height: 844 });
+      await panel.evaluate((element) =>
+        Promise.all(element.getAnimations().map((animation) => animation.finished)),
+      );
+      await expect(panel).toBeInViewport({ ratio: 1 });
+      await expect(panel.getByTestId("overview-panel-stop-reason")).toBeInViewport({ ratio: 1 });
+      await page.screenshot({
+        path: testInfo.outputPath("overview-stopped-panel-mobile.png"),
+        fullPage: true,
+      });
+      await page.keyboard.press("Escape");
+      await expect(panel).toHaveCount(0);
+      await expect(shown).toBeInViewport();
+      await page.screenshot({
+        path: testInfo.outputPath("overview-stopped-mobile.png"),
+        fullPage: true,
+      });
+      await shown.getByTestId("overview-card-open").click();
+      await page.getByTestId("overview-panel-open-run").click();
+      await expect(page.getByTestId("run-status")).toHaveText("Stopped");
+      await expect(page.getByTestId("run-stop-reason")).toContainText(reason);
+    } finally {
+      await me.cleanup();
+    }
+  });
+
   test("the filter by time without movement keeps only the runs untouched since the cut", async ({
     page,
   }) => {

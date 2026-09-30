@@ -55,6 +55,7 @@ export interface OverviewRun {
   workflowVersion: string | null;
   title: string;
   status: OverviewStatus;
+  stopReason: string | null;
   /** False for a run shown only because it belongs to a matching tree (shown muted). */
   matches: boolean;
   waitingForUser: OverviewWaitingForUser | null;
@@ -179,7 +180,7 @@ function projectRow(
     }
   }
   const graph = flow?.graph;
-  const running = node.status !== "completed";
+  const running = node.status !== "completed" && node.status !== "stopped";
   const activeIndex = progress?.activeNodeId
     ? progress.nodes.findIndex((block) => block.id === progress!.activeNodeId)
     : -1;
@@ -197,6 +198,7 @@ function projectRow(
     workflowVersion: execution.workflowVersion ?? null,
     title: progress?.taskTitle || execution.note || flow?.name || execution.workflowId,
     status: node.status,
+    stopReason: execution.stopReason ?? null,
     matches: node.matches,
     waitingForUser: waitingSource ? { ...waitingSource, notification: mark(notification) } : null,
     refusalCount: execution.refusalCount ?? 0,
@@ -297,11 +299,14 @@ async function projectNodes(
     row.subtreeActivityAt = latest;
     row.children = {
       total: row.childRuns.length,
-      unfinished: row.childRuns.filter((child) => child.status !== "completed").length,
+      unfinished: row.childRuns.filter(
+        (child) => child.status !== "completed" && child.status !== "stopped",
+      ).length,
     };
     row.childRuns.sort(
       (a, b) =>
-        Number(a.status === "completed") - Number(b.status === "completed") ||
+        Number(a.status === "completed" || a.status === "stopped") -
+          Number(b.status === "completed" || b.status === "stopped") ||
         (b.subtreeActivityAt ?? 0) - (a.subtreeActivityAt ?? 0),
     );
     return latest;

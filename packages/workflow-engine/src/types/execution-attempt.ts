@@ -147,4 +147,6 @@ export interface CompleteExecutionAttemptInput {
   expectedExecution: WorkflowExecution;
   response: string;
   nextAttempt?: PresentedExecutionAttempt;
+  /** A person's answer clears an agent question only when the run leaves its node. */
+  answeredByUser?: boolean;
 }

@@ -102,7 +102,7 @@ export function stageItems(run: OverviewRun): PlanItem[] {
     index,
     title,
     done: finished || (active !== null ? index < active : index < run.stages!.doneCount),
-    current: !finished && active === index,
+    current: !finished && run.status !== "stopped" && active === index,
     durationMs: null,
   }));
 }
@@ -120,7 +120,10 @@ export function cardPlan(run: OverviewRun): CardPlan {
       title: run.list.title,
       done: run.list.done,
       total: run.list.total,
-      items: run.list.items,
+      items:
+        run.status === "stopped"
+          ? run.list.items.map((item) => ({ ...item, current: false }))
+          : run.list.items,
     };
   }
   if (run.stages && run.stages.labels.length > 0) {
@@ -140,6 +143,7 @@ export function cardPlan(run: OverviewRun): CardPlan {
  * Without it the plan gets its line.
  */
 export function hasStripRow(run: OverviewRun): boolean {
+  if (run.status === "stopped") return true;
   if (run.status === "waiting-user" && run.waitingForUser) return true;
   return cardPlan(run).kind === "list" && run.stages !== null && run.stages.labels.length > 0;
 }
@@ -283,6 +287,7 @@ export const STATUS_FILTERS: readonly OverviewStatusFilter[] = [
   "waiting-agent",
   "locked",
   "completed",
+  "stopped",
   "all",
 ];
 export const IDLE_FILTERS: readonly OverviewIdle[] = ["1h", "1d", "3d", "7d", "30d"];
@@ -396,5 +401,7 @@ export function activityOf(run: OverviewRun): number {
 
 /** Unfinished and without movement for longer than `STALE_AFTER_MS`. */
 export function isStale(run: OverviewRun, now: number): boolean {
-  return run.status !== "completed" && now - activityOf(run) > STALE_AFTER_MS;
+  return (
+    run.status !== "completed" && run.status !== "stopped" && now - activityOf(run) > STALE_AFTER_MS
+  );
 }

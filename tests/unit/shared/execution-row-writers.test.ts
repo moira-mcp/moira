@@ -39,8 +39,8 @@ const INVENTORY: Record<string, { sites: number; writers: string }> = {
       "save (update, insert), delete, deleteCompletedOlderThan, updateNote, setAwaitingUser, setParent, updateReminders, updateContext, appendError, cancelExecution, clearErrors",
   },
   "packages/shared/src/database/repositories/execution-attempt-repository.ts": {
-    sites: 4,
-    writers: "claimStart, cancelWithStartAttempt, recoverToNode, complete",
+    sites: 5,
+    writers: "claimStart, cancelWithStartAttempt, stopExecution, recoverToNode, complete",
   },
   "packages/shared/src/database/gate-waiting.ts": {
     sites: 1,
@@ -119,7 +119,7 @@ describe("writers of the execution row", () => {
     const updates = [...text.matchAll(/`(UPDATE workflowExecution[^`]*)`/g)]
       .map((match) => match[1])
       .filter((sql) => /currentNodeId = \?|state = 'completed'/.test(sql));
-    expect(updates.length).toBe(3);
-    for (const sql of updates) expect(sql).toMatch(/awaitingUser = NULL/);
+    expect(updates.length).toBe(4);
+    for (const sql of updates) expect(sql).toMatch(/awaitingUser = (?:NULL|CASE)/);
   });
 });

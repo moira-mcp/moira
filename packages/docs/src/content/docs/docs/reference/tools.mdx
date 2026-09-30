@@ -77,11 +77,30 @@ match.
 
 For an agent-directive step whose expression reads a saved top-level variable absent from the execution, `diagnose` reports `missing_expression_variables` as blocking when Moira can establish that no answer field accepted by both the input schema and the node's top-level output declaration can supply the value, and the node has no authored error route. An open input schema alone does not make an undeclared answer field usable. A declared output field also cannot supply the value if the input schema forbids it, for example with `maxProperties: 0`, a false property schema, or a prohibition inside `allOf`. For schema constraints Moira cannot establish as a prohibition, the field remains answer-capable and an invalid answer must be corrected normally. A failed `step` caused by that missing read and `current_step` point the agent to `diagnose` and `recover`. Supply the named values through `recover` with the current `nodeId`; declared variables must match their registry schemas. Recovery refuses missing or invalid values without changing the execution. A successful recovery presents the same node with a fresh Step attempt ID; submit the step's ordinary answer to continue. A malformed answer or an expression error caused by answer data remains retryable, even when diagnosis also names a later missing saved value; correct the current answer error first. An authored error route still runs as defined. A historical recorded error alone does not make a healthy run recoverable.
 
-The execution revision advances only when an original `step` persists workflow state. Parent, reminder, note, and runtime-variable mutations do not advance it or invalidate the current Step attempt. Parent, reminder, and runtime-variable writes require both `expectedRevision` and the corresponding opaque revision returned by `execution_context`, `reminders`, `variables`, or the previous mutation (`expectedParentRevision`, `expectedRemindersRevision`, or `expectedContextRevision`). These target revisions prevent an older metadata snapshot from overwriting a newer one within the same step generation. Parent changes accept `"none"` to detach, require same-owner running executions, and reject ancestry cycles. Reminders do not change the workflow plan or grant authority; active reminders are returned when an execution completes. Runtime variable writes are default-deny, must satisfy the variable schema, and never advance the graph. A write whose revision is no longer current is rejected before anything is written; its `AGENT INSTRUCTIONS` tell the caller to re-read that state and retry with the current revisions, without involving the user.
+During ordinary progression, an original `step` advances the execution revision when it persists workflow state; `stop-execution` also advances it once when ending the run. Parent, reminder, note, and runtime-variable mutations do not advance it or invalidate the current Step attempt. Parent, reminder, and runtime-variable writes require both `expectedRevision` and the corresponding opaque revision returned by `execution_context`, `reminders`, `variables`, or the previous mutation (`expectedParentRevision`, `expectedRemindersRevision`, or `expectedContextRevision`). These target revisions prevent an older metadata snapshot from overwriting a newer one within the same step generation. Parent changes accept `"none"` to detach, require same-owner running executions, and reject ancestry cycles. Reminders do not change the workflow plan or grant authority; active reminders are returned when an execution completes. Runtime variable writes are default-deny, must satisfy the variable schema, and never advance the graph. A write whose revision is no longer current is rejected before anything is written; its `AGENT INSTRUCTIONS` tell the caller to re-read that state and retry with the current revisions, without involving the user.
 
 When `current_step` presents a paused materialization node, it returns a fresh five-minute archive command rather than file contents. The grant is bound to the current user, execution, node, and context snapshot and can be downloaded repeatedly only while that execution remains waiting on the node with the same context. Run or retry the returned command exactly, then complete the node with `null` or `{}`; advancing the execution or changing its context invalidates the URL. A host that cannot run the command or reach the network uses `materialize` instead, which returns the same file bodies in the response under the same bindings and window, subject to a smaller total-size ceiling, and completes the node the same way.
 
 Progress-image grants are bound to the execution owner, workflow version, workflow-step revision, context revision, and normalized render options. Failed rendering or failed HTTP delivery does not consume the grant; successful response completion does.
+
+### Stopping a run
+
+Use `session({ action: "stop-execution", executionId, expectedRevision, reason })` when the user
+cancels a running workflow or wants to continue outside it. Use the current `execution_context`
+response's `revision` as `expectedRevision`. The caller must own the execution, and `reason` must contain 1–500
+characters after trimming. The operation permanently ends the run, records `stopReason`, clears
+its waits and advances its revision once; it does not report successful task completion.
+Pending notifications are superseded, but a notification delivery already begun may finish.
+
+An execution operation still in progress, including recovery or a run-page answer, prevents stopping; wait for it to
+finish and reload the context. A stale revision or an already finished run is refused without a
+change. Repeating the successful stop with the original revision and the same trimmed reason
+returns the same result without another write. `execution_context` and `executions` expose
+`stopReason`; the overview displays these runs as **Stopped**, hidden in its default active view
+even when they are children. Select **Stopped** or **All** to find them. An active child of a
+stopped parent remains active and is shown independently with its parent link.
+
+`cancel-execution` remains the separate operation for retiring a blocked start.
 
 ### Workflow definitions and reconciliation
 

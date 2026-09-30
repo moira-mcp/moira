@@ -13,7 +13,7 @@ export const overviewGuide: GuideDefinition = {
   routes: ["/overview"],
   steps: [
     { id: "intro", anchor: "overview.header", kind: "look", revision: 1 },
-    { id: "status", anchor: "overview.status", kind: "look", revision: 1 },
+    { id: "status", anchor: "overview.status", kind: "look", revision: 2 },
     { id: "idle", anchor: "overview.idle", kind: "look", revision: 1 },
     { id: "board", anchor: "overview.board", kind: "look", revision: 1 },
     { id: "live", anchor: "overview.live", kind: "look", revision: 1 },

@@ -351,6 +351,13 @@
       "when": 1790000660000,
       "tag": "0048_execution_change",
       "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "7",
+      "when": 1790000720000,
+      "tag": "0049_execution_stop",
+      "breakpoints": true
     }
   ]
 }

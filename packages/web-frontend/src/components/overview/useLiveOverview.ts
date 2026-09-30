@@ -1,11 +1,11 @@
 /**
  * The overview kept current without a reload: the live connection (`liveConnection.ts`) turned into
- * page updates. A change of a run's activity or note refreshes that run and its ancestors on the
- * page in place — batched, one request per burst, so a burst of events costs one call against the
- * `/api` rate limit. Whatever may change which runs the filters admit — a new run, a removed one, a
- * change of status, a lock (which moves a run between locked and waiting), activity while the page
- * filters by activity, or a reset — fetches the whole page again (debounced). The page keeps showing
- * its cards while either request runs, and an open panel stays open. A page restored from the
+ * page updates. Every change can affect the server's tree membership, ordering or pagination:
+ * activity moves trees in activity order, and metadata includes notes used by search and parent
+ * links used by nesting. Refetches are collected into one request per burst, including changes to
+ * runs outside the current page. One refresh runs at a time; events received during it request one
+ * follow-up after it finishes, so slow responses remain usable during continuous activity. The page
+ * keeps showing its cards while a request runs, and an open panel stays open. A page restored from the
  * browser's back-forward cache joins the live connection again.
  */
 
@@ -19,23 +19,14 @@ import {
   type LiveSnapshot,
 } from "./liveConnection";
 
-/** How long changes are collected before one refresh request. */
-export const ROW_BATCH_MS = 300;
+/** How long changes are collected before one page request. */
 export const PAGE_REFETCH_MS = 700;
-/** The overview answers at most this many ids at once. */
-export const MAX_IDS = 100;
 
 export interface LiveOverviewHandlers {
-  /** Refresh these runs in place. */
-  refreshRows(ids: string[]): void;
   /** Fetch the page again. */
-  refetchPage(): void;
+  refetchPage(): Promise<void>;
   /** Take this run off the page now. */
   removeRun(id: string): void;
-  /** The runs on the page an update of `id` also touches: `id` and its ancestors, or [] when absent. */
-  touchedBy(id: string): string[];
-  /** The page filters by time without movement or by the last step's date. */
-  activityFiltered: boolean;
 }
 
 /** The stream lives beside the rest of the API, which the app reaches at `/api` from any base path. */
@@ -52,30 +43,17 @@ function defaultDependencies(): LiveDependencies {
 }
 
 /**
- * Route one message of the live connection to the page: in-place refreshes are collected into a
- * batch, page refetches into one. Exported for the tests of the routing.
+ * Route a change to the server page query, removing a deleted row immediately while it reloads.
+ * The feed does not contain enough facts to reproduce the query's filters and placement locally.
  */
 export function routeLiveMessage(
   message: LiveMessage,
-  handlers: Pick<LiveOverviewHandlers, "removeRun" | "touchedBy" | "activityFiltered">,
+  handlers: Pick<LiveOverviewHandlers, "removeRun">,
 ): { rows: string[]; refetch: boolean } {
   if (message.type === "reset") return { rows: [], refetch: true };
   const change: OverviewChange = message.change;
-  switch (change.kind) {
-    case "deleted":
-      handlers.removeRun(change.executionId);
-      return { rows: [], refetch: true };
-    case "created":
-    case "status":
-    case "lock":
-      return { rows: [], refetch: true };
-    case "activity":
-      return handlers.activityFiltered
-        ? { rows: [], refetch: true }
-        : { rows: handlers.touchedBy(change.executionId), refetch: false };
-    default:
-      return { rows: handlers.touchedBy(change.executionId), refetch: false };
-  }
+  if (change.kind === "deleted") handlers.removeRun(change.executionId);
+  return { rows: [], refetch: true };
 }
 
 export function useLiveOverview(
@@ -91,33 +69,32 @@ export function useLiveOverview(
   const createRef = useRef(createDependencies);
 
   useEffect(() => {
-    const pendingRows = new Set<string>();
-    let rowTimer: ReturnType<typeof setTimeout> | null = null;
     let pageTimer: ReturnType<typeof setTimeout> | null = null;
-
-    const flushRows = () => {
-      rowTimer = null;
-      const ids = [...pendingRows].slice(0, MAX_IDS);
-      pendingRows.clear();
-      if (ids.length > 0) handlersRef.current.refreshRows(ids);
+    let refreshing = false;
+    let dirty = false;
+    let disposed = false;
+    const schedule = () => {
+      if (disposed || refreshing || pageTimer !== null || !dirty) return;
+      pageTimer = setTimeout(() => void refresh(), PAGE_REFETCH_MS);
+    };
+    const refresh = async () => {
+      pageTimer = null;
+      if (disposed) return;
+      dirty = false;
+      refreshing = true;
+      try {
+        await handlersRef.current.refetchPage();
+      } catch {
+        // The resource keeps its previous data and reports the error; a later change retries it.
+      } finally {
+        refreshing = false;
+        schedule();
+      }
     };
     const onMessage = (message: LiveMessage) => {
-      const routed = routeLiveMessage(message, handlersRef.current);
-      if (routed.refetch) {
-        // A page refetch brings every row anyway.
-        pendingRows.clear();
-        if (rowTimer) clearTimeout(rowTimer);
-        rowTimer = null;
-        if (pageTimer) clearTimeout(pageTimer);
-        pageTimer = setTimeout(() => {
-          pageTimer = null;
-          handlersRef.current.refetchPage();
-        }, PAGE_REFETCH_MS);
-        return;
-      }
-      if (pageTimer) return;
-      for (const id of routed.rows) pendingRows.add(id);
-      if (pendingRows.size > 0 && !rowTimer) rowTimer = setTimeout(flushRows, ROW_BATCH_MS);
+      routeLiveMessage(message, handlersRef.current);
+      dirty = true;
+      schedule();
     };
 
     let connection: LiveConnection | null = null;
@@ -137,10 +114,10 @@ export function useLiveOverview(
     window.addEventListener("pagehide", leave);
     window.addEventListener("pageshow", back);
     return () => {
+      disposed = true;
       window.removeEventListener("pagehide", leave);
       window.removeEventListener("pageshow", back);
       leave();
-      if (rowTimer) clearTimeout(rowTimer);
       if (pageTimer) clearTimeout(pageTimer);
     };
   }, []);

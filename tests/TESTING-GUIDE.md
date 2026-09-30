@@ -24,6 +24,19 @@ npm run test:workflow -- --file tests/workflow/engine/template-processor.test.ts
 npm run test:e2e -- --file tests/e2e/admin-panel.spec.ts
 ```
 
+For a worktree whose normal CI ports are already occupied, copy `.env.ci` to an ignored local
+environment file and set unique `DOCKER_PORT`, `DOCKER_CONTAINER_NAME`, `DOCKER_IMAGE_NAME`,
+`MOIRA_HOST` and `STATIC_ARTIFACTS_DOMAIN` values. Run the complete Docker gate with that file and a
+separate free self-host port:
+
+```bash
+MOIRA_VERIFY_ENV_FILE=.env.verify MOIRA_TEST_SELF_HOST_PORT=3055 npm run verify:docker
+```
+
+The gate and its `ci-saas`/`ci` test environments use those selected settings. Without overrides,
+they use `.env.ci` and the normal self-host port. Check your local port inventory before assigning
+either port; keep the selected file out of Git.
+
 **Docker requirement:**
 
 ```bash

@@ -401,6 +401,7 @@ export class InMemoryRepository implements IDataRepository {
           e.workflowId === workflowId &&
           e.userId === userId &&
           e.status === "completed" &&
+          !e.stopReason &&
           e.workflowVersion === workflowVersion,
       )
       .map((e) => ({ ...e, ...executionActivity(e) }));
@@ -412,7 +413,11 @@ export class InMemoryRepository implements IDataRepository {
     userId: string,
   ): Promise<{ count: number; lastCompletedAt: number | null; unstamped: number }> {
     const completed = Array.from(this.executions.values()).filter(
-      (e) => e.workflowId === workflowId && e.userId === userId && e.status === "completed",
+      (e) =>
+        e.workflowId === workflowId &&
+        e.userId === userId &&
+        e.status === "completed" &&
+        !e.stopReason,
     );
     const stamped = completed.filter((e) => e.workflowVersion === workflowVersion);
     const completedAt = (e: WorkflowExecution) => e.completedAt ?? e.updatedAt;
@@ -599,6 +604,63 @@ export class InMemoryRepository implements IDataRepository {
       }
     }
     return result;
+  }
+
+  async stopExecution(
+    executionId: string,
+    userId: string,
+    expectedRevision: number,
+    reason: string,
+  ): Promise<{ changed: boolean; revision: number }> {
+    reason = reason.trim();
+    if (!reason || reason.length > 500)
+      throw new ValidationError("Stop reason must contain 1–500 characters");
+    const execution = this.executions.get(executionId);
+    if (!execution || execution.userId !== userId)
+      throw new ValidationError("Execution must belong to the authenticated user");
+    if (
+      execution.status === "completed" &&
+      execution.stopReason === reason &&
+      execution.revision === expectedRevision + 1
+    )
+      return { changed: false, revision: execution.revision };
+    if (execution.revision !== expectedRevision)
+      throw new ConflictError("Execution state changed; reload execution_context before stopping");
+    if (!["running", "waiting"].includes(execution.status))
+      throw new ValidationError("Execution is already finished");
+    const attempts = [...this.executionAttempts.values()].filter(
+      (attempt) => attempt.executionId === executionId && attempt.userId === userId,
+    );
+    if (attempts.some((attempt) => attempt.state === "executing"))
+      throw new ConflictError(
+        "An agent operation is executing; wait for it to finish before stopping",
+      );
+    const now = Date.now();
+    Object.assign(execution, {
+      status: "completed",
+      stopReason: reason,
+      revision: expectedRevision + 1,
+      waitingForInputNodeId: null,
+      gateWaiting: false,
+      awaitingUser: null,
+      completedAt: now,
+      updatedAt: now,
+      lastActivityAt: now,
+    });
+    for (const attempt of attempts) {
+      if (!["presented", "outcome_unknown"].includes(attempt.state)) continue;
+      Object.assign(attempt, {
+        state: "superseded",
+        response: null,
+        ownerId: null,
+        heartbeatAt: null,
+        leaseExpiresAt: null,
+        fence: attempt.fence + 1,
+        completedAt: now,
+        updatedAt: now,
+      });
+    }
+    return { changed: true, revision: execution.revision };
   }
 
   async setExecutionParent(
@@ -1072,6 +1134,15 @@ export class InMemoryRepository implements IDataRepository {
       return { kind: "outcome_unknown", attempt: structuredClone(attempt) };
     if (attempt.state === "executing")
       return { kind: "processing", attempt: structuredClone(attempt) };
+    const execution = this.executions.get(input.executionId);
+    if (
+      !execution ||
+      execution.userId !== input.userId ||
+      !["running", "waiting"].includes(execution.status) ||
+      execution.revision !== input.executionRevision ||
+      execution.currentNodeId !== input.nodeId
+    )
+      return { kind: "stale" };
     attempt.state = "executing";
     attempt.inputFingerprint = input.inputFingerprint;
     attempt.ownerId = input.ownerId;
@@ -1172,7 +1243,9 @@ export class InMemoryRepository implements IDataRepository {
     updatedExecution.errors = structuredClone(current.errors);
     updatedExecution.reminders = structuredClone(current.reminders);
     updatedExecution.parentExecutionId = current.parentExecutionId;
-    updatedExecution.awaitingUser = null; // the agent acted
+    updatedExecution.awaitingUser = input.answeredByUser
+      ? awaitingUserAfterMove(current.awaitingUser, updatedExecution)
+      : null;
     if (!noteChanged) updatedExecution.note = current.note;
     const now = Date.now();
     const completedAttempt: ExecutionAttempt = {
@@ -1208,6 +1281,15 @@ export class InMemoryRepository implements IDataRepository {
 
     this.executions.set(input.execution.executionId, updatedExecution);
     this.executionAttempts.set(input.attemptId, completedAttempt);
+    for (const prior of this.executionAttempts.values()) {
+      if (
+        prior.executionId === input.execution.executionId &&
+        prior.userId === input.execution.userId &&
+        prior.state === "superseded" &&
+        prior.nextAttemptId === input.attemptId
+      )
+        prior.nextAttemptId = input.nextAttempt?.attemptId ?? null;
+    }
     if (presentedAttempt) this.executionAttempts.set(presentedAttempt.attemptId, presentedAttempt);
     input.execution.revision = nextRevision;
     return true;

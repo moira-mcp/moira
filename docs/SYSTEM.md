@@ -84,16 +84,18 @@ Materialize and progress-image grants bind context-derived content to an indepen
 revision as well as their execution/node or workflow-step constraints. Metadata changes therefore
 do not masquerade as step transitions, while a URL cannot render different context after issuance.
 
-The execution revision is the workflow-step generation. It advances only when an original `step`
-persists workflow state; receipt replay and session mutations such as note, parent, reminder, or
+The execution revision is the workflow-step generation. It advances when an original `step`
+persists workflow state or an explicit stop ends the run; receipt replay and session mutations such as note, parent, reminder, or
 runtime-variable changes do not advance it or invalidate the presented attempt. Those mutations
 guard the field or stored snapshot they actually change with independent opaque parent, context,
 and reminder revisions returned by the corresponding read and mutation surfaces.
 
 A person may answer the waiting step from the run page (`POST /api/executions/:id/answer`). That
-runs the step without an attempt: the execution's compare-and-set save guards it, the accepted
-values are recorded as an adjustment visit with the acting user, and the presented attempt the
-agent was holding is marked `superseded` and linked to the presentation created for the new node.
+runs the step through an internal durable attempt: the agent's presentation is superseded before
+the internal attempt claims ownership, the execution's revision and active state are checked before
+handlers run, and its completion is committed through the same fenced transaction as an MCP step.
+The accepted values are recorded as an adjustment visit with the acting user, and the superseded
+agent attempt is linked to the presentation created for the new node.
 A superseded attempt is stale on `step` (never replayed), is not the current attempt, and is
 evicted with old receipts; the answer is refused while an attempt is executing or outcome-unknown.
 
@@ -220,6 +222,19 @@ the corresponding `operation` label, so an expired Start lease is never reported
 
 ### Waiting-for-you notifications
 
+`session({ action: "stop-execution", executionId, expectedRevision, reason })` ends an owned active
+execution. The trimmed reason is required and contains 1–500 characters. In one immediate transaction,
+`ExecutionAttemptRepository.stopExecution` stores lifecycle state `completed` with `stopReason`,
+advances the step revision, clears input, gate and question waits, retires presented and
+outcome-unknown attempts with a new fence, and records a status change in the feed. An executing
+Start or Step attempt refuses the stop until it finishes. Repeating the original revision and reason
+returns the same result without another write. Stopping does not roll back external effects or stop
+separately running child executions. `cancel-execution` remains the recovery action for an unknown
+Start outcome. Terminal guards prevent either stopped or ordinarily completed runs from resuming.
+The stop transaction supersedes pending waiting notifications. The sender rechecks the stored wait
+after loading and before beginning delivery; a stopped run cannot queue another reminder. A delivery
+already begun may still reach its external channel after the stop.
+
 When a run starts waiting for its person — it arrives at a step marked `humanGate` whose condition
 held, or the agent raises `session await-user` — a row is written to `executionNotification` in the
 same transaction as the write that put the run there. For a gate with `notify: "auto"` (the default)
@@ -309,6 +324,13 @@ facts (a match anywhere, the latest activity, a run waiting for its person) and 
 the runs in one query, each flow's definition once (`WorkflowRepository.getManyForUser`), the
 notification marks in two (`ExecutionNotificationRepository.latestForCurrentWaits`) — so the number of
 queries does not grow with the page; the projection is `projectExecutionRun`.
+
+The overview derives `stopped` from a non-null `stopReason` (migration `0049_execution_stop`),
+separately from `completed`. Its default `active` filter removes stopped roots and descendants;
+their active children remain discoverable as roots carrying the parent link. Other filters can show
+stopped runs and their reason. The run projection preserves unfinished route history and freezes a
+stopped run's open duration at its completion timestamp; stopped runs do not enter typical-duration
+statistics.
 
 ### Bundled Workflow Reconciliation
 
@@ -882,6 +904,7 @@ interface WorkflowExecution {
   status: "running" | "completed";
   errors?: ExecutionError[]; // Persistent error log
   note?: string | null; // User-provided note for identification (max 500 chars)
+  stopReason?: string | null; // Explicit stop explanation; null for ordinary completion
   createdAt: number;
   updatedAt: number;
 }
@@ -1716,7 +1739,7 @@ Action-based tool for session-related information.
 // Parameters
 {
   action: 'user' | 'executions' | 'execution_context' | 'current_step' | 'diagnose' | 'recover'
-        | 'update-note' | 'await-user';
+        | 'update-note' | 'await-user' | 'stop-execution';
   executionId?: string;  // Required for execution_context, current_step, diagnose, recover, update-note, await-user
   nodeId?: string;       // Required for recover: the node the run must resume from
   variableValues?: Record<string, unknown>; // recover: values written into the execution context
@@ -1724,6 +1747,8 @@ Action-based tool for session-related information.
   question?: string;     // await-user: what the agent needs from the person (1-500 chars)
   options?: string[];    // await-user: up to 4 choices (1-200 chars each)
   resolve?: true;        // await-user: clear the open question instead of raising one
+  expectedRevision?: number; // stop-execution: required step revision from execution_context
+  reason?: string;       // stop-execution: required trimmed explanation, 1-500 chars
 }
 
 // action: 'user' - Returns authenticated user information
@@ -1743,6 +1768,7 @@ Action-based tool for session-related information.
     status: 'running' | 'completed' | 'locked';  // "locked" = running + active lock
     currentNodeId: string;
     note?: string | null;
+    stopReason: string | null;
     parentExecutionId?: string | null;
     createdAt: string;   // ISO 8601
     updatedAt: string;   // ISO 8601
@@ -1763,6 +1789,7 @@ Action-based tool for session-related information.
   waitingForInputNodeId: string | null;
   errors?: ExecutionError[]; // Persistent error log
   note?: string | null;
+  stopReason: string | null;
   context: {
     variables: Record<string, unknown>;
     nodeStates: Record<string, unknown>;
@@ -1775,6 +1802,14 @@ Action-based tool for session-related information.
 
 // action: 'current_step' - Returns the authoritative current presentation
 string  // Formatted directive including Process ID and Step attempt ID
+
+// action: 'stop-execution' - Ends an owned active run; exact repeats return the same data
+{
+  executionId: string;
+  stopped: true;
+  stopReason: string;
+  revision: number;
+}
 
 // action: 'diagnose' - Reports whether a paused run can still continue, and why not
 {

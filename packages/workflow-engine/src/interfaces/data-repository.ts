@@ -295,6 +295,13 @@ export interface IDataRepository {
     executionId: string,
     error: ExecutionError,
   ): Promise<{ changed: boolean; execution: WorkflowExecution | null }>;
+  /** Stop an owned active run; an exact retry replays without another mutation. */
+  stopExecution(
+    executionId: string,
+    userId: string,
+    expectedRevision: number,
+    reason: string,
+  ): Promise<{ changed: boolean; revision: number }>;
 
   /**
    * Find active (running/waiting) child executions for a parent execution

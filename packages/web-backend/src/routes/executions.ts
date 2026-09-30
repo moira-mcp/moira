@@ -365,6 +365,7 @@ router.get(
         status: isLocked ? ("locked" as const) : exec.status,
         currentNodeId: exec.currentNodeId,
         note: exec.note,
+        stopReason: exec.stopReason ?? null,
         createdAt: exec.createdAt,
         updatedAt: exec.updatedAt,
         completedAt: exec.completedAt,
@@ -410,6 +411,7 @@ const OVERVIEW_STATUSES: OverviewStatusFilter[] = [
   "waiting-agent",
   "locked",
   "completed",
+  "stopped",
   "all",
 ];
 const OVERVIEW_SORTS: OverviewSort[] = ["activity", "idle", "created"];
@@ -571,6 +573,7 @@ router.get(
           currentNodeId: execution.currentNodeId,
           waitingForInputNodeId: execution.waitingForInputNodeId,
           note: execution.note,
+          stopReason: execution.stopReason ?? null,
           parentExecutionId: execution.parentExecutionId ?? null,
           revision: execution.revision,
           metadataRevisions: {

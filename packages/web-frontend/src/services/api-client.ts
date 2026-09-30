@@ -30,7 +30,7 @@ export interface WaitingNotificationMark {
 }
 
 /** Where a run of the overview stands: the move is the person's, the agent's, a PIN's, or it ended. */
-export type OverviewStatus = "waiting-user" | "waiting-agent" | "locked" | "completed";
+export type OverviewStatus = "waiting-user" | "waiting-agent" | "locked" | "completed" | "stopped";
 /** The overview's status filter: every unfinished run (`active`), one status, or everything. */
 export type OverviewStatusFilter = "active" | OverviewStatus | "all";
 export type OverviewSort = "activity" | "idle" | "created";
@@ -73,6 +73,8 @@ export interface OverviewRun {
   workflowVersion: string | null;
   title: string;
   status: OverviewStatus;
+  /** The agent's recorded reason for stopping this run before it reached its end. */
+  stopReason: string | null;
   /** False for a run shown only because its tree matches (drawn muted). */
   matches: boolean;
   waitingForUser: OverviewWaitingForUser | null;
@@ -1794,6 +1796,7 @@ export class MoiraApiClient {
     workflowName?: string | null;
     userId: string;
     status: string;
+    stopReason?: string | null;
     currentNodeId: string | null;
     waitingForInputNodeId: string | null;
     revision: number;
@@ -1821,6 +1824,7 @@ export class MoiraApiClient {
           workflowName?: string | null;
           userId: string;
           status: string;
+          stopReason?: string | null;
           currentNodeId: string | null;
           waitingForInputNodeId: string | null;
           revision: number;
@@ -2126,6 +2130,7 @@ export class MoiraApiClient {
     userEmail: string | null;
     userName: string | null;
     status: string;
+    stopReason?: string | null;
     currentNodeId: string | null;
     waitingForInputNodeId: string | null;
     context: {
@@ -2154,6 +2159,7 @@ export class MoiraApiClient {
         userEmail: string | null;
         userName: string | null;
         status: string;
+        stopReason?: string | null;
         currentNodeId: string | null;
         waitingForInputNodeId: string | null;
         context: {

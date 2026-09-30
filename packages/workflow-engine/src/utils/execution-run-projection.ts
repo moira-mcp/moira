@@ -531,7 +531,10 @@ export function projectExecutionRun(
 
   // Timings and bound lists: the variables at the cursor, the passes of every block, and — for
   // a bound block — the item each pass worked on.
-  const now = options.now ?? Date.now();
+  const now =
+    execution.stopReason && cursor === null
+      ? (execution.completedAt ?? execution.updatedAt)
+      : (options.now ?? Date.now());
   const bindings = new Map(
     definition.nodes.filter((node) => node.list).map((node) => [node.id, node.list!]),
   );

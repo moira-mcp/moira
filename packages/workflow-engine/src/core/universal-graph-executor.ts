@@ -322,6 +322,22 @@ export class UniversalGraphExecutor implements IGraphExecutor {
           operation: "step" | "start";
         }
       | undefined = mutation?.preclaimedAttempt;
+    // Run-page answers and recovery presentations execute handlers too. Give them the same durable
+    // ownership fence as MCP steps, while retiring the presentation the agent was holding.
+    if (!claimed && !mutation?.attemptId && mutation?.createPresentation) {
+      const internalAttempt = this.mutationCoordinator.newPresentedAttempt(execution, graph, null);
+      await this.repository.supersedePresentedExecutionAttempt(internalAttempt);
+      const outcome = await this.mutationCoordinator.claimStep(
+        internalAttempt.attemptId,
+        execution,
+        graph,
+        attemptInput,
+        teleportTo,
+        execution.userId,
+      );
+      if (outcome.kind === "replay") return outcome.response;
+      claimed = { attemptId: internalAttempt.attemptId, ...outcome, operation: "step" };
+    }
     if (mutation?.attemptId && !claimed) {
       const outcome = await this.mutationCoordinator.claimStep(
         mutation.attemptId,
@@ -484,6 +500,7 @@ export class UniversalGraphExecutor implements IGraphExecutor {
           expectedExecution: loadedExecution,
           response,
           nextAttempt,
+          answeredByUser: mutation?.answeredBy?.role === "user",
         });
         if (!completed) {
           throw new ConflictError(

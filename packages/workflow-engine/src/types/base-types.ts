@@ -100,6 +100,8 @@ export interface WorkflowExecution {
   globalContext: ExecutionContext;
   status: LegacyExecutionStatus; // TODO(#386): Change to ExecutionStatus after migration
   note?: string | null; // User-provided note for identification (max 500 chars)
+  /** Required explanation of an explicit stop; null for ordinary completion. */
+  stopReason?: string | null;
   parentExecutionId?: string | null; // Links to parent execution for continuation
   revision: number; // Workflow-step generation; metadata targets use independent revisions
   /** `metadata.version` of the definition the run started on; absent for runs recorded before it was stamped. */
