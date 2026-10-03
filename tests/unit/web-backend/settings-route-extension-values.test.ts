@@ -110,6 +110,14 @@ jest.unstable_mockModule("@mcp-moira/workflow-engine", () => ({
     getSettingDefinition = getSettingDefinition;
     getSettingDefinitions = getSettingDefinitions;
     getSettingsForApi = getSettingsForApi;
+    getSettingsForBrowser = async (_userId: string, category?: string) =>
+      Object.fromEntries(
+        [...stored.entries()].filter(
+          ([key]) =>
+            !definitions.get(key)?.adminOnly &&
+            (!category || definitions.get(key)?.category === category),
+        ),
+      );
     getRawSettingValue = jest.fn(async () => null);
     setSetting = setSetting;
     deleteUserSettingValue = deleteUserSettingValue;

@@ -140,6 +140,10 @@ a JSON Schema in `validation`; the generic editor accepts JSON text, validates t
 and preserves its JSON meaning. A handler receives a JSON setting as serialized JSON text and must
 parse it with `JSON.parse`.
 
+An effective JSON value `null` is present and reaches a granted handler as the text `"null"`;
+`services.secret` returns actual `null` only when the setting has no effective value. Stored
+`false`, zero and empty strings also remain values rather than triggering a default.
+
 Settings are per user. The handler receives values belonging to the user whose execution is running.
 An `adminOnly` setting is writable only through the authenticated API or MCP settings tool by an
 administrator; it is still not a shared installation-wide value. Use `adminOnly` only for nodes

@@ -5,7 +5,7 @@
 
 import { Router, Request, Response } from "express";
 import { randomBytes } from "node:crypto";
-import { DatabaseRepository, TelegramClient, maskEncryptedValue } from "@mcp-moira/workflow-engine";
+import { DatabaseRepository, TelegramClient } from "@mcp-moira/workflow-engine";
 import { asyncHandler, createApiError } from "../middleware/error-middleware.js";
 import { checkAdminRole } from "../utils/admin-utils.js";
 import { AuthenticatedRequest } from "../types/express-types.js";
@@ -28,22 +28,7 @@ const settingsService = getSettingsService();
  * no stored raw value and therefore must not be revealed.
  */
 async function getBrowserSettings(userId: string, category?: string) {
-  const definitions = (await repository.getSettingDefinitions(category)).filter(
-    (definition) => !definition.adminOnly,
-  );
-  const visibleKeys = new Set(definitions.map((definition) => definition.key));
-  const settings = await repository.getSettingsForApi(userId, category);
-  const projected = Object.fromEntries(
-    Object.entries(settings).filter(([key]) => visibleKeys.has(key)),
-  );
-
-  for (const definition of definitions) {
-    if (definition.type !== "encrypted" || !(definition.key in projected)) continue;
-    const raw = await repository.getRawSettingValue(userId, definition.key);
-    if (raw !== null) projected[definition.key] = maskEncryptedValue(raw);
-  }
-
-  return projected;
+  return repository.getSettingsForBrowser(userId, category);
 }
 
 /**

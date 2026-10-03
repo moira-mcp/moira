@@ -552,11 +552,25 @@ Request logging includes country detection via geoip-lite:
 
 ## Admin Features
 
+### Administrator Overview
+
+The `/admin` page shows deployment-neutral system health and managed-workflow reconciliation.
+The Cloud `adminAnalytics` capability also enables recently active people, registrations,
+executions needing attention, popular flows and execution analytics. Each card has its own period.
+Activity means a recorded action or refreshed unexpired session, not continuous online presence.
+
+Analytics excludes current administrators by default. Individual exclusions and an explicit
+include-everyone choice are saved separately for each account in the current browser. Management
+lists and system health remain outside these exclusions; default self-host does not expose these
+installation-wide analytics.
+
 ### User Management
 
 Admin panel at `/admin/users` provides:
 
 - **User list** with approval, email verification, and blocked status
+- **Work context** with recorded activity, accepted-step time, run count and most-used flows;
+  unknown activity or step time is identified explicitly
 - **User details** page with sessions, OAuth connections, email history
 - **Approve** pending self-host registrations
 - **Session management** - revoke individual sessions or all sessions
@@ -573,8 +587,10 @@ server-denied and hidden by the default self-host policy:
 
 - View all user executions
 - Filter by user, status
-- Search by execution ID or workflow ID
-- Inspect execution context and variables
+- Search by execution ID, workflow ID or note
+- Read owner, note, lock/refusal badges, known start time and the last accepted step separately;
+  a record edit does not change step time, and missing timestamps are not fabricated
+- Open permitted run details, including recorded progress, locks and errors
 
 ### Email History
 

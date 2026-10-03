@@ -8,7 +8,6 @@ import { asyncHandler, createApiError } from "../middleware/error-middleware.js"
 import {
   DatabaseRepository,
   UniversalGraphExecutor,
-  WorkflowExecution,
   adjustmentVisit,
   projectExecutionRun,
   ProgressImageService,
@@ -329,7 +328,7 @@ router.get(
     const mine = req.query.mine === "true";
 
     // Get executions with filters
-    const result = await repository.listExecutionsWithFilters({
+    const result = await new ExecutionRepository(getDatabase()).listSummaries({
       userId: isAdmin && !mine ? undefined : userId, // Admins see all unless `mine`, users see only their own
       status: dbStatuses,
       workflowId,
@@ -338,57 +337,14 @@ router.get(
       sortOrder,
       limit,
       offset,
+      locked: hasLockedFilter && !originalIncludedRunning,
     });
-
-    // Issue #421: Get workflow names for display
-    const db = getDatabase();
-    const workflows = await db
-      .select({
-        id: workflow.id,
-        name: workflow.name,
-      })
-      .from(workflow);
-    const workflowNameMap = new Map(workflows.map((w) => [w.id, w.name]));
-
-    // Get active lock execution IDs for lock status enrichment
-    const lockService = getLockService();
-    const lockedExecutionIds = await lockService.getActiveExecutionIds();
-
-    let enrichedExecutions = result.executions.map((exec: WorkflowExecution) => {
-      const isLocked = exec.status === "running" && lockedExecutionIds.has(exec.executionId);
-      return {
-        executionId: exec.executionId,
-        workflowId: exec.workflowId,
-        // Issue #421: Include workflow name for UI display
-        workflowName: workflowNameMap.get(exec.workflowId) || null,
-        userId: exec.userId,
-        status: isLocked ? ("locked" as const) : exec.status,
-        currentNodeId: exec.currentNodeId,
-        note: exec.note,
-        stopReason: exec.stopReason ?? null,
-        createdAt: exec.createdAt,
-        updatedAt: exec.updatedAt,
-        completedAt: exec.completedAt,
-        error: exec.error, // deprecated, use errors array
-        hasActiveLock: isLocked,
-        // Issue #386: Include error count for list view badge. Degradation entries are not
-        // refusals, so a run that continued without a playbook does not wear an error badge.
-        errorCount: countRefusals(exec.errors),
-      };
-    });
-
-    // If filtering by "locked" only (not explicitly "running"), remove non-locked running execs
-    let totalCount = result.total;
-    if (hasLockedFilter && !originalIncludedRunning) {
-      enrichedExecutions = enrichedExecutions.filter((e) => e.status !== "running");
-      totalCount = enrichedExecutions.length;
-    }
 
     res.json({
       success: true,
       data: {
-        executions: enrichedExecutions,
-        total: totalCount,
+        executions: result.executions,
+        total: result.total,
         limit,
         offset,
       },

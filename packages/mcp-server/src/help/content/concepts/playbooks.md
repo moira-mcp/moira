@@ -47,6 +47,10 @@ Playbooks are managed on the Playbooks page, reachable from the sidebar:
 - When a playbook is read by processes that are running, the editor says how many before you save:
   the change reaches them at their next step
 
+List and history previews are short excerpts; open the playbook or a revision to read complete
+text. If the editor reports incomplete usage inspection, the displayed process count is a lower
+bound: additional running processes may also pick up the edit at their next step.
+
 On the flow page, a step that names playbooks lists them under its details with a link to each:
 your own opens in the editor, another account's published one opens read-only on the Playbooks
 page; a playbook you cannot read is marked as not available. On the run page, a step that ran without a

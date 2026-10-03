@@ -4,10 +4,16 @@
  * Shows business analytics (funnel, top workflows, engagement) + 6 operational metrics
  */
 
-import React, { useState, useEffect, useCallback, useRef } from "react";
+import React, { useState, useEffect, useCallback } from "react";
+import { useResource } from "../hooks/useResource";
+import { DataRegion } from "../components/DataRegion";
+import { EmptyState } from "../components/empty-state";
 import { useTranslation } from "react-i18next";
 import { AreaChart, BarChart, LineChart } from "@tremor/react";
 import type { CustomTooltipProps } from "@tremor/react";
+import type { AnalyticsSeriesWindow } from "@mcp-moira/shared";
+import { AnalyticsSeriesNotice } from "../components/admin/AnalyticsSeriesNotice";
+import { CHART_COLORS } from "@/lib/chart-colors";
 import { apiClient } from "../services/api-client";
 import { useFeatures } from "../hooks/useFeatures";
 import { PageShell } from "../components/PageShell";
@@ -61,23 +67,9 @@ interface ActiveFilters {
   resource?: string;
 }
 
-interface OperationalMetric {
-  name: string;
-  value: number;
-  available: boolean;
-  unit: string;
-  timeSeries: Array<{ date: string; value: number }>;
-}
-
 interface BreakdownItem {
   label: string;
   count: number;
-}
-
-interface Breakdowns {
-  byAction: BreakdownItem[];
-  bySource: BreakdownItem[];
-  byResource: BreakdownItem[];
 }
 
 interface FunnelStage {
@@ -86,23 +78,8 @@ interface FunnelStage {
   count: number;
 }
 
-interface TopWorkflow {
-  workflowId: string;
-  workflowName: string;
-  executionCount: number;
-  completedCount: number;
-  failedCount: number;
-  successRate: number;
-  avgDurationMs: number | null;
-}
-
-interface EngagementData {
-  returningUsersRate: number;
-  returningUsersCount: number;
-  totalActiveUsers: number;
-  avgExecutionsPerUser: number;
-  avgTimeToFirstWorkflowDays: number | null;
-  activeUsersTrend: Array<{ date: string; value: number }>;
+function filterChoices(items: BreakdownItem[], selected?: string): string[] {
+  return [...new Set([...items.map((item) => item.label), ...(selected ? [selected] : [])])];
 }
 
 const METRIC_ICONS: Record<string, LucideIcon> = {
@@ -145,7 +122,7 @@ function ChartTooltip({ active, payload, label }: CustomTooltipProps) {
           {entry.color && (
             <span
               className="inline-block w-2 h-2 rounded-full"
-              style={{ background: entry.color }}
+              style={{ backgroundColor: `var(--${entry.color})` }}
             />
           )}
           <span className="text-muted-foreground">{String(entry.name ?? "")}:</span>
@@ -167,12 +144,14 @@ function TimeSeriesChart({
   metricName,
   testId,
   chartType = "area",
+  window,
 }: {
   data: Array<{ date: string; value: number }>;
   granularity: string;
   metricName: string;
   testId?: string;
   chartType?: ChartType;
+  window?: AnalyticsSeriesWindow;
 }) {
   const chartData = data.map((point) => ({
     label: formatDateLabel(point.date, granularity),
@@ -184,7 +163,7 @@ function TimeSeriesChart({
     data: chartData,
     index: "label" as const,
     categories: [metricName],
-    colors: ["blue" as const],
+    colors: [CHART_COLORS[0]],
     showLegend: true,
     showAnimation: true,
     valueFormatter: (v: number) => v.toLocaleString(),
@@ -200,6 +179,7 @@ function TimeSeriesChart({
       ) : (
         <AreaChart {...commonProps} curveType="monotone" />
       )}
+      <AnalyticsSeriesNotice window={window} shown={data.length} />
     </div>
   );
 }
@@ -211,7 +191,11 @@ function MultiSeriesChart({
   chartType = "area",
   testId,
 }: {
-  series: Array<{ name: string; data: Array<{ date: string; value: number }> }>;
+  series: Array<{
+    name: string;
+    data: Array<{ date: string; value: number }>;
+    window?: AnalyticsSeriesWindow;
+  }>;
   granularity: string;
   chartType?: ChartType;
   testId?: string;
@@ -223,16 +207,21 @@ function MultiSeriesChart({
   const dates = [...dateSet].sort();
 
   const chartData = dates.map((date) => {
-    const point: Record<string, string | number> = { label: formatDateLabel(date, granularity) };
+    const point: Record<string, string | number | null> = {
+      label: formatDateLabel(date, granularity),
+    };
     for (const s of series) {
       const match = s.data.find((p) => p.date === date);
-      point[s.name] = match?.value ?? 0;
+      // Each series transfers its own latest observed buckets. An absent date before a
+      // truncated tail is unknown; gaps in its covered history still mean no events.
+      const clipped = s.window?.limited && (!s.window.firstDate || date < s.window.firstDate);
+      point[s.name] = match ? match.value : clipped ? null : 0;
     }
     return point;
   });
 
   const categories = series.map((s) => s.name);
-  const colors = (["blue", "emerald", "amber", "rose"] as const).slice(0, categories.length);
+  const colors = CHART_COLORS.slice(0, categories.length);
 
   const commonProps = {
     className: "h-48",
@@ -255,6 +244,14 @@ function MultiSeriesChart({
       ) : (
         <AreaChart {...commonProps} curveType="monotone" />
       )}
+      {series.map((item) => (
+        <AnalyticsSeriesNotice
+          key={item.name}
+          window={item.window}
+          shown={item.data.length}
+          seriesName={item.name}
+        />
+      ))}
     </div>
   );
 }
@@ -309,7 +306,7 @@ function ConversionFunnel({ funnel, testId }: { funnel: FunnelStage[]; testId?: 
     active: t("admin.businessAnalytics.conversionFunnel.active"),
   };
 
-  const STAGE_COLORS = ["bg-blue-500", "bg-green-500", "bg-amber-500", "bg-purple-500"];
+  const STAGE_COLORS = ["bg-chart-1", "bg-chart-2", "bg-chart-3", "bg-chart-4"];
 
   return (
     <div className="space-y-3" data-testid={testId}>
@@ -329,10 +326,12 @@ function ConversionFunnel({ funnel, testId }: { funnel: FunnelStage[]; testId?: 
             </div>
             <div className="flex-1 bg-muted rounded-full h-6 relative overflow-hidden">
               <div
-                className={`${STAGE_COLORS[idx] || "bg-blue-500"} h-6 rounded-full transition-all flex items-center justify-end pr-2`}
+                className={`${STAGE_COLORS[idx] || "bg-chart-1"} h-6 rounded-full transition-all flex items-center justify-end pr-2`}
                 style={{ width: `${Math.max(pct, 5)}%` }}
               >
-                <span className="text-xs font-bold text-white drop-shadow">{stage.count}</span>
+                <span className="rounded bg-background/90 px-1 text-xs font-bold text-foreground">
+                  {stage.count}
+                </span>
               </div>
             </div>
             {idx > 0 && (
@@ -349,103 +348,63 @@ export const OperationalDashboard: React.FC = () => {
   const { t } = useTranslation();
   const { isEnabled } = useFeatures();
   const analyticsEnabled = isEnabled("adminAnalytics");
-  // Operational metrics state
-  const [metrics, setMetrics] = useState<OperationalMetric[]>([]);
-  const [breakdowns, setBreakdowns] = useState<Breakdowns>({
-    byAction: [],
-    bySource: [],
-    byResource: [],
-  });
-  const [resolvedGranularity, setResolvedGranularity] = useState<string>("daily");
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const [timeRange, setTimeRange] = useState<TimeRange>("month");
   const [granularity, setGranularity] = useState<Granularity>("auto");
   const [autoRefresh, setAutoRefresh] = useState(false);
-  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
-  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [chartType, setChartType] = useState<ChartType>("area");
   const [filters, setFilters] = useState<ActiveFilters>({});
 
-  // Business analytics state
-  const [funnel, setFunnel] = useState<FunnelStage[]>([]);
-  const [registrationTrend, setRegistrationTrend] = useState<
-    Array<{ date: string; value: number }>
-  >([]);
-  const [topWorkflows, setTopWorkflows] = useState<TopWorkflow[]>([]);
-  const [engagement, setEngagement] = useState<EngagementData | null>(null);
-
+  const operational = useResource(
+    JSON.stringify({ timeRange, granularity, filters }),
+    async (key) => {
+      const requested = JSON.parse(key) as {
+        timeRange: TimeRange;
+        granularity: Granularity;
+        filters: ActiveFilters;
+      };
+      const data = await apiClient.getOperationalMetrics(
+        requested.timeRange,
+        requested.granularity,
+        requested.filters,
+      );
+      return { ...data, updatedAt: new Date() };
+    },
+  );
+  const businessKey = analyticsEnabled ? timeRange : null;
+  const conversion = useResource(businessKey, (range) => apiClient.getConversionFunnel(range));
+  const top = useResource(businessKey, (range) => apiClient.getAnalyticsTopWorkflows(range, 10));
+  const engagementResource = useResource(businessKey, (range) =>
+    apiClient.getEngagementMetrics(range),
+  );
+  const metrics = operational.data?.metrics ?? [];
+  const breakdowns = operational.data?.breakdowns ?? { byAction: [], bySource: [], byResource: [] };
+  const resolvedGranularity = operational.data?.granularity ?? "daily";
+  const lastUpdated = operational.data?.updatedAt;
+  const funnel = conversion.data?.funnel ?? [];
+  const registrationTrend = conversion.data?.registrationTrend ?? [];
+  const registrationTrendWindow = conversion.data?.registrationTrendWindow;
+  const topWorkflows = top.data?.workflows ?? [];
+  const engagement = engagementResource.data;
+  const refreshOperational = operational.refresh;
+  const refreshConversion = conversion.refresh;
+  const refreshTop = top.refresh;
+  const refreshEngagement = engagementResource.refresh;
   const loadMetrics = useCallback(async () => {
-    try {
-      const activeFilters = Object.fromEntries(
-        Object.entries(filters).filter(([, v]) => v && v !== "all"),
-      ) as { action?: string; source?: string; resource?: string };
-
-      // Load all data in parallel
-      const [operationalData, funnelData, topWfData, engagementData] = await Promise.all([
-        apiClient.getOperationalMetrics(
-          timeRange,
-          granularity,
-          Object.keys(activeFilters).length > 0 ? activeFilters : undefined,
-        ),
-        analyticsEnabled ? apiClient.getConversionFunnel(timeRange).catch(() => null) : null,
-        analyticsEnabled
-          ? apiClient.getAnalyticsTopWorkflows(timeRange, 10).catch(() => null)
-          : null,
-        analyticsEnabled ? apiClient.getEngagementMetrics(timeRange).catch(() => null) : null,
-      ]);
-
-      setMetrics(operationalData.metrics);
-      setBreakdowns(operationalData.breakdowns);
-      setResolvedGranularity(operationalData.granularity);
-
-      if (funnelData) {
-        setFunnel(funnelData.funnel);
-        setRegistrationTrend(funnelData.registrationTrend);
-      }
-      if (topWfData) {
-        setTopWorkflows(topWfData.workflows);
-      }
-      if (engagementData) {
-        setEngagement(engagementData);
-      }
-
-      setLastUpdated(new Date());
-      setError(null);
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : t("common.errors.failedToLoad");
-      setError(message);
-    } finally {
-      setLoading(false);
-    }
-  }, [analyticsEnabled, timeRange, granularity, filters, t]);
-
-  useEffect(() => {
-    setLoading(true);
-    loadMetrics();
-  }, [loadMetrics]);
+    await Promise.all([
+      refreshOperational(),
+      refreshConversion(),
+      refreshTop(),
+      refreshEngagement(),
+    ]);
+  }, [refreshOperational, refreshConversion, refreshTop, refreshEngagement]);
+  const scopeLabel = (range: string) => t(`admin.analytics.timeRanges.${range}`);
 
   useEffect(() => {
     if (autoRefresh) {
-      intervalRef.current = setInterval(loadMetrics, 15000);
-    } else if (intervalRef.current) {
-      clearInterval(intervalRef.current);
-      intervalRef.current = null;
+      const interval = setInterval(() => void loadMetrics(), 15000);
+      return () => clearInterval(interval);
     }
-    return () => {
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current);
-      }
-    };
   }, [autoRefresh, loadMetrics]);
-
-  if (loading && metrics.length === 0) {
-    return <PageShell title={t("admin.operational.title")} loading />;
-  }
-
-  if (error && metrics.length === 0) {
-    return <PageShell title={t("admin.operational.title")} error={error} onRetry={loadMetrics} />;
-  }
 
   return (
     <PageShell title={t("admin.operational.title")}>
@@ -502,11 +461,13 @@ export const OperationalDashboard: React.FC = () => {
         </div>
 
         <div className="flex items-center gap-3">
-          <Badge variant="outline" data-testid="granularity-badge">
-            {resolvedGranularity === "hourly"
-              ? `⏱ ${t("admin.operational.granularity.hourly")}`
-              : `📅 ${t("admin.operational.granularity.daily")}`}
-          </Badge>
+          {operational.data && (
+            <Badge variant="outline" data-testid="granularity-badge">
+              {resolvedGranularity === "hourly"
+                ? `⏱ ${t("admin.operational.granularity.hourly")}`
+                : `📅 ${t("admin.operational.granularity.daily")}`}
+            </Badge>
+          )}
           {lastUpdated && (
             <span className="text-sm text-muted-foreground" data-testid="last-updated">
               {t("admin.operational.lastUpdated", {
@@ -514,7 +475,13 @@ export const OperationalDashboard: React.FC = () => {
               })}
             </span>
           )}
-          <Button variant="outline" size="sm" onClick={loadMetrics} data-testid="refresh-button">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={loadMetrics}
+            aria-label={t("common.dataRegion.refresh")}
+            data-testid="refresh-button"
+          >
             <RefreshCw className="h-4 w-4" />
           </Button>
         </div>
@@ -535,9 +502,9 @@ export const OperationalDashboard: React.FC = () => {
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">{t("admin.operational.filters.allActions")}</SelectItem>
-            {breakdowns.byAction.map((item) => (
-              <SelectItem key={item.label} value={item.label}>
-                {item.label}
+            {filterChoices(breakdowns.byAction, filters.action).map((label) => (
+              <SelectItem key={label} value={label}>
+                {label}
               </SelectItem>
             ))}
           </SelectContent>
@@ -554,9 +521,9 @@ export const OperationalDashboard: React.FC = () => {
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">{t("admin.operational.filters.allSources")}</SelectItem>
-            {breakdowns.bySource.map((item) => (
-              <SelectItem key={item.label} value={item.label}>
-                {item.label}
+            {filterChoices(breakdowns.bySource, filters.source).map((label) => (
+              <SelectItem key={label} value={label}>
+                {label}
               </SelectItem>
             ))}
           </SelectContent>
@@ -573,9 +540,9 @@ export const OperationalDashboard: React.FC = () => {
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">{t("admin.operational.filters.allResources")}</SelectItem>
-            {breakdowns.byResource.map((item) => (
-              <SelectItem key={item.label} value={item.label}>
-                {item.label}
+            {filterChoices(breakdowns.byResource, filters.resource).map((label) => (
+              <SelectItem key={label} value={label}>
+                {label}
               </SelectItem>
             ))}
           </SelectContent>
@@ -638,42 +605,62 @@ export const OperationalDashboard: React.FC = () => {
           </h2>
 
           {/* Engagement Summary Cards */}
-          {engagement && (
-            <div
-              className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6"
-              data-testid="engagement-cards"
-            >
-              <StatCard
-                label={t("admin.businessAnalytics.engagement.returningUsers")}
-                value={`${engagement.returningUsersRate}%`}
-                icon={UserCheck}
-                trend={
-                  engagement.activeUsersTrend.length > 1
-                    ? engagement.activeUsersTrend.map((p) => p.value)
-                    : undefined
-                }
-              />
-              <StatCard
-                label={t("admin.businessAnalytics.engagement.avgExecutionsPerUser")}
-                value={engagement.avgExecutionsPerUser}
-                icon={BarChart3}
-              />
-              <StatCard
-                label={t("admin.businessAnalytics.engagement.timeToFirstWorkflow")}
-                value={
-                  engagement.avgTimeToFirstWorkflowDays !== null
-                    ? `${engagement.avgTimeToFirstWorkflowDays} ${t("admin.businessAnalytics.engagement.days")}`
-                    : "—"
-                }
-                icon={Target}
-              />
-              <StatCard
-                label={t("admin.analytics.userActivity.activeUsers")}
-                value={engagement.totalActiveUsers}
-                icon={Users}
-              />
-            </div>
-          )}
+          <DataRegion
+            hasResult={engagement !== undefined}
+            pending={engagementResource.pending}
+            error={engagementResource.error}
+            onRetry={engagementResource.refresh}
+            resultScope={engagement && scopeLabel(engagement.timeRange)}
+            testId="engagement-region"
+          >
+            {engagement && (
+              <div
+                className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6"
+                data-testid="engagement-cards"
+              >
+                <div data-testid="returning-users-card">
+                  <StatCard
+                    label={t("admin.businessAnalytics.engagement.returningUsers")}
+                    value={
+                      engagement.returningUsersRate === null
+                        ? "—"
+                        : `${engagement.returningUsersRate}%`
+                    }
+                    icon={UserCheck}
+                    trend={
+                      engagement.activeUsersTrend.length > 1
+                        ? engagement.activeUsersTrend.map((p) => p.value)
+                        : undefined
+                    }
+                  />
+                  {engagement.returningUsersRate === null && (
+                    <p className="mt-2 text-xs text-muted-foreground">
+                      {t("adminOverview.noPreviousPeriod")}
+                    </p>
+                  )}
+                </div>
+                <StatCard
+                  label={t("admin.businessAnalytics.engagement.avgExecutionsPerUser")}
+                  value={engagement.avgExecutionsPerUser}
+                  icon={BarChart3}
+                />
+                <StatCard
+                  label={t("admin.businessAnalytics.engagement.timeToFirstWorkflow")}
+                  value={
+                    engagement.avgTimeToFirstWorkflowDays !== null
+                      ? `${engagement.avgTimeToFirstWorkflowDays} ${t("admin.businessAnalytics.engagement.days")}`
+                      : "—"
+                  }
+                  icon={Target}
+                />
+                <StatCard
+                  label={t("admin.analytics.userActivity.activeUsers")}
+                  value={engagement.totalActiveUsers}
+                  icon={Users}
+                />
+              </div>
+            )}
+          </DataRegion>
 
           {/* Funnel + Top Workflows side by side */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
@@ -686,13 +673,22 @@ export const OperationalDashboard: React.FC = () => {
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                {funnel.length > 0 ? (
-                  <ConversionFunnel funnel={funnel} testId="conversion-funnel" />
-                ) : (
-                  <p className="text-sm text-muted-foreground py-4 text-center">
-                    {t("admin.businessAnalytics.engagement.noData")}
-                  </p>
-                )}
+                <DataRegion
+                  hasResult={conversion.data !== undefined}
+                  pending={conversion.pending}
+                  error={conversion.error}
+                  onRetry={conversion.refresh}
+                  resultScope={conversion.data && scopeLabel(conversion.data.timeRange)}
+                  testId="conversion-region"
+                >
+                  {funnel.length > 0 ? (
+                    <ConversionFunnel funnel={funnel} testId="conversion-funnel" />
+                  ) : (
+                    <p className="text-sm text-muted-foreground py-4 text-center">
+                      {t("admin.businessAnalytics.engagement.noData")}
+                    </p>
+                  )}
+                </DataRegion>
               </CardContent>
             </Card>
 
@@ -705,32 +701,41 @@ export const OperationalDashboard: React.FC = () => {
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                {topWorkflows.length > 0 ? (
-                  <div data-testid="top-workflows-chart">
-                    <BarChart
-                      className="h-56"
-                      data={topWorkflows.slice(0, 8).map((wf) => ({
-                        name:
-                          wf.workflowName.length > 25
-                            ? wf.workflowName.slice(0, 18) + "..."
-                            : wf.workflowName,
-                        [t("admin.businessAnalytics.topWorkflows.executions")]: wf.executionCount,
-                      }))}
-                      index="name"
-                      categories={[t("admin.businessAnalytics.topWorkflows.executions")]}
-                      colors={["indigo"]}
-                      showLegend={false}
-                      showAnimation
-                      layout="vertical"
-                      yAxisWidth={180}
-                      valueFormatter={(v: number) => String(v)}
-                    />
-                  </div>
-                ) : (
-                  <p className="text-sm text-muted-foreground py-4 text-center">
-                    {t("admin.businessAnalytics.topWorkflows.noData")}
-                  </p>
-                )}
+                <DataRegion
+                  hasResult={top.data !== undefined}
+                  pending={top.pending}
+                  error={top.error}
+                  onRetry={top.refresh}
+                  resultScope={top.data && scopeLabel(top.data.timeRange)}
+                  testId="top-workflows-region"
+                >
+                  {topWorkflows.length > 0 ? (
+                    <div data-testid="top-workflows-chart">
+                      <BarChart
+                        className="h-56"
+                        data={topWorkflows.slice(0, 8).map((wf) => ({
+                          name:
+                            wf.workflowName.length > 25
+                              ? wf.workflowName.slice(0, 18) + "..."
+                              : wf.workflowName,
+                          [t("admin.businessAnalytics.topWorkflows.executions")]: wf.executionCount,
+                        }))}
+                        index="name"
+                        categories={[t("admin.businessAnalytics.topWorkflows.executions")]}
+                        colors={[CHART_COLORS[0]]}
+                        showLegend={false}
+                        showAnimation
+                        layout="vertical"
+                        yAxisWidth={180}
+                        valueFormatter={(v: number) => String(v)}
+                      />
+                    </div>
+                  ) : (
+                    <p className="text-sm text-muted-foreground py-4 text-center">
+                      {t("admin.businessAnalytics.topWorkflows.noData")}
+                    </p>
+                  )}
+                </DataRegion>
               </CardContent>
             </Card>
           </div>
@@ -745,13 +750,23 @@ export const OperationalDashboard: React.FC = () => {
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <TimeSeriesChart
-                    data={registrationTrend}
-                    granularity="daily"
-                    metricName={t("admin.businessAnalytics.conversionFunnel.registered")}
-                    testId="chart-registration-trend"
-                    chartType={chartType}
-                  />
+                  <DataRegion
+                    hasResult={conversion.data !== undefined}
+                    pending={conversion.pending}
+                    error={conversion.error}
+                    onRetry={conversion.refresh}
+                    resultScope={conversion.data && scopeLabel(conversion.data.timeRange)}
+                    testId="registration-trend-region"
+                  >
+                    <TimeSeriesChart
+                      data={registrationTrend}
+                      granularity="daily"
+                      metricName={t("admin.businessAnalytics.conversionFunnel.registered")}
+                      testId="chart-registration-trend"
+                      chartType={chartType}
+                      window={registrationTrendWindow}
+                    />
+                  </DataRegion>
                 </CardContent>
               </Card>
             )}
@@ -764,13 +779,23 @@ export const OperationalDashboard: React.FC = () => {
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <TimeSeriesChart
-                    data={engagement.activeUsersTrend}
-                    granularity="daily"
-                    metricName={t("admin.businessAnalytics.engagement.activeUsersTrend")}
-                    testId="chart-active-users-trend"
-                    chartType={chartType}
-                  />
+                  <DataRegion
+                    hasResult={engagement !== undefined}
+                    pending={engagementResource.pending}
+                    error={engagementResource.error}
+                    onRetry={engagementResource.refresh}
+                    resultScope={scopeLabel(engagement.timeRange)}
+                    testId="active-users-trend-region"
+                  >
+                    <TimeSeriesChart
+                      data={engagement.activeUsersTrend}
+                      granularity="daily"
+                      metricName={t("admin.businessAnalytics.engagement.activeUsersTrend")}
+                      testId="chart-active-users-trend"
+                      chartType={chartType}
+                      window={engagement.activeUsersTrendWindow}
+                    />
+                  </DataRegion>
                 </CardContent>
               </Card>
             )}
@@ -787,202 +812,239 @@ export const OperationalDashboard: React.FC = () => {
         {t("admin.operational.title")}
       </h2>
 
-      {/* Metrics Grid — summary cards */}
-      <div
-        className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8"
-        data-testid="metrics-grid"
+      <DataRegion
+        hasResult={operational.data !== undefined}
+        pending={operational.pending}
+        error={operational.error}
+        onRetry={operational.refresh}
+        testId="operational-region"
+        resultScope={
+          operational.data && (
+            <span>
+              {scopeLabel(operational.data.timeRange)} ·{" "}
+              {t(`admin.operational.granularity.${operational.data.granularity}`)} ·{" "}
+              {t("admin.operational.filters.action")}:{" "}
+              {operational.data.activeFilters.action || t("admin.operational.filters.allActions")} ·{" "}
+              {t("admin.operational.filters.source")}:{" "}
+              {operational.data.activeFilters.source || t("admin.operational.filters.allSources")} ·{" "}
+              {t("admin.operational.filters.resource")}:{" "}
+              {operational.data.activeFilters.resource ||
+                t("admin.operational.filters.allResources")}
+            </span>
+          )
+        }
       >
-        {metrics.map((metric) => {
-          const Icon = METRIC_ICONS[metric.name];
-          const trendValues = (metric.timeSeries ?? []).map((p) => p.value);
+        {metrics.length === 0 && <EmptyState title={t("common.noResults")} />}
 
-          if (!metric.available) {
-            return (
-              <Card key={metric.name} className="opacity-60" data-testid={`metric-${metric.name}`}>
-                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                  <CardTitle className="text-sm font-medium text-muted-foreground">
-                    {t(`admin.operational.metrics.${metric.name}`)}
-                  </CardTitle>
-                  {Icon && <Icon className="h-4 w-4 text-muted-foreground" />}
-                </CardHeader>
-                <CardContent>
-                  <Badge variant="outline">{t("admin.operational.unavailable")}</Badge>
-                  <p className="text-xs text-muted-foreground mt-2">{metric.unit}</p>
-                </CardContent>
-              </Card>
-            );
-          }
+        {/* Metrics Grid — summary cards */}
+        <div
+          className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8"
+          data-testid="metrics-grid"
+        >
+          {metrics.map((metric) => {
+            const Icon = METRIC_ICONS[metric.name];
+            const trendValues = (metric.timeSeries ?? []).map((p) => p.value);
 
-          return (
-            <StatCard
-              key={metric.name}
-              label={t(`admin.operational.metrics.${metric.name}`)}
-              value={formatMetricValue(metric.name, metric.value)}
-              icon={Icon}
-              trend={trendValues.length > 1 ? trendValues : undefined}
-            />
-          );
-        })}
-      </div>
-
-      {/* Time Series Charts — detailed view per metric */}
-      {metrics.filter((m) => m.available && m.timeSeries.length > 1).length > 0 && (
-        <div className="mb-8">
-          <h3 className="text-lg font-semibold mb-4" data-testid="time-series-heading">
-            {t("admin.operational.timeSeriesTitle")}
-          </h3>
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6" data-testid="time-series-section">
-            {metrics
-              .filter((m) => m.available && m.timeSeries.length > 1)
-              .map((metric) => (
-                <Card key={`ts-${metric.name}`}>
-                  <CardHeader className="pb-2">
-                    <CardTitle className="text-sm font-medium">
+            if (!metric.available) {
+              return (
+                <Card
+                  key={metric.name}
+                  className="opacity-60"
+                  data-testid={`metric-${metric.name}`}
+                >
+                  <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                    <CardTitle className="text-sm font-medium text-muted-foreground">
                       {t(`admin.operational.metrics.${metric.name}`)}
                     </CardTitle>
+                    {Icon && <Icon className="h-4 w-4 text-muted-foreground" />}
                   </CardHeader>
                   <CardContent>
-                    <TimeSeriesChart
-                      data={metric.timeSeries}
-                      granularity={resolvedGranularity}
-                      metricName={t(`admin.operational.metrics.${metric.name}`)}
-                      testId={`chart-${metric.name}`}
-                      chartType={chartType}
-                    />
+                    <Badge variant="outline">{t("admin.operational.unavailable")}</Badge>
+                    <p className="text-xs text-muted-foreground mt-2">{metric.unit}</p>
                   </CardContent>
                 </Card>
-              ))}
-          </div>
+              );
+            }
+
+            return (
+              <StatCard
+                key={metric.name}
+                label={t(`admin.operational.metrics.${metric.name}`)}
+                value={formatMetricValue(metric.name, metric.value)}
+                icon={Icon}
+                trend={trendValues.length > 1 ? trendValues : undefined}
+              />
+            );
+          })}
         </div>
-      )}
 
-      {/* Multi-Series Comparison — overlay related metrics */}
-      {(() => {
-        const started = metrics.find((m) => m.name === "workflows_started_per_day");
-        const completed = metrics.find((m) => m.name === "workflows_completed_per_day");
-        const hasWorkflowComparison =
-          started?.available &&
-          completed?.available &&
-          (started.timeSeries?.length ?? 0) > 1 &&
-          (completed.timeSeries?.length ?? 0) > 1;
-
-        const callsRate = metrics.find((m) => m.name === "calls_per_second");
-        const mcpRate = metrics.find((m) => m.name === "mcp_calls_per_second");
-        const hasRateComparison =
-          callsRate?.available &&
-          mcpRate?.available &&
-          (callsRate.timeSeries?.length ?? 0) > 1 &&
-          (mcpRate.timeSeries?.length ?? 0) > 1;
-
-        if (!hasWorkflowComparison && !hasRateComparison) return null;
-
-        return (
-          <div className="mb-8" data-testid="multi-series-section">
-            <h3 className="text-lg font-semibold mb-4">
-              {t("admin.operational.multiSeriesTitle")}
+        {/* Time Series Charts — detailed view per metric */}
+        {metrics.filter((m) => m.available && m.timeSeries.length > 1).length > 0 && (
+          <div className="mb-8">
+            <h3 className="text-lg font-semibold mb-4" data-testid="time-series-heading">
+              {t("admin.operational.timeSeriesTitle")}
             </h3>
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              {hasWorkflowComparison && started && completed && (
-                <Card>
-                  <CardHeader className="pb-2">
-                    <CardTitle className="text-sm font-medium">
-                      {t("admin.operational.multiSeries.workflowComparison")}
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <MultiSeriesChart
-                      series={[
-                        {
-                          name: t("admin.operational.metrics.workflows_started_per_day"),
-                          data: started.timeSeries,
-                        },
-                        {
-                          name: t("admin.operational.metrics.workflows_completed_per_day"),
-                          data: completed.timeSeries,
-                        },
-                      ]}
-                      granularity={resolvedGranularity}
-                      chartType={chartType}
-                      testId="chart-workflow-comparison"
-                    />
-                  </CardContent>
-                </Card>
-              )}
-              {hasRateComparison && callsRate && mcpRate && (
-                <Card>
-                  <CardHeader className="pb-2">
-                    <CardTitle className="text-sm font-medium">
-                      {t("admin.operational.multiSeries.rateComparison")}
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <MultiSeriesChart
-                      series={[
-                        {
-                          name: t("admin.operational.metrics.calls_per_second"),
-                          data: callsRate.timeSeries,
-                        },
-                        {
-                          name: t("admin.operational.metrics.mcp_calls_per_second"),
-                          data: mcpRate.timeSeries,
-                        },
-                      ]}
-                      granularity={resolvedGranularity}
-                      chartType={chartType}
-                      testId="chart-rate-comparison"
-                    />
-                  </CardContent>
-                </Card>
-              )}
+            <div
+              className="grid grid-cols-1 lg:grid-cols-2 gap-6"
+              data-testid="time-series-section"
+            >
+              {metrics
+                .filter((m) => m.available && m.timeSeries.length > 1)
+                .map((metric) => (
+                  <Card key={`ts-${metric.name}`}>
+                    <CardHeader className="pb-2">
+                      <CardTitle className="text-sm font-medium">
+                        {t(`admin.operational.metrics.${metric.name}`)}
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <TimeSeriesChart
+                        data={metric.timeSeries}
+                        granularity={resolvedGranularity}
+                        metricName={t(`admin.operational.metrics.${metric.name}`)}
+                        testId={`chart-${metric.name}`}
+                        chartType={chartType}
+                        window={metric.timeSeriesWindow}
+                      />
+                    </CardContent>
+                  </Card>
+                ))}
             </div>
           </div>
-        );
-      })()}
-
-      {/* Breakdowns — action types, sources, resources */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6" data-testid="breakdowns-section">
-        {/* By Action */}
-        {breakdowns.byAction.length > 0 && (
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium">
-                {t("admin.operational.breakdowns.byAction")}
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <BreakdownTable items={breakdowns.byAction} testId="breakdown-actions" />
-            </CardContent>
-          </Card>
         )}
 
-        {/* By Source */}
-        {breakdowns.bySource.length > 0 && (
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium">
-                {t("admin.operational.breakdowns.bySource")}
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <BreakdownTable items={breakdowns.bySource} testId="breakdown-sources" />
-            </CardContent>
-          </Card>
-        )}
+        {/* Multi-Series Comparison — overlay related metrics */}
+        {(() => {
+          const started = metrics.find((m) => m.name === "workflows_started_per_day");
+          const completed = metrics.find((m) => m.name === "workflows_completed_per_day");
+          const hasWorkflowComparison =
+            started?.available &&
+            completed?.available &&
+            (started.timeSeries?.length ?? 0) > 1 &&
+            (completed.timeSeries?.length ?? 0) > 1;
 
-        {/* By Resource */}
-        {breakdowns.byResource.length > 0 && (
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium">
-                {t("admin.operational.breakdowns.byResource")}
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <BreakdownTable items={breakdowns.byResource} testId="breakdown-resources" />
-            </CardContent>
-          </Card>
-        )}
-      </div>
+          const callsRate = metrics.find((m) => m.name === "calls_per_second");
+          const mcpRate = metrics.find((m) => m.name === "mcp_calls_per_second");
+          const hasRateComparison =
+            callsRate?.available &&
+            mcpRate?.available &&
+            (callsRate.timeSeries?.length ?? 0) > 1 &&
+            (mcpRate.timeSeries?.length ?? 0) > 1;
+
+          if (!hasWorkflowComparison && !hasRateComparison) return null;
+
+          return (
+            <div className="mb-8" data-testid="multi-series-section">
+              <h3 className="text-lg font-semibold mb-4">
+                {t("admin.operational.multiSeriesTitle")}
+              </h3>
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                {hasWorkflowComparison && started && completed && (
+                  <Card>
+                    <CardHeader className="pb-2">
+                      <CardTitle className="text-sm font-medium">
+                        {t("admin.operational.multiSeries.workflowComparison")}
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <MultiSeriesChart
+                        series={[
+                          {
+                            name: t("admin.operational.metrics.workflows_started_per_day"),
+                            data: started.timeSeries,
+                            window: started.timeSeriesWindow,
+                          },
+                          {
+                            name: t("admin.operational.metrics.workflows_completed_per_day"),
+                            data: completed.timeSeries,
+                            window: completed.timeSeriesWindow,
+                          },
+                        ]}
+                        granularity={resolvedGranularity}
+                        chartType={chartType}
+                        testId="chart-workflow-comparison"
+                      />
+                    </CardContent>
+                  </Card>
+                )}
+                {hasRateComparison && callsRate && mcpRate && (
+                  <Card>
+                    <CardHeader className="pb-2">
+                      <CardTitle className="text-sm font-medium">
+                        {t("admin.operational.multiSeries.rateComparison")}
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <MultiSeriesChart
+                        series={[
+                          {
+                            name: t("admin.operational.metrics.calls_per_second"),
+                            data: callsRate.timeSeries,
+                            window: callsRate.timeSeriesWindow,
+                          },
+                          {
+                            name: t("admin.operational.metrics.mcp_calls_per_second"),
+                            data: mcpRate.timeSeries,
+                            window: mcpRate.timeSeriesWindow,
+                          },
+                        ]}
+                        granularity={resolvedGranularity}
+                        chartType={chartType}
+                        testId="chart-rate-comparison"
+                      />
+                    </CardContent>
+                  </Card>
+                )}
+              </div>
+            </div>
+          );
+        })()}
+
+        {/* Breakdowns — action types, sources, resources */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6" data-testid="breakdowns-section">
+          {/* By Action */}
+          {breakdowns.byAction.length > 0 && (
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium">
+                  {t("admin.operational.breakdowns.byAction")}
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <BreakdownTable items={breakdowns.byAction} testId="breakdown-actions" />
+              </CardContent>
+            </Card>
+          )}
+
+          {/* By Source */}
+          {breakdowns.bySource.length > 0 && (
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium">
+                  {t("admin.operational.breakdowns.bySource")}
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <BreakdownTable items={breakdowns.bySource} testId="breakdown-sources" />
+              </CardContent>
+            </Card>
+          )}
+
+          {/* By Resource */}
+          {breakdowns.byResource.length > 0 && (
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium">
+                  {t("admin.operational.breakdowns.byResource")}
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <BreakdownTable items={breakdowns.byResource} testId="breakdown-resources" />
+              </CardContent>
+            </Card>
+          )}
+        </div>
+      </DataRegion>
     </PageShell>
   );
 };

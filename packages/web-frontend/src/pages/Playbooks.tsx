@@ -24,14 +24,13 @@ import { useDebounce } from "../hooks/useDebounce";
 import { useListPageSize } from "../hooks/useListPageSize";
 import { useLatestRequest } from "../hooks/useLatestRequest";
 import { PlaybookEditor } from "../components/playbooks/PlaybookEditor";
-import {
-  RevisionHistoryDialog,
-  type RevisionHistorySource,
-} from "../components/history/RevisionHistoryDialog";
+import { RevisionHistoryDialog } from "../components/history/LazyRevisionHistoryDialog";
+import type { RevisionHistorySource } from "../components/history/RevisionHistoryDialog";
 import { PlaybookCard } from "../components/cards";
 import { VisibilityToggle } from "../components/access/VisibilityToggle";
 import { X } from "lucide-react";
 import { guideAnchor } from "@/guides/anchors";
+import { InlineError } from "@/components/inline-error";
 
 /**
  * A playbook a link from a workflow node points at.
@@ -48,8 +47,15 @@ export const Playbooks: React.FC = () => {
   const { t } = useTranslation();
   const { pageSize, containerRef, onViewModeChange } = useListPageSize(() => setCurrentPage(1));
 
-  const [playbooks, setPlaybooks] = useState<PlaybookSummary[]>([]);
-  const [total, setTotal] = useState(0);
+  const [accepted, setAccepted] = useState<{
+    playbooks: PlaybookSummary[];
+    total: number;
+    page: number;
+    pageSize: number;
+    search: string;
+  } | null>(null);
+  const playbooks = accepted?.playbooks ?? [];
+  const total = accepted?.total ?? 0;
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -61,6 +67,7 @@ export const Playbooks: React.FC = () => {
   const [editing, setEditing] = useState<string | null>(null);
   const [historySlug, setHistorySlug] = useState<string | null>(null);
   const [deleteSlug, setDeleteSlug] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   // `?name=` (and `?owner=`) arrive from a node's reference on the flow page.
   const [searchParams, setSearchParams] = useSearchParams();
@@ -119,8 +126,13 @@ export const Playbooks: React.FC = () => {
         offset: (currentPage - 1) * pageSize,
       });
       if (!isCurrent()) return;
-      setPlaybooks(result.playbooks);
-      setTotal(result.total);
+      setAccepted({
+        playbooks: result.playbooks,
+        total: result.total,
+        page: currentPage,
+        pageSize,
+        search: debouncedSearch,
+      });
       setError(null);
     } catch (err) {
       if (!isCurrent()) return;
@@ -151,37 +163,19 @@ export const Playbooks: React.FC = () => {
 
   const handleDelete = useCallback(async () => {
     if (!deleteSlug) return;
+    setDeleteError(null);
     try {
       await apiClient.deletePlaybook(deleteSlug);
       setDeleteSlug(null);
       load();
     } catch (err) {
       console.error("Failed to delete playbook:", err);
+      setDeleteError(err instanceof Error ? err.message : t("common.errors.failedToDelete"));
+      throw err;
     }
-  }, [deleteSlug, load]);
+  }, [deleteSlug, load, t]);
 
-  const totalPages = Math.ceil(total / pageSize);
-
-  if (loading && playbooks.length === 0) {
-    return (
-      <PageShell
-        title={t("pages.playbooks.title")}
-        guide={guideAnchor("playbooks.header")}
-        loading
-      />
-    );
-  }
-
-  if (error) {
-    return (
-      <PageShell
-        title={t("pages.playbooks.title")}
-        guide={guideAnchor("playbooks.header")}
-        error={error}
-        onRetry={load}
-      />
-    );
-  }
+  const totalPages = Math.ceil(total / (accepted?.pageSize ?? pageSize));
 
   return (
     <PageShell title={t("pages.playbooks.title")} guide={guideAnchor("playbooks.header")}>
@@ -317,7 +311,10 @@ export const Playbooks: React.FC = () => {
               onClick={() => startEditing(playbook.slug)}
               onEdit={() => startEditing(playbook.slug)}
               onHistory={() => setHistorySlug(playbook.slug)}
-              onDelete={() => setDeleteSlug(playbook.slug)}
+              onDelete={() => {
+                setDeleteError(null);
+                setDeleteSlug(playbook.slug);
+              }}
             />
           )
         }
@@ -325,17 +322,32 @@ export const Playbooks: React.FC = () => {
         storageKey="playbooks-view-mode"
         guide={guideAnchor("playbooks.list")}
         loading={loading}
+        hasResult={accepted !== null}
+        error={error}
+        onRetry={load}
+        onRefresh={load}
+        resultScope={
+          accepted && (
+            <span>
+              {t("common.pagination.page", {
+                current: accepted.page,
+                total: Math.max(1, totalPages),
+              })}
+              {accepted.search && ` · ${t("common.filters.search")}: ${accepted.search}`}
+            </span>
+          )
+        }
         emptyIcon={BookOpen}
         emptyTitle={
-          debouncedSearch ? t("pages.playbooks.noResults") : t("pages.playbooks.noPlaybooks")
+          accepted?.search ? t("pages.playbooks.noResults") : t("pages.playbooks.noPlaybooks")
         }
         containerRef={containerRef}
         pagination={{
           mode: "total",
-          currentPage,
+          currentPage: accepted?.page ?? currentPage,
           totalPages,
           totalItems: total,
-          pageSize,
+          pageSize: accepted?.pageSize ?? pageSize,
           onPageChange: setCurrentPage,
         }}
         className="flex-1 min-h-0 flex flex-col"
@@ -359,7 +371,11 @@ export const Playbooks: React.FC = () => {
         cancelLabel={t("common.cancel")}
         variant="destructive"
         onConfirm={handleDelete}
-      />
+      >
+        {deleteError && (
+          <InlineError title={t("common.errors.failedToDelete")} message={deleteError} />
+        )}
+      </ConfirmDialog>
     </PageShell>
   );
 };

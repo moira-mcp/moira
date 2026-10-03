@@ -27,6 +27,38 @@ interface IGraphStorage {
 - Executions: `.graph-storage/executions/<uuid>.json`
 - Workflows: `workflows/production/flows/<uuid>.json` — one file per flow, named by its stable UUID. Each file carries top-level catalog metadata `owner` (the owning user id) and `visibility` (`public` | `private`) alongside the graph; catalog identity is `(owner, slug)` since a slug is unique only per owner. Read via `readWorkflowCatalog()` in `packages/shared/src/services/workflow-catalog.ts`.
 
+Database list consumers use SQL projections before materialization. `WorkflowRepository.listSummaries`
+returns metadata/scalars through the same access, grant, search, validation, sort and pagination
+predicates as the full list; HTTP workflow lists do not load executable nodes. Detail and engine
+reads retain the complete graph. `size`/HTTP `fileSize` is the UTF-8 byte length of stored JSON,
+using `length(CAST(graph AS BLOB))` for SQL summaries and `Buffer.byteLength(graph, "utf8")` for full
+reads, consistent with `MAX_WORKFLOW_SIZE_BYTES`.
+
+Notes join the current revision for the selected page, with distinct matching counts and the user's
+non-deleted tag inventory independent of that page. Playbook usage groups all current
+running/waiting executions in SQL before reading at most 200 distinct workflow definitions; an
+incomplete inspection returns a lower bound. Administrator identity choices use
+`UserRepository.listAdminLookup` on the existing users endpoint, projecting only ID, email, name
+and administrator flag while sharing management filtering/count/page rules. See [API.md](API.md)
+for wire shapes and summary/detail boundaries.
+
+Settings reads compose bulk definition/value lists rather than per-key queries.
+`DatabaseRepository.readSettingsProjection` combines database and installed-extension definitions
+with per-user value maps; this composition does not introduce a transaction or a cross-user secret
+cache. Presence is checked before conversion, preserving JSON null, false, zero and stored empty
+strings. An installed declaration owns its key even when unset or excluded by category, so a
+stored definition cannot supply a fallback. Browser projection excludes administrative keys and
+masks persisted secrets with bullets/last four characters. `getSettingsForApi` uses `[encrypted]`
+for database-backed secrets and masks persisted extension secrets; trusted internal consumers
+receive decrypted values. Unset encrypted manifest defaults are omitted from public projections.
+
+Stable HTTP lists call `sendConditionalRead` only after current authorization, source reads and
+service effects. Its requesting-user-scoped validator can return a bodyless 304 without suppressing
+the note-list audit or overlooking another process's writes. Dynamic observations and sensitive
+reads retain their own contracts rather than using a stable list validator. User routers attach
+admission/rate limits to matched handlers; ordered workflow routers share one namespace guard,
+so falling through one router does not repeat session/user reads or consume a second API quota.
+
 ### Shared Revision Store
 
 Versioned content belongs to one store rather than to each entity that keeps a history. Notes, global
@@ -62,6 +94,13 @@ Rules a consumer has to know:
 - **Reading a revision distinguishes two absences.** `get` and `compare` return null when the
   revision is unknown or already pruned; a revision that exists with null content is a different
   answer.
+- **Summaries read bounded previews.** Compose `revisionPreviewPrefix` and `renderRevisionPreview`
+  from `packages/shared/src/database/revision-preview.ts` for list/history projections rather than
+  reading full text per row. The SQL binary prefix preserves embedded NUL; the renderer uses the
+  first 100 UTF-16 code units and appends literal `...` only for longer text. A boundary can split
+  a surrogate pair, as JavaScript `substring` does. Empty/null content renders an empty preview;
+  full `latest`/`get`/`compare`/restore reads retain complete content and its null semantics.
+  Internal `previewChars` accepts safe integers 0–1000; it is not an HTTP option.
 
 ### Replay-safe execution mutations
 
@@ -505,6 +544,29 @@ the authenticated user's repository-backed configuration and projects sanitized
 adapter through `UserCommunicationService.testChannel()`, retaining shared limits and result
 normalization without ordinary fan-out. Administrator trust approval is read-only in this user
 projection and remains writable only through the admin boundary.
+
+`UserCommunicationService.deliverChannel(channelId, request, repository)` sends through one
+registered adapter using the same validation, repository-backed configuration, provider rate and
+concurrency limits, deadlines and aggregate results as ordinary delivery. `testChannel` composes
+this method with its fixed test message; an unknown channel returns null.
+
+`notifyAdminsOfRegistration` selects only the built-in Telegram channel for a confirmed new
+account. Both service-owned auth factories inject it as `onSuccessfulRegistration`; dispatch does
+not wait for Telegram before returning the authentication response. The global
+`system.notify_admins_on_registration` boolean in `globalSetting`, category `system`, is seeded as
+`"true"` without overwriting an operator's choice. Only a typed true value enables delivery;
+false, null or an absent setting disables it. Each recipient must be a persisted administrator
+admitted by `getAccountAccessDenial` with `requireEmailVerified: true`: blocked accounts are
+excluded, and approval and email verification are required when their deployment/account gates
+are enabled. The recipient's own
+`telegram.enabled`, bot token and chat ID configure delivery; no credentials are seeded by this
+global preference.
+
+The message is plain text containing the new account's name, email, recorded registration time
+and administrative detail URL built from `getBaseUrl()`, `getAppPrefix()` and the encoded user ID.
+Recipient failures are independent. Delivery is best-effort: it has no queue or automatic retry,
+does not roll back registration, and does not promise delivery across a crash or unknown provider
+outcome. A timeout or failure is not reported as delivered.
 
 `renderPortableHelpTokens()` in `packages/shared/src/utils/portable-help.ts` is the shared resolver
 for configured MCP, Moira and static-artifact URLs and MCP client deeplinks. The MCP runtime applies

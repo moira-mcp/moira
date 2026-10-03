@@ -7,11 +7,12 @@
  * Note: console.error used for browser debugging of OAuth consent checks
  */
 
+import { productFetch } from "@/services/product-fetch";
 import React, { useState, useMemo, useEffect } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { AuthView } from "@daveyplate/better-auth-ui";
-import { useSession, signOut } from "../auth/better-auth-client";
+import { AuthView } from "../auth/LazyAuthView";
+import { authClient, useSession, signOut } from "../auth/better-auth-client";
 import { Button } from "../components/ui/button";
 import {
   Card,
@@ -26,8 +27,46 @@ import { Check, X, User, Key, LogOut } from "lucide-react";
 import { AuthErrorDisplay } from "../components/auth/AuthErrorDisplay";
 import { AuthLayout } from "../components/AuthLayout";
 import { ROUTES } from "../constants/routes";
+import { PrivateReadScopeBoundary, useReadOwnerGuard } from "../auth/ReadScopeBoundary";
+import { getReadIdentity } from "../services/read-scope";
 
 export const OAuthAuthorize: React.FC = () => {
+  const { t } = useTranslation();
+  const [searchParams] = useSearchParams();
+  const { data: session, isPending } = useSession();
+  if (session?.user)
+    return (
+      <PrivateReadScopeBoundary>
+        <OAuthAuthorizeConsent />
+      </PrivateReadScopeBoundary>
+    );
+  if (isPending)
+    return (
+      <AuthLayout showLanguageSwitcher={false}>
+        <div className="text-center text-muted-foreground">{t("pages.oauthAuthorize.loading")}</div>
+      </AuthLayout>
+    );
+  const redirectToUrl = `${ROUTES.OAUTH_AUTHORIZE}?${searchParams.toString()}`;
+  return (
+    <AuthLayout>
+      <div className="space-y-4">
+        <div className="bg-card border border-border px-6 py-6 rounded-xl shadow-sm">
+          <h2 className="text-xl font-semibold leading-none mb-2">
+            {t("pages.oauthAuthorize.signInTitle")}
+          </h2>
+          <p className="text-sm text-muted-foreground">
+            {t("pages.oauthAuthorize.signInDescription")}
+          </p>
+        </div>
+        <AuthView pathname={ROUTES.LOGIN} redirectTo={redirectToUrl} />
+        <AuthErrorDisplay />
+      </div>
+    </AuthLayout>
+  );
+};
+
+const OAuthAuthorizeConsent: React.FC = () => {
+  const captureOwner = useReadOwnerGuard();
   const { t } = useTranslation();
   const [searchParams] = useSearchParams();
   const { data: session, isPending: isLoading } = useSession();
@@ -41,15 +80,6 @@ export const OAuthAuthorize: React.FC = () => {
   const scope = searchParams.get("scope");
   const scopes = scope ? scope.split(" ").filter((s) => s) : ["openid"];
 
-  // Build redirectTo URL with OAuth params for post-login redirect
-  const redirectToUrl = useMemo(() => {
-    const params = new URLSearchParams();
-    searchParams.forEach((value, key) => {
-      params.set(key, value);
-    });
-    return `${ROUTES.OAUTH_AUTHORIZE}?${params.toString()}`;
-  }, [searchParams]);
-
   // Build final authorize URL
   const authorizeUrl = useMemo(() => {
     const params = new URLSearchParams();
@@ -61,12 +91,15 @@ export const OAuthAuthorize: React.FC = () => {
 
   // Check for existing consent when user is logged in
   useEffect(() => {
+    let active = true;
+    const ownsResponse = captureOwner();
+    const isCurrent = () => active && ownsResponse();
     const checkExistingConsent = async () => {
       if (!user || !clientId) return;
 
       setIsCheckingConsent(true);
       try {
-        const response = await fetch(
+        const response = await productFetch(
           `/api/oauth/consent/check?client_id=${encodeURIComponent(clientId)}`,
           {
             credentials: "include",
@@ -75,6 +108,7 @@ export const OAuthAuthorize: React.FC = () => {
 
         if (response.ok) {
           const data = await response.json();
+          if (!isCurrent()) return;
           if (data.data?.hasConsent) {
             // Auto-approve - redirect directly to authorize
             setHasExistingConsent(true);
@@ -83,27 +117,33 @@ export const OAuthAuthorize: React.FC = () => {
             setHasExistingConsent(false);
           }
         } else {
-          setHasExistingConsent(false);
+          if (isCurrent()) setHasExistingConsent(false);
         }
       } catch (error) {
+        if (!isCurrent()) return;
         // If check fails, show consent screen
         console.error("Failed to check consent:", error);
         setHasExistingConsent(false);
       } finally {
-        setIsCheckingConsent(false);
+        if (isCurrent()) setIsCheckingConsent(false);
       }
     };
 
     checkExistingConsent();
-  }, [user, clientId, authorizeUrl]);
+    return () => {
+      active = false;
+    };
+  }, [user, clientId, authorizeUrl, captureOwner]);
 
   // Handle consent approval
   const handleAllow = async () => {
+    const isCurrent = captureOwner();
+    const ownsPage = captureOwner(false);
     setIsSubmitting(true);
 
     // Save consent to database before redirecting
     try {
-      await fetch("/api/oauth/consent", {
+      await productFetch("/api/oauth/consent", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
@@ -117,7 +157,9 @@ export const OAuthAuthorize: React.FC = () => {
       console.error("Failed to save consent:", error);
     }
 
-    window.location.href = authorizeUrl;
+    if (!isCurrent() && ownsPage()) await authClient.$store.atoms.session.get().refetch();
+    if (ownsPage() && getReadIdentity() !== null) window.location.href = authorizeUrl;
+    else if (ownsPage()) setIsSubmitting(false);
   };
 
   // Handle consent denial
@@ -235,22 +277,5 @@ export const OAuthAuthorize: React.FC = () => {
     );
   }
 
-  // If user is not logged in, show login form
-  return (
-    <AuthLayout>
-      <div className="space-y-4">
-        <div className="bg-card border border-border px-6 py-6 rounded-xl shadow-sm">
-          <h2 className="text-xl font-semibold leading-none mb-2">
-            {t("pages.oauthAuthorize.signInTitle")}
-          </h2>
-          <p className="text-sm text-muted-foreground">
-            {t("pages.oauthAuthorize.signInDescription")}
-          </p>
-        </div>
-
-        <AuthView pathname={ROUTES.LOGIN} redirectTo={redirectToUrl} />
-        <AuthErrorDisplay />
-      </div>
-    </AuthLayout>
-  );
+  return null;
 };

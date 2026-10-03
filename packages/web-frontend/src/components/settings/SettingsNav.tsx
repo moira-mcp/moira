@@ -10,7 +10,6 @@
 import React, { useEffect, useState } from "react";
 import type { LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { guideAnchor } from "../../guides/anchors";
 
 export interface SettingsNavItem {
   id: string;
@@ -79,16 +78,24 @@ export function SettingsNav({
   active,
   onSelect,
   label,
+  testIdPrefix = "settings-nav",
+  guide,
+  getHref = (id) => `#${id}`,
 }: {
   items: readonly SettingsNavItem[];
   active: string | null;
   onSelect: (id: string) => void;
   /** Accessible name of the navigation landmark. */
   label: string;
+  testIdPrefix?: string;
+  guide?: { "data-guide": string };
+  /** URL and selection effects belong to the caller (section hashes or administrative tabs). */
+  getHref?: (id: string) => string;
 }): React.JSX.Element {
   const select = (event: React.MouseEvent<HTMLAnchorElement>, id: string) => {
+    if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey)
+      return;
     event.preventDefault();
-    window.history.replaceState(window.history.state, "", `#${id}`);
     onSelect(id);
   };
   return (
@@ -96,18 +103,18 @@ export function SettingsNav({
       {/* Narrow screens: a sticky row of chips above the sections. */}
       <nav
         aria-label={label}
-        data-testid="settings-nav-chips"
-        {...guideAnchor("settings.nav")}
+        data-testid={`${testIdPrefix}-chips`}
+        {...guide}
         className="sticky top-0 z-20 -mx-4 mb-6 border-b bg-background/95 px-4 py-2 backdrop-blur supports-[backdrop-filter]:bg-background/80 lg:hidden"
       >
         <ul className="flex gap-2 overflow-x-auto pb-0.5 [scrollbar-width:none]">
           {items.map(({ id, label: itemLabel, icon: Icon }) => (
             <li key={id} className="shrink-0">
               <a
-                href={`#${id}`}
+                href={getHref(id)}
                 onClick={(event) => select(event, id)}
                 aria-current={active === id ? "location" : undefined}
-                data-testid={`settings-nav-chip-${id}`}
+                data-testid={`${testIdPrefix}-chip-${id}`}
                 className={cn(
                   "inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
                   active === id
@@ -126,18 +133,18 @@ export function SettingsNav({
       {/* Wide screens: a sticky list beside the sections. */}
       <nav
         aria-label={label}
-        data-testid="settings-nav"
-        {...guideAnchor("settings.nav")}
+        data-testid={testIdPrefix}
+        {...guide}
         className="sticky top-8 hidden self-start lg:block"
       >
         <ul className="space-y-0.5">
           {items.map(({ id, label: itemLabel, icon: Icon }) => (
             <li key={id}>
               <a
-                href={`#${id}`}
+                href={getHref(id)}
                 onClick={(event) => select(event, id)}
                 aria-current={active === id ? "location" : undefined}
-                data-testid={`settings-nav-${id}`}
+                data-testid={`${testIdPrefix}-${id}`}
                 className={cn(
                   "relative flex items-center gap-2.5 rounded-md px-3 py-2 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
                   active === id

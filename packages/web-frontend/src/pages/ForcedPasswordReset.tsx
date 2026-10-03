@@ -5,12 +5,12 @@
  * Auto-login after successful password change
  */
 
-import React, { useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { apiClient } from "../services/api-client";
-import { authClient, useSession } from "../auth/better-auth-client";
+import { authClient, useSession, revokeObservedSession } from "../auth/better-auth-client";
 import { ROUTES } from "../constants/routes";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
@@ -20,12 +20,22 @@ import { Lock, CheckCircle } from "lucide-react";
 import { useAuthError } from "../auth/AuthProvider";
 import { AuthErrorDisplay } from "../components/auth/AuthErrorDisplay";
 import { AuthLayout } from "../components/AuthLayout";
+import { useReadOwnerGuard } from "../auth/ReadScopeBoundary";
+import { getReadIdentity } from "../services/read-scope";
 
 export const ForcedPasswordReset: React.FC = () => {
   const navigate = useNavigate();
   const { t } = useTranslation();
   const { data: session } = useSession();
   const { setAuthError } = useAuthError();
+  const captureOwner = useReadOwnerGuard();
+  const redirectTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  useEffect(
+    () => () => {
+      if (redirectTimer.current) clearTimeout(redirectTimer.current);
+    },
+    [],
+  );
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -60,10 +70,32 @@ export const ForcedPasswordReset: React.FC = () => {
     }
 
     setLoading(true);
+    const ownsOperation = captureOwner(false);
+    const ownsAuthority = captureOwner();
+    const userId = session?.user.id;
+    const originalSession = session?.session;
+    const scheduleLogin = () => {
+      redirectTimer.current = setTimeout(() => {
+        if (!ownsOperation()) return;
+        // Revoke only the observed session; completion must not redirect a later login.
+        void revokeObservedSession(originalSession);
+        navigate(ROUTES.LOGIN, { replace: true });
+      }, 1500);
+    };
+    const confirmOwner = async () => {
+      if (!ownsOperation()) return false;
+      if (!ownsAuthority()) await authClient.$store.atoms.session.get().refetch();
+      return (
+        ownsOperation() &&
+        getReadIdentity() !== null &&
+        authClient.$store.atoms.session.get().data?.user.id === userId
+      );
+    };
 
     try {
       // Change password via API
       await apiClient.changeForcedPassword(currentPassword, newPassword);
+      if (!(await confirmOwner())) return;
 
       // Show success state
       setSuccess(true);
@@ -73,32 +105,35 @@ export const ForcedPasswordReset: React.FC = () => {
       const userEmail = session?.user?.email;
       if (userEmail) {
         try {
-          await authClient.signIn.email({
+          const result = await authClient.signIn.email({
             email: userEmail,
             password: newPassword,
           });
+          if (result.error) throw new Error(result.error.message);
+          await authClient.$store.atoms.session.get().refetch();
+          if (
+            !ownsOperation() ||
+            getReadIdentity() === null ||
+            authClient.$store.atoms.session.get().data?.user.id !== userId
+          )
+            return;
           // Wait 1.5 seconds then redirect
-          setTimeout(() => {
-            navigate(ROUTES.WORKFLOWS, { replace: true });
+          redirectTimer.current = setTimeout(() => {
+            if (ownsOperation() && getReadIdentity() !== null)
+              navigate(ROUTES.WORKFLOWS, { replace: true });
           }, 1500);
         } catch {
+          if (!ownsOperation()) return;
           // Auto-login failed, redirect to login page
           toast.info(t("pages.forcedPasswordReset.loginWithNew"));
-          setTimeout(() => {
-            authClient.signOut().finally(() => {
-              navigate(ROUTES.LOGIN, { replace: true });
-            });
-          }, 1500);
+          scheduleLogin();
         }
       } else {
         // No email available, redirect to login
-        setTimeout(() => {
-          authClient.signOut().finally(() => {
-            navigate(ROUTES.LOGIN, { replace: true });
-          });
-        }, 1500);
+        scheduleLogin();
       }
     } catch (err) {
+      if (!ownsOperation()) return;
       if (err instanceof Error) {
         setAuthError(err.message);
       } else {

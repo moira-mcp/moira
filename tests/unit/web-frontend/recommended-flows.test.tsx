@@ -1,7 +1,7 @@
 /** @jest-environment jsdom */
 /**
  * The recommended section shows a flow only when this instance has it as a system flow: it asks
- * the catalog once for the named slugs of the reader's language, and an entry the answer lacks —
+ * the catalog for the named slugs of the reader's language, and an entry the answer lacks —
  * or answers with a same-named flow of another owner — is not offered, since its card would open a
  * missing page or somebody else's flow. With nothing to offer, the section is not drawn at all.
  */
@@ -58,7 +58,7 @@ afterEach(async () => {
 });
 
 describe("RecommendedFlows", () => {
-  test("offers only the system flows the catalog has, after one lookup of the reader's slugs", async () => {
+  test("offers only the system flows the catalog has for the reader's slugs", async () => {
     await i18n.changeLanguage("en");
     const lookup = answer([
       { slug: "example-simple-steps", ownerHandle: "moira" },
@@ -72,7 +72,6 @@ describe("RecommendedFlows", () => {
     expect(
       screen.getAllByTestId("recommended-flow").map((card) => card.getAttribute("data-slug")),
     ).toEqual(["example-simple-steps", "quick-task"]);
-    expect(lookup).toHaveBeenCalledTimes(1);
     expect(lookup.mock.calls[0][0]).toMatchObject({
       slugs: [
         "example-simple-steps",
@@ -103,15 +102,19 @@ describe("RecommendedFlows", () => {
     ]);
   });
 
-  test("a second mount in the same visit asks the catalog nothing again", async () => {
+  test("a second mount observes catalog changes made outside this browser", async () => {
     await i18n.changeLanguage("en");
     const lookup = answer([{ slug: "quick-task", ownerHandle: "moira" }]);
     renderSection();
     await waitFor(() => expect(screen.getAllByTestId("recommended-flow")).toHaveLength(1));
     cleanup();
+    lookup.mockResolvedValue({
+      workflows: [{ slug: "todo-list", ownerHandle: "moira" }],
+      totalWorkflows: 1,
+    } as never);
     renderSection();
     await waitFor(() => expect(screen.getAllByTestId("recommended-flow")).toHaveLength(1));
-    expect(lookup).toHaveBeenCalledTimes(1);
+    expect(screen.getByTestId("recommended-flow")).toHaveAttribute("data-slug", "todo-list");
   });
 
   test("draws nothing when none of the recommended flows exists here", async () => {
@@ -119,7 +122,7 @@ describe("RecommendedFlows", () => {
     const lookup = answer([]);
     renderSection();
 
-    await waitFor(() => expect(lookup).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(lookup).toHaveBeenCalled());
     await waitFor(() => expect(screen.queryByTestId("recommended-flows")).toBeNull());
   });
 });

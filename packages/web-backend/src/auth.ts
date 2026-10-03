@@ -4,6 +4,7 @@
  */
 
 import { createAuth, createLogger } from "@mcp-moira/shared";
+import { notifyAdminsOfRegistration } from "@mcp-moira/workflow-engine";
 
 const logger = createLogger({ component: "BetterAuth" });
-export const auth = createAuth(logger);
+export const auth = createAuth(logger, { onSuccessfulRegistration: notifyAdminsOfRegistration });

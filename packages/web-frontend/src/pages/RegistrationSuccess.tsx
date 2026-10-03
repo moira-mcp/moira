@@ -3,6 +3,7 @@
  * Polls for email verification status and redirects when verified
  */
 
+import { productFetch } from "@/services/product-fetch";
 import React, { useEffect, useState, useRef, useCallback } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
@@ -17,11 +18,19 @@ import { useFeatures } from "../hooks/useFeatures";
 import { apiClient } from "../services/api-client";
 import { authClient } from "../auth/better-auth-client";
 import { getRegistrationCompletionMode } from "../auth/admission-routing";
+import { PrivateReadScopeBoundary, useReadOwnerGuard } from "../auth/ReadScopeBoundary";
 
 // Buffer seconds to add to server cooldown for network latency
 const COOLDOWN_BUFFER_SECONDS = 2;
 
-export const RegistrationSuccess: React.FC = () => {
+export const RegistrationSuccess: React.FC = () => (
+  <PrivateReadScopeBoundary allowAnonymous>
+    <RegistrationSuccessContent />
+  </PrivateReadScopeBoundary>
+);
+
+const RegistrationSuccessContent: React.FC = () => {
+  const captureOwner = useReadOwnerGuard();
   const navigate = useNavigate();
   const { t } = useTranslation();
   const {
@@ -77,17 +86,20 @@ export const RegistrationSuccess: React.FC = () => {
   const handleResend = useCallback(async () => {
     if (!userEmail || isResending || countdown > 0) return;
 
+    const isCurrent = captureOwner();
+    const ownsPage = captureOwner(false);
     setIsResending(true);
     setResendStatus("idle");
 
     try {
-      const response = await fetch("/api/user/resend-verification", {
+      const response = await productFetch("/api/user/resend-verification", {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
       });
 
       const data = await response.json();
+      if (!isCurrent()) return;
 
       if (response.status === 429) {
         // Rate limited - use cooldown from server
@@ -105,11 +117,11 @@ export const RegistrationSuccess: React.FC = () => {
         }
       }
     } catch {
-      setResendStatus("error");
+      if (isCurrent()) setResendStatus("error");
     } finally {
-      setIsResending(false);
+      if (ownsPage()) setIsResending(false);
     }
-  }, [userEmail, isResending, countdown, startCountdown]);
+  }, [userEmail, isResending, countdown, startCountdown, captureOwner]);
 
   // Cleanup countdown on unmount
   useEffect(() => {
@@ -122,13 +134,16 @@ export const RegistrationSuccess: React.FC = () => {
 
   // Direct API call to check verification status (bypasses all caches)
   const checkVerificationStatus = useCallback(async () => {
+    const isCurrent = captureOwner();
     try {
       // disableCookieCache=true forces Better Auth to read fresh user data from DB
-      const response = await fetch("/api/auth/get-session?disableCookieCache=true", {
+      const response = await productFetch("/api/auth/get-session?disableCookieCache=true", {
         credentials: "include",
       });
       if (response.ok) {
         const data = await response.json();
+        if (!isCurrent() || data?.user?.id !== authClient.$store.atoms.session.get().data?.user.id)
+          return;
         // Extract email from session for resend functionality
         if (data?.user?.email && !userEmail) {
           setUserEmail(data.user.email);
@@ -144,7 +159,7 @@ export const RegistrationSuccess: React.FC = () => {
     } catch {
       // Ignore errors, keep polling
     }
-  }, [userEmail]);
+  }, [userEmail, captureOwner]);
 
   useEffect(() => {
     if (completionMode !== "email-verification") return;
@@ -161,8 +176,11 @@ export const RegistrationSuccess: React.FC = () => {
   }, [checkVerificationStatus, completionMode]);
 
   const checkApprovalStatus = useCallback(async () => {
+    const isCurrent = captureOwner();
     try {
       const userInfo = await apiClient.getUserInfo();
+      if (!isCurrent() || userInfo.id !== authClient.$store.atoms.session.get().data?.user.id)
+        return;
       setApprovalCheckFailed(false);
       if (!userInfo.accountApprovalRequired || userInfo.accountApproved) {
         setIsApproved(true);
@@ -171,9 +189,9 @@ export const RegistrationSuccess: React.FC = () => {
         setIsPolling(true);
       }
     } catch {
-      setApprovalCheckFailed(true);
+      if (isCurrent()) setApprovalCheckFailed(true);
     }
-  }, []);
+  }, [captureOwner]);
 
   useEffect(() => {
     if (completionMode !== "approval" || isApproved) return;
@@ -189,8 +207,10 @@ export const RegistrationSuccess: React.FC = () => {
         ? isApproved
         : completionMode === "email-verification" && isVerified;
     if (registrationComplete) {
+      const isCurrent = captureOwner();
       // Small delay to show verified state
       const redirectTimer = setTimeout(() => {
+        if (!isCurrent()) return;
         if (hasOAuthFlow) {
           // Continue OAuth flow - redirect to authorize with preserved params
           const params = new URLSearchParams();
@@ -207,14 +227,17 @@ export const RegistrationSuccess: React.FC = () => {
       }, 1500);
       return () => clearTimeout(redirectTimer);
     }
-  }, [completionMode, isApproved, isVerified, navigate, hasOAuthFlow, searchParams]);
+  }, [completionMode, isApproved, isVerified, navigate, hasOAuthFlow, searchParams, captureOwner]);
 
   const handleSignOut = async () => {
+    const previousUser = authClient.$store.atoms.session.get().data?.user.id;
     setIsSigningOut(true);
     setSignOutFailed(false);
     try {
       const result = await authClient.signOut();
       if (result.error) throw result.error;
+      const currentUser = authClient.$store.atoms.session.get().data?.user.id;
+      if (currentUser && currentUser !== previousUser) return;
       navigate(ROUTES.LOGIN, { replace: true });
     } catch {
       setSignOutFailed(true);

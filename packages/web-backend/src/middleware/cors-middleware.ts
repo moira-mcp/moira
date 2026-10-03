@@ -43,7 +43,7 @@ export function setupCorsMiddleware() {
     credentials: true,
     methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allowedHeaders: "*",
-    exposedHeaders: ["WWW-Authenticate", "Set-Cookie"],
+    exposedHeaders: ["WWW-Authenticate", "Set-Cookie", "ETag"],
     optionsSuccessStatus: 200,
   });
 }

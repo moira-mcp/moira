@@ -12,6 +12,7 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useS
 import { apiClient } from "@/services/api-client";
 import type { CodespaceConnectionView } from "@mcp-moira/shared";
 import type { CodespaceManagementView } from "@/types/api-types";
+import { useLatestRequest } from "@/hooks/useLatestRequest";
 
 export interface GitHubCodespacesState {
   connection: CodespaceConnectionView | null;
@@ -37,34 +38,40 @@ export function GitHubCodespacesProvider({ children }: { children: React.ReactNo
   const [management, setManagement] = useState<CodespaceManagementView | null>(null);
   const [managementLoading, setManagementLoading] = useState(true);
   const [managementError, setManagementError] = useState(false);
+  const beginConnectionRequest = useLatestRequest();
+  const beginManagementRequest = useLatestRequest();
 
   const reloadConnection = useCallback(async () => {
+    const isCurrent = beginConnectionRequest();
     try {
       setConnectionLoading(true);
       setConnectionError(false);
-      setConnection(await apiClient.getGitHubCodespaceConnection());
+      const next = await apiClient.getGitHubCodespaceConnection();
+      if (isCurrent()) setConnection(next);
     } catch {
-      setConnectionError(true);
+      if (isCurrent()) setConnectionError(true);
     } finally {
-      setConnectionLoading(false);
+      if (isCurrent()) setConnectionLoading(false);
     }
-  }, []);
+  }, [beginConnectionRequest]);
 
   const reloadManagement = useCallback(
-    async ({ silent = false, sync = false }: { silent?: boolean; sync?: boolean } = {}) => {
+    async ({ sync = false }: { silent?: boolean; sync?: boolean } = {}) => {
+      const isCurrent = beginManagementRequest();
       try {
-        if (!silent) setManagementLoading(true);
+        setManagementLoading(true);
         setManagementError(false);
-        setManagement(
-          sync ? await apiClient.refreshGitHubCodespaces() : await apiClient.getGitHubCodespaces(),
-        );
+        const next = sync
+          ? await apiClient.refreshGitHubCodespaces()
+          : await apiClient.getGitHubCodespaces();
+        if (isCurrent()) setManagement(next);
       } catch {
-        if (!silent) setManagementError(true);
+        if (isCurrent()) setManagementError(true);
       } finally {
-        if (!silent) setManagementLoading(false);
+        if (isCurrent()) setManagementLoading(false);
       }
     },
-    [],
+    [beginManagementRequest],
   );
 
   useEffect(() => {
@@ -74,10 +81,13 @@ export function GitHubCodespacesProvider({ children }: { children: React.ReactNo
 
   const applyConnection = useCallback(
     (next: CodespaceConnectionView) => {
+      beginConnectionRequest();
       setConnection(next);
+      setConnectionLoading(false);
+      setConnectionError(false);
       void reloadManagement({ silent: true });
     },
-    [reloadManagement],
+    [reloadManagement, beginConnectionRequest],
   );
 
   const value = useMemo(

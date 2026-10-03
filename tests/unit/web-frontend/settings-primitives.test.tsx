@@ -77,7 +77,8 @@ describe("SettingsNav", () => {
     { id: "notifications", label: "Notifications", icon: Bell },
   ];
 
-  test("marks the section being read and moves to a chosen one, updating the link", () => {
+  test("marks the section and delegates selection without changing the caller's address", () => {
+    window.history.replaceState(null, "", "/settings?keep=yes#account");
     const onSelect = jest.fn();
     render(<SettingsNav items={items} active="account" onSelect={onSelect} label="Sections" />);
     expect(screen.getByTestId("settings-nav-account")).toHaveAttribute("aria-current", "location");
@@ -85,7 +86,52 @@ describe("SettingsNav", () => {
 
     fireEvent.click(screen.getByTestId("settings-nav-notifications"));
     expect(onSelect).toHaveBeenCalledWith("notifications");
-    expect(window.location.hash).toBe("#notifications");
+    expect(window.location.hash).toBe("#account");
+    expect(window.location.search).toBe("?keep=yes");
+  });
+
+  test("a user caller owns its hash and explicitly supplies the tour anchor", () => {
+    window.history.replaceState({ retained: true }, "", "/settings?keep=yes");
+    render(
+      <SettingsNav
+        items={items}
+        active="account"
+        label="Sections"
+        guide={{ "data-guide": "settings.nav" }}
+        onSelect={(id) => window.history.replaceState(window.history.state, "", `#${id}`)}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("settings-nav-notifications"));
+    expect(window.location.href).toContain("/settings?keep=yes#notifications");
+    expect(window.history.state).toEqual({ retained: true });
+    expect(screen.getByTestId("settings-nav")).toHaveAttribute("data-guide", "settings.nav");
+  });
+
+  test("an admin caller owns query links without a user tour anchor or hash write", () => {
+    window.history.replaceState(null, "", "/admin/settings?tab=account&keep=yes#retained");
+    const select = jest.fn((id: string) => {
+      const url = new URL(window.location.href);
+      url.searchParams.set("tab", id);
+      window.history.replaceState(window.history.state, "", url);
+    });
+    render(
+      <SettingsNav
+        items={items}
+        active="account"
+        label="Admin sections"
+        testIdPrefix="admin-nav"
+        getHref={(id) => `/admin/settings?tab=${id}&keep=yes`}
+        onSelect={select}
+      />,
+    );
+    const link = screen.getByTestId("admin-nav-notifications");
+    expect(link).toHaveAttribute("href", "/admin/settings?tab=notifications&keep=yes");
+    fireEvent.click(link, { ctrlKey: true });
+    expect(select).not.toHaveBeenCalled();
+    fireEvent.click(link);
+    expect(window.location.search).toBe("?tab=notifications&keep=yes");
+    expect(window.location.hash).toBe("#retained");
+    expect(screen.getByTestId("admin-nav")).not.toHaveAttribute("data-guide");
   });
 });
 

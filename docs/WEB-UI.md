@@ -65,7 +65,7 @@ frontend/src/
 │   │   └── EditControls.tsx                         # In-place editors (block text, transitions, owner, node text)
 │   ├── onboarding/              # What is recommended to newcomers
 │   │   ├── recommended.ts                           # The registry: learning examples per language, universal flows, which open on the steps view
-│   │   ├── RecommendedFlows.tsx                     # The recommended section (flow list: full; home: compact), one catalog lookup per page
+│   │   ├── RecommendedFlows.tsx                     # The recommended section (flow list: full; home: compact), bounded source-validated lookup
 │   │   ├── beginnerPanels.ts                        # The beginner panels and the account's hidden set (user setting ui.hidden_panels)
 │   │   └── HidePanelButton.tsx                      # The one "Hide" control every beginner panel carries
 │   ├── run/                     # Run page: the execution as a process
@@ -92,6 +92,7 @@ frontend/src/
 │   │   ├── NoteInlineEditor.tsx # Inline expandable card editor (create/edit)
 │   │   └── NoteHistoryDialog.tsx # Notes' source for the shared history dialog
 │   ├── history/
+│   │   ├── LazyRevisionHistoryDialog.tsx # Loads the shared history presentation only while open
 │   │   └── RevisionHistoryDialog.tsx # One version-history dialog for notes, playbooks and global settings; exports DiffView
 │   ├── access/
 │   │   └── VisibilityToggle.tsx # One control for a resource's visibility: badge when read-only, button when it can change
@@ -120,7 +121,7 @@ frontend/src/
 │   │   ├── PreferencesSettings.tsx # Theme, interface language, and the beginner-panel switches
 │   │   └── settings.guide.ts    # The Settings screen tour and the GitHub & Codespaces and Telegram task tours
 │   ├── Admin.tsx                # Admin panel entry
-│   ├── AdminDashboard.tsx       # Admin dashboard with stats + merged analytics
+│   ├── AdminDashboard.tsx       # Independent scoped analytics cards, system health and maintenance
 │   ├── AdminExecutions.tsx      # Admin executions monitoring (PageShell + DataListView)
 │   ├── AdminExecutionInspectorPage.tsx # Admin execution inspector wrapper
 │   ├── AdminUserDetail.tsx      # Admin user detail and security management
@@ -154,7 +155,10 @@ frontend/src/
 │   ├── FirstRunPrompt.tsx / ShowMeAround.tsx  # The home page's one-time prompt; the sidebar's guides menu
 │   └── snapshot.ts / revisions.snapshot.json  # The step revision snapshot (`npm run guides:snapshot`)
 ├── auth/
-│   ├── AuthProvider.tsx         # Better Auth UI provider
+│   ├── AuthProvider.tsx         # Global error store/context, auth-error interception and Toaster
+│   ├── AuthForm.tsx             # Better Auth UI configuration, localized forms and continuation callbacks
+│   ├── LazyAuthView.tsx         # Form presentation loaded only for a rendered auth branch
+│   ├── ReadScopeBoundary.tsx    # Read authority observer and private holding/operation boundaries
 │   └── better-auth-client.ts    # Auth client config
 ├── hooks/
 │   ├── useResource.ts           # Page-local data store with last-good retention
@@ -162,7 +166,9 @@ frontend/src/
 │   ├── useNotes.ts              # Notes API integration
 │   └── useTheme.ts              # Theme management
 ├── services/
-│   └── api-client.ts            # HTTP client
+│   ├── api-client.ts            # HTTP client and common safe-read boundary
+│   ├── conditional-read-store.ts # Bounded conditional representations and overlapping-read coalescing
+│   └── read-scope.ts            # Observed owner, credentials, capabilities and read retirement
 └── utils/
     └── workflow-transformer.ts  # Per-node presentation data for the graph
 ```
@@ -214,10 +220,13 @@ Higher-level composable components in `src/components/`:
 
 | Component             | File                                | Purpose                                                                                                                                                                 |
 | --------------------- | ----------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| PageHeader            | `page-header.tsx`                   | Page title, description, action slot, SidebarTrigger                                                                                                                    |
+| PageHeader            | `page-header.tsx`                   | Standard title, description, actions and route screen tour over the shared header presentation                                                                          |
+| PageHeaderContent     | `page-header-content.tsx`           | Router-free presentation shared by standard and compact process headers; the latter preserves back navigation, facts, badges, actions and guide identities              |
+| DataRegion            | `DataRegion.tsx`                    | Explicit accepted-result state with local pending/error/retry and retained children                                                                                     |
+| SettingsNav           | `settings/SettingsNav.tsx`          | Responsive section links; URL, selection, scrolling and optional guide identity belong to the caller                                                                    |
 | StatCard              | `stat-card.tsx`                     | KPI card with label, value, icon, optional Tremor SparkAreaChart sparkline                                                                                              |
 | StatusBadge           | `status-badge.tsx`                  | Execution status in the reader's language (`common.status.*`) with its semantic colour (running/waiting/completed/failed/locked)                                        |
-| DataListView          | `DataListView.tsx`                  | Universal data list wrapper: ViewToggle, grid/list layout, ServerPagination, PageLoader, EmptyState                                                                     |
+| DataListView          | `DataListView.tsx`                  | Always-mounted toolbar, grid/list cards, accepted-result pagination and DataRegion feedback                                                                             |
 | DataTable             | `data-table/`                       | @tanstack/react-table wrapper with sorting, filtering, pagination                                                                                                       |
 | CardShell             | `cards/CardShell.tsx`               | The one list item: slots (icon, title, titleAside, description, note, meta, badges, actions) in list and grid views                                                     |
 | Card Components       | `cards/`                            | One card per list: ExecutionCard, NoteCard, ArtifactCard, PlaybookCard, DeletedWorkflowCard, AdminWorkflowCard, AuditLogCard, UserCard, TokenCard; pages only wire them |
@@ -226,14 +235,14 @@ Higher-level composable components in `src/components/`:
 | LabeledFilter         | `LabeledFilter.tsx`                 | Wrapper adding visible label above any filter control                                                                                                                   |
 | SortSelect            | `SortSelect.tsx`                    | Combined sort field+direction dropdown (e.g., "Created ↓")                                                                                                              |
 | SearchableSelect      | `SearchableSelect.tsx`              | Combobox with text search for dynamic option lists (absolute dropdown + cmdk)                                                                                           |
-| TopWorkflowsTable     | `TopWorkflowsTable.tsx`             | Shared DataTable for admin top workflows (AdminDashboard, AdminAnalytics)                                                                                               |
+| AnalyticsCard         | `admin/AnalyticsCard.tsx`           | Analytical section with an independent period button group, returned scope, local pending/error and retry                                                               |
 | ServerPagination      | `ServerPagination.tsx`              | Server-side pagination (total-based or cursor-based), matches DataTable style                                                                                           |
 | EmptyState            | `empty-state.tsx`                   | Centered icon + title + description + action CTA                                                                                                                        |
 | InlineError           | `inline-error.tsx`                  | Alert destructive with optional retry                                                                                                                                   |
 | PageLoader            | `page-loader.tsx`                   | Skeleton stat cards + table rows placeholder; only before a page's first data                                                                                           |
 | RouteSkeleton         | `route-skeleton.tsx`                | In-layout skeleton while a lazily loaded page's code arrives                                                                                                            |
 | DiagramSkeleton       | `route-skeleton.tsx`                | Quiet surface while the technical graph chunk arrives (flow and run pages)                                                                                              |
-| ConfirmDialog         | `confirm-dialog.tsx`                | AlertDialog wrapper with async onConfirm, loading state, ReactNode description                                                                                          |
+| ConfirmDialog         | `confirm-dialog.tsx`                | AlertDialog wrapper that awaits onConfirm, retains failed confirmations and accepts accessible error/form children                                                      |
 | RevisionHistoryDialog | `history/RevisionHistoryDialog.tsx` | Version history for anything the shared revision store versions; driven by a `RevisionHistorySource` (list, read revision, read current, restore); exports `DiffView`   |
 | VisibilityToggle      | `access/VisibilityToggle.tsx`       | A resource's visibility as a badge (read-only) or a button that flips it; used by the flow page and playbooks                                                           |
 
@@ -241,32 +250,41 @@ DataTable subcomponents: `column-header.tsx` (sortable headers), `pagination.tsx
 
 ServerPagination: used on pages with server-side pagination (Executions, Notes, Artifacts, AdminArtifacts, AdminExecutions, AdminTokens, DeletedWorkflows, UserManagement, AuditLog). Rendered outside the scroll container (sticky at bottom). With the opt-in `embedded` prop it renders instead as a static footer inside a card (top rule, wraps on narrow screens, no separate "page X of Y" counter); the Settings page's Active sessions and Connected apps lists use it that way. Supports total-based mode (shows page X of Y, first/prev/next/last) and cursor-based mode (prev/next only). Uses `common.pagination` i18n keys.
 
-`useListPageSize` hook (`hooks/useListPageSize.ts`): the page size of a card list — the list items, or the grid rows times the grid's columns, that fit the container, starting from `LIST_ITEM_HEIGHT` / `GRID_ROW_HEIGHT` and then sizing by the height of the items a view draws first, measured once per view so a later page's items never change the size and paging stays where the reader went; it follows a container that mounts after the list's loader and recomputes on resize. Returns `{ pageSize, containerRef, onViewModeChange }`; pass both to `DataListView`, and give the hook a callback that resets to page 1 when the size changes. Every `DataListView` page (the list pages above, AdminWorkflows, Playbooks and the flow list) uses it.
+`useListPageSize` hook (`hooks/useListPageSize.ts`): the page size of a card list — the list items, or the grid rows times the grid's columns, that fit the container, starting from `LIST_ITEM_HEIGHT` / `GRID_ROW_HEIGHT` and then sizing by the first valid item geometry. Every measured item must have a finite positive height; hidden retained cards and partially unmeasured sets do not settle the view. `ResizeObserver` retries when the box becomes visible. Measurement settles once per view, so a later page's items never change the row height and paging stays where the reader went; the hook follows a container that mounts after the list's loader and recomputes capacity on resize. Returns `{ pageSize, containerRef, onViewModeChange }`; pass both to `DataListView`, and give the hook a callback that resets to page 1 when the size changes. Every `DataListView` page (the list pages above, AdminWorkflows, Playbooks and the flow list) uses it.
 
-`useLatestRequest` hook (`hooks/useLatestRequest.ts`): `beginRequest()` marks a new request and returns `isCurrent()`, true only until the next request begins. While a list's page size settles, two list requests can be in flight and the older may answer last, so every list loader (each list page and `useWorkflowList`) begins its request with it, drops a response or an error whose request is no longer current, and clears `loading` only for the current request. `useResource` uses the same hook; a list loader keeps no counter of its own (`tests/unit/web-frontend/list-latest-request.test.ts`).
+`useLatestRequest` hook (`hooks/useLatestRequest.ts`): `beginRequest()` marks a new request and returns `isCurrent()`, true only until the next request begins. List loaders compose it directly or through `useResource`: an older success or error cannot replace the newer accepted query, and an older settlement cannot clear the current request's pending indicator. `useWorkflowList` uses the same guard. Consumer behavior is covered by `tests/unit/web-frontend/admin-deleted-reported-regions.test.tsx` and `list-retained-regions.test.tsx`; no page needs a second request counter.
 
 `useDynamicPageSize` hook (`hooks/useDynamicPageSize.ts`): the general measurement under it — page size from container height, a row height, and optional items per row, minimum rows and header overhead. Returns `{ pageSize, containerRef }`; ResizeObserver with 500ms debounce. No page calls it directly today; a paged table sized by its rows would.
 
 `useDebounce<T>` hook (`hooks/useDebounce.ts`): generic debounce for any value. Returns debounced value after specified delay (default 300ms). Used in Executions, Notes, AuditLog, AdminArtifacts, AdminTokens for search/filter inputs.
 
-Table page layout standard: all list pages use `h-full flex-col` layout with sticky pagination:
+Standard data-list pages compose `PageShell`, `FilterBar` and `DataListView`; settings, detail and
+process pages retain their specialized layouts. `CardShell` provides compact/grid and list cards.
+View mode persists via `storageKey`. Use `LabeledFilter` for visible filter labels rather than
+duplicating a toolbar.
 
-```tsx
-<div className="h-full flex flex-col p-6 md:p-8">
-  <PageHeader />
-  <div className="mb-6 flex flex-wrap gap-4 items-center">/* filters + view mode toggle */</div>
-  <div className="flex-1 min-h-0 overflow-auto" ref={containerRef}>
-    {/* Card list/grid or EmptyState */}
-  </div>
-  {data.length > 0 && <ServerPagination />}
-</div>
-```
+`DataRegion` requires `hasResult` and `pending`; optional props are `error`, `onRetry`, `resultScope`,
+`initialContent`, `retryLabel`, `testId`, `className` and `children`. An accepted empty response is a
+result. Pending and errors stay beside retained children with `aria-busy`; only a region with no
+accepted result uses the initial skeleton. Retry reads the affected source.
 
-All pages use `PageShell` for layout (title, description, loading/error states). `FilterBar` provides search and filters. `DataListView` provides ViewToggle (list/grid), card layout, ServerPagination, PageLoader, and EmptyState. Card components use `CardShell` with dual-mode rendering (compact/list) and accept `compact` prop for grid mode. View mode persisted in localStorage via `storageKey` prop.
+`DataListView<T>` requires `items`, `hasResult`, `renderCard(item, viewMode)`, `keyExtractor` and
+`storageKey`. It accepts `loading`, `error`, `onRetry`, `onRefresh`, `resultScope`, `pagination`
+(`total` | `cursor` | `none`), `containerRef`, `onViewModeChange`, toolbar and empty-state props.
+Its toolbar remains mounted in every data state. `loading` drives local feedback rather than
+returning a loader before the toolbar. Keep accepted items, total, query, page and size together,
+separate from requested controls; the scope caption and footer describe the accepted response.
+An empty out-of-range page reports zero displayed items and keeps first/previous navigation.
 
-`DataListView<T>` API: `items`, `renderCard(item, viewMode)`, `keyExtractor`, `storageKey`, `pagination` (discriminated union: `total` | `cursor` | `none`), `containerRef`, `emptyIcon`, `emptyTitle`.
+`PageShell.hasResult` is optional for compatibility; set it explicitly when its whole body owns
+retained data. With `hasResult=true`, loading/error keeps that body. Without it, loading/error
+selects the initial presentation. Place independently refreshed regions below a stable shell so
+one failure cannot discard other panels, filter focus or drafts. This partial-update principle
+applies throughout the Web UI, including user settings, detail pages and operational cards.
 
-Filter layout standard: all pages use `<div className="mb-6 flex flex-wrap gap-4 items-center">` — no Card wrappers, no Labels.
+`ConfirmDialog.onConfirm` must await the operation and reject failure. Render its refusal inside
+the `children` slot, not only behind the modal. The dialog then stays open with typed input for
+retry. Use `returnFocusRef` or `onReturnFocus` to restore focus to the initiating control on close.
 
 All shared components accept i18n label props for translatable strings — do not hardcode English text.
 
@@ -524,6 +542,39 @@ Each entry also says how a reader has it explained (`coverage`): `screen` names 
 `exempt` or `deferred` gives the reason it has none. The route-coverage check (see "Guides") holds
 the table and the guides to each other, so a new route cannot land without that decision.
 
+All route page modules load through `React.lazy`. `MainAppLayout` and `AdminLayout` keep their
+sidebar, guide provider and outlet Suspense boundary mounted while page code arrives. Standalone
+pages use the outer `RouteSkeleton` boundary. Form code has a separate local boundary:
+`LazyAuthView` loads `AuthForm` inside the existing `AuthLayout`, leaving the surrounding page and
+error display mounted. Global `AuthProvider` supplies errors, interception and Toaster without
+importing the form library; `AuthForm` supplies the installed `AuthUIProvider`, language,
+legal/social capability configuration and continuation callbacks with the same auth client.
+
+`ReadScopeBoundary` observes session/features without owning public form state. Private routes
+compose `PrivateReadScopeBoundary` with source admission in `ProtectedRoute`; authenticated
+standalone consent/completion/invite content uses its own private holding boundary. During
+observed authority uncertainty, private holdings are hidden and inert while same-owner drafts
+remain mounted. Confirmed account/backend replacement resets private state. Public sign-in
+operations stay outside that private key so their successful continuation can complete. Session
+failure offers retry rather than treating the held account as admitted; see
+[Authentication](AUTHENTICATION.md) for session observation and admission contracts.
+
+The existing Better Auth session broadcast channel carries credential-change notifications at
+dispatch and settlement, including a rejected transport. An accepted change of user/session ID
+also notifies peers, including the first observation after a full-page OAuth return. Ordinary
+same-session renewal and identical observations do not echo notifications. A receiving tab
+withholds private holdings until the installed provider's authoritative session check settles;
+arbitrary cookie writes are not an instantaneous synchronization mechanism.
+
+Automatic auth-error and password-reset cleanup uses `revokeObservedSession` with the originally
+observed session, rather than signing out whichever cookie is current at completion. The existing
+targeted revoke endpoint leaves cookies unchanged on success and API refusal. Ownership and
+mounted-operation guards reject late results and timers from a replaced account. Forced password
+reset still completes an owned auto-login after same-account renewal; a refused auto-login,
+including an HTTP error result, or missing email follows the owned Login fallback. Cleanup
+completion is not a claim that a failed revoke request succeeded. See
+[Authentication](AUTHENTICATION.md) for the authoritative cleanup and admission contract.
+
 Standalone routes:
 
 | Path                    | Guard     | Coverage                                                                      |
@@ -665,6 +716,10 @@ write path.
 
 Settings → Preferences lists every beginner panel with shown/hidden switches
 (`preferences-beginner-panels`, `beginner-panel-switch`); it is where a hidden panel comes back.
+Its data region distinguishes an accepted empty hidden-panel set from an unreadable setting.
+A failed read exposes retry rather than claiming all panels are enabled; a later refresh keeps
+accepted switches and does not discard independent preferences. The shared setting store exposes
+accepted, pending, error and refresh state alongside its optimistic value.
 
 ### Recommended flows
 
@@ -680,9 +735,10 @@ universal flows, when to pick it are interface text (`onboarding.*`). `preferred
 the learning examples open on the steps view.
 
 `RecommendedFlows` looks the slugs up once per page with `GET /api/workflows?slugs=…&visibility=public`,
-and offers only the system-owned flows the answer contains. A second mount, or the other page,
-reuses the lookup; a failed lookup is retried on the next mount. With nothing to offer, the section
-is not drawn.
+and offers only the system-owned flows the answer contains. The query names the current language's
+slugs with a finite limit. Overlapping identical reads share a request through the common API
+boundary; a later independent read checks the source again. There is no indefinitely retained
+module-level catalogue result. With nothing to offer, the section is not drawn.
 
 On the flow list the section is full and foldable (`recommended-toggle`, "Collapse" / "Expand"; the
 fold is remembered in `localStorage` under `moira.workflows.recommendedCollapsed`) and shows when to
@@ -724,7 +780,16 @@ One page at `/settings` whose sections are all always mounted. `Settings.tsx` do
 - Deep links: `/settings#<section-id>` scrolls to and briefly highlights the section once the page's
   data has loaded, and keeps it in place while content above it settles until the reader scrolls,
   types or clicks (`useSectionHighlight`, built on `useHighlightTarget`).
-- A failed load shows an alert with Retry; each section shows skeletons while its data loads.
+- Profile, settings definitions/values and notification descriptors have independent data regions.
+  An initial read shows its region's skeleton; later pending/error states retain accepted content
+  and a local retry without removing other sections, navigation or drafts.
+
+The profile resource owns accepted facts. A confirmed profile/handle readback publishes through
+`useResource.update`, superseding older GET replies. Untouched name/handle fields adopt fresh
+accepted values; unrelated dirty fields and edits made after submission remain. During same-owner
+access uncertainty, accepted profile props stay mounted behind the existing concealed private
+boundary; confirmed owner replacement clears them. A refused handle change keeps its confirmation
+and typed handle open, with the normalized string or API error message inside the accessible modal.
 
 **Sections** (each a `SettingsSection`: icon, heading, one-sentence description, optional
 `HelpPopover` and actions; the anchor is the section `id`):
@@ -777,7 +842,8 @@ execution inspector) receive `null` for a user that no longer exists and show th
   dialog with name and expiration (30d/90d/365d/never); a one-time token display with copy and
   warning; revoke through `ConfirmDialog` (variant="destructive").
 - GitHub & Codespaces: `GitHubCodespacesProvider` loads the connection view and the codespace view
-  (repositories and `limits`) together and reloads what a change can affect. The connection card
+  (repositories and `limits`) independently and reloads what a change can affect. Local pending,
+  failure and retry retain the other view and form drafts. The connection card
   shows the `GitHubSetupSteps` stepper (connect GitHub, install the Moira App, grant repositories;
   each done, current, not started or unavailable on this instance). The App can be installed on the
   connected user's account or an organization, but Codespace creation requires GitHub to bill the
@@ -838,6 +904,12 @@ global/provider kill switches with a reason field and confirmed stop/resume.
 - `collapsible={true}` (default): Collapsible groups with ChevronDown toggle — used by AdminSettings
 - `collapsible={false}`: Flat Card rendering without Collapsible wrapper — used by Settings page
 
+Generic setting rows keep the full label, help, inheritance badge and actions inside their card.
+On narrow screens actions move below the metadata and wrap; wider screens retain the side-by-side
+layout. Descriptions wrap and storage keys can break without truncating their content. A pending
+save disables its Save action while the input remains editable. Successful completion clears only
+the submitted draft: a newer edit to that same field stays dirty for the next save.
+
 **Implementation:** Settings.tsx → ProfileSettings.tsx, SecuritySettings.tsx, SessionsSettings.tsx,
 GitHubCodespacesData.tsx, GitHubCodespaceSettings.tsx, GitHubCodespaceManagement.tsx,
 CodespaceAutoPause.tsx, CodespaceLimitsPanel.tsx, OAuthSettings.tsx, ApiTokensSettings.tsx,
@@ -850,7 +922,7 @@ PreferencesSettings.tsx
 - Saves one edited dynamic value through bulk PUT /api/settings and applies the returned saved/refused result
 - Tests one channel through POST /api/notifications/channels/:channelId/test with no request body
 - Updates profile via PATCH /api/user/profile
-- Reads the account's sign-in methods via Better Auth `listAccounts` (a `credential` account means it has a password; on failure the page assumes it does)
+- Reads the account's sign-in methods via Better Auth `listAccounts` (a `credential` account means it has a password); an unreadable result remains unknown with retry rather than being treated as a password account
 - Changes password via POST /api/user/change-password, or sets a first password for a social-only account via POST /api/user/set-password; refusals are shown by their `reason` code (`CURRENT_PASSWORD_INCORRECT`, `PASSWORD_ALREADY_SET`, `SESSION_NOT_FRESH`)
 - Resends verification via POST /api/user/resend-verification
 - OAuth consents via GET/DELETE /api/user/oauth-consents
@@ -906,11 +978,15 @@ own runs from `GET /api/executions/overview`, 50 trees a page, runs waiting for 
   notification line (`waitingNotificationText`, shared with the run page), the current step, refusals,
   the active block's list through `BlockListCard` and all stages from `GET /api/executions/:id/progress`,
   child runs, dates and **Open run**. No answer form.
-- **Live updates** (`liveConnection.ts`, `useLiveOverview.ts`, `useOverviewRows.ts`): one tab per
-  browser leads through Web Locks (`moira-overview-stream`) and holds the `EventSource` on
-  `/api/executions/overview/stream`; the others receive changes and the connection state over the
-  `BroadcastChannel` `moira-overview`, which also carries the stream's position from `ready`, so the
-  next leader resumes from it. Every change refetches the ordered, filtered page: activity and
+- **Live updates** (`liveConnection.ts`, `useLiveOverview.ts`, `useOverviewRows.ts`): one tab leads
+  among browser tabs using the same backend and account. The Web Lock `moira-overview-stream:<scope>`
+  and `BroadcastChannel` `moira-overview:<scope>` use the public backend/account scope from
+  `getReadOwner()`, without session credentials; different backends or accounts coordinate separately.
+  The leader holds the `EventSource` on `/api/executions/overview/stream`; the other tabs in its scope
+  receive changes, the connection state and the stream's position from `ready`, so the next leader
+  resumes from it. A changed or suspended read identity retires the former connection's callbacks
+  and closes that connection; the hook rejoins only with an accepted read identity.
+  Every change refetches the ordered, filtered page: activity and
   metadata can change order, search membership, or parent grouping even when the changed run
   is outside the current page. Bursts coalesce into one refresh after 700 ms; continuous changes
   cannot postpone it indefinitely. Only one page request runs at a time. Events arriving while
@@ -935,19 +1011,20 @@ Execution history at `/executions` with filtering, sorting, and pagination.
 
 **Filter Controls:**
 
-- Search input: Filter by note (300ms debounce)
+- Search input: Substring search in execution ID, workflow ID or note (300ms debounce)
 - Status dropdown: All statuses, Active (running), Locked, Completed, Failed, Waiting
 - Workflow dropdown: Filter by specific workflow (dynamically loaded)
 - Sort by: Created date or Updated date
 - Sort order: Newest first or Oldest first
 
-**Table Columns:**
+**Cards:**
 
-- Execution ID (truncated to 8 chars)
-- Workflow (displays workflow name from API; falls back to truncated UUID if workflow deleted)
-- Status (color-coded) with error count badge
-- Created date
-- Updated date
+- `ExecutionCard` fills `CardShell` slots in list and grid views: flow name (workflow ID when no
+  name remains), task note, translated state, active-lock and refusal badges.
+- The meta line shows a recorded creation time, the last accepted step, owner where supplied and
+  the short execution ID. A missing creation timestamp is omitted; epoch zero is a valid date.
+- `lastStepAt` comes from an accepted step audit record, not `updatedAt`. A note edit does not move
+  it; absent step history reads as unknown in the interface language.
 
 **Error Display:**
 
@@ -956,7 +1033,7 @@ Execution history at `/executions` with filtering, sorting, and pagination.
 
 **Pagination:**
 
-- 20 items per page
+- Page size follows `useListPageSize` and the selected list/grid view
 - Previous/Next buttons with disabled states
 - Page indicator (X / Y)
 - Results count display
@@ -1000,6 +1077,13 @@ notes disappear, and the map reads its guidance from `pages.flowPage.modeGuide`.
 carries where each current problem sits, so a block, a step and a connection show their own, and
 the registry panel edits a whole declaration as JSON Schema besides its type, description and
 default.
+
+Diagram consumers share the engine's `loadLayoutEngine` constructor loader. An explicit map/graph
+selection starts its code acquisition alongside detail data; an already known map also warms
+that constructor. A mounted diagram steps view acquires it for its layout, while the large-flow
+reading list needs no layout engine. This does not prefetch diagram code from ordinary list or
+authentication pages. Layout calls create their own engine instances and keep the existing geometry;
+a failed warmup does not become a retained rejected promise that prevents the actual layout retry.
 
 **URL state:**
 
@@ -1260,6 +1344,12 @@ block panel, editable variable list for the Variables panel) and the run project
 route, the variables — comes from the projection; the page derives none of it. When a route cursor
 is set the page keeps the whole-run projection (for the scrubber) and fetches the projection at
 the cursor for the views.
+
+Mounting run detail starts the shared layout constructor import alongside execution data, before
+the workflow request completes. Map, technical graph and diagram steps layouts reuse that loader;
+loading its module does not perform a layout or share a mutable engine instance. Graph presentation
+has its own `DiagramSkeleton` boundary when first selected; header and panel state remain owned
+by the page.
 
 **URL state:** `view` (`map | graph`, default map, registry `components/run/modes.ts`; any other
 value resolves to `map`), `block` (selected block), `at` (route cursor, a visit sequence number),
@@ -1575,7 +1665,7 @@ User artifact management at `/artifacts`.
 - Create dialog (name + HTML textarea)
 - Quota indicator showing storage usage
 
-**Table Columns:**
+**Card fields:**
 
 - Name
 - Size (formatted: B/KB/MB)
@@ -1609,9 +1699,99 @@ User artifact management at `/artifacts`.
 - Deletes artifact via DELETE /api/artifacts/:uuid
 - Gets stats via GET /api/artifacts/stats
 
+### Administrator overview and user inventory
+
+`/admin` renders `AdminDashboard` through `PageShell`. Installation-wide user analytics is gated
+by `adminAnalytics`; the deployment-neutral system-status request remains available without that
+capability. The default self-host view keeps health and maintenance, not broad analytics requests.
+`/admin/analytics` redirects to this page.
+
+`components/admin/AdminOverview.tsx` composes independent `AnalyticsCard` resources:
+
+| Card                   | Period buttons     | Initial period | Data                                                                            |
+| ---------------------- | ------------------ | -------------- | ------------------------------------------------------------------------------- |
+| Recently active people | 15m, 30m, hour     | 30m            | Recorded activity, accepted step, current running work                          |
+| Needs attention        | hour, day, week    | week           | Active lock, refusal, or input wait with a recorded step over an hour old       |
+| Popular flows          | today, week, month | month          | Runs, distinct participants, top users, last run and successful completion rate |
+| Registrations          | today, week, month | week           | Accounts created in the interval with independently recorded activity           |
+| Analytics              | today, week, month | month          | Started runs, completed/failed/successful runs, owners and UTC daily history    |
+
+The card requests six rows where its endpoint is paged. Periods are independent page state; they
+reset when the overview remounts. Each request key includes the signed-in account, period and
+exclusion mode/IDs. The header's loaded scope, excluded count and observation time use the server
+response, so pending or failed requests do not relabel retained data. Buttons and neighboring cards
+remain mounted while one resource loads. The first-load `PageLoader` sits in that card's content;
+it is the shared dashboard-shaped skeleton, not a compact card-specific loader. A refresh with
+data shows a local accessible updating status; `InlineError` retries only the failed resource.
+
+Activity is recorded audit action or observed provider renewal of an unexpired session, excluding
+registration and blocked sign-in. Renewal is recorded in `session.refreshedAt`; initial and
+historical creation/update stamps do not prove it, and no renewal time is backfilled. Without an
+observed renewal or recorded action, activity stays unknown. It is coarse recent activity rather
+than a precise online status. A person's
+current running work is independent of when the run started. Included-account/owned-flow counts
+are lifetime inventory; execution counts and distinct run owners use the selected start interval.
+Success rate counts successful completions among completions; degradation is not failure. For the
+wire fields, bounds and definitions, see `docs/API.md` → **Admin Analytics API**.
+
+`AnalyticsExclusionsControl` uses the existing dialog, buttons, checkbox and `FilterBar` primitives.
+The default policy excludes all current administrators. Custom mode selects at most 100 accounts;
+**Include everyone** is an explicit empty custom selection. Search pages existing user choices
+rather than taking the first page as the complete inventory; selected names are restored
+through an exact bounded ID lookup. While a search loads, only its result region is replaced;
+mode buttons, search and selected chips remain. The choice is saved in this browser under
+`moira:analytics-exclusions:<account id>`; it is not a server setting synchronized across browsers.
+Invalid stored values use default mode, and a failed storage write shows a persistence warning
+while retaining the in-memory choice.
+
+These selectors use `apiClient.getAdminUserChoices`, the same `/api/admin/users` endpoint with
+`projection=lookup`. Its paged rows contain only ID, email, nullable name and administrator role.
+The execution/workflow user filters use the same projection; `getAdminUsers` retains the enriched
+management inventory. Conditional revalidation of choices remains scoped to the requesting
+administrator and checks current authorization before a retained representation can return.
+
+The overview and operational/business charts render the returned `AnalyticsSeriesWindow`
+metadata through `AnalyticsSeriesNotice` when the series is limited. Individual series carry the
+latest observed UTC buckets in ascending order without adding missing buckets. Workflow and rate
+comparisons merge their dates but respect each series's own window: an absent point before a
+limited `firstDate` is `null` (unknown), not zero. Received values, including zero, stay unchanged;
+an absent point in covered history or an unlimited series is zero. If a limited window has no
+starting bound, unmatched points remain unknown; without limiting metadata, comparison gaps keep
+their ordinary zero filling. Area/line charts preserve the null gap, and it supplies no numerical
+tooltip value. The notice
+identifies the displayed count, full bucket count and actual bounds. Scalar totals still cover
+the complete selected period. In the operational business section, an unavailable all-period
+returning-user comparison and an unknown first-execution delay render as a dash, distinct from
+a known zero. Available operational metrics keep their own series/granularity and unavailable
+metrics keep their existing independent state; system metrics do not inherit user exclusions.
+
+Person/attention rows open permitted account/run details. Their labels and the full-management
+links explicitly distinguish that scope from analytics: exclusions never hide accounts, runs or
+flows in management. System state and system events are also installation-wide. An undated system
+event stays in the list with a dash for its time; epoch zero renders as a recorded date through the
+shared localized formatter. Compact health
+shows backend/database/definitions/reconciliation; an unhealthy reconciliation retains conflict
+identity, classification, candidate references and instructions. Maintenance retains Settings,
+Deleted Workflows and confirmed logout-all where their named capabilities allow them.
+
+`/admin/users` uses `UserManagement`, `FilterBar`, `DataListView` and `UserCard`. Besides approval,
+verification and block state, rows show lifetime run count, up to three most-used flows, and
+recorded last activity. Registration remains a separate date. Workflow counts are the account's
+own non-deleted public/private workflows, not the public catalog it can read. The list retains the
+complete management inventory independently of the overview's exclusions.
+
+Requested filters remain separate from accepted rows/count/page. A confirmed approval patches the
+returned approval timestamp, supersedes an older list read and refreshes the currently requested
+query. Late replies and global feedback cannot act for a departed or uncertain private authority.
+
 ### Admin User Detail Page
 
 Admin user management at `/admin/users/:id` with security controls.
+
+Main profile, security activity, sessions, OAuth information and artifact quota use independent
+regions. Local refresh/failure retains accepted data, controls and unrelated form edits. Confirmed
+actions update their affected facts and refresh their actual dependencies; force-reset refreshes
+sessions as well as security status. Quota readback must not overwrite an edit made after Save.
 
 **User Information:**
 
@@ -1679,9 +1859,9 @@ Admin artifact management at `/admin/artifacts`.
 - Include deleted checkbox
 - Clear filters button
 
-**Table Columns:**
+**Card fields:**
 
-- User (email with link to user detail)
+- Owner display, or an unknown-owner label when the account no longer exists
 - Artifact name
 - Size (formatted)
 - Created date
@@ -1696,7 +1876,7 @@ Admin artifact management at `/admin/artifacts`.
 
 **Pagination:**
 
-- Limit selector (10/20/50)
+- List/grid cards sized by `useListPageSize`, with the accepted response's page and count
 - Previous/next navigation
 - Total results count
 
@@ -1808,7 +1988,9 @@ Playbooks at `/playbooks`: named, reusable behaviour text a workflow node refere
   reference a node would use (`{{playbook:name}}`)
 - Live-runs warning (`playbook-live-runs-warning`): the editor asks
   `GET /api/playbooks/:name/usage` and, before the change is saved, says how many running processes
-  read this playbook; `complete: false` adds that more may be affected
+  read this playbook; `complete: false` adds that more may be affected. Counts include all active
+  executions for each inspected definition; the inspection bound applies to distinct workflow
+  definitions rather than a sampled execution page
 - History via the shared `RevisionHistoryDialog` (`history-playbook-<name>`), restore as a new
   revision; delete via `ConfirmDialog`
 - Test ids: `create-playbook-button`, `new-playbook-card`, `playbook-card-<name>`,
@@ -1825,9 +2007,9 @@ published one is shown read-only above the list (`linked-playbook`), and an unre
 reported (`linked-playbook-missing`). Closing the slot, or starting to edit another playbook
 from the list, clears the `name`/`owner` parameters and returns the page to the plain list.
 
-### Admin Notes Page
+### Notes Page
 
-Notes management at `/admin/notes` for persistent agent memory.
+Notes management at `/notes` for persistent agent memory.
 
 **Features:**
 
@@ -1841,8 +2023,8 @@ Notes management at `/admin/notes` for persistent agent memory.
 
 - Search by note key or content
 - Tag filter dropdown (all tags from existing notes)
-- Table columns: Key, Tags, Size, Updated, Created, Actions
-- Pagination with configurable page size
+- `NoteCard` fields: key, text preview, tags, size, version, last update and actions
+- List/grid pagination sized by `useListPageSize`; accepted list scope remains distinct from requested search/tag controls
 
 **Persistent New Note Card:**
 
@@ -1856,6 +2038,9 @@ Notes management at `/admin/notes` for persistent agent memory.
 - Create mode: renders above the list with key input field
 - Edit mode: replaces card in DataListView, key shown as read-only
 - Content textarea with markdown preview toggle
+- The editor module loads when a create/edit card opens. Markdown presentation loads only when
+  preview is selected; its local Skeleton leaves the key, tags, save/cancel controls and draft
+  mounted. Returning to editing preserves the unsaved text.
 - Tag editor with autocomplete from existing tags
 - Size indicator with progress bar (100KB limit)
 - Save via button or Ctrl+Enter, cancel via button or Escape
@@ -1872,6 +2057,10 @@ Notes management at `/admin/notes` for persistent agent memory.
 restore) to the shared `RevisionHistoryDialog`; the dialog itself is the same one playbooks and
 global settings use.
 
+Consumers open it through `LazyRevisionHistoryDialog`, which renders the existing Dialog and a
+local Skeleton while the shared history/diff presentation arrives. Closing before arrival does
+not require the rest of the page to wait.
+
 - Split-pane dialog: version list (left), content panel (right); stacks on a narrow screen
 - Right panel tabs: Content (the selected version), Side by side (selected beside current) and
   Diff (line-by-line via the shared `DiffView`)
@@ -1884,7 +2073,7 @@ global settings use.
 - Progress bar visualization
 - Warning state when approaching limit
 
-**Implementation:** AdminNotesPage.tsx
+**Implementation:** `pages/Notes.tsx`
 
 - Lists notes via GET /api/notes
 - Creates note via POST /api/notes
@@ -1892,6 +2081,22 @@ global settings use.
 - Deletes note via DELETE /api/notes/:key
 - Gets versions via GET /api/notes/:key/versions
 - Restores version via POST /api/notes/:key/restore
+
+### Unified Administrator Settings
+
+`/admin/settings?tab=definitions|values|maintenance|codespaces` uses `SettingsNav` and one stable
+header. Definitions is the default; `/admin/global-settings` selects Values unless an explicit
+`tab` overrides it. Selection preserves other query parameters. The administrator caller supplies
+query links and `admin-settings-nav` test identities; `SettingsNav` writes no history and supplies
+no user-settings guide. User settings separately own their `#section` links, scrolling and
+`settings.nav` guide anchor.
+
+Visited administrator sections remain mounted and hidden while another section is selected.
+Returning to a source-backed section refreshes its data without discarding dirty editors. Each
+definition/value/prompt/codespace region owns its initial loader, retained result, error and retry.
+Prompt scopes retain their own drafts and reject late answers for another selection. Maintenance
+still offers confirmed vacuum and a real database-backup download; definition schema import/export,
+value import/export/history and codespace availability controls retain their separate operations.
 
 ### System Settings Page
 
@@ -1939,6 +2144,7 @@ Supports `embedded` prop for rendering without header inside `AdminSettingsUnifi
 **Categories:**
 
 - MCP prompts (system prompt and system reminder, including agent/model overrides)
+- System configuration, including registration notifications
 - Messages & Validation (error messages, validation help)
 
 **Features:**
@@ -1977,12 +2183,42 @@ Supports `embedded` prop for rendering without header inside `AdminSettingsUnifi
 
 **Implementation:** AdminSettings.tsx with SettingsEditor component
 
+Global values use a `string | null` wire representation. The shared
+`components/settings/global-setting-value.ts` adapter gives `SettingsEditor` typed values: null
+stays unset, boolean `"true"`/`"1"` becomes true (other strings false), and number strings become
+numbers while an empty string remains empty. Saving maps null/undefined to null and other values
+to strings, including false to `"false"`. Do not use truthiness to lose an explicit false or unset
+value. Confirmed saves and resets refresh accepted source values while preserving unrelated dirty
+fields; failures remain local with retry.
+
+Generic built-in global definitions use `localizeSettingDefinition` for their label, description
+and help, with the same server-text fallback as user settings. The registration preference
+`system.notify_admins_on_registration` is a global boolean under System configuration, enabled by
+default. Its checkbox **Notify administrators of new registrations** uses the existing typed
+editor, save and history actions; explicit false persists as `"false"` after reopening.
+
+When enabled, a successfully created email/OAuth account initiates Telegram notification delivery
+to admitted administrators with a ready personal Telegram channel. Each recipient configures
+`telegram.bot_token`, `telegram.chat_id` and `telegram.enabled` in **Settings → Notifications**;
+the global preference adds no credentials to the administrator editor. Turning it off affects
+registration messages without changing personal notification settings. Existing-user login,
+provider linking and failed registrations do not notify. The plain message includes the new
+account's name, email, registration time and app-prefix-aware administrator detail link.
+
+Delivery runs outside the registration response and is best-effort. One recipient's refusal does
+not block others or fail registration. Provider failure, timeout or process interruption can leave
+delivery unknown; no automatic replay or durable queue is promised. See
+[Authentication](AUTHENTICATION.md) for the successful-registration boundary and
+[Telegram setup](../packages/mcp-server/src/help/content/integration/telegram-setup.md) for recipient configuration.
+The personal Telegram setup tour keeps its bot/chat/channel/test controls; administrator settings
+retain their declared deferred tour coverage and do not reuse those user anchors.
+
 - Loads settings via GET /api/admin/global-settings
 - Updates settings via PUT /api/admin/global-settings/:key
 - Export via GET /api/admin/global-settings/export
 - Categories sorted by predefined order (mcp, system, messages)
 - Settings within category sorted by sortOrder
-- History via GET /api/admin/audit-log with filters
+- Generic value history uses the revision endpoints above; MCP prompts retain their scoped inline history. Audit-log events record operations separately.
 
 ## API Endpoints
 
@@ -2170,7 +2406,7 @@ Deployment-specific UI is selected by named capabilities:
 
 | Flag                    | UI gated                                                                                                     |
 | ----------------------- | ------------------------------------------------------------------------------------------------------------ |
-| `legalConsents`         | Registration terms + residency consent checkboxes (`AuthProvider`)                                           |
+| `legalConsents`         | Registration terms + residency consent checkboxes (`AuthForm`)                                               |
 | `betaNotices`           | `BetaAgreementModal` + `BetaWarningBanner` (`useBetaAgreement`)                                              |
 | `userManagement`        | Users list and user detail                                                                                   |
 | `multiUserAdmin`        | Executions, Workflows, Artifacts, Reported Artifacts, Deleted Workflows, logout-all, and related quick links |
@@ -2328,13 +2564,51 @@ useResource<T>(key: string | null, fetcher: (key: string) => Promise<T>, describ
   pending: boolean;         // a fetch is in flight (first load or refetch)
   error: string | null;     // last failure, cleared by the next success; `data` is kept
   refresh: () => Promise<void>;
+  update: (transform: (previous: T) => T) => void;
 }
 ```
 
-Fetches when `key` changes and on `refresh()`; a response from an older request that resolves
+Fetches when `key` changes, on read-scope changes and on `refresh()`; a response from an older request that resolves
 after a newer one is dropped; a `null` key clears the value. A page shows its full-page loader only
 while `data` is undefined and `pending` is true; every later fetch renders the previous value with
 a local pending indicator. The fetcher is read through a ref, so it may close over page state.
+
+`update(transform)` publishes a confirmed change only to the currently accepted key/owner and
+supersedes an older read. It does nothing before an initial result, for a changed key/owner, or
+while private authority is suspended. Keep drafts separate from these accepted source facts.
+
+Apply the Design System's **Loading and partial updates** contract at each resource boundary.
+Loaded empty data is distinct from no result. Pending/error/retry belongs to the affected region;
+frame, tabs, controls, focus and unsaved values stay. The held result's `dataKey` or returned scope
+must distinguish it from a new selection, and a changed account/resource must not display another
+identity's private data as current.
+
+Read ownership is separate from the page's query key: account/backend replacement clears
+incompatible held data; observed session uncertainty withholds private results without claiming
+they are current. The private boundary preserves same-owner drafts while access is revalidated.
+Credential/capability changes retire old reads, but do not remount ordinary same-account drafts.
+`refresh()` retires shared retained representations and in-flight work before reading again.
+
+### Shared safe-read boundary
+
+`services/api-client.ts` composes `ConditionalReadStore` with `read-scope.ts`. Opted-in readers use
+the complete observed identity (backend, account, authority version and capabilities) plus the
+normalized URL/query. Identical overlapping reads share a flight. Every later independent read
+checks HTTP source; this is not a cache hit that skips the server for a TTL.
+
+Notes, playbooks, node types and the administrator's compact user lookup may send `If-None-Match`.
+A successful 304 restores only that key's matching retained response wrapper. Retention has
+finite entry, age and representation-size bounds; an expired or oversized representation requires
+a full source read. Workflow lists still read source with 200 because their scan observation is
+dynamic. Detail/context, secrets, tokens, sessions, admission decisions and volatile analytics
+remain outside stable representation retention.
+
+Mutation request/settlement, including partial or failed effects, retires the generation. Raw
+product effects use the same retirement primitive. A retired answer cannot publish: the API
+boundary repeats a source read only when the original full read identity still equals the live
+identity, joining any matching current flight. Changed owner, credentials or capabilities reject
+that replay; HTTP/network failures are not converted into unconditional retries. External MCP or
+database changes are discovered by the next source check, without client polling or an event bus.
 
 ### Workflow Data Hook
 
@@ -2372,6 +2646,14 @@ useWorkflowList(): {
 - **shadcn/ui**: Component library with Radix UI primitives
 - **Semantic tokens**: bg-card, text-foreground, bg-muted, border-border for automatic dark mode
 - **Theme switching**: ThemeProvider with system/light/dark modes, localStorage persistence
+
+Tremor series use `CHART_COLORS` from `lib/chart-colors.ts` in operational time/comparison/top-flow
+charts and `StatCard` sparklines. These semantic names (`chart-1` through `chart-5`) resolve to the
+existing live `--chart-*` variables. `globals.css` generates only the finite vendor-constructed
+stroke/fill/text/background utilities with `@source inline`; it does not scan the whole vendor or
+redefine the built-in color palette. Tremor content/emphasis/border/background aliases in
+`@theme inline` resolve to muted foreground, foreground, border and card respectively in both
+themes. Custom tooltip markers resolve the supplied semantic name as `var(--chart-*)`.
 
 ```typescript
 // Theme provider hook
@@ -2442,7 +2724,7 @@ Avoid hardcoded colors:
 - **aria-labels**: Required on all icon-only buttons (e.g., delete, clear, close)
 - **aria-live regions**: `assertive` on error displays (AuthErrorDisplay, ErrorBoundary), `polite` on loading states
 - **Keyboard navigation**: All interactive elements reachable via Tab/Enter/Space/Escape
-- **Code splitting**: Heavy pages use `React.lazy()`; the Suspense boundary sits inside
+- **Code splitting**: Route pages use `React.lazy()`; the Suspense boundary sits inside
   `MainAppLayout` and `AdminLayout` around the outlet with `RouteSkeleton` as the fallback, so the
   sidebar stays while a page's code arrives (an in-app navigation is a router transition and keeps
   the current page until the next one can render; the skeleton shows on a direct load). The outer
@@ -2530,10 +2812,15 @@ src/
 ├── i18n.ts              # i18n configuration
 └── locales/
     ├── en.json          # English translations (default)
-    └── ru.json          # Russian translations
+    ├── ru.json          # Russian translations
+    ├── admin-overview.en.json # Admin overview and shared activity wording
+    └── admin-overview.ru.json # Matching Russian keys
 ```
 
 ### Translation Namespaces
+
+`i18n.ts` merges the localized admin overview modules under `adminOverview`. Shared user/run cards
+read the same last-activity, last-step, unknown-time and run-count words from that namespace.
 
 ```json
 // locales/en.json structure
@@ -2745,25 +3032,21 @@ root.render(
 
 ```typescript
 // App.tsx
-const App: React.FC = () => {
-  const { selectedFolder, selectedWorkflow, selectWorkflow } = useWorkflowApp();
-  const [sidebarOpen, setSidebarOpen] = useState(true);
-  const [backendConnected, setBackendConnected] = useState(false);
-
-  return (
-    <Layout
-      header={<AppHeader backendConnected={backendConnected} />}
-      footer={<AppFooter />}
-      sidebar={<WorkflowExplorer onWorkflowSelect={handleWorkflowSelect} />}
-      sidebarOpen={sidebarOpen}
-    >
-      <WorkflowViewerPlaceholder
-        debugSelectedFolder={selectedFolder}
-        debugSelectedWorkflow={selectedWorkflow}
-      />
-    </Layout>
-  );
-};
+// Provider composition; App.tsx fills Routes from routes/routeTable.ts.
+<Suspense fallback={<RouteSkeleton />}>
+  <BrowserRouter>
+    <ThemeProvider>
+      <HintLayer />
+      <FeaturesProvider>
+        <AuthProvider>
+          <ReadScopeBoundary>
+            <Routes>{/* standalone routes and protected main/admin layouts */}</Routes>
+          </ReadScopeBoundary>
+        </AuthProvider>
+      </FeaturesProvider>
+    </ThemeProvider>
+  </BrowserRouter>
+</Suspense>;
 ```
 
 ## API Client Configuration
@@ -2777,7 +3060,7 @@ export class MoiraApiClient {
 
   constructor(baseURL: string = "") {
     this.client = axios.create({
-      baseURL,
+      baseURL: `${baseURL}/api`,
       timeout: 30000,
       headers: { "Content-Type": "application/json" },
     });
@@ -2832,6 +3115,20 @@ renderer, node registry or dagre layout module: every page draws the graph descr
 // Frontend is built as static files and served by nginx in Docker
 // API requests use same-origin (empty base URL), proxied by nginx to backend
 ```
+
+`optimization.splitChunks.chunks = "all"` uses webpack's consumer-based groups without a fixed
+vendor name that would combine route-only libraries into entry code. Route modules, form UI,
+Markdown, shared revision/diff presentation, charts and ELK load with their actual consumers;
+shared providers/layouts remain entry dependencies. Auth UI styling remains in the common CSS.
+`APP_BASE_PATH` selects root assets (`/`) or hosted assets (`/app/`) consistently with routes.
+Production emits hidden source maps for error analysis; they are not served as browser maps.
+
+When checking a baked bundle, take initial scripts from its generated HTML and inspect their
+corresponding map sources, then confirm feature requests at the mounted consumer. Numeric chunk
+names alone do not distinguish entry assets from deferred assets. Compare cold direct entry,
+first SPA navigation and warm return on the same data, order and viewport, using populated
+page/settled-diagram readiness rather than network idle. Record transferred bytes and actual source
+reads as well as readiness; a smaller entry does not promise universally faster warm navigation.
 
 ## Animations
 
@@ -2922,7 +3219,14 @@ frontend/
 
 ### Adding a New Data List Page
 
-1. Create page component using `PageShell` for loading/error/title:
+Keep `PageShell` and `FilterBar` mounted while the list resource updates. In this rendering
+fragment, `resource` is the page's `useResource` result; `items`, `currentPage`, `totalPages`,
+`totalItems` and `pageSize` describe its held successful response, not the request currently in
+flight. `heldScopeLabel` is localized page text describing that response's filters and page,
+derived from `resource.dataKey` or the endpoint's returned scope. It remains visible while a
+different selection loads or fails.
+Use `useListPageSize` for `containerRef` and `onViewModeChange`, and reset the requested page when
+the search or measured size changes.
 
 ```tsx
 import { PageShell } from "../components/PageShell";
@@ -2930,16 +3234,26 @@ import { DataListView } from "../components/DataListView";
 import { FilterBar } from "../components/FilterBar";
 
 export const MyPage: React.FC = () => {
-  if (loading) return <PageShell title="My Page" loading />;
-  if (error) return <PageShell title="My Page" error={error} onRetry={reload} />;
+  // Page-specific resource, filters and pagination wiring precedes this fragment.
+  const hasResult = resource.data !== undefined;
 
   return (
-    <PageShell title="My Page">
+    <PageShell title={t("pages.myPage.title")}>
       <FilterBar search={search} onSearchChange={setSearch} />
       <DataListView
         items={items}
-        renderCard={(item, viewMode) => <MyCard item={item} compact={viewMode === "grid"} />}
+        hasResult={hasResult}
+        loading={resource.pending}
+        error={resource.error}
+        onRetry={resource.refresh}
+        onRefresh={resource.refresh}
+        resultScope={heldScopeLabel}
+        renderCard={(item, viewMode) => <MyCard data={item} compact={viewMode === "grid"} />}
         keyExtractor={(item) => item.id}
+        storageKey="my-page-view-mode"
+        containerRef={containerRef}
+        onViewModeChange={onViewModeChange}
+        className="flex-1 min-h-0 flex flex-col"
         pagination={{
           mode: "total",
           currentPage,
@@ -2953,6 +3267,15 @@ export const MyPage: React.FC = () => {
   );
 };
 ```
+
+An empty successful response still sets `hasResult`, so its list, empty state and view toggle stay
+mounted on refresh and failure. `DataListView.loading` preserves the accepted body
+even when no rows exist: its `DataRegion` owns the local pending/error presentation and the
+toolbar remains available. Before the first successful response, the body shows its loader or
+retryable error without claiming an empty result. Register page-specific translation keys in both languages.
+For a toured page, pass its declared `guideAnchor` values through the existing `guide` props of
+`PageShell`, `FilterBar` and `DataListView`. Remount or hide the held resource when the account or
+private resource identity changes; retaining a filter result must not expose another identity's data.
 
 ### Adding a New Card Component
 

@@ -12,7 +12,6 @@ import fs from "fs";
 import path from "path";
 
 const SRC = path.join(process.cwd(), "packages/web-frontend/src");
-const SHARED = "history/RevisionHistoryDialog";
 
 const CONSUMERS = {
   notes: "components/notes/NoteHistoryDialog.tsx",
@@ -30,9 +29,17 @@ describe("shared revision history", () => {
     (_consumer, file) => {
       const source = read(file);
       expect(source).toContain("RevisionHistoryDialog");
-      expect(source).toMatch(new RegExp(`from "[^"]*${SHARED}"`));
+      // A consumer may defer the same interface through its lazy presentation wrapper.
+      expect(source).toMatch(/from "[^"]*history\/(?:Lazy)?RevisionHistoryDialog"/);
     },
   );
+
+  test("deferred history still loads the common history implementation", () => {
+    const source = read("components/history/LazyRevisionHistoryDialog.tsx");
+    expect(source).toMatch(/import\("\.\/RevisionHistoryDialog"\)/);
+    expect(source).not.toContain("diffLines");
+    expect(source).not.toContain('data-testid="version-content"');
+  });
 
   test("no consumer keeps its own version list, diff or restore dialog", () => {
     for (const file of Object.values(CONSUMERS)) {

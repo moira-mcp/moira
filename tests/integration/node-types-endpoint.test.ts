@@ -90,10 +90,16 @@ describe("GET /api/node-types over the real route", () => {
     expect(JSON.stringify(response.body)).not.toContain("catalog-probe.token");
   });
 
-  test("without a live registry the built-in types still answer, and absence is not claimed", async () => {
+  test("conditional catalog reads check the live registry rather than retaining a process-local version", async () => {
+    const first = await request(app()).get("/api/node-types");
+    const unchanged = await request(app())
+      .get("/api/node-types")
+      .set("If-None-Match", first.headers.etag);
+    expect(unchanged.status).toBe(304);
     setActiveExtensionRegistry(null);
-
-    const response = await request(app()).get("/api/node-types");
+    const response = await request(app())
+      .get("/api/node-types")
+      .set("If-None-Match", first.headers.etag);
 
     expect(response.status).toBe(200);
     expect(response.body.data.extensionsAvailable).toBe(false);

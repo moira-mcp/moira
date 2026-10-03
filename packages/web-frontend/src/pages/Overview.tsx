@@ -16,11 +16,11 @@ import { cn } from "@/lib/utils";
 import { guideAnchor } from "@/guides/anchors";
 import { PageShell } from "../components/PageShell";
 import { EmptyState } from "../components/empty-state";
-import { InlineError } from "../components/inline-error";
+import { DataRegion } from "../components/DataRegion";
 import { ServerPagination } from "../components/ServerPagination";
 import { useDebounce } from "../hooks/useDebounce";
 import { useResource } from "../hooks/useResource";
-import { apiClient, type OverviewPage } from "../services/api-client";
+import { apiClient, type OverviewPage, type OverviewQuery } from "../services/api-client";
 import { OverviewBoard } from "../components/overview/OverviewBoard";
 import { OverviewPanel } from "../components/overview/OverviewPanel";
 import { OverviewFiltersPopover } from "../components/overview/OverviewFilters";
@@ -82,22 +82,11 @@ export const Overview: React.FC = () => {
     return () => window.clearInterval(timer);
   }, []);
 
-  const [workflows, setWorkflows] = useState<Array<{ id: string; name: string }>>([]);
-  useEffect(() => {
-    apiClient
-      .getWorkflows()
-      .then((response) =>
-        setWorkflows(
-          response.workflows.map((workflow) => ({
-            id: workflow.id,
-            name: workflow.metadata?.name || workflow.id,
-          })),
-        ),
-      )
-      .catch(() => {
-        // Without the list the flow filter is simply not offered.
-      });
-  }, []);
+  const workflowChoices = useResource("overview-workflow-choices", () => apiClient.getWorkflows());
+  const workflows = (workflowChoices.data?.workflows ?? []).map((workflow) => ({
+    id: workflow.id,
+    name: workflow.metadata?.name || workflow.id,
+  }));
 
   const query = overviewQuery(filters, PAGE_SIZE);
   const page = useResource<OverviewPage>(
@@ -131,15 +120,21 @@ export const Overview: React.FC = () => {
   }, [setParams]);
 
   const total = page.data?.total ?? 0;
-  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const acceptedQuery: OverviewQuery | null = page.dataKey ? JSON.parse(page.dataKey) : null;
+  const acceptedPageSize = page.data?.limit ?? PAGE_SIZE;
+  const acceptedPage = page.data
+    ? Math.floor(page.data.offset / acceptedPageSize) + 1
+    : filters.page;
+  const totalPages = Math.max(1, Math.ceil(total / acceptedPageSize));
   const filtered =
-    filters.status !== DEFAULT_FILTERS.status ||
-    filters.idle !== null ||
-    filters.activeFrom !== null ||
-    filters.activeTo !== null ||
-    filters.workflowId !== null ||
-    filters.refusals ||
-    filters.search.trim() !== "";
+    !!acceptedQuery &&
+    ((acceptedQuery.status ?? DEFAULT_FILTERS.status) !== DEFAULT_FILTERS.status ||
+      acceptedQuery.idle !== undefined ||
+      acceptedQuery.activeFrom !== undefined ||
+      acceptedQuery.activeTo !== undefined ||
+      acceptedQuery.workflowId !== undefined ||
+      acceptedQuery.refusals ||
+      !!acceptedQuery.search?.trim());
   const stale = filters.idle === STALE_IDLE;
 
   // The page's state beside its tour button: whether changes arrive live, and how many runs match.
@@ -275,14 +270,6 @@ export const Overview: React.FC = () => {
   );
 
   const board = (() => {
-    if (page.error && !page.data)
-      return (
-        <InlineError
-          message={t("pages.overview.error")}
-          onRetry={() => void page.refresh()}
-          retryLabel={t("pages.overview.retry")}
-        />
-      );
     if (!page.data) return null;
     if (runs.length === 0)
       return filtered ? (
@@ -304,27 +291,63 @@ export const Overview: React.FC = () => {
       title={t("pages.overview.title")}
       description={t("pages.overview.subtitle")}
       guide={guideAnchor("overview.header")}
-      loading={page.pending && !page.data && !page.error}
       actions={pageState}
     >
       {toolbar}
-      <section
-        className="min-h-[120px]"
-        aria-label={t("pages.overview.board")}
-        aria-busy={page.pending || undefined}
-        {...guideAnchor("overview.board")}
+      <DataRegion
+        hasResult={workflowChoices.data !== undefined}
+        pending={workflowChoices.pending}
+        error={workflowChoices.error}
+        onRetry={workflowChoices.refresh}
+        testId="overview-workflow-choices-region"
+      />
+      <DataRegion
+        hasResult={page.data !== undefined}
+        pending={page.pending}
+        error={page.error ? t("pages.overview.error") : null}
+        onRetry={page.refresh}
+        retryLabel={t("pages.overview.retry")}
+        testId="overview-results-region"
+        resultScope={
+          acceptedQuery && (
+            <span>
+              {t("common.pagination.page", { current: acceptedPage, total: totalPages })}
+              {` · ${t(`pages.overview.status.${acceptedQuery.status ?? DEFAULT_FILTERS.status}`)}`}
+              {acceptedQuery.search &&
+                ` · ${t("pages.overview.search.label")}: ${acceptedQuery.search}`}
+              {acceptedQuery.workflowId &&
+                ` · ${t("pages.overview.filters.flow")}: ${workflows.find((workflow) => workflow.id === acceptedQuery.workflowId)?.name ?? acceptedQuery.workflowId}`}
+              {acceptedQuery.idle &&
+                ` · ${t("pages.overview.filters.idle")}: ${t(`pages.overview.filters.idleOptions.${acceptedQuery.idle}`)}`}
+              {acceptedQuery.activeFrom !== undefined &&
+                ` · ${t("pages.overview.filters.from")}: ${new Date(acceptedQuery.activeFrom).toLocaleDateString()}`}
+              {acceptedQuery.activeTo !== undefined &&
+                ` · ${t("pages.overview.filters.to")}: ${new Date(acceptedQuery.activeTo).toLocaleDateString()}`}
+              {acceptedQuery.refusals && ` · ${t("pages.overview.filters.refusals")}`}
+              {` · ${t(`pages.overview.filters.sortOptions.${acceptedQuery.sort ?? "activity"}`)}`}
+            </span>
+          )
+        }
       >
-        {board}
-      </section>
-      {totalPages > 1 ? (
-        <ServerPagination
-          currentPage={filters.page}
-          totalPages={totalPages}
-          totalItems={total}
-          pageSize={PAGE_SIZE}
-          onPageChange={(next) => setFilters({ page: next })}
-        />
-      ) : null}
+        <section
+          className="min-h-[120px]"
+          aria-label={t("pages.overview.board")}
+          aria-busy={page.pending || undefined}
+          {...guideAnchor("overview.board")}
+        >
+          {board}
+        </section>
+        {page.data && (totalPages > 1 || acceptedPage > 1) ? (
+          <ServerPagination
+            currentPage={acceptedPage}
+            totalPages={totalPages}
+            totalItems={total}
+            pageSize={acceptedPageSize}
+            itemCount={runs.length}
+            onPageChange={(next) => setFilters({ page: next })}
+          />
+        ) : null}
+      </DataRegion>
       <OverviewPanel
         runId={openRunId}
         run={panelRun}

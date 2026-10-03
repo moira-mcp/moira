@@ -11,13 +11,21 @@
 
 import { useEffect, useSyncExternalStore } from "react";
 import { useSession } from "../auth/better-auth-client";
-import { apiClient } from "../services/api-client";
+import { apiClient, ApiErrorUtils } from "../services/api-client";
+import { retireReads } from "../services/read-scope";
 
 export type SettingChange<T> = (value: T) => T;
 
 export interface UserSettingStore<T> {
   /** The value as this page knows it; `loaded` is false until it is known. */
-  useValue(): { loaded: boolean; value: T | null };
+  useValue(): {
+    loaded: boolean;
+    value: T | null;
+    accepted: boolean;
+    pending: boolean;
+    error: string | null;
+    refresh: () => Promise<void>;
+  };
   /** Apply a change: seen at once, saved against the stored value, undone if refused. */
   change(change: SettingChange<T>): Promise<void>;
   /** Forget the in-page copy; for tests that sign in as another user. */
@@ -43,8 +51,15 @@ export function createUserSettingStore<T>(
   key: string,
   { parse, serialize = (value) => value, whenUnreadable }: UserSettingStoreOptions<T>,
 ): UserSettingStore<T> {
-  let state: { userId: string | null; value: T | null } = { userId: null, value: null };
+  let state: {
+    userId: string | null;
+    value: T | null;
+    accepted: boolean;
+    pending: boolean;
+    error: string | null;
+  } = { userId: null, value: null, accepted: false, pending: false, error: null };
   let loadingFor: string | null = null;
+  let currentRead: object | null = null;
   const listeners = new Set<() => void>();
   /** Changes shown on this page whose save has not finished, in the order they were made. */
   const pending: SettingChange<T>[] = [];
@@ -53,32 +68,52 @@ export function createUserSettingStore<T>(
   /** The value as last read from or written to the server, under the pending changes. */
   let stored: T | null = null;
 
-  const publish = (next: typeof state) => {
-    state = next;
+  const publish = (next: Pick<typeof state, "userId" | "value"> & Partial<typeof state>) => {
+    state = { ...state, ...next };
     listeners.forEach((listener) => listener());
   };
   const withPending = (base: T): T => pending.reduce((value, change) => change(value), base);
 
-  const load = (userId: string) => {
-    if (loadingFor === userId) return;
+  const load = (userId: string, force = false): Promise<void> => {
+    if (!force && loadingFor === userId) return Promise.resolve();
     if (state.userId !== userId) {
       // Another account: nothing of the previous one's value or pending changes applies.
       pending.length = 0;
       stored = null;
     }
+    const sameOwner = state.userId === userId;
+    const read = {};
+    currentRead = read;
     loadingFor = userId;
-    publish({ userId, value: null });
-    apiClient.getUserSettings().then(
+    publish({
+      userId,
+      value: sameOwner ? state.value : null,
+      accepted: sameOwner && state.accepted,
+      pending: true,
+      error: null,
+    });
+    return apiClient.getUserSettings().then(
       (settings) => {
-        if (loadingFor !== userId) return;
+        if (loadingFor !== userId || currentRead !== read) return;
         stored = parse(settings[key]);
-        publish({ userId, value: withPending(stored) });
+        publish({
+          userId,
+          value: withPending(stored),
+          accepted: true,
+          pending: false,
+          error: null,
+        });
       },
-      () => {
-        if (loadingFor !== userId) return;
+      (error: unknown) => {
+        if (loadingFor !== userId || currentRead !== read) return;
         loadingFor = null;
-        stored = whenUnreadable ? whenUnreadable() : null;
-        publish({ userId, value: stored === null ? null : withPending(stored) });
+        if (!state.accepted) stored = whenUnreadable ? whenUnreadable() : null;
+        publish({
+          userId,
+          value: stored === null ? null : withPending(stored),
+          pending: false,
+          error: ApiErrorUtils.getUserFriendlyMessage(error),
+        });
       },
     );
   };
@@ -108,7 +143,7 @@ export function createUserSettingStore<T>(
         settle();
         if (state.userId === owner) {
           stored = next;
-          publish({ userId: owner, value: withPending(next) });
+          publish({ userId: owner, value: withPending(next), accepted: true, error: null });
         }
       } catch (error) {
         settle();
@@ -128,22 +163,30 @@ export function createUserSettingStore<T>(
     const { data: session } = useSession();
     const userId = session?.user?.id ?? ANONYMOUS;
     useEffect(() => {
-      load(userId);
+      void load(userId);
     }, [userId]);
     const snapshot = useSyncExternalStore(subscribe, () => state);
     const current = snapshot.userId === userId;
     return {
       loaded: current && snapshot.value !== null,
       value: current ? snapshot.value : null,
+      accepted: current && snapshot.accepted,
+      pending: !current || snapshot.pending,
+      error: current ? snapshot.error : null,
+      refresh: () => {
+        retireReads();
+        return load(userId, true);
+      },
     };
   };
 
   const reset = () => {
     loadingFor = null;
+    currentRead = null;
     pending.length = 0;
     saving = Promise.resolve();
     stored = null;
-    state = { userId: null, value: null };
+    state = { userId: null, value: null, accepted: false, pending: false, error: null };
   };
 
   return { useValue, change, reset };

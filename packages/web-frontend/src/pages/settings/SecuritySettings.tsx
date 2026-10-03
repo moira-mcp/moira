@@ -6,14 +6,16 @@
  * password to type, so it is told how it signs in and may set a password as well.
  */
 
-import React, { useCallback, useEffect, useState } from "react";
+import { productFetch } from "@/services/product-fetch";
+import React, { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
-import { Skeleton } from "@/components/ui/skeleton";
+import { DataRegion } from "@/components/DataRegion";
+import { useResource } from "@/hooks/useResource";
 import { toast } from "sonner";
 import { authClient } from "@/auth/better-auth-client";
 
@@ -45,33 +47,23 @@ function refusalReason(body: unknown): string | undefined {
 export const SecuritySettings: React.FC = () => {
   const { t } = useTranslation();
 
-  const [methods, setMethods] = useState<SignInMethods | null>(null);
+  const resource = useResource<SignInMethods>("user-sign-in-methods", async () => {
+    const { data, error } = await authClient.listAccounts();
+    if (error || !data) throw new Error(t("common.errors.failedToLoad"));
+    return {
+      hasPassword: data.some((account) => account.providerId === "credential"),
+      providers: data
+        .filter((account) => account.providerId !== "credential")
+        .map((account) => providerName(account.providerId)),
+    };
+  });
+  const methods = resource.data;
+  const loadMethods = resource.refresh;
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [passwordError, setPasswordError] = useState<string | null>(null);
-
-  const loadMethods = useCallback(async () => {
-    try {
-      const { data } = await authClient.listAccounts();
-      if (!data) throw new Error("no accounts");
-      setMethods({
-        hasPassword: data.some((account) => account.providerId === "credential"),
-        providers: data
-          .filter((account) => account.providerId !== "credential")
-          .map((account) => providerName(account.providerId)),
-      });
-    } catch {
-      // Without the list, fall back to the form every password account needs; the server still
-      // refuses a change that cannot apply.
-      setMethods({ hasPassword: true, providers: [] });
-    }
-  }, []);
-
-  useEffect(() => {
-    void loadMethods();
-  }, [loadMethods]);
 
   const getPasswordStrength = (): { value: number; label: string } => {
     if (!newPassword) return { value: 0, label: "" };
@@ -118,7 +110,7 @@ export const SecuritySettings: React.FC = () => {
 
     try {
       setSubmitting(true);
-      const response = await fetch("/api/user/change-password", {
+      const response = await productFetch("/api/user/change-password", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
@@ -158,7 +150,7 @@ export const SecuritySettings: React.FC = () => {
 
     try {
       setSubmitting(true);
-      const response = await fetch("/api/user/set-password", {
+      const response = await productFetch("/api/user/set-password", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
@@ -238,7 +230,7 @@ export const SecuritySettings: React.FC = () => {
     </>
   );
 
-  if (methods === null) {
+  if (!methods) {
     return (
       <Card>
         <CardHeader>
@@ -246,7 +238,13 @@ export const SecuritySettings: React.FC = () => {
           <CardDescription>{t("pages.settings.security.description")}</CardDescription>
         </CardHeader>
         <CardContent>
-          <Skeleton className="h-40 w-full max-w-md" />
+          <DataRegion
+            hasResult={false}
+            pending={resource.pending}
+            error={resource.error}
+            onRetry={resource.refresh}
+            testId="security-methods-region"
+          />
         </CardContent>
       </Card>
     );
@@ -269,18 +267,26 @@ export const SecuritySettings: React.FC = () => {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <form
-            onSubmit={handleSetPassword}
-            className="space-y-4 max-w-md"
-            data-testid="security-set-password-form"
+          <DataRegion
+            hasResult
+            pending={resource.pending}
+            error={resource.error}
+            onRetry={resource.refresh}
+            testId="security-methods-region"
           >
-            {newPasswordFields}
-            <Button type="submit" disabled={submitting}>
-              {submitting
-                ? t("pages.settings.security.settingPassword")
-                : t("pages.settings.security.setPassword")}
-            </Button>
-          </form>
+            <form
+              onSubmit={handleSetPassword}
+              className="space-y-4 max-w-md"
+              data-testid="security-set-password-form"
+            >
+              {newPasswordFields}
+              <Button type="submit" disabled={submitting}>
+                {submitting
+                  ? t("pages.settings.security.settingPassword")
+                  : t("pages.settings.security.setPassword")}
+              </Button>
+            </form>
+          </DataRegion>
         </CardContent>
       </Card>
     );
@@ -293,31 +299,41 @@ export const SecuritySettings: React.FC = () => {
         <CardDescription>{t("pages.settings.security.description")}</CardDescription>
       </CardHeader>
       <CardContent>
-        <form
-          onSubmit={handleChangePassword}
-          className="space-y-4 max-w-md"
-          data-testid="security-password-form"
+        <DataRegion
+          hasResult
+          pending={resource.pending}
+          error={resource.error}
+          onRetry={resource.refresh}
+          testId="security-methods-region"
         >
-          <div className="space-y-2">
-            <Label htmlFor="current-password">{t("pages.settings.security.currentPassword")}</Label>
-            <Input
-              id="current-password"
-              type="password"
-              value={currentPassword}
-              onChange={(e) => setCurrentPassword(e.target.value)}
-              placeholder={t("pages.settings.security.currentPasswordPlaceholder")}
-              autoComplete="current-password"
-            />
-          </div>
+          <form
+            onSubmit={handleChangePassword}
+            className="space-y-4 max-w-md"
+            data-testid="security-password-form"
+          >
+            <div className="space-y-2">
+              <Label htmlFor="current-password">
+                {t("pages.settings.security.currentPassword")}
+              </Label>
+              <Input
+                id="current-password"
+                type="password"
+                value={currentPassword}
+                onChange={(e) => setCurrentPassword(e.target.value)}
+                placeholder={t("pages.settings.security.currentPasswordPlaceholder")}
+                autoComplete="current-password"
+              />
+            </div>
 
-          {newPasswordFields}
+            {newPasswordFields}
 
-          <Button type="submit" disabled={submitting}>
-            {submitting
-              ? t("pages.settings.security.changingPassword")
-              : t("pages.settings.security.changePassword")}
-          </Button>
-        </form>
+            <Button type="submit" disabled={submitting}>
+              {submitting
+                ? t("pages.settings.security.changingPassword")
+                : t("pages.settings.security.changePassword")}
+            </Button>
+          </form>
+        </DataRegion>
       </CardContent>
     </Card>
   );

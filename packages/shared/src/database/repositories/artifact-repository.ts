@@ -16,7 +16,7 @@ import { artifact, artifactToken } from "../schema.js";
 import { createLogger } from "../../logging/logger.js";
 import type * as schema from "../schema.js";
 import { randomUUID } from "node:crypto";
-import { executeListQuery, type ListQueryConfig } from "../list-query-builder.js";
+import { executeListQuery, clampPagination, type ListQueryConfig } from "../list-query-builder.js";
 
 const ARTIFACT_LIST_CONFIG: ListQueryConfig<"createdAt" | "updatedAt" | "name" | "size"> = {
   table: artifact,
@@ -697,7 +697,11 @@ export class ArtifactRepository {
     offset?: number;
     includeTakenDown?: boolean;
   }): Promise<{ artifacts: ReportedArtifact[]; total: number }> {
-    const { limit = 50, offset = 0, includeTakenDown = true } = options;
+    const { includeTakenDown = true } = options;
+    const { limit, offset } = clampPagination(ARTIFACT_LIST_CONFIG, {
+      limit: Number.isFinite(options.limit) ? Math.trunc(options.limit!) : undefined,
+      offset: Number.isFinite(options.offset) ? Math.trunc(options.offset!) : undefined,
+    });
 
     const conditions = [gt(artifact.reportCount, 0)];
     if (!includeTakenDown) {
@@ -726,7 +730,7 @@ export class ArtifactRepository {
       })
       .from(artifact)
       .where(whereClause)
-      .orderBy(desc(artifact.reportCount), desc(artifact.lastReportedAt))
+      .orderBy(desc(artifact.reportCount), desc(artifact.lastReportedAt), artifact.uuid)
       .limit(limit)
       .offset(offset);
 

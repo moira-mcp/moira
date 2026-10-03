@@ -209,4 +209,87 @@ describe("auth gating by DEPLOYMENT_MODE", () => {
       await db.delete(user).where(eq(user.email, email));
     }
   });
+  it("observes only authentic provider session renewal, never signup stamps or client updates", async () => {
+    await resolverFor("self-host");
+    const { getDatabase, user, session, AdminAnalyticsRepository, parseAnalyticsQuery } =
+      await import("@mcp-moira/shared");
+    const { auth } = await import("../../packages/web-backend/src/auth.js");
+    const db = getDatabase();
+    const email = `session-renewal-${randomUUID()}@example.com`;
+    try {
+      const signup = await auth.handler(
+        new Request("http://localhost/api/auth/sign-up/email", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email, password: "SessionRenewal123!", name: "Session Renewal" }),
+        }),
+      );
+      expect(signup.status).toBe(200);
+      const cookie = (signup.headers.get("set-cookie") || "").split(";")[0];
+      expect(cookie).toBeTruthy();
+      const [account] = await db.select().from(user).where(eq(user.email, email));
+      const stored = async () =>
+        (await db.select().from(session).where(eq(session.userId, account.id)))[0];
+      const initial = await stored();
+      expect(initial.refreshedAt).toBeNull();
+      // Separate initial Date calls can drift; this must not become proof of use.
+      await db
+        .update(session)
+        .set({ updatedAt: new Date(Date.parse(initial.createdAt) + 1).toISOString() })
+        .where(eq(session.id, initial.id));
+      const analytics = () => new AdminAnalyticsRepository(db, () => Date.now() + 1);
+      const query = parseAnalyticsQuery({ range: "30m", excludeUserIds: "" });
+      expect(analytics().userActivities([account.id]).get(account.id)?.lastActivityAt).toBeNull();
+      const read = () =>
+        auth.handler(
+          new Request("http://localhost/api/auth/get-session", { headers: { Cookie: cookie } }),
+        );
+      expect((await read()).status).toBe(200);
+      expect((await stored()).refreshedAt).toBeNull();
+      await db
+        .update(user)
+        .set({ approvedAt: new Date().toISOString() })
+        .where(eq(user.id, account.id));
+      for (const update of [
+        {},
+        { refreshedAt: new Date().toISOString() },
+        { expiresAt: new Date().toISOString(), updatedAt: new Date().toISOString() },
+      ]) {
+        const response = await auth.handler(
+          new Request("http://localhost/api/auth/update-session", {
+            method: "POST",
+            headers: { Cookie: cookie, "Content-Type": "application/json" },
+            body: JSON.stringify(update),
+          }),
+        );
+        expect(response.status).toBe(400);
+        expect((await stored()).refreshedAt).toBeNull();
+      }
+      // Age the actual session into the provider's one-hour renewal condition.
+      await db
+        .update(session)
+        .set({ expiresAt: new Date(Date.now() + (7 * 24 - 2) * 3600000).toISOString() })
+        .where(eq(session.id, initial.id));
+      const renewed = await read();
+      expect(renewed.status).toBe(200);
+      const body = await renewed.json();
+      expect(body.session).not.toHaveProperty("refreshedAt");
+      const observed = await stored();
+      expect(observed.refreshedAt).toBe(observed.updatedAt);
+      expect(Date.parse(observed.expiresAt)).toBeGreaterThan(Date.parse(initial.expiresAt) - 1000);
+      expect(
+        analytics()
+          .users(query)
+          .activePeople.find((person) => person.userId === account.id),
+      ).toMatchObject({
+        recentSessionAt: Date.parse(observed.refreshedAt!),
+        lastActivityAt: Date.parse(observed.refreshedAt!),
+      });
+      const stable = await read();
+      expect(stable.status).toBe(200);
+      expect((await stored()).refreshedAt).toBe(observed.refreshedAt);
+    } finally {
+      await db.delete(user).where(eq(user.email, email));
+    }
+  });
 });

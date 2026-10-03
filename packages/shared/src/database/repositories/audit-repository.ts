@@ -157,8 +157,10 @@ export class AuditRepository {
     if (filter.resource) conditions.push(eq(auditLog.resource, filter.resource));
     if (filter.resourceId) conditions.push(eq(auditLog.resourceId, filter.resourceId));
     if (filter.source) conditions.push(eq(auditLog.source, filter.source));
-    if (filter.fromDate) conditions.push(gte(auditLog.createdAt, new Date(filter.fromDate)));
-    if (filter.toDate) conditions.push(lte(auditLog.createdAt, new Date(filter.toDate)));
+    if (filter.fromDate !== undefined)
+      conditions.push(gte(auditLog.createdAt, new Date(filter.fromDate)));
+    if (filter.toDate !== undefined)
+      conditions.push(lte(auditLog.createdAt, new Date(filter.toDate)));
     return conditions;
   }
 

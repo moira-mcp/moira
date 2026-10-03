@@ -38,6 +38,7 @@ import type { WorkflowGraph } from "../../types/workflow-types";
 import { stepsModel, stepsPresentation, type StepCard, type StepsModel } from "./stepsModel";
 import { StepsList } from "./StepsList";
 import { guideAnchor } from "../../guides/anchors";
+import { loadLayoutEngine } from "@mcp-moira/workflow-engine/progress-visual";
 
 const CARD_WIDTH = 360;
 const PILL_WIDTH = 150;
@@ -135,7 +136,7 @@ interface StepsLayout {
 }
 
 async function layoutSteps(model: StepsModel): Promise<StepsLayout> {
-  const { default: ELK } = await import("elkjs/lib/elk.bundled.js");
+  const ELK = await loadLayoutEngine();
   const elk = new ELK();
   const laid = await elk.layout({
     id: "steps",

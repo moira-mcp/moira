@@ -9,6 +9,7 @@
 
 import type { GraphModel } from "../run/graphModel";
 import type { LayoutPreset } from "../diagram/layoutPreset";
+import { loadLayoutEngine } from "@mcp-moira/workflow-engine/progress-visual";
 
 /**
  * What a layout preset means on the graph: how the block groups are stacked (`outer`) and how the
@@ -840,7 +841,7 @@ export async function layoutGraph(
   innerDirectionOverride?: "DOWN" | "RIGHT",
 ): Promise<GraphLayout> {
   const GROUP_GAP = spacing.group;
-  const { default: ELK } = await import("elkjs/lib/elk.bundled.js");
+  const ELK = await loadLayoutEngine();
   const elk = new ELK();
   const stepById = new Map(model.steps.map((s) => [s.id, s]));
   // A card also holds a chip for every edge arriving at it that the graph names instead of

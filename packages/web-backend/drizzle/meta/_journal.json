@@ -358,6 +358,27 @@
       "when": 1790000720000,
       "tag": "0049_execution_stop",
       "breakpoints": true
+    },
+    {
+      "idx": 51,
+      "version": "7",
+      "when": 1790000780000,
+      "tag": "0050_admin_analytics_indexes",
+      "breakpoints": true
+    },
+    {
+      "idx": 52,
+      "version": "7",
+      "when": 1790000840000,
+      "tag": "0051_session_refresh_observation",
+      "breakpoints": true
+    },
+    {
+      "idx": 53,
+      "version": "7",
+      "when": 1790000900000,
+      "tag": "0052_registration_notifications",
+      "breakpoints": true
     }
   ]
 }

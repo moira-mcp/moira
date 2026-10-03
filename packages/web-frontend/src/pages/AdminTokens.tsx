@@ -45,8 +45,16 @@ const ALL_FILTER = "__all__";
 
 export const AdminTokens: React.FC = () => {
   const { t } = useTranslation();
-  const [tokens, setTokens] = useState<AdminToken[]>([]);
-  const [total, setTotal] = useState(0);
+  const [accepted, setAccepted] = useState<{
+    tokens: AdminToken[];
+    total: number;
+    page: number;
+    pageSize: number;
+    search: string;
+    status: string;
+  } | null>(null);
+  const tokens = accepted?.tokens ?? [];
+  const total = accepted?.total ?? 0;
   const [currentPage, setCurrentPage] = useState(1);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -79,8 +87,14 @@ export const AdminTokens: React.FC = () => {
       });
 
       if (!isCurrent()) return;
-      setTokens(data.tokens);
-      setTotal(data.total);
+      setAccepted({
+        tokens: data.tokens,
+        total: data.total,
+        page: currentPage,
+        pageSize,
+        search: debouncedSearch,
+        status: selectedStatus,
+      });
       setError(null);
     } catch (err: unknown) {
       if (!isCurrent()) return;
@@ -102,8 +116,9 @@ export const AdminTokens: React.FC = () => {
       toast.success(t("admin.tokens.revokeSuccess"));
       setRevokeTarget(null);
       loadData();
-    } catch {
+    } catch (error) {
       toast.error(t("admin.tokens.revokeError"));
+      throw error;
     }
   };
 
@@ -112,24 +127,7 @@ export const AdminTokens: React.FC = () => {
     setSearchQuery("");
   };
 
-  const totalPages = Math.ceil(total / pageSize);
-
-  if (loading && tokens.length === 0) {
-    return (
-      <PageShell title={t("admin.tokens.title")} description={t("admin.tokens.subtitle")} loading />
-    );
-  }
-
-  if (error) {
-    return (
-      <PageShell
-        title={t("admin.tokens.title")}
-        error={error}
-        onRetry={loadData}
-        retryLabel={t("admin.tokens.retry")}
-      />
-    );
-  }
+  const totalPages = Math.ceil(total / (accepted?.pageSize ?? pageSize));
 
   return (
     <PageShell title={t("admin.tokens.title")} description={t("admin.tokens.subtitle")}>
@@ -172,12 +170,29 @@ export const AdminTokens: React.FC = () => {
         keyExtractor={(t) => t.id}
         storageKey="admin-tokens-view-mode"
         loading={loading}
+        hasResult={accepted !== null}
+        error={error}
+        onRetry={loadData}
+        onRefresh={loadData}
+        resultScope={
+          accepted && (
+            <span>
+              {t("common.pagination.page", {
+                current: accepted.page,
+                total: Math.max(1, totalPages),
+              })}
+              {accepted.search && ` · ${t("common.filters.search")}: ${accepted.search}`}
+              {accepted.status &&
+                ` · ${t("common.filters.status")}: ${t(`admin.tokens.status${accepted.status[0].toUpperCase()}${accepted.status.slice(1)}`)}`}
+            </span>
+          )
+        }
         containerRef={containerRef}
         pagination={{
           mode: "total",
-          currentPage,
+          currentPage: accepted?.page ?? currentPage,
           totalPages,
-          pageSize,
+          pageSize: accepted?.pageSize ?? pageSize,
           totalItems: total,
           onPageChange: setCurrentPage,
         }}

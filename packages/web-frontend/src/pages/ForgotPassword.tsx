@@ -3,7 +3,7 @@
  */
 
 import React from "react";
-import { AuthView } from "@daveyplate/better-auth-ui";
+import { AuthView } from "../auth/LazyAuthView";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { MailX } from "lucide-react";

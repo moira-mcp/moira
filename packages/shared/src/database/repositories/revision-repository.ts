@@ -18,6 +18,11 @@ import { entityRevision } from "../schema.js";
 import { createLogger } from "../../logging/logger.js";
 import { compareRevisionContent, type RevisionDiffPart } from "../../services/revision-diff.js";
 import type * as schema from "../schema.js";
+import {
+  DEFAULT_REVISION_PREVIEW_CHARS,
+  revisionPreviewPrefix,
+  renderRevisionPreview,
+} from "../revision-preview.js";
 
 /** Entity kinds the shared history serves. */
 export const REVISION_ENTITY_TYPES = {
@@ -52,19 +57,13 @@ export interface RevisionSummary extends Omit<Revision, "content"> {
 }
 
 /** Preview length used when the caller does not ask for another one. */
-export const DEFAULT_REVISION_PREVIEW_CHARS = 100;
+export { DEFAULT_REVISION_PREVIEW_CHARS } from "../revision-preview.js";
 
 export interface AppendRevisionOptions extends RevisionTarget {
   content: string | null;
   authorId?: string | null;
   /** Keep at most this many newest revisions; omit to keep every revision. */
   maxRevisions?: number;
-}
-
-/** Short, listing-sized rendering of a revision's content; absent content previews as empty. */
-function previewOf(content: string | null, previewChars: number): string {
-  if (!content) return "";
-  return content.length > previewChars ? `${content.substring(0, previewChars)}...` : content;
 }
 
 export class RevisionRepository {
@@ -144,7 +143,7 @@ export class RevisionRepository {
       .select({
         revision: entityRevision.revision,
         size: entityRevision.size,
-        content: entityRevision.content,
+        prefix: revisionPreviewPrefix(entityRevision.content, previewChars),
         authorId: entityRevision.authorId,
         createdAt: entityRevision.createdAt,
       })
@@ -160,7 +159,7 @@ export class RevisionRepository {
     return rows.map((row) => ({
       revision: row.revision,
       size: row.size,
-      preview: previewOf(row.content, previewChars),
+      preview: renderRevisionPreview(row.prefix, previewChars),
       authorId: row.authorId ?? null,
       createdAt: (row.createdAt as Date).getTime(),
     }));

@@ -7,7 +7,7 @@
  * Note: console.error used for browser debugging of API errors
  */
 
-import React, { useState, useEffect, useCallback } from "react";
+import React, { lazy, Suspense, useState, useEffect, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { Plus, X, FileText, FilePlus } from "lucide-react";
 import { apiClient } from "../services/api-client";
@@ -16,7 +16,7 @@ import { Progress } from "../components/ui/progress";
 import { PageShell } from "../components/PageShell";
 import { FilterBar } from "../components/FilterBar";
 import { useDebounce } from "../hooks/useDebounce";
-import { NoteInlineEditor } from "../components/notes/NoteInlineEditor";
+import { Skeleton } from "../components/ui/skeleton";
 import { NoteHistoryDialog } from "../components/notes/NoteHistoryDialog";
 import { useListPageSize } from "../hooks/useListPageSize";
 import { useLatestRequest } from "../hooks/useLatestRequest";
@@ -25,6 +25,15 @@ import { formatSize } from "../components/cards/format-utils";
 import { DataListView } from "../components/DataListView";
 import { ConfirmDialog } from "../components/confirm-dialog";
 import { guideAnchor } from "@/guides/anchors";
+import { useResource } from "@/hooks/useResource";
+import { DataRegion } from "@/components/DataRegion";
+import { InlineError } from "@/components/inline-error";
+
+const NoteInlineEditor = lazy(() =>
+  import("../components/notes/NoteInlineEditor").then((module) => ({
+    default: module.NoteInlineEditor,
+  })),
+);
 
 interface NoteListItem {
   id: string;
@@ -49,10 +58,20 @@ export const Notes: React.FC = () => {
   const { pageSize, containerRef, onViewModeChange } = useListPageSize(() => setCurrentPage(1));
 
   // Data state
-  const [notes, setNotes] = useState<NoteListItem[]>([]);
-  const [allTags, setAllTags] = useState<string[]>([]);
-  const [stats, setStats] = useState<NoteStats | null>(null);
-  const [total, setTotal] = useState(0);
+  const [accepted, setAccepted] = useState<{
+    notes: NoteListItem[];
+    allTags: string[];
+    total: number;
+    page: number;
+    pageSize: number;
+    search: string;
+    tag: string | null;
+  } | null>(null);
+  const notes = accepted?.notes ?? [];
+  const allTags = accepted?.allTags ?? [];
+  const total = accepted?.total ?? 0;
+  const statsResource = useResource<NoteStats>("note-stats", () => apiClient.getNoteStats());
+  const stats = statsResource.data;
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -66,6 +85,7 @@ export const Notes: React.FC = () => {
   const [historyOpen, setHistoryOpen] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [selectedNoteKey, setSelectedNoteKey] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   // Debounce search
   const debouncedSearch = useDebounce(searchQuery, 300);
@@ -73,16 +93,6 @@ export const Notes: React.FC = () => {
   useEffect(() => {
     setCurrentPage(1);
   }, [debouncedSearch]);
-
-  // Load stats
-  const loadStats = useCallback(async () => {
-    try {
-      const statsData = await apiClient.getNoteStats();
-      setStats(statsData);
-    } catch {
-      // Stats are non-critical, don't show error
-    }
-  }, []);
 
   // Load notes
   const beginRequest = useLatestRequest();
@@ -99,9 +109,15 @@ export const Notes: React.FC = () => {
       });
 
       if (!isCurrent()) return;
-      setNotes(result.notes);
-      setTotal(result.total);
-      setAllTags(result.allTags);
+      setAccepted({
+        notes: result.notes,
+        total: result.total,
+        allTags: result.allTags,
+        page: currentPage,
+        pageSize,
+        search: debouncedSearch,
+        tag: tagFilter,
+      });
       setError(null);
     } catch (err: unknown) {
       if (!isCurrent()) return;
@@ -114,8 +130,7 @@ export const Notes: React.FC = () => {
 
   useEffect(() => {
     loadNotes();
-    loadStats();
-  }, [loadNotes, loadStats]);
+  }, [loadNotes]);
 
   const handleTagClick = (tag: string) => {
     setTagFilter(tag === tagFilter ? null : tag);
@@ -141,21 +156,24 @@ export const Notes: React.FC = () => {
   };
 
   const handleDeleteClick = (key: string) => {
+    setDeleteError(null);
     setSelectedNoteKey(key);
     setDeleteDialogOpen(true);
   };
 
   const handleDeleteConfirm = async () => {
     if (!selectedNoteKey) return;
-
+    setDeleteError(null);
     try {
       await apiClient.deleteNote(selectedNoteKey);
       setDeleteDialogOpen(false);
       setSelectedNoteKey(null);
       loadNotes();
-      loadStats();
+      void statsResource.refresh();
     } catch (err) {
       console.error("Failed to delete note:", err);
+      setDeleteError(err instanceof Error ? err.message : t("common.errors.failedToDelete"));
+      throw err;
     }
   };
 
@@ -163,7 +181,7 @@ export const Notes: React.FC = () => {
     setEditingNoteKey(null);
     if (saved) {
       loadNotes();
-      loadStats();
+      void statsResource.refresh();
     }
   };
 
@@ -172,45 +190,37 @@ export const Notes: React.FC = () => {
     setSelectedNoteKey(null);
     if (restored) {
       loadNotes();
-      loadStats();
+      void statsResource.refresh();
     }
   };
 
-  const totalPages = Math.ceil(total / pageSize);
-
-  if (loading && notes.length === 0) {
-    return <PageShell title={t("pages.notes.title")} guide={guideAnchor("notes.header")} loading />;
-  }
-
-  if (error) {
-    return (
-      <PageShell
-        title={t("pages.notes.title")}
-        guide={guideAnchor("notes.header")}
-        error={error}
-        onRetry={loadNotes}
-        retryLabel={t("pages.notes.retry")}
-      />
-    );
-  }
+  const totalPages = Math.ceil(total / (accepted?.pageSize ?? pageSize));
 
   return (
     <PageShell title={t("pages.notes.title")} guide={guideAnchor("notes.header")}>
       {/* Quota indicator */}
-      {stats && (
-        <div className="w-64 mb-6" data-testid="quota-indicator" {...guideAnchor("notes.quota")}>
-          <div className="flex justify-between text-sm text-muted-foreground mb-1">
-            <span>{t("pages.notes.quota.used")}</span>
-            <span>
-              {formatSize(stats.totalSize)} / {formatSize(stats.limit)}
-            </span>
+      <DataRegion
+        hasResult={stats !== undefined}
+        pending={statsResource.pending}
+        error={statsResource.error}
+        onRetry={statsResource.refresh}
+        testId="note-stats-region"
+      >
+        {stats && (
+          <div className="w-64 mb-6" data-testid="quota-indicator" {...guideAnchor("notes.quota")}>
+            <div className="flex justify-between text-sm text-muted-foreground mb-1">
+              <span>{t("pages.notes.quota.used")}</span>
+              <span>
+                {formatSize(stats.totalSize)} / {formatSize(stats.limit)}
+              </span>
+            </div>
+            <Progress value={stats.usedPercent} className="h-2" />
+            <div className="text-xs text-muted-foreground mt-1 text-right">
+              {stats.usedPercent.toFixed(1)}% {t("pages.notes.quota.usedPercent")}
+            </div>
           </div>
-          <Progress value={stats.usedPercent} className="h-2" />
-          <div className="text-xs text-muted-foreground mt-1 text-right">
-            {stats.usedPercent.toFixed(1)}% {t("pages.notes.quota.usedPercent")}
-          </div>
-        </div>
-      )}
+        )}
+      </DataRegion>
 
       {/* Filters */}
       <FilterBar
@@ -257,7 +267,13 @@ export const Notes: React.FC = () => {
       {/* Inline editor for creating new note */}
       {editingNoteKey === "__NEW__" && (
         <div className="mb-4" data-testid="new-note-editor">
-          <NoteInlineEditor noteKey={null} allTags={allTags} onClose={handleEditorClose} />
+          <Suspense
+            fallback={
+              <Skeleton className="h-64 w-full" role="status" aria-label={t("common.loading")} />
+            }
+          >
+            <NoteInlineEditor noteKey={null} allTags={allTags} onClose={handleEditorClose} />
+          </Suspense>
         </div>
       )}
 
@@ -281,12 +297,18 @@ export const Notes: React.FC = () => {
         items={notes}
         renderCard={(note, viewMode) =>
           editingNoteKey === note.key ? (
-            <NoteInlineEditor
-              noteKey={note.key}
-              allTags={allTags}
-              onClose={handleEditorClose}
-              onCompare={() => handleViewHistory(note.key)}
-            />
+            <Suspense
+              fallback={
+                <Skeleton className="h-64 w-full" role="status" aria-label={t("common.loading")} />
+              }
+            >
+              <NoteInlineEditor
+                noteKey={note.key}
+                allTags={allTags}
+                onClose={handleEditorClose}
+                onCompare={() => handleViewHistory(note.key)}
+              />
+            </Suspense>
           ) : (
             <NoteCard
               note={note}
@@ -303,17 +325,33 @@ export const Notes: React.FC = () => {
         storageKey="notes-view-mode"
         guide={guideAnchor("notes.list")}
         loading={loading}
+        hasResult={accepted !== null}
+        error={error}
+        onRetry={loadNotes}
+        onRefresh={loadNotes}
+        resultScope={
+          accepted && (
+            <span>
+              {t("common.pagination.page", {
+                current: accepted.page,
+                total: Math.max(1, totalPages),
+              })}
+              {accepted.search && ` · ${t("common.filters.search")}: ${accepted.search}`}
+              {accepted.tag && ` · ${t("pages.notes.filters.tag")}: ${accepted.tag}`}
+            </span>
+          )
+        }
         emptyIcon={FileText}
         emptyTitle={
-          debouncedSearch || tagFilter ? t("pages.notes.noResults") : t("pages.notes.noNotes")
+          accepted?.search || accepted?.tag ? t("pages.notes.noResults") : t("pages.notes.noNotes")
         }
         containerRef={containerRef}
         pagination={{
           mode: "total",
-          currentPage,
+          currentPage: accepted?.page ?? currentPage,
           totalPages,
           totalItems: total,
-          pageSize,
+          pageSize: accepted?.pageSize ?? pageSize,
           onPageChange: setCurrentPage,
         }}
         className="flex-1 min-h-0 flex flex-col"
@@ -334,7 +372,11 @@ export const Notes: React.FC = () => {
         cancelLabel={t("common.cancel")}
         variant="destructive"
         onConfirm={handleDeleteConfirm}
-      />
+      >
+        {deleteError && (
+          <InlineError title={t("common.errors.failedToDelete")} message={deleteError} />
+        )}
+      </ConfirmDialog>
     </PageShell>
   );
 };

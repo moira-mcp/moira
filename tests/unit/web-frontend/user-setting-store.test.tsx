@@ -7,7 +7,7 @@
  */
 
 import { afterEach, describe, expect, jest, test } from "@jest/globals";
-import { act, renderHook, waitFor } from "@testing-library/react";
+import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 
 let currentUser = "account-a";
 jest.unstable_mockModule("../../../packages/web-frontend/src/auth/better-auth-client", () => ({
@@ -19,8 +19,62 @@ const { createUserSettingStore } =
   await import("../../../packages/web-frontend/src/lib/userSettingStore");
 
 afterEach(() => {
+  cleanup();
   jest.restoreAllMocks();
   currentUser = "account-a";
+});
+
+test("failed initial source keeps a display fallback distinct from accepted preferences and retries", async () => {
+  const store = createUserSettingStore<string[]>("ui.probe", {
+    parse: (value) => (Array.isArray(value) ? (value as string[]) : []),
+    whenUnreadable: () => [],
+  });
+  jest
+    .spyOn(apiClient, "getUserSettings")
+    .mockRejectedValueOnce(new Error("offline"))
+    .mockResolvedValue({ "ui.probe": ["saved"] });
+  const { result } = renderHook(() => store.useValue());
+  await waitFor(() => expect(result.current.error).not.toBeNull());
+  expect(result.current.loaded).toBe(true);
+  expect(result.current.accepted).toBe(false);
+  expect(result.current.value).toEqual([]);
+  await act(async () => result.current.refresh());
+  expect(result.current.accepted).toBe(true);
+  expect(result.current.error).toBeNull();
+  expect(result.current.value).toEqual(["saved"]);
+});
+
+test("refresh keeps accepted empty data and a failed refresh keeps the last value", async () => {
+  const store = createUserSettingStore<string[]>("ui.probe", {
+    parse: (value) => (Array.isArray(value) ? (value as string[]) : []),
+  });
+  let reject!: (reason: unknown) => void;
+  jest
+    .spyOn(apiClient, "getUserSettings")
+    .mockResolvedValueOnce({ "ui.probe": [] })
+    .mockImplementationOnce(
+      () =>
+        new Promise((_resolve, no) => {
+          reject = no;
+        }),
+    );
+  const { result } = renderHook(() => store.useValue());
+  await waitFor(() => expect(result.current.accepted).toBe(true));
+  let refresh!: Promise<void>;
+  act(() => {
+    refresh = result.current.refresh();
+  });
+  expect(result.current.pending).toBe(true);
+  expect(result.current.accepted).toBe(true);
+  expect(result.current.value).toEqual([]);
+  await act(async () => {
+    reject(new Error("offline"));
+    await refresh;
+  });
+  expect(result.current.pending).toBe(false);
+  expect(result.current.accepted).toBe(true);
+  expect(result.current.value).toEqual([]);
+  expect(result.current.error).not.toBeNull();
 });
 
 describe("a user-setting store across an account switch", () => {

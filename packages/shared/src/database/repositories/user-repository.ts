@@ -7,7 +7,7 @@
  * - User lookup: by ID or by handle
  */
 
-import { eq, and, ne, like, or, sql, gt, asc, desc } from "drizzle-orm";
+import { eq, and, ne, like, or, sql, gt, asc, desc, inArray } from "drizzle-orm";
 import type { BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
 import {
   user,
@@ -107,6 +107,24 @@ export interface UserInfo {
   id: string;
   handle: string;
   name: string | null;
+}
+
+/** Shared administrative list scope, whether the caller needs management rows or choices. */
+export interface AdminUserListFilter {
+  ids?: string[];
+  search?: string;
+  sort?: "email" | "name" | "createdAt";
+  sortOrder?: "asc" | "desc";
+  limit?: number;
+  offset?: number;
+}
+
+/** Stable identity facts required by administrative selectors, without activity enrichment. */
+export interface AdminUserLookup {
+  id: string;
+  email: string;
+  name: string | null;
+  isAdmin: boolean;
 }
 
 export class UserRepository {
@@ -569,13 +587,7 @@ export class UserRepository {
    * List users with server-side search, sort, and pagination.
    * Includes workflow count per user via subquery.
    */
-  async listAdmin(filter: {
-    search?: string;
-    sort?: "email" | "name" | "createdAt";
-    sortOrder?: "asc" | "desc";
-    limit?: number;
-    offset?: number;
-  }): Promise<{
+  async listAdmin(filter: AdminUserListFilter): Promise<{
     users: Array<{
       id: string;
       email: string;
@@ -589,13 +601,6 @@ export class UserRepository {
     }>;
     total: number;
   }> {
-    const conditions = [];
-
-    if (filter.search) {
-      const pattern = `%${filter.search}%`;
-      conditions.push(or(like(user.email, pattern), like(user.name, pattern)));
-    }
-
     const { rows, total } = await executeListQuery(
       this.db,
       USER_LIST_CONFIG,
@@ -605,7 +610,7 @@ export class UserRepository {
         limit: filter.limit,
         offset: filter.offset,
       },
-      conditions,
+      this.adminListConditions(filter),
       {
         id: user.id,
         email: user.email,
@@ -659,6 +664,34 @@ export class UserRepository {
     };
   }
 
+  /** The same filtered/count/paged inventory, projected in SQL before transfer to selectors. */
+  async listAdminLookup(
+    filter: AdminUserListFilter,
+  ): Promise<{ users: AdminUserLookup[]; total: number }> {
+    const { rows, total } = await executeListQuery(
+      this.db,
+      USER_LIST_CONFIG,
+      filter,
+      this.adminListConditions(filter),
+      { id: user.id, email: user.email, name: user.name, isAdmin: user.isAdmin },
+    );
+    return {
+      users: rows.map((row: AdminUserLookup) => ({ ...row, isAdmin: Boolean(row.isAdmin) })),
+      total,
+    };
+  }
+
+  private adminListConditions(filter: AdminUserListFilter) {
+    const conditions = [];
+    if (filter.ids !== undefined)
+      conditions.push(filter.ids.length ? inArray(user.id, filter.ids) : sql`0=1`);
+    if (filter.search) {
+      const pattern = `%${filter.search}%`;
+      conditions.push(or(like(user.email, pattern), like(user.name, pattern)));
+    }
+    return conditions;
+  }
+
   /**
    * Return the user IDs of all administrators (isAdmin = true), excluding blocked
    * accounts. Used to fan out admin notifications (e.g. abuse reports).
@@ -669,5 +702,33 @@ export class UserRepository {
       .from(user)
       .where(and(eq(user.isAdmin, true), eq(user.blocked, false)));
     return rows.map((r) => r.id);
+  }
+
+  /** Persisted admission facts for administrator notifications, without credentials or enrichment. */
+  async getAdminNotificationRecipients(): Promise<
+    Array<{
+      id: string;
+      isAdmin: boolean;
+      blocked: boolean;
+      approvedAt: string | null;
+      emailVerified: boolean;
+    }>
+  > {
+    const rows = await this.db
+      .select({
+        id: user.id,
+        isAdmin: user.isAdmin,
+        blocked: user.blocked,
+        approvedAt: user.approvedAt,
+        emailVerified: user.emailVerified,
+      })
+      .from(user)
+      .where(eq(user.isAdmin, true));
+    return rows.map((row) => ({
+      ...row,
+      isAdmin: row.isAdmin === true,
+      blocked: row.blocked === true,
+      emailVerified: row.emailVerified === true,
+    }));
   }
 }

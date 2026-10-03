@@ -11,7 +11,7 @@
  * Note: console.error used for browser debugging of admin API errors
  */
 
-import React, { useState, useEffect, useCallback, useMemo } from "react";
+import React, { useState, useCallback, useMemo, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { apiClient } from "../services/api-client";
 import { Button } from "@/components/ui/button";
@@ -29,7 +29,7 @@ import {
   RevisionHistoryDialog,
   type RevisionHistorySource,
 } from "@/components/history/RevisionHistoryDialog";
-import { Loader2, AlertCircle, RotateCcw, Download, Upload, Check, X, Plus } from "lucide-react";
+import { Loader2, RotateCcw, Download, Upload, Check, X, Plus } from "lucide-react";
 import { SettingsEditor, SettingDefinition } from "@/components/settings/SettingsEditor";
 import {
   McpPromptsEditor,
@@ -38,6 +38,16 @@ import {
   McpPromptFetchResult,
 } from "@/components/settings/McpPromptsEditor";
 import { PageShell } from "../components/PageShell";
+import { DataRegion } from "@/components/DataRegion";
+import { InlineError } from "@/components/inline-error";
+import { localizeSettingDefinition } from "@/components/settings/localize-definition";
+import { useResource } from "@/hooks/useResource";
+import { toast } from "sonner";
+import { useRefreshOnActivation } from "@/components/settings/useRefreshOnActivation";
+import {
+  globalSettingEditorValue,
+  globalSettingStoredValue,
+} from "@/components/settings/global-setting-value";
 
 interface GlobalSetting {
   key: string;
@@ -68,11 +78,6 @@ interface ImportChange {
 // Category display order and labels for non-MCP settings
 // MCP categories are handled by McpPromptsEditor with dynamic scope/model selection
 const CATEGORY_ORDER = ["system", "messages"];
-const CATEGORY_LABELS: Record<string, string> = {
-  system: "System Configuration",
-  messages: "Messages & Validation",
-};
-
 // MCP categories to exclude from SettingsEditor (handled by McpPromptsEditor)
 const MCP_CATEGORIES = ["mcp", "mcp-agent-prompts", "mcp-model-prompts"];
 
@@ -112,13 +117,26 @@ const isOverrideSetting = (key: string): boolean => {
 
 interface AdminSettingsProps {
   embedded?: boolean;
+  active?: boolean;
 }
 
-export const AdminSettings: React.FC<AdminSettingsProps> = ({ embedded = false }) => {
+export const AdminSettings: React.FC<AdminSettingsProps> = ({
+  embedded = false,
+  active = true,
+}) => {
   const { t } = useTranslation();
-  const [settings, setSettings] = useState<GlobalSetting[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const resource = useResource(
+    "admin-global-settings",
+    async () => (await apiClient.getGlobalSettings()).settings,
+    () => t("admin.globalSettings.loadError"),
+  );
+  const settings = useMemo(() => resource.data ?? [], [resource.data]);
+  const loadSettings = resource.refresh;
+  useRefreshOnActivation(active, loadSettings);
+  const [committedValues, setCommittedValues] = useState<Record<string, string | null>>({});
+  useEffect(() => {
+    setCommittedValues({});
+  }, [resource.data]);
 
   // Which setting's value history is open. The history itself is the shared one: a setting's
   // values live in the same revision store as notes and playbooks, so the same dialog reads them.
@@ -133,45 +151,36 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({ embedded = false }
 
   // Reset confirmation state
   const [resetKey, setResetKey] = useState<string | null>(null);
-
-  const loadSettings = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const settingsData = await apiClient.getGlobalSettings();
-      setSettings(settingsData.settings);
-    } catch (err) {
-      console.error("Failed to load global settings:", err);
-      setError(t("admin.globalSettings.loadError"));
-    } finally {
-      setLoading(false);
-    }
-  }, [t]);
-
-  useEffect(() => {
-    loadSettings();
-  }, [loadSettings]);
+  const [resetError, setResetError] = useState<string | null>(null);
 
   // Filter out MCP categories - they're handled by McpPromptsEditor
   const nonMcpSettings = settings.filter((s) => !MCP_CATEGORIES.includes(s.category));
 
   // Convert GlobalSetting to SettingDefinition for SettingsEditor (non-MCP only)
-  const definitions: SettingDefinition[] = nonMcpSettings.map((s) => ({
-    key: s.key,
-    type: s.type as SettingDefinition["type"],
-    category: s.category,
-    label: s.label,
-    description: s.description,
-    defaultValue: null,
-    required: false,
-    validation: null,
-    sortOrder: s.sortOrder,
-  }));
+  const definitions: SettingDefinition[] = nonMcpSettings.map((s) =>
+    localizeSettingDefinition(
+      {
+        key: s.key,
+        type: s.type as SettingDefinition["type"],
+        category: s.category,
+        label: s.label,
+        description: s.description,
+        defaultValue: null,
+        required: false,
+        validation: null,
+        sortOrder: s.sortOrder,
+      },
+      t,
+    ),
+  );
 
   // Convert settings to values map for SettingsEditor (non-MCP only)
   const values: Record<string, unknown> = {};
   nonMcpSettings.forEach((s) => {
-    values[s.key] = s.value;
+    values[s.key] = globalSettingEditorValue(
+      s.type,
+      Object.hasOwn(committedValues, s.key) ? committedValues[s.key]! : s.value,
+    );
   });
 
   // MCP Prompts Editor handlers
@@ -181,24 +190,12 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({ embedded = false }
       vendor: Vendor,
       model: string | null,
     ): Promise<McpPromptFetchResult> => {
-      try {
-        const result = await apiClient.getMcpPromptScopeValue({
-          promptType,
-          vendor,
-          model,
-        });
-        return { value: result.value, key: result.key };
-      } catch (error) {
-        console.error("Failed to fetch MCP prompt value:", error);
-        // Return a fallback key based on the request params for history lookup
-        const fallbackKey =
-          vendor === "default"
-            ? `mcp.${promptType}`
-            : model
-              ? `mcp.agent.${vendor}.model.${model}.${promptType}`
-              : `mcp.agent.${vendor}.${promptType}`;
-        return { value: null, key: fallbackKey };
-      }
+      const result = await apiClient.getMcpPromptScopeValue({
+        promptType,
+        vendor,
+        model,
+      });
+      return { value: result.value, key: result.key };
     },
     [],
   );
@@ -234,7 +231,9 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({ embedded = false }
 
   // Handle save from SettingsEditor
   const handleSave = async (key: string, value: unknown) => {
-    await apiClient.updateGlobalSetting(key, value as string | null);
+    const stored = globalSettingStoredValue(value);
+    await apiClient.updateGlobalSetting(key, stored);
+    setCommittedValues((current) => ({ ...current, [key]: stored }));
     await loadSettings();
   };
 
@@ -283,18 +282,21 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({ embedded = false }
 
   // Handle reset button click - opens confirmation dialog
   const handleResetClick = (key: string) => {
+    setResetError(null);
     setResetKey(key);
   };
 
   // Perform reset - set value to null
   const performReset = async () => {
     if (!resetKey) return;
-
+    setResetError(null);
     try {
       await apiClient.resetGlobalSetting(resetKey);
+      setCommittedValues((current) => ({ ...current, [resetKey]: null }));
       await loadSettings();
     } catch (err) {
       console.error("Failed to reset setting:", err);
+      setResetError(err instanceof Error ? err.message : t("admin.settingsRegions.resetFailed"));
       throw err;
     }
   };
@@ -364,6 +366,7 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({ embedded = false }
       URL.revokeObjectURL(url);
     } catch (err) {
       console.error("Failed to export settings:", err);
+      toast.error(t("admin.settingsRegions.exportFailed"));
     } finally {
       setExportLoading(false);
     }
@@ -384,7 +387,7 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({ embedded = false }
       const data = JSON.parse(text) as ExportData;
 
       if (!data.values || typeof data.values !== "object") {
-        console.error("Invalid import file format: missing values");
+        toast.error(t("admin.settingsRegions.invalidImport"));
         return;
       }
 
@@ -438,6 +441,7 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({ embedded = false }
       setImportPreviewOpen(true);
     } catch (err) {
       console.error("Failed to parse import file:", err);
+      toast.error(t("admin.settingsRegions.invalidImport"));
     } finally {
       // Reset file input so same file can be selected again
       event.target.value = "";
@@ -454,6 +458,7 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({ embedded = false }
         // Only update existing settings (add requires definition)
         if (change.type === "overwrite") {
           await apiClient.updateGlobalSetting(change.key, change.newValue);
+          setCommittedValues((current) => ({ ...current, [change.key]: change.newValue }));
         }
         // Skip "add" type - can't add without definition
       }
@@ -463,6 +468,8 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({ embedded = false }
       setImportChanges([]);
     } catch (err) {
       console.error("Failed to import settings:", err);
+      toast.error(t("admin.settingsRegions.importFailed"));
+      await loadSettings();
     } finally {
       setImportLoading(false);
     }
@@ -473,40 +480,14 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({ embedded = false }
     setImportChanges([]);
   };
 
-  if (loading) {
-    if (embedded) {
-      return (
-        <div className="py-8 flex items-center justify-center">
-          <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-        </div>
-      );
-    }
-    return <PageShell title={t("admin.globalSettings.title")} loading />;
-  }
-
-  if (error) {
-    if (embedded) {
-      return (
-        <Card>
-          <CardContent className="pt-6">
-            <div className="flex items-center gap-2 text-destructive">
-              <AlertCircle className="h-5 w-5" />
-              <span>{error}</span>
-            </div>
-            <Button onClick={loadSettings} className="mt-4">
-              {t("admin.globalSettings.retry")}
-            </Button>
-          </CardContent>
-        </Card>
-      );
-    }
-    return (
-      <PageShell title={t("admin.globalSettings.title")} error={error} onRetry={loadSettings} />
-    );
-  }
-
   const content = (
-    <>
+    <DataRegion
+      hasResult={resource.data !== undefined}
+      pending={resource.pending}
+      error={resource.error}
+      onRetry={loadSettings}
+      testId="admin-global-settings-region"
+    >
       {!embedded && (
         <div className="mb-6 flex justify-end gap-2">
           <Button
@@ -600,6 +581,7 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({ embedded = false }
               </div>
             </details>
             <McpPromptsEditor
+              active={active}
               onFetchValue={handleMcpFetchValue}
               onSave={handleMcpSave}
               onReset={handleMcpReset}
@@ -618,9 +600,11 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({ embedded = false }
               <SettingsEditor
                 definitions={definitions}
                 values={values}
-                categoryLabels={CATEGORY_LABELS}
+                categoryLabels={{
+                  system: t("admin.settingsRegions.systemCategory"),
+                  messages: t("admin.settingsRegions.messagesCategory"),
+                }}
                 onSave={handleSave}
-                loading={loading}
                 categorySortOrder={CATEGORY_ORDER}
                 enableFullscreenEdit={true}
                 testIdPrefix="setting"
@@ -653,7 +637,11 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({ embedded = false }
         cancelLabel={t("admin.globalSettings.cancel")}
         variant="destructive"
         onConfirm={performReset}
-      />
+      >
+        {resetError && (
+          <InlineError title={t("admin.settingsRegions.resetFailed")} message={resetError} />
+        )}
+      </ConfirmDialog>
 
       {/* Value history — the same dialog notes and playbooks use */}
       <RevisionHistoryDialog
@@ -777,7 +765,7 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({ embedded = false }
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </>
+    </DataRegion>
   );
 
   if (embedded) return content;

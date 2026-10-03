@@ -35,6 +35,7 @@ import {
   normalizeSlug,
 } from "../../validation/slug-handle.js";
 import { executeListQuery, type ListQueryConfig } from "../list-query-builder.js";
+import { clampPagination } from "../list-query-builder.js";
 import { WorkflowRevisionConflictError } from "../../errors/domain-errors.js";
 import { recomputeGateWaiting, storedGraphNodes } from "../gate-waiting.js";
 
@@ -134,6 +135,13 @@ export interface AdminWorkflowListResult {
  */
 export interface WorkflowListResult {
   workflows: WorkflowInfo[];
+  total: number;
+}
+
+/** HTTP listing facts without the executable graph or its hidden node data. */
+export type WorkflowSummary = Omit<WorkflowInfo, "workflow">;
+export interface WorkflowSummaryListResult {
+  workflows: WorkflowSummary[];
   total: number;
 }
 
@@ -485,7 +493,7 @@ export class WorkflowRepository {
         accessType,
         metadata: graph.metadata,
         storagePath: `database:workflow:${row.id}`,
-        size: row.graph.length,
+        size: Buffer.byteLength(row.graph, "utf8"),
         createdAt: row.createdAt ? (row.createdAt as Date).getTime() : Date.now(),
         updatedAt: row.updatedAt ? (row.updatedAt as Date).getTime() : Date.now(),
         revision: row.revision,
@@ -525,9 +533,152 @@ export class WorkflowRepository {
       offset,
     });
 
+    const whereClause = this.listWhere(filter);
+
+    // Get total count (correct count for pagination)
+    const countResult = await this.db
+      .select({ count: sql<number>`count(*)` })
+      .from(workflow)
+      .where(whereClause);
+    const total = countResult[0]?.count ?? 0;
+
+    // Get paginated results with sorting
+    const sortColumn = this.listSortColumn(sort);
+    const sortFn = sortOrder === "asc" ? asc : desc;
+
+    const rows = await this.db
+      .select({
+        id: workflow.id,
+        slug: workflow.slug,
+        userId: workflow.userId,
+        ownerHandle: user.handle,
+        visibility: workflow.visibility,
+        graph: workflow.graph,
+        createdAt: workflow.createdAt,
+        updatedAt: workflow.updatedAt,
+        revision: workflow.revision,
+        isValid: workflow.isValid,
+        validationErrors: workflow.validationErrors,
+        validatedAt: workflow.validatedAt,
+      })
+      .from(workflow)
+      .leftJoin(user, eq(workflow.userId, user.id))
+      .where(whereClause)
+      .orderBy(sortFn(sortColumn), workflow.id)
+      .limit(this.listPageBounds(filter).limit)
+      .offset(this.listPageBounds(filter).offset);
+
+    this.logger.info("listWithFilters() DB query returned", { rowCount: rows.length, total });
+
+    const workflows = rows.map((row) => {
+      const graph = parseStoredGraph(row.graph);
+      // Determine access type: owner > shared > public
+      let accessType: "owner" | "shared" | "public";
+      if (row.userId === userId) {
+        accessType = "owner";
+      } else if (row.visibility === "public") {
+        accessType = "public";
+      } else {
+        // Private workflow that's not owned by user must be shared
+        accessType = "shared";
+      }
+      return {
+        id: row.id,
+        slug: row.slug,
+        userId: row.userId,
+        ownerHandle: row.ownerHandle || "unknown",
+        visibility: row.visibility as "public" | "private",
+        accessType,
+        metadata: graph.metadata,
+        storagePath: `database:workflow:${row.id}`,
+        size: Buffer.byteLength(row.graph, "utf8"),
+        createdAt: row.createdAt ? (row.createdAt as Date).getTime() : Date.now(),
+        updatedAt: row.updatedAt ? (row.updatedAt as Date).getTime() : Date.now(),
+        revision: row.revision,
+        workflow: graph,
+        validation: parseValidationCache(row.isValid, row.validationErrors, row.validatedAt),
+      };
+    });
+
+    return {
+      workflows,
+      total,
+    };
+  }
+
+  private listPageBounds(filter: WorkflowFilter) {
+    return clampPagination({ defaultLimit: 20, maxLimit: 100 }, filter);
+  }
+
+  private listSortColumn(sort: WorkflowFilter["sort"]) {
+    return sort === "name" ? workflow.name : workflow.createdAt;
+  }
+
+  /** Same access/filter/page decisions as full reads; only scalar listing facts cross SQLite. */
+  async listSummaries(filter: WorkflowFilter): Promise<WorkflowSummaryListResult> {
+    const where = this.listWhere(filter);
+    const page = this.listPageBounds(filter);
+    const [count] = await this.db
+      .select({ total: sql<number>`count(*)` })
+      .from(workflow)
+      .where(where);
+    const rows = await this.db
+      .select({
+        id: workflow.id,
+        slug: workflow.slug,
+        userId: workflow.userId,
+        ownerHandle: user.handle,
+        visibility: workflow.visibility,
+        createdAt: workflow.createdAt,
+        updatedAt: workflow.updatedAt,
+        revision: workflow.revision,
+        isValid: workflow.isValid,
+        validationErrors: workflow.validationErrors,
+        validatedAt: workflow.validatedAt,
+        metadata: sql<string>`CASE WHEN json_type(${workflow.graph}, '$.metadata')='object' THEN json_extract(${workflow.graph}, '$.metadata') ELSE '{}' END`,
+        graphKind: sql<string>`json_type(${workflow.graph})`,
+        size: sql<number>`length(CAST(${workflow.graph} AS BLOB))`,
+      })
+      .from(workflow)
+      .leftJoin(user, eq(workflow.userId, user.id))
+      .where(where)
+      .orderBy(
+        (filter.sortOrder === "asc" ? asc : desc)(this.listSortColumn(filter.sort)),
+        workflow.id,
+      )
+      .limit(page.limit)
+      .offset(page.offset);
+    const summaries = rows.map((row) => {
+      if (row.graphKind !== "object")
+        throw new SyntaxError("Stored workflow graph is not an object");
+      const metadata = JSON.parse(row.metadata) as WorkflowGraph["metadata"];
+      // Reuse metadata schema stamping without loading or migrating hidden executable nodes.
+      const migrated = migrateWorkflowGraph({ metadata, nodes: [] }).graph.metadata;
+      const accessType: WorkflowSummary["accessType"] =
+        row.userId === filter.userId ? "owner" : row.visibility === "public" ? "public" : "shared";
+      return {
+        id: row.id,
+        slug: row.slug,
+        userId: row.userId,
+        ownerHandle: row.ownerHandle ?? "unknown",
+        visibility: row.visibility as "public" | "private",
+        accessType,
+        metadata: migrated,
+        storagePath: `database:workflow:${row.id}`,
+        size: row.size,
+        createdAt: row.createdAt.getTime(),
+        updatedAt: row.updatedAt.getTime(),
+        revision: row.revision,
+        validation: parseValidationCache(row.isValid, row.validationErrors, row.validatedAt),
+      };
+    });
+    return { workflows: summaries, total: count?.total ?? 0 };
+  }
+
+  private listWhere(filter: WorkflowFilter): SQL {
+    const { userId, search, slugs, visibility, access, validationStatus } = filter;
     // Build base conditions - user's own workflows OR public workflows
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const conditions: any[] = [];
+    const conditions: (SQL | undefined)[] = [];
 
     // Workflows an explicit grant reaches: made to the user directly, or to a group they belong to,
     // which the policy counts exactly as much.
@@ -600,77 +751,7 @@ export class WorkflowRepository {
       conditions.push(slugs.length > 0 ? inArray(workflow.slug, slugs) : sql`0 = 1`);
     }
 
-    const whereClause = and(...conditions)!; // Non-null assertion: conditions always has at least 2 elements
-
-    // Get total count (correct count for pagination)
-    const countResult = await this.db
-      .select({ count: sql<number>`count(*)` })
-      .from(workflow)
-      .where(whereClause);
-    const total = countResult[0]?.count ?? 0;
-
-    // Get paginated results with sorting
-    const sortColumn = sort === "name" ? workflow.name : workflow.updatedAt;
-    const sortFn = sortOrder === "asc" ? asc : desc;
-
-    const rows = await this.db
-      .select({
-        id: workflow.id,
-        slug: workflow.slug,
-        userId: workflow.userId,
-        ownerHandle: user.handle,
-        visibility: workflow.visibility,
-        graph: workflow.graph,
-        createdAt: workflow.createdAt,
-        updatedAt: workflow.updatedAt,
-        revision: workflow.revision,
-        isValid: workflow.isValid,
-        validationErrors: workflow.validationErrors,
-        validatedAt: workflow.validatedAt,
-      })
-      .from(workflow)
-      .leftJoin(user, eq(workflow.userId, user.id))
-      .where(whereClause)
-      .orderBy(sortFn(sortColumn))
-      .limit(limit)
-      .offset(offset);
-
-    this.logger.info("listWithFilters() DB query returned", { rowCount: rows.length, total });
-
-    const workflows = rows.map((row) => {
-      const graph = parseStoredGraph(row.graph);
-      // Determine access type: owner > shared > public
-      let accessType: "owner" | "shared" | "public";
-      if (row.userId === userId) {
-        accessType = "owner";
-      } else if (row.visibility === "public") {
-        accessType = "public";
-      } else {
-        // Private workflow that's not owned by user must be shared
-        accessType = "shared";
-      }
-      return {
-        id: row.id,
-        slug: row.slug,
-        userId: row.userId,
-        ownerHandle: row.ownerHandle || "unknown",
-        visibility: row.visibility as "public" | "private",
-        accessType,
-        metadata: graph.metadata,
-        storagePath: `database:workflow:${row.id}`,
-        size: row.graph.length,
-        createdAt: row.createdAt ? (row.createdAt as Date).getTime() : Date.now(),
-        updatedAt: row.updatedAt ? (row.updatedAt as Date).getTime() : Date.now(),
-        revision: row.revision,
-        workflow: graph,
-        validation: parseValidationCache(row.isValid, row.validationErrors, row.validatedAt),
-      };
-    });
-
-    return {
-      workflows,
-      total,
-    };
+    return and(...conditions)!;
   }
 
   // ===== Get Operations =====
@@ -841,7 +922,7 @@ export class WorkflowRepository {
       accessType,
       metadata: graph.metadata,
       storagePath: `database:workflow:${row.id}`,
-      size: row.graph.length,
+      size: Buffer.byteLength(row.graph, "utf8"),
       createdAt: row.createdAt ? (row.createdAt as Date).getTime() : Date.now(),
       updatedAt: row.updatedAt ? (row.updatedAt as Date).getTime() : Date.now(),
       revision: row.revision,
@@ -1192,7 +1273,7 @@ export class WorkflowRepository {
         accessType: "owner" as const, // Deleted workflows are always owned by user
         metadata: graph.metadata,
         storagePath: `database:workflow:${row.id}`,
-        size: row.graph.length,
+        size: Buffer.byteLength(row.graph, "utf8"),
         createdAt: row.createdAt ? (row.createdAt as Date).getTime() : Date.now(),
         updatedAt: row.updatedAt ? (row.updatedAt as Date).getTime() : Date.now(),
         revision: row.revision,
@@ -1235,6 +1316,8 @@ export class WorkflowRepository {
    */
   async listAllDeletedPaginated(filter: {
     search?: string;
+    fromDate?: number;
+    toDate?: number;
     sort?: "name" | "deletedAt";
     sortOrder?: "asc" | "desc";
     limit?: number;
@@ -1253,6 +1336,14 @@ export class WorkflowRepository {
     if (filter.search) {
       const pattern = `%${filter.search}%`;
       conditions.push(or(like(workflow.name, pattern), like(workflow.id, pattern))!);
+    }
+
+    // The same bounds constrain both the count and the page. NULL dates do not match a range.
+    if (filter.fromDate !== undefined) {
+      conditions.push(sql`${workflow.deletedAt} >= ${filter.fromDate}`);
+    }
+    if (filter.toDate !== undefined) {
+      conditions.push(sql`${workflow.deletedAt} <= ${filter.toDate}`);
     }
 
     const { rows, total } = await executeListQuery(
@@ -1324,10 +1415,10 @@ export class WorkflowRepository {
     }
 
     // Date range filter on updatedAt
-    if (filter.fromDate) {
+    if (filter.fromDate !== undefined) {
       conditions.push(sql`${workflow.updatedAt} >= ${filter.fromDate}`);
     }
-    if (filter.toDate) {
+    if (filter.toDate !== undefined) {
       conditions.push(sql`${workflow.updatedAt} <= ${filter.toDate}`);
     }
 

@@ -4,7 +4,7 @@
  * application out everywhere; it must be authorized again to reconnect.
  */
 
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { AppWindow, Loader2, Plug, Search } from "lucide-react";
@@ -13,7 +13,8 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Skeleton } from "@/components/ui/skeleton";
+import { DataRegion } from "@/components/DataRegion";
+import { useResource } from "@/hooks/useResource";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { EmptyState } from "@/components/empty-state";
 import { ServerPagination } from "@/components/ServerPagination";
@@ -32,39 +33,30 @@ const PAGE_SIZE = 8;
 
 export const OAuthSettings: React.FC = () => {
   const { t, i18n } = useTranslation();
-  const [consents, setConsents] = useState<OAuthConsent[]>([]);
-  const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
-  const [loading, setLoading] = useState(true);
-  const [loadFailed, setLoadFailed] = useState(false);
   const [revoking, setRevoking] = useState<string | null>(null);
   const [revokeTarget, setRevokeTarget] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const debouncedSearch = useDebounce(searchQuery, 300);
 
-  const loadConsents = useCallback(async () => {
-    try {
-      setLoading(true);
-      setLoadFailed(false);
-      const result = await apiClient.getOAuthConsents({
-        search: debouncedSearch || undefined,
-        sort: "createdAt",
-        sortOrder: "desc",
-        limit: PAGE_SIZE,
-        offset: (page - 1) * PAGE_SIZE,
-      });
-      setConsents(result.consents);
-      setTotal(result.total);
-    } catch {
-      setLoadFailed(true);
-    } finally {
-      setLoading(false);
-    }
-  }, [debouncedSearch, page]);
-
-  useEffect(() => {
-    void loadConsents();
-  }, [loadConsents]);
+  const resource = useResource<{
+    consents: OAuthConsent[];
+    total: number;
+    page: number;
+    search: string;
+  }>(JSON.stringify({ page, search: debouncedSearch }), async (key) => {
+    const query = JSON.parse(key) as { page: number; search: string };
+    const result = await apiClient.getOAuthConsents({
+      search: query.search || undefined,
+      sort: "createdAt",
+      sortOrder: "desc",
+      limit: PAGE_SIZE,
+      offset: (query.page - 1) * PAGE_SIZE,
+    });
+    return { ...result, ...query };
+  });
+  const consents = resource.data?.consents ?? [];
+  const total = resource.data?.total ?? 0;
 
   useEffect(() => {
     setPage(1);
@@ -75,12 +67,13 @@ export const OAuthSettings: React.FC = () => {
       setRevoking(consentId);
       await apiClient.revokeOAuthConsent(consentId);
       toast.success(t("pages.settings.oauth.revoked"));
-      await loadConsents();
-    } catch {
+      setRevokeTarget(null);
+      await resource.refresh();
+    } catch (error) {
       toast.error(t("pages.settings.oauth.revokeFailed"));
+      throw error;
     } finally {
       setRevoking(null);
-      setRevokeTarget(null);
     }
   };
 
@@ -105,86 +98,101 @@ export const OAuthSettings: React.FC = () => {
           />
         </div>
 
-        {loading && consents.length === 0 ? (
-          <Skeleton className="h-16 w-full" />
-        ) : loadFailed ? (
-          <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-sm">
-            <span>{t("pages.settings.oauth.loadFailed")}</span>
-            <Button variant="outline" size="sm" onClick={() => void loadConsents()}>
-              {t("pages.settings.retry")}
-            </Button>
-          </div>
-        ) : consents.length === 0 ? (
-          <EmptyState
-            icon={Plug}
-            title={t("pages.settings.oauth.noConsents")}
-            description={t("pages.settings.oauth.noConsentsDescription")}
-          />
-        ) : (
-          <ul className="divide-y rounded-lg border" data-testid="oauth-list">
-            {consents.map((consent) => (
-              <li
-                key={consent.id}
-                className="flex flex-wrap items-start justify-between gap-3 p-3"
-                data-testid={`oauth-consent-${consent.id}`}
-              >
-                <div className="flex min-w-0 items-start gap-3">
-                  {consent.clientIcon ? (
-                    <img src={consent.clientIcon} alt="" className="size-8 shrink-0 rounded-md" />
-                  ) : (
-                    <span className="flex size-8 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground">
-                      <AppWindow className="size-4" aria-hidden="true" />
-                    </span>
-                  )}
-                  <div className="min-w-0 space-y-1">
-                    <p className="text-sm font-medium">{consent.clientName}</p>
-                    {consent.scopes.length > 0 && (
-                      <div
-                        className="flex flex-wrap gap-1"
-                        aria-label={t("pages.settings.oauth.permissions")}
-                      >
-                        {consent.scopes.map((scope) => (
-                          <Badge key={scope} variant="secondary" className="font-mono text-[11px]">
-                            {scope}
-                          </Badge>
-                        ))}
-                      </div>
-                    )}
-                    <p className="text-xs text-muted-foreground">
-                      {t("pages.settings.oauth.authorized")}: {formatDate(consent.createdAt)}
-                      {" · "}
-                      {t("pages.settings.oauth.clientId")}:{" "}
-                      <span className="font-mono">{consent.clientId}</span>
-                    </p>
-                  </div>
-                </div>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setRevokeTarget(consent.id)}
-                  disabled={revoking === consent.id}
-                  data-testid={`oauth-revoke-${consent.id}`}
+        <DataRegion
+          hasResult={resource.data !== undefined}
+          pending={resource.pending}
+          error={resource.error}
+          onRetry={resource.refresh}
+          testId="oauth-data-region"
+          resultScope={
+            resource.data && (
+              <span>
+                {t("common.pagination.page", {
+                  current: resource.data.page,
+                  total: Math.max(1, Math.ceil(total / PAGE_SIZE)),
+                })}
+                {resource.data.search &&
+                  ` · ${t("common.filters.search")}: ${resource.data.search}`}
+              </span>
+            )
+          }
+        >
+          {consents.length === 0 ? (
+            <EmptyState
+              icon={Plug}
+              title={t("pages.settings.oauth.noConsents")}
+              description={t("pages.settings.oauth.noConsentsDescription")}
+            />
+          ) : (
+            <ul className="divide-y rounded-lg border" data-testid="oauth-list">
+              {consents.map((consent) => (
+                <li
+                  key={consent.id}
+                  className="flex flex-wrap items-start justify-between gap-3 p-3"
+                  data-testid={`oauth-consent-${consent.id}`}
                 >
-                  {revoking === consent.id ? (
-                    <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-                  ) : (
-                    t("pages.settings.oauth.revoke")
-                  )}
-                </Button>
-              </li>
-            ))}
-          </ul>
-        )}
+                  <div className="flex min-w-0 items-start gap-3">
+                    {consent.clientIcon ? (
+                      <img src={consent.clientIcon} alt="" className="size-8 shrink-0 rounded-md" />
+                    ) : (
+                      <span className="flex size-8 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground">
+                        <AppWindow className="size-4" aria-hidden="true" />
+                      </span>
+                    )}
+                    <div className="min-w-0 space-y-1">
+                      <p className="text-sm font-medium">{consent.clientName}</p>
+                      {consent.scopes.length > 0 && (
+                        <div
+                          className="flex flex-wrap gap-1"
+                          aria-label={t("pages.settings.oauth.permissions")}
+                        >
+                          {consent.scopes.map((scope) => (
+                            <Badge
+                              key={scope}
+                              variant="secondary"
+                              className="font-mono text-[11px]"
+                            >
+                              {scope}
+                            </Badge>
+                          ))}
+                        </div>
+                      )}
+                      <p className="text-xs text-muted-foreground">
+                        {t("pages.settings.oauth.authorized")}: {formatDate(consent.createdAt)}
+                        {" · "}
+                        {t("pages.settings.oauth.clientId")}:{" "}
+                        <span className="font-mono">{consent.clientId}</span>
+                      </p>
+                    </div>
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setRevokeTarget(consent.id)}
+                    disabled={revoking === consent.id}
+                    data-testid={`oauth-revoke-${consent.id}`}
+                  >
+                    {revoking === consent.id ? (
+                      <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                    ) : (
+                      t("pages.settings.oauth.revoke")
+                    )}
+                  </Button>
+                </li>
+              ))}
+            </ul>
+          )}
 
-        <ServerPagination
-          embedded
-          currentPage={page}
-          totalPages={Math.ceil(total / PAGE_SIZE)}
-          totalItems={total}
-          pageSize={PAGE_SIZE}
-          onPageChange={setPage}
-          data-testid="oauth-pager"
-        />
+          <ServerPagination
+            embedded
+            currentPage={resource.data?.page ?? page}
+            totalPages={Math.ceil(total / PAGE_SIZE)}
+            totalItems={total}
+            pageSize={PAGE_SIZE}
+            onPageChange={setPage}
+            data-testid="oauth-pager"
+          />
+        </DataRegion>
       </CardContent>
 
       <ConfirmDialog

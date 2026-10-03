@@ -17,6 +17,18 @@
 import { test, expect, type Page } from "./fixtures.js";
 import { loginAsAdmin } from "./helpers/auth-helper.js";
 import { getTestBaseUrl } from "../utils/test-config.js";
+import type {
+  AnalyticsScope,
+  AnalyticsOverview,
+  AnalyticsUsers,
+  AnalyticsRegistrations,
+  AnalyticsAttention,
+  AnalyticsTopWorkflows,
+} from "@mcp-moira/shared";
+import {
+  analyticsBounds,
+  parseAnalyticsQuery,
+} from "../../packages/shared/src/database/admin-analytics-query.js";
 
 const BASE_URL = getTestBaseUrl();
 
@@ -112,8 +124,7 @@ test.describe("Feature-mode UI gating", () => {
     await mockFeatures(page, "self-host");
     await loginAsAdmin(page, false);
     await page.goto(`${BASE_URL}/admin`, { waitUntil: "commit" });
-    // Scope to sidebar nav links (data-sidebar="menu-button") — the admin
-    // dashboard also renders Quick Links cards pointing at the same hrefs.
+    // Navigation and dashboard maintenance actions have independent capabilities.
     const sidebarLink = (href: string) =>
       page.locator(`a[data-sidebar="menu-button"][href="${href}"]`);
     await expect(sidebarLink("/admin/settings")).toBeVisible({ timeout: 30000 });
@@ -139,10 +150,7 @@ test.describe("Feature-mode UI gating", () => {
       ),
     ).toEqual([]);
 
-    const dashboardLink = (href: string) =>
-      page.locator(`a[href="${href}"]:not([data-sidebar="menu-button"])`);
-    await expect(dashboardLink("/admin/users")).toBeVisible();
-    await expect(dashboardLink("/admin/executions")).toHaveCount(0);
+    await expect(page.getByRole("link", { name: "System Settings", exact: true })).toBeVisible();
 
     await page.unroute("**/api/features");
     await mockFeatures(page, "self-host", { userManagement: false });
@@ -180,30 +188,74 @@ test.describe("Feature-mode UI gating", () => {
       });
     });
     await page.route("**/api/admin/analytics/**", async (route) => {
-      const pathname = new URL(route.request().url()).pathname;
-      const data = pathname.endsWith("/overview")
-        ? {
+      const url = new URL(route.request().url());
+      const query = parseAnalyticsQuery(Object.fromEntries(url.searchParams));
+      const asOf = Date.now();
+      const scope: AnalyticsScope = {
+        timeRange: query.range,
+        ...analyticsBounds(query.range, asOf),
+        asOf,
+        exclusions: {
+          ...query.exclusions,
+          effectiveCount: query.exclusions.mode === "custom" ? query.exclusions.userIds.length : 1,
+        },
+      };
+      const scoped = { scope, timeRange: query.range };
+      let data:
+        | AnalyticsOverview
+        | AnalyticsUsers
+        | AnalyticsRegistrations
+        | AnalyticsAttention
+        | AnalyticsTopWorkflows;
+      switch (url.pathname.split("/").pop()) {
+        case "overview":
+          data = {
+            ...scoped,
             totalUsers: 0,
             totalWorkflows: 0,
             totalExecutions: 0,
             activeExecutions: 0,
             completedExecutions: 0,
             failedExecutions: 0,
-            timeRange: "month",
-          }
-        : pathname.endsWith("/top-workflows")
-          ? { workflows: [] }
-          : pathname.endsWith("/executions")
-            ? {
-                total: 0,
-                completed: 0,
-                failed: 0,
-                active: 0,
-                successRate: 0,
-                avgDurationMs: null,
-                overTime: [],
-              }
-            : { activeUsers: 0, newUsers: 0, topUsers: [] };
+            activeUsers: 0,
+            successfulExecutions: 0,
+            successRate: 0,
+            avgDurationMs: 0,
+            overTime: [],
+            overTimeWindow: {
+              granularity: "daily",
+              limit: 366,
+              totalBuckets: 0,
+              limited: false,
+              firstDate: null,
+              lastDate: null,
+            },
+          };
+          break;
+        case "users":
+          data = {
+            ...scoped,
+            totalUsers: 0,
+            activeUsers: 0,
+            newUsers: 0,
+            activePeople: [],
+            activePeopleTotal: 0,
+            topUsers: [],
+          };
+          break;
+        case "registrations":
+          data = { ...scoped, users: [], total: 0 };
+          break;
+        case "attention":
+          data = { ...scoped, executions: [], total: 0 };
+          break;
+        case "top-workflows":
+          data = { ...scoped, workflows: [], total: 0 };
+          break;
+        default:
+          await route.continue();
+          return;
+      }
       await route.fulfill({
         status: 200,
         contentType: "application/json",
@@ -218,7 +270,7 @@ test.describe("Feature-mode UI gating", () => {
     await expect(sidebarLink("/admin/executions")).toBeVisible();
     await expect(sidebarLink("/admin/monitoring-test")).toBeVisible();
     await expect(sidebarLink("/admin/operational")).toBeVisible();
-    await expect(page.getByText("Top 10 Workflows", { exact: true })).toBeVisible();
+    await expect(page.getByTestId("admin-card-flows")).toBeVisible();
     await expect(page.getByRole("button", { name: "Logout All Users" })).toBeVisible();
     await expect(page.getByTestId("admin-recent-activity")).toBeVisible();
     await expect(page.getByText("saas-workflow", { exact: false })).toBeVisible();

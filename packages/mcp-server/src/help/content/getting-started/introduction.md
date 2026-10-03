@@ -3,9 +3,9 @@ title: Introduction to Moira
 description: What Moira does for you and your agent, and how to start without learning to build flows
 ---
 
-Moira keeps an AI agent on track. It gives the agent one clear step at a time and checks each
-result before the agent may move on, so a multi-step task is done completely and in order. The
-steps come from a **flow** (a workflow): a process written once and run the same way every time.
+Moira keeps an AI agent on track with one clear step at a time, checking each result before it
+moves on so multi-step tasks finish completely and in order. A **flow** (workflow) defines the
+process once for repeatable execution.
 
 ## You do not have to build flows
 
@@ -21,8 +21,8 @@ plain words. The agent does the rest:
    should be: a simple one is built quickly and gets a light check, a larger one goes through
    design and independent review. A flow can always be made more thorough later.
 
-Everything else — the diagrams in the web app, variables, node types, editing a flow by hand — is
-optional. It is there for when you want to look inside a flow, not something you must learn first.
+Everything else — web diagrams, variables, node types and editing a flow by hand — is optional.
+Use it to look inside a flow when you want; you need not learn it first.
 
 ## Finding your way in the web app
 
@@ -47,6 +47,25 @@ The web app explains itself on screen:
 - **Where you stopped and what you have seen** follows your account to every browser. Settings →
   Preferences → Guides starts the full tour again, or forgets what you have seen.
 
+### Administrator overview
+
+**Admin Panel** shows health/flow reconciliation. Cloud analytics cards show active people/work,
+new accounts, attention, popular flows and run stats. Per-card period buttons use rolling windows
+or **Today** (UTC midnight); choices last on this page.
+
+**Excluded users** defaults to admins: search name/email or **Include everyone**. Choices stay per
+account/browser, without sync. Refresh retains labelled scope; errors/retry stay local.
+
+Activity is a recorded action or observed provider renewal of an unexpired session, not online
+status. No renewal is inferred from signup/old stamps. Last step is an accepted step; missing times
+are unknown.
+
+**Manage all users/runs/flows** keeps all records and all-period account details. Exclusions leave
+management/health unchanged. Default self-host: health and **Users**, no analytics.
+
+**Admin Settings** groups definitions/values/maintenance/Codespaces; `?tab=values` selects a section.
+Updates/errors/retry stay local; other controls, loaded data and drafts remain.
+
 ## A gradual path
 
 Start at the top and stop wherever you have what you need:
@@ -62,7 +81,7 @@ Start at the top and stop wherever you have what you need:
 
 ## What goes wrong without structure
 
-AI agents are powerful, but on a long task they can:
+On a long task, AI agents can:
 
 - Lose focus on complex multi-step tasks
 - Skip important steps or prerequisites

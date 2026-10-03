@@ -1,7 +1,8 @@
 /** @jest-environment jsdom */
 
 import { act, cleanup, renderHook } from "@testing-library/react";
-import { afterEach, describe, expect, jest, test } from "@jest/globals";
+import { afterEach, beforeEach, describe, expect, jest, test } from "@jest/globals";
+import { observeReadSession } from "../../../packages/web-frontend/src/services/read-scope";
 import { useResource } from "../../../packages/web-frontend/src/hooks/useResource";
 import {
   PAGE_REFETCH_MS,
@@ -11,10 +12,16 @@ import type {
   LiveDependencies,
   StreamLike,
 } from "../../../packages/web-frontend/src/components/overview/liveConnection";
+import {
+  browserDependencies,
+  LiveConnection,
+} from "../../../packages/web-frontend/src/components/overview/liveConnection";
 
+beforeEach(() => observeReadSession("reader", "reader-session"));
 afterEach(() => {
   cleanup();
   jest.useRealTimers();
+  observeReadSession(null, null);
 });
 
 function dependencies() {
@@ -59,6 +66,48 @@ function connect(refetchPage = jest.fn<() => Promise<void>>().mockResolvedValue(
 }
 
 describe("the overview refreshes the server's tree query", () => {
+  test("browser leaders and broadcasts are shared only within the same public owner scope", async () => {
+    const originalChannel = globalThis.BroadcastChannel;
+    const names: string[] = [];
+    globalThis.BroadcastChannel = class {
+      onmessage = null;
+      constructor(name: string) {
+        names.push(name);
+      }
+      postMessage() {}
+      close() {}
+    } as unknown as typeof BroadcastChannel;
+    const locks: string[] = [];
+    const connections: LiveConnection[] = [];
+    try {
+      for (const scope of ["backend/owner-a", "backend/owner-a", "backend/owner-b"]) {
+        const { deps } = dependencies();
+        const browser = browserDependencies(deps.openStream, deps.pollChanges, scope);
+        const connection = new LiveConnection(
+          {
+            ...browser,
+            locks: {
+              request: async (name, callback) => {
+                locks.push(name);
+                await callback();
+              },
+            },
+          },
+          () => undefined,
+          () => undefined,
+        );
+        connections.push(connection);
+        connection.start();
+      }
+      expect(names[0]).toBe(names[1]);
+      expect(names[2]).not.toBe(names[0]);
+      expect(locks[0]).toBe(locks[1]);
+      expect(locks[2]).not.toBe(locks[0]);
+    } finally {
+      connections.forEach((connection) => connection.stop());
+      globalThis.BroadcastChannel = originalChannel;
+    }
+  });
   test.each(["activity", "meta"])("%s outside the visible page requests a new page", (kind) => {
     const { change, refetchPage } = connect();
     act(() => change("outside-current-page", kind));

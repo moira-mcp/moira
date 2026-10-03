@@ -3,13 +3,14 @@ import { useTranslation } from "react-i18next";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 
-type ExecutionStatus = "running" | "waiting" | "completed" | "failed" | "locked";
+type ExecutionStatus = "running" | "waiting" | "completed" | "failed" | "locked" | "stopped";
 
 const statusStyles: Record<ExecutionStatus, string> = {
   running: "border-transparent bg-info text-info-foreground",
   waiting: "border-transparent bg-warning text-warning-foreground",
   completed: "border-transparent bg-success text-success-foreground",
   failed: "border-transparent bg-destructive-fill text-destructive-foreground",
+  stopped: "border-transparent bg-secondary text-secondary-foreground",
   locked:
     "border-transparent bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300",
 };
@@ -24,7 +25,7 @@ export function StatusBadge({ status, className }: StatusBadgeProps) {
   const { t } = useTranslation();
   return (
     <Badge className={cn(statusStyles[status], className)} data-status={status}>
-      {t(`common.status.${status}`)}
+      {t(status === "stopped" ? "pages.overview.runStatus.stopped" : `common.status.${status}`)}
     </Badge>
   );
 }

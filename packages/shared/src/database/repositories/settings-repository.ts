@@ -6,7 +6,7 @@
 import { eq, and } from "drizzle-orm";
 import type { BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
 import { settingDefinition, userSettingValue } from "../schema.js";
-import { encryptValue, decryptValue } from "@mcp-moira/workflow-engine";
+import { encryptValue, decryptValue, maskEncryptedValue } from "@mcp-moira/workflow-engine";
 import type { SettingDefinition } from "@mcp-moira/workflow-engine";
 import type * as schema from "../schema.js";
 import { ValidationError } from "../../errors/app-error.js";
@@ -176,17 +176,7 @@ export class SettingsRepository {
 
   async getSettings(userId: string, category?: string): Promise<Record<string, unknown>> {
     const definitions = await this.getSettingDefinitions(category);
-
-    const result: Record<string, unknown> = {};
-
-    for (const def of definitions) {
-      const value = await this.getSetting(userId, def.key);
-      if (value !== null) {
-        result[def.key] = value;
-      }
-    }
-
-    return result;
+    return this.projectValues(definitions, await this.listValues(userId), "internal");
   }
 
   /**
@@ -195,24 +185,47 @@ export class SettingsRepository {
    */
   async getSettingsForApi(userId: string, category?: string): Promise<Record<string, unknown>> {
     const definitions = await this.getSettingDefinitions(category);
+    return this.projectValues(definitions, await this.listValues(userId), "api");
+  }
 
+  /** Bulk persisted rows; plaintext/ciphertext remain private to trusted projection owners. */
+  async listValues(
+    userId: string,
+  ): Promise<Array<{ settingKey: string; value: string; encrypted: boolean }>> {
+    const rows = await this.db
+      .select({
+        settingKey: userSettingValue.settingKey,
+        value: userSettingValue.value,
+        encrypted: userSettingValue.encrypted,
+      })
+      .from(userSettingValue)
+      .where(eq(userSettingValue.userId, userId));
+    return rows.map((row) => ({ ...row, encrypted: Boolean(row.encrypted) }));
+  }
+
+  /** Resolve one definition/value snapshot without per-key lookups or secret caching. */
+  projectValues(
+    definitions: SettingDefinition[],
+    rows: Array<{ settingKey: string; value: string; encrypted: boolean }>,
+    exposure: "internal" | "api" | "browser",
+  ): Record<string, unknown> {
+    const stored = new Map(rows.map((row) => [row.settingKey, row]));
     const result: Record<string, unknown> = {};
-
-    for (const def of definitions) {
-      if (def.type === "encrypted") {
-        // Check if value exists without decrypting
-        const rawValue = await this.getRawSettingValue(userId, def.key);
-        if (rawValue !== null) {
-          result[def.key] = "[encrypted]";
-        }
-      } else {
-        const value = await this.getSetting(userId, def.key);
-        if (value !== null) {
-          result[def.key] = value;
-        }
+    for (const definition of definitions) {
+      const row = stored.get(definition.key);
+      if (definition.type === "encrypted" && exposure !== "internal") {
+        if (row)
+          result[definition.key] =
+            exposure === "browser" ? maskEncryptedValue(row.value) : "[encrypted]";
+        continue;
       }
+      // Keep the built-in empty-default policy; a stored empty string is still a value.
+      if (!row && !definition.defaultValue) continue;
+      const raw = row?.value ?? definition.defaultValue!;
+      const effective = row?.encrypted && definition.type === "encrypted" ? decryptValue(raw) : raw;
+      // Presence was decided before conversion: JSON null remains a present value.
+      result[definition.key] = this.convertToType(effective, definition.type);
     }
-
     return result;
   }
 

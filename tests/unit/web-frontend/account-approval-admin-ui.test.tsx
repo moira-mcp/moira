@@ -15,6 +15,7 @@ import { AdminUserDetail } from "../../../packages/web-frontend/src/pages/AdminU
 import { ForgotPassword } from "../../../packages/web-frontend/src/pages/ForgotPassword";
 import { ProfileSettings } from "../../../packages/web-frontend/src/pages/settings/ProfileSettings";
 import { apiClient } from "../../../packages/web-frontend/src/services/api-client";
+import { AuthProvider } from "../../../packages/web-frontend/src/auth/AuthProvider";
 
 const pendingUser = {
   id: "saas-user",
@@ -73,7 +74,9 @@ function renderForgotPassword() {
     translated(
       <FeaturesProvider>
         <MemoryRouter>
-          <ForgotPassword />
+          <AuthProvider>
+            <ForgotPassword />
+          </AuthProvider>
         </MemoryRouter>
       </FeaturesProvider>,
     ),
@@ -117,7 +120,7 @@ describe("administrator account-approval presentation", () => {
     await waitFor(() =>
       expect(screen.queryByText("Checking email recovery availability...")).not.toBeInTheDocument(),
     );
-    expect(container.querySelector('[data-slot="card"]')).toBeInTheDocument();
+    await waitFor(() => expect(container.querySelector('[data-slot="card"]')).toBeInTheDocument());
     expect(screen.queryByTestId("email-delivery-unavailable")).not.toBeInTheDocument();
   });
 

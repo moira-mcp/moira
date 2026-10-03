@@ -26,18 +26,31 @@ import {
   getFeatureResolver,
   getLockService,
   getUserService,
+  AdminAnalyticsRepository,
+  ExecutionRepository,
+  parseUserIdSelection,
   MCP_TEXT_KEYS,
   MCP_AGENT_CATEGORY,
   MCP_MODEL_CATEGORY,
   getSqliteInstance,
   getWorkflowReconciliationStatusSummary,
+  clampPagination,
 } from "@mcp-moira/shared";
 import * as sharedEmail from "@mcp-moira/shared";
 import { isCodespaceReadinessDegraded } from "@mcp-moira/shared";
 import { getCodespaceObservabilityService } from "../services/codespace-services.js";
+import { sendConditionalRead } from "../utils/conditional-read.js";
 
 const router = Router();
 const repository = new DatabaseRepository();
+
+function optionalListInteger(value: unknown, name: string): number | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== "string" || value.trim() === "" || !Number.isSafeInteger(Number(value))) {
+    throw createApiError.validationFailed(`${name} must be an integer`);
+  }
+  return Number(value);
+}
 
 /**
  * GET /api/admin/settings/definitions - List all setting definitions (including adminOnly)
@@ -232,6 +245,9 @@ router.get(
 router.get(
   "/users",
   asyncHandler(async (req: Request, res: Response) => {
+    const projection = req.query.projection;
+    if (projection !== undefined && projection !== "lookup")
+      throw createApiError.validationFailed("Invalid user list projection");
     const search = req.query.search as string | undefined;
     const sort = req.query.sort as string | undefined;
     const sortOrder = req.query.sortOrder as "asc" | "desc" | undefined;
@@ -242,17 +258,44 @@ router.get(
     const db = getDatabase();
     const userRepo = new UserRepository(db);
 
-    const result = await userRepo.listAdmin({
+    const filter = {
+      ids: req.query.ids === undefined ? undefined : parseUserIdSelection(req.query.ids),
       search,
       sort: sort as "email" | "name" | "createdAt" | undefined,
       sortOrder,
       limit,
       offset,
-    });
+    };
 
+    if (projection === "lookup") {
+      const result = await userRepo.listAdminLookup(filter);
+      sendConditionalRead(
+        req,
+        res,
+        {
+          users: result.users,
+          total: result.total,
+          limit: Math.min(Math.max(1, limit ?? 20), 100),
+          offset: Math.max(0, offset ?? 0),
+        },
+        { scope: (req as AuthenticatedRequest).userId },
+      );
+      return;
+    }
+
+    const result = await userRepo.listAdmin(filter);
+
+    const activity = new AdminAnalyticsRepository(db).userActivities(
+      result.users.map((item) => item.id),
+    );
     res.json({
       success: true,
-      data: { users: result.users, total: result.total, limit: limit ?? 20, offset: offset ?? 0 },
+      data: {
+        users: result.users.map((item) => ({ ...item, ...activity.get(item.id) })),
+        total: result.total,
+        limit: limit ?? 20,
+        offset: offset ?? 0,
+      },
       timestamp: new Date().toISOString(),
     });
   }),
@@ -297,7 +340,12 @@ router.get(
       .limit(50);
 
     // Get workflow count
-    const workflows = await repository.listWorkflows(id);
+    const { workflow: ownWorkflow } = await import("@mcp-moira/shared");
+    const { count, and } = await import("drizzle-orm");
+    const [ownCount] = await db
+      .select({ count: count() })
+      .from(ownWorkflow)
+      .where(and(eq(ownWorkflow.userId, id), eq(ownWorkflow.deleted, false)));
 
     // Get blockedBy admin name if user is blocked
     let blockedByName: string | null = null;
@@ -335,7 +383,7 @@ router.get(
           updatedAt: userData.updatedAt,
         },
         stats: {
-          workflowsCount: workflows.length,
+          workflowsCount: ownCount?.count ?? 0,
           sessionsCount: sessions.length,
           emailsCount: emails.length,
         },
@@ -792,34 +840,40 @@ router.get(
 router.get(
   "/stats",
   asyncHandler(async (_req: Request, res: Response) => {
-    // Get counts from repository
-    const workflows = await repository.listWorkflows("system-admin"); // Admin sees all
-    const executions = await repository.listExecutions();
-    const systemStatus = await getAdminSystemStatus();
-
-    // Count active executions (Issue #386: only "running" status for active)
-    const activeExecutions = executions.filter((e) => e.status === "running").length;
-
-    // Recent activity (last 10 executions)
-    const recentActivity = executions
-      .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
-      .slice(0, 10)
-      .map((e) => ({
-        id: e.executionId,
-        workflowId: e.workflowId,
-        status: e.status,
-        timestamp: e.createdAt,
-        action: `Workflow execution ${e.status}`,
-      }));
-
+    const { getDatabase, workflow, workflowExecution } = await import("@mcp-moira/shared");
+    const { count, eq, desc, sql } = await import("drizzle-orm");
+    const db = getDatabase();
+    const [workflows] = await db
+      .select({ count: count() })
+      .from(workflow)
+      .where(sql`coalesce(${workflow.deleted},0)=0`);
+    const [executions] = await db.select({ count: count() }).from(workflowExecution);
+    const [active] = await db
+      .select({ count: count() })
+      .from(workflowExecution)
+      .where(eq(workflowExecution.state, "running"));
+    const recent = await db
+      .select({
+        id: workflowExecution.executionId,
+        workflowId: workflowExecution.workflowId,
+        status: workflowExecution.state,
+        timestamp: workflowExecution.createdAt,
+      })
+      .from(workflowExecution)
+      .orderBy(desc(workflowExecution.createdAt))
+      .limit(10);
     res.json({
       success: true,
       data: {
-        totalWorkflows: workflows.length,
-        totalExecutions: executions.length,
-        ...systemStatus,
-        activeExecutions,
-        recentActivity,
+        totalWorkflows: workflows.count,
+        totalExecutions: executions.count,
+        ...(await getAdminSystemStatus()),
+        activeExecutions: active.count,
+        recentActivity: recent.map((item) => ({
+          ...item,
+          timestamp: item.timestamp?.getTime() ?? null,
+          action: `Workflow execution ${item.status}`,
+        })),
       },
       timestamp: new Date().toISOString(),
     });
@@ -945,8 +999,8 @@ router.get(
     const sortOrder = req.query.sortOrder as "asc" | "desc" | undefined;
     const limit = parseInt(req.query.limit as string) || undefined;
     const offset = parseInt(req.query.offset as string) || undefined;
-    const fromDate = parseInt(req.query.fromDate as string) || undefined;
-    const toDate = parseInt(req.query.toDate as string) || undefined;
+    const fromDate = optionalListInteger(req.query.fromDate, "fromDate");
+    const toDate = optionalListInteger(req.query.toDate, "toDate");
 
     // Parse isValid: "true" → true, "false" → false, "unknown" → null, undefined → skip
     let isValid: boolean | null | undefined;
@@ -983,7 +1037,7 @@ router.get(
 
 /**
  * GET /api/admin/workflows/deleted - List deleted workflows
- * Query params: search, sort, sortOrder, limit, offset
+ * Query params: search, fromDate, toDate (inclusive milliseconds), sort, sortOrder, limit, offset
  */
 router.get(
   "/workflows/deleted",
@@ -991,21 +1045,39 @@ router.get(
     const search = req.query.search as string | undefined;
     const sort = req.query.sort as string | undefined;
     const sortOrder = req.query.sortOrder as "asc" | "desc" | undefined;
-    const limit = parseInt(req.query.limit as string) || undefined;
-    const offset = parseInt(req.query.offset as string) || undefined;
+    const page = clampPagination(
+      { defaultLimit: 20, maxLimit: 100 },
+      {
+        limit: optionalListInteger(req.query.limit, "limit"),
+        offset: optionalListInteger(req.query.offset, "offset"),
+      },
+    );
+    const fromDate = optionalListInteger(req.query.fromDate, "fromDate");
+    const toDate = optionalListInteger(req.query.toDate, "toDate");
 
     const { items, total } = await repository.listAllDeletedWorkflowsPaginated({
       search,
+      fromDate,
+      toDate,
       sort: sort as "name" | "deletedAt" | undefined,
       sortOrder,
-      limit,
-      offset,
+      ...page,
     });
 
     // Enrich deletedBy userId with email
     const { user, getDatabase } = await import("@mcp-moira/shared");
+    const { inArray } = await import("drizzle-orm");
     const db = getDatabase();
-    const users = await db.select({ id: user.id, email: user.email }).from(user);
+    const deletingUserIds = [
+      ...new Set(items.flatMap((item) => (item.deletedBy ? [item.deletedBy] : []))),
+    ];
+    const users =
+      deletingUserIds.length === 0
+        ? []
+        : await db
+            .select({ id: user.id, email: user.email })
+            .from(user)
+            .where(inArray(user.id, deletingUserIds));
     const userMap = new Map(users.map((u) => [u.id, u.email]));
 
     const enriched = items.map((wf) => ({
@@ -1015,7 +1087,7 @@ router.get(
 
     res.json({
       success: true,
-      data: { workflows: enriched, total, limit: limit ?? 20, offset: offset ?? 0 },
+      data: { workflows: enriched, total, ...page },
       timestamp: new Date().toISOString(),
     });
   }),
@@ -1829,7 +1901,7 @@ router.get(
 router.get(
   "/executions",
   asyncHandler(async (req: Request, res: Response) => {
-    const { mapLegacyStatusArray, user, workflow, getDatabase } = await import("@mcp-moira/shared");
+    const { mapLegacyStatusArray, getDatabase } = await import("@mcp-moira/shared");
 
     const userId = req.query.userId as string | undefined;
     const statusParam = req.query.status as string | undefined;
@@ -1860,8 +1932,7 @@ router.get(
       }
     }
 
-    // Server-side pagination via listExecutionsWithFilters
-    const result = await repository.listExecutionsWithFilters({
+    const result = await new ExecutionRepository(getDatabase()).listSummaries({
       userId: userId || undefined,
       status: adminDbStatuses,
       search,
@@ -1869,46 +1940,10 @@ router.get(
       sortOrder: "desc",
       limit,
       offset,
+      locked: adminHasLockedFilter && !adminOriginalIncludedRunning ? true : undefined,
     });
-
-    // Get user info for enrichment
-    const db = getDatabase();
-    const users = await db.select({ id: user.id, email: user.email, name: user.name }).from(user);
-    const userMap = new Map(users.map((u) => [u.id, { email: u.email, name: u.name }]));
-
-    const workflows = await db.select({ id: workflow.id, name: workflow.name }).from(workflow);
-    const workflowNameMap = new Map(workflows.map((w) => [w.id, w.name]));
-
-    // Get active lock execution IDs for lock indicators
-    const lockService = getLockService();
-    const lockedExecutionIds = await lockService.getActiveExecutionIds();
-
-    let enrichedExecutions = result.executions.map((exec) => {
-      const userInfo = userMap.get(exec.userId);
-      const isLocked = exec.status === "running" && lockedExecutionIds.has(exec.executionId);
-      return {
-        executionId: exec.executionId,
-        workflowId: exec.workflowId,
-        workflowName: workflowNameMap.get(exec.workflowId) || null,
-        userId: exec.userId,
-        userEmail: userInfo?.email || null,
-        userName: userInfo?.name || null,
-        status: isLocked ? ("locked" as const) : exec.status,
-        currentNodeId: exec.currentNodeId,
-        createdAt: exec.createdAt,
-        updatedAt: exec.updatedAt,
-        completedAt: exec.completedAt,
-        error: exec.error,
-        hasActiveLock: isLocked,
-      };
-    });
-
-    // If filtering by "locked" only (not explicitly "running"), remove non-locked running execs
-    let totalCount = result.total;
-    if (adminHasLockedFilter && !adminOriginalIncludedRunning) {
-      enrichedExecutions = enrichedExecutions.filter((e) => e.status !== "running");
-      totalCount = enrichedExecutions.length;
-    }
+    const enrichedExecutions = result.executions;
+    const totalCount = result.total;
 
     res.json({
       success: true,
@@ -2303,8 +2338,13 @@ router.get(
 
     const artifactService = getArtifactService();
     const result = await artifactService.adminListReported(currentUserId, {
-      limit: limit ? parseInt(limit as string, 10) : undefined,
-      offset: offset ? parseInt(offset as string, 10) : undefined,
+      ...clampPagination(
+        { defaultLimit: 50, maxLimit: 100 },
+        {
+          limit: optionalListInteger(limit, "limit"),
+          offset: optionalListInteger(offset, "offset"),
+        },
+      ),
       includeTakenDown: includeTakenDown === undefined ? true : includeTakenDown === "true",
     });
 

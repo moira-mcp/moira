@@ -8,6 +8,7 @@ export interface NormalizedExecution {
   workflowId: string;
   workflowName?: string | null;
   status: string;
+  stopReason?: string | null;
   note?: string;
   errorCount?: number;
   error?: string;
@@ -16,7 +17,8 @@ export interface NormalizedExecution {
    * longer be found; the card words that in the reader's language.
    */
   userDisplay?: string | null;
-  createdAt?: number;
+  createdAt?: number | null;
+  lastStepAt?: number | null;
   completedAt?: number;
   duration?: number | null;
   hasActiveLock?: boolean;
@@ -27,8 +29,10 @@ interface ExecutionListItem {
   workflowId: string;
   workflowName?: string | null;
   status: string;
+  stopReason?: string | null;
   note?: string;
-  createdAt?: number;
+  createdAt?: number | null;
+  lastStepAt?: number | null;
   completedAt?: number;
   error?: string;
   errorCount?: number;
@@ -42,7 +46,11 @@ interface AdminExecution {
   userEmail: string | null;
   userName: string | null;
   status: string;
-  createdAt?: number;
+  stopReason?: string | null;
+  createdAt?: number | null;
+  lastStepAt?: number | null;
+  note?: string | null;
+  errorCount?: number;
   completedAt?: number;
   error?: string;
   hasActiveLock?: boolean;
@@ -61,8 +69,12 @@ export function normalizeExecution(execution: AnyExecution): NormalizedExecution
       workflowId: execution.workflowId,
       workflowName: execution.workflowName,
       status: execution.status,
+      stopReason: execution.stopReason,
       userDisplay: execution.userName || execution.userEmail || null,
       createdAt: execution.createdAt,
+      lastStepAt: execution.lastStepAt,
+      note: execution.note ?? undefined,
+      errorCount: execution.errorCount,
       completedAt: execution.completedAt,
       error: execution.error,
       hasActiveLock: execution.hasActiveLock,
@@ -74,9 +86,11 @@ export function normalizeExecution(execution: AnyExecution): NormalizedExecution
     workflowId: execution.workflowId,
     workflowName: execution.workflowName,
     status: execution.status,
+    stopReason: execution.stopReason,
     note: execution.note,
     errorCount: execution.errorCount,
     createdAt: execution.createdAt,
+    lastStepAt: execution.lastStepAt,
     completedAt: execution.completedAt,
     error: execution.error,
     hasActiveLock: execution.hasActiveLock,

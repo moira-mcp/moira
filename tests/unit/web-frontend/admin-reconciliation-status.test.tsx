@@ -2,7 +2,7 @@
 
 import React from "react";
 import { afterEach, beforeEach, describe, expect, jest, test } from "@jest/globals";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import "@testing-library/jest-dom/jest-globals";
 import { I18nextProvider } from "react-i18next";
 import { MemoryRouter } from "react-router-dom";
@@ -10,6 +10,7 @@ import i18n from "../../../packages/web-frontend/src/i18n";
 import { FeaturesProvider } from "../../../packages/web-frontend/src/hooks/useFeatures";
 import { AdminDashboard } from "../../../packages/web-frontend/src/pages/AdminDashboard";
 import { apiClient } from "../../../packages/web-frontend/src/services/api-client";
+import { authClient } from "../../../packages/web-frontend/src/auth/better-auth-client";
 
 const originalReact = (globalThis as typeof globalThis & { React?: typeof React }).React;
 
@@ -53,6 +54,15 @@ const features = {
 
 beforeEach(async () => {
   (globalThis as typeof globalThis & { React?: typeof React }).React = React;
+  // This fixture checks installation policy/reconciliation outside route admission.
+  // Settle the real provider's anonymous authority instead of attempting localhost networking.
+  jest.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+    if (new URL(String(input), "http://localhost").pathname === "/api/auth/get-session") {
+      return Response.json(null);
+    }
+    throw new Error("Unexpected network request in reconciliation fixture");
+  });
+  await authClient.$store.atoms.session.get().refetch();
   await i18n.changeLanguage("en");
   jest.spyOn(apiClient, "getFeatures").mockResolvedValue(features);
   jest.spyOn(apiClient, "getAdminStats").mockRejectedValue(new Error("must not be requested"));
@@ -101,13 +111,13 @@ describe("administrator managed-workflow reconciliation status", () => {
     });
     expect(screen.queryByTestId("time-range-selector")).not.toBeInTheDocument();
     expect(
-      screen.queryByText(i18n.t("admin.dashboard.stats.totalWorkflows")),
+      screen.queryByText(`${i18n.t("admin.dashboard.stats.totalWorkflows")}:`),
     ).not.toBeInTheDocument();
     expect(
-      screen.queryByText(i18n.t("admin.dashboard.stats.totalExecutions")),
+      screen.queryByText(`${i18n.t("admin.dashboard.stats.totalExecutions")}:`),
     ).not.toBeInTheDocument();
     expect(
-      screen.queryByText(i18n.t("admin.dashboard.stats.activeExecutions")),
+      screen.queryByText(`${i18n.t("admin.dashboard.stats.activeExecutions")}:`),
     ).not.toBeInTheDocument();
     expect(screen.queryByText(i18n.t("admin.analytics.topWorkflows"))).not.toBeInTheDocument();
   });
@@ -143,9 +153,11 @@ describe("administrator managed-workflow reconciliation status", () => {
     renderDashboard();
 
     expect(
-      await screen.findByText(i18n.t("admin.dashboard.stats.totalWorkflows")),
+      await screen.findByText(`${i18n.t("admin.dashboard.stats.totalWorkflows")}:`),
     ).toBeInTheDocument();
-    expect(screen.getByText(i18n.t("admin.dashboard.stats.totalExecutions"))).toBeInTheDocument();
+    expect(
+      screen.getByText(`${i18n.t("admin.dashboard.stats.totalExecutions")}:`),
+    ).toBeInTheDocument();
     expect(screen.getByTestId("admin-recent-activity")).toHaveTextContent("saas-workflow");
     expect(apiClient.getAdminStats).toHaveBeenCalledTimes(1);
   });
@@ -201,5 +213,48 @@ describe("administrator managed-workflow reconciliation status", () => {
 
     expect(await screen.findByText("Up to date")).toBeInTheDocument();
     expect(screen.queryByTestId("workflow-reconciliation-error")).not.toBeInTheDocument();
+  });
+
+  test("logout-all refusal is accessible inside the retained confirmation, and a successful retry closes it", async () => {
+    jest.mocked(apiClient.getFeatures).mockResolvedValue({
+      ...features,
+      features: { ...features.features, multiUserAdmin: true },
+    });
+    jest.spyOn(apiClient, "getAdminSystemStatus").mockResolvedValue(baseSystemStatus);
+    let finish!: (value: { deletedSessions: number; message: string }) => void;
+    const retry = new Promise<{ deletedSessions: number; message: string }>((resolve) => {
+      finish = resolve;
+    });
+    const logout = jest
+      .spyOn(apiClient, "logoutAllUsers")
+      .mockRejectedValueOnce(new Error("Logout refused by source"))
+      .mockImplementation(() => retry);
+    renderDashboard();
+    const system = await screen.findByTestId("admin-system-health");
+    fireEvent.click(
+      screen.getByRole("button", { name: i18n.t("admin.dashboard.logoutAll.button") }),
+    );
+    const dialog = screen.getByRole("alertdialog");
+    await act(async () =>
+      fireEvent.click(
+        within(dialog).getByRole("button", { name: i18n.t("admin.dashboard.logoutAll.confirm") }),
+      ),
+    );
+    expect(screen.getByRole("alertdialog")).toBe(dialog);
+    expect(within(dialog).getByRole("alert")).toHaveTextContent("Logout refused by source");
+    expect(system).toBeInTheDocument();
+    fireEvent.click(
+      within(dialog).getByRole("button", { name: i18n.t("admin.dashboard.logoutAll.confirm") }),
+    );
+    await waitFor(() =>
+      expect(
+        within(dialog).getByRole("button", { name: i18n.t("admin.dashboard.logoutAll.confirm") }),
+      ).toBeDisabled(),
+    );
+    expect(screen.getByRole("alertdialog")).toBe(dialog);
+    await act(async () => finish({ deletedSessions: 2, message: "Other users signed out" }));
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+    expect(screen.getByText("Other users signed out")).toBeInTheDocument();
+    expect(logout).toHaveBeenCalledTimes(2);
   });
 });

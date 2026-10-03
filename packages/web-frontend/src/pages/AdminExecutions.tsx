@@ -12,6 +12,8 @@ import { ROUTES } from "../constants/routes";
 import { useListPageSize } from "../hooks/useListPageSize";
 import { useLatestRequest } from "../hooks/useLatestRequest";
 import { useDebounce } from "../hooks/useDebounce";
+import { useResource } from "../hooks/useResource";
+import { DataRegion } from "@/components/DataRegion";
 import {
   Select,
   SelectContent,
@@ -35,18 +37,13 @@ interface AdminExecution {
   userEmail: string | null;
   userName: string | null;
   status: string;
+  stopReason?: string | null;
   currentNodeId: string | null;
-  createdAt?: number;
-  updatedAt?: number;
+  createdAt?: number | null;
+  updatedAt?: number | null;
   completedAt?: number;
   error?: string;
   hasActiveLock?: boolean;
-}
-
-interface User {
-  id: string;
-  email: string;
-  name: string | null;
 }
 
 const ALL_FILTER = "__all__";
@@ -54,9 +51,21 @@ const ALL_FILTER = "__all__";
 export const AdminExecutions: React.FC = () => {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const [executions, setExecutions] = useState<AdminExecution[]>([]);
-  const [users, setUsers] = useState<User[]>([]);
-  const [total, setTotal] = useState(0);
+  const [accepted, setAccepted] = useState<{
+    executions: AdminExecution[];
+    total: number;
+    page: number;
+    pageSize: number;
+    search: string;
+    userId: string;
+    status: string;
+  } | null>(null);
+  const executions = accepted?.executions ?? [];
+  const total = accepted?.total ?? 0;
+  const choices = useResource("admin-user-choices", () =>
+    apiClient.getAdminUserChoices({ limit: 100 }),
+  );
+  const users = choices.data?.users ?? [];
   const [currentPage, setCurrentPage] = useState(1);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -80,21 +89,24 @@ export const AdminExecutions: React.FC = () => {
       setLoading(true);
       const offset = (currentPage - 1) * pageSize;
 
-      const [executionsData, usersData] = await Promise.all([
-        apiClient.getAdminExecutions({
-          userId: selectedUserId || undefined,
-          status: selectedStatus || undefined,
-          search: debouncedSearch || undefined,
-          limit: pageSize,
-          offset,
-        }),
-        apiClient.getAdminUsers({ limit: 100 }),
-      ]);
+      const executionsData = await apiClient.getAdminExecutions({
+        userId: selectedUserId || undefined,
+        status: selectedStatus || undefined,
+        search: debouncedSearch || undefined,
+        limit: pageSize,
+        offset,
+      });
 
       if (!isCurrent()) return;
-      setExecutions(executionsData.executions);
-      setTotal(executionsData.total);
-      setUsers(usersData.users.map((u) => ({ id: u.id, email: u.email, name: u.name })));
+      setAccepted({
+        executions: executionsData.executions,
+        total: executionsData.total,
+        page: currentPage,
+        pageSize,
+        search: debouncedSearch,
+        userId: selectedUserId,
+        status: selectedStatus,
+      });
       setError(null);
     } catch (err: unknown) {
       if (!isCurrent()) return;
@@ -115,28 +127,7 @@ export const AdminExecutions: React.FC = () => {
     setSearchQuery("");
   };
 
-  const totalPages = Math.ceil(total / pageSize);
-
-  if (loading && executions.length === 0) {
-    return (
-      <PageShell
-        title={t("admin.executions.title")}
-        description={t("admin.executions.subtitle")}
-        loading
-      />
-    );
-  }
-
-  if (error) {
-    return (
-      <PageShell
-        title={t("admin.executions.title")}
-        error={error}
-        onRetry={loadData}
-        retryLabel={t("admin.executions.retry")}
-      />
-    );
-  }
+  const totalPages = Math.ceil(total / (accepted?.pageSize ?? pageSize));
 
   return (
     <PageShell title={t("admin.executions.title")} description={t("admin.executions.subtitle")}>
@@ -156,8 +147,9 @@ export const AdminExecutions: React.FC = () => {
                   { value: ALL_FILTER, label: t("admin.executions.filters.allUsers") },
                   ...users.map((user) => ({ value: user.id, label: user.email })),
                 ]}
-                placeholder={t("admin.executions.filters.allUsers")}
+                placeholder={selectedUserId || t("admin.executions.filters.allUsers")}
                 searchPlaceholder={t("common.filters.search")}
+                emptyMessage={t("admin.userManagement.noSearchResults")}
                 testId="user-filter"
               />
             </LabeledFilter>
@@ -188,6 +180,14 @@ export const AdminExecutions: React.FC = () => {
         }
       />
 
+      <DataRegion
+        hasResult={choices.data !== undefined}
+        pending={choices.pending}
+        error={choices.error}
+        onRetry={choices.refresh}
+        testId="admin-user-choices-region"
+      />
+
       <LockedExecutionsWidget admin />
 
       <DataListView
@@ -203,12 +203,31 @@ export const AdminExecutions: React.FC = () => {
         keyExtractor={(e) => e.executionId}
         storageKey="admin-executions-view-mode"
         loading={loading}
+        hasResult={accepted !== null}
+        error={error}
+        onRetry={loadData}
+        onRefresh={loadData}
+        resultScope={
+          accepted && (
+            <span>
+              {t("common.pagination.page", {
+                current: accepted.page,
+                total: Math.max(1, totalPages),
+              })}
+              {accepted.search && ` · ${t("common.filters.search")}: ${accepted.search}`}
+              {accepted.userId &&
+                ` · ${t("common.filters.user")}: ${users.find((u) => u.id === accepted.userId)?.email ?? accepted.userId}`}
+              {accepted.status &&
+                ` · ${t("common.filters.status")}: ${t(accepted.status === "locked" ? "common.status.locked" : `admin.executions.filters.${accepted.status}`)}`}
+            </span>
+          )
+        }
         containerRef={containerRef}
         pagination={{
           mode: "total",
-          currentPage,
+          currentPage: accepted?.page ?? currentPage,
           totalPages,
-          pageSize,
+          pageSize: accepted?.pageSize ?? pageSize,
           totalItems: total,
           onPageChange: setCurrentPage,
         }}

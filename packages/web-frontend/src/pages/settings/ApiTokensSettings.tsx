@@ -4,13 +4,14 @@
  * visible, and revoking it cuts every client using it off at once.
  */
 
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { apiClient } from "@/services/api-client";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { Skeleton } from "@/components/ui/skeleton";
+import { DataRegion } from "@/components/DataRegion";
+import { useResource } from "@/hooks/useResource";
 import { EmptyState } from "@/components/empty-state";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -51,9 +52,10 @@ type ExpirationOption = "30d" | "90d" | "365d" | "never";
 export const ApiTokensSettings: React.FC = () => {
   const { t, i18n } = useTranslation();
 
-  const [tokens, setTokens] = useState<ApiToken[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [loadFailed, setLoadFailed] = useState(false);
+  const resource = useResource<{ tokens: ApiToken[] }>("user-api-tokens", () =>
+    apiClient.getApiTokens(),
+  );
+  const tokens = resource.data?.tokens ?? [];
   const [revoking, setRevoking] = useState<string | null>(null);
   const [revokeTarget, setRevokeTarget] = useState<string | null>(null);
 
@@ -67,23 +69,6 @@ export const ApiTokensSettings: React.FC = () => {
   const [displayToken, setDisplayToken] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 
-  const loadTokens = useCallback(async () => {
-    try {
-      setLoading(true);
-      setLoadFailed(false);
-      const result = await apiClient.getApiTokens();
-      setTokens(result.tokens);
-    } catch {
-      setLoadFailed(true);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    loadTokens();
-  }, [loadTokens]);
-
   const handleCreate = async () => {
     const trimmedName = tokenName.trim();
     if (!trimmedName) return;
@@ -95,7 +80,7 @@ export const ApiTokensSettings: React.FC = () => {
       setCreateOpen(false);
       setTokenName("");
       setTokenExpiry("90d");
-      await loadTokens();
+      await resource.refresh();
     } catch {
       toast.error(t("pages.settings.apiTokens.createFailed"));
     } finally {
@@ -108,12 +93,13 @@ export const ApiTokensSettings: React.FC = () => {
       setRevoking(tokenId);
       await apiClient.revokeApiToken(tokenId);
       toast.success(t("pages.settings.apiTokens.revoked"));
-      await loadTokens();
-    } catch {
+      setRevokeTarget(null);
+      await resource.refresh();
+    } catch (error) {
       toast.error(t("pages.settings.apiTokens.revokeFailed"));
+      throw error;
     } finally {
       setRevoking(null);
-      setRevokeTarget(null);
     }
   };
 
@@ -165,80 +151,79 @@ export const ApiTokensSettings: React.FC = () => {
           </Button>
         </div>
 
-        {loading && tokens.length === 0 ? (
-          <Skeleton className="h-16 w-full" />
-        ) : loadFailed ? (
-          <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-sm">
-            <span>{t("pages.settings.apiTokens.loadFailed")}</span>
-            <Button variant="outline" size="sm" onClick={() => void loadTokens()}>
-              {t("pages.settings.retry")}
-            </Button>
-          </div>
-        ) : tokens.length === 0 ? (
-          <EmptyState
-            icon={KeyRound}
-            title={t("pages.settings.apiTokens.noTokens")}
-            description={t("pages.settings.apiTokens.noTokensDescription")}
-          />
-        ) : (
-          <ul className="divide-y rounded-lg border" data-testid="token-list">
-            {tokens.map((token) => (
-              <li
-                key={token.id}
-                className="flex flex-wrap items-start justify-between gap-3 p-3"
-                data-testid={`token-row-${token.id}`}
-              >
-                <div className="flex min-w-0 items-start gap-3">
-                  <span className="flex size-8 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground">
-                    <KeyRound className="size-4" aria-hidden="true" />
-                  </span>
-                  <div className="min-w-0 space-y-1">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="text-sm font-medium" data-testid="token-name">
-                        {token.name}
-                      </span>
-                      {getStatusBadge(token)}
+        <DataRegion
+          hasResult={resource.data !== undefined}
+          pending={resource.pending}
+          error={resource.error}
+          onRetry={resource.refresh}
+          testId="tokens-data-region"
+        >
+          {tokens.length === 0 ? (
+            <EmptyState
+              icon={KeyRound}
+              title={t("pages.settings.apiTokens.noTokens")}
+              description={t("pages.settings.apiTokens.noTokensDescription")}
+            />
+          ) : (
+            <ul className="divide-y rounded-lg border" data-testid="token-list">
+              {tokens.map((token) => (
+                <li
+                  key={token.id}
+                  className="flex flex-wrap items-start justify-between gap-3 p-3"
+                  data-testid={`token-row-${token.id}`}
+                >
+                  <div className="flex min-w-0 items-start gap-3">
+                    <span className="flex size-8 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground">
+                      <KeyRound className="size-4" aria-hidden="true" />
+                    </span>
+                    <div className="min-w-0 space-y-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="text-sm font-medium" data-testid="token-name">
+                          {token.name}
+                        </span>
+                        {getStatusBadge(token)}
+                      </div>
+                      <code
+                        className="inline-block rounded bg-muted px-1.5 py-0.5 font-mono text-xs"
+                        data-testid="token-prefix"
+                      >
+                        {token.tokenPrefix}...
+                      </code>
+                      <p className="text-xs text-muted-foreground">
+                        {t("pages.settings.apiTokens.created")}: {formatDate(token.createdAt)}
+                        {" · "}
+                        {t("pages.settings.apiTokens.expires")}:{" "}
+                        {token.expiresAt
+                          ? formatDate(token.expiresAt)
+                          : t("pages.settings.apiTokens.expiryNever")}
+                        {" · "}
+                        {t("pages.settings.apiTokens.lastUsed")}:{" "}
+                        {token.lastUsedAt
+                          ? formatDate(token.lastUsedAt)
+                          : t("pages.settings.apiTokens.neverUsed")}
+                      </p>
                     </div>
-                    <code
-                      className="inline-block rounded bg-muted px-1.5 py-0.5 font-mono text-xs"
-                      data-testid="token-prefix"
-                    >
-                      {token.tokenPrefix}...
-                    </code>
-                    <p className="text-xs text-muted-foreground">
-                      {t("pages.settings.apiTokens.created")}: {formatDate(token.createdAt)}
-                      {" · "}
-                      {t("pages.settings.apiTokens.expires")}:{" "}
-                      {token.expiresAt
-                        ? formatDate(token.expiresAt)
-                        : t("pages.settings.apiTokens.expiryNever")}
-                      {" · "}
-                      {t("pages.settings.apiTokens.lastUsed")}:{" "}
-                      {token.lastUsedAt
-                        ? formatDate(token.lastUsedAt)
-                        : t("pages.settings.apiTokens.neverUsed")}
-                    </p>
                   </div>
-                </div>
-                {!token.isRevoked && (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setRevokeTarget(token.id)}
-                    disabled={revoking === token.id}
-                    data-testid={`revoke-token-${token.id}`}
-                  >
-                    {revoking === token.id ? (
-                      <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-                    ) : (
-                      t("pages.settings.apiTokens.revoke")
-                    )}
-                  </Button>
-                )}
-              </li>
-            ))}
-          </ul>
-        )}
+                  {!token.isRevoked && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setRevokeTarget(token.id)}
+                      disabled={revoking === token.id}
+                      data-testid={`revoke-token-${token.id}`}
+                    >
+                      {revoking === token.id ? (
+                        <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                      ) : (
+                        t("pages.settings.apiTokens.revoke")
+                      )}
+                    </Button>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+        </DataRegion>
       </CardContent>
 
       {/* Create Token Dialog */}

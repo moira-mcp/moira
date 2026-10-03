@@ -19,7 +19,14 @@ interface ExecutionCardProps {
   compact?: boolean;
 }
 
-const validStatuses: ExecutionStatus[] = ["running", "waiting", "completed", "failed", "locked"];
+const validStatuses: ExecutionStatus[] = [
+  "running",
+  "waiting",
+  "completed",
+  "failed",
+  "locked",
+  "stopped",
+];
 
 export const ExecutionCard: React.FC<ExecutionCardProps> = ({
   execution,
@@ -27,7 +34,8 @@ export const ExecutionCard: React.FC<ExecutionCardProps> = ({
   compact = false,
 }) => {
   const { t } = useTranslation();
-  const isValidStatus = validStatuses.includes(execution.status as ExecutionStatus);
+  const displayedStatus = execution.stopReason ? "stopped" : execution.status;
+  const isValidStatus = validStatuses.includes(displayedStatus as ExecutionStatus);
 
   return (
     <CardShell
@@ -42,7 +50,7 @@ export const ExecutionCard: React.FC<ExecutionCardProps> = ({
           {execution.hasActiveLock && (
             <Badge
               variant="outline"
-              className="h-5 gap-1 border-yellow-500/50 px-1.5 text-[11px] text-yellow-600 dark:text-yellow-400"
+              className="h-5 gap-1 border-warning/30 px-1.5 text-[11px] text-warning"
             >
               <Lock className="size-3" aria-hidden="true" />
               {t("common.locked", { defaultValue: "Locked" })}
@@ -59,17 +67,29 @@ export const ExecutionCard: React.FC<ExecutionCardProps> = ({
           )}
           {isValidStatus && (
             <StatusBadge
-              status={execution.status as ExecutionStatus}
+              status={displayedStatus as ExecutionStatus}
               className="h-5 px-1.5 text-[11px]"
             />
           )}
         </>
       }
+      note={
+        execution.stopReason
+          ? `${t("pages.overview.panel.stopReason")}: ${execution.stopReason}`
+          : undefined
+      }
       meta={
         <>
+          {execution.createdAt != null && (
+            <span>
+              {t("adminOverview.runCreated", { when: formatRelativeTime(execution.createdAt) })}
+            </span>
+          )}
           <span className="inline-flex items-center gap-1">
             <Clock className="size-3" aria-hidden="true" />
-            {formatRelativeTime(execution.createdAt)}
+            {execution.lastStepAt == null
+              ? t("adminOverview.unknownStep")
+              : t("adminOverview.lastStep", { when: formatRelativeTime(execution.lastStepAt) })}
           </span>
           {execution.userDisplay !== undefined && (
             <span className="font-mono">{execution.userDisplay ?? t("common.unknownUser")}</span>

@@ -6,7 +6,8 @@
  * shows only in a hint is here in full. Esc closes the panel and focus returns to where it was.
  */
 
-import React, { useCallback, useLayoutEffect, useRef } from "react";
+import React, { useCallback, useLayoutEffect, useRef, useSyncExternalStore } from "react";
+import { getReadIdentity, subscribeReadScope } from "../../services/read-scope";
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Check, Circle, CircleDot } from "lucide-react";
@@ -332,10 +333,11 @@ export function OverviewPanel({
   onClose,
 }: OverviewPanelProps): React.JSX.Element {
   const { t } = useTranslation();
+  const identity = useSyncExternalStore(subscribeReadScope, getReadIdentity, getReadIdentity);
   // The panel opens from a card's title without a dialog trigger, so it remembers what had focus
   // when it opened and gives focus back there when it closes.
   const returnFocus = useRef<HTMLElement | null>(null);
-  const isOpen = runId !== null;
+  const isOpen = runId !== null && identity !== null;
   useLayoutEffect(() => {
     if (isOpen && document.activeElement instanceof HTMLElement) {
       returnFocus.current = document.activeElement;
@@ -357,7 +359,7 @@ export function OverviewPanel({
   const fetchedRow = fetched.data?.executionId === runId ? fetched.data : null;
   const shown = run ?? fetchedRow ?? lastRow.current;
   return (
-    <Sheet open={runId !== null} onOpenChange={(open) => (open ? undefined : onClose())}>
+    <Sheet open={isOpen} onOpenChange={(open) => (open ? undefined : onClose())}>
       <SheetContent
         side="right"
         className="w-full gap-0 p-0 sm:max-w-[460px]"

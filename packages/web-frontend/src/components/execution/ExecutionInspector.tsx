@@ -91,6 +91,7 @@ import { StepCard, StepCardList } from "../run/StepCard";
 import type { RunBlock, RunProgress } from "../run/model";
 import { clampCursor } from "../run/route";
 import { guideAnchor } from "../../guides/anchors";
+import { loadLayoutEngine } from "@mcp-moira/workflow-engine/progress-visual";
 
 // The technical graph is a large chunk: it is loaded lazily, but requested as soon as the page
 // mounts, so the first switch to the graph view has nothing to wait for.
@@ -296,6 +297,10 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
   // nothing to download and shows no skeleton.
   useEffect(() => {
     void importWorkflowGraph();
+    // Both the map and technical graph need ELK. Load its code while execution/workflow
+    // reads are pending, without constructing an instance or prefetching from list routes.
+    // This optional attempt may fail; the actual layout owns its error and retries the import.
+    void loadLayoutEngine().catch(() => {});
   }, []);
 
   const handleRefresh = useCallback(() => {

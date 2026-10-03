@@ -56,17 +56,26 @@ export function useListPageSize(onPageSizeChange?: () => void): {
     if (settled.current[key]) return;
     const items = box?.querySelectorAll<HTMLElement>('[data-slotted="true"]');
     if (!items || items.length === 0) return;
-    settled.current[key] = true;
-    const total = Array.from(items).reduce((sum, item) => sum + item.offsetHeight, 0);
+    const heights = Array.from(items, (item) => item.offsetHeight);
+    // Retained cards under a concealed ancestor have no geometry yet. Do not settle this view
+    // until every card is measured; ResizeObserver retries when the box becomes visible.
+    if (heights.some((height) => !Number.isFinite(height) || height <= 0)) return;
+    const total = heights.reduce((sum, height) => sum + height, 0);
     const average = Math.round(total / items.length + (grid ? GRID_GAP : LIST_GAP));
+    settled.current[key] = true;
     setMeasured((current) => (average === current[key] ? current : { ...current, [key]: average }));
   }, [box, grid]);
   useEffect(() => {
     if (!box) return;
     const observer = new MutationObserver(() => measure());
+    const resizeObserver = new ResizeObserver(() => measure());
     observer.observe(box, { childList: true, subtree: true });
+    resizeObserver.observe(box);
     measure();
-    return () => observer.disconnect();
+    return () => {
+      observer.disconnect();
+      resizeObserver.disconnect();
+    };
   }, [box, measure]);
 
   const containerRef = useCallback(

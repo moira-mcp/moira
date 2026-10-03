@@ -4,10 +4,13 @@
  * Allows user to approve or deny, and switch accounts
  */
 
-import React, { useState } from "react";
+import { productFetch } from "@/services/product-fetch";
+import React, { useState, useRef } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { useSession, signOut } from "../auth/better-auth-client";
+import { authClient, useSession, signOut } from "../auth/better-auth-client";
+import { PrivateReadScopeBoundary, useReadOwnerGuard } from "../auth/ReadScopeBoundary";
+import { getReadIdentity, isReadSessionSuspended } from "../services/read-scope";
 import { Button } from "../components/ui/button";
 import {
   Card,
@@ -23,6 +26,53 @@ import { AuthLayout } from "../components/AuthLayout";
 import { ROUTES } from "../constants/routes";
 
 export const OAuthConsent: React.FC = () => {
+  const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
+  const { data: session, isPending } = useSession();
+  const [switchingOwner, setSwitchingOwner] = useState<string | null>(null);
+  const alive = useRef(true);
+  React.useEffect(() => {
+    alive.current = true;
+    return () => {
+      alive.current = false;
+    };
+  }, []);
+  React.useEffect(() => {
+    if (session?.user) {
+      if (switchingOwner && switchingOwner !== session.user.id) setSwitchingOwner(null);
+      return;
+    }
+    if (!isPending && !isReadSessionSuspended()) {
+      const params = new URLSearchParams(searchParams);
+      if (switchingOwner) params.delete("consent_code");
+      navigate(`${ROUTES.OAUTH_AUTHORIZE}?${params.toString()}`);
+    }
+  }, [isPending, session?.user, switchingOwner, navigate, searchParams]);
+
+  // This public operation survives the private owner's departure; consent facts do not.
+  const handleSwitchAccount = async () => {
+    setSwitchingOwner(session?.user.id ?? null);
+    try {
+      const result = await signOut();
+      if (result.error && alive.current) setSwitchingOwner(null);
+      // The authoritative anonymous session effect owns the redirect, even when
+      // provider invalidation supersedes one of the transport's refetch promises.
+    } catch (error) {
+      if (alive.current) setSwitchingOwner(null);
+      throw error;
+    }
+  };
+  return (
+    <PrivateReadScopeBoundary>
+      <OAuthConsentContent onSwitchAccount={handleSwitchAccount} />
+    </PrivateReadScopeBoundary>
+  );
+};
+
+const OAuthConsentContent: React.FC<{ onSwitchAccount: () => Promise<void> }> = ({
+  onSwitchAccount,
+}) => {
+  const captureOwner = useReadOwnerGuard();
   const { t } = useTranslation();
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
@@ -35,18 +85,6 @@ export const OAuthConsent: React.FC = () => {
   const consentCode = searchParams.get("consent_code");
   const clientId = searchParams.get("client_id");
   const scope = searchParams.get("scope");
-
-  // Redirect to login if not authenticated
-  React.useEffect(() => {
-    if (!isLoading && !user) {
-      // Preserve OAuth params for after login
-      const params = new URLSearchParams();
-      searchParams.forEach((value, key) => {
-        params.set(key, value);
-      });
-      navigate(`${ROUTES.OAUTH_AUTHORIZE}?${params.toString()}`);
-    }
-  }, [isLoading, user, navigate, searchParams]);
 
   // Show loading while checking auth
   if (isLoading) {
@@ -74,9 +112,10 @@ export const OAuthConsent: React.FC = () => {
 
     setIsSubmitting(true);
     setError(null);
+    const isCurrent = captureOwner(false);
 
     try {
-      const response = await fetch("/api/auth/oauth2/consent", {
+      const response = await productFetch("/api/auth/oauth2/consent", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -97,6 +136,10 @@ export const OAuthConsent: React.FC = () => {
 
       // Response contains redirectURI
       const data = await response.json();
+      // This auth mutation retires credentials itself. Confirm the cookie's current owner
+      // before applying its redirect, rather than accepting the dispatch credential epoch.
+      await authClient.$store.atoms.session.get().refetch();
+      if (!isCurrent() || getReadIdentity() === null) return;
       if (data.redirectURI) {
         window.location.href = data.redirectURI;
       } else if (data.redirectTo) {
@@ -106,23 +149,11 @@ export const OAuthConsent: React.FC = () => {
         navigate(ROUTES.DASHBOARD);
       }
     } catch (err) {
+      if (!isCurrent()) return;
       setError(err instanceof Error ? err.message : t("pages.oauthConsent.consentFailed"));
-      setIsSubmitting(false);
+    } finally {
+      if (isCurrent()) setIsSubmitting(false);
     }
-  };
-
-  // Handle account switch
-  const handleSwitchAccount = async () => {
-    await signOut();
-    // Redirect back to OAuth authorize with original params
-    // Need to rebuild from original OAuth request, not consent params
-    const params = new URLSearchParams();
-    searchParams.forEach((value, key) => {
-      if (key !== "consent_code") {
-        params.set(key, value);
-      }
-    });
-    navigate(`${ROUTES.OAUTH_AUTHORIZE}?${params.toString()}`);
   };
 
   // Get scope descriptions using i18n
@@ -175,7 +206,7 @@ export const OAuthConsent: React.FC = () => {
                 <p className="text-xs text-muted-foreground truncate">{user.email}</p>
               )}
             </div>
-            <Button variant="ghost" size="sm" onClick={handleSwitchAccount} className="shrink-0">
+            <Button variant="ghost" size="sm" onClick={onSwitchAccount} className="shrink-0">
               <LogOut className="h-4 w-4 mr-1" />
               {t("pages.oauthConsent.switch")}
             </Button>

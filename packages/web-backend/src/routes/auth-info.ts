@@ -6,6 +6,7 @@
 import { Router, Request, Response } from "express";
 import { asyncHandler, createApiError } from "../middleware/error-middleware.js";
 import { requireAuth, requireSessionAuth } from "../middleware/auth-middleware.js";
+import { apiLimiter } from "../middleware/rate-limit-middleware.js";
 import { AuthenticatedRequest } from "../types/express-types.js";
 import { toHeaders } from "../utils/headers.js";
 import { DatabaseRepository } from "@mcp-moira/workflow-engine";
@@ -18,6 +19,7 @@ const router = Router();
  */
 router.get(
   "/me",
+  apiLimiter,
   requireSessionAuth,
   asyncHandler(async (req: Request, res: Response) => {
     const userId = (req as AuthenticatedRequest).userId;
@@ -48,6 +50,7 @@ router.get(
  */
 router.post(
   "/change-password-forced",
+  apiLimiter,
   requireAuth,
   asyncHandler(async (req: Request, res: Response) => {
     const userId = (req as AuthenticatedRequest).userId;

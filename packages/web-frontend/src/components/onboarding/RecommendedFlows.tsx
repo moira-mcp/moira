@@ -8,12 +8,14 @@
  * can be hidden for good.
  */
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { ArrowRight, ChevronDown, GraduationCap, Sparkles, Wrench } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { apiClient } from "../../services/api-client";
+import { retireReads } from "../../services/read-scope";
+import { useResource } from "../../hooks/useResource";
 import { ROUTES } from "../../constants/routes";
 import { useStoredFlag } from "../diagram/useStoredFlag";
 import { recommendedFlows, SYSTEM_HANDLE, type RecommendedFlow } from "./recommended";
@@ -24,36 +26,22 @@ import { useGuideProgress } from "@/guides/progress";
 import { BUILD_FLOW_ID } from "@/guides/tutorial/buildFlow.guide";
 import { tutorialStart } from "@/guides/tutorial/start";
 
-/**
- * One lookup per set of slugs for the life of the page. The section can mount more than once in a
- * visit — the home page and the flow list both show it, and a route re-renders when the session is
- * re-checked — and each mount would otherwise ask the catalog again. A failed lookup is forgotten,
- * so the next mount asks afresh.
- */
-const lookups = new Map<string, Promise<Set<string>>>();
-
 function lookUp(slugs: string): Promise<Set<string>> {
-  let lookup = lookups.get(slugs);
-  if (!lookup) {
-    lookup = apiClient
-      .getWorkflows({ slugs: slugs.split(","), visibility: "public", limit: 50 })
-      .then(
-        (response) =>
-          new Set(
-            response.workflows
-              .filter((info) => info.ownerHandle === SYSTEM_HANDLE)
-              .map((info) => info.slug),
-          ),
-      );
-    lookup.catch(() => lookups.delete(slugs));
-    lookups.set(slugs, lookup);
-  }
-  return lookup;
+  return apiClient
+    .getWorkflows({ slugs: slugs.split(","), visibility: "public", limit: 50 })
+    .then(
+      (response) =>
+        new Set(
+          response.workflows
+            .filter((info) => info.ownerHandle === SYSTEM_HANDLE)
+            .map((info) => info.slug),
+        ),
+    );
 }
 
 /** Forget every lookup; for tests that stand up a different catalog. */
 export function resetRecommendedLookups(): void {
-  lookups.clear();
+  retireReads();
 }
 
 /**
@@ -66,22 +54,11 @@ export function useRecommendedFlows(): { flows: RecommendedFlow[]; loaded: boole
   // The lookup follows the set of slugs, not the language object: a language that settles on a
   // variant of the same language asks nothing again.
   const slugs = wanted.map((flow) => flow.slug).join(",");
-  const [present, setPresent] = useState<Set<string> | null>(null);
-  useEffect(() => {
-    let live = true;
-    setPresent(null);
-    lookUp(slugs)
-      .catch(() => new Set<string>())
-      .then((found) => {
-        if (live) setPresent(found);
-      });
-    return () => {
-      live = false;
-    };
-  }, [slugs]);
+  const resource = useResource(slugs, lookUp);
+  const present = resource.dataKey === slugs ? resource.data : undefined;
   return {
     flows: present ? wanted.filter((flow) => present.has(flow.slug)) : [],
-    loaded: present !== null,
+    loaded: !resource.pending,
   };
 }
 

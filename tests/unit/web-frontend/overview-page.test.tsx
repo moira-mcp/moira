@@ -7,7 +7,7 @@
  */
 
 import React, { useState } from "react";
-import { afterEach, beforeAll, describe, expect, jest, test } from "@jest/globals";
+import { afterEach, beforeAll, beforeEach, describe, expect, jest, test } from "@jest/globals";
 import {
   act,
   cleanup,
@@ -16,10 +16,18 @@ import {
   renderHook,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import "@testing-library/jest-dom/jest-globals";
 import { I18nextProvider } from "react-i18next";
 import { MemoryRouter } from "react-router-dom";
+import { Overview } from "../../../packages/web-frontend/src/pages/Overview";
+import { GuideProvider } from "../../../packages/web-frontend/src/guides/GuideContext";
+import { FeaturesProvider } from "../../../packages/web-frontend/src/hooks/useFeatures";
+import {
+  observeReadSession,
+  suspendReadSession,
+} from "../../../packages/web-frontend/src/services/read-scope";
 import i18n from "../../../packages/web-frontend/src/i18n";
 import {
   apiClient,
@@ -38,6 +46,12 @@ import type {
 } from "../../../packages/web-frontend/src/components/overview/liveConnection";
 
 const NOW = 1_800_000_000_000;
+const originalReact = globalThis.React;
+
+beforeEach(() => {
+  globalThis.React = React;
+  observeReadSession("reader", "reader-session");
+});
 
 function run(overrides: Partial<OverviewRun> = {}): OverviewRun {
   return {
@@ -89,6 +103,8 @@ afterEach(() => {
   cleanup();
   jest.restoreAllMocks();
   jest.useRealTimers();
+  observeReadSession(null, null);
+  globalThis.React = originalReact;
 });
 
 describe("the overview's side panel", () => {
@@ -139,6 +155,26 @@ describe("the overview's side panel", () => {
 });
 
 describe("the panel when its run leaves the page", () => {
+  test("an open portal is concealed during authority uncertainty and restored for the same owner", async () => {
+    jest.spyOn(apiClient, "getExecutionProgress").mockResolvedValue(null);
+    const close = jest.fn();
+    wrap(
+      <OverviewPanel
+        runId="run-1"
+        run={run()}
+        ancestors={[]}
+        now={NOW}
+        onOpen={() => undefined}
+        onClose={close}
+      />,
+    );
+    expect(await screen.findByRole("dialog")).toHaveAccessibleName("Import March orders");
+    act(() => suspendReadSession());
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    act(() => observeReadSession("reader", "renewed-session"));
+    expect(await screen.findByRole("dialog")).toHaveAccessibleName("Import March orders");
+    expect(close).not.toHaveBeenCalled();
+  });
   test("keeps showing the run it had instead of going blank", async () => {
     jest.spyOn(apiClient, "getExecutionProgress").mockResolvedValue(null);
     jest.spyOn(apiClient, "getOverviewRows").mockReturnValue(new Promise(() => undefined));
@@ -192,6 +228,88 @@ describe("the panel when its run leaves the page", () => {
       await i18n.changeLanguage("en");
     }
   });
+});
+
+test("the mounted overview keeps controls, accepted page and focus through a refused query and local retry", async () => {
+  const originalEventSource = globalThis.EventSource;
+  globalThis.EventSource = class {
+    onopen = null;
+    onerror = null;
+    addEventListener() {}
+    close() {}
+  } as unknown as typeof EventSource;
+  jest.spyOn(apiClient, "getUserSettings").mockResolvedValue({});
+  jest
+    .spyOn(apiClient, "getFeatures")
+    .mockResolvedValue({ deploymentMode: "self-host", features: {} } as never);
+  jest
+    .spyOn(apiClient, "getWorkflows")
+    .mockResolvedValue({ workflows: [], totalWorkflows: 0 } as never);
+  let initial!: (value: {
+    runs: OverviewRun[];
+    total: number;
+    offset: number;
+    limit: number;
+  }) => void;
+  let refuse!: (error: unknown) => void;
+  const query = jest
+    .spyOn(apiClient, "getOverview")
+    .mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          initial = resolve;
+        }),
+    )
+    .mockImplementationOnce(
+      () =>
+        new Promise((_resolve, reject) => {
+          refuse = reject;
+        }),
+    )
+    .mockResolvedValue({ runs: [], total: 0, limit: 50, offset: 0 });
+  try {
+    render(
+      <MemoryRouter initialEntries={["/overview?page=2"]}>
+        <I18nextProvider i18n={i18n}>
+          <FeaturesProvider>
+            <GuideProvider>
+              <Overview />
+            </GuideProvider>
+          </FeaturesProvider>
+        </I18nextProvider>
+      </MemoryRouter>,
+    );
+    const input = screen.getByRole("searchbox");
+    expect(input).toBeInTheDocument();
+    await waitFor(() => expect(query).toHaveBeenCalledTimes(1));
+    await act(async () => {
+      initial({ runs: [run()], total: 75, limit: 50, offset: 50 });
+    });
+    expect(await screen.findByTestId("overview-card")).toHaveTextContent("Import March orders");
+    input.focus();
+    fireEvent.click(screen.getByTestId("overview-status-completed"));
+    await waitFor(() => expect(query).toHaveBeenCalledTimes(2));
+    const region = screen.getByTestId("overview-results-region");
+    expect(region).toHaveTextContent("2 / 2");
+    expect(region).toHaveTextContent("In progress");
+    expect(region).not.toHaveTextContent("Nothing matches the filters");
+    expect(screen.getByRole("searchbox")).toBe(input);
+    expect(input).toHaveFocus();
+    await act(async () => {
+      refuse(new Error("Source refused query"));
+    });
+    expect(within(region).getByRole("alert")).toHaveTextContent("The overview could not be loaded");
+    expect(screen.getByTestId("overview-card")).toHaveTextContent("Import March orders");
+    expect(region).toHaveTextContent("2 / 2");
+    fireEvent.click(within(region).getByRole("button", { name: "Try again" }));
+    expect(await screen.findByText("Nothing matches the filters")).toBeInTheDocument();
+    expect(region).toHaveTextContent("Completed");
+    expect(region).toHaveTextContent("1 / 1");
+    expect(screen.queryByTestId("overview-card")).toBeNull();
+    expect(query.mock.calls[2][0]).toMatchObject({ status: "completed", offset: 0 });
+  } finally {
+    globalThis.EventSource = originalEventSource;
+  }
 });
 
 describe("a dimmed run in the panel", () => {
@@ -389,6 +507,31 @@ describe("the live hook", () => {
     expect(opened).toHaveLength(2);
   });
 
+  test("authority suspension closes the stream and retires queued changes before a new owner joins", () => {
+    jest.useFakeTimers();
+    const { deps, stream } = dependencies();
+    const refetchPage = jest.fn<() => Promise<void>>().mockResolvedValue(undefined);
+    const removeRun = jest.fn<(id: string) => void>();
+    renderHook(() => useLiveOverview({ refetchPage, removeRun }, () => deps));
+    const former = stream();
+    const close = jest.spyOn(former, "close");
+    act(() => former.change(1, "former-run", "activity"));
+    act(() => suspendReadSession());
+    expect(close).toHaveBeenCalledTimes(1);
+    act(() => {
+      former.change(2, "former-run", "deleted");
+      jest.advanceTimersByTime(PAGE_REFETCH_MS);
+    });
+    expect(removeRun).not.toHaveBeenCalled();
+    expect(refetchPage).not.toHaveBeenCalled();
+    act(() => observeReadSession("replacement", "replacement-session"));
+    expect(stream()).not.toBe(former);
+    act(() => stream().change(1, "replacement-run", "deleted"));
+    expect(removeRun).toHaveBeenCalledWith("replacement-run");
+    act(() => jest.advanceTimersByTime(PAGE_REFETCH_MS));
+    expect(refetchPage).toHaveBeenCalledTimes(1);
+  });
+
   test("a burst of activity refreshes the ordered page in one request", () => {
     jest.useFakeTimers();
     const { calls, stream } = hook();
@@ -416,6 +559,29 @@ describe("the live hook", () => {
 });
 
 describe("the rows on the page", () => {
+  test("a former credential's row answer cannot replace the held row", async () => {
+    let answer!: (rows: OverviewRun[]) => void;
+    const page = [run()];
+    const { result } = renderHook(() =>
+      useOverviewRows(
+        page,
+        () =>
+          new Promise((resolve) => {
+            answer = resolve;
+          }),
+      ),
+    );
+    let pending!: Promise<void>;
+    act(() => {
+      pending = result.current.refreshRows(["run-1"]);
+    });
+    act(() => observeReadSession("reader", "renewed-session"));
+    await act(async () => {
+      answer([run({ title: "Retired credential response" })]);
+      await pending;
+    });
+    expect(result.current.runs[0].title).toBe("Import March orders");
+  });
   test("a row refresh that began before a newer page arrives is dropped", async () => {
     let answer!: (rows: OverviewRun[]) => void;
     const fetchRows = () => new Promise<OverviewRun[]>((resolve) => (answer = resolve));

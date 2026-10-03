@@ -58,16 +58,14 @@ function recordVerificationSent(userId: string): void {
   lastVerificationSentMap.set(userId, Date.now());
 }
 
-// Apply rate limiting and authentication to all routes
-router.use(apiLimiter);
-router.use(requireAuth);
-
 /**
  * GET /api/user/profile
  * Get current user profile data
  */
 router.get(
   "/profile",
+  apiLimiter,
+  requireAuth,
   asyncHandler(async (req: Request, res: Response) => {
     const db = getDatabase();
     const userId = (req as AuthenticatedRequest).userId;
@@ -108,6 +106,8 @@ router.get(
  */
 router.patch(
   "/profile",
+  apiLimiter,
+  requireAuth,
   asyncHandler(async (req: Request, res: Response) => {
     const userId = (req as AuthenticatedRequest).userId;
     const { name } = req.body;
@@ -143,6 +143,8 @@ router.patch(
  */
 router.post(
   "/change-password",
+  apiLimiter,
+  requireAuth,
   asyncHandler(async (req: Request, res: Response) => {
     const { currentPassword, newPassword } = req.body;
     const userId = (req as AuthenticatedRequest).userId;
@@ -243,6 +245,8 @@ router.post(
  */
 router.post(
   "/set-password",
+  apiLimiter,
+  requireAuth,
   asyncHandler(async (req: Request, res: Response) => {
     const { newPassword } = req.body;
     const userId = (req as AuthenticatedRequest).userId;
@@ -297,6 +301,8 @@ router.post(
  */
 router.post(
   "/resend-verification",
+  apiLimiter,
+  requireAuth,
   asyncHandler(async (req: Request, res: Response) => {
     const userId = (req as AuthenticatedRequest).userId;
     const userEmail = (req as AuthenticatedRequest).userEmail;
@@ -358,7 +364,7 @@ router.post(
  * GET /api/user/handle
  * Get current user's handle
  */
-router.get("/handle", async (req: Request, res: Response) => {
+router.get("/handle", apiLimiter, requireAuth, async (req: Request, res: Response) => {
   try {
     const userId = (req as AuthenticatedRequest).userId;
 
@@ -395,7 +401,7 @@ router.get("/handle", async (req: Request, res: Response) => {
  * PATCH /api/user/handle
  * Update user handle
  */
-router.patch("/handle", async (req: Request, res: Response) => {
+router.patch("/handle", apiLimiter, requireAuth, async (req: Request, res: Response) => {
   try {
     const userId = (req as AuthenticatedRequest).userId;
     const { handle } = req.body;

@@ -10,13 +10,14 @@
  * - Soft delete: Preserves data for audit trail
  */
 
-import { eq, and, or, isNull, like, desc, sql } from "drizzle-orm";
+import { eq, and, or, isNull, like, desc, asc, sql } from "drizzle-orm";
 import type { BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
-import { note } from "../schema.js";
+import { note, entityRevision } from "../schema.js";
 import { createLogger } from "../../logging/logger.js";
 import type * as schema from "../schema.js";
 import { randomUUID } from "node:crypto";
-import { executeListQuery, clampPagination, type ListQueryConfig } from "../list-query-builder.js";
+import { clampPagination, type ListQueryConfig } from "../list-query-builder.js";
+import { revisionPreviewPrefix, renderRevisionPreview } from "../revision-preview.js";
 import { REVISION_ENTITY_TYPES, RevisionRepository } from "./revision-repository.js";
 
 const NOTE_LIST_CONFIG: ListQueryConfig<"updatedAt" | "createdAt" | "key"> = {
@@ -172,7 +173,24 @@ export class NoteRepository {
       currentVersion: note.currentVersion,
       createdAt: note.createdAt,
       updatedAt: note.updatedAt,
+      prefix: revisionPreviewPrefix(entityRevision.content),
     };
+
+    const page = this.db
+      .select(noteSelectColumns)
+      .from(note)
+      .leftJoin(
+        entityRevision,
+        and(
+          eq(entityRevision.entityType, REVISION_ENTITY_TYPES.note),
+          eq(entityRevision.entityId, note.id),
+          eq(entityRevision.revision, note.currentVersion),
+        ),
+      );
+    const { limit, offset } = clampPagination(NOTE_LIST_CONFIG, filter);
+    const sortColumn =
+      NOTE_LIST_CONFIG.sortableColumns[filter.sort ?? NOTE_LIST_CONFIG.defaultSort.field];
+    const sortFn = (filter.sortOrder ?? NOTE_LIST_CONFIG.defaultSort.order) === "asc" ? asc : desc;
 
     let rows;
     let total: number;
@@ -187,45 +205,36 @@ export class NoteRepository {
       total = countResult[0]?.count ?? 0;
 
       // Tag queries need the JOIN and GROUP BY which the builder can't handle
-      const { limit, offset } = clampPagination(NOTE_LIST_CONFIG, filter);
-      rows = await this.db
-        .select(noteSelectColumns)
-        .from(note)
+      rows = await page
         .innerJoin(sql`json_each(${note.tags})`, sql`1=1`)
         .where(and(...conditions))
         .groupBy(note.id)
-        .orderBy(desc(note.updatedAt))
+        .orderBy(sortFn(sortColumn), note.id)
         .limit(limit)
         .offset(offset);
     } else {
-      // Standard path uses the list query builder
-      const result = await executeListQuery(
-        this.db,
-        NOTE_LIST_CONFIG,
-        filter,
-        conditions,
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        noteSelectColumns as any,
-      );
-      rows = result.rows;
-      total = result.total;
+      const [countResult] = await this.db
+        .select({ count: sql<number>`count(*)` })
+        .from(note)
+        .where(and(...conditions));
+      total = countResult?.count ?? 0;
+      rows = await page
+        .where(and(...conditions))
+        .orderBy(sortFn(sortColumn), note.id)
+        .limit(limit)
+        .offset(offset);
     }
 
     // Get previews for each note (latest version content)
     const notes: NoteInfo[] = [];
     for (const row of rows) {
-      const current = await this.revisions.get(this.revisionTarget(row.id), row.currentVersion);
-
-      const value = current?.content || "";
-      const preview = value.substring(0, 100) + (value.length > 100 ? "..." : "");
-
       notes.push({
         id: row.id,
         key: row.key,
         tags: row.tags ? JSON.parse(row.tags) : [],
         size: row.size,
         currentVersion: row.currentVersion,
-        preview,
+        preview: renderRevisionPreview(row.prefix),
         createdAt: (row.createdAt as Date).getTime(),
         updatedAt: (row.updatedAt as Date).getTime(),
       });

@@ -34,6 +34,7 @@ import {
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { codespaceErrorMessage } from "@/lib/codespace-error-message";
 import { guideAnchor } from "../../guides/anchors";
+import { DataRegion } from "@/components/DataRegion";
 
 const BUSY_STATES: ReadonlySet<CodespaceSummaryView["state"]> = new Set([
   "create_pending",
@@ -184,7 +185,7 @@ export const GitHubCodespaceManagement: React.FC = () => {
     }
   };
 
-  if (loading) {
+  if (loading && !view) {
     return (
       <Card data-testid="github-codespace-management" {...guideAnchor("settings.codespaces")}>
         <CardContent className="flex min-h-32 items-center justify-center p-6">
@@ -194,7 +195,7 @@ export const GitHubCodespaceManagement: React.FC = () => {
     );
   }
 
-  if (loadError || !view) {
+  if (!view) {
     return (
       <Card data-testid="github-codespace-management" {...guideAnchor("settings.codespaces")}>
         <CardContent className="space-y-4 p-6">
@@ -239,264 +240,273 @@ export const GitHubCodespaceManagement: React.FC = () => {
         </div>
       </CardHeader>
       <CardContent className="space-y-4">
-        <Alert data-testid="github-codespace-disclosure">
-          <ShieldAlert aria-hidden="true" />
-          <AlertTitle>{t("pages.settings.codespaces.disclosureTitle")}</AlertTitle>
-          <AlertDescription>
-            {t("pages.settings.codespaces.disclosureDescription")}
-          </AlertDescription>
-        </Alert>
-
-        {!ready && (
-          <Alert variant={readiness.state === "disabled" ? "default" : "destructive"}>
-            <AlertCircle aria-hidden="true" />
-            <AlertTitle>
-              {t(`pages.settings.codespaces.instanceStates.${readiness.state}`)}
-            </AlertTitle>
+        <DataRegion
+          hasResult
+          pending={loading}
+          error={loadError ? t("pages.settings.codespaces.loadFailed") : null}
+          onRetry={() => load()}
+          testId="github-management-region"
+        >
+          <Alert data-testid="github-codespace-disclosure">
+            <ShieldAlert aria-hidden="true" />
+            <AlertTitle>{t("pages.settings.codespaces.disclosureTitle")}</AlertTitle>
             <AlertDescription>
-              {t(`pages.settings.codespaces.instanceDescriptions.${readiness.state}`)}
+              {t("pages.settings.codespaces.disclosureDescription")}
             </AlertDescription>
           </Alert>
-        )}
 
-        {ready && !connected && (
-          <Alert>
-            <AlertCircle aria-hidden="true" />
-            <AlertTitle>{t("pages.settings.codespaces.connectFirstTitle")}</AlertTitle>
-            <AlertDescription>
-              {t("pages.settings.codespaces.connectFirstDescription")}
-            </AlertDescription>
-          </Alert>
-        )}
+          {!ready && (
+            <Alert variant={readiness.state === "disabled" ? "default" : "destructive"}>
+              <AlertCircle aria-hidden="true" />
+              <AlertTitle>
+                {t(`pages.settings.codespaces.instanceStates.${readiness.state}`)}
+              </AlertTitle>
+              <AlertDescription>
+                {t(`pages.settings.codespaces.instanceDescriptions.${readiness.state}`)}
+              </AlertDescription>
+            </Alert>
+          )}
 
-        {view.repositories_stale && (
-          <Alert data-testid="github-codespace-repositories-stale">
-            <AlertCircle aria-hidden="true" />
-            <AlertTitle>{t("pages.settings.github.repositoriesStaleTitle")}</AlertTitle>
-            <AlertDescription>{t("pages.settings.github.repositoriesStale")}</AlertDescription>
-          </Alert>
-        )}
+          {ready && !connected && (
+            <Alert>
+              <AlertCircle aria-hidden="true" />
+              <AlertTitle>{t("pages.settings.codespaces.connectFirstTitle")}</AlertTitle>
+              <AlertDescription>
+                {t("pages.settings.codespaces.connectFirstDescription")}
+              </AlertDescription>
+            </Alert>
+          )}
 
-        {view.resources_stale && (
-          <Alert data-testid="github-codespace-resources-stale">
-            <AlertCircle aria-hidden="true" />
-            <AlertTitle>{t("pages.settings.codespaces.resourcesStaleTitle")}</AlertTitle>
-            <AlertDescription>{t("pages.settings.codespaces.resourcesStale")}</AlertDescription>
-          </Alert>
-        )}
+          {view.repositories_stale && (
+            <Alert data-testid="github-codespace-repositories-stale">
+              <AlertCircle aria-hidden="true" />
+              <AlertTitle>{t("pages.settings.github.repositoriesStaleTitle")}</AlertTitle>
+              <AlertDescription>{t("pages.settings.github.repositoriesStale")}</AlertDescription>
+            </Alert>
+          )}
 
-        {canCreate && (
-          <form
-            className="grid gap-3 rounded-md border p-3 sm:grid-cols-[1fr_minmax(0,12rem)_auto]"
-            data-testid="github-codespace-create"
-            onSubmit={(event) => {
-              event.preventDefault();
-              void create();
-            }}
-          >
-            <div className="space-y-1">
-              <Label htmlFor="github-codespace-repository">
-                {t("pages.settings.codespaces.repository")}
-              </Label>
-              <Select value={repositoryId} onValueChange={setRepositoryId}>
-                <SelectTrigger
-                  id="github-codespace-repository"
-                  data-testid="github-codespace-repository"
+          {view.resources_stale && (
+            <Alert data-testid="github-codespace-resources-stale">
+              <AlertCircle aria-hidden="true" />
+              <AlertTitle>{t("pages.settings.codespaces.resourcesStaleTitle")}</AlertTitle>
+              <AlertDescription>{t("pages.settings.codespaces.resourcesStale")}</AlertDescription>
+            </Alert>
+          )}
+
+          {canCreate && (
+            <form
+              className="grid gap-3 rounded-md border p-3 sm:grid-cols-[1fr_minmax(0,12rem)_auto]"
+              data-testid="github-codespace-create"
+              onSubmit={(event) => {
+                event.preventDefault();
+                void create();
+              }}
+            >
+              <div className="space-y-1">
+                <Label htmlFor="github-codespace-repository">
+                  {t("pages.settings.codespaces.repository")}
+                </Label>
+                <Select value={repositoryId} onValueChange={setRepositoryId}>
+                  <SelectTrigger
+                    id="github-codespace-repository"
+                    data-testid="github-codespace-repository"
+                  >
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {view.repositories.map((repository) => (
+                      <SelectItem key={repository.repository_id} value={repository.repository_id}>
+                        {repository.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor="github-codespace-ref">{t("pages.settings.codespaces.ref")}</Label>
+                <Input
+                  id="github-codespace-ref"
+                  data-testid="github-codespace-ref"
+                  value={ref}
+                  maxLength={255}
+                  onChange={(event) => setRef(event.target.value)}
+                />
+              </div>
+              <div className="flex items-end">
+                <Button
+                  type="submit"
+                  disabled={creating || !repositoryId || !ref.trim()}
+                  data-testid="github-codespace-create-submit"
                 >
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {view.repositories.map((repository) => (
-                    <SelectItem key={repository.repository_id} value={repository.repository_id}>
-                      {repository.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-1">
-              <Label htmlFor="github-codespace-ref">{t("pages.settings.codespaces.ref")}</Label>
-              <Input
-                id="github-codespace-ref"
-                data-testid="github-codespace-ref"
-                value={ref}
-                maxLength={255}
-                onChange={(event) => setRef(event.target.value)}
-              />
-            </div>
-            <div className="flex items-end">
-              <Button
-                type="submit"
-                disabled={creating || !repositoryId || !ref.trim()}
-                data-testid="github-codespace-create-submit"
-              >
-                {creating && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                {t("pages.settings.codespaces.create")}
-              </Button>
-            </div>
-            <p className="text-xs text-muted-foreground sm:col-span-3">
-              {t("pages.settings.codespaces.createHint", {
-                held: limits.codespaces.held,
-                max: limits.codespaces.max_per_user,
-              })}
+                  {creating && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                  {t("pages.settings.codespaces.create")}
+                </Button>
+              </div>
+              <p className="text-xs text-muted-foreground sm:col-span-3">
+                {t("pages.settings.codespaces.createHint", {
+                  held: limits.codespaces.held,
+                  max: limits.codespaces.max_per_user,
+                })}
+              </p>
+            </form>
+          )}
+
+          <div className="flex items-center justify-between gap-3">
+            <h3 className="text-sm font-medium">{t("pages.settings.codespaces.list")}</h3>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => void load({ sync: true })}
+              aria-label={t("pages.settings.codespaces.refresh")}
+            >
+              <RefreshCw className="h-4 w-4" aria-hidden="true" />
+            </Button>
+          </div>
+
+          {codespaces.length === 0 ? (
+            <p className="text-sm text-muted-foreground" data-testid="github-codespace-empty">
+              {t("pages.settings.codespaces.empty")}
             </p>
-          </form>
-        )}
-
-        <div className="flex items-center justify-between gap-3">
-          <h3 className="text-sm font-medium">{t("pages.settings.codespaces.list")}</h3>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => void load({ sync: true })}
-            aria-label={t("pages.settings.codespaces.refresh")}
-          >
-            <RefreshCw className="h-4 w-4" aria-hidden="true" />
-          </Button>
-        </div>
-
-        {codespaces.length === 0 ? (
-          <p className="text-sm text-muted-foreground" data-testid="github-codespace-empty">
-            {t("pages.settings.codespaces.empty")}
-          </p>
-        ) : (
-          <ul className="space-y-2" data-testid="github-codespace-list">
-            {codespaces.map((codespace) => {
-              const busy =
-                BUSY_STATES.has(codespace.state) || busyCodespace === codespace.codespace_id;
-              return (
-                <li
-                  key={codespace.codespace_id}
-                  className="rounded-lg border bg-card p-3"
-                  data-testid={`github-codespace-${codespace.codespace_id}`}
-                >
-                  <div className="flex flex-wrap items-start justify-between gap-2">
-                    <div className="flex min-w-0 items-start gap-2.5">
-                      <span
-                        className={cn(
-                          "mt-2 size-2 shrink-0 rounded-full",
-                          TONE_DOT[stateTone(codespace.state)],
-                        )}
-                        aria-hidden="true"
-                      />
-                      <div className="min-w-0">
-                        <p className="truncate font-medium">{codespace.repository}</p>
-                        <p className="flex items-center gap-1 text-sm text-muted-foreground">
-                          <GitBranch className="size-3.5 shrink-0" aria-hidden="true" />
-                          <span className="truncate font-mono text-xs">
-                            {codespace.current_ref ?? codespace.requested_ref}
-                          </span>
-                        </p>
-                        <p className="text-xs text-muted-foreground">
-                          {t("pages.settings.codespaces.providerLine", {
-                            machine: codespace.machine.display_name,
-                          })}
-                        </p>
+          ) : (
+            <ul className="space-y-2" data-testid="github-codespace-list">
+              {codespaces.map((codespace) => {
+                const busy =
+                  BUSY_STATES.has(codespace.state) || busyCodespace === codespace.codespace_id;
+                return (
+                  <li
+                    key={codespace.codespace_id}
+                    className="rounded-lg border bg-card p-3"
+                    data-testid={`github-codespace-${codespace.codespace_id}`}
+                  >
+                    <div className="flex flex-wrap items-start justify-between gap-2">
+                      <div className="flex min-w-0 items-start gap-2.5">
+                        <span
+                          className={cn(
+                            "mt-2 size-2 shrink-0 rounded-full",
+                            TONE_DOT[stateTone(codespace.state)],
+                          )}
+                          aria-hidden="true"
+                        />
+                        <div className="min-w-0">
+                          <p className="truncate font-medium">{codespace.repository}</p>
+                          <p className="flex items-center gap-1 text-sm text-muted-foreground">
+                            <GitBranch className="size-3.5 shrink-0" aria-hidden="true" />
+                            <span className="truncate font-mono text-xs">
+                              {codespace.current_ref ?? codespace.requested_ref}
+                            </span>
+                          </p>
+                          <p className="text-xs text-muted-foreground">
+                            {t("pages.settings.codespaces.providerLine", {
+                              machine: codespace.machine.display_name,
+                            })}
+                          </p>
+                        </div>
                       </div>
+                      <Badge
+                        variant="outline"
+                        className={TONE_BADGE[stateTone(codespace.state)]}
+                        data-testid={`github-codespace-state-${codespace.codespace_id}`}
+                      >
+                        {t(`pages.settings.codespaces.states.${codespace.state}`)}
+                      </Badge>
                     </div>
-                    <Badge
-                      variant="outline"
-                      className={TONE_BADGE[stateTone(codespace.state)]}
-                      data-testid={`github-codespace-state-${codespace.codespace_id}`}
-                    >
-                      {t(`pages.settings.codespaces.states.${codespace.state}`)}
-                    </Badge>
-                  </div>
-                  <div className="mt-3 flex flex-wrap items-center gap-2">
-                    {codespace.state === "stopped" && (
+                    <div className="mt-3 flex flex-wrap items-center gap-2">
+                      {codespace.state === "stopped" && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={busy}
+                          onClick={() => void lifecycle(codespace, "start")}
+                          data-testid={`github-codespace-start-${codespace.codespace_id}`}
+                        >
+                          <Play className="mr-1 h-4 w-4" aria-hidden="true" />
+                          {t("pages.settings.codespaces.start")}
+                        </Button>
+                      )}
+                      {codespace.state === "usable" && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={busy}
+                          onClick={() => void lifecycle(codespace, "stop")}
+                          data-testid={`github-codespace-stop-${codespace.codespace_id}`}
+                        >
+                          <Square className="mr-1 h-4 w-4" aria-hidden="true" />
+                          {t("pages.settings.codespaces.stop")}
+                        </Button>
+                      )}
                       <Button
                         size="sm"
-                        variant="outline"
+                        variant="destructive"
                         disabled={busy}
-                        onClick={() => void lifecycle(codespace, "start")}
-                        data-testid={`github-codespace-start-${codespace.codespace_id}`}
+                        onClick={(event) => {
+                          deleteTriggerRef.current = event.currentTarget;
+                          setPendingDelete(codespace);
+                        }}
+                        data-testid={`github-codespace-delete-${codespace.codespace_id}`}
                       >
-                        <Play className="mr-1 h-4 w-4" aria-hidden="true" />
-                        {t("pages.settings.codespaces.start")}
+                        <Trash2 className="mr-1 h-4 w-4" aria-hidden="true" />
+                        {t("pages.settings.codespaces.delete")}
                       </Button>
-                    )}
-                    {codespace.state === "usable" && (
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        disabled={busy}
-                        onClick={() => void lifecycle(codespace, "stop")}
-                        data-testid={`github-codespace-stop-${codespace.codespace_id}`}
+                    </div>
+                    <Collapsible className="mt-2">
+                      <CollapsibleTrigger
+                        className="group inline-flex items-center gap-1 rounded text-xs text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                        data-testid={`github-codespace-details-toggle-${codespace.codespace_id}`}
                       >
-                        <Square className="mr-1 h-4 w-4" aria-hidden="true" />
-                        {t("pages.settings.codespaces.stop")}
-                      </Button>
-                    )}
-                    <Button
-                      size="sm"
-                      variant="destructive"
-                      disabled={busy}
-                      onClick={(event) => {
-                        deleteTriggerRef.current = event.currentTarget;
-                        setPendingDelete(codespace);
-                      }}
-                      data-testid={`github-codespace-delete-${codespace.codespace_id}`}
-                    >
-                      <Trash2 className="mr-1 h-4 w-4" aria-hidden="true" />
-                      {t("pages.settings.codespaces.delete")}
-                    </Button>
-                  </div>
-                  <Collapsible className="mt-2">
-                    <CollapsibleTrigger
-                      className="group inline-flex items-center gap-1 rounded text-xs text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                      data-testid={`github-codespace-details-toggle-${codespace.codespace_id}`}
-                    >
-                      <ChevronDown
-                        className="size-3.5 transition-transform group-data-[state=open]:rotate-180"
-                        aria-hidden="true"
-                      />
-                      {t("pages.settings.codespaces.technicalDetails")}
-                    </CollapsibleTrigger>
-                    <CollapsibleContent>
-                      <dl
-                        className="mt-2 grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1 rounded-md bg-muted/50 p-3 text-xs"
-                        data-testid={`github-codespace-details-${codespace.codespace_id}`}
-                      >
-                        <dt className="text-muted-foreground">
-                          {t("pages.settings.codespaces.details.requestedRef")}
-                        </dt>
-                        <dd className="truncate font-mono">{codespace.requested_ref}</dd>
-                        <dt className="text-muted-foreground">
-                          {t("pages.settings.codespaces.details.currentRef")}
-                        </dt>
-                        <dd className="truncate font-mono">
-                          {codespace.current_ref ?? t("pages.settings.codespaces.details.unknown")}
-                        </dd>
-                        <dt className="text-muted-foreground">
-                          {t("pages.settings.codespaces.details.lifecycle")}
-                        </dt>
-                        <dd>
-                          {t("pages.settings.codespaces.detailLine", {
-                            desired: t(
-                              `pages.settings.codespaces.desired.${codespace.desired_state}`,
-                            ),
-                            observed: t(
-                              `pages.settings.codespaces.observed.${codespace.observed_state}`,
-                            ),
-                            generation: codespace.generation,
-                          })}
-                        </dd>
-                        <dt className="text-muted-foreground">
-                          {t("pages.settings.codespaces.details.updated")}
-                        </dt>
-                        <dd>{formatDate(codespace.updated_at)}</dd>
-                        <dt className="text-muted-foreground">
-                          {t("pages.settings.codespaces.details.id")}
-                        </dt>
-                        <dd className="truncate font-mono">{codespace.codespace_id}</dd>
-                      </dl>
-                    </CollapsibleContent>
-                  </Collapsible>
-                </li>
-              );
-            })}
-          </ul>
-        )}
+                        <ChevronDown
+                          className="size-3.5 transition-transform group-data-[state=open]:rotate-180"
+                          aria-hidden="true"
+                        />
+                        {t("pages.settings.codespaces.technicalDetails")}
+                      </CollapsibleTrigger>
+                      <CollapsibleContent>
+                        <dl
+                          className="mt-2 grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1 rounded-md bg-muted/50 p-3 text-xs"
+                          data-testid={`github-codespace-details-${codespace.codespace_id}`}
+                        >
+                          <dt className="text-muted-foreground">
+                            {t("pages.settings.codespaces.details.requestedRef")}
+                          </dt>
+                          <dd className="truncate font-mono">{codespace.requested_ref}</dd>
+                          <dt className="text-muted-foreground">
+                            {t("pages.settings.codespaces.details.currentRef")}
+                          </dt>
+                          <dd className="truncate font-mono">
+                            {codespace.current_ref ??
+                              t("pages.settings.codespaces.details.unknown")}
+                          </dd>
+                          <dt className="text-muted-foreground">
+                            {t("pages.settings.codespaces.details.lifecycle")}
+                          </dt>
+                          <dd>
+                            {t("pages.settings.codespaces.detailLine", {
+                              desired: t(
+                                `pages.settings.codespaces.desired.${codespace.desired_state}`,
+                              ),
+                              observed: t(
+                                `pages.settings.codespaces.observed.${codespace.observed_state}`,
+                              ),
+                              generation: codespace.generation,
+                            })}
+                          </dd>
+                          <dt className="text-muted-foreground">
+                            {t("pages.settings.codespaces.details.updated")}
+                          </dt>
+                          <dd>{formatDate(codespace.updated_at)}</dd>
+                          <dt className="text-muted-foreground">
+                            {t("pages.settings.codespaces.details.id")}
+                          </dt>
+                          <dd className="truncate font-mono">{codespace.codespace_id}</dd>
+                        </dl>
+                      </CollapsibleContent>
+                    </Collapsible>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </DataRegion>
       </CardContent>
 
       <ConfirmDialog

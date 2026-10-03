@@ -54,6 +54,10 @@ schema and validation errors.
 `list` returns a page rather than the complete collection. Use `limit` and `offset`, and compare the
 returned notes with `total` to determine whether another page is needed.
 
+List and history entries contain short previews, not complete note text. Use `get` to read the
+current value, or pass `version` to read a specific version; opening a version in the Web UI also
+reads its full text. A truncated preview does not mean the stored value was truncated.
+
 ## Automatic Node Types
 
 Three node types execute note operations without agent interaction. They run server-side and continue to the next node automatically.

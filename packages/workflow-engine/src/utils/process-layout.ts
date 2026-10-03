@@ -29,6 +29,16 @@
 
 import type { ELK } from "elkjs/lib/elk-api.js";
 
+/** Load code without creating a layout instance; selected views can overlap this with data reads. */
+export async function loadLayoutEngine(): Promise<new () => ELK> {
+  // Node and the browser bundler both expose the CommonJS constructor on default.
+  // Let the module loader share successful/in-flight imports; keep no failed promise here.
+  const loaded = (await import("elkjs/lib/elk.bundled.js")) as unknown as {
+    default: new () => ELK;
+  };
+  return loaded.default;
+}
+
 /** A transition as the layout reads it: where it leads, its label, and whether it is a return. */
 export interface LayoutTransition {
   to: string;
@@ -202,13 +212,8 @@ async function placeBlocks(
   rankSep: number,
   nodeSep: number = BASE_NODE_SEP,
 ): Promise<Placed[]> {
-  // The bundled ELK is a CommonJS module whose export is the constructor; under Node's module
-  // resolution its namespace type is the constructor itself, under the bundler's it is `default`,
-  // and at run time both give the constructor on `default`.
-  const loaded = (await import("elkjs/lib/elk.bundled.js")) as unknown as {
-    default: new () => ELK;
-  };
-  const elk = new loaded.default();
+  const ELK = await loadLayoutEngine();
+  const elk = new ELK();
   const ids = new Set(blocks.map((b) => b.id));
   const edges = blocks.flatMap((block) =>
     block.transitions

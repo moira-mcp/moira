@@ -23,7 +23,11 @@ import { useLatestRequest } from "./useLatestRequest";
  */
 export function useWorkflowList() {
   const { data: session } = useSession();
-  const [workflows, setWorkflows] = useState<WorkflowListResponse | null>(null);
+  const [accepted, setAccepted] = useState<{
+    response: WorkflowListResponse;
+    filters: WorkflowListRequest;
+  } | null>(null);
+  const workflows = accepted?.response ?? null;
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [lastUpdated, setLastUpdated] = useState<number | null>(null);
@@ -40,14 +44,15 @@ export function useWorkflowList() {
       }
 
       const isCurrent = beginRequest();
+      const requestedFilters = { ...filters };
       setLoading(true);
       setError(null);
 
       try {
-        const response = await apiClient.getWorkflows(filters);
+        const response = await apiClient.getWorkflows(requestedFilters);
         // A newer query (a filter, a page, the page size settling) may have answered first
         if (!isCurrent()) return;
-        setWorkflows(response);
+        setAccepted({ response, filters: requestedFilters });
         setLastUpdated(Date.now());
       } catch (err) {
         if (!isCurrent()) return;
@@ -73,6 +78,7 @@ export function useWorkflowList() {
 
   return {
     workflows,
+    acceptedFilters: accepted?.filters ?? null,
     loading,
     error,
     lastUpdated,

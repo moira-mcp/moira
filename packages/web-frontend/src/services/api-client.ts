@@ -6,7 +6,17 @@
  * Note: console.* used for browser debugging of API requests/responses
  */
 
-import axios, { AxiosInstance, AxiosResponse, AxiosError } from "axios";
+import axios, { AxiosInstance, AxiosResponse, AxiosError, AxiosRequestConfig } from "axios";
+import { ConditionalReadStore, ReadRetiredError } from "./conditional-read-store";
+import {
+  getReadIdentity,
+  getReadOwner,
+  getReadCredentialVersion,
+  getReadScopeVersion,
+  observeReadBackend,
+  observeReadCapabilities,
+  retireReads,
+} from "./read-scope";
 import type {
   ExecutionProgress,
   WorkflowVersionStatistics,
@@ -17,6 +27,16 @@ import type {
   CodespaceControlView,
   CodespaceReadinessView,
   CodespaceSummaryView,
+  AnalyticsQuery,
+  AnalyticsOverview,
+  AnalyticsUsers,
+  AnalyticsRegistrations,
+  AnalyticsAttention,
+  AnalyticsTopWorkflows,
+  AdminUserActivity,
+  AdminUserLookup,
+  AdminUserListFilter,
+  AnalyticsSeriesWindow,
 } from "@mcp-moira/shared";
 
 /** The latest notification about the wait a run stands in: what the run page shows under its banner. */
@@ -330,6 +350,12 @@ export class ApiClientError extends Error {
 export class MoiraApiClient {
   private client: AxiosInstance;
   private baseURL: string;
+  private reads = new ConditionalReadStore<unknown>();
+  private latestUserInfoRequest = 0;
+  private requestAuthority = new WeakMap<
+    AxiosRequestConfig,
+    { owner: string; credential: number; scope: number }
+  >();
   constructor(baseURL: string = "") {
     this.baseURL = baseURL;
 
@@ -352,6 +378,12 @@ export class MoiraApiClient {
     // Request interceptor
     this.client.interceptors.request.use(
       (config) => {
+        this.requestAuthority.set(config, {
+          owner: getReadOwner(),
+          credential: getReadCredentialVersion(),
+          scope: getReadScopeVersion(),
+        });
+        if (!["get", "head", "options"].includes(config.method ?? "get")) retireReads();
         if (process.env.NODE_ENV === "development") {
           console.log(`🌐 API Request: ${config.method?.toUpperCase()} ${config.url}`);
         }
@@ -359,13 +391,15 @@ export class MoiraApiClient {
       },
       (error) => {
         console.error("🔴 API Request Error:", error);
-        return Promise.reject(error);
+        throw error;
       },
+      { synchronous: true },
     );
 
     // Response interceptor
     this.client.interceptors.response.use(
       (response: AxiosResponse<ApiResponse>) => {
+        if (!["get", "head", "options"].includes(response.config.method ?? "get")) retireReads();
         if (process.env.NODE_ENV === "development") {
           console.log(`✅ API Response: ${response.status} ${response.config.url}`);
         }
@@ -390,6 +424,7 @@ export class MoiraApiClient {
         return response;
       },
       (error: AxiosError<ApiResponse>) => {
+        if (!["get", "head", "options"].includes(error.config?.method ?? "get")) retireReads();
         console.error("🔴 API Response Error:", error.response?.status, error.message);
 
         // Handle network errors
@@ -406,7 +441,12 @@ export class MoiraApiClient {
         const requestUrl = error.config?.url;
 
         // Handle 401/403 for non-public auth endpoints
-        if ((status === 401 || status === 403) && !isPublicAuthEndpoint(requestUrl)) {
+        if (
+          (status === 401 || status === 403) &&
+          !isPublicAuthEndpoint(requestUrl) &&
+          this.isCurrentAuthority(error.config, true)
+        ) {
+          retireReads();
           // Extract error message for blocked users
           let errorMessage =
             status === 401
@@ -457,6 +497,68 @@ export class MoiraApiClient {
         );
       },
     );
+  }
+
+  /** A late response may settle for its caller without affecting a newer signed-in owner. */
+  private isCurrentAuthority(config?: AxiosRequestConfig, includeCapabilities = false): boolean {
+    const captured = config && this.requestAuthority.get(config);
+    return (
+      !!captured &&
+      captured.owner === getReadOwner() &&
+      captured.credential === getReadCredentialVersion() &&
+      (!includeCapabilities || captured.scope === getReadScopeVersion()) &&
+      getReadIdentity() !== null
+    );
+  }
+
+  /** Opt-in only: lists with stable projections validate every warm read; workflow scan stays 200. */
+  private read<T>(url: string, config?: AxiosRequestConfig): Promise<{ data: T }> {
+    const identity = getReadIdentity();
+    if (!identity) return this.client.get<T>(url, config);
+    const uri = new URL(this.client.getUri({ ...config, url }), "http://same-origin");
+    uri.searchParams.sort();
+    const key = JSON.stringify([identity, uri.toString()]);
+    const path = url.split("?")[0];
+    const conditional =
+      ["/notes", "/node-types", "/playbooks"].includes(path) ||
+      (path === "/admin/users" && uri.searchParams.get("projection") === "lookup");
+    return this.reads
+      .read(
+        key,
+        async (etag) => {
+          const response = await this.client.get<T>(url, {
+            ...config,
+            headers: {
+              ...config?.headers,
+              "Cache-Control": etag ? undefined : "no-cache",
+              ...(etag ? { "If-None-Match": etag } : {}),
+            },
+            validateStatus: (status) =>
+              (status >= 200 && status < 300) || (conditional && status === 304),
+          });
+          if (response.status !== 304 && !(response.data as ApiResponse)?.success) {
+            throw new ApiClientError(
+              "Read did not return a successful representation",
+              ApiErrorCode.INTERNAL_ERROR,
+            );
+          }
+          return {
+            value: response.data,
+            etag: response.headers.etag,
+            unchanged: response.status === 304,
+          };
+        },
+        conditional,
+      )
+      .then((data) => ({ data: data as T }))
+      .catch((error: unknown) => {
+        // A local write retires the flight, not the requesting owner's operation. Re-enter
+        // the shared boundary for a fresh source check; never borrow another authority.
+        if (error instanceof ReadRetiredError && identity === getReadIdentity()) {
+          return this.read<T>(url, config);
+        }
+        throw error;
+      });
   }
 
   /**
@@ -519,7 +621,7 @@ export class MoiraApiClient {
         params.append("search", request.search);
       }
       if (request?.slugs && request.slugs.length > 0) {
-        params.append("slugs", request.slugs.join(","));
+        params.append("slugs", [...new Set(request.slugs)].sort().join(","));
       }
       if (request?.visibility) {
         params.append("visibility", request.visibility);
@@ -543,7 +645,7 @@ export class MoiraApiClient {
       const queryString = params.toString();
       const url = queryString ? `/workflows?${queryString}` : "/workflows";
 
-      const response = await this.client.get<ApiResponse<WorkflowListResponse>>(url);
+      const response = await this.read<ApiResponse<WorkflowListResponse>>(url);
       return response.data.data!;
     } catch (error) {
       if (error instanceof ApiClientError) {
@@ -691,7 +793,7 @@ export class MoiraApiClient {
    * added after this bundle was built would otherwise be drawn as unknown.
    */
   async getNodeTypes(): Promise<NodeTypeCatalog> {
-    const response = await this.client.get<ApiResponse<NodeTypeCatalog>>("/node-types");
+    const response = await this.read<ApiResponse<NodeTypeCatalog>>("/node-types");
     return response.data.data!;
   }
 
@@ -1095,6 +1197,7 @@ export class MoiraApiClient {
    * Update base URL (for dynamic backend discovery)
    */
   updateBaseURL(newBaseURL: string): void {
+    observeReadBackend(newBaseURL);
     this.baseURL = newBaseURL;
     this.client.defaults.baseURL = `${newBaseURL}/api`;
   }
@@ -1114,6 +1217,7 @@ export class MoiraApiClient {
     accountApproved: boolean;
     accountApprovalRequired: boolean;
   }> {
+    const request = ++this.latestUserInfoRequest;
     try {
       const response = await this.client.get<
         ApiResponse<{
@@ -1129,6 +1233,25 @@ export class MoiraApiClient {
           accountApprovalRequired: boolean;
         }>
       >("/user/me");
+      if (
+        response.data.data &&
+        request === this.latestUserInfoRequest &&
+        this.isCurrentAuthority(response.config)
+      ) {
+        const user = response.data.data;
+        observeReadCapabilities(
+          JSON.stringify([
+            user.id,
+            user.isAdmin,
+            user.blocked,
+            user.passwordResetRequired,
+            user.emailVerified,
+            user.accountApproved,
+            user.accountApprovalRequired,
+          ]),
+          "user",
+        );
+      }
       return response.data.data!;
     } catch (error) {
       throw new ApiClientError("Failed to get user info", ApiErrorCode.INTERNAL_ERROR);
@@ -1294,43 +1417,77 @@ export class MoiraApiClient {
     }
   }
 
-  async getAdminUsers(filters?: { search?: string; limit?: number; offset?: number }): Promise<{
-    users: Array<{
-      id: string;
-      email: string;
-      name: string | null;
-      isAdmin: boolean;
-      emailVerified: boolean;
-      approvedAt: string | null;
-      blocked: boolean;
-      createdAt: string;
-      workflowsCount: number;
-    }>;
+  private adminUserParams(filters?: AdminUserListFilter): URLSearchParams {
+    const params = new URLSearchParams();
+    if (filters?.search) params.set("search", filters.search);
+    if (filters?.ids !== undefined) params.set("ids", [...new Set(filters.ids)].sort().join(","));
+    if (filters?.sort) params.set("sort", filters.sort);
+    if (filters?.sortOrder) params.set("sortOrder", filters.sortOrder);
+    if (filters?.limit) params.set("limit", String(filters.limit));
+    if (filters?.offset) params.set("offset", String(filters.offset));
+    return params;
+  }
+
+  /** Bounded identity/role choices; the management response remains a separate rich read. */
+  async getAdminUserChoices(filters?: AdminUserListFilter): Promise<{
+    users: AdminUserLookup[];
+    total: number;
+    limit: number;
+    offset: number;
+  }> {
+    const params = this.adminUserParams(filters);
+    params.set("projection", "lookup");
+    return this.wrapFailure("get admin user choices", async () => {
+      const response = await this.read<
+        ApiResponse<{
+          users: AdminUserLookup[];
+          total: number;
+          limit: number;
+          offset: number;
+        }>
+      >(`/admin/users?${params}`);
+      return response.data.data!;
+    });
+  }
+
+  async getAdminUsers(filters?: AdminUserListFilter): Promise<{
+    users: Array<
+      AdminUserActivity & {
+        id: string;
+        email: string;
+        name: string | null;
+        isAdmin: boolean;
+        emailVerified: boolean;
+        approvedAt: string | null;
+        blocked: boolean;
+        createdAt: string;
+        workflowsCount: number;
+      }
+    >;
     total: number;
     limit: number;
     offset: number;
   }> {
     try {
       type AdminUsersResponse = {
-        users: Array<{
-          id: string;
-          email: string;
-          name: string | null;
-          isAdmin: boolean;
-          emailVerified: boolean;
-          approvedAt: string | null;
-          blocked: boolean;
-          createdAt: string;
-          workflowsCount: number;
-        }>;
+        users: Array<
+          AdminUserActivity & {
+            id: string;
+            email: string;
+            name: string | null;
+            isAdmin: boolean;
+            emailVerified: boolean;
+            approvedAt: string | null;
+            blocked: boolean;
+            createdAt: string;
+            workflowsCount: number;
+          }
+        >;
         total: number;
         limit: number;
         offset: number;
       };
-      const params = new URLSearchParams();
-      if (filters?.search) params.append("search", filters.search);
-      if (filters?.limit) params.append("limit", filters.limit.toString());
-      if (filters?.offset) params.append("offset", filters.offset.toString());
+      const params = this.adminUserParams(filters);
       const queryString = params.toString();
       const url = queryString ? `/admin/users?${queryString}` : "/admin/users";
       const response = await this.client.get<ApiResponse<AdminUsersResponse>>(url);
@@ -1432,8 +1589,8 @@ export class MoiraApiClient {
       if (filters?.visibility && filters.visibility !== "all")
         params.append("visibility", filters.visibility);
       if (filters?.isValid) params.append("isValid", filters.isValid);
-      if (filters?.fromDate) params.append("fromDate", filters.fromDate.toString());
-      if (filters?.toDate) params.append("toDate", filters.toDate.toString());
+      if (filters?.fromDate !== undefined) params.append("fromDate", filters.fromDate.toString());
+      if (filters?.toDate !== undefined) params.append("toDate", filters.toDate.toString());
       if (filters?.sort) params.append("sort", filters.sort);
       if (filters?.sortOrder) params.append("sortOrder", filters.sortOrder);
       if (filters?.limit) params.append("limit", filters.limit.toString());
@@ -1453,17 +1610,16 @@ export class MoiraApiClient {
    */
   async getDeletedWorkflows(filters?: {
     search?: string;
+    fromDate?: number;
+    toDate?: number;
     limit?: number;
     offset?: number;
   }): Promise<{
     workflows: Array<{
       id: string;
       name: string;
-      userId: string;
-      deleted: boolean;
       deletedAt: number | null;
       deletedBy: string | null;
-      createdAt?: number;
     }>;
     total: number;
     limit: number;
@@ -1474,11 +1630,8 @@ export class MoiraApiClient {
         workflows: Array<{
           id: string;
           name: string;
-          userId: string;
-          deleted: boolean;
           deletedAt: number | null;
           deletedBy: string | null;
-          createdAt?: number;
         }>;
         total: number;
         limit: number;
@@ -1486,6 +1639,8 @@ export class MoiraApiClient {
       };
       const params = new URLSearchParams();
       if (filters?.search) params.append("search", filters.search);
+      if (filters?.fromDate !== undefined) params.append("fromDate", filters.fromDate.toString());
+      if (filters?.toDate !== undefined) params.append("toDate", filters.toDate.toString());
       if (filters?.limit) params.append("limit", filters.limit.toString());
       if (filters?.offset) params.append("offset", filters.offset.toString());
       const queryString = params.toString();
@@ -1677,12 +1832,15 @@ export class MoiraApiClient {
       userId: string;
       status: string;
       currentNodeId: string | null;
+      stopReason: string | null;
       note?: string;
-      createdAt?: number;
-      updatedAt?: number;
+      createdAt?: number | null;
+      updatedAt?: number | null;
       completedAt?: number;
       error?: string;
       errorCount?: number; // Issue #386: Count of errors for badge display
+      lastStepAt: number | null;
+      hasActiveLock?: boolean;
     }>;
     total: number;
     limit: number;
@@ -1697,12 +1855,15 @@ export class MoiraApiClient {
           userId: string;
           status: string;
           currentNodeId: string | null;
+          stopReason: string | null;
           note?: string;
-          createdAt?: number;
-          updatedAt?: number;
+          createdAt?: number | null;
+          updatedAt?: number | null;
           completedAt?: number;
           error?: string;
           errorCount?: number; // Issue #386
+          lastStepAt: number | null;
+          hasActiveLock?: boolean;
         }>;
         total: number;
         limit: number;
@@ -1758,7 +1919,7 @@ export class MoiraApiClient {
     if (query.limit !== undefined) params.limit = String(query.limit);
     if (query.offset !== undefined) params.offset = String(query.offset);
     return this.wrapFailure("load the overview", async () => {
-      const response = await this.client.get<ApiResponse<OverviewPage>>("/executions/overview", {
+      const response = await this.read<ApiResponse<OverviewPage>>("/executions/overview", {
         params,
       });
       return response.data.data!;
@@ -1768,7 +1929,7 @@ export class MoiraApiClient {
   /** The overview rows of these runs (at most 100), without nesting; other people's are left out. */
   async getOverviewRows(executionIds: string[]): Promise<OverviewRun[]> {
     return this.wrapFailure("refresh the overview", async () => {
-      const response = await this.client.get<ApiResponse<{ runs: OverviewRun[] }>>(
+      const response = await this.read<ApiResponse<{ runs: OverviewRun[] }>>(
         "/executions/overview",
         { params: { ids: executionIds.join(",") } },
       );
@@ -1782,7 +1943,7 @@ export class MoiraApiClient {
    */
   async getOverviewChanges(after: number | null): Promise<OverviewChanges> {
     return this.wrapFailure("check the overview for changes", async () => {
-      const response = await this.client.get<ApiResponse<OverviewChanges>>(
+      const response = await this.read<ApiResponse<OverviewChanges>>(
         "/executions/overview/changes",
         { params: after === null ? {} : { after: String(after) } },
       );
@@ -1991,8 +2152,13 @@ export class MoiraApiClient {
       userName: string | null;
       status: string;
       currentNodeId: string | null;
-      createdAt?: number;
-      updatedAt?: number;
+      stopReason: string | null;
+      lastStepAt: number | null;
+      hasActiveLock?: boolean;
+      errorCount?: number;
+      note?: string | null;
+      createdAt?: number | null;
+      updatedAt?: number | null;
       completedAt?: number;
       error?: string;
     }>;
@@ -2011,8 +2177,13 @@ export class MoiraApiClient {
           userName: string | null;
           status: string;
           currentNodeId: string | null;
-          createdAt?: number;
-          updatedAt?: number;
+          stopReason: string | null;
+          lastStepAt: number | null;
+          hasActiveLock?: boolean;
+          errorCount?: number;
+          note?: string | null;
+          createdAt?: number | null;
+          updatedAt?: number | null;
           completedAt?: number;
           error?: string;
         }>;
@@ -2231,8 +2402,8 @@ export class MoiraApiClient {
       if (filters?.resource) params.set("resource", filters.resource);
       if (filters?.resourceId) params.set("resourceId", filters.resourceId);
       if (filters?.source) params.set("source", filters.source);
-      if (filters?.fromDate) params.set("fromDate", filters.fromDate.toString());
-      if (filters?.toDate) params.set("toDate", filters.toDate.toString());
+      if (filters?.fromDate !== undefined) params.set("fromDate", filters.fromDate.toString());
+      if (filters?.toDate !== undefined) params.set("toDate", filters.toDate.toString());
       if (filters?.sortBy) params.set("sortBy", filters.sortBy);
       if (filters?.sortOrder) params.set("sortOrder", filters.sortOrder);
       if (filters?.limit) params.set("limit", filters.limit.toString());
@@ -2565,6 +2736,41 @@ export class MoiraApiClient {
 
   // ==================== Analytics API ====================
 
+  private async readAdminAnalytics<T>(endpoint: string, query: AnalyticsQuery): Promise<T> {
+    const params = new URLSearchParams({
+      range: query.range,
+      limit: String(query.limit),
+      offset: String(query.offset),
+    });
+    if (query.exclusions.mode === "custom") {
+      params.set("excludeUserIds", [...new Set(query.exclusions.userIds)].sort().join(","));
+    }
+    const response = await this.client.get<ApiResponse<T>>(
+      `/admin/analytics/${endpoint}?${params}`,
+    );
+    return response.data.data!;
+  }
+
+  getAdminAnalyticsOverview(query: AnalyticsQuery): Promise<AnalyticsOverview> {
+    return this.readAdminAnalytics("overview", query);
+  }
+
+  getAdminAnalyticsUsers(query: AnalyticsQuery): Promise<AnalyticsUsers> {
+    return this.readAdminAnalytics("users", query);
+  }
+
+  getAdminAnalyticsRegistrations(query: AnalyticsQuery): Promise<AnalyticsRegistrations> {
+    return this.readAdminAnalytics("registrations", query);
+  }
+
+  getAdminAnalyticsAttention(query: AnalyticsQuery): Promise<AnalyticsAttention> {
+    return this.readAdminAnalytics("attention", query);
+  }
+
+  getAdminAnalyticsTopWorkflows(query: AnalyticsQuery): Promise<AnalyticsTopWorkflows> {
+    return this.readAdminAnalytics("top-workflows", query);
+  }
+
   /**
    * Get analytics overview (admin only)
    */
@@ -2609,6 +2815,7 @@ export class MoiraApiClient {
     avgDurationMs: number | null;
     byWorkflow: Array<{ workflowId: string; workflowName: string; count: number }>;
     overTime: Array<{ date: string; count: number }>;
+    overTimeWindow: AnalyticsSeriesWindow;
     timeRange: string;
   }> {
     try {
@@ -2622,6 +2829,7 @@ export class MoiraApiClient {
         avgDurationMs: number | null;
         byWorkflow: Array<{ workflowId: string; workflowName: string; count: number }>;
         overTime: Array<{ date: string; count: number }>;
+        overTimeWindow: AnalyticsSeriesWindow;
         timeRange: string;
       };
       const response = await this.client.get<ApiResponse<ExecutionsResponse>>(
@@ -2818,6 +3026,7 @@ export class MoiraApiClient {
       available: boolean;
       unit: string;
       timeSeries: Array<{ date: string; value: number }>;
+      timeSeriesWindow?: AnalyticsSeriesWindow;
     }>;
     breakdowns: {
       byAction: Array<{ label: string; count: number }>;
@@ -2847,6 +3056,7 @@ export class MoiraApiClient {
           available: boolean;
           unit: string;
           timeSeries: Array<{ date: string; value: number }>;
+          timeSeriesWindow?: AnalyticsSeriesWindow;
         }>;
         breakdowns: {
           byAction: Array<{ label: string; count: number }>;
@@ -2876,6 +3086,7 @@ export class MoiraApiClient {
   async getConversionFunnel(range?: string): Promise<{
     funnel: Array<{ stage: string; label: string; count: number }>;
     registrationTrend: Array<{ date: string; value: number }>;
+    registrationTrendWindow: AnalyticsSeriesWindow;
     timeRange: string;
   }> {
     try {
@@ -2884,6 +3095,7 @@ export class MoiraApiClient {
         ApiResponse<{
           funnel: Array<{ stage: string; label: string; count: number }>;
           registrationTrend: Array<{ date: string; value: number }>;
+          registrationTrendWindow: AnalyticsSeriesWindow;
           timeRange: string;
         }>
       >(`/admin/analytics/conversion-funnel${qs}`);
@@ -2897,24 +3109,26 @@ export class MoiraApiClient {
    * Get engagement metrics (admin only)
    */
   async getEngagementMetrics(range?: string): Promise<{
-    returningUsersRate: number;
-    returningUsersCount: number;
+    returningUsersRate: number | null;
+    returningUsersCount: number | null;
     totalActiveUsers: number;
     avgExecutionsPerUser: number;
     avgTimeToFirstWorkflowDays: number | null;
     activeUsersTrend: Array<{ date: string; value: number }>;
+    activeUsersTrendWindow: AnalyticsSeriesWindow;
     timeRange: string;
   }> {
     try {
       const qs = range ? `?range=${range}` : "";
       const response = await this.client.get<
         ApiResponse<{
-          returningUsersRate: number;
-          returningUsersCount: number;
+          returningUsersRate: number | null;
+          returningUsersCount: number | null;
           totalActiveUsers: number;
           avgExecutionsPerUser: number;
           avgTimeToFirstWorkflowDays: number | null;
           activeUsersTrend: Array<{ date: string; value: number }>;
+          activeUsersTrendWindow: AnalyticsSeriesWindow;
           timeRange: string;
         }>
       >(`/admin/analytics/engagement${qs}`);
@@ -2956,7 +3170,7 @@ export class MoiraApiClient {
 
       const queryString = queryParams.toString();
       const url = queryString ? `/notes?${queryString}` : "/notes";
-      const response = await this.client.get<
+      const response = await this.read<
         ApiResponse<{
           notes: Array<{
             id: string;
@@ -3739,7 +3953,7 @@ export class MoiraApiClient {
     total: number;
   }> {
     return this.wrapFailure("list playbooks", async () => {
-      const response = await this.client.get<
+      const response = await this.read<
         ApiResponse<{ playbooks: PlaybookSummary[]; total: number }>
       >("/playbooks", { params });
       return response.data.data!;

@@ -311,6 +311,48 @@ test.describe("Notes Management", () => {
     await expect(page.getByTestId(`note-row-${testKey}`)).toBeHidden();
   });
 
+  test("refused deletion retains the note and accessible confirmation until a real successful retry", async ({
+    page,
+  }) => {
+    const key = `refused-delete-${Date.now()}`;
+    await page.goto(`${BASE_URL}/notes`);
+    await page.getByTestId("create-note-button").click();
+    await page.getByTestId("note-key-input").fill(key);
+    await page.getByTestId("note-content-input").fill("Keep this note until deletion succeeds.");
+    await page.getByTestId("save-note-button").click();
+    await expect(page.getByTestId("note-inline-editor")).toBeHidden();
+    await expect(page.getByTestId(`note-row-${key}`)).toBeVisible();
+
+    let refuse = true;
+    const target = `${BASE_URL}/api/notes/${encodeURIComponent(key)}`;
+    await page.route(target, async (route) => {
+      if (route.request().method() === "DELETE" && refuse) {
+        refuse = false;
+        await route.fulfill({
+          status: 500,
+          json: {
+            success: false,
+            error: { code: "INTERNAL_ERROR", message: "Deletion refused by source" },
+          },
+        });
+      } else await route.continue();
+    });
+    await page.getByTestId(`delete-note-${key}`).click();
+    const dialog = page.getByRole("alertdialog");
+    await dialog.getByRole("button", { name: /Delete|Удалить/ }).click();
+    await expect(dialog.getByRole("alert")).toContainText("Failed to delete note");
+    await expect(dialog).toContainText(key);
+    await expect(page.getByTestId(`note-row-${key}`)).toBeAttached();
+
+    const deleted = page.waitForResponse(
+      (response) => response.url() === target && response.request().method() === "DELETE",
+    );
+    await dialog.getByRole("button", { name: /Delete|Удалить/ }).click();
+    expect((await deleted).status()).toBe(200);
+    await expect(dialog).toBeHidden();
+    await expect(page.getByTestId(`note-row-${key}`)).toBeHidden();
+  });
+
   test("tag click filters notes by tag", async ({ page }) => {
     // Create notes with different tags
     await page.goto(`${BASE_URL}/notes`);
@@ -445,8 +487,39 @@ test.describe("Notes Management", () => {
     await expect(page.getByTestId("note-content-input")).toBeVisible();
     await expect(page.getByTestId("note-content-preview")).toBeHidden();
 
-    // Click preview toggle
-    await page.getByTestId("markdown-preview-toggle").click();
+    // Only preview needs the Markdown renderer. Hold its first asynchronous scripts and
+    // verify that loading them keeps the editor's other controls and draft available.
+    const chunks = /\/\d+\.[0-9a-f]+\.js(\?|$)/;
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await page.route(chunks, async (route) => {
+      await gate;
+      await route.continue();
+    });
+    const keyInput = await page.getByTestId("note-key-input").elementHandle();
+    const requested = page.waitForRequest(
+      (request) => request.resourceType() === "script" && chunks.test(request.url()),
+    );
+    try {
+      await page.getByTestId("markdown-preview-toggle").click();
+      await requested;
+      await expect(page.getByTestId("note-content-preview").getByRole("status")).toBeVisible();
+      await expect(page.getByTestId("note-key-input")).toHaveValue(testKey);
+      await expect(page.getByTestId("note-tag-input")).toBeEnabled();
+      await expect(page.getByTestId("save-note-button")).toBeEnabled();
+      expect(
+        await page
+          .getByTestId("note-key-input")
+          .evaluate((element, original) => element === original, keyInput),
+      ).toBe(true);
+    } finally {
+      release();
+      // Removing interception before the released handlers finish makes Playwright handle
+      // their routes itself; the resumed route.continue would then handle them a second time.
+      await page.unrouteAll({ behavior: "wait" });
+    }
 
     // Should now show preview
     await expect(page.getByTestId("note-content-preview")).toBeVisible();
@@ -461,6 +534,9 @@ test.describe("Notes Management", () => {
 
     // Should show textarea again
     await expect(page.getByTestId("note-content-input")).toBeVisible();
+    await expect(page.getByTestId("note-content-input")).toHaveValue(
+      "# Heading\n\n**bold text**\n\n- list item",
+    );
     await expect(page.getByTestId("note-content-preview")).toBeHidden();
   });
 

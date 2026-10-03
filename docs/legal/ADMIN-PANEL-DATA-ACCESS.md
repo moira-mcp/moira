@@ -6,22 +6,22 @@ This document describes what personal user data is accessible through the Moira 
 
 ### User Profile Data
 
-| Field                              | Source   | Admin Page                              |
-| ---------------------------------- | -------- | --------------------------------------- |
-| User ID                            | Database | User Management, User Detail            |
-| Email                              | Database | User Management, User Detail, Audit Log |
-| Name                               | Database | User Management, User Detail, Audit Log |
-| Account creation date              | Database | User Management, User Detail            |
-| Account update date                | Database | User Detail                             |
-| Admin status                       | Database | User Management, User Detail            |
-| Email verification status          | Database | User Management, User Detail            |
-| Blocked status                     | Database | User Management, User Detail            |
-| Block reason                       | Database | User Detail                             |
-| Block timestamp                    | Database | User Detail                             |
-| Blocked by (admin ID)              | Database | User Detail                             |
-| Password reset required flag       | Database | User Detail                             |
-| Password reset requested timestamp | Database | User Detail                             |
-| Password reset requested by        | Database | User Detail                             |
+| Field                              | Source   | Admin Page                                                      |
+| ---------------------------------- | -------- | --------------------------------------------------------------- |
+| User ID                            | Database | User Management, User Detail                                    |
+| Email                              | Database | User Management, User Detail, Audit Log, Administrator Overview |
+| Name                               | Database | User Management, User Detail, Audit Log, Administrator Overview |
+| Account creation date              | Database | User Management, User Detail, Overview registrations            |
+| Account update date                | Database | User Detail                                                     |
+| Admin status                       | Database | User Management, User Detail                                    |
+| Email verification status          | Database | User Management, User Detail                                    |
+| Blocked status                     | Database | User Management, User Detail                                    |
+| Block reason                       | Database | User Detail                                                     |
+| Block timestamp                    | Database | User Detail                                                     |
+| Blocked by (admin ID)              | Database | User Detail                                                     |
+| Password reset required flag       | Database | User Detail                                                     |
+| Password reset requested timestamp | Database | User Detail                                                     |
+| Password reset requested by        | Database | User Detail                                                     |
 
 ### Session Data
 
@@ -58,12 +58,27 @@ This document describes what personal user data is accessible through the Moira 
 
 ### Activity Data
 
-| Field                 | Source   | Admin Page                   |
-| --------------------- | -------- | ---------------------------- |
-| Workflow count        | Database | User Management, User Detail |
-| Active sessions count | Database | User Detail                  |
-| OAuth tokens count    | Database | User Detail                  |
-| Emails sent count     | Database | User Detail                  |
+| Field                                                                                | Source                                                                                                 | Admin Page                                                         |
+| ------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------ |
+| Owned nondeleted workflow count, including private workflows                         | Workflow owner rows                                                                                    | User Management, User Detail                                       |
+| Execution count                                                                      | Owner execution rows                                                                                   | User Management (all periods), Overview (selected creation period) |
+| Last recorded activity time                                                          | Audit actions and observed provider renewal of unexpired sessions; signup and blocked sign-in excluded | User Management, Administrator Overview                            |
+| Last accepted step time                                                              | `execution:step` audit records for the execution resource                                              | User Management, Administrator Overview                            |
+| Recent session refresh time                                                          | Observed provider renewal in `session.refreshedAt` for unexpired sessions                              | Administrator Overview API                                         |
+| Current running count and bounded sample of run IDs, flow names and current node IDs | Running execution rows joined to workflow names                                                        | Administrator Overview                                             |
+| Most-used flow names and run counts                                                  | Grouped owner execution rows, bounded samples                                                          | User Management, Administrator Overview                            |
+| Popular flow participants, names/email, run counts and last run start                | Execution rows joined to workflow and user rows, bounded participant samples                           | Administrator Overview                                             |
+| Active sessions count                                                                | Database                                                                                               | User Detail                                                        |
+| OAuth tokens count                                                                   | Database                                                                                               | User Detail                                                        |
+| Emails sent count                                                                    | Database                                                                                               | User Detail                                                        |
+
+Activity is a recorded observation, not continuous online tracking. Initial and historical session
+creation/update timestamps do not prove provider renewal, and its time is not backfilled. Until
+renewal is observed, that session source is unknown; independently recorded actions still count.
+Missing activity, accepted-step or registration observations remain unknown. Overview period controls and account-scoped browser
+exclusions select the displayed analytics; management lists retain their complete inventory.
+Installation-wide overview analytics requires the `adminAnalytics` capability. The default
+self-host policy retains narrow user management and system health without that analytics surface.
 
 ### Audit Log Data
 
@@ -82,18 +97,27 @@ This document describes what personal user data is accessible through the Moira 
 
 ### Execution Data
 
-| Field                | Source   | Admin Page       |
-| -------------------- | -------- | ---------------- |
-| Execution ID         | Database | Admin Executions |
-| Workflow ID          | Database | Admin Executions |
-| User email           | Database | Admin Executions |
-| User name            | Database | Admin Executions |
-| Execution status     | Database | Admin Executions |
-| Current node ID      | Database | Admin Executions |
-| Creation timestamp   | Database | Admin Executions |
-| Update timestamp     | Database | Admin Executions |
-| Completion timestamp | Database | Admin Executions |
-| Error message        | Database | Admin Executions |
+| Field                               | Source                                                                                              | Admin Page                                            |
+| ----------------------------------- | --------------------------------------------------------------------------------------------------- | ----------------------------------------------------- |
+| Execution ID                        | Database                                                                                            | Admin Executions, Overview current work and attention |
+| Workflow ID and name                | Execution rows and workflow name                                                                    | Admin Executions, Overview current work and attention |
+| User email and name                 | User rows                                                                                           | Admin Executions, Overview current work and attention |
+| Execution status                    | Execution state; active lock derives locked status for a running execution                          | Admin Executions, Overview attention                  |
+| Current node ID                     | Database                                                                                            | Admin Executions, Overview current work and attention |
+| Note                                | Database                                                                                            | Admin Executions, Overview attention                  |
+| Creation timestamp                  | Database, nullable when not recorded                                                                | Admin Executions                                      |
+| Update timestamp                    | Database, nullable when not recorded                                                                | Admin Executions API                                  |
+| Completion timestamp                | Database                                                                                            | Admin Executions API                                  |
+| Last accepted step timestamp        | `execution:step` audit records for this execution                                                   | Admin Executions, Overview current work and attention |
+| Active lock indication              | Active execution-lock row                                                                           | Admin Executions, Overview attention                  |
+| Refusal count and last refusal time | Execution error journal, excluding degradation entries                                              | Admin Executions (count), Overview attention          |
+| Attention reason                    | Active lock event, recorded refusal, or running input wait with an accepted step older than an hour | Overview attention                                    |
+| Error message                       | Database                                                                                            | Admin Executions API                                  |
+
+These list and overview projections omit execution contexts, workflow graphs and raw error input.
+Full execution inspection is a separate permitted detail read. General record updates do not serve
+as accepted-step evidence. Cross-user execution management requires `multiUserAdmin`; analytics
+exclusions do not restrict that management access.
 
 ## 2. Purpose
 

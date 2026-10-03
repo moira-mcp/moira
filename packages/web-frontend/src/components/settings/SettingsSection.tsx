@@ -90,6 +90,7 @@ export function SettingsSubsection({
   actions,
   children,
   className,
+  headingLevel = 3,
   "data-testid": testId,
 }: {
   title: string;
@@ -98,6 +99,8 @@ export function SettingsSubsection({
   actions?: React.ReactNode;
   children: React.ReactNode;
   className?: string;
+  /** Direct page cards use level 2; cards nested in a SettingsSection use level 3. */
+  headingLevel?: 2 | 3;
   "data-testid"?: string;
 }): React.JSX.Element {
   return (
@@ -106,7 +109,7 @@ export function SettingsSubsection({
         <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
           <div className="min-w-0 flex-1 basis-60 space-y-1.5">
             <div className="flex items-center gap-1.5">
-              <CardTitle role="heading" aria-level={3} className="text-base">
+              <CardTitle role="heading" aria-level={headingLevel} className="text-base">
                 {title}
               </CardTitle>
               {help}

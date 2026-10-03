@@ -118,6 +118,7 @@ import type { WorkflowValidationStatus } from "../types/react-flow-types";
 import { FlowLevelBadge } from "../components/workflow/FlowLevelBadge";
 import { splitFlowTags } from "../utils/workflow-level";
 import { collectPlaybookReferences } from "@mcp-moira/shared/services/playbook-references";
+import { loadLayoutEngine } from "@mcp-moira/workflow-engine/progress-visual";
 
 // Lazy chunk, requested on mount so the first switch to the graph view downloads nothing.
 const importWorkflowGraph = () => import("../components/workflow/WorkflowGraph");
@@ -159,6 +160,7 @@ export const FlowPage: React.FC = () => {
   const [copying, setCopying] = useState(false);
   const [shareDialogOpen, setShareDialogOpen] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const [selectedNode, setSelectedNode] = useState<Node | null>(null);
   const [focusRequest, requestFocus] = useRequest<{ nodeId: string }>();
   const [chosenTab, setChosenTab] = useState<FlowPanelTab>("block");
@@ -188,6 +190,14 @@ export const FlowPage: React.FC = () => {
   useEffect(() => {
     void importWorkflowGraph();
   }, []);
+
+  const explicitView = searchParams.get(VIEW_PARAM);
+  useEffect(() => {
+    // These explicit diagram views need ELK regardless of whether the definition has a
+    // process. An unknown/default or steps view may be a reading list and loads on use.
+    if (explicitView !== "graph" && explicitView !== "map") return;
+    void loadLayoutEngine().catch(() => {});
+  }, [explicitView]);
 
   const detail = workflowDetail.workflow;
   const { index: nodeTypeIndex } = useNodeTypes();
@@ -380,11 +390,15 @@ export const FlowPage: React.FC = () => {
 
   const handleDeleteWorkflow = useCallback(async () => {
     if (!workflowIdentifier) return;
+    setDeleteError(null);
     try {
       await apiClient.deleteWorkflow(workflowIdentifier);
       navigate(ROUTES.WORKFLOWS);
     } catch (err: unknown) {
-      toast.error(err instanceof Error ? err.message : t("common.errors.failedToDelete"));
+      const message = err instanceof Error ? err.message : t("common.errors.failedToDelete");
+      setDeleteError(message);
+      toast.error(message);
+      throw err;
     }
   }, [workflowIdentifier, navigate, t]);
 
@@ -1100,13 +1114,20 @@ export const FlowPage: React.FC = () => {
         )}
         <ConfirmDialog
           open={deleteDialogOpen}
-          onOpenChange={setDeleteDialogOpen}
+          onOpenChange={(open) => {
+            setDeleteDialogOpen(open);
+            if (!open) setDeleteError(null);
+          }}
           title={t("pages.workflowDetail.deleteWorkflow")}
           description={t("pages.workflowDetail.confirmDelete")}
           confirmLabel={t("common.delete")}
           variant="destructive"
           onConfirm={handleDeleteWorkflow}
-        />
+        >
+          {deleteError && (
+            <InlineError title={t("common.errors.failedToDelete")} message={deleteError} />
+          )}
+        </ConfirmDialog>
       </div>
     </EditingProvider>
   );

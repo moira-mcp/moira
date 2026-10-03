@@ -14,6 +14,7 @@ import { Button } from "../ui/button";
 import { Badge } from "../ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../ui/tabs";
 import { ConfirmDialog } from "../confirm-dialog";
+import { InlineError } from "../inline-error";
 import { toast } from "sonner";
 
 interface ShareDialogProps {
@@ -59,6 +60,7 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({ open, onClose, workflo
   const [generating, setGenerating] = useState(false);
   const [copiedToken, setCopiedToken] = useState<string | null>(null);
   const [revokingId, setRevokingId] = useState<string | null>(null);
+  const [revokeError, setRevokeError] = useState<string | null>(null);
   const [revokeTarget, setRevokeTarget] = useState<{
     type: "invite" | "access";
     id: string;
@@ -161,16 +163,19 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({ open, onClose, workflo
 
   // Revoke invite
   const handleRevokeInvite = (inviteId: string) => {
+    setRevokeError(null);
     setRevokeTarget({ type: "invite", id: inviteId });
   };
 
   // Revoke access
   const handleRevokeAccess = (userId: string, userName: string | null) => {
+    setRevokeError(null);
     setRevokeTarget({ type: "access", id: userId, name: userName || undefined });
   };
 
   const handleConfirmRevoke = async () => {
     if (!revokeTarget) return;
+    setRevokeError(null);
     try {
       setRevokingId(revokeTarget.id);
       if (revokeTarget.type === "invite") {
@@ -183,7 +188,9 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({ open, onClose, workflo
     } catch (err) {
       const message =
         err instanceof ApiClientError ? err.message : t("pages.workflowDetail.sharing.revokeError");
+      setRevokeError(message);
       toast.error(message);
+      throw err;
     } finally {
       setRevokingId(null);
     }
@@ -390,7 +397,10 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({ open, onClose, workflo
         <ConfirmDialog
           open={!!revokeTarget}
           onOpenChange={(open) => {
-            if (!open) setRevokeTarget(null);
+            if (!open) {
+              setRevokeTarget(null);
+              setRevokeError(null);
+            }
           }}
           title={t("pages.workflowDetail.sharing.confirmRevoke")}
           description={
@@ -403,7 +413,14 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({ open, onClose, workflo
           confirmLabel={t("common.delete")}
           variant="destructive"
           onConfirm={handleConfirmRevoke}
-        />
+        >
+          {revokeError && (
+            <InlineError
+              title={t("pages.workflowDetail.sharing.revokeError")}
+              message={revokeError}
+            />
+          )}
+        </ConfirmDialog>
       </DialogContent>
     </Dialog>
   );

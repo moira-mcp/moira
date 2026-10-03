@@ -4,10 +4,22 @@ description: How to read one execution as a process on the run page, follow its 
 ---
 
 Opening an execution in the web UI (`/executions/<id>`, or `/admin/executions/<id>` for an
-administrator) shows the **run page**: one run of a workflow shown as the process the workflow
+administrator with cross-user management enabled) shows the **run page**: one run of a workflow
+shown as the process the workflow
 declares. Everything on the page comes from the run's recorded route; nothing is inferred from
 block order. A workflow without a process view (`progress`) shows the technical node graph and the
 variables panel instead.
+
+## Opening a run from the list
+
+Open **Runs** and choose its card. The card keeps the known start time separately from the last
+recorded accepted step. Editing a run's note or other record data does not move that step time.
+**Last step unknown** means no retained accepted-step observation is available; a missing start
+time is not replaced with another date. Notes, status, locks and refusal counts provide context
+before opening the run. An administrator with cross-user management enabled can use the admin
+run list, which also identifies the owner and is not filtered by analytics exclusions. Choosing
+**Locked** filters before pagination, so its total describes locked runs rather than matches on
+only the visible page.
 
 ## Views
 
@@ -65,7 +77,8 @@ the one you chose. The compass opens a note on how to read the view that is open
 whether you left it open.
 
 Switching tabs keeps the page as it is: the map keeps its selected block, the graph the position
-you left it at, and nothing reloads.
+you left it at. The diagram can show a local placeholder while its presentation first loads;
+the page does not reload, and the header, panel and selected block stay available.
 
 ## The cursor
 

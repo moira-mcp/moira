@@ -28,6 +28,7 @@ export interface CardAction {
   onClick: () => void;
   variant?: "default" | "destructive" | "success";
   testId?: string;
+  disabled?: boolean;
 }
 
 /**
@@ -84,6 +85,7 @@ const ActionsGroup: React.FC<{
         aria-label={action.label}
         data-hint={action.label}
         data-testid={action.testId}
+        disabled={action.disabled}
       >
         {action.icon}
       </Button>

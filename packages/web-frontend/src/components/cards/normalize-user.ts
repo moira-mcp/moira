@@ -3,7 +3,9 @@
  * Maps 2 different user interfaces to a single normalized shape
  */
 
-export interface NormalizedUser {
+import type { AdminUserActivity } from "@mcp-moira/shared";
+
+export interface NormalizedUser extends Partial<AdminUserActivity> {
   id: string;
   email: string;
   name: string | null;
@@ -15,7 +17,7 @@ export interface NormalizedUser {
   blocked?: boolean;
 }
 
-interface UserManagementUser {
+interface UserManagementUser extends Partial<AdminUserActivity> {
   id: string;
   email: string;
   name: string | null;
@@ -27,7 +29,7 @@ interface UserManagementUser {
   workflowsCount: number;
 }
 
-interface AdminUser {
+interface AdminUser extends Partial<AdminUserActivity> {
   id: string;
   email: string;
   name: string | null;
@@ -46,6 +48,10 @@ export function normalizeUser(user: AnyUser): NormalizedUser {
     isAdmin: user.isAdmin,
     createdAt: user.createdAt,
     workflowsCount: user.workflowsCount,
+    lastActivityAt: user.lastActivityAt,
+    lastStepAt: user.lastStepAt,
+    executionsCount: user.executionsCount,
+    topWorkflows: user.topWorkflows,
     emailVerified: "emailVerified" in user ? user.emailVerified : undefined,
     approvedAt: "approvedAt" in user ? user.approvedAt : undefined,
     blocked: "blocked" in user ? user.blocked : undefined,

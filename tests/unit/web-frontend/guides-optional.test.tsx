@@ -354,6 +354,8 @@ describe("an optional step", () => {
   });
 
   test("drawn only by another view waits unseen while the page switches views", async () => {
+    // Flush lazy loading and React commits between controlled polling ticks and view changes.
+    jest.useFakeTimers();
     render(
       <MemoryRouter initialEntries={["/fixture"]}>
         <I18nextProvider i18n={i18n}>
@@ -374,10 +376,16 @@ describe("an optional step", () => {
     });
     observer.observe(document.body, { subtree: true, childList: true, attributes: true });
     fireEvent.click(screen.getByTestId("guide-open"));
+    await act(async () => {});
+    await act(async () => jest.advanceTimersByTimeAsync(250));
+    await act(async () => jest.advanceTimersByTimeAsync(250));
     await waitFor(() =>
       expect(screen.getByTestId("guide-card")).toHaveAttribute("data-guide-step", "start"),
     );
     fireEvent.click(screen.getByTestId("guide-next"));
+    await act(async () => jest.advanceTimersByTimeAsync(250));
+    await act(async () => jest.advanceTimersByTimeAsync(250));
+    await act(async () => jest.advanceTimersByTimeAsync(250));
     await waitFor(
       () => expect(screen.getByTestId("guide-card")).toHaveAttribute("data-guide-step", "mapped"),
       { timeout: 4000 },
@@ -388,6 +396,7 @@ describe("an optional step", () => {
   });
 
   test("a required step waits unseen for its other view and its spotlight", async () => {
+    jest.useFakeTimers();
     render(
       <MemoryRouter initialEntries={["/fixture"]}>
         <I18nextProvider i18n={i18n}>
@@ -409,10 +418,16 @@ describe("an optional step", () => {
     });
     observer.observe(document.body, { subtree: true, childList: true, attributes: true });
     fireEvent.click(screen.getByTestId("guide-open"));
+    await act(async () => {});
+    await act(async () => jest.advanceTimersByTimeAsync(250));
+    await act(async () => jest.advanceTimersByTimeAsync(250));
     await waitFor(() =>
       expect(screen.getByTestId("guide-card")).toHaveAttribute("data-guide-step", "start"),
     );
     fireEvent.click(screen.getByTestId("guide-next"));
+    await act(async () => jest.advanceTimersByTimeAsync(250));
+    await act(async () => jest.advanceTimersByTimeAsync(250));
+    await act(async () => jest.advanceTimersByTimeAsync(250));
     await waitFor(
       () => expect(screen.getByTestId("guide-card")).toHaveAttribute("data-guide-step", "mapped"),
       { timeout: 4000 },

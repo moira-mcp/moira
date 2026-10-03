@@ -59,7 +59,10 @@ an administrator approves it. Email verification is a separate gate and is not r
 in self-host mode. Missing secrets are generated on first start.
 
 The self-host administrator keeps the **Users** page for approval, blocking, and account
-recovery. Cross-user workflow/execution/artifact administration, cloud analytics, the operational
+recovery. Its rows also show recorded activity, the last accepted step when recorded, run count
+and most-used flows. These management facts are independent of analytics periods and exclusions;
+absence of an activity or step record is shown as unknown. Cross-user workflow/execution/artifact
+administration, cloud analytics, the operational
 dashboard, and deliberate monitoring-test tools are disabled by the server and omitted from the
 navigation. These are deployment capabilities, not security controls implemented only in the UI.
 The SaaS policy enables them through the same resolver used by the API and the Web UI.
