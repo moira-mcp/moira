@@ -92,6 +92,7 @@ interface TopWorkflow {
   executionCount: number;
   completedCount: number;
   failedCount: number;
+  stoppedCount: number;
   successRate: number;
   avgDurationMs: number | null;
 }

@@ -26,14 +26,16 @@ export const runGuide: GuideDefinition = {
       id: "agent",
       anchor: "process.current-step",
       kind: "look",
-      revision: 1,
+      revision: 2,
+      optional: true,
       prepare: { currentBlock: true, panel: "block", section: "steps" },
     },
     {
       id: "evidence",
       anchor: "process.current-step-inputs",
       kind: "look",
-      revision: 1,
+      revision: 2,
+      optional: true,
       prepare: { currentBlock: true, panel: "block", section: "steps" },
     },
     // A run of a flow without a loop has no return port to show.
@@ -56,7 +58,7 @@ export const runGuide: GuideDefinition = {
       optional: true,
       prepare: { panel: "variables" },
     },
-    { id: "notifications", anchor: "run.header", kind: "look", revision: 1 },
+    { id: "notifications", anchor: "run.header", kind: "look", revision: 2 },
     {
       id: "explore",
       anchor: { map: "process.map-toolbar", graph: "process.graph-toolbar" },

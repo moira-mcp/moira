@@ -29,6 +29,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 import type { PlacedIssue, SaveGate } from "./issues";
 import type { PausedRunWarning } from "./structure";
 import { exportLine, type ExportEntry } from "./operations";
+import { ExecutionStopButton } from "../execution/ExecutionStop";
 
 function GateStatus({
   gate,
@@ -264,7 +265,11 @@ export function EditBar({
             </p>
             <ul className="mt-1 space-y-0.5 pl-5">
               {runWarnings.map((warning) => (
-                <li key={warning.executionId} data-run-warning={warning.executionId}>
+                <li
+                  key={warning.executionId}
+                  className="min-w-0 [overflow-wrap:anywhere]"
+                  data-run-warning={warning.executionId}
+                >
                   <span data-testid={`flow-edit-run-task-${warning.executionId}`}>
                     {t("pages.flowPage.edit.pausedRuns.item", {
                       id:
@@ -278,6 +283,13 @@ export function EditBar({
                           : t("pages.flowPage.edit.pausedRuns.removed"),
                     })}
                   </span>
+                  <ExecutionStopButton
+                    target={{
+                      executionId: warning.executionId,
+                      title: warning.taskTitle ?? warning.workflowName ?? warning.executionId,
+                      stopCapability: warning.stopCapability,
+                    }}
+                  />
                   {warning.note ? (
                     <p
                       className="text-muted-foreground"

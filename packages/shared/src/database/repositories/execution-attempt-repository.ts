@@ -1,7 +1,13 @@
 import type Database from "better-sqlite3";
 import { createHash } from "node:crypto";
 import { canonicalJson } from "../../utils/canonical-json.js";
-import { ConflictError, ValidationError } from "../../errors/index.js";
+import {
+  ConflictError,
+  ValidationError,
+  NotFoundError,
+  AuthorizationError,
+} from "../../errors/index.js";
+import { executionStopCapability } from "../../types/execution-management.js";
 import type {
   ClaimStartExecutionAttemptInput,
   CompleteExecutionAttemptInput,
@@ -392,6 +398,8 @@ export class ExecutionAttemptRepository {
     expectedRevision: number,
     reason: string,
   ): { changed: boolean; revision: number } {
+    if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0)
+      throw new ValidationError("expectedRevision must be a non-negative safe integer");
     reason = reason.trim();
     if (!reason || reason.length > 500)
       throw new ValidationError("Stop reason must contain 1–500 characters");
@@ -399,32 +407,54 @@ export class ExecutionAttemptRepository {
       .transaction(() => {
         const row = this.sqlite
           .prepare(
-            "SELECT state, revision, stopReason FROM workflowExecution WHERE executionId = ? AND userId = ?",
+            "SELECT userId, state, revision, stopReason FROM workflowExecution WHERE executionId = ?",
           )
-          .get(executionId, userId) as
-          { state: string; revision: number; stopReason: string | null } | undefined;
-        if (!row) throw new ValidationError("Execution must belong to the authenticated user");
+          .get(executionId) as
+          | { userId: string; state: string; revision: number; stopReason: string | null }
+          | undefined;
+        if (!row) throw new NotFoundError("Execution not found");
+        if (row.userId !== userId)
+          throw new AuthorizationError("Execution must belong to the authenticated user");
         if (
           row.state === "completed" &&
           row.stopReason === reason &&
           row.revision === expectedRevision + 1
         )
           return { changed: false, revision: row.revision };
-        if (row.revision !== expectedRevision)
-          throw new ConflictError(
-            "Execution state changed; reload execution_context before stopping",
-          );
-        if (!["running", "waiting"].includes(row.state))
-          throw new ValidationError("Execution is already finished");
-        if (
+        const hasExecutingAttempt = Boolean(
           this.sqlite
             .prepare(
               "SELECT 1 FROM executionMutationAttempt WHERE executionId = ? AND userId = ? AND state = 'executing'",
             )
-            .get(executionId, userId)
-        )
+            .get(executionId, userId),
+        );
+        const context = {
+          currentRevision: row.revision,
+          stopCapability: executionStopCapability(
+            {
+              status: row.state,
+              revision: row.revision,
+              stopReason: row.stopReason,
+              userId: row.userId,
+              hasExecutingAttempt,
+            },
+            userId,
+          ),
+        };
+        if (row.revision !== expectedRevision)
+          throw new ConflictError(
+            "Execution state changed; reload execution_context before stopping",
+            { ...context, stopRefusal: "stale" },
+          );
+        if (row.stopReason !== null || !["running", "waiting"].includes(row.state))
+          throw new ConflictError("Execution is already finished", {
+            ...context,
+            stopRefusal: "terminal",
+          });
+        if (hasExecutingAttempt)
           throw new ConflictError(
             "An agent operation is executing; wait for it to finish before stopping",
+            { ...context, stopRefusal: "in-flight" },
           );
         const now = Date.now();
         this.tracked(executionId, () =>

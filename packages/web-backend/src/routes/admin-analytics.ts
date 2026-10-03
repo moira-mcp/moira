@@ -5,22 +5,39 @@
 
 import { Router, Request, Response } from "express";
 import { asyncHandler, createApiError } from "../middleware/error-middleware.js";
-import { auditLog, user, getDatabase, workflowExecution, countRefusals } from "@mcp-moira/shared";
+import { auditLog, user, getDatabase, workflowExecution } from "@mcp-moira/shared";
+import {
+  classifyExecutionOutcome,
+  type ExecutionOutcomeInput,
+} from "@mcp-moira/shared/execution-management";
 import { DatabaseRepository } from "@mcp-moira/workflow-engine";
-import { and, gte, lte, count, desc, sql, countDistinct, eq, type SQL } from "drizzle-orm";
+import { and, gte, lte, count, desc, sql, countDistinct, eq, isNull, type SQL } from "drizzle-orm";
 
 /**
- * Whether a completed execution failed.
- *
- * A degradation entry records that a step ran without behaviour text it names; the run still did
- * what it was asked. Counting it as a failure would turn a missing playbook into a red number on
- * the operator's dashboard.
+ * Genuine completions include the refused-step subset; intentional stops are separate.
  */
-function completedWithFailure(execution: {
-  status?: string;
-  errors?: { errorType?: string }[];
-}): boolean {
-  return execution.status === "completed" && countRefusals(execution.errors) > 0;
+function genuinelyCompleted(execution: ExecutionOutcomeInput): boolean {
+  const outcome = classifyExecutionOutcome(execution);
+  return outcome === "completed" || outcome === "completed-with-refusals";
+}
+
+function completionCounts(executions: readonly ExecutionOutcomeInput[]) {
+  let completed = 0;
+  let failed = 0;
+  let stopped = 0;
+  for (const execution of executions) {
+    const outcome = classifyExecutionOutcome(execution);
+    if (outcome === "stopped") stopped++;
+    else if (outcome === "completed" || outcome === "completed-with-refusals") {
+      completed++;
+      if (outcome === "completed-with-refusals") failed++;
+    }
+  }
+  return { completed, failed, stopped };
+}
+
+function successRate(completed: number, failed: number): number {
+  return completed > 0 ? Math.round(((completed - failed) / completed) * 10000) / 100 : 0;
 }
 
 const router = Router();
@@ -88,14 +105,12 @@ router.get(
     }
     const totalExecutions = filteredExecutions.length;
 
-    // Active executions (Issue #386: only "running" status exists for active)
-    const activeExecutions = filteredExecutions.filter((e) => e.status === "running").length;
+    // Preserve running-only active semantics; every recorded stop marker takes precedence.
+    const activeExecutions = filteredExecutions.filter(
+      (e) => e.status === "running" && e.stopReason == null,
+    ).length;
 
-    // Completed executions (includes both successful and failed completions)
-    const completedExecutions = filteredExecutions.filter((e) => e.status === "completed").length;
-
-    // Failed executions (Issue #386: executions that completed with errors)
-    const failedExecutions = filteredExecutions.filter((e) => completedWithFailure(e)).length;
+    const { completed, failed, stopped } = completionCounts(filteredExecutions);
 
     res.json({
       success: true,
@@ -104,8 +119,9 @@ router.get(
         totalWorkflows,
         totalExecutions,
         activeExecutions,
-        completedExecutions,
-        failedExecutions,
+        completedExecutions: completed,
+        failedExecutions: failed,
+        stoppedExecutions: stopped,
         timeRange: range,
       },
       timestamp: new Date().toISOString(),
@@ -128,24 +144,23 @@ router.get(
     const filteredExecutions =
       start > 0 ? executions.filter((e) => e.createdAt >= start && e.createdAt <= end) : executions;
 
-    // Calculate success rate
-    // Issue #386: "failed" = completed with errors, "success" = completed without errors
-    const completed = filteredExecutions.filter((e) => e.status === "completed").length;
-    const failed = filteredExecutions.filter((e) => completedWithFailure(e)).length;
-    const successful = completed - failed;
-    const successRate = completed > 0 ? (successful / completed) * 100 : 0;
+    const { completed, failed, stopped } = completionCounts(filteredExecutions);
 
     // Executions by workflow
-    const byWorkflow: Record<string, { count: number; completed: number; failed: number }> = {};
+    const byWorkflow: Record<
+      string,
+      { count: number; completed: number; failed: number; stopped: number }
+    > = {};
     for (const exec of filteredExecutions) {
       if (!byWorkflow[exec.workflowId]) {
-        byWorkflow[exec.workflowId] = { count: 0, completed: 0, failed: 0 };
+        byWorkflow[exec.workflowId] = { count: 0, completed: 0, failed: 0, stopped: 0 };
       }
       byWorkflow[exec.workflowId].count++;
-      if (exec.status === "completed") {
+      const outcome = classifyExecutionOutcome(exec);
+      if (outcome === "stopped") byWorkflow[exec.workflowId].stopped++;
+      else if (outcome === "completed" || outcome === "completed-with-refusals") {
         byWorkflow[exec.workflowId].completed++;
-        // Issue #386: count as failed if has errors
-        if (completedWithFailure({ status: "completed", errors: exec.errors })) {
+        if (outcome === "completed-with-refusals") {
           byWorkflow[exec.workflowId].failed++;
         }
       }
@@ -154,18 +169,19 @@ router.get(
     // Executions over time (daily buckets)
     const overTime: Record<
       string,
-      { date: string; count: number; completed: number; failed: number }
+      { date: string; count: number; completed: number; failed: number; stopped: number }
     > = {};
     for (const exec of filteredExecutions) {
       const date = new Date(exec.createdAt).toISOString().split("T")[0];
       if (!overTime[date]) {
-        overTime[date] = { date, count: 0, completed: 0, failed: 0 };
+        overTime[date] = { date, count: 0, completed: 0, failed: 0, stopped: 0 };
       }
       overTime[date].count++;
-      if (exec.status === "completed") {
+      const outcome = classifyExecutionOutcome(exec);
+      if (outcome === "stopped") overTime[date].stopped++;
+      else if (outcome === "completed" || outcome === "completed-with-refusals") {
         overTime[date].completed++;
-        // Issue #386: count as failed if has errors
-        if (completedWithFailure({ status: "completed", errors: exec.errors })) {
+        if (outcome === "completed-with-refusals") {
           overTime[date].failed++;
         }
       }
@@ -176,7 +192,7 @@ router.get(
 
     // Average duration for completed executions
     const completedWithDuration = filteredExecutions.filter(
-      (e) => e.status === "completed" && e.completedAt && e.createdAt,
+      (e) => genuinelyCompleted(e) && e.completedAt && e.createdAt,
     );
     const avgDurationMs =
       completedWithDuration.length > 0
@@ -190,9 +206,11 @@ router.get(
         total: filteredExecutions.length,
         completed,
         failed,
-        // Issue #386: only "running" status for active
-        active: filteredExecutions.filter((e) => e.status === "running").length,
-        successRate: Math.round(successRate * 100) / 100,
+        stopped,
+        // Legacy waiting states remain outside this running-only count.
+        active: filteredExecutions.filter((e) => e.status === "running" && e.stopReason == null)
+          .length,
+        successRate: successRate(completed, failed),
         avgDurationMs: Math.round(avgDurationMs),
         byWorkflow: Object.entries(byWorkflow).map(([workflowId, stats]) => ({
           workflowId,
@@ -225,7 +243,14 @@ router.get(
     // Count by workflow
     const workflowCounts: Record<
       string,
-      { count: number; completed: number; failed: number; avgDuration: number; durations: number[] }
+      {
+        count: number;
+        completed: number;
+        failed: number;
+        stopped: number;
+        avgDuration: number;
+        durations: number[];
+      }
     > = {};
 
     for (const exec of filteredExecutions) {
@@ -234,18 +259,20 @@ router.get(
           count: 0,
           completed: 0,
           failed: 0,
+          stopped: 0,
           avgDuration: 0,
           durations: [],
         };
       }
       workflowCounts[exec.workflowId].count++;
-      if (exec.status === "completed") {
+      const outcome = classifyExecutionOutcome(exec);
+      if (outcome === "stopped") workflowCounts[exec.workflowId].stopped++;
+      else if (outcome === "completed" || outcome === "completed-with-refusals") {
         workflowCounts[exec.workflowId].completed++;
         if (exec.completedAt) {
           workflowCounts[exec.workflowId].durations.push(exec.completedAt - exec.createdAt);
         }
-        // Issue #386: count as failed if has errors
-        if (completedWithFailure({ status: "completed", errors: exec.errors })) {
+        if (outcome === "completed-with-refusals") {
           workflowCounts[exec.workflowId].failed++;
         }
       }
@@ -272,10 +299,8 @@ router.get(
         executionCount: stats.count,
         completedCount: stats.completed,
         failedCount: stats.failed,
-        successRate:
-          stats.completed + stats.failed > 0
-            ? Math.round((stats.completed / (stats.completed + stats.failed)) * 10000) / 100
-            : 0,
+        stoppedCount: stats.stopped,
+        successRate: successRate(stats.completed, stats.failed),
         avgDurationMs: stats.avgDuration,
       }))
       .sort((a, b) => b.executionCount - a.executionCount)
@@ -584,7 +609,8 @@ router.get(
     const workflowExecutions = executions.filter(
       (e) => e.workflowId === workflowId && e.createdAt >= start && e.createdAt <= end,
     );
-    const completedCount = workflowExecutions.filter((e) => e.status === "completed").length;
+    const { completed: completedCount, stopped: stoppedCount } =
+      completionCounts(workflowExecutions);
     const totalCount = workflowExecutions.length;
     const completionRate =
       totalCount > 0 ? Math.round((completedCount / totalCount) * 10000) / 100 : 0;
@@ -598,6 +624,7 @@ router.get(
         completionRate,
         totalExecutions: totalCount,
         completedExecutions: completedCount,
+        stoppedExecutions: stoppedCount,
         hotSteps,
         deadSteps,
         problematicSteps,
@@ -1104,6 +1131,7 @@ router.get(
         .where(
           and(
             eq(workflowExecution.state, "completed"),
+            isNull(workflowExecution.stopReason),
             gte(workflowExecution.completedAt, new Date(start)),
             lte(workflowExecution.completedAt, new Date(end)),
           ),

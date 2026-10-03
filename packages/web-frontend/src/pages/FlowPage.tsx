@@ -114,6 +114,7 @@ import { useDraftValidation } from "../components/flow/useDraftValidation";
 import { EditBar, ProblemList } from "../components/flow/EditBar";
 import { CanvasEditingHost } from "../components/flow/CanvasEditing";
 import { pausedRunWarnings } from "../components/flow/structure";
+import { ExecutionStopProvider } from "../components/execution/ExecutionStop";
 import type { WorkflowValidationStatus } from "../types/react-flow-types";
 import { FlowLevelBadge } from "../components/workflow/FlowLevelBadge";
 import { splitFlowTags } from "../utils/workflow-level";
@@ -310,17 +311,20 @@ export const FlowPage: React.FC = () => {
   const serverErrors = issues.all.filter(
     (i) => i.source === "server" && i.severity === "error",
   ).length;
-  // The owner's paused runs on a node the draft renames or removes: fetched once the draft first
+  // Actual paused runs on a node the draft renames or removes: fetched once the draft first
   // touches a node's identity, and named before the save.
   const touchesIdentity = diff.some((e) => e.kind === "rename-node" || e.kind === "remove-node");
-  const runs = useResource(touchesIdentity && workflowId ? `${workflowId}:running` : null, () =>
+  const runs = useResource(touchesIdentity && workflowId ? `${workflowId}:active` : null, () =>
     apiClient
-      .getExecutions({ workflowId, status: ["running"], limit: 100 })
+      .getExecutions({ workflowId, status: ["running", "waiting"], limit: 100 })
       .then((r) => r.executions),
   );
   const runWarnings = useMemo(
-    () => (touchesIdentity ? pausedRunWarnings(runs.data ?? [], diff) : []),
-    [touchesIdentity, runs.data, diff],
+    () =>
+      touchesIdentity && runs.dataKey === `${workflowId}:active`
+        ? pausedRunWarnings(runs.data ?? [], diff)
+        : [],
+    [touchesIdentity, workflowId, runs.data, runs.dataKey, diff],
   );
   // The page lists every error; warnings only while the definition is being edited.
   const listedIssues = useMemo(
@@ -728,387 +732,392 @@ export const FlowPage: React.FC = () => {
   const flowTags = splitFlowTags(savedWorkflow?.metadata.tags);
 
   return (
-    <EditingProvider
-      enabled={editing}
-      definition
-      issues={issues}
-      draft={edited}
-      blocks={blocks}
-      apply={onEdit}
-    >
-      <div className="h-full flex flex-col" data-testid="flow-page" data-view={mode}>
-        <PageHeader
-          back={{
-            label: t("pages.workflowDetail.backToWorkflows"),
-            onClick: handleBack,
-            testId: "flow-back",
-          }}
-          title={
-            savedWorkflow ? (
-              <span data-testid="flow-title">{savedWorkflow.metadata.name}</span>
-            ) : null
-          }
-          meta={savedWorkflow ? `v${savedWorkflow.metadata.version}` : undefined}
-          description={savedWorkflow?.metadata.description}
-          facts={
-            savedWorkflow ? (
-              <>
-                <FlowLevelBadge level={flowTags.level} guide={guideAnchor("flow.level")} />
-                {flowTags.subjects.map((tag) => (
-                  <span
-                    key={tag}
-                    className="rounded-full border bg-muted/40 px-2 py-0.5 text-[11px] text-muted-foreground"
-                    data-testid="flow-tag"
-                  >
-                    {tag}
-                  </span>
-                ))}
-                <span
-                  className="rounded-full border bg-muted/40 px-2 py-0.5 text-[11px] tabular-nums text-muted-foreground"
-                  data-testid="flow-node-count"
-                >
-                  {savedWorkflow.nodes.length} {t("components.workflowSidebar.totalNodes")}
-                </span>
-              </>
-            ) : undefined
-          }
-          actions={
-            <>
-              <div className="hidden md:flex items-center gap-2">
-                {isOwner && (
-                  <>
-                    <button
-                      type="button"
-                      onClick={() => update({ [EDIT_PARAM]: editing ? null : "1" })}
-                      aria-pressed={editing}
-                      className={cn(
-                        "inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-xs font-medium transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                        editing
-                          ? "border-warning bg-warning/15 text-warning-foreground"
-                          : "text-muted-foreground hover:text-foreground",
-                      )}
-                      data-testid="flow-edit-toggle"
-                      {...guideAnchor("flow.edit-toggle")}
+    <ExecutionStopProvider scopeKey={workflowIdentifier} onStopped={runs.refresh}>
+      <EditingProvider
+        enabled={editing}
+        definition
+        issues={issues}
+        draft={edited}
+        blocks={blocks}
+        apply={onEdit}
+      >
+        <div className="h-full flex flex-col" data-testid="flow-page" data-view={mode}>
+          <PageHeader
+            back={{
+              label: t("pages.workflowDetail.backToWorkflows"),
+              onClick: handleBack,
+              testId: "flow-back",
+            }}
+            title={
+              savedWorkflow ? (
+                <span data-testid="flow-title">{savedWorkflow.metadata.name}</span>
+              ) : null
+            }
+            meta={savedWorkflow ? `v${savedWorkflow.metadata.version}` : undefined}
+            description={savedWorkflow?.metadata.description}
+            facts={
+              savedWorkflow ? (
+                <>
+                  <FlowLevelBadge level={flowTags.level} guide={guideAnchor("flow.level")} />
+                  {flowTags.subjects.map((tag) => (
+                    <span
+                      key={tag}
+                      className="rounded-full border bg-muted/40 px-2 py-0.5 text-[11px] text-muted-foreground"
+                      data-testid="flow-tag"
                     >
-                      <PencilLine className="size-3.5" aria-hidden="true" />
-                      {t(editing ? "pages.flowPage.edit.on" : "pages.flowPage.edit.off")}
-                    </button>
-                    <GuidanceHint label={t("pages.flowPage.edit.hintLabel")}>
-                      {t("pages.flowPage.edit.hint")}
-                    </GuidanceHint>
-                  </>
-                )}
-                {ownerActions}
-              </div>
-
-              <div className="md:hidden">
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button variant="ghost" size="icon" aria-label={t("common.actions")}>
-                      <MoreHorizontal className="h-4 w-4" />
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end">
-                    {isOwner && (
-                      <DropdownMenuItem
-                        onClick={() => update({ [EDIT_PARAM]: editing ? null : "1" })}
-                      >
-                        <PencilLine className="mr-2 h-4 w-4" />
-                        {t(editing ? "pages.flowPage.edit.on" : "pages.flowPage.edit.off")}
-                      </DropdownMenuItem>
-                    )}
-                    {fileInfo?.visibility === "public" && session?.user && (
-                      <DropdownMenuItem onClick={handleCopyWorkflow} disabled={copying}>
-                        <Copy className="mr-2 h-4 w-4" />
-                        {t("pages.workflowDetail.useAsTemplate")}
-                      </DropdownMenuItem>
-                    )}
-                    {isOwner && fileInfo && (
-                      <DropdownMenuItem
-                        onClick={handleToggleVisibility}
-                        disabled={visibilityUpdating}
-                      >
-                        {fileInfo.visibility === "public" ? (
-                          <Globe className="mr-2 h-4 w-4" />
-                        ) : (
-                          <Lock className="mr-2 h-4 w-4" />
-                        )}
-                        {t("pages.workflowDetail.toggleVisibility")}
-                      </DropdownMenuItem>
-                    )}
-                    {isOwner && workflowIdentifier && (
-                      <DropdownMenuItem onClick={() => setShareDialogOpen(true)}>
-                        <Share2 className="mr-2 h-4 w-4" />
-                        {t("pages.workflowDetail.share")}
-                      </DropdownMenuItem>
-                    )}
-                    {isOwner && (
-                      <DropdownMenuItem
-                        onClick={() => setDeleteDialogOpen(true)}
-                        className="text-destructive focus:text-destructive"
-                      >
-                        <Trash2 className="mr-2 h-4 w-4" />
-                        {t("pages.workflowDetail.deleteWorkflow")}
-                      </DropdownMenuItem>
-                    )}
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              </div>
-            </>
-          }
-          testId="flow-header"
-          guide={guideAnchor("flow.header")}
-          detailsGuide={guideAnchor("flow.facts")}
-        />
-
-        {breadcrumbs.length > 0 && (
-          <WorkflowBreadcrumbComponent
-            breadcrumbs={breadcrumbs}
-            onNavigate={handleNavigate}
-            onClear={clearBreadcrumbs}
-          />
-        )}
-
-        {workflowDetail.loading || (workflowDetail.current && processLoading) ? (
-          <PageLoader />
-        ) : workflowDetail.error && !workflowDetail.current ? (
-          <div className="flex items-center justify-center h-full">
-            <InlineError
-              message={workflowDetail.error}
-              onRetry={() => workflowIdentifier && selectWorkflow(workflowIdentifier)}
-            />
-          </div>
-        ) : !savedWorkflow || !edited ? (
-          <div className="flex items-center justify-center h-full">
-            <p className="text-muted-foreground">{t("pages.workflowDetail.selectWorkflow")}</p>
-          </div>
-        ) : (
-          <div className="flex-1 min-h-0 flex flex-col lg:flex-row overflow-y-auto lg:overflow-hidden">
-            <section
-              className={cn(
-                "flex min-w-0 flex-col lg:flex-1 lg:min-h-0 lg:overflow-hidden",
-                // The steps view has no panel under it, so on a narrow screen it takes the whole
-                // remaining height instead of a fixed box with an empty band beneath.
-                mode === "steps" && "flex-1 min-h-0",
-              )}
-              aria-label={t("pages.flowPage.title")}
-              data-testid="flow-view"
-            >
-              {!process && (
-                <div
-                  className="border-b bg-muted/20 px-4 py-2 text-xs text-muted-foreground flex flex-wrap items-center gap-2"
-                  data-testid="flow-no-process"
-                >
-                  <span className="flex-1">{t("pages.flowPage.noProcess")}</span>
-                  {refetching && <PendingIndicator />}
-                </div>
-              )}
-
-              <EditorTourOffer editing={editing} />
-              {editing && (
-                <EditBar
-                  diff={diff}
-                  canUndo={hasEdits}
-                  onUndo={() => {
-                    editLog.undo();
-                    setSaveError(null);
-                  }}
-                  onReset={() => {
-                    resetEdits();
-                    setSaveError(null);
-                  }}
-                  gate={gate}
-                  processProblems={diagnostics.length}
-                  serverErrors={serverErrors}
-                  onRetry={retryDryRun}
-                  saving={saving}
-                  onSave={handleSave}
-                  revision={fileInfo?.revision ?? 0}
-                  saveError={saveError}
-                  runWarnings={runWarnings}
-                />
-              )}
-
-              <ProblemList issues={listedIssues} onFocusNode={focusNode} />
-
-              {/* Only the shown view is mounted: the selection lives in the URL and the graph
-                  re-centres on its focus request, so a switch loses nothing. */}
-              <div className={cn("lg:flex-1 lg:min-h-0", mode === "steps" && "flex-1 min-h-0")}>
-                {mode === "steps" && (
-                  <div className="h-full min-h-80">
-                    <StepsView
-                      workflow={edited}
-                      inline={inline}
-                      onToggleInline={toggleInline}
-                      toolbarModes={flowModes}
-                      toolbarTrailing={flowTrailing}
-                    />
-                  </div>
-                )}
-                {progress && mode === "map" && (
-                  <div className="lg:h-full">
-                    <MapView
-                      toolbarModes={flowModes}
-                      toolbarTrailing={flowTrailing}
-                      onFocusNode={focusNode}
-                      progress={progress}
-                      blocks={blocks}
-                      route={[]}
-                      workflow={edited}
-                      selectedBlockId={selectedBlockId}
-                      onSelectBlock={(blockId) => {
-                        update({ [BLOCK_PARAM]: blockId });
-                        if (blockId) setChosenTab("block");
-                        const first = blocks.find((b) => b.id === blockId)?.nodeIds[0];
-                        if (first) requestFocus({ nodeId: first });
-                      }}
-                      cursor={null}
-                      onSetCursor={() => {}}
-                    />
-                  </div>
-                )}
-                {progress && mode === "graph" && (
-                  <ContentsLayout
-                    blocks={blocks}
-                    selectedBlockId={selectedBlockId}
-                    onSelect={(id) => {
-                      update({ [BLOCK_PARAM]: id });
-                      setChosenTab("block");
-                    }}
-                    testId="graph-view"
+                      {tag}
+                    </span>
+                  ))}
+                  <span
+                    className="rounded-full border bg-muted/40 px-2 py-0.5 text-[11px] tabular-nums text-muted-foreground"
+                    data-testid="flow-node-count"
                   >
-                    {(toggle) => (
-                      <ContentsToggleProvider value={toggle}>
-                        <div className="h-[60vh] lg:h-full">{technicalGraph}</div>
-                      </ContentsToggleProvider>
-                    )}
-                  </ContentsLayout>
-                )}
-                {!progress && mode === "graph" && (
-                  <div className="h-[60vh] lg:h-full">{technicalGraph}</div>
-                )}
-              </div>
-            </section>
+                    {savedWorkflow.nodes.length} {t("components.workflowSidebar.totalNodes")}
+                  </span>
+                </>
+              ) : undefined
+            }
+            actions={
+              <>
+                <div className="hidden md:flex items-center gap-2">
+                  {isOwner && (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => update({ [EDIT_PARAM]: editing ? null : "1" })}
+                        aria-pressed={editing}
+                        className={cn(
+                          "inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-xs font-medium transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                          editing
+                            ? "border-warning bg-warning/15 text-warning-foreground"
+                            : "text-muted-foreground hover:text-foreground",
+                        )}
+                        data-testid="flow-edit-toggle"
+                        {...guideAnchor("flow.edit-toggle")}
+                      >
+                        <PencilLine className="size-3.5" aria-hidden="true" />
+                        {t(editing ? "pages.flowPage.edit.on" : "pages.flowPage.edit.off")}
+                      </button>
+                      <GuidanceHint label={t("pages.flowPage.edit.hintLabel")}>
+                        {t("pages.flowPage.edit.hint")}
+                      </GuidanceHint>
+                    </>
+                  )}
+                  {ownerActions}
+                </div>
 
-            {/* The panel is the only home of a node's details, so it exists without a process view
+                <div className="md:hidden">
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button variant="ghost" size="icon" aria-label={t("common.actions")}>
+                        <MoreHorizontal className="h-4 w-4" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                      {isOwner && (
+                        <DropdownMenuItem
+                          onClick={() => update({ [EDIT_PARAM]: editing ? null : "1" })}
+                        >
+                          <PencilLine className="mr-2 h-4 w-4" />
+                          {t(editing ? "pages.flowPage.edit.on" : "pages.flowPage.edit.off")}
+                        </DropdownMenuItem>
+                      )}
+                      {fileInfo?.visibility === "public" && session?.user && (
+                        <DropdownMenuItem onClick={handleCopyWorkflow} disabled={copying}>
+                          <Copy className="mr-2 h-4 w-4" />
+                          {t("pages.workflowDetail.useAsTemplate")}
+                        </DropdownMenuItem>
+                      )}
+                      {isOwner && fileInfo && (
+                        <DropdownMenuItem
+                          onClick={handleToggleVisibility}
+                          disabled={visibilityUpdating}
+                        >
+                          {fileInfo.visibility === "public" ? (
+                            <Globe className="mr-2 h-4 w-4" />
+                          ) : (
+                            <Lock className="mr-2 h-4 w-4" />
+                          )}
+                          {t("pages.workflowDetail.toggleVisibility")}
+                        </DropdownMenuItem>
+                      )}
+                      {isOwner && workflowIdentifier && (
+                        <DropdownMenuItem onClick={() => setShareDialogOpen(true)}>
+                          <Share2 className="mr-2 h-4 w-4" />
+                          {t("pages.workflowDetail.share")}
+                        </DropdownMenuItem>
+                      )}
+                      {isOwner && (
+                        <DropdownMenuItem
+                          onClick={() => setDeleteDialogOpen(true)}
+                          className="text-destructive focus:text-destructive"
+                        >
+                          <Trash2 className="mr-2 h-4 w-4" />
+                          {t("pages.workflowDetail.deleteWorkflow")}
+                        </DropdownMenuItem>
+                      )}
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </div>
+              </>
+            }
+            testId="flow-header"
+            guide={guideAnchor("flow.header")}
+            detailsGuide={guideAnchor("flow.facts")}
+          />
+
+          {breadcrumbs.length > 0 && (
+            <WorkflowBreadcrumbComponent
+              breadcrumbs={breadcrumbs}
+              onNavigate={handleNavigate}
+              onClear={clearBreadcrumbs}
+            />
+          )}
+
+          {workflowDetail.loading || (workflowDetail.current && processLoading) ? (
+            <PageLoader />
+          ) : workflowDetail.error && !workflowDetail.current ? (
+            <div className="flex items-center justify-center h-full">
+              <InlineError
+                message={workflowDetail.error}
+                onRetry={() => workflowIdentifier && selectWorkflow(workflowIdentifier)}
+              />
+            </div>
+          ) : !savedWorkflow || !edited ? (
+            <div className="flex items-center justify-center h-full">
+              <p className="text-muted-foreground">{t("pages.workflowDetail.selectWorkflow")}</p>
+            </div>
+          ) : (
+            <div className="flex-1 min-h-0 flex flex-col lg:flex-row overflow-y-auto lg:overflow-hidden">
+              <section
+                className={cn(
+                  "flex min-w-0 flex-col lg:flex-1 lg:min-h-0 lg:overflow-hidden",
+                  // The steps view has no panel under it, so on a narrow screen it takes the whole
+                  // remaining height instead of a fixed box with an empty band beneath.
+                  mode === "steps" && "flex-1 min-h-0",
+                )}
+                aria-label={t("pages.flowPage.title")}
+                data-testid="flow-view"
+              >
+                {!process && (
+                  <div
+                    className="border-b bg-muted/20 px-4 py-2 text-xs text-muted-foreground flex flex-wrap items-center gap-2"
+                    data-testid="flow-no-process"
+                  >
+                    <span className="flex-1">{t("pages.flowPage.noProcess")}</span>
+                    {refetching && <PendingIndicator />}
+                  </div>
+                )}
+
+                <EditorTourOffer editing={editing} />
+                {editing && (
+                  <EditBar
+                    diff={diff}
+                    canUndo={hasEdits}
+                    onUndo={() => {
+                      editLog.undo();
+                      setSaveError(null);
+                    }}
+                    onReset={() => {
+                      resetEdits();
+                      setSaveError(null);
+                    }}
+                    gate={gate}
+                    processProblems={diagnostics.length}
+                    serverErrors={serverErrors}
+                    onRetry={retryDryRun}
+                    saving={saving}
+                    onSave={handleSave}
+                    revision={fileInfo?.revision ?? 0}
+                    saveError={saveError}
+                    runWarnings={runWarnings}
+                  />
+                )}
+
+                <ProblemList issues={listedIssues} onFocusNode={focusNode} />
+
+                {/* Only the shown view is mounted: the selection lives in the URL and the graph
+                  re-centres on its focus request, so a switch loses nothing. */}
+                <div className={cn("lg:flex-1 lg:min-h-0", mode === "steps" && "flex-1 min-h-0")}>
+                  {mode === "steps" && (
+                    <div className="h-full min-h-80">
+                      <StepsView
+                        workflow={edited}
+                        inline={inline}
+                        onToggleInline={toggleInline}
+                        toolbarModes={flowModes}
+                        toolbarTrailing={flowTrailing}
+                      />
+                    </div>
+                  )}
+                  {progress && mode === "map" && (
+                    <div className="lg:h-full">
+                      <MapView
+                        toolbarModes={flowModes}
+                        toolbarTrailing={flowTrailing}
+                        onFocusNode={focusNode}
+                        progress={progress}
+                        blocks={blocks}
+                        route={[]}
+                        workflow={edited}
+                        selectedBlockId={selectedBlockId}
+                        onSelectBlock={(blockId) => {
+                          update({ [BLOCK_PARAM]: blockId });
+                          if (blockId) setChosenTab("block");
+                          const first = blocks.find((b) => b.id === blockId)?.nodeIds[0];
+                          if (first) requestFocus({ nodeId: first });
+                        }}
+                        cursor={null}
+                        onSetCursor={() => {}}
+                      />
+                    </div>
+                  )}
+                  {progress && mode === "graph" && (
+                    <ContentsLayout
+                      blocks={blocks}
+                      selectedBlockId={selectedBlockId}
+                      onSelect={(id) => {
+                        update({ [BLOCK_PARAM]: id });
+                        setChosenTab("block");
+                      }}
+                      testId="graph-view"
+                    >
+                      {(toggle) => (
+                        <ContentsToggleProvider value={toggle}>
+                          <div className="h-[60vh] lg:h-full">{technicalGraph}</div>
+                        </ContentsToggleProvider>
+                      )}
+                    </ContentsLayout>
+                  )}
+                  {!progress && mode === "graph" && (
+                    <div className="h-[60vh] lg:h-full">{technicalGraph}</div>
+                  )}
+                </div>
+              </section>
+
+              {/* The panel is the only home of a node's details, so it exists without a process view
                 too (its block level then shows the empty-state callout). The steps view is the
                 simple picture and keeps the page to itself. */}
-            {mode !== "steps" && (
-              <aside
-                className={cn(
-                  "relative flex flex-col bg-card overflow-hidden border-t lg:border-t-0 lg:border-l",
-                  "max-h-[38vh] lg:max-h-none shrink-0",
-                  panelCollapsed ? "h-10 lg:h-auto lg:w-10" : "lg:w-[380px] xl:w-[440px]",
-                )}
-                data-testid="flow-panel"
-                data-collapsed={panelCollapsed ? "true" : undefined}
-              >
-                {!panelCollapsed && (
-                  <button
-                    type="button"
-                    onClick={togglePanel}
-                    data-hint={t("pages.flowPage.panel.collapse")}
-                    aria-label={t("pages.flowPage.panel.collapse")}
-                    className="absolute right-1 top-1 z-10 inline-flex h-8 w-8 items-center justify-center rounded-md border bg-card/90 text-muted-foreground shadow-sm hover:bg-accent hover:text-foreground"
-                    data-testid="flow-panel-collapse"
-                  >
-                    <PanelRightClose className="size-4" aria-hidden="true" />
-                  </button>
-                )}
-                {panelCollapsed && (
-                  <button
-                    type="button"
-                    onClick={togglePanel}
-                    data-hint={t("pages.flowPage.panel.expand")}
-                    aria-label={t("pages.flowPage.panel.expand")}
-                    className="flex h-10 w-full items-center justify-center text-muted-foreground hover:bg-accent hover:text-foreground"
-                    data-testid="flow-panel-expand"
-                  >
-                    <PanelRightOpen className="size-4" aria-hidden="true" />
-                  </button>
-                )}
-                <div className={cn("flex min-h-0 flex-1 flex-col", panelCollapsed && "hidden")}>
-                  <Tabs
-                    value={chosenTab}
-                    onValueChange={(value) => setChosenTab(value as FlowPanelTab)}
-                    className="flex flex-col h-full"
-                  >
-                    <TabsList
-                      className="w-full justify-start rounded-none border-b bg-muted/30 pl-2 pr-10 h-10"
-                      {...guideAnchor("flow.panel-tabs")}
+              {mode !== "steps" && (
+                <aside
+                  className={cn(
+                    "relative flex flex-col bg-card overflow-hidden border-t lg:border-t-0 lg:border-l",
+                    "max-h-[38vh] lg:max-h-none shrink-0",
+                    panelCollapsed ? "h-10 lg:h-auto lg:w-10" : "lg:w-[380px] xl:w-[440px]",
+                  )}
+                  data-testid="flow-panel"
+                  data-collapsed={panelCollapsed ? "true" : undefined}
+                >
+                  {!panelCollapsed && (
+                    <button
+                      type="button"
+                      onClick={togglePanel}
+                      data-hint={t("pages.flowPage.panel.collapse")}
+                      aria-label={t("pages.flowPage.panel.collapse")}
+                      className="absolute right-1 top-1 z-10 inline-flex h-8 w-8 items-center justify-center rounded-md border bg-card/90 text-muted-foreground shadow-sm hover:bg-accent hover:text-foreground"
+                      data-testid="flow-panel-collapse"
                     >
-                      <TabsTrigger value="block" className="gap-1.5 text-xs">
-                        <Boxes className="h-3.5 w-3.5" />
-                        {t("pages.flowPage.tabs.block")}
-                      </TabsTrigger>
-                      <TabsTrigger value="variables" className="gap-1.5 text-xs">
-                        <Variable className="h-3.5 w-3.5" />
-                        {t("pages.flowPage.tabs.variables")}
-                      </TabsTrigger>
-                    </TabsList>
-                    <TabsContent value="block" className="scrollbar-thin flex-1 overflow-auto m-0">
-                      {selectedNode ? (
-                        <NodePanel
-                          workflow={edited}
-                          blocks={blocks}
-                          nodeId={selectedNode.id}
-                          onBack={handleClearSelection}
-                          onFocusNode={focusNode}
-                          onSelectVariable={goToVariable}
-                          validation={validation ?? null}
-                          nodeTypes={nodeTypeIndex}
-                        />
-                      ) : (
-                        <BlockDetailPanel
-                          block={shownBlock}
-                          blocks={blocks}
-                          workflow={edited}
-                          statistics={statistics}
-                          statisticsPending={statisticsResource.pending}
-                          statisticsError={statisticsResource.error}
-                          onSelectBlock={(blockId) => {
-                            handleClearSelection();
-                            update({ [BLOCK_PARAM]: blockId });
-                          }}
-                          onFocusNode={focusNode}
-                          openSection={sectionOpen}
-                        />
-                      )}
-                    </TabsContent>
-                    <TabsContent
-                      value="variables"
-                      className="scrollbar-thin flex-1 overflow-auto m-0"
+                      <PanelRightClose className="size-4" aria-hidden="true" />
+                    </button>
+                  )}
+                  {panelCollapsed && (
+                    <button
+                      type="button"
+                      onClick={togglePanel}
+                      data-hint={t("pages.flowPage.panel.expand")}
+                      aria-label={t("pages.flowPage.panel.expand")}
+                      className="flex h-10 w-full items-center justify-center text-muted-foreground hover:bg-accent hover:text-foreground"
+                      data-testid="flow-panel-expand"
                     >
-                      <RegistryPanel
-                        registry={edited.variableRegistry}
-                        highlight={variableHighlight}
-                      />
-                    </TabsContent>
-                  </Tabs>
-                </div>
-              </aside>
-            )}
-          </div>
-        )}
+                      <PanelRightOpen className="size-4" aria-hidden="true" />
+                    </button>
+                  )}
+                  <div className={cn("flex min-h-0 flex-1 flex-col", panelCollapsed && "hidden")}>
+                    <Tabs
+                      value={chosenTab}
+                      onValueChange={(value) => setChosenTab(value as FlowPanelTab)}
+                      className="flex flex-col h-full"
+                    >
+                      <TabsList
+                        className="w-full justify-start rounded-none border-b bg-muted/30 pl-2 pr-10 h-10"
+                        {...guideAnchor("flow.panel-tabs")}
+                      >
+                        <TabsTrigger value="block" className="gap-1.5 text-xs">
+                          <Boxes className="h-3.5 w-3.5" />
+                          {t("pages.flowPage.tabs.block")}
+                        </TabsTrigger>
+                        <TabsTrigger value="variables" className="gap-1.5 text-xs">
+                          <Variable className="h-3.5 w-3.5" />
+                          {t("pages.flowPage.tabs.variables")}
+                        </TabsTrigger>
+                      </TabsList>
+                      <TabsContent
+                        value="block"
+                        className="scrollbar-thin flex-1 overflow-auto m-0"
+                      >
+                        {selectedNode ? (
+                          <NodePanel
+                            workflow={edited}
+                            blocks={blocks}
+                            nodeId={selectedNode.id}
+                            onBack={handleClearSelection}
+                            onFocusNode={focusNode}
+                            onSelectVariable={goToVariable}
+                            validation={validation ?? null}
+                            nodeTypes={nodeTypeIndex}
+                          />
+                        ) : (
+                          <BlockDetailPanel
+                            block={shownBlock}
+                            blocks={blocks}
+                            workflow={edited}
+                            statistics={statistics}
+                            statisticsPending={statisticsResource.pending}
+                            statisticsError={statisticsResource.error}
+                            onSelectBlock={(blockId) => {
+                              handleClearSelection();
+                              update({ [BLOCK_PARAM]: blockId });
+                            }}
+                            onFocusNode={focusNode}
+                            openSection={sectionOpen}
+                          />
+                        )}
+                      </TabsContent>
+                      <TabsContent
+                        value="variables"
+                        className="scrollbar-thin flex-1 overflow-auto m-0"
+                      >
+                        <RegistryPanel
+                          registry={edited.variableRegistry}
+                          highlight={variableHighlight}
+                        />
+                      </TabsContent>
+                    </Tabs>
+                  </div>
+                </aside>
+              )}
+            </div>
+          )}
 
-        {workflowIdentifier && (
-          <ShareDialog
-            open={shareDialogOpen}
-            onClose={() => setShareDialogOpen(false)}
-            workflowId={workflowIdentifier}
+          {workflowIdentifier && (
+            <ShareDialog
+              open={shareDialogOpen}
+              onClose={() => setShareDialogOpen(false)}
+              workflowId={workflowIdentifier}
+            />
+          )}
+          <ConfirmDialog
+            open={deleteDialogOpen}
+            onOpenChange={setDeleteDialogOpen}
+            title={t("pages.workflowDetail.deleteWorkflow")}
+            description={t("pages.workflowDetail.confirmDelete")}
+            confirmLabel={t("common.delete")}
+            variant="destructive"
+            onConfirm={handleDeleteWorkflow}
           />
-        )}
-        <ConfirmDialog
-          open={deleteDialogOpen}
-          onOpenChange={setDeleteDialogOpen}
-          title={t("pages.workflowDetail.deleteWorkflow")}
-          description={t("pages.workflowDetail.confirmDelete")}
-          confirmLabel={t("common.delete")}
-          variant="destructive"
-          onConfirm={handleDeleteWorkflow}
-        />
-      </div>
-    </EditingProvider>
+        </div>
+      </EditingProvider>
+    </ExecutionStopProvider>
   );
 };
 

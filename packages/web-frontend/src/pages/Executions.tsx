@@ -7,7 +7,9 @@ import React, { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Play } from "lucide-react";
-import { apiClient } from "../services/api-client";
+import { apiClient, type ExecutionSummary } from "../services/api-client";
+import { ExecutionStopProvider } from "../components/execution/ExecutionStop";
+import { InlineError } from "../components/inline-error";
 import { ROUTES } from "../constants/routes";
 import { PageShell } from "../components/PageShell";
 import { FilterBar } from "../components/FilterBar";
@@ -29,20 +31,7 @@ import { DataListView } from "../components/DataListView";
 import { LockedExecutionsWidget } from "../components/LockedExecutionsWidget";
 import { guideAnchor } from "@/guides/anchors";
 
-interface ExecutionListItem {
-  executionId: string;
-  workflowId: string;
-  workflowName?: string | null; // Issue #421: Workflow name from API
-  userId: string;
-  status: string;
-  currentNodeId: string | null;
-  note?: string;
-  createdAt?: number;
-  updatedAt?: number;
-  completedAt?: number;
-  error?: string;
-  errorCount?: number; // Issue #386: Error count for badge display
-}
+type ExecutionListItem = ExecutionSummary;
 
 interface WorkflowInfo {
   id: string;
@@ -60,6 +49,7 @@ export const Executions: React.FC = () => {
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [stopRefresh, setStopRefresh] = useState(0);
 
   // Filter state
   const [searchQuery, setSearchQuery] = useState("");
@@ -118,10 +108,7 @@ export const Executions: React.FC = () => {
     try {
       setLoading(true);
 
-      const statusList =
-        statusFilter === "all"
-          ? undefined
-          : [statusFilter as "running" | "waiting" | "completed" | "failed"];
+      const statusList = statusFilter === "all" ? undefined : [statusFilter];
 
       const result = await apiClient.getExecutions({
         status: statusList,
@@ -177,7 +164,7 @@ export const Executions: React.FC = () => {
     );
   }
 
-  if (error) {
+  if (error && executions.length === 0) {
     return (
       <PageShell
         title={t("pages.executions.title")}
@@ -190,127 +177,136 @@ export const Executions: React.FC = () => {
   }
 
   return (
-    <PageShell
-      title={t("pages.executions.title")}
-      guide={guideAnchor("runs.header")}
-      description={t("pages.executions.subtitle")}
+    <ExecutionStopProvider
+      onStopped={async () => {
+        await loadExecutions();
+        setStopRefresh((value) => value + 1);
+      }}
     >
-      <FilterBar
-        search={searchQuery}
-        onSearchChange={setSearchQuery}
-        searchPlaceholder={t("pages.executions.filters.searchPlaceholder")}
-        searchTestId="executions-search"
-        onReset={handleReset}
-        filters={
-          <>
-            <LabeledFilter label={t("common.filters.status")}>
-              <Select
-                value={statusFilter}
-                onValueChange={(value) => {
-                  setStatusFilter(value);
-                  setCurrentPage(1);
-                }}
-              >
-                <SelectTrigger
-                  className="w-[150px]"
-                  data-testid="status-filter"
-                  {...guideAnchor("runs.status")}
-                >
-                  <SelectValue placeholder={t("pages.executions.filters.status")} />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">{t("pages.executions.filters.allStatuses")}</SelectItem>
-                  <SelectItem value="running">
-                    {t("pages.executions.filters.active", "Active")}
-                  </SelectItem>
-                  <SelectItem value="locked">{t("common.status.locked", "Locked")}</SelectItem>
-                  <SelectItem value="completed">{t("common.status.completed")}</SelectItem>
-                  <SelectItem value="failed">{t("common.status.failed")}</SelectItem>
-                  <SelectItem value="waiting">{t("common.status.waiting")}</SelectItem>
-                </SelectContent>
-              </Select>
-            </LabeledFilter>
-
-            {workflows.length > 0 && (
-              <LabeledFilter label={t("common.filters.workflow")}>
-                <SearchableSelect
-                  value={workflowFilter}
+      <PageShell
+        title={t("pages.executions.title")}
+        guide={guideAnchor("runs.header")}
+        description={t("pages.executions.subtitle")}
+      >
+        {error ? <InlineError message={error} onRetry={loadExecutions} /> : null}
+        <FilterBar
+          search={searchQuery}
+          onSearchChange={setSearchQuery}
+          searchPlaceholder={t("pages.executions.filters.searchPlaceholder")}
+          searchTestId="executions-search"
+          onReset={handleReset}
+          filters={
+            <>
+              <LabeledFilter label={t("common.filters.status")}>
+                <Select
+                  value={statusFilter}
                   onValueChange={(value) => {
-                    setWorkflowFilter(value);
+                    setStatusFilter(value);
                     setCurrentPage(1);
                   }}
-                  options={[
-                    { value: "all", label: t("pages.executions.filters.allWorkflows") },
-                    ...workflows.map((wf) => ({ value: wf.id, label: wf.name })),
-                  ]}
-                  placeholder={t("pages.executions.filters.workflow")}
-                  searchPlaceholder={t("common.filters.search")}
-                  testId="workflow-filter"
-                />
+                >
+                  <SelectTrigger
+                    className="w-[150px]"
+                    data-testid="status-filter"
+                    {...guideAnchor("runs.status")}
+                  >
+                    <SelectValue placeholder={t("pages.executions.filters.status")} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">{t("pages.executions.filters.allStatuses")}</SelectItem>
+                    <SelectItem value="running">
+                      {t("pages.executions.filters.active", "Active")}
+                    </SelectItem>
+                    <SelectItem value="locked">{t("common.status.locked", "Locked")}</SelectItem>
+                    <SelectItem value="completed">{t("common.status.completed")}</SelectItem>
+                    <SelectItem value="stopped">{t("pages.overview.runStatus.stopped")}</SelectItem>
+                    <SelectItem value="failed">{t("common.status.failed")}</SelectItem>
+                    <SelectItem value="waiting">{t("common.status.waiting")}</SelectItem>
+                  </SelectContent>
+                </Select>
               </LabeledFilter>
-            )}
 
-            <SortSelect
-              value={sortValue}
-              onChange={handleSortChange}
-              label={t("common.filters.sort")}
-              options={[
-                {
-                  value: "createdAt-desc",
-                  label: `${t("pages.executions.filters.sortByCreated")} ↓`,
-                },
-                {
-                  value: "createdAt-asc",
-                  label: `${t("pages.executions.filters.sortByCreated")} ↑`,
-                },
-                {
-                  value: "updatedAt-desc",
-                  label: `${t("pages.executions.filters.sortByUpdated")} ↓`,
-                },
-                {
-                  value: "updatedAt-asc",
-                  label: `${t("pages.executions.filters.sortByUpdated")} ↑`,
-                },
-              ]}
-              testId="sort-select"
+              {workflows.length > 0 && (
+                <LabeledFilter label={t("common.filters.workflow")}>
+                  <SearchableSelect
+                    value={workflowFilter}
+                    onValueChange={(value) => {
+                      setWorkflowFilter(value);
+                      setCurrentPage(1);
+                    }}
+                    options={[
+                      { value: "all", label: t("pages.executions.filters.allWorkflows") },
+                      ...workflows.map((wf) => ({ value: wf.id, label: wf.name })),
+                    ]}
+                    placeholder={t("pages.executions.filters.workflow")}
+                    searchPlaceholder={t("common.filters.search")}
+                    testId="workflow-filter"
+                  />
+                </LabeledFilter>
+              )}
+
+              <SortSelect
+                value={sortValue}
+                onChange={handleSortChange}
+                label={t("common.filters.sort")}
+                options={[
+                  {
+                    value: "createdAt-desc",
+                    label: `${t("pages.executions.filters.sortByCreated")} ↓`,
+                  },
+                  {
+                    value: "createdAt-asc",
+                    label: `${t("pages.executions.filters.sortByCreated")} ↑`,
+                  },
+                  {
+                    value: "updatedAt-desc",
+                    label: `${t("pages.executions.filters.sortByUpdated")} ↓`,
+                  },
+                  {
+                    value: "updatedAt-asc",
+                    label: `${t("pages.executions.filters.sortByUpdated")} ↑`,
+                  },
+                ]}
+                testId="sort-select"
+              />
+            </>
+          }
+        />
+
+        <LockedExecutionsWidget refreshKey={stopRefresh} />
+
+        <DataListView
+          onViewModeChange={onViewModeChange}
+          items={executions}
+          renderCard={(execution, viewMode) => (
+            <ExecutionCard
+              execution={normalizeExecution(execution)}
+              compact={viewMode === "grid"}
+              onClick={() => handleExecutionClick(execution.executionId)}
             />
-          </>
-        }
-      />
-
-      <LockedExecutionsWidget />
-
-      <DataListView
-        onViewModeChange={onViewModeChange}
-        items={executions}
-        renderCard={(execution, viewMode) => (
-          <ExecutionCard
-            execution={normalizeExecution(execution)}
-            compact={viewMode === "grid"}
-            onClick={() => handleExecutionClick(execution.executionId)}
-          />
-        )}
-        keyExtractor={(e) => e.executionId}
-        storageKey="executions-view-mode"
-        guide={guideAnchor("runs.list")}
-        loading={loading}
-        emptyIcon={Play}
-        emptyTitle={
-          debouncedSearch || statusFilter !== "all" || workflowFilter !== "all"
-            ? t("pages.executions.noResults")
-            : t("pages.executions.noExecutions")
-        }
-        containerRef={containerRef}
-        pagination={{
-          mode: "total",
-          currentPage,
-          totalPages,
-          totalItems: total,
-          pageSize,
-          onPageChange: setCurrentPage,
-        }}
-        className="flex-1 min-h-0 flex flex-col"
-      />
-    </PageShell>
+          )}
+          keyExtractor={(e) => e.executionId}
+          storageKey="executions-view-mode"
+          guide={guideAnchor("runs.list")}
+          loading={loading}
+          emptyIcon={Play}
+          emptyTitle={
+            debouncedSearch || statusFilter !== "all" || workflowFilter !== "all"
+              ? t("pages.executions.noResults")
+              : t("pages.executions.noExecutions")
+          }
+          containerRef={containerRef}
+          pagination={{
+            mode: "total",
+            currentPage,
+            totalPages,
+            totalItems: total,
+            pageSize,
+            onPageChange: setCurrentPage,
+          }}
+          className="flex-1 min-h-0 flex flex-col"
+        />
+      </PageShell>
+    </ExecutionStopProvider>
   );
 };

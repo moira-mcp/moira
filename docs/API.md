@@ -889,6 +889,10 @@ The home page's work area for the signed-in user. Requires a session.
       status: "running" | "locked"; // the store keeps running and completed; a held lock reads locked
       hasActiveLock: boolean;
       errorCount: number;          // refusals, as on the executions list
+      revision: number | null;
+      displayStatus: OverviewStatus;
+      stopReason: string | null;
+      stopCapability: ExecutionStopCapability;
       stepId: string | null;       // the node the run waits at, else its current node
       stepName: string | null;     // null when the step has no name to show
       createdAt: number;
@@ -902,6 +906,9 @@ The home page's work area for the signed-in user. Requires a session.
       stopReason: string | null; // explicit stop explanation; null for ordinary completion
       status: string;
       hasActiveLock: boolean;
+      revision: number | null;
+      displayStatus: OverviewStatus;
+      stopCapability: ExecutionStopCapability;
       errorCount: number;
       createdAt: number;
       completedAt?: number;
@@ -2567,7 +2574,7 @@ List user's executions with filters, sorting, and pagination.
 
 Query parameters:
 
-- `status`: Comma-separated status filter (running, completed). Legacy values (waiting, failed) mapped automatically.
+- `status`: Comma-separated status filter (`running`, `completed`, `locked`, `stopped`). A non-null stop marker decides `stopped`, also in combination with `locked`; waiting/failed values retain their compatibility mapping.
 - `workflowId`: Filter by workflow ID
 - `search`: Search in note field
 - `sort`: Sort field (createdAt, updatedAt). Default: createdAt
@@ -2591,6 +2598,10 @@ Response:
       userId: string;
       status: "running" | "completed" | "locked";
       currentNodeId: string;
+      revision: number | null;
+      displayStatus: OverviewStatus;
+      stopReason: string | null;
+      stopCapability: ExecutionStopCapability;
       note?: string;
       createdAt: number;
       updatedAt: number;
@@ -2607,6 +2618,25 @@ Response:
 Authentication: Required
 Admin users see all executions unless `mine=true`; regular users see only their own.
 
+### Execution management fields
+
+Execution list, detail, home summary and administrator read surfaces expose the shared management
+snapshot independently of their compatible raw `status` field:
+
+```typescript
+type OverviewStatus = "waiting-user" | "waiting-agent" | "locked" | "completed" | "stopped";
+type ExecutionStopCapability =
+  | { available: true; revision: number }
+  | { available: false; revision: number; reason: "not-owner" | "in-flight" | "terminal" }
+  | { available: false; revision: null; reason: "unavailable" };
+```
+
+A non-null stored `stopReason`, including an empty string, gives `displayStatus: "stopped"`
+regardless of raw state. Raw failed executions retain reader status `completed`. Capability is an
+advisory owner-specific snapshot; the mutation repeats its guards atomically. Administrator read
+access does not grant permission to stop another owner's execution. Unavailable metadata has null
+revision, never an invented revision zero.
+
 ### GET /api/executions/overview
 
 The signed-in user's runs as trees of a root run and its child runs, for the overview page. Only the
@@ -2614,34 +2644,38 @@ caller's own runs are returned, administrators included.
 
 Query parameters:
 
-- `status`: `active` (default: every unfinished run), `waiting-user`, `waiting-agent`, `locked`,
-  `completed`, `stopped` or `all`. A run's status is `stopped` when an agent explicitly stopped it
-  with a reason, `completed` when it ended without an explicit stop, `locked` when it runs with an
+- `status`: `active` (default: unfinished runs), `waiting-user`, `waiting-agent`, `locked`,
+  `completed`, `stopped` or `all`. A run's status is `stopped` when its stored stop marker is non-null,
+  `completed` when it ended without an explicit stop, `locked` when it runs with an
   active execution lock, `waiting-user` when it is paused on a step marked `humanGate` whose condition
   held or the agent's question is open, and `waiting-agent` otherwise.
 - `refusals`: `true` shows only runs with refusals.
 - `workflowId`: runs of one workflow.
-- `search`: matched against the note, the run id and the workflow name (at most 200 characters).
-- `idle`: `1h`, `1d`, `3d`, `7d` or `30d` — trees without activity for longer than that.
-- `activeFrom`, `activeTo`: epoch ms or ISO date — trees whose latest activity lies within.
-- `sort`: `activity` (latest activity first, default), `idle` (longest without activity first) or
-  `created` (newest first). In every sort, trees holding a run that waits for its person come first.
+- `search`: literal, case-insensitive match against the current visible canonical heading, separate
+  note, run id and own workflow name (at most 200 characters). Unicode casing and literal `%`, `_`
+  and backslash are supported. An explicit task identity excludes an overridden authored heading.
+- `period`: `7d` (default), `30d` or `all`, relative to the run's own meaningful activity.
+- `idle`: `1h`, `1d`, `3d`, `7d` or `30d` — runs whose complete owned subtree has been idle for at least that interval.
+- `activeFrom`, `activeTo`: epoch ms or ISO date — inclusive bounds on the run's own activity.
+  Relative period, idle and explicit range resolve against one server clock. Idle and range cannot
+  be combined; either advanced filter allows only absent period or `period=all`.
+- `sort`: `activity` (UTC activity-hour descending, default), `idle` (oldest full-subtree activity
+  first) or `created` (newest first). Activity-hour ties use immutable creation descending, then
+  execution id ascending; nested siblings use the same order. Waiting status adds no priority.
 - `limit`: trees per page (1–100). Default: 50
 - `offset`: trees to skip. Default: 0
 - `ids`: comma-separated run ids (at most 100) — returns those runs' rows only (`data.runs`), without
   nesting or paging, for refreshing single cards: `childRuns` is empty and `parent` null, while
-  `children` and `subtreeActivityAt` still describe each run's whole subtree; other users' ids are
-  left out.
+  shown `children` are zero and `childrenTotal` retains all owned direct-child counts, with
+  complete-subtree activity facts. Other users' ids are left out. This unfiltered owner refresh
+  does not decide membership in the paginated query.
 
-The status filter decides the candidate runs; a root is a candidate with no ancestor among the
-candidates — a running child of a finished parent is a root under the default filter and names its
-parent in `parent`. The default `active` view excludes stopped runs everywhere, including descendants;
-an active child of a stopped parent becomes a root and retains its parent link. Other status filters
-keep all descendants under a root, including muted runs outside the selected status, so each run
-appears once. `refusals`, `workflowId`, `search` and the activity filters apply to a tree: it is
-shown when some candidate run of it matches, and its other runs come back with `matches: false`
-(shown muted). Activity filters read `subtreeActivityAt`, the latest activity of the root and all its
-descendants. `total` counts trees.
+Eligibility is decided before counting and pagination. Each eligible run is retained with only its
+necessary same-owner ancestors; these context rows have `matches: false`. A stopped or older ancestor
+can remain visible around an eligible child, without unrelated siblings. Missing or foreign parents
+end the owner path. Each retained run appears once and `total` counts retained roots.
+`subtreeActivityAt` is the latest retained matching activity; `idleActivityAt` covers every owned
+descendant, including those outside the visible selection. Missing activity remains unknown.
 
 Response:
 
@@ -2653,7 +2687,19 @@ Response:
     limit: number;
     offset: number;
     runs: OverviewRun[];
+    evaluatedAt: number;
+    effectiveTime:
+      | { kind: "period"; period: "7d" | "30d" | "all" }
+      | { kind: "idle"; idle: "1h" | "1d" | "3d" | "7d" | "30d" }
+      | { kind: "range"; activeFrom: number | null; activeTo: number | null };
   }
+}
+
+interface ExecutionStages {
+  entries: Array<{ id: string; label: string; status: "pending" | "active" | "done" | "repeated" | "skipped" | "waiting" }>;
+  labels: string[];
+  activeIndex: number | null;
+  doneCount: number;
 }
 
 interface OverviewRun {
@@ -2661,8 +2707,10 @@ interface OverviewRun {
   workflowId: string;
   workflowName: string | null;
   workflowVersion: string | null;
-  title: string; // the run's task title: its note, else the flow's progress title or name
+  title: string; // canonical task identity, resolved authored title, then own flow name
   status: "waiting-user" | "waiting-agent" | "locked" | "completed" | "stopped";
+  revision: number | null;
+  stopCapability: ExecutionStopCapability;
   stopReason: string | null;
   matches: boolean;
   waitingForUser:
@@ -2678,7 +2726,7 @@ interface OverviewRun {
   refusalCount: number;
   note: string | null;
   current: { stepName: string | null; directiveShownAt: number | null } | null; // null once ended
-  stages: { labels: string[]; activeIndex: number | null; doneCount: number } | null; // null without progress blocks
+  stages: ExecutionStages | null; // entries carry actual per-stage status; null without progress blocks
   list: {
     title: string; // the active block's label
     done: number | null;
@@ -2686,13 +2734,15 @@ interface OverviewRun {
     items: Array<{ index: number; title: string; done: boolean; current: boolean; durationMs: number | null }>; // up to five around the current item
   } | null;
   lastActivityAt: number | null; // the run's last event of work
-  subtreeActivityAt: number | null; // the latest over the run and its descendants
-  createdAt: number;
+  subtreeActivityAt: number | null; // latest retained matching activity
+  idleActivityAt: number | null; // latest activity over all owned descendants
+  createdAt: number | null;
   completedAt: number | null;
   parentExecutionId: string | null;
   parent: { executionId: string; title: string } | null; // for a root that continues another run
-  children: { total: number; unfinished: number };
-  childRuns: OverviewRun[]; // unfinished first, then by latest activity
+  children: { total: number; unfinished: number }; // shown direct children
+  childrenTotal: { total: number; unfinished: number }; // all owned direct children
+  childRuns: OverviewRun[]; // selected ordering with stable creation/id ties
 }
 // NotificationMark: as `waitingNotification` of GET /api/executions/:id, without createdAt
 ```
@@ -2791,7 +2841,9 @@ Response:
       note?: string | null;
       stopReason: string | null; // status stays completed after an explicit stop
       parentExecutionId: string | null; // null for a standalone execution
-      revision: number; // expectedRevision source for step-generation guards
+      revision: number | null; // expectedRevision source when management metadata is available
+      displayStatus: OverviewStatus;
+      stopCapability: ExecutionStopCapability;
       metadataRevisions: {
         taskIdentity: string;
         parent: string;
@@ -2846,6 +2898,39 @@ Response:
   }
 }
 ```
+
+Authentication: Required
+
+### POST /api/executions/:id/stop
+
+Permanently stop an owned active execution through the same guarded operation as MCP
+`session stop-execution`. The request must be an object containing only:
+
+```json
+{ "expectedRevision": 3, "reason": "The task was cancelled by its owner" }
+```
+
+`expectedRevision` is a nonnegative safe integer from the management snapshot. The trimmed reason
+must contain 1–500 UTF-16 code units (JavaScript string length). Stopping does not stop child runs,
+undo external effects or certify successful task completion; recorded partial work remains available.
+
+```typescript
+interface ExecutionStopResult {
+  executionId: string;
+  stopped: true;
+  stopReason: string;
+  revision: number;
+  changed: boolean;
+  displayStatus: "stopped";
+  stopCapability: { available: false; revision: number; reason: "terminal" };
+}
+```
+
+The success envelope returns this result in `data`. Exact valid replay of the original revision and
+reason returns `changed: false`. Malformed input returns 400, missing session 401, a non-owner
+(including an administrator) 403, and a missing execution 404. Stale, in-flight and terminal guards
+return 409 with authorized details `stopRefusal`, `currentRevision` and `stopCapability`; reread the
+current state before deciding to stop again.
 
 Authentication: Required
 
@@ -3320,6 +3405,8 @@ Response:
       id: string;
       workflowId: string;
       status: string;
+      displayStatus: OverviewStatus;
+      stopReason: string | null;
       timestamp: number;
       action: string;
     }>;
@@ -3778,6 +3865,10 @@ Response:
       userName: string | null;
       status: string;
       currentNodeId: string | null;
+      revision: number | null;
+      displayStatus: OverviewStatus;
+      stopReason: string | null;
+      stopCapability: ExecutionStopCapability;
       hasActiveLock: boolean; // true if execution has an active lock
       createdAt: number;
       updatedAt: number;
@@ -3807,6 +3898,10 @@ Response includes `activeLock` when the execution has an active lock:
     userName: string | null;
     status: string;
     currentNodeId: string;
+    revision: number | null;
+    displayStatus: OverviewStatus;
+    stopReason: string | null;
+    stopCapability: ExecutionStopCapability;
     context: object;
     activeLock?: {        // Present when execution has an active lock
       lockId: string;
@@ -4399,7 +4494,21 @@ Authentication: Required (admin role)
 Analytics endpoints for audit data aggregation and dashboards. Every route in this section requires
 `adminAnalytics`, except `/api/admin/analytics/operational`, which requires `adminOperations`. Both
 capabilities are denied by the default self-host policy. All endpoints support the `range` query
-parameter: `today`, `week`, `month`, `year`, `all` (default: `all`).
+parameter: `today`, `week`, `month`, `year`, `all`. Overview defaults to `all`, executions,
+top-workflows and workflow-quality to `month`, and operational to `week`.
+
+Genuine completion means raw `completed` with no stop marker. Completed-with-refusals executions
+are a subset of genuine completions; degradation-only journal entries do not count as refusals.
+Any non-null stop marker, including an empty marker or a historical raw-running marker, means
+stopped and excludes that execution from completion and refusal counts. Raw failed and unsupported
+states remain in total starts but are neither genuine completion nor refusal outcomes. The reader's
+compatible `displayStatus` is separate from these analytics outcomes.
+
+Success rate is `(completed - failed) / completed * 100`, rounded to two decimals. Here `failed`
+counts genuine completions with refusals, not raw failed executions. With no genuine completions
+the API returns numeric zero; the dashboard explains that no completion sample exists. Active
+analytics counts retain raw-running semantics and exclude stop markers. Completion duration
+averages include genuine completions with refusals and exclude stopped executions.
 
 ### GET /api/admin/analytics/overview
 
@@ -4417,6 +4526,7 @@ Response:
     activeExecutions: number;
     completedExecutions: number;
     failedExecutions: number;
+    stoppedExecutions: number;
     timeRange: string;
   }
   timestamp: string;
@@ -4438,17 +4548,23 @@ Response:
     total: number;
     completed: number;
     failed: number;
+    stopped: number;
     active: number;
     successRate: number;
-    avgDurationMs: number | null;
+    avgDurationMs: number; // zero when no genuine completion has a measured duration
     byWorkflow: Array<{
       workflowId: string;
-      workflowName: string;
       count: number;
+      completed: number;
+      failed: number;
+      stopped: number;
     }>;
     overTime: Array<{
       date: string;
       count: number;
+      completed: number;
+      failed: number;
+      stopped: number;
     }>;
     timeRange: string;
   }
@@ -4478,8 +4594,9 @@ Response:
       executionCount: number;
       completedCount: number;
       failedCount: number;
+      stoppedCount: number;
       successRate: number;
-      avgDurationMs: number | null;
+      avgDurationMs: number;
     }>;
     timeRange: string;
   }
@@ -4564,6 +4681,7 @@ Response:
     completionRate: number;
     totalExecutions: number;
     completedExecutions: number;
+    stoppedExecutions: number;
     hotSteps: Array<{
       nodeId: string;
       executionCount: number;
@@ -4594,10 +4712,10 @@ Operational metrics: user activity, request rates, workflow throughput. All metr
 Parameters:
 
 - `range`: Time range filter (optional, values: `today`, `week`, `month`, `year`, `all`, default: `week`)
-- `granularity`: Time series granularity (optional, values: `auto`, `hourly`, `daily`, default: `auto`). Auto resolves to `hourly` for `today`, `daily` for other ranges.
-- `filterAction`: Filter audit-log metrics by action type (optional, exact match)
-- `filterSource`: Filter audit-log metrics by source (optional, exact match: `web`, `mcp`, `api`, `system`)
-- `filterResource`: Filter audit-log metrics by resource (optional, exact match)
+- `granularity`: Time series granularity (optional, values: `auto`, `hourly`, `daily`, default: `auto`). Auto resolves to `hourly` for `today` and `week`, `daily` for other ranges.
+- `action`: Filter audit-log metrics by action type (optional, exact match)
+- `source`: Filter audit-log metrics by source (optional, exact match: `web`, `mcp`, `api`, `system`)
+- `resource`: Filter audit-log metrics by resource (optional, exact match)
 
 Response:
 
@@ -4640,6 +4758,12 @@ Metrics:
 - `mcp_calls_per_second` — MCP call rate from audit log source=mcp (hourly time series)
 
 Filter params apply to audit-log-based metrics (`unique_users_per_day`, `total_calls_per_day`, `calls_per_second`, `mcp_calls_per_second`) and breakdowns. Workflow metrics (`workflows_started_per_day`, `workflows_completed_per_day`) are unaffected by filters (different data source).
+
+Workflow starts use the creation-time cohort. Genuine completed workflows, including those with
+refusals, use their recorded `completedAt` UTC cohort for both the scalar and time series; stop
+markers are excluded. Execution analytics above use creation-day buckets, and workflow quality's
+completion rate is genuine completions divided by all starts. The operational metric names remain
+the names listed above; stopping does not create another metric.
 
 Graceful degradation: each metric has independent error handling. If a query fails, that metric returns `available: false` with `unavailableReason`.
 

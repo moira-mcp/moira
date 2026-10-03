@@ -25,7 +25,9 @@ import { ConfirmDialog } from "@/components/confirm-dialog";
 import { LogOut } from "lucide-react";
 import { StatCard } from "../components/stat-card";
 import { useFeatures } from "../hooks/useFeatures";
+import { useLatestRequest } from "../hooks/useLatestRequest";
 import type { AdminStatsResponse, AdminSystemStatusResponse } from "../types";
+import { StatusBadge, isExecutionStatus } from "../components/status-badge";
 
 type TimeRange = "today" | "week" | "month" | "year" | "all";
 
@@ -36,6 +38,7 @@ interface OverviewData {
   activeExecutions: number;
   completedExecutions: number;
   failedExecutions: number;
+  stoppedExecutions: number;
   timeRange: string;
 }
 
@@ -43,6 +46,7 @@ interface ExecutionsData {
   total: number;
   completed: number;
   failed: number;
+  stopped: number;
   active: number;
   successRate: number;
   avgDurationMs: number | null;
@@ -62,13 +66,6 @@ interface UsersData {
 }
 
 const formatPercentage = (value: number): string => `${value.toFixed(1)}%`;
-
-const statusBadgeClass = (status: string): string => {
-  if (status === "completed") return "border-transparent bg-success text-success-foreground";
-  if (status === "failed")
-    return "border-transparent bg-destructive-fill text-destructive-foreground";
-  return "border-transparent bg-info text-info-foreground";
-};
 
 export const AdminDashboard: React.FC = () => {
   const { t } = useTranslation();
@@ -91,6 +88,7 @@ export const AdminDashboard: React.FC = () => {
   const [executionsData, setExecutionsData] = useState<ExecutionsData | null>(null);
   const [usersData, setUsersData] = useState<UsersData | null>(null);
   const [analyticsLoading, setAnalyticsLoading] = useState(true);
+  const beginAnalyticsRequest = useLatestRequest();
 
   const loadDashboardData = useCallback(async () => {
     setLoading(true);
@@ -111,6 +109,7 @@ export const AdminDashboard: React.FC = () => {
   }, [analyticsEnabled, t]);
 
   const loadAnalytics = useCallback(async () => {
+    const isCurrent = beginAnalyticsRequest();
     if (!analyticsEnabled) {
       setOverview(null);
       setTopWorkflows([]);
@@ -128,6 +127,7 @@ export const AdminDashboard: React.FC = () => {
         apiClient.getAnalyticsExecutions(timeRange),
         apiClient.getAnalyticsUsers(timeRange),
       ]);
+      if (!isCurrent()) return;
       setOverview(overviewRes);
       setTopWorkflows(topWorkflowsRes.workflows);
       setExecutionsData(executionsRes);
@@ -145,9 +145,9 @@ export const AdminDashboard: React.FC = () => {
     } catch {
       // Analytics failure is non-blocking; system stats still shown
     } finally {
-      setAnalyticsLoading(false);
+      if (isCurrent()) setAnalyticsLoading(false);
     }
-  }, [analyticsEnabled, timeRange]);
+  }, [analyticsEnabled, beginAnalyticsRequest, timeRange]);
 
   useEffect(() => {
     loadDashboardData();
@@ -236,6 +236,11 @@ export const AdminDashboard: React.FC = () => {
           <StatCard
             value={executionsData ? formatPercentage(executionsData.successRate) : "-"}
             label={t("admin.analytics.cards.successRate")}
+            description={
+              executionsData?.completed === 0
+                ? t("admin.analytics.noCompletions")
+                : t("admin.analytics.successRateHint")
+            }
           />
           <StatCard value={overview.totalUsers} label={t("admin.analytics.cards.activeUsers")} />
           <StatCard
@@ -247,13 +252,17 @@ export const AdminDashboard: React.FC = () => {
 
       {/* Execution Status Breakdown */}
       {!analyticsLoading && overview && (
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
           <StatCard
             value={overview.completedExecutions}
             label={t("admin.analytics.status.completed")}
           />
           <StatCard value={overview.activeExecutions} label={t("admin.analytics.status.active")} />
           <StatCard value={overview.failedExecutions} label={t("admin.analytics.status.failed")} />
+          <StatCard
+            value={overview.stoppedExecutions}
+            label={t("admin.analytics.status.stopped")}
+          />
         </div>
       )}
 
@@ -502,23 +511,38 @@ export const AdminDashboard: React.FC = () => {
           </CardHeader>
           <CardContent>
             <div className="space-y-3">
-              {stats.recentActivity.map((activity) => (
-                <div
-                  key={activity.id}
-                  className="flex items-start gap-3 p-3 border-b border-border last:border-0"
-                >
-                  <div className="flex-1">
-                    <div className="text-sm text-foreground">{activity.action}</div>
-                    <div className="text-xs text-muted-foreground mt-1">
-                      {t("admin.dashboard.recentActivity.workflow")}: {activity.workflowId} •{" "}
-                      {new Date(activity.timestamp).toLocaleString()}
+              {stats.recentActivity.map((activity) => {
+                const status =
+                  activity.stopReason != null
+                    ? "stopped"
+                    : activity.status === "failed"
+                      ? "failed"
+                      : (activity.displayStatus ?? activity.status);
+                return (
+                  <div
+                    key={activity.id}
+                    className="flex items-start gap-3 p-3 border-b border-border last:border-0"
+                  >
+                    <div className="flex-1">
+                      <div className="text-sm text-foreground">{activity.action}</div>
+                      {activity.stopReason != null ? (
+                        <p className="text-xs text-muted-foreground [overflow-wrap:anywhere]">
+                          {t("pages.overview.panel.stopReason")}: {activity.stopReason}
+                        </p>
+                      ) : null}
+                      <div className="text-xs text-muted-foreground mt-1">
+                        {t("admin.dashboard.recentActivity.workflow")}: {activity.workflowId} •{" "}
+                        {new Date(activity.timestamp).toLocaleString()}
+                      </div>
                     </div>
+                    {isExecutionStatus(status) ? (
+                      <StatusBadge status={status} />
+                    ) : (
+                      <Badge variant="outline">{status}</Badge>
+                    )}
                   </div>
-                  <Badge className={statusBadgeClass(activity.status)}>
-                    {t(`common.status.${activity.status}`)}
-                  </Badge>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </CardContent>
         </Card>

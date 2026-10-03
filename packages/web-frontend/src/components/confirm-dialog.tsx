@@ -1,4 +1,12 @@
-import { useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
+import {
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+  type RefObject,
+} from "react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -18,6 +26,11 @@ interface ConfirmDialogProps {
   onOpenChange: (open: boolean) => void;
   title: string;
   description: ReactNode;
+  /** Form fields belong outside the description's paragraph. */
+  content?: ReactNode | ((loading: boolean) => ReactNode);
+  confirmDisabled?: boolean;
+  /** A replacement decision retires an earlier asynchronous confirmation. */
+  confirmationKey?: unknown;
   confirmLabel?: string;
   cancelLabel?: string;
   variant?: "default" | "destructive";
@@ -31,6 +44,9 @@ export function ConfirmDialog({
   onOpenChange,
   title,
   description,
+  content,
+  confirmDisabled = false,
+  confirmationKey,
   confirmLabel = "Confirm",
   cancelLabel = "Cancel",
   variant = "default",
@@ -38,37 +54,57 @@ export function ConfirmDialog({
   returnFocusRef,
   onReturnFocus,
 }: ConfirmDialogProps) {
-  const [loading, setLoading] = useState(false);
+  const lifetime = useMemo(() => ({ open, confirmationKey }), [open, confirmationKey]);
+  const current = useRef<typeof lifetime | null>(null);
+  const submitting = useRef<typeof lifetime | null>(null);
+  const [pending, setPending] = useState<typeof lifetime | null>(null);
+  const loading = pending === lifetime;
+  useLayoutEffect(() => {
+    current.current = lifetime;
+    return () => {
+      current.current = null;
+    };
+  }, [lifetime]);
   const wasOpen = useRef(open);
 
   useEffect(() => {
     if (wasOpen.current && !open) {
       if (onReturnFocus) onReturnFocus();
-      else returnFocusRef?.current?.focus();
+      else if (returnFocusRef?.current?.isConnected) returnFocusRef.current.focus();
     }
     wasOpen.current = open;
   }, [open, onReturnFocus, returnFocusRef]);
 
   const handleConfirm = async () => {
-    setLoading(true);
+    if (!open || confirmDisabled || current.current !== lifetime || submitting.current === lifetime)
+      return;
+    submitting.current = lifetime;
+    setPending(lifetime);
     try {
       await onConfirm();
-      onOpenChange(false);
+      if (current.current === lifetime) onOpenChange(false);
     } catch {
       // The owning action reports a localized error. Keep the dialog open so
       // the user can retry without losing context.
     } finally {
-      setLoading(false);
+      if (submitting.current === lifetime) submitting.current = null;
+      if (current.current === lifetime) setPending(null);
     }
   };
 
   return (
-    <AlertDialog open={open} onOpenChange={loading ? undefined : onOpenChange}>
-      <AlertDialogContent>
+    <AlertDialog
+      open={open}
+      onOpenChange={(next) => {
+        if (submitting.current !== lifetime) onOpenChange(next);
+      }}
+    >
+      <AlertDialogContent className="max-h-[calc(100dvh-2rem)] min-w-0 overflow-y-auto [overflow-wrap:anywhere]">
         <AlertDialogHeader>
           <AlertDialogTitle>{title}</AlertDialogTitle>
           <AlertDialogDescription>{description}</AlertDialogDescription>
         </AlertDialogHeader>
+        {typeof content === "function" ? content(loading) : content}
         <AlertDialogFooter>
           <AlertDialogCancel disabled={loading}>{cancelLabel}</AlertDialogCancel>
           <AlertDialogAction
@@ -76,7 +112,7 @@ export function ConfirmDialog({
               e.preventDefault();
               handleConfirm();
             }}
-            disabled={loading}
+            disabled={loading || confirmDisabled}
             className={cn(variant === "destructive" && buttonVariants({ variant: "destructive" }))}
           >
             {loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}

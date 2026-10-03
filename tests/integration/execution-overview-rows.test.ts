@@ -150,7 +150,15 @@ describe("an overview row", () => {
 
   test("its stages are the flow's blocks, with the active one", async () => {
     const { row } = await runAt(2);
-    expect(row.stages).toEqual({ labels: ["Import", "Check"], activeIndex: 0, doneCount: 0 });
+    expect(row.stages).toEqual({
+      entries: [
+        { id: "work", label: "Import", status: "waiting" },
+        { id: "check", label: "Check", status: "pending" },
+      ],
+      labels: ["Import", "Check"],
+      activeIndex: 0,
+      doneCount: 0,
+    });
   });
 
   test("a stored rename reaches compact rows independently of notes and retains own flow identity", async () => {
@@ -211,7 +219,7 @@ describe("an overview row", () => {
     expect(resolveExecutionTaskTitle(legacyWorkflow, stored)).toBe(legacyWorkflow.metadata.name);
   });
 
-  test("a root continuing a completed parent uses the parent's canonical name without inheriting it", async () => {
+  test("a matching child retains its completed parent as context and keeps its own canonical name", async () => {
     const parent = await runAt(1);
     const child = await runAt(2);
     const executionRepository = new ExecutionRepository(getDatabase());
@@ -246,10 +254,16 @@ describe("an overview row", () => {
       deps(),
     );
     expect(page.runs).toHaveLength(1);
-    expect(page.runs[0].title).toBe("Order import rows");
-    expect(page.runs[0].parent).toEqual({
+    expect(page.runs[0]).toMatchObject({
       executionId: parent.executionId,
       title: "Parent import task",
+      matches: false,
+    });
+    expect(page.runs[0].childRuns).toHaveLength(1);
+    expect(page.runs[0].childRuns[0]).toMatchObject({
+      executionId: child.executionId,
+      title: "Order import rows",
+      matches: true,
     });
   });
 
@@ -271,6 +285,13 @@ describe("an overview row", () => {
     });
     const [atCheck] = await overviewRows(USER_ID, [executionId], deps());
     expect(atCheck.current?.stepName).toBe("Check");
-    expect(JSON.stringify(atCheck)).not.toMatch(/"(?:import|check)"/);
+    // Stable stage ids support reconciliation; every user-visible heading stays authored text.
+    expect(
+      JSON.stringify({
+        current: atCheck.current,
+        labels: atCheck.stages?.labels,
+        list: atCheck.list,
+      }),
+    ).not.toMatch(/"(?:import|check)"/);
   });
 });

@@ -14,6 +14,7 @@ export interface TopWorkflow {
   executionCount: number;
   completedCount: number;
   failedCount: number;
+  stoppedCount: number;
   successRate: number;
   avgDurationMs: number | null;
 }
@@ -67,10 +68,26 @@ export const TopWorkflowsTable: React.FC<TopWorkflowsTableProps> = ({
         ),
       },
       {
+        accessorKey: "stoppedCount",
+        header: t("admin.analytics.table.stopped"),
+        cell: ({ row }) => (
+          <span className="block text-right text-muted-foreground">
+            {row.original.stoppedCount}
+          </span>
+        ),
+      },
+      {
         accessorKey: "successRate",
         header: t("admin.analytics.table.successRate"),
         cell: ({ row }) => (
-          <span className="text-right block">{formatPercentage(row.original.successRate)}</span>
+          <span className="text-right block">
+            {formatPercentage(row.original.successRate)}
+            {row.original.completedCount === 0 ? (
+              <span className="block text-xs text-muted-foreground">
+                {t("admin.analytics.noCompletions")}
+              </span>
+            ) : null}
+          </span>
         ),
       },
       {
@@ -85,12 +102,15 @@ export const TopWorkflowsTable: React.FC<TopWorkflowsTableProps> = ({
   );
 
   return (
-    <DataTable
-      columns={columns}
-      data={workflows}
-      emptyMessage={emptyMessage || t("admin.analytics.noWorkflowData")}
-      showPagination={false}
-      showToolbar={false}
-    />
+    <div>
+      <p className="mb-3 text-xs text-muted-foreground">{t("admin.analytics.successRateHint")}</p>
+      <DataTable
+        columns={columns}
+        data={workflows}
+        emptyMessage={emptyMessage || t("admin.analytics.noWorkflowData")}
+        showPagination={false}
+        showToolbar={false}
+      />
+    </div>
   );
 };

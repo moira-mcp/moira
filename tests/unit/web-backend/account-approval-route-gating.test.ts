@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, jest } from "@jest/globals";
 import express, { type NextFunction, type Request, type Response } from "express";
 import request from "supertest";
+import { readExecutionManagement } from "../../../packages/workflow-engine/src/utils/execution-management.js";
 
 const deployment = { accountApprovalEnabled: false, adminAnalyticsEnabled: false };
 const approvalState: { approvedAt: string | null } = { approvedAt: null };
@@ -51,6 +52,7 @@ jest.unstable_mockModule(
 );
 
 jest.unstable_mockModule("@mcp-moira/workflow-engine", () => ({
+  readExecutionManagement,
   DatabaseRepository: class {
     async listWorkflows() {
       return listWorkflows();
@@ -60,6 +62,9 @@ jest.unstable_mockModule("@mcp-moira/workflow-engine", () => ({
     }
     async getSettingDefinitions() {
       return getSettingDefinitions();
+    }
+    async getExecutingExecutionIds() {
+      return [];
     }
   },
   getActiveExtensionRegistry: () => null,
@@ -89,7 +94,7 @@ jest.unstable_mockModule("@mcp-moira/shared", () => ({
   getDbPath: () => "/definitely-not-present/moira.db",
   getFeatureResolver: () => ({ isEnabled }),
   getGlobalSettingsService: jest.fn(),
-  getLockService: jest.fn(),
+  getLockService: () => ({ getActiveExecutionIds: async () => new Set<string>() }),
   getLoadTestSecret: jest.fn(),
   getMcpTextService: jest.fn(),
   getRateLimitWhitelist: () => [],
@@ -342,6 +347,8 @@ describe("account approval route capability", () => {
           id: "execution-new",
           workflowId: "workflow-2",
           status: "running",
+          displayStatus: "waiting-agent",
+          stopReason: null,
           timestamp: 300,
           action: "Workflow execution running",
         },
@@ -349,6 +356,8 @@ describe("account approval route capability", () => {
           id: "execution-middle",
           workflowId: "workflow-1",
           status: "failed",
+          displayStatus: "completed",
+          stopReason: null,
           timestamp: 200,
           action: "Workflow execution failed",
         },
@@ -356,6 +365,8 @@ describe("account approval route capability", () => {
           id: "execution-old",
           workflowId: "workflow-1",
           status: "completed",
+          displayStatus: "completed",
+          stopReason: null,
           timestamp: 100,
           action: "Workflow execution completed",
         },

@@ -176,7 +176,7 @@ export function AnswerForm({
         {t("pages.runPage.answer.title")}
       </p>
       <p className="text-xs text-muted-foreground">
-        {t("pages.runPage.answer.body", {
+        {t(blockName ? "pages.runPage.answer.body" : "pages.runPage.answer.bodyNoBlock", {
           step: step.displayName ?? step.id,
           block: blockName ?? "",
         })}

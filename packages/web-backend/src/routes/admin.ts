@@ -8,6 +8,7 @@ import {
   DatabaseRepository,
   getActiveExtensionRegistry,
   TrustedExtensionChannelApprovalService,
+  readExecutionManagement,
 } from "@mcp-moira/workflow-engine";
 import { asyncHandler, createApiError } from "../middleware/error-middleware.js";
 import { apiLimiter } from "../middleware/rate-limit-middleware.js";
@@ -792,26 +793,36 @@ router.get(
  */
 router.get(
   "/stats",
-  asyncHandler(async (_req: Request, res: Response) => {
+  asyncHandler(async (req: Request, res: Response) => {
     // Get counts from repository
     const workflows = await repository.listWorkflows("system-admin"); // Admin sees all
     const executions = await repository.listExecutions();
     const systemStatus = await getAdminSystemStatus();
 
     // Count active executions (Issue #386: only "running" status for active)
-    const activeExecutions = executions.filter((e) => e.status === "running").length;
+    const activeExecutions = executions.filter(
+      (e) => e.status === "running" && e.stopReason == null,
+    ).length;
 
     // Recent activity (last 10 executions)
-    const recentActivity = executions
+    const recentExecutions = executions
       .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
-      .slice(0, 10)
-      .map((e) => ({
-        id: e.executionId,
-        workflowId: e.workflowId,
-        status: e.status,
-        timestamp: e.createdAt,
-        action: `Workflow execution ${e.status}`,
-      }));
+      .slice(0, 10);
+    const management = await readExecutionManagement(
+      repository,
+      recentExecutions,
+      (req as AuthenticatedRequest).userId,
+      await getLockService().getActiveExecutionIds(),
+    );
+    const recentActivity = recentExecutions.map((e) => ({
+      id: e.executionId,
+      workflowId: e.workflowId,
+      status: e.status,
+      displayStatus: management.get(e.executionId)!.displayStatus,
+      stopReason: management.get(e.executionId)!.stopReason,
+      timestamp: e.createdAt,
+      action: `Workflow execution ${e.status}`,
+    }));
 
     res.json({
       success: true,
@@ -1091,6 +1102,12 @@ router.get(
     }
 
     const taskTitles = await executionTaskTitles([execution]);
+    const management = await readExecutionManagement(
+      repository,
+      [execution],
+      (req as AuthenticatedRequest).userId,
+      await getLockService().getActiveExecutionIds(),
+    );
 
     res.json({
       success: true,
@@ -1102,6 +1119,7 @@ router.get(
         note: execution.note ?? null,
         userId: execution.userId,
         status: execution.status,
+        ...management.get(execution.executionId),
         currentNodeId: execution.currentNodeId,
         waitingForInputNodeId: execution.waitingForInputNodeId,
         context: {
@@ -1852,6 +1870,11 @@ router.get(
             ["running", "waiting", "completed", "failed", "locked"].includes(s),
           ) as LegacyStatus[])
       : undefined;
+    const includeStopped = statusParam?.split(",").includes("stopped")
+      ? true
+      : rawStatus?.length
+        ? false
+        : undefined;
 
     let adminDbStatuses: ReturnType<typeof mapLegacyStatusArray>["dbStatuses"] | undefined;
     let adminHasLockedFilter = false;
@@ -1870,6 +1893,7 @@ router.get(
     const result = await repository.listExecutionsWithFilters({
       userId: userId || undefined,
       status: adminDbStatuses,
+      includeStopped,
       search,
       sort: "createdAt",
       sortOrder: "desc",
@@ -1889,6 +1913,12 @@ router.get(
     // Get active lock execution IDs for lock indicators
     const lockService = getLockService();
     const lockedExecutionIds = await lockService.getActiveExecutionIds();
+    const management = await readExecutionManagement(
+      repository,
+      result.executions,
+      (req as AuthenticatedRequest).userId,
+      lockedExecutionIds,
+    );
 
     let enrichedExecutions = result.executions.map((exec) => {
       const userInfo = userMap.get(exec.userId);
@@ -1904,7 +1934,9 @@ router.get(
         userEmail: userInfo?.email || null,
         userName: userInfo?.name || null,
         status: isLocked ? ("locked" as const) : exec.status,
+        ...management.get(exec.executionId),
         currentNodeId: exec.currentNodeId,
+        waitingForInputNodeId: exec.waitingForInputNodeId,
         createdAt: exec.createdAt,
         updatedAt: exec.updatedAt,
         completedAt: exec.completedAt,
@@ -1916,7 +1948,9 @@ router.get(
     // If filtering by "locked" only (not explicitly "running"), remove non-locked running execs
     let totalCount = result.total;
     if (adminHasLockedFilter && !adminOriginalIncludedRunning) {
-      enrichedExecutions = enrichedExecutions.filter((e) => e.status !== "running");
+      enrichedExecutions = enrichedExecutions.filter(
+        (e) => e.status !== "running" || e.displayStatus === "stopped",
+      );
       totalCount = enrichedExecutions.length;
     }
 
@@ -1971,6 +2005,12 @@ router.get(
     // Get active lock info
     const lockService = getLockService();
     const activeLock = await lockService.getActiveLock(executionId);
+    const management = await readExecutionManagement(
+      repository,
+      [execution],
+      (req as AuthenticatedRequest).userId,
+      new Set(activeLock ? [executionId] : []),
+    );
 
     res.json({
       success: true,
@@ -1986,6 +2026,7 @@ router.get(
         userName: userInfo?.name || null,
         status:
           execution.status === "running" && activeLock ? ("locked" as const) : execution.status,
+        ...management.get(executionId),
         currentNodeId: execution.currentNodeId,
         waitingForInputNodeId: execution.waitingForInputNodeId,
         context: execution.globalContext,

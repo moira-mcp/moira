@@ -28,6 +28,7 @@ export interface CardAction {
   onClick: () => void;
   variant?: "default" | "destructive" | "success";
   testId?: string;
+  disabled?: boolean;
 }
 
 /**
@@ -84,6 +85,7 @@ const ActionsGroup: React.FC<{
         aria-label={action.label}
         data-hint={action.label}
         data-testid={action.testId}
+        disabled={action.disabled}
       >
         {action.icon}
       </Button>
@@ -159,14 +161,17 @@ function SlottedBody({
           </div>
         )}
         {note && (
-          <div className="text-xs leading-5 text-foreground/80" data-slot="card-note">
+          <div
+            className="min-w-0 text-xs leading-5 text-foreground/80 [overflow-wrap:anywhere]"
+            data-slot="card-note"
+          >
             {note}
           </div>
         )}
         {meta && (
           <div
             className={cn(
-              "flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground",
+              "flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground [&>span]:min-w-0 [&>span]:[overflow-wrap:anywhere]",
               compact && "mt-auto",
             )}
             data-slot="card-meta"

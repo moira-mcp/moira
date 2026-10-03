@@ -13,6 +13,16 @@ import { getDbPath, isLogSqlEnabled, getNodeEnv, isTestEnvironment } from "../co
 
 let dbInstance: BetterSQLite3Database<typeof schema> | null = null;
 let sqliteInstance: Database.Database | null = null;
+const managementFunctions = new WeakSet<Database.Database>();
+
+/** Unicode case folding shared by singleton and independent overview connections. */
+export function registerExecutionManagementFunctions(sqlite: Database.Database): void {
+  if (managementFunctions.has(sqlite)) return;
+  sqlite.function("moira_lower", { deterministic: true }, (value) =>
+    typeof value === "string" ? value.toLowerCase() : "",
+  );
+  managementFunctions.add(sqlite);
+}
 
 class DrizzleLogger {
   private logger = createLogger({ component: "Drizzle" });
@@ -51,6 +61,7 @@ export function getDatabase() {
     }
 
     sqliteInstance = new Database(resolvedPath);
+    registerExecutionManagementFunctions(sqliteInstance);
 
     sqliteInstance.pragma("journal_mode = WAL"); // WAL for concurrent reads + faster writes
     sqliteInstance.pragma("synchronous = NORMAL"); // Safe with WAL, faster than FULL

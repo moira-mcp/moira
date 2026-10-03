@@ -9,6 +9,7 @@ import {
   getWorkflowService,
   user,
   WorkflowRepository,
+  metadataRevision,
 } from "@mcp-moira/shared";
 import {
   DatabaseRepository,
@@ -22,6 +23,7 @@ import {
   overviewRows,
 } from "../../packages/web-backend/src/services/execution-overview.js";
 import { cpuTimeMs } from "../utils/cpu-time.js";
+import Database from "better-sqlite3";
 
 /**
  * The overview projects a page in batch: the number of database queries is the same for a page of
@@ -170,6 +172,289 @@ describe("the overview's cost does not grow with the page", () => {
     expect(fifty.page.runs.every((run) => run.stages?.labels.length === 2)).toBe(true);
     expect(fifty.queries).toBe(five.queries);
   });
+
+  test("exact current visible heading search precedes count/page and excludes unused native payload", async () => {
+    const definition = graph();
+    definition.metadata.name = "Selective heading fixture";
+    definition.progress!.title = "{{task_prompt}}";
+    const marker = "UNUSED_TITLE_SEARCH_PAYLOAD_";
+    definition.variableRegistry = {
+      task_prompt: {
+        type: "string",
+        description: "Authored title",
+        default: "{{#if ready}}{{chosen[index].name}}{{else}}Not ready{{/if}}",
+      },
+      unused_default: {
+        type: "string",
+        description: marker.repeat(1000),
+        default: marker.repeat(1000),
+      },
+    };
+    const repository = new DatabaseRepository();
+    const saved = await getWorkflowService().save({
+      graph: definition,
+      userId: USER_ID,
+      visibility: "private",
+    });
+    const authored = (await repository.getWorkflowGraph(saved.id, USER_ID))!;
+    const engine = MCPEngine.getInstance(repository);
+    const ids: string[] = [];
+    for (let index = 0; index < 3; index++) {
+      ids.push(
+        await engine.executor.startWorkflow(
+          authored,
+          {
+            ready: true,
+            index: 1,
+            chosen: [{ name: "Earlier" }, { name: "Точная видимая задача" }],
+            unused: marker.repeat(1000),
+          },
+          USER_ID,
+          "Independent investigation note",
+        ),
+      );
+    }
+    const executions = new ExecutionRepository(getDatabase());
+    const first = (await executions.get(ids[0]))!;
+    await executions.updateExecutionTaskTitle(
+      ids[0],
+      USER_ID,
+      first.revision,
+      metadataRevision(null),
+      "Explicit replacement heading",
+    );
+    const dependencies = deps();
+    const fullDefinitions = jest.spyOn(dependencies.workflows, "getManyForUser");
+    const query = {
+      userId: USER_ID,
+      workflowId: saved.id,
+      status: "active" as const,
+      search: "ТОЧНАЯ ВИДИМАЯ",
+      sort: "activity" as const,
+      limit: 1,
+      offset: 2,
+    };
+    const { result: beyond, native } = await nativeRead(() => overviewPage(query, dependencies));
+    expect(beyond.total).toBe(2);
+    expect(beyond.runs).toEqual([]);
+    expect(native).not.toContain(marker);
+    expect(fullDefinitions.mock.calls.every(([requested]) => requested.length === 0)).toBe(true);
+    const visible = await overviewPage({ ...query, offset: 0, limit: 10 }, deps());
+    expect(visible.runs.map((run) => run.executionId).sort()).toEqual(ids.slice(1).sort());
+    expect(visible.runs.every((run) => run.title === "Точная видимая задача")).toBe(true);
+    const replacement = await overviewPage(
+      { ...query, search: "Explicit replacement", offset: 0 },
+      deps(),
+    );
+    expect(replacement.total).toBe(1);
+    expect(replacement.runs[0].executionId).toBe(ids[0]);
+  });
+
+  test("a same-generation title context change is retried before SQL membership", async () => {
+    const definition = graph();
+    definition.metadata.name = "Heading generation fixture";
+    definition.progress!.title = "{{task_request}}";
+    const repository = new DatabaseRepository();
+    const saved = await getWorkflowService().save({
+      graph: definition,
+      userId: USER_ID,
+      visibility: "private",
+    });
+    const authored = (await repository.getWorkflowGraph(saved.id, USER_ID))!;
+    const id = await MCPEngine.getInstance(repository).executor.startWorkflow(
+      authored,
+      { task_request: "Obsolete visible heading" },
+      USER_ID,
+    );
+    const initialRevision = (await repository.getExecution(id))!.revision;
+    const dependencies = deps();
+    const original = dependencies.executions.getManyForProgress.bind(dependencies.executions);
+    let changed = false;
+    jest
+      .spyOn(dependencies.executions, "getManyForProgress")
+      .mockImplementation(async (ids, reads, purpose) => {
+        const result = await original(ids, reads, purpose);
+        if (
+          !changed &&
+          purpose === "title" &&
+          reads?.some((read) => read.variables?.includes("task_request"))
+        ) {
+          changed = true;
+          getSqliteInstance()
+            .prepare(
+              "UPDATE workflowExecution SET context=json_set(context,'$.variables.task_request',?) WHERE executionId=?",
+            )
+            .run("Latest visible heading", id);
+        }
+        return result;
+      });
+    const page = await overviewPage(
+      {
+        userId: USER_ID,
+        workflowId: saved.id,
+        status: "active",
+        search: "Latest visible",
+        sort: "activity",
+        limit: 1,
+        offset: 0,
+      },
+      dependencies,
+    );
+    expect(changed).toBe(true);
+    expect(page.total).toBe(1);
+    expect(page.runs[0]).toMatchObject({ executionId: id, title: "Latest visible heading" });
+    expect((await repository.getExecution(id))!.revision).toBe(initialRevision);
+    const obsolete = await overviewPage(
+      {
+        userId: USER_ID,
+        workflowId: saved.id,
+        status: "active",
+        search: "Obsolete visible",
+        sort: "activity",
+        limit: 1,
+        offset: 0,
+      },
+      deps(),
+    );
+    expect(obsolete.total).toBe(0);
+  });
+
+  test("older definitions use one complete migration fallback and preserve literal title data", async () => {
+    const definition = graph();
+    definition.metadata.name = "Earlier schema heading fixture";
+    definition.progress!.title = "{{task_text}}";
+    const repository = new DatabaseRepository();
+    const saved = await getWorkflowService().save({
+      graph: definition,
+      userId: USER_ID,
+      visibility: "private",
+    });
+    const authored = (await repository.getWorkflowGraph(saved.id, USER_ID))!;
+    const ids: string[] = [];
+    for (let index = 0; index < 2; index++)
+      ids.push(
+        await MCPEngine.getInstance(repository).executor.startWorkflow(
+          authored,
+          {
+            task_text: "Literal {{secret}} reference",
+            secret: "Hidden expanded value",
+          },
+          USER_ID,
+        ),
+      );
+    getSqliteInstance()
+      .prepare("UPDATE workflow SET graph=json_remove(graph,'$.metadata.schemaVersion') WHERE id=?")
+      .run(saved.id);
+    const dependencies = deps();
+    const fallback = jest.spyOn(dependencies.workflows, "getManyForUser");
+    const query = {
+      userId: USER_ID,
+      workflowId: saved.id,
+      status: "active" as const,
+      search: "{{secret}}",
+      sort: "activity" as const,
+      limit: 1,
+      offset: 2,
+    };
+    const page = await overviewPage(query, dependencies);
+    expect(page.total).toBe(2);
+    expect(page.runs).toEqual([]);
+    expect(fallback.mock.calls.filter(([requested]) => requested.length > 0)).toEqual([
+      [[saved.id], USER_ID],
+    ]);
+    const hidden = await overviewPage({ ...query, search: "Hidden expanded", offset: 0 }, deps());
+    expect(hidden.total).toBe(0);
+    const visible = await overviewPage({ ...query, offset: 0, limit: 10 }, deps());
+    expect(visible.runs.map((run) => run.executionId).sort()).toEqual(ids.sort());
+    expect(visible.runs.every((run) => run.title === "Literal {{secret}} reference")).toBe(true);
+  });
+
+  test.each(["context", "definition"])(
+    "another SQLite connection changing %s cannot return stale heading membership",
+    async (mutation) => {
+      const definition = graph();
+      definition.metadata.name = `Independent ${mutation} heading fixture`;
+      definition.progress!.title = "{{task_request}}";
+      const repository = new DatabaseRepository();
+      const saved = await getWorkflowService().save({
+        graph: definition,
+        userId: USER_ID,
+        visibility: "private",
+      });
+      const authored = (await repository.getWorkflowGraph(saved.id, USER_ID))!;
+      const id = await MCPEngine.getInstance(repository).executor.startWorkflow(
+        authored,
+        { task_request: "Earlier heading generation" },
+        USER_ID,
+      );
+      const before = (await repository.getExecution(id))!;
+      const other = new Database(getSqliteInstance().name);
+      const dependencies = deps();
+      let changed = false;
+      try {
+        if (mutation === "context") {
+          const original = dependencies.executions.getManyForProgress.bind(dependencies.executions);
+          jest
+            .spyOn(dependencies.executions, "getManyForProgress")
+            .mockImplementation(async (ids, reads, purpose) => {
+              const result = await original(ids, reads, purpose);
+              if (
+                !changed &&
+                purpose === "title" &&
+                reads?.some((read) => read.variables?.includes("task_request"))
+              ) {
+                changed = true;
+                expect(
+                  other
+                    .prepare(
+                      "UPDATE workflowExecution SET context=json_set(context,'$.variables.task_request',?) WHERE executionId=?",
+                    )
+                    .run("Latest heading generation", id).changes,
+                ).toBe(1);
+              }
+              return result;
+            });
+        } else {
+          const original = dependencies.workflows.getManyForTaskTitles.bind(dependencies.workflows);
+          jest
+            .spyOn(dependencies.workflows, "getManyForTaskTitles")
+            .mockImplementation(async (...args) => {
+              const result = await original(...args);
+              if (!changed) {
+                changed = true;
+                expect(
+                  other
+                    .prepare(
+                      "UPDATE workflow SET graph=json_set(graph,'$.progress.title',?) WHERE id=?",
+                    )
+                    .run("Latest heading generation", saved.id).changes,
+                ).toBe(1);
+              }
+              return result;
+            });
+        }
+        const query = {
+          userId: USER_ID,
+          workflowId: saved.id,
+          status: "active" as const,
+          search: "Latest heading generation",
+          sort: "activity" as const,
+          limit: 1,
+          offset: 0,
+        };
+        const page = await overviewPage(query, dependencies);
+        expect(changed).toBe(true);
+        expect(page.total).toBe(1);
+        expect(page.runs[0]).toMatchObject({ executionId: id, title: "Latest heading generation" });
+        expect((await repository.getExecution(id))!.revision).toBe(before.revision);
+        expect(
+          (await overviewPage({ ...query, search: "Earlier heading generation" }, deps())).total,
+        ).toBe(0);
+      } finally {
+        other.close();
+      }
+    },
+  );
 
   test("unused context and visit payloads never cross the native compact-read boundary", async () => {
     const repository = new ExecutionRepository(getDatabase());
@@ -701,7 +986,7 @@ describe("the overview's cost does not grow with the page", () => {
       );
       expect(measured.result.total).toBe(237);
       expect(measured.result.roots).toHaveLength(237);
-      expect(measured.result.nodes).toHaveLength(811);
+      expect(measured.result.nodes).toHaveLength(307);
       expect(measured.result.nodes.filter((node) => node.matches)).toHaveLength(307);
       expect(measured.cpuMs).toBeLessThan(500);
       expect(

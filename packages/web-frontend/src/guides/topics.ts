@@ -15,6 +15,7 @@ export const REQUIRED_TOPICS: Readonly<Record<string, Readonly<Record<string, st
     "try-prompt": "try",
     recommended: "recommended",
     "work-area": "work",
+    "stop-run": "work",
     "show-me-around": "show-me-around",
   },
   flows: {
@@ -46,6 +47,7 @@ export const REQUIRED_TOPICS: Readonly<Record<string, Readonly<Record<string, st
     "reconnect-label": "connections",
     "add-choice": "choice",
     "undo-reset": "bar",
+    "stop-paused-run": "bar",
     "inline-validation": "validation",
     "stale-revision": "stale",
   },
@@ -56,10 +58,13 @@ export const REQUIRED_TOPICS: Readonly<Record<string, Readonly<Record<string, st
     "panel-tabs": "panel-tabs",
     "answer-waiting-step": "answer",
     "notification-link": "notifications",
+    "stop-run": "notifications",
   },
   overview: {
     "runs-in-progress": "intro",
-    "waiting-for-you-first": "status",
+    "stable-hour-order": "status",
+    "recent-activity-period": "intro",
+    "stop-run": "board",
     "answer-in-chat": "status",
     "find-stalled": "idle",
     "filters-in-url": "idle",
@@ -71,6 +76,7 @@ export const REQUIRED_TOPICS: Readonly<Record<string, Readonly<Record<string, st
     "what-is-a-run": "intro",
     "status-filter": "status",
     "open-run": "list",
+    "stop-run": "list",
   },
   notes: {
     "what-is-a-note": "intro",

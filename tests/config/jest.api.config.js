@@ -12,7 +12,8 @@ export default {
   testMatch: ["<rootDir>/tests/api/**/*.test.ts"],
   testPathIgnorePatterns,
   testTimeout: 90000,
-  maxWorkers: 5, // WAL mode allows concurrent access; admin-logout-all removed to enable parallelism
+  // Fixtures share one server database; global aggregate assertions require isolated writes.
+  maxWorkers: 1,
   workerIdleMemoryLimit: "4GB",
   setupFiles: ["<rootDir>/tests/config/jest-memory-setup.js"],
   // API tests need browser-equivalent Origin headers for direct Better Auth requests.

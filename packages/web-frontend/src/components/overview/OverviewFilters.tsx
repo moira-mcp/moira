@@ -85,7 +85,7 @@ export function OverviewFiltersPopover({
       <PopoverContent
         align="end"
         collisionPadding={16}
-        className="grid w-[300px] gap-3"
+        className="grid max-h-[var(--radix-popover-content-available-height)] w-[300px] max-w-[calc(100vw-2rem)] gap-3 overflow-y-auto"
         data-testid="overview-filters-popover"
       >
         <div className="grid gap-1">
@@ -111,48 +111,56 @@ export function OverviewFiltersPopover({
             </SelectContent>
           </Select>
         </div>
-        <fieldset className="grid gap-1">
-          <legend className="mb-1 text-xs text-muted-foreground">
-            {t("pages.overview.filters.range")}
-          </legend>
-          <div className="grid gap-2">
-            <div className="grid gap-1">
-              <Label
-                htmlFor="overview-active-from"
-                className="text-xs font-normal text-muted-foreground"
-              >
-                {t("pages.overview.filters.from")}
-              </Label>
-              <Input
-                id="overview-active-from"
-                type="datetime-local"
-                value={toLocalInput(filters.activeFrom)}
-                onChange={(event) =>
-                  onChange({ activeFrom: fromLocalInput(event.target.value), page: 1 })
-                }
-                data-testid="overview-filter-from"
-              />
+        <details className="min-w-0">
+          <summary className="cursor-pointer text-xs text-muted-foreground">
+            {t("pages.overview.filters.advanced")}
+          </summary>
+          <fieldset className="mt-2 grid gap-1">
+            <legend className="mb-1 text-xs text-muted-foreground">
+              {t("pages.overview.filters.range")}
+            </legend>
+            <div className="grid gap-2">
+              <div className="grid gap-1">
+                <Label
+                  htmlFor="overview-active-from"
+                  className="text-xs font-normal text-muted-foreground"
+                >
+                  {t("pages.overview.filters.from")}
+                </Label>
+                <Input
+                  id="overview-active-from"
+                  type="datetime-local"
+                  value={toLocalInput(filters.activeFrom)}
+                  onChange={(event) =>
+                    onChange({ activeFrom: fromLocalInput(event.target.value), page: 1 })
+                  }
+                  data-testid="overview-filter-from"
+                />
+              </div>
+              <div className="grid gap-1">
+                <Label
+                  htmlFor="overview-active-to"
+                  className="text-xs font-normal text-muted-foreground"
+                >
+                  {t("pages.overview.filters.to")}
+                </Label>
+                <Input
+                  id="overview-active-to"
+                  type="datetime-local"
+                  value={toLocalInput(filters.activeTo)}
+                  onChange={(event) =>
+                    onChange({ activeTo: fromLocalInput(event.target.value), page: 1 })
+                  }
+                  data-testid="overview-filter-to"
+                />
+              </div>
             </div>
-            <div className="grid gap-1">
-              <Label
-                htmlFor="overview-active-to"
-                className="text-xs font-normal text-muted-foreground"
-              >
-                {t("pages.overview.filters.to")}
-              </Label>
-              <Input
-                id="overview-active-to"
-                type="datetime-local"
-                value={toLocalInput(filters.activeTo)}
-                onChange={(event) =>
-                  onChange({ activeTo: fromLocalInput(event.target.value), page: 1 })
-                }
-                data-testid="overview-filter-to"
-              />
-            </div>
-          </div>
-        </fieldset>
-        {workflows.length > 0 ? (
+          </fieldset>
+          <p className="mt-1 text-xs text-muted-foreground">
+            {t("pages.overview.filters.timeZone")}
+          </p>
+        </details>
+        {workflows.length > 0 || filters.workflowId ? (
           <div className="grid gap-1">
             <span className="text-xs text-muted-foreground">
               {t("pages.overview.filters.flow")}
@@ -165,11 +173,16 @@ export function OverviewFiltersPopover({
               options={[
                 { value: ALL, label: t("pages.overview.filters.allFlows") },
                 ...workflows.map((workflow) => ({ value: workflow.id, label: workflow.name })),
+                ...(filters.workflowId &&
+                !workflows.some((workflow) => workflow.id === filters.workflowId)
+                  ? [{ value: filters.workflowId, label: filters.workflowId }]
+                  : []),
               ]}
               searchPlaceholder={t("common.filters.search")}
               className="w-full"
               contentClassName="w-full"
               testId="overview-filter-flow"
+              positioning="inline"
             />
           </div>
         ) : null}
@@ -211,6 +224,9 @@ export function OverviewFiltersPopover({
             className="h-auto p-0"
             onClick={() =>
               onChange({
+                status: DEFAULT_FILTERS.status,
+                period: DEFAULT_FILTERS.period,
+                search: "",
                 idle: DEFAULT_FILTERS.idle,
                 activeFrom: null,
                 activeTo: null,

@@ -10,6 +10,30 @@ import axios, { AxiosInstance, AxiosResponse, AxiosError } from "axios";
 import type { WorkflowVersionStatistics } from "@mcp-moira/workflow-engine/progress-visual";
 import type { ProcessProjection } from "@mcp-moira/workflow-engine/process";
 import type { ExecutionProgressResult } from "@mcp-moira/workflow-engine";
+import type { ExecutionStages } from "@mcp-moira/workflow-engine/progress-visual";
+import type {
+  OverviewStatus,
+  OverviewStatusFilter,
+  OverviewSort,
+  OverviewIdle,
+  OverviewPeriod,
+  OverviewTimeFilter,
+  ExecutionStopCapability,
+  ExecutionManagementFields,
+  ExecutionStopRequest,
+  ExecutionStopResult,
+  OverviewChildCounts,
+} from "@mcp-moira/shared/execution-management";
+export type {
+  OverviewStatus,
+  OverviewStatusFilter,
+  OverviewSort,
+  OverviewIdle,
+  OverviewPeriod,
+  OverviewTimeFilter,
+  ExecutionStopCapability,
+  ExecutionManagementFields,
+} from "@mcp-moira/shared/execution-management";
 import type {
   CodespaceConnectionView,
   CodespaceControlView,
@@ -28,13 +52,6 @@ export interface WaitingNotificationMark {
   deliveryStatus: "delivered" | "partial" | "no_configured_channels" | "all_failed" | null;
   deliveredChannels: string[];
 }
-
-/** Where a run of the overview stands: the move is the person's, the agent's, a PIN's, or it ended. */
-export type OverviewStatus = "waiting-user" | "waiting-agent" | "locked" | "completed" | "stopped";
-/** The overview's status filter: every unfinished run (`active`), one status, or everything. */
-export type OverviewStatusFilter = "active" | OverviewStatus | "all";
-export type OverviewSort = "activity" | "idle" | "created";
-export type OverviewIdle = "1h" | "1d" | "3d" | "7d" | "30d";
 
 /** The latest notification about a run's wait, as the overview carries it. */
 export interface OverviewNotificationMark {
@@ -73,6 +90,8 @@ export interface OverviewRun {
   workflowVersion: string | null;
   title: string;
   status: OverviewStatus;
+  revision: number | null;
+  stopCapability: ExecutionStopCapability;
   /** The agent's recorded reason for stopping this run before it reached its end. */
   stopReason: string | null;
   /** False for a run shown only because its tree matches (drawn muted). */
@@ -81,7 +100,7 @@ export interface OverviewRun {
   refusalCount: number;
   note: string | null;
   current: { stepName: string | null; directiveShownAt: number | null } | null;
-  stages: { labels: string[]; activeIndex: number | null; doneCount: number } | null;
+  stages: ExecutionStages | null;
   list: {
     title: string;
     done: number | null;
@@ -90,11 +109,13 @@ export interface OverviewRun {
   } | null;
   lastActivityAt: number | null;
   subtreeActivityAt: number | null;
-  createdAt: number;
+  idleActivityAt: number | null;
+  createdAt: number | null;
   completedAt: number | null;
   parentExecutionId: string | null;
   parent: { executionId: string; title: string } | null;
-  children: { total: number; unfinished: number };
+  children: OverviewChildCounts;
+  childrenTotal: OverviewChildCounts;
   childRuns: OverviewRun[];
 }
 
@@ -104,6 +125,7 @@ export interface OverviewQuery {
   workflowId?: string;
   search?: string;
   idle?: OverviewIdle;
+  period?: OverviewPeriod;
   activeFrom?: number;
   activeTo?: number;
   sort?: OverviewSort;
@@ -112,6 +134,8 @@ export interface OverviewQuery {
 }
 
 export interface OverviewPage {
+  evaluatedAt: number;
+  effectiveTime: OverviewTimeFilter;
   total: number;
   limit: number;
   offset: number;
@@ -177,6 +201,41 @@ export interface ExecutionVariableAccess {
   revision: number;
 }
 
+/** Scalar management facts shared by lists, home cards and detail consumers. */
+export interface ExecutionSummary extends ExecutionManagementFields {
+  executionId: string;
+  workflowId: string;
+  workflowName?: string | null;
+  taskTitle?: string;
+  taskIdentity?: ExecutionTaskIdentity | null;
+  userId: string;
+  status: string;
+  currentNodeId: string | null;
+  waitingForInputNodeId?: string | null;
+  note?: string | null;
+  createdAt?: number;
+  updatedAt?: number;
+  completedAt?: number;
+  error?: string;
+  errorCount?: number;
+  userEmail?: string | null;
+  userName?: string | null;
+}
+
+export interface ExecutionDetail extends ExecutionSummary {
+  waitingForInputNodeId: string | null;
+  metadataRevisions?: { parent: string; context: string; reminders: string; taskIdentity?: string };
+  context: { variables: Record<string, unknown>; nodeStates: Record<string, unknown> };
+  errors?: Array<{
+    timestamp: number;
+    nodeId: string;
+    errorType: "validation" | "handler" | "system";
+    message: string;
+    input?: unknown;
+  }>;
+  waitingNotification?: WaitingNotificationMark | null;
+}
+
 // Public auth endpoints that should not trigger 401/403 interceptor redirects
 // NOTE: Only auth-related endpoints should be here. Other endpoints (settings, user/me)
 // should NOT be excluded - they need to trigger logout for blocked users.
@@ -230,7 +289,7 @@ const isPublicAuthEndpoint = (url?: string): boolean => {
  */
 /** One revision as a history listing shows it: metadata plus a short preview. */
 /** A run of the signed-in user, as the home page's work area lists it. */
-export interface WorkRun {
+export interface WorkRun extends ExecutionManagementFields {
   executionId: string;
   workflowId: string;
   workflowName: string | null;
@@ -1672,44 +1731,14 @@ export class MoiraApiClient {
     /** Only the caller's own runs, also for an admin. */
     mine?: boolean;
   }): Promise<{
-    executions: Array<{
-      executionId: string;
-      workflowId: string;
-      workflowName?: string | null; // Issue #421
-      taskTitle?: string;
-      taskIdentity?: ExecutionTaskIdentity | null;
-      userId: string;
-      status: string;
-      currentNodeId: string | null;
-      note?: string;
-      createdAt?: number;
-      updatedAt?: number;
-      completedAt?: number;
-      error?: string;
-      errorCount?: number; // Issue #386: Count of errors for badge display
-    }>;
+    executions: ExecutionSummary[];
     total: number;
     limit: number;
     offset: number;
   }> {
     try {
       type ExecutionsResponse = {
-        executions: Array<{
-          executionId: string;
-          workflowId: string;
-          workflowName?: string | null; // Issue #421
-          taskTitle?: string;
-          taskIdentity?: ExecutionTaskIdentity | null;
-          userId: string;
-          status: string;
-          currentNodeId: string | null;
-          note?: string;
-          createdAt?: number;
-          updatedAt?: number;
-          completedAt?: number;
-          error?: string;
-          errorCount?: number; // Issue #386
-        }>;
+        executions: ExecutionSummary[];
         total: number;
         limit: number;
         offset: number;
@@ -1758,6 +1787,7 @@ export class MoiraApiClient {
     if (query.workflowId) params.workflowId = query.workflowId;
     if (query.search) params.search = query.search;
     if (query.idle) params.idle = query.idle;
+    if (query.period) params.period = query.period;
     if (query.activeFrom !== undefined) params.activeFrom = String(query.activeFrom);
     if (query.activeTo !== undefined) params.activeTo = String(query.activeTo);
     if (query.sort) params.sort = query.sort;
@@ -1796,77 +1826,9 @@ export class MoiraApiClient {
     });
   }
 
-  async getExecution(executionId: string): Promise<{
-    executionId: string;
-    workflowId: string;
-    workflowName?: string | null;
-    taskTitle?: string;
-    taskIdentity?: ExecutionTaskIdentity | null;
-    note?: string | null;
-    userId: string;
-    status: string;
-    stopReason?: string | null;
-    currentNodeId: string | null;
-    waitingForInputNodeId: string | null;
-    revision: number;
-    metadataRevisions?: {
-      parent: string;
-      context: string;
-      reminders: string;
-      taskIdentity?: string;
-    };
-    context: {
-      variables: Record<string, unknown>;
-      nodeStates: Record<string, unknown>;
-    };
-    error?: string; // @deprecated - legacy error field
-    errors?: Array<{
-      // Issue #386: Full error log
-      timestamp: number;
-      nodeId: string;
-      errorType: "validation" | "handler" | "system";
-      message: string;
-      input?: unknown;
-    }>;
-    waitingNotification?: WaitingNotificationMark | null;
-  }> {
+  async getExecution(executionId: string): Promise<ExecutionDetail> {
     try {
-      type ExecutionResponse = {
-        execution: {
-          executionId: string;
-          workflowId: string;
-          workflowName?: string | null;
-          taskTitle?: string;
-          taskIdentity?: ExecutionTaskIdentity | null;
-          note?: string | null;
-          userId: string;
-          status: string;
-          stopReason?: string | null;
-          currentNodeId: string | null;
-          waitingForInputNodeId: string | null;
-          revision: number;
-          metadataRevisions?: {
-            parent: string;
-            context: string;
-            reminders: string;
-            taskIdentity?: string;
-          };
-          context: {
-            variables: Record<string, unknown>;
-            nodeStates: Record<string, unknown>;
-          };
-          error?: string;
-          errors?: Array<{
-            timestamp: number;
-            nodeId: string;
-            errorType: "validation" | "handler" | "system";
-            message: string;
-            input?: unknown;
-          }>;
-          waitingNotification?: WaitingNotificationMark | null;
-        };
-      };
-      const response = await this.client.get<ApiResponse<ExecutionResponse>>(
+      const response = await this.client.get<ApiResponse<{ execution: ExecutionDetail }>>(
         `/executions/${executionId}`,
       );
       return response.data.data!.execution;
@@ -1936,6 +1898,20 @@ export class MoiraApiClient {
       `/executions/${executionId}/variables`,
     );
     return response.data.data!;
+  }
+
+  /** Stop one owned execution against its current generation, preserving typed conflicts. */
+  async stopExecution(
+    executionId: string,
+    request: ExecutionStopRequest,
+  ): Promise<ExecutionStopResult> {
+    return this.wrapFailure("stop the task", async () => {
+      const response = await this.client.post<ApiResponse<ExecutionStopResult>>(
+        `/executions/${encodeURIComponent(executionId)}/stop`,
+        request,
+      );
+      return response.data.data!;
+    });
   }
 
   /** Rename owned running task metadata independently of the workflow step and arbitrary note. */
@@ -2019,52 +1995,8 @@ export class MoiraApiClient {
     search?: string;
     limit?: number;
     offset?: number;
-  }): Promise<{
-    executions: Array<{
-      executionId: string;
-      workflowId: string;
-      workflowName?: string | null;
-      taskTitle?: string;
-      taskIdentity?: ExecutionTaskIdentity | null;
-      note?: string;
-      userId: string;
-      userEmail: string | null;
-      userName: string | null;
-      status: string;
-      currentNodeId: string | null;
-      createdAt?: number;
-      updatedAt?: number;
-      completedAt?: number;
-      error?: string;
-    }>;
-    total: number;
-    limit: number;
-    offset: number;
-  }> {
+  }): Promise<{ executions: ExecutionSummary[]; total: number; limit: number; offset: number }> {
     try {
-      type AdminExecutionsResponse = {
-        executions: Array<{
-          executionId: string;
-          workflowId: string;
-          workflowName?: string | null;
-          taskTitle?: string;
-          taskIdentity?: ExecutionTaskIdentity | null;
-          note?: string;
-          userId: string;
-          userEmail: string | null;
-          userName: string | null;
-          status: string;
-          currentNodeId: string | null;
-          createdAt?: number;
-          updatedAt?: number;
-          completedAt?: number;
-          error?: string;
-        }>;
-        total: number;
-        limit: number;
-        offset: number;
-      };
-
       const params = new URLSearchParams();
       if (filters?.userId) params.append("userId", filters.userId);
       if (filters?.status) params.append("status", filters.status);
@@ -2075,7 +2007,14 @@ export class MoiraApiClient {
       const queryString = params.toString();
       const url = queryString ? `/admin/executions?${queryString}` : "/admin/executions";
 
-      const response = await this.client.get<ApiResponse<AdminExecutionsResponse>>(url);
+      const response = await this.client.get<
+        ApiResponse<{
+          executions: ExecutionSummary[];
+          total: number;
+          limit: number;
+          offset: number;
+        }>
+      >(url);
       return response.data.data!;
     } catch (error) {
       throw new ApiClientError("Failed to get admin executions", ApiErrorCode.INTERNAL_ERROR);
@@ -2166,70 +2105,9 @@ export class MoiraApiClient {
   /**
    * Get execution details (admin only - can view any execution)
    */
-  async getAdminExecution(executionId: string): Promise<{
-    executionId: string;
-    workflowId: string;
-    workflowName?: string | null;
-    taskTitle?: string;
-    taskIdentity?: ExecutionTaskIdentity | null;
-    note?: string | null;
-    userId: string;
-    userEmail: string | null;
-    userName: string | null;
-    status: string;
-    stopReason?: string | null;
-    currentNodeId: string | null;
-    waitingForInputNodeId: string | null;
-    context: {
-      variables: Record<string, unknown>;
-      nodeStates: Record<string, unknown>;
-    };
-    createdAt?: number;
-    updatedAt?: number;
-    completedAt?: number;
-    error?: string;
-    errors?: Array<{
-      // Issue #386: Full error log
-      timestamp: number;
-      nodeId: string;
-      errorType: "validation" | "handler" | "system";
-      message: string;
-      input?: unknown;
-    }>;
-  }> {
+  async getAdminExecution(executionId: string): Promise<ExecutionDetail> {
     try {
-      type AdminExecutionResponse = {
-        executionId: string;
-        workflowId: string;
-        workflowName?: string | null;
-        taskTitle?: string;
-        taskIdentity?: ExecutionTaskIdentity | null;
-        note?: string | null;
-        userId: string;
-        userEmail: string | null;
-        userName: string | null;
-        status: string;
-        stopReason?: string | null;
-        currentNodeId: string | null;
-        waitingForInputNodeId: string | null;
-        context: {
-          variables: Record<string, unknown>;
-          nodeStates: Record<string, unknown>;
-        };
-        createdAt?: number;
-        updatedAt?: number;
-        completedAt?: number;
-        error?: string;
-        errors?: Array<{
-          timestamp: number;
-          nodeId: string;
-          errorType: "validation" | "handler" | "system";
-          message: string;
-          input?: unknown;
-        }>;
-      };
-
-      const response = await this.client.get<ApiResponse<AdminExecutionResponse>>(
+      const response = await this.client.get<ApiResponse<ExecutionDetail>>(
         `/admin/executions/${executionId}`,
       );
       return response.data.data!;
@@ -2625,6 +2503,7 @@ export class MoiraApiClient {
     activeExecutions: number;
     completedExecutions: number;
     failedExecutions: number;
+    stoppedExecutions: number;
     timeRange: string;
   }> {
     try {
@@ -2636,6 +2515,7 @@ export class MoiraApiClient {
         activeExecutions: number;
         completedExecutions: number;
         failedExecutions: number;
+        stoppedExecutions: number;
         timeRange: string;
       };
       const response = await this.client.get<ApiResponse<OverviewResponse>>(
@@ -2654,11 +2534,25 @@ export class MoiraApiClient {
     total: number;
     completed: number;
     failed: number;
+    stopped: number;
     active: number;
     successRate: number;
     avgDurationMs: number | null;
-    byWorkflow: Array<{ workflowId: string; workflowName: string; count: number }>;
-    overTime: Array<{ date: string; count: number }>;
+    byWorkflow: Array<{
+      workflowId: string;
+      workflowName: string;
+      count: number;
+      completed: number;
+      failed: number;
+      stopped: number;
+    }>;
+    overTime: Array<{
+      date: string;
+      count: number;
+      completed: number;
+      failed: number;
+      stopped: number;
+    }>;
     timeRange: string;
   }> {
     try {
@@ -2667,11 +2561,25 @@ export class MoiraApiClient {
         total: number;
         completed: number;
         failed: number;
+        stopped: number;
         active: number;
         successRate: number;
         avgDurationMs: number | null;
-        byWorkflow: Array<{ workflowId: string; workflowName: string; count: number }>;
-        overTime: Array<{ date: string; count: number }>;
+        byWorkflow: Array<{
+          workflowId: string;
+          workflowName: string;
+          count: number;
+          completed: number;
+          failed: number;
+          stopped: number;
+        }>;
+        overTime: Array<{
+          date: string;
+          count: number;
+          completed: number;
+          failed: number;
+          stopped: number;
+        }>;
         timeRange: string;
       };
       const response = await this.client.get<ApiResponse<ExecutionsResponse>>(
@@ -2696,6 +2604,7 @@ export class MoiraApiClient {
       executionCount: number;
       completedCount: number;
       failedCount: number;
+      stoppedCount: number;
       successRate: number;
       avgDurationMs: number | null;
     }>;
@@ -2714,6 +2623,7 @@ export class MoiraApiClient {
           executionCount: number;
           completedCount: number;
           failedCount: number;
+          stoppedCount: number;
           successRate: number;
           avgDurationMs: number | null;
         }>;
@@ -2811,6 +2721,7 @@ export class MoiraApiClient {
     completionRate: number;
     totalExecutions: number;
     completedExecutions: number;
+    stoppedExecutions: number;
     hotSteps: Array<{ nodeId: string; executionCount: number; nodeName: string }>;
     deadSteps: Array<{ nodeId: string; nodeName: string }>;
     problematicSteps: Array<{
@@ -2831,6 +2742,7 @@ export class MoiraApiClient {
         completionRate: number;
         totalExecutions: number;
         completedExecutions: number;
+        stoppedExecutions: number;
         hotSteps: Array<{ nodeId: string; executionCount: number; nodeName: string }>;
         deadSteps: Array<{ nodeId: string; nodeName: string }>;
         problematicSteps: Array<{

@@ -52,6 +52,18 @@ export function dockerExecSync(command: string[], container?: string): string {
   }).trim();
 }
 
+/** Execute a bounded container command and await its real completion without blocking HTTP callers. */
+export async function dockerExecAsync(command: string[], container?: string): Promise<string> {
+  const containerName = container || getContainerName();
+  const context = process.env.REMOTE_DOCKER_CONTEXT;
+  const { stdout } = await execFileAsync(
+    "docker",
+    [...(context ? ["--context", context] : []), "exec", containerName, ...command],
+    { encoding: "utf-8" },
+  );
+  return stdout.trim();
+}
+
 /**
  * Execute sqlite3 command inside Docker container (sync)
  * Equivalent to: docker [--context ctx] exec <container> sqlite3 -cmd ".timeout 5000" <db> "<sql>"

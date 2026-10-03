@@ -2,7 +2,7 @@
 
 import React from "react";
 import { afterEach, beforeEach, describe, expect, jest, test } from "@jest/globals";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import "@testing-library/jest-dom/jest-globals";
 import { I18nextProvider } from "react-i18next";
 import { MemoryRouter } from "react-router-dom";
@@ -193,6 +193,101 @@ describe("administrator managed-workflow reconciliation status", () => {
       "database:workflow-reconciliation:system-admin/managed-flow#incoming",
     );
   });
+
+  test.each([
+    [4, 1, 8, 75, "75.0%"],
+    [0, 0, 8, 0, "0.0%"],
+  ])(
+    "keeps completed=%i, refusals=%i, stopped=%i and the completion denominator readable",
+    async (completed, failed, stopped, rate, formatted) => {
+      jest.mocked(apiClient.getFeatures).mockResolvedValue({
+        ...features,
+        deploymentMode: "saas",
+        features: { ...features.features, adminAnalytics: true, multiUserAdmin: true },
+      });
+      jest.spyOn(apiClient, "getAdminSystemStatus").mockResolvedValue(baseSystemStatus);
+      jest.mocked(apiClient.getAdminStats).mockResolvedValue({
+        ...baseSystemStatus,
+        totalWorkflows: 1,
+        totalExecutions: completed + stopped,
+        activeExecutions: 0,
+        recentActivity: [
+          {
+            id: "raw-failure",
+            workflowId: "flow",
+            status: "failed",
+            displayStatus: "completed",
+            stopReason: null,
+            timestamp: 1,
+            action: "Raw failure",
+          },
+          {
+            id: "stopped-marker",
+            workflowId: "flow",
+            status: "completed",
+            displayStatus: "completed",
+            stopReason: "",
+            timestamp: 1,
+            action: "Intentional stop",
+          },
+        ],
+      });
+      jest.mocked(apiClient.getAnalyticsOverview).mockResolvedValue({
+        totalUsers: 1,
+        totalWorkflows: 1,
+        totalExecutions: completed + stopped,
+        activeExecutions: 0,
+        completedExecutions: completed,
+        failedExecutions: failed,
+        stoppedExecutions: stopped,
+        timeRange: "month",
+      });
+      jest.mocked(apiClient.getAnalyticsExecutions).mockResolvedValue({
+        total: completed + stopped,
+        completed,
+        failed,
+        stopped,
+        active: 0,
+        successRate: rate,
+        avgDurationMs: null,
+        byWorkflow: [],
+        overTime: [],
+        timeRange: "month",
+      });
+      jest
+        .mocked(apiClient.getAnalyticsUsers)
+        .mockResolvedValue({ activeUsers: 1, newUsers: 0, topUsers: [], timeRange: "month" });
+      jest.mocked(apiClient.getAnalyticsTopWorkflows).mockResolvedValue({
+        workflows: [
+          {
+            workflowId: "flow",
+            workflowName: "Own flow",
+            executionCount: completed + stopped,
+            completedCount: completed,
+            failedCount: failed,
+            stoppedCount: stopped,
+            successRate: rate,
+            avgDurationMs: null,
+          },
+        ],
+        timeRange: "month",
+      });
+      renderDashboard();
+      const row = await screen.findByRole("row", { name: /Own flow/ });
+      expect(within(row).getByText(formatted)).toBeVisible();
+      expect(screen.getAllByText("Of completed: with refusals").length).toBeGreaterThan(0);
+      expect(screen.getAllByText("Stopped").length).toBeGreaterThan(0);
+      expect(screen.getAllByText(i18n.t("admin.analytics.successRateHint")).length).toBeGreaterThan(
+        0,
+      );
+      if (completed === 0)
+        expect(screen.getAllByText("No genuine completions in this period")).toHaveLength(2);
+      else expect(screen.queryByText("No genuine completions in this period")).toBeNull();
+      const activity = screen.getByTestId("admin-recent-activity");
+      expect(activity.querySelector('[data-status="failed"]')).toHaveClass("bg-destructive-fill");
+      expect(activity.querySelector('[data-status="stopped"]')).toHaveTextContent("Stopped");
+    },
+  );
 
   test("renders the clear state without an unresolved-error panel", async () => {
     jest.spyOn(apiClient, "getAdminSystemStatus").mockResolvedValue(baseSystemStatus);

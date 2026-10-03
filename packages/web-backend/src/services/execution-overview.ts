@@ -26,10 +26,21 @@ import {
   resolveExecutionTaskTitle,
   progressReadDependencies,
   PROGRESS_SUMMARY_LIST_WINDOW,
+  templateReadDependencies,
   type ExecutionProgressSummary,
   type WorkflowExecution,
   type WorkflowGraph,
 } from "@mcp-moira/workflow-engine";
+import {
+  executionStopCapability,
+  resolveOverviewQuery,
+  type ExecutionStopCapability,
+  type OverviewSort,
+  type OverviewChildCounts,
+  type OverviewTimeFilter,
+  type ResolvedOverviewQuery,
+} from "@mcp-moira/shared/execution-management";
+import type { ExecutionStages } from "@mcp-moira/workflow-engine/progress-visual";
 import { stepNameIn } from "../utils/current-step.js";
 
 /** Items of the active block's list shown around the current one. */
@@ -62,6 +73,8 @@ export interface OverviewRun {
   workflowVersion: string | null;
   title: string;
   status: OverviewStatus;
+  revision: number | null;
+  stopCapability: ExecutionStopCapability;
   stopReason: string | null;
   /** False for a run shown only because it belongs to a matching tree (shown muted). */
   matches: boolean;
@@ -69,7 +82,7 @@ export interface OverviewRun {
   refusalCount: number;
   note: string | null;
   current: { stepName: string | null; directiveShownAt: number | null } | null;
-  stages: { labels: string[]; activeIndex: number | null; doneCount: number } | null;
+  stages: ExecutionStages | null;
   list: {
     title: string;
     done: number | null;
@@ -85,13 +98,15 @@ export interface OverviewRun {
   } | null;
   lastActivityAt: number | null;
   subtreeActivityAt: number | null;
-  createdAt: number;
+  createdAt: number | null;
+  idleActivityAt: number | null;
   completedAt: number | null;
   parentExecutionId: string | null;
   /** For a root whose parent exists but is not shown in this tree: which run it continues. */
   parent: { executionId: string; title: string } | null;
-  children: { total: number; unfinished: number };
-  /** Child runs, in order: unfinished first, then by latest activity. */
+  children: OverviewChildCounts;
+  childrenTotal: OverviewChildCounts;
+  /** Child runs follow the selected server ordering, with stable creation/id ties. */
   childRuns: OverviewRun[];
 }
 
@@ -100,6 +115,8 @@ export interface OverviewResult {
   limit: number;
   offset: number;
   runs: OverviewRun[];
+  evaluatedAt: number;
+  effectiveTime: OverviewTimeFilter;
 }
 
 export interface OverviewDependencies {
@@ -177,6 +194,7 @@ function projectRow(
   flow: { name: string; graph: WorkflowGraph } | undefined,
   notification: ExecutionNotificationRow | undefined,
   now: number,
+  hasExecutingAttempt: boolean,
 ): OverviewRun {
   let progress: ExecutionProgressSummary | null = null;
   if (flow) {
@@ -205,6 +223,14 @@ function projectRow(
     workflowVersion: execution.workflowVersion ?? null,
     title: progress?.taskTitle ?? resolveExecutionTaskTitle(graph, execution),
     status: node.status,
+    revision:
+      Number.isSafeInteger(execution.revision) && execution.revision >= 0
+        ? execution.revision
+        : null,
+    stopCapability: executionStopCapability(
+      { ...execution, hasExecutingAttempt },
+      execution.userId,
+    ),
     stopReason: execution.stopReason ?? null,
     matches: node.matches,
     waitingForUser: waitingSource ? { ...waitingSource, notification: mark(notification) } : null,
@@ -219,6 +245,7 @@ function projectRow(
         : null,
     stages: progress
       ? {
+          entries: progress.nodes.map(({ id, label, status }) => ({ id, label, status })),
           labels: progress.nodes.map((block) => block.label),
           activeIndex: activeIndex >= 0 ? activeIndex : null,
           doneCount: progress.nodes.filter(
@@ -241,13 +268,15 @@ function projectRow(
             })),
           }
         : null,
-    lastActivityAt: execution.lastActivityAt ?? null,
-    subtreeActivityAt: execution.lastActivityAt ?? null,
-    createdAt: execution.createdAt,
+    lastActivityAt: node.lastActivityAt,
+    subtreeActivityAt: node.subtreeActivityAt,
+    idleActivityAt: node.idleActivityAt,
+    createdAt: node.createdAt,
     completedAt: execution.completedAt ?? null,
     parentExecutionId: execution.parentExecutionId ?? null,
     parent: null,
     children: { total: 0, unfinished: 0 },
+    childrenTotal: node.childrenTotal,
     childRuns: [],
   };
 }
@@ -258,6 +287,7 @@ async function projectNodes(
   roots: string[],
   userId: string,
   deps: OverviewDependencies,
+  sort: OverviewSort = "activity",
 ): Promise<OverviewRun[]> {
   const now = deps.now?.() ?? Date.now();
   const ids = nodes.map((node) => node.executionId);
@@ -384,6 +414,7 @@ async function projectNodes(
     finalReads = attempt >= 1 ? observed.map((read) => ({ ...read, arrayWindows: [] })) : observed;
   }
   const byId = new Map(executions.map((execution) => [execution.executionId, execution]));
+  const executing = new Set(await deps.executions.getExecutingIds(ids));
   const marks = deps.notifications.latestForCurrentWaits(
     nodes.filter((node) => node.status === "waiting-user").map((node) => node.executionId),
     now,
@@ -401,23 +432,18 @@ async function projectNodes(
         flows.get(execution.workflowId),
         marks.get(node.executionId),
         now,
+        executing.has(execution.executionId),
       ),
     );
   }
-  // Nest: every non-root under its parent, children unfinished first, then by latest activity.
+  // SQL supplies an acyclic display placement; persisted parent links remain separately inspectable.
   for (const node of nodes) {
     if (roots.includes(node.executionId)) continue;
     const row = rows.get(node.executionId);
     const parent = node.parentExecutionId ? rows.get(node.parentExecutionId) : undefined;
     if (row && parent) parent.childRuns.push(row);
   }
-  const subtreeActivity = (row: OverviewRun): number | null => {
-    let latest = row.lastActivityAt;
-    for (const child of row.childRuns) {
-      const childLatest = subtreeActivity(child);
-      if (childLatest !== null && (latest === null || childLatest > latest)) latest = childLatest;
-    }
-    row.subtreeActivityAt = latest;
+  for (const row of rows.values()) {
     row.children = {
       total: row.childRuns.length,
       unfinished: row.childRuns.filter(
@@ -426,19 +452,22 @@ async function projectNodes(
     };
     row.childRuns.sort(
       (a, b) =>
-        Number(a.status === "completed" || a.status === "stopped") -
-          Number(b.status === "completed" || b.status === "stopped") ||
-        (b.subtreeActivityAt ?? 0) - (a.subtreeActivityAt ?? 0),
+        (sort === "created"
+          ? 0
+          : sort === "idle"
+            ? (a.idleActivityAt ?? 0) - (b.idleActivityAt ?? 0)
+            : Math.floor((b.subtreeActivityAt ?? 0) / 3_600_000) -
+              Math.floor((a.subtreeActivityAt ?? 0) / 3_600_000)) ||
+        (b.createdAt ?? 0) - (a.createdAt ?? 0) ||
+        (a.executionId < b.executionId ? -1 : a.executionId > b.executionId ? 1 : 0),
     );
-    return latest;
-  };
+  }
   const result: OverviewRun[] = [];
   for (const rootId of roots) {
     const row = rows.get(rootId);
     if (!row) continue;
-    subtreeActivity(row);
     const parent = row.parentExecutionId ? byId.get(row.parentExecutionId) : undefined;
-    if (parent && parent.userId === userId) {
+    if (parent && parent.userId === userId && !rows.has(parent.executionId)) {
       row.parent = {
         executionId: parent.executionId,
         title: resolveExecutionTaskTitle(flows.get(parent.workflowId)?.graph, parent),
@@ -449,18 +478,156 @@ async function projectNodes(
   return result;
 }
 
-/** One page of the overview. */
+/** Selective legacy headings are resolved before SQL membership, never after pagination. */
+async function matchingTaskTitles(
+  query: ResolvedOverviewQuery,
+  deps: OverviewDependencies,
+  version: string,
+): Promise<string[]> {
+  if (!query.search) return [];
+  const needle = query.search.toLowerCase();
+  const candidates = deps.overview.searchCandidates(query);
+  const executions = new Map<string, WorkflowExecution>();
+  const read = async (
+    ids: string[],
+    specifications?: Parameters<ExecutionRepository["getManyForProgress"]>[1],
+  ) => {
+    for (let start = 0; start < ids.length; start += 500) {
+      const chunk = ids.slice(start, start + 500);
+      const requested = specifications?.filter((specification) =>
+        chunk.includes(specification.executionId),
+      );
+      for (const execution of await deps.executions.getManyForProgress(chunk, requested, "title"))
+        executions.set(execution.executionId, execution);
+      if (deps.overview.readVersion() !== version)
+        throw new ConflictError("Execution overview changed while reading; retry");
+    }
+  };
+  await read(candidates.map((candidate) => candidate.executionId));
+  const legacy = [...executions.values()].filter((execution) => !execution.taskIdentity);
+  const definitions = await deps.workflows.getManyForTaskTitles(
+    legacy.map((execution) => execution.workflowId),
+    query.userId,
+  );
+  if (deps.overview.readVersion() !== version)
+    throw new ConflictError("Execution overview changed while reading; retry");
+  const variableRequests = new Map<string, string>();
+  const defaultRequests = new Map<string, string>();
+  for (;;) {
+    const reads = legacy.map((execution) => {
+      const current = executions.get(execution.executionId)!;
+      const definition = definitions.get(execution.workflowId)?.definition;
+      return {
+        executionId: execution.executionId,
+        workflowId: execution.workflowId,
+        variables: definition?.progress?.title
+          ? templateReadDependencies(
+              [definition.progress.title],
+              definition.variableRegistry,
+              current.globalContext.variables,
+            )
+          : [],
+        historyRoots: [],
+        visits: false,
+      };
+    });
+    const scopes = new Map<string, Set<string> | null>();
+    for (const spec of reads) {
+      if (!definitions.get(spec.workflowId)?.current) continue;
+      const previous = scopes.get(spec.workflowId);
+      if (previous === null || spec.variables === null) scopes.set(spec.workflowId, null);
+      else scopes.set(spec.workflowId, new Set([...(previous ?? []), ...spec.variables]));
+    }
+    const defaults = [...scopes]
+      .map(([workflowId, variables]) => ({
+        workflowId,
+        variables: variables === null ? null : [...variables].sort(),
+      }))
+      .filter((spec) => defaultRequests.get(spec.workflowId) !== JSON.stringify(spec.variables));
+    if (defaults.length) {
+      const values = await deps.workflows.getTaskTitleDefaultsForUser(defaults, query.userId);
+      if (deps.overview.readVersion() !== version)
+        throw new ConflictError("Execution overview changed while reading; retry");
+      for (const spec of defaults) {
+        defaultRequests.set(spec.workflowId, JSON.stringify(spec.variables));
+        const definition = definitions.get(spec.workflowId);
+        if (definition) definition.definition.variableRegistry = values.get(spec.workflowId) ?? {};
+      }
+    }
+    const missing = reads.filter(
+      (spec) => variableRequests.get(spec.executionId) !== JSON.stringify(spec.variables),
+    );
+    if (missing.length) {
+      await read(
+        missing.map((spec) => spec.executionId),
+        missing,
+      );
+      for (const spec of missing)
+        variableRequests.set(spec.executionId, JSON.stringify(spec.variables));
+    }
+    if (!defaults.length && !missing.length) break;
+  }
+  return [...executions.values()]
+    .filter((execution) =>
+      resolveExecutionTaskTitle(definitions.get(execution.workflowId)?.definition, execution)
+        .toLowerCase()
+        .includes(needle),
+    )
+    .map((execution) => execution.executionId);
+}
+
+/** One request clock for inclusive selection, canonical projection and notification facts. */
 export async function overviewPage(
-  query: OverviewQuery,
+  query: OverviewQuery | ResolvedOverviewQuery,
   deps: OverviewDependencies,
 ): Promise<OverviewResult> {
-  const page = deps.overview.page(query);
-  return {
-    total: page.total,
-    limit: query.limit,
-    offset: query.offset,
-    runs: await projectNodes(page.nodes, page.roots, query.userId, deps),
-  };
+  const now = "now" in query ? query.now : (deps.now?.() ?? Date.now());
+  const advanced =
+    query.activeSince !== undefined ||
+    query.activeUntil !== undefined ||
+    query.idleSince !== undefined;
+  const resolved: ResolvedOverviewQuery =
+    "effectiveTime" in query
+      ? query
+      : {
+          ...resolveOverviewQuery({ ...query, period: advanced ? "all" : undefined }, now),
+          ...query,
+          now,
+          effectiveTime: advanced
+            ? {
+                kind: "range",
+                activeFrom: query.activeSince ?? null,
+                activeTo: query.activeUntil ?? query.idleSince ?? null,
+              }
+            : { kind: "period", period: "7d" },
+        };
+  const requestDeps = { ...deps, now: () => now };
+  for (let attempt = 0; ; attempt++) {
+    const version = deps.overview.readVersion();
+    try {
+      const headings = await matchingTaskTitles(resolved, requestDeps, version);
+      const page = deps.overview.page(resolved, headings);
+      const runs = await projectNodes(
+        page.nodes,
+        page.roots,
+        query.userId,
+        requestDeps,
+        resolved.sort,
+      );
+      if (deps.overview.readVersion() !== version)
+        throw new ConflictError("Execution overview changed while reading; retry");
+      return {
+        total: page.total,
+        limit: query.limit,
+        offset: query.offset,
+        runs,
+        evaluatedAt: now,
+        effectiveTime: resolved.effectiveTime,
+      };
+    } catch (error) {
+      if (!(error instanceof ConflictError) || attempt >= MAX_PROGRESS_READ_RETRIES) throw error;
+    }
+  }
 }
 
 /**
@@ -482,6 +649,10 @@ export async function overviewRows(
     status: fact.status,
     matches: true,
     lastActivityAt: fact.lastActivityAt,
+    createdAt: fact.createdAt,
+    subtreeActivityAt: fact.subtreeActivityAt,
+    idleActivityAt: fact.idleActivityAt,
+    childrenTotal: fact.children,
   }));
   const runs = await projectNodes(
     nodes,
@@ -495,6 +666,8 @@ export async function overviewRows(
     ...run,
     parent: null,
     subtreeActivityAt: byId.get(run.executionId)?.subtreeActivityAt ?? run.lastActivityAt,
-    children: byId.get(run.executionId)?.children ?? run.children,
+    idleActivityAt: byId.get(run.executionId)?.idleActivityAt ?? run.idleActivityAt,
+    childrenTotal: byId.get(run.executionId)?.children ?? run.childrenTotal,
+    children: { total: 0, unfinished: 0 },
   }));
 }

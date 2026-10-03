@@ -1,6 +1,6 @@
 /** @jest-environment jsdom */
 /**
- * The overview's interactive parts in the DOM: the side panel is a modal dialog that closes on Esc
+ * The overview's interactive parts in the DOM: the detail is a modal dialog that closes on Esc
  * and gives focus back, says what the person is waited for and that the answer goes to the agent,
  * and offers no answer form; a card's hint opens from the keyboard; and the live hook turns a burst
  * of changes into one refresh request, while a change of status refetches the page instead.
@@ -47,6 +47,8 @@ function run(overrides: Partial<OverviewRun> = {}): OverviewRun {
     workflowVersion: "1.0.0",
     title: "Import March orders",
     status: "waiting-user",
+    revision: 1,
+    stopCapability: { available: true, revision: 1 },
     stopReason: null,
     matches: true,
     waitingForUser: {
@@ -63,11 +65,13 @@ function run(overrides: Partial<OverviewRun> = {}): OverviewRun {
     list: null,
     lastActivityAt: NOW - 60 * 60_000,
     subtreeActivityAt: NOW - 60 * 60_000,
+    idleActivityAt: NOW - 60 * 60_000,
     createdAt: NOW - 2 * 60 * 60_000,
     completedAt: null,
     parentExecutionId: null,
     parent: null,
     children: { total: 0, unfinished: 0 },
+    childrenTotal: { total: 0, unfinished: 0 },
     childRuns: [],
     ...overrides,
   };
@@ -91,7 +95,7 @@ afterEach(() => {
   jest.useRealTimers();
 });
 
-describe("the overview's side panel", () => {
+describe("the overview's detail dialog", () => {
   function Harness({ shown }: { shown: OverviewRun }) {
     const [open, setOpen] = useState<string | null>(null);
     return (
@@ -275,6 +279,58 @@ describe("a dimmed card", () => {
   });
 });
 
+describe("wire child-count objects", () => {
+  test.each([0, 1])(
+    "a card shows %i selected children against the actual global count object",
+    async (visible) => {
+      const shown = run({
+        children: { total: visible, unfinished: visible },
+        childrenTotal: { total: 2, unfinished: 1 },
+      });
+      wrap(<OverviewCard run={shown} parentTitle={null} now={NOW} onOpen={() => undefined} />);
+      const flag = screen.getByTestId("overview-flag-children");
+      expect(flag).toHaveTextContent(`${visible}/2`);
+      act(() => flag.focus());
+      const hint = await screen.findByRole("tooltip");
+      expect(hint).toHaveTextContent(`Showing ${visible} of 2 child runs`);
+      expect(hint).toHaveTextContent("All child runs in progress: 1");
+    },
+  );
+
+  test.each([0, 1])(
+    "the detail explains %i shown children and preserves the complete count object",
+    async (visible) => {
+      jest.spyOn(apiClient, "getExecutionProgress").mockResolvedValue(null);
+      const child = run({
+        executionId: "child",
+        title: "Child task",
+        workflowName: "Child own flow",
+        childrenTotal: { total: 0, unfinished: 0 },
+      });
+      const shown = run({
+        children: { total: visible, unfinished: visible },
+        childrenTotal: { total: 2, unfinished: 1 },
+        childRuns: visible ? [child] : [],
+      });
+      wrap(
+        <OverviewPanel
+          runId={shown.executionId}
+          run={shown}
+          ancestors={[]}
+          now={NOW}
+          onOpen={() => undefined}
+          onClose={() => undefined}
+        />,
+      );
+      const section = await screen.findByTestId("overview-panel-children");
+      expect(section).toHaveTextContent(`Showing ${visible} of 2 child runs`);
+      expect(section).toHaveTextContent("All child runs in progress: 1");
+      expect(section).not.toHaveTextContent("[object Object]");
+      if (visible) expect(section).toHaveTextContent("Child own flow");
+    },
+  );
+});
+
 describe("a card's hints", () => {
   test("the status hint opens from the keyboard", async () => {
     wrap(<OverviewCard run={run()} parentTitle={null} now={NOW} onOpen={() => undefined} />);
@@ -294,7 +350,16 @@ describe("stopped runs in the overview", () => {
       completedAt: NOW - 60_000,
       lastActivityAt: NOW - 30 * 24 * 60 * 60_000,
       subtreeActivityAt: NOW - 30 * 24 * 60 * 60_000,
-      stages: { labels: ["Plan", "Work", "Check"], activeIndex: 1, doneCount: 1 },
+      stages: {
+        entries: [
+          { id: "plan", label: "Plan", status: "done" },
+          { id: "work", label: "Work", status: "active" },
+          { id: "check", label: "Check", status: "pending" },
+        ],
+        labels: ["Plan", "Work", "Check"],
+        activeIndex: 1,
+        doneCount: 1,
+      },
     });
 
   test("the card identifies a stopped run, shows its reason and preserves unfinished stages", () => {

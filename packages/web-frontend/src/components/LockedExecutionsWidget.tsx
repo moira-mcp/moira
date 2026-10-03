@@ -2,7 +2,7 @@
  * Widget showing currently locked executions as a banner above the execution list.
  * Users see their own locks, admins see all locks.
  */
-import React, { useState, useEffect } from "react";
+import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Lock, Clock, ChevronDown, ChevronUp } from "lucide-react";
@@ -11,23 +11,8 @@ import { Button } from "./ui/button";
 import { Badge } from "./ui/badge";
 import { apiClient } from "../services/api-client";
 import { ROUTES } from "../constants/routes";
-import type { ExecutionTaskIdentity } from "@mcp-moira/shared";
-
-interface LockedExecution {
-  executionId: string;
-  workflowId: string;
-  workflowName?: string | null;
-  taskTitle?: string;
-  taskIdentity?: ExecutionTaskIdentity | null;
-  status: string;
-  note?: string;
-  createdAt?: number;
-  updatedAt?: number;
-  hasActiveLock?: boolean;
-  // Admin-only fields
-  userEmail?: string | null;
-  userName?: string | null;
-}
+import { useResource } from "../hooks/useResource";
+import { ExecutionStopButton } from "./execution/ExecutionStop";
 
 interface LockedExecutionsWidgetProps {
   admin?: boolean;
@@ -51,37 +36,16 @@ export const LockedExecutionsWidget: React.FC<LockedExecutionsWidgetProps> = ({
 }) => {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const [locked, setLocked] = useState<LockedExecution[]>([]);
   const [expanded, setExpanded] = useState(false);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    const fetchLocked = async () => {
-      try {
-        setLoading(true);
-        if (admin) {
-          const result = await apiClient.getAdminExecutions({
-            status: "locked",
-            limit: 20,
-          });
-          setLocked(result.executions || []);
-        } else {
-          const result = await apiClient.getExecutions({
-            status: ["locked"],
-            limit: 20,
-          });
-          setLocked(result.executions || []);
-        }
-      } catch {
-        setLocked([]);
-      } finally {
-        setLoading(false);
-      }
-    };
-    fetchLocked();
-  }, [admin, refreshKey]);
-
-  if (loading || locked.length === 0) return null;
+  const key = `${admin ? "admin" : "owner"}:locked:${refreshKey}`;
+  const resource = useResource(key, async () => {
+    const result = admin
+      ? await apiClient.getAdminExecutions({ status: "locked", limit: 20 })
+      : await apiClient.getExecutions({ status: ["locked"], limit: 20 });
+    return { admin, executions: result.executions };
+  });
+  const locked = resource.data?.admin === admin ? resource.data.executions : [];
+  if (locked.length === 0) return null;
 
   const displayItems = expanded ? locked : locked.slice(0, 3);
   const hasMore = locked.length > 3;
@@ -111,7 +75,7 @@ export const LockedExecutionsWidget: React.FC<LockedExecutionsWidgetProps> = ({
               onClick={() => handleClick(exec.executionId)}
               data-testid="locked-execution-item"
             >
-              <div className="flex items-center gap-2 min-w-0">
+              <div className="flex min-w-0 flex-1 items-center gap-2">
                 <Badge
                   variant="outline"
                   className="text-[10px] px-1 py-0 h-4 border-yellow-500/50 text-yellow-600 dark:text-yellow-400 shrink-0"
@@ -133,10 +97,17 @@ export const LockedExecutionsWidget: React.FC<LockedExecutionsWidgetProps> = ({
                   <span className="text-xs text-muted-foreground truncate">({exec.userEmail})</span>
                 )}
               </div>
-              <div className="flex items-center gap-1 text-xs text-muted-foreground shrink-0">
+              <div className="flex shrink-0 items-center gap-1 text-xs text-muted-foreground">
                 <Clock className="w-3 h-3" />
-                {exec.updatedAt ? formatDuration(Date.now() - exec.updatedAt) : "—"}
+                {exec.updatedAt != null ? formatDuration(Date.now() - exec.updatedAt) : "—"}
               </div>
+              <ExecutionStopButton
+                target={{
+                  executionId: exec.executionId,
+                  title: exec.taskTitle ?? exec.workflowName ?? exec.workflowId,
+                  stopCapability: exec.stopCapability,
+                }}
+              />
             </div>
           ))}
           {hasMore && (

@@ -225,19 +225,32 @@ Higher-level composable components in `src/components/`:
 | FilterBar             | `FilterBar.tsx`                     | Standardized filter toolbar: search input, filters slot, actions slot, reset button; `foldFilters` puts filters and reset behind a counted "Filters" button             |
 | LabeledFilter         | `LabeledFilter.tsx`                 | Wrapper adding visible label above any filter control                                                                                                                   |
 | SortSelect            | `SortSelect.tsx`                    | Combined sort field+direction dropdown (e.g., "Created ↓")                                                                                                              |
-| SearchableSelect      | `SearchableSelect.tsx`              | Combobox with text search for dynamic option lists (absolute dropdown + cmdk)                                                                                           |
-| TopWorkflowsTable     | `TopWorkflowsTable.tsx`             | Shared DataTable for admin top workflows (AdminDashboard, AdminAnalytics)                                                                                               |
+| SearchableSelect      | `SearchableSelect.tsx`              | Combobox with text search for dynamic option lists (cmdk; absolute or inline dropdown placement)                                                                        |
+| TopWorkflowsTable     | `TopWorkflowsTable.tsx`             | Shared DataTable for admin top workflows (AdminDashboard)                                                                                                               |
 | ServerPagination      | `ServerPagination.tsx`              | Server-side pagination (total-based or cursor-based), matches DataTable style                                                                                           |
 | EmptyState            | `empty-state.tsx`                   | Centered icon + title + description + action CTA                                                                                                                        |
 | InlineError           | `inline-error.tsx`                  | Alert destructive with optional retry                                                                                                                                   |
 | PageLoader            | `page-loader.tsx`                   | Skeleton stat cards + table rows placeholder; only before a page's first data                                                                                           |
 | RouteSkeleton         | `route-skeleton.tsx`                | In-layout skeleton while a lazily loaded page's code arrives                                                                                                            |
 | DiagramSkeleton       | `route-skeleton.tsx`                | Quiet surface while the technical graph chunk arrives (flow and run pages)                                                                                              |
-| ConfirmDialog         | `confirm-dialog.tsx`                | AlertDialog wrapper with async onConfirm, loading state, ReactNode description                                                                                          |
+| ConfirmDialog         | `confirm-dialog.tsx`                | AlertDialog wrapper with async onConfirm, loading state, ReactNode description, form slot, immediate submit guard and focus return                                      |
 | RevisionHistoryDialog | `history/RevisionHistoryDialog.tsx` | Version history for anything the shared revision store versions; driven by a `RevisionHistorySource` (list, read revision, read current, restore); exports `DiffView`   |
 | VisibilityToggle      | `access/VisibilityToggle.tsx`       | A resource's visibility as a badge (read-only) or a button that flips it; used by the flow page and playbooks                                                           |
 
 DataTable subcomponents: `column-header.tsx` (sortable headers), `pagination.tsx` (page nav + i18n props + aria-labels), `toolbar.tsx` (search + reset).
+
+`ExecutionStopProvider` / `ExecutionStopButton` (`components/execution/ExecutionStop.tsx`) share the
+existing `ConfirmDialog` across overview cards/details, run Inspector, execution lists, home work,
+locked widgets and applicable paused-run editing warnings. The dialog's content slot holds a
+required trimmed reason; immediate submission guards prevent duplicates. Errors retain the reason,
+and a conflict requires an explicit current-state read and another owner decision. In-flight
+capability disables the action; terminal/non-owner/unavailable capability hides it. Responses from
+another execution lifetime cannot change the current decision. Connected opener or heading fallback
+receives focus on close. HintLayer supplies delegated hints rather than browser title tooltips.
+
+`ConfirmDialog` supports a content render slot, disabled confirmation, decision identity and focus
+return callback alongside its async loading/error behavior. The shared stop controller owns the
+revision and mutation decision; each surface retains its existing refresh owner.
 
 ServerPagination: used on pages with server-side pagination (Executions, Notes, Artifacts, AdminArtifacts, AdminExecutions, AdminTokens, DeletedWorkflows, UserManagement, AuditLog). Rendered outside the scroll container (sticky at bottom). With the opt-in `embedded` prop it renders instead as a static footer inside a card (top rule, wraps on narrow screens, no separate "page X of Y" counter); the Settings page's Active sessions and Connected apps lists use it that way. Supports total-based mode (shows page X of Y, first/prev/next/last) and cursor-based mode (prev/next only). Uses `common.pagination` i18n keys.
 
@@ -874,45 +887,56 @@ PreferencesSettings.tsx
 ### Overview page
 
 `/overview` (`pages/Overview.tsx`, components in `components/overview/`) shows the signed-in person's
-own runs from `GET /api/executions/overview`, 50 trees a page, runs waiting for the person first.
+own runs from `GET /api/executions/overview`, 50 trees a page. The default is active work with
+meaningful activity in the last seven days. Activity ordering uses UTC hour descending, immutable
+creation descending and execution id ascending, including nested siblings in grid and lanes.
 
 - **Filters in the URL** (`components/overview/model.ts`, `filtersFromParams` / `paramsWithFilters`):
   `status` (`active` by default, `waiting-user`, `waiting-agent`, `locked`, `completed`, `stopped`, `all`),
   `idle` (`1h`…`30d`), `activeFrom` / `activeTo` (epoch ms), `workflowId`, `sort` (`activity`,
-  `idle`, `created`), `refusals`, `q` (search: the note, the flow's name, the run id), `layout`
+  `idle`, `created`), `period` (`7d`, `30d`, `all`), `refusals`, `q` (search: the visible canonical
+  heading, separate note, own flow name and run id), `layout`
   (`grid`, `lanes`), `page`, and `run` for the open panel. Defaults are left out of the URL; a
-  malformed value reads as its default. The status switch and the «No movement > 7 days» chip
-  (`idle=7d`) sit in the toolbar, the rest in the Filters popover; the search box follows the URL
+  malformed value reads as its default. Period, status and the «No movement > 7 days» chip
+  (`idle=7d`) sit in the toolbar, with an explicit selection-meaning line. Custom dates are optional
+  advanced controls in the Filters popover. Period clears advanced time filters; idle or range
+  selects all time. Empty views offer recent defaults and older-work discovery. The search box follows the URL
   when a link or the browser changes it.
 - **Flow choices** (`services/workflow-choices.ts`): the workflow filter reads all accessible
   choices from `GET /api/workflows` in bounded, name-sorted pages. A failed or inconsistent page
   read shows a localized **Flow filter unavailable** alert with **Try again**; the overview
   remains usable while the list is unavailable. Only a complete successful read supplies the
   choices, and retry reloads them through the page's existing `useResource` store.
-- **Stopped runs**: `session stop-execution` records a reason and stops further execution. The
+- **Stopped runs**: the shared owner stop control or `session stop-execution` records a reason and stops further execution. The
   overview distinguishes `stopped` from `completed`; the default **In progress** and the
-  **Completed** filter exclude stopped runs. **Stopped** and **All** include them. Their neutral
+  **Completed** filter exclude stopped matches; a necessary stopped ancestor can remain as context.
+  **Stopped** and **All** include them. Their neutral
   status, reason strip (`overview-stop-reason`, full text in its hint), and stopped timestamp
   distinguish them from successful completion. The panel shows the complete reason
   (`overview-panel-stop-reason`) and a **Stopped** date. Stopped runs are never stale, show no
   current-step or waiting prompt, and preserve completed stages and checklist results without
   marking the remaining work complete.
 - **Card** (`OverviewCard.tsx`, `data-testid="overview-card"`, `data-run-id`, `data-status`): a
-  constant 340 px height with fixed rows — status (its meaning in a hint) and the age of the subtree's
+  constant 360 px height with zero-minimum fractional grid columns and fixed rows — status (its meaning in a hint) and the age of the retained matching tree's
   last step (dates in the hint), the two-line title as the button that opens the panel
-  (`overview-card-open`), the flow name or a «↳ child of «…»» relationship (the child's own flow
-  name is available in its hover/focus hint), then the waiting banner (`overview-waiting`)
+  (`overview-card-open`), its own flow name and, for a child, a separate «↳ child of «…»» relationship,
+  then the waiting banner (`overview-waiting`)
   or the stage strip, the plan (`overview-plan`) and the footer with flags for child runs and
   refusals (and an arbitrary note, even when it matches the title). The plan window (`planRows`) is centred on
   the current item in five or six one-line slots (six without the strip row); a current item longer
   than one line takes two; what does not fit folds into «↑ N» / «↓ N». The list items come from the
   overview's five-item window; a flow with stages but no list shows the stages as the plan.
 - **Groups** (`OverviewBoard.tsx`, `boardNode`): a run with children is a group
-  (`overview-group`, `data-depth`); children without children share the parent's row, nested groups
-  follow at full width; from depth 2 a group starts folded (`overview-group-fold`); rows the filter
-  admits only through their tree are dimmed. **Grid** or **Lanes** layout.
-- **Panel** (`OverviewPanel.tsx`, `overview-panel`): a modal `Sheet` that returns focus to what opened
-  it; the status and its meaning, the parent chain, what is waited for with the choices and the
+  (`overview-group`, `data-depth`); children follow server sibling ordering, including nested groups;
+  from depth 2 a group starts folded (`overview-group-fold`). Only eligible rows and required owned
+  ancestors are shown; context ancestors are labelled and dimmed, unrelated siblings are excluded.
+  Child flags distinguish shown direct children from all direct children using count objects.
+  **Grid** or **Lanes** layout.
+- **Panel** (`OverviewPanel.tsx`, `overview-panel`): a spacious bounded `Dialog` with independently
+  scrollable header and body through the existing `ScrollArea`, returning focus to a connected opener
+  or heading fallback. It shows full text without hover and retains same-run scroll through live
+  rename or stop, including when the run leaves the filtered page. It shows the status and its
+  meaning, the parent chain, what is waited for with the choices and the
   notification line (`waitingNotificationText`, shared with the run page), the current step, refusals,
   the active block's list through `BlockListCard` and all stages from `GET /api/executions/:id/progress`,
   child runs, dates and **Open run**. No answer form.
@@ -940,6 +964,14 @@ own runs from `GET /api/executions/overview`, 50 trees a page, runs waiting for 
   says why it is shown. The
   indicator (`overview-connection`, `data-state` = `connecting`, `live`, `reconnecting`, `polling`) is
   the page's only `aria-live` region.
+
+### Administrator dashboards
+
+Current administrator dashboards keep genuine completions and stopped executions separate. Refusal
+completions are a subset of genuine completions; success divides completions without refusals by
+genuine completions. With no genuine completion sample, numeric zero has an explanatory label.
+TopWorkflowsTable shows the stopped count on AdminDashboard. OperationalDashboard retains its
+existing metric names and excludes stopped work from completion throughput; starts still include it.
 
 ### Executions Page
 
@@ -1298,9 +1330,10 @@ live URL so a duplicate change pushes no history entry.
   screen (the "unavailable" banner is a first-load state only). The Locks tab holds its history in a
   `useResource` store: opening it again refreshes behind the list (`locks-panel` with
   `data-pending`), the spinner (`locks-loading`) shows only before the first list.
-- A detail response with `stopReason` displays **Stopped** in the neutral header badge
+- A detail response with non-null `stopReason`, including an empty marker, displays **Stopped** in the neutral header badge
   (`run-status`, `data-status="stopped"`) and the full reason below it (`run-stop-reason`), in
-  the run view. The recorded route and partial progress remain available.
+  the run view. The recorded route and partial progress remain available, with a neutral unfinished
+  frontier, no active pulse/wait prompt and frozen duration rather than fabricated completed stages.
 - Under the header, while the shown projection carries `waitingForUser`, a banner
   (`run-waiting-for-user`, `role="status"`, `data-source` = `gate` or `agent`) reads "Waiting for
   you: <label> — answer the agent in the chat" for a step marked `humanGate`, or "The agent is asking
@@ -2867,7 +2900,7 @@ Page-level wrapper animations are **not used** on `AnimatedPage` (a `h-full` wra
 
 - CSS classes: `animate-in fade-in slide-in-from-bottom-3 duration-300 fill-mode-both`
 - Fade from transparent + slide up 12px over 300ms
-- Applied to: Dashboard, Settings, AdminDashboard, AdminAnalytics, AdminSettings, AdminUserDetail, UserManagement, DeletedWorkflows, OperationalDashboard
+- Applied to: Dashboard, Settings, AdminDashboard, AdminSettings, AdminUserDetail, UserManagement, DeletedWorkflows, OperationalDashboard
 - **Not applied to the flow page's graph view** — React Flow requires immediate full opacity to measure container dimensions
 
 Usage: replace outermost `<div>` with `<FadeIn className="...">` in page content return (after loading guard).

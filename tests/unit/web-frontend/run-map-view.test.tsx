@@ -242,6 +242,26 @@ function cardOf(blockId: string): HTMLElement {
 }
 
 describe("the map view", () => {
+  test("a stopped frontier keeps its actual status, counts and list while removing current markers and animation", async () => {
+    const blocks = await renderMap({ executionStatus: "completed", stopReason: "" });
+    const frontier = blocks[1];
+    const card = cardOf(frontier.id);
+    expect(card.getAttribute("data-status")).toBe("active");
+    expect(card.getAttribute("data-tone")).toBe("neutral");
+    expect(card.getAttribute("data-current")).not.toBe("true");
+    expect(card.textContent).toContain("Stopped here");
+    expect(card.textContent).toContain("1/3");
+    expect(card.querySelector(".animate-spin")).toBeNull();
+    expect(
+      [...card.querySelectorAll("[data-block-list-items] li")].map((item) => item.textContent),
+    ).toEqual(["✓first", "·second", "·third"]);
+    const row = screen.getByTestId(`map-contents-${frontier.id}`);
+    expect(row.getAttribute("aria-current")).toBeNull();
+    expect(row.getAttribute("data-status")).toBe("active");
+    expect(row.querySelector(".animate-spin")).toBeNull();
+    expect(cardOf(blocks[0].id).getAttribute("data-status")).toBe("repeated");
+    expect(cardOf(blocks[2].id).getAttribute("data-status")).toBe("pending");
+  });
   test("lists every block of the process in the contents, in order and with its counts", async () => {
     const blocks = await renderMap();
     const contents = screen.getByTestId("map-contents-list");

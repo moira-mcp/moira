@@ -3,19 +3,7 @@
  * Drizzle ORM queries for execution operations
  */
 
-import {
-  eq,
-  ne,
-  and,
-  or,
-  like,
-  inArray,
-  isNotNull,
-  isNull,
-  sql,
-  desc,
-  type SQL,
-} from "drizzle-orm";
+import { eq, ne, and, or, like, inArray, isNotNull, isNull, sql, desc } from "drizzle-orm";
 import type { BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
 import { randomUUID } from "node:crypto";
 import { workflowExecution } from "../schema.js";
@@ -36,6 +24,8 @@ import {
   type ExecutionTaskTitleMutationResult,
 } from "../../types/execution-task-identity.js";
 import { executionActivity, parseStoredErrors, parseStoredVisits } from "../execution-activity.js";
+import type { ExecutionManagementHeader } from "../../types/execution-management.js";
+import { storedJsonValue } from "../sql-json.js";
 
 import { enqueueWaitingNotification } from "../execution-notification.js";
 import {
@@ -67,6 +57,8 @@ export interface ExecutionFilter {
   sortOrder?: "asc" | "desc";
   limit?: number;
   offset?: number;
+  /** Explicit management status selection; omitted preserves legacy raw-status callers. */
+  includeStopped?: boolean;
 }
 
 /**
@@ -88,16 +80,6 @@ export interface ExecutionProgressRead {
     start: number;
     size: number;
   }>;
-}
-
-/** Preserve JSON scalar types when SQLite exposes booleans as integer values. */
-function storedJsonValue(type: SQL, value: SQL): SQL {
-  return sql`CASE ${type}
-    WHEN 'true' THEN json('true')
-    WHEN 'false' THEN json('false')
-    WHEN 'array' THEN json(${value})
-    WHEN 'object' THEN json(${value})
-    ELSE ${value} END`;
 }
 
 export class ExecutionRepository {
@@ -255,6 +237,52 @@ export class ExecutionRepository {
       .where(inArray(workflowExecution.executionId, executionIds));
   }
 
+  /** Scalar management facts in one batch; no context, visit or attempt response is transferred. */
+  async getManyManagementHeaders(executionIds: string[]): Promise<ExecutionManagementHeader[]> {
+    if (!executionIds.length) return [];
+    const rows = await this.db
+      .select({
+        executionId: workflowExecution.executionId,
+        workflowId: workflowExecution.workflowId,
+        userId: workflowExecution.userId,
+        status: workflowExecution.state,
+        revision: workflowExecution.revision,
+        stopReason: workflowExecution.stopReason,
+        hasExecutingAttempt: sql<number>`EXISTS (SELECT 1 FROM executionMutationAttempt a
+        WHERE a.executionId = ${workflowExecution.executionId} AND a.userId = ${workflowExecution.userId} AND a.state = 'executing')`,
+        hasActiveLock: sql<number>`EXISTS (SELECT 1 FROM executionLock l
+        WHERE l.executionId = ${workflowExecution.executionId} AND l.status = 'active')`,
+        gateWaiting: workflowExecution.gateWaiting,
+        awaitingUser: sql<number>`${workflowExecution.awaitingUser} IS NOT NULL`,
+        createdAt: workflowExecution.createdAt,
+        lastActivityAt: workflowExecution.lastActivityAt,
+      })
+      .from(workflowExecution)
+      .where(inArray(workflowExecution.executionId, [...new Set(executionIds)]));
+    return rows.map((row) => ({
+      ...row,
+      hasExecutingAttempt: Boolean(row.hasExecutingAttempt),
+      hasActiveLock: Boolean(row.hasActiveLock),
+      awaitingUser: Boolean(row.awaitingUser),
+      createdAt: row.createdAt?.getTime() ?? null,
+    }));
+  }
+
+  async getExecutingIds(executionIds: string[]): Promise<string[]> {
+    if (!executionIds.length) return [];
+    const rows = await this.db
+      .select({ executionId: workflowExecution.executionId })
+      .from(workflowExecution)
+      .where(
+        and(
+          inArray(workflowExecution.executionId, [...new Set(executionIds)]),
+          sql`EXISTS (SELECT 1 FROM executionMutationAttempt a WHERE a.executionId=${workflowExecution.executionId}
+          AND a.userId=${workflowExecution.userId} AND a.state='executing')`,
+        ),
+      );
+    return rows.map((row) => row.executionId);
+  }
+
   /**
    * Current progress inputs, without journals, reminders, node states or unrelated variables.
    * With no read specification this returns only scalar headers. Full engine/detail reads use
@@ -263,6 +291,7 @@ export class ExecutionRepository {
   async getManyForProgress(
     executionIds: string[],
     reads?: ExecutionProgressRead[],
+    purpose: "progress" | "title" = "progress",
   ): Promise<WorkflowExecution[]> {
     if (!executionIds.length) return [];
     const historyGroups: string[][] = [];
@@ -340,7 +369,7 @@ export class ExecutionRepository {
         state: workflowExecution.state,
         currentNodeId: workflowExecution.currentNodeId,
         waitingForInputNodeId: workflowExecution.waitingForInputNodeId,
-        note: workflowExecution.note,
+        note: purpose === "title" ? sql<null>`NULL` : workflowExecution.note,
         taskIdentity: workflowExecution.taskIdentity,
         stopReason: workflowExecution.stopReason,
         parentExecutionId: workflowExecution.parentExecutionId,
@@ -348,7 +377,7 @@ export class ExecutionRepository {
         gateWaiting: workflowExecution.gateWaiting,
         lastActivityAt: workflowExecution.lastActivityAt,
         refusalCount: workflowExecution.refusalCount,
-        awaitingUser: workflowExecution.awaitingUser,
+        awaitingUser: purpose === "title" ? sql<null>`NULL` : workflowExecution.awaitingUser,
         workflowVersion: workflowExecution.workflowVersion,
         createdAt: workflowExecution.createdAt,
         updatedAt: workflowExecution.updatedAt,
@@ -633,8 +662,22 @@ export class ExecutionRepository {
         if (s === "completed") expandedStatuses.add("failed");
         if (s === "failed") expandedStatuses.add("completed");
       }
-      conditions.push(inArray(workflowExecution.state, Array.from(expandedStatuses)));
+      const state = inArray(workflowExecution.state, Array.from(expandedStatuses));
+      conditions.push(
+        filter.includeStopped === undefined
+          ? state
+          : or(
+              and(state, isNull(workflowExecution.stopReason)),
+              filter.includeStopped ? isNotNull(workflowExecution.stopReason) : sql`0`,
+            ),
+      );
     }
+    if (!status?.length && filter.includeStopped !== undefined)
+      conditions.push(
+        filter.includeStopped
+          ? isNotNull(workflowExecution.stopReason)
+          : isNull(workflowExecution.stopReason),
+      );
 
     if (workflowId) {
       conditions.push(eq(workflowExecution.workflowId, workflowId));
@@ -764,7 +807,7 @@ export class ExecutionRepository {
           .get();
         if (!row || row.userId !== userId)
           throw new ValidationError("Execution must belong to the authenticated user");
-        if (!["running", "waiting"].includes(row.state))
+        if (row.stopReason !== null || !["running", "waiting"].includes(row.state))
           throw new ValidationError("Only active executions accept task title changes");
         if (row.revision !== expectedRevision)
           throw new ConflictError("Execution state changed; reload before changing task title");
@@ -805,6 +848,7 @@ export class ExecutionRepository {
                   eq(workflowExecution.userId, userId),
                   eq(workflowExecution.revision, expectedRevision),
                   inArray(workflowExecution.state, ["running", "waiting"]),
+                  isNull(workflowExecution.stopReason),
                   row.taskIdentity === null
                     ? isNull(workflowExecution.taskIdentity)
                     : eq(workflowExecution.taskIdentity, row.taskIdentity),

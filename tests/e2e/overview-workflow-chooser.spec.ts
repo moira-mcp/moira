@@ -142,6 +142,29 @@ for (const viewport of [
         path: testInfo.outputPath(`overview-chosen-flow-${viewport.label}.png`),
         fullPage: true,
       });
+      // Every control remains reachable inside the bounded popover, even at the mobile edge.
+      await page.getByTestId("overview-filters").click();
+      const popover = page.getByTestId("overview-filters-popover");
+      await expect(popover).toBeInViewport({ ratio: 1 });
+      await popover.locator("summary").click();
+      const sort = page.getByTestId("overview-filter-sort");
+      await sort.scrollIntoViewIfNeeded();
+      await expect(sort).toBeInViewport({ ratio: 1 });
+      await sort.click();
+      await expect(page.getByRole("option", { name: "newest first", exact: true })).toBeInViewport({
+        ratio: 1,
+      });
+      await page.keyboard.press("Escape");
+      const reset = page.getByTestId("overview-filters-reset");
+      await reset.scrollIntoViewIfNeeded();
+      await expect(reset).toBeInViewport({ ratio: 1 });
+      await reset.click();
+      await expect(page).not.toHaveURL(/workflowId=|period=|idle=|activeFrom=|activeTo=|q=|page=/);
+      await expect(page.getByTestId("overview-period")).toHaveText("Last 7 days");
+      await page.screenshot({
+        path: testInfo.outputPath(`overview-filters-reset-${viewport.label}.png`),
+        fullPage: true,
+      });
     } finally {
       dockerExecSync([
         "node",

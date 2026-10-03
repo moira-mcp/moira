@@ -135,6 +135,8 @@ export interface AdminStatsResponse extends AdminSystemStatusResponse {
     id: string;
     workflowId: string;
     status: string;
+    displayStatus?: import("@mcp-moira/shared/execution-management").OverviewStatus;
+    stopReason?: string | null;
     timestamp: number;
     action: string;
   }>;

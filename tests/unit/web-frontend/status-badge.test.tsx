@@ -23,9 +23,15 @@ describe("StatusBadge", () => {
   test.each([
     ["en", "running", "Running"],
     ["en", "completed", "Completed"],
+    ["en", "stopped", "Stopped"],
+    ["en", "waiting-user", "Waiting for you"],
+    ["en", "waiting-agent", "Waiting for the agent"],
     ["ru", "running", "Выполняется"],
     ["ru", "completed", "Завершён"],
     ["ru", "failed", "Ошибка"],
+    ["ru", "stopped", "Остановлен"],
+    ["ru", "waiting-user", "Ждёт вас"],
+    ["ru", "waiting-agent", "Ждёт агента"],
   ] as const)("in %s, %s reads %s", async (language, status, label) => {
     await i18n.changeLanguage(language);
     render(
