@@ -8,11 +8,18 @@ import {
   getWorkflowService,
   user,
   WorkflowRepository,
+  metadataRevision,
 } from "@mcp-moira/shared";
-import { DatabaseRepository, type WorkflowGraph } from "@mcp-moira/workflow-engine";
+import {
+  DatabaseRepository,
+  projectExecutionRun,
+  resolveExecutionTaskTitle,
+  type WorkflowGraph,
+} from "@mcp-moira/workflow-engine";
 import { MCPEngine } from "../../packages/mcp-server/src/core/mcp-engine.js";
 import {
   overviewRows,
+  overviewPage,
   type OverviewRun,
 } from "../../packages/web-backend/src/services/execution-overview.js";
 
@@ -144,6 +151,106 @@ describe("an overview row", () => {
   test("its stages are the flow's blocks, with the active one", async () => {
     const { row } = await runAt(2);
     expect(row.stages).toEqual({ labels: ["Import", "Check"], activeIndex: 0, doneCount: 0 });
+  });
+
+  test("a stored rename reaches compact rows independently of notes and retains own flow identity", async () => {
+    const { executionId, row } = await runAt(2);
+    expect(row.title).toBe("Order import rows");
+    expect(row.note).toBe("Rows 2");
+    const executionRepository = new ExecutionRepository(getDatabase());
+    const source = (await repository.getExecution(executionId))!;
+    const renamed = await executionRepository.updateExecutionTaskTitle(
+      executionId,
+      USER_ID,
+      source.revision,
+      metadataRevision(null),
+      "Import April orders",
+    );
+    await executionRepository.updateNote(executionId, "Investigating alternate delimiters");
+    const [current] = await overviewRows(USER_ID, [executionId], deps());
+    expect(current.title).toBe("Import April orders");
+    expect(current.workflowName).toBe("Order import rows");
+    expect(current.note).toBe("Investigating alternate delimiters");
+    const [compact] = await executionRepository.getManyForProgress([executionId]);
+    expect(compact.taskIdentity).toEqual(renamed.taskIdentity);
+    expect(compact.globalContext.variables).toEqual({});
+  });
+
+  test("a legacy authored title exceeding its resolved limit falls back to its own flow without losing the note", async () => {
+    const definition = graph();
+    definition.progress!.title = "{{task_request}}";
+    definition.variableRegistry!.task_request = {
+      type: "string",
+      description: "The original task request",
+    };
+    const saved = await getWorkflowService().save({
+      graph: definition,
+      userId: USER_ID,
+      visibility: "private",
+    });
+    const legacyWorkflow = (await repository.getWorkflowGraph(saved.id, USER_ID))!;
+    engine = MCPEngine.getInstance(repository);
+    const request = "🧭".repeat(501);
+    const note = "Investigating the source request independently";
+    const executionId = await engine.executor.startWorkflow(
+      legacyWorkflow,
+      { task_request: request, plan_steps: STEPS, current_step: 1 },
+      USER_ID,
+      note,
+    );
+    const stored = (await repository.getExecution(executionId))!;
+    expect(stored.taskIdentity ?? null).toBeNull();
+    expect(stored.globalContext.variables.task_request).toBe(request);
+    expect(() => projectExecutionRun(legacyWorkflow, stored)).toThrow(
+      /title exceeds .* after template resolution/,
+    );
+    const [row] = await overviewRows(USER_ID, [executionId], deps());
+    expect(row.title).toBe(legacyWorkflow.metadata.name);
+    expect(row.note).toBe(note);
+    expect(row.stages).toBeNull();
+    expect(resolveExecutionTaskTitle(legacyWorkflow, stored)).toBe(legacyWorkflow.metadata.name);
+  });
+
+  test("a root continuing a completed parent uses the parent's canonical name without inheriting it", async () => {
+    const parent = await runAt(1);
+    const child = await runAt(2);
+    const executionRepository = new ExecutionRepository(getDatabase());
+    const parentSource = (await repository.getExecution(parent.executionId))!;
+    const childSource = (await repository.getExecution(child.executionId))!;
+    await repository.setExecutionParent(
+      child.executionId,
+      parent.executionId,
+      USER_ID,
+      childSource.revision,
+      metadataRevision(null),
+    );
+    await executionRepository.updateExecutionTaskTitle(
+      parent.executionId,
+      USER_ID,
+      parentSource.revision,
+      metadataRevision(null),
+      "Parent import task",
+    );
+    parentSource.status = "completed";
+    parentSource.completedAt = 100;
+    await repository.saveExecution(parentSource);
+    const page = await overviewPage(
+      {
+        userId: USER_ID,
+        status: "active",
+        search: child.executionId,
+        sort: "activity",
+        limit: 20,
+        offset: 0,
+      },
+      deps(),
+    );
+    expect(page.runs).toHaveLength(1);
+    expect(page.runs[0].title).toBe("Order import rows");
+    expect(page.runs[0].parent).toEqual({
+      executionId: parent.executionId,
+      title: "Parent import task",
+    });
   });
 
   test("its step is named as people read it, and dates the directive it waits at", async () => {

@@ -57,6 +57,33 @@ function adapter(
 }
 
 describe("UserCommunicationService", () => {
+  test("prepares mutable content after channel configuration and validates it before handoff", async () => {
+    let title = "Old";
+    const texts: string[] = [];
+    const service = new UserCommunicationService(
+      [
+        {
+          ...adapter("late", async (message) => {
+            texts.push(message.text);
+          }),
+          isConfigured: async () => {
+            title = "Current";
+            return true;
+          },
+        },
+      ],
+      { maxTextLength: 10 },
+    );
+    await service.deliver({ userId: "u", text: "Old" }, repository, async () => ({ text: title }));
+    expect(texts).toEqual(["Current"]);
+    await expect(
+      service.deliver({ userId: "u", text: "Old" }, repository, async () => ({
+        text: "x".repeat(11),
+      })),
+    ).rejects.toThrow("text exceeds");
+    await service.deliver({ userId: "u", text: "Old" }, repository, async () => null);
+    expect(texts).toEqual(["Current"]);
+  });
   test("tests one registered channel through the common limits without fanning out", async () => {
     const calls: string[] = [];
     const registry = new CommunicationChannelRegistry([
@@ -958,6 +985,7 @@ describe("UserNotificationHandler", () => {
         attachment: expect.objectContaining({ kind: "image", filename: "workflow-progress.png" }),
       }),
       repo,
+      expect.any(Function),
     );
     // The image is rendered as of this node, not of the wait the persisted route still ends on.
     // The graph has no successor node for `notify`, so nothing is waited on.

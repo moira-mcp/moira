@@ -179,8 +179,7 @@ export class LockHandler implements INodeHandler {
       nodeId: lockNode.id,
       reason,
       userId,
-      // The note as of this node: one set earlier in this cycle is not persisted yet.
-      ...(liveRun ? { note: liveRun().note ?? null } : {}),
+      liveRun,
       rootExecutionId: context._rootExecutionId,
     });
 

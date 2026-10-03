@@ -1,16 +1,27 @@
 /**
  * What a person receives from a Todo List run: the checklist when it is ready and again, with every
- * item's state, when all tasks are done — headed by the flow and the task the first step named,
+ * item's state, when all tasks are done — headed by the flow and the task explicitly persisted at intake,
  * linked to the run, with nothing internal in the text.
  */
 
 import { describe, expect, test } from "@jest/globals";
 import { GraphValidator, runPageUrl } from "@mcp-moira/workflow-engine";
 import { catalogGraph } from "../../helpers/catalog-graphs.js";
-import { internalValues, runNotificationScenario } from "../../helpers/notification-scenario.js";
+import {
+  internalValues,
+  runNotificationScenario,
+  type NotificationScenario,
+} from "../../helpers/notification-scenario.js";
 
 const workflow = catalogGraph("todo-list");
-const note = "Tidy the release_notes *draft*";
+const taskTitle = "Tidy the release_notes *draft*";
+const note = "The draft stays unpublished until the release is approved";
+const runScenario = (scenario: NotificationScenario) =>
+  runNotificationScenario(workflow, {
+    ...scenario,
+    note,
+    taskTitle: { atNode: "obtain-tasks", title: taskTitle },
+  });
 const tasks = [
   { action: "Collect the merged changes", expected_result: "A list of every merged change" },
   { action: "Group them by area", expected_result: "Changes grouped under each area" },
@@ -31,14 +42,16 @@ function answers(overrides: Record<string, unknown> = {}) {
 
 describe("Todo List notifications", () => {
   test("the checklist is announced when ready and again, all done, at the finish", async () => {
-    const run = await runNotificationScenario(workflow, { mockInputs: answers() });
+    const run = await runScenario({ mockInputs: answers() });
     expect(run.notifications.map((message) => message.nodeId)).toEqual([
       "notify-checklist-ready",
       "notify-finished",
     ]);
     const [ready, finished] = run.notifications.map((message) => message.text);
+    expect(run.taskIdentity?.title).toBe(taskTitle);
+    expect(run.note).toBe(note);
 
-    // The heading names the flow and the task the first step set, linked to the run.
+    // The heading names the flow and the independently persisted task, linked to the run.
     for (const text of [ready, finished]) {
       expect(
         text.startsWith(
@@ -62,7 +75,7 @@ describe("Todo List notifications", () => {
       tasks[0],
       { action: "Split the changes by release", expected_result: "One list per release" },
     ];
-    const run = await runNotificationScenario(workflow, {
+    const run = await runScenario({
       mockInputs: answers({
         "teleport-revise-tasks": {
           tasks: revised,

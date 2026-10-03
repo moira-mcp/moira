@@ -1030,7 +1030,9 @@ Notifications keep users informed during long-running workflows. Use them strate
 
 A notification is all the person sees of the run, often on a phone. The engine already opens every
 message with the flow name and the run's task, linked to the run page, so a message never repeats
-them; the flow sets the task through `execution_note` on its first agent step.
+them. Its first evidence-bearing intake establishes the actual task through the guarded
+[execution task-name operation](/docs/concepts/workflows/#execution-task-name). An authorized
+scope-changing responsibility updates that same name; arbitrary `execution_note` stays separate.
 
 - The plan list comes from the list bound on the working block (see the progress reference), through
   `planList`: `full` at plan ready and at every finish, `progress` — the one-line `📝 done/total:

@@ -23,6 +23,7 @@ import {
 import {
   isAgentDirectiveNode,
   projectExecutionRunSummary,
+  resolveExecutionTaskTitle,
   progressReadDependencies,
   PROGRESS_SUMMARY_LIST_WINDOW,
   type ExecutionProgressSummary,
@@ -202,7 +203,7 @@ function projectRow(
     workflowId: execution.workflowId,
     workflowName: flow?.name ?? null,
     workflowVersion: execution.workflowVersion ?? null,
-    title: progress?.taskTitle || execution.note || flow?.name || execution.workflowId,
+    title: progress?.taskTitle ?? resolveExecutionTaskTitle(graph, execution),
     status: node.status,
     stopReason: execution.stopReason ?? null,
     matches: node.matches,
@@ -440,7 +441,7 @@ async function projectNodes(
     if (parent && parent.userId === userId) {
       row.parent = {
         executionId: parent.executionId,
-        title: parent.note || flows.get(parent.workflowId)?.name || parent.workflowId,
+        title: resolveExecutionTaskTitle(flows.get(parent.workflowId)?.graph, parent),
       };
     }
     result.push(row);

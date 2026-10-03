@@ -3,13 +3,16 @@
  * Maps the user and admin execution list items to a single normalized shape
  */
 
+import type { ExecutionTaskIdentity } from "@mcp-moira/shared";
+
 export interface NormalizedExecution {
   id: string;
   workflowId: string;
   workflowName?: string | null;
+  taskTitle?: string;
   status: string;
   stopReason?: string | null;
-  note?: string;
+  note?: string | null;
   errorCount?: number;
   error?: string;
   /**
@@ -28,9 +31,11 @@ interface ExecutionListItem {
   executionId: string;
   workflowId: string;
   workflowName?: string | null;
+  taskTitle?: string;
+  taskIdentity?: ExecutionTaskIdentity | null;
   status: string;
   stopReason?: string | null;
-  note?: string;
+  note?: string | null;
   createdAt?: number | null;
   lastStepAt?: number | null;
   completedAt?: number;
@@ -43,6 +48,8 @@ interface AdminExecution {
   executionId: string;
   workflowId: string;
   workflowName?: string | null;
+  taskTitle?: string;
+  taskIdentity?: ExecutionTaskIdentity | null;
   userEmail: string | null;
   userName: string | null;
   status: string;
@@ -63,17 +70,23 @@ function isAdminExecution(e: AnyExecution): e is AdminExecution {
 }
 
 export function normalizeExecution(execution: AnyExecution): NormalizedExecution {
+  const taskTitle =
+    execution.taskTitle ??
+    execution.taskIdentity?.title ??
+    execution.workflowName ??
+    execution.workflowId;
   if (isAdminExecution(execution)) {
     return {
       id: execution.executionId,
       workflowId: execution.workflowId,
       workflowName: execution.workflowName,
+      taskTitle,
       status: execution.status,
       stopReason: execution.stopReason,
       userDisplay: execution.userName || execution.userEmail || null,
       createdAt: execution.createdAt,
       lastStepAt: execution.lastStepAt,
-      note: execution.note ?? undefined,
+      note: execution.note,
       errorCount: execution.errorCount,
       completedAt: execution.completedAt,
       error: execution.error,
@@ -85,6 +98,7 @@ export function normalizeExecution(execution: AnyExecution): NormalizedExecution
     id: execution.executionId,
     workflowId: execution.workflowId,
     workflowName: execution.workflowName,
+    taskTitle,
     status: execution.status,
     stopReason: execution.stopReason,
     note: execution.note,

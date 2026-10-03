@@ -379,6 +379,13 @@
       "when": 1790000900000,
       "tag": "0052_registration_notifications",
       "breakpoints": true
+    },
+    {
+      "idx": 54,
+      "version": "7",
+      "when": 1790000960000,
+      "tag": "0053_execution_task_identity",
+      "breakpoints": true
     }
   ]
 }

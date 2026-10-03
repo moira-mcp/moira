@@ -191,6 +191,15 @@ describe("waiting-for-you notifications", () => {
 
   test("a step into a gate queues one notification; repeats queue none; the sender delivers it", async () => {
     const { engine, executionId, presentation } = await runAtGate("notify-step");
+    const repository = new DatabaseRepository();
+    const named = (await repository.getExecution(executionId))!;
+    await repository.updateExecutionTaskTitle(
+      executionId,
+      USER_ID,
+      named.revision,
+      metadataRevision(null),
+      "Release 4.2",
+    );
     expect(rows(executionId)).toEqual([
       expect.objectContaining({
         waitKey: expect.stringMatching(/^gate:\d+$/),
@@ -239,6 +248,61 @@ describe("waiting-for-you notifications", () => {
     await expect(repository.saveExecution(moved)).rejects.toThrow("Execution state changed");
     expect(rows(executionId)).toEqual([]);
   });
+
+  test.each(["definition", "availability"] as const)(
+    "queued notification uses a title renamed during %s without changing its wait",
+    async (phase) => {
+      const { repository, executionId, stored } = await runAtGate(`notify-title-${phase}`);
+      const run = (await repository.getExecution(executionId))!;
+      let renamed = false;
+      const rename = async () => {
+        if (renamed) return;
+        renamed = true;
+        await repository.updateExecutionTaskTitle(
+          executionId,
+          USER_ID,
+          run.revision,
+          metadataRevision(null),
+          "Current release task",
+        );
+      };
+      const loading = new (class extends DatabaseRepository {
+        override async getWorkflowGraph(workflowId: string, userId: string) {
+          if (phase === "definition" && workflowId === stored.id) await rename();
+          return super.getWorkflowGraph(workflowId, userId);
+        }
+      })();
+      const texts: string[] = [];
+      const service = new UserCommunicationService([
+        {
+          id: "capture-title",
+          provider: "capture-title",
+          capabilities: { text: true, image: true, document: true, trusted: false },
+          metadata: { title: "Capture", origin: "builtin", settingKeys: [] },
+          isConfigured: async () => {
+            if (phase === "availability") await rename();
+            return true;
+          },
+          deliver: async (message) => {
+            texts.push(message.text);
+          },
+        },
+      ]);
+      at(0);
+      await new WaitingNotificationSender(loading, queue(), {
+        now: () => clock,
+        communication: service,
+      }).tick();
+      const own = texts.filter((text) => text.includes(executionId));
+      expect(renamed).toBe(true);
+      expect(own).toHaveLength(1);
+      expect(own[0]).toContain(`notify-title-${phase} · Current release task`);
+      expect(own[0]).not.toContain("Release 4.2");
+      expect(own[0]).toContain("Waiting for your decision: Approve the release plan");
+      expect(rows(executionId)[0].state).toBe("sent");
+      expect((await repository.getExecution(executionId))!.note).toBe("Release 4.2");
+    },
+  );
 
   test("notify: off queues nothing", async () => {
     const { executionId } = await runAtGate("notify-off", {

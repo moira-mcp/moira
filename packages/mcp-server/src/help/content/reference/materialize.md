@@ -98,6 +98,11 @@ Files are emitted with mode `0644`. The engine validates `basePath`, but it does
 destination to a project directory. Workflow authors must derive it from a trusted workspace path,
 and agents must inspect the emitted destination before running the command.
 
+Recovery to a blocked materialize node re-presents delivery on that same node without advancing
+it. Delivery resolves current workflow registry defaults into the files; preserved execution
+context can still contain an earlier guide. Write and inspect the returned files before proceeding.
+Changing a context variable alone does not refresh files already written on the caller's filesystem.
+
 ## Grant and error behavior
 
 The five-minute grant is stored server-side and bound to the current user, execution, and node. The

@@ -40,6 +40,7 @@ import * as sharedEmail from "@mcp-moira/shared";
 import { isCodespaceReadinessDegraded } from "@mcp-moira/shared";
 import { getCodespaceObservabilityService } from "../services/codespace-services.js";
 import { sendConditionalRead } from "../utils/conditional-read.js";
+import { executionTaskTitles } from "../utils/execution-task-titles.js";
 
 const router = Router();
 const repository = new DatabaseRepository();
@@ -1161,11 +1162,16 @@ router.get(
       throw createApiError.notFound(`Execution not found: ${id}`, { executionId: id });
     }
 
+    const taskTitles = await executionTaskTitles([execution]);
+
     res.json({
       success: true,
       data: {
         executionId: execution.executionId,
         workflowId: execution.workflowId,
+        taskTitle: taskTitles.get(execution.executionId),
+        taskIdentity: execution.taskIdentity ?? null,
+        note: execution.note ?? null,
         userId: execution.userId,
         status: execution.status,
         currentNodeId: execution.currentNodeId,
@@ -1942,7 +1948,10 @@ router.get(
       offset,
       locked: adminHasLockedFilter && !adminOriginalIncludedRunning ? true : undefined,
     });
-    const enrichedExecutions = result.executions;
+    const enrichedExecutions = result.executions.map((execution) => ({
+      ...execution,
+      taskTitle: execution.taskIdentity?.title ?? execution.workflowName ?? "Workflow unavailable",
+    }));
     const totalCount = result.total;
 
     res.json({
@@ -1991,6 +2000,7 @@ router.get(
       .select({ id: workflowTable.id, name: workflowTable.name })
       .from(workflowTable);
     const workflowNameMap = new Map(allWorkflows.map((w) => [w.id, w.name]));
+    const taskTitles = await executionTaskTitles([execution]);
 
     // Get active lock info
     const lockService = getLockService();
@@ -2002,6 +2012,9 @@ router.get(
         executionId: execution.executionId,
         workflowId: execution.workflowId,
         workflowName: workflowNameMap.get(execution.workflowId) || null,
+        taskTitle: taskTitles.get(execution.executionId),
+        taskIdentity: execution.taskIdentity ?? null,
+        note: execution.note ?? null,
         userId: execution.userId,
         userEmail: userInfo?.email || null,
         userName: userInfo?.name || null,

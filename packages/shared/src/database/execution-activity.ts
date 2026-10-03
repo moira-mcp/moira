@@ -3,18 +3,20 @@
  *
  * `lastActivityAt` is the moment of the run's last event of work: the latest `enteredAt` or `leftAt`
  * of its visits (a step handed in, a new directive shown, a variable adjustment by the agent or a
- * person) and its `completedAt`. A note, a reminder, a new parent, a journal entry, a lock or the
+ * person), its `completedAt`, or its independent task identity's `changedAt`. A note, a reminder,
+ * a new parent, a journal entry, a lock or the
  * agent's own «waiting for the user» move none of them, so they do not count. `refusalCount` is how
  * many entries of the journal are refusals (`countRefusals`).
  *
- * Every writer that changes `visits`, `completedAt` or `errors` stores both from this one function
+ * Every writer that changes `visits`, `completedAt`, task identity or `errors` stores its derived facts
  * in the same write, and the in-memory repository calls it too; migration 0047 fills existing rows
- * with the same formula in SQL.
+ * with the visit/completion formula in SQL; task identity is absent on those older rows.
  */
 
 import { countRefusals, type ExecutionError } from "../types/execution-error.js";
 
 export interface ExecutionActivitySource {
+  taskIdentity?: { changedAt: number } | null;
   visits?: ReadonlyArray<{ enteredAt?: number; leftAt?: number }> | null;
   completedAt?: number | null;
   errors?: ReadonlyArray<{ errorType?: string }> | null;
@@ -42,6 +44,7 @@ export function executionActivity(source: ExecutionActivitySource): ExecutionAct
     consider(visit.leftAt);
   }
   consider(source.completedAt ?? null);
+  consider(source.taskIdentity?.changedAt);
   return { lastActivityAt: latest, refusalCount: countRefusals([...(source.errors ?? [])]) };
 }
 

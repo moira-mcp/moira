@@ -30,13 +30,16 @@ import {
   getAuthorizationService,
   RESOURCE_TYPES,
   countRefusals,
+  type ExecutionTaskIdentity,
 } from "@mcp-moira/shared";
 import {
   DatabaseRepository,
   adjustmentVisit,
   diagnoseContinuation,
   recoverContinuation,
-  projectExecutionRun,
+  projectExecutionProgress,
+  resolveExecutionTaskTitle,
+  type WorkflowGraph,
   prepareExecutionVariableWrite,
   queryExecutionVariables,
 } from "@mcp-moira/workflow-engine";
@@ -76,6 +79,8 @@ interface ExecutionItem {
   status: ExecutionStatusResponse | "waiting" | "failed";
   currentNodeId: string | null;
   note?: string | null;
+  taskTitle: string;
+  taskIdentity: ExecutionTaskIdentity | null;
   stopReason: string | null;
   parentExecutionId?: string | null;
   createdAt: string;
@@ -100,6 +105,8 @@ interface ExecutionContextData {
   currentNodeId: string | null;
   waitingForInputNodeId: string | null;
   note?: string | null;
+  taskTitle: string;
+  taskIdentity: ExecutionTaskIdentity | null;
   stopReason: string | null;
   parentExecutionId?: string | null;
   /** The agent's open question to the person (`await-user`), or null. */
@@ -109,6 +116,7 @@ interface ExecutionContextData {
     parent: string;
     context: string;
     reminders: string;
+    taskIdentity: string;
   };
   context: {
     variables: Record<string, unknown>;
@@ -155,6 +163,7 @@ type SessionInfoData =
   | NoteUpdateResult
   | AwaitUserResult
   | ParentUpdateResult
+  | import("@mcp-moira/shared").ExecutionTaskTitleMutationResult
   | { executionId: string; cancelled: true; revision: number }
   | { executionId: string; stopped: true; stopReason: string; revision: number }
   | {
@@ -175,6 +184,7 @@ type SessionInfoData =
   | (import("@mcp-moira/workflow-engine").ExecutionProgress & {
       statistics?: import("@mcp-moira/workflow-engine").WorkflowVersionStatistics | null;
     })
+  | import("@mcp-moira/workflow-engine").ExecutionProgressMetadata
   | import("@mcp-moira/workflow-engine").ProgressImageGrant
   | import("./deliver-materialize.js").MaterializeDeliveryData
   | string;
@@ -289,7 +299,10 @@ export async function getSessionInfo(
 
         // Batch fetch workflow info for all unique workflow IDs
         const uniqueWorkflowIds = [...new Set(result.executions.map((e) => e.workflowId))];
-        const workflowInfoMap = new Map<string, { slug: string; ownerHandle: string }>();
+        const workflowInfoMap = new Map<
+          string,
+          { slug: string; ownerHandle: string; workflow: WorkflowGraph }
+        >();
 
         // Fetch workflow info in parallel
         await Promise.all(
@@ -299,6 +312,7 @@ export async function getSessionInfo(
               workflowInfoMap.set(wfId, {
                 slug: workflowInfo.slug,
                 ownerHandle: workflowInfo.ownerHandle,
+                workflow: workflowInfo.workflow,
               });
             }
           }),
@@ -320,6 +334,10 @@ export async function getSessionInfo(
               status: isLocked ? "locked" : exec.status,
               currentNodeId: exec.currentNodeId,
               note: exec.note,
+              taskTitle: wfInfo
+                ? resolveExecutionTaskTitle(wfInfo.workflow, exec)
+                : (exec.taskIdentity?.title ?? "Workflow unavailable"),
+              taskIdentity: exec.taskIdentity ?? null,
               stopReason: exec.stopReason ?? null,
               parentExecutionId: exec.parentExecutionId,
               createdAt: new Date(exec.createdAt).toISOString(),
@@ -430,6 +448,10 @@ export async function getSessionInfo(
           currentNodeId: execution.currentNodeId,
           waitingForInputNodeId: execution.waitingForInputNodeId || null,
           note: execution.note,
+          taskTitle: workflowInfo
+            ? resolveExecutionTaskTitle(workflowInfo.workflow, execution)
+            : (execution.taskIdentity?.title ?? "Workflow unavailable"),
+          taskIdentity: execution.taskIdentity ?? null,
           stopReason: execution.stopReason ?? null,
           parentExecutionId: execution.parentExecutionId,
           awaitingUser: execution.awaitingUser ?? null,
@@ -438,6 +460,7 @@ export async function getSessionInfo(
             parent: metadataRevision(execution.parentExecutionId ?? null),
             context: metadataRevision(execution.globalContext),
             reminders: metadataRevision(execution.reminders ?? []),
+            taskIdentity: metadataRevision(execution.taskIdentity ?? null),
           },
           context: {
             variables: filteredVariables,
@@ -606,11 +629,20 @@ export async function getSessionInfo(
           execution,
           params.nodeId,
           (params.variableValues ?? {}) as Record<string, unknown>,
-          async (id) =>
-            engine.executor.executeStep(id, undefined, undefined, {
+          async (id) => {
+            const graph = await repository.getWorkflowGraph(execution.workflowId, userId);
+            if (graph?.nodes.find((node) => node.id === params.nodeId)?.type === "materialize") {
+              // An empty materialize completion advances the run; recovery must only show it.
+              const presentation = await engine.executor.presentCurrentStep(id);
+              if (presentation === null)
+                throw new ValidationError("Recovered materialize step could not be presented");
+              return presentation;
+            }
+            return engine.executor.executeStep(id, undefined, undefined, {
               userId,
               createPresentation: true,
-            }),
+            });
+          },
         );
 
         if (recovery.outcome === "refused") {
@@ -747,6 +779,30 @@ export async function getSessionInfo(
           success: true,
           data: { executionId, cancelled: true, revision: params.expectedRevision },
         };
+      }
+
+      case "update-task-title": {
+        if (
+          !executionId ||
+          params.taskTitle === undefined ||
+          params.expectedRevision === undefined ||
+          !params.expectedTaskIdentityRevision
+        ) {
+          return {
+            success: false,
+            error:
+              "executionId, taskTitle, expectedRevision and expectedTaskIdentityRevision are required for update-task-title",
+          };
+        }
+        const repository = MCPEngine.getInstance().repository;
+        const result = await repository.updateExecutionTaskTitle(
+          executionId,
+          userId,
+          params.expectedRevision,
+          params.expectedTaskIdentityRevision,
+          params.taskTitle,
+        );
+        return { success: true, data: result };
       }
 
       case "update-note": {
@@ -923,8 +979,8 @@ export async function getSessionInfo(
           return { success: false, error: ERRORS.execution_access_denied };
         const graph = await repository.getWorkflowGraph(execution.workflowId, userId);
         if (!graph) return { success: false, error: "Workflow not found" };
-        const progress = projectExecutionRun(graph, execution, { at: params.at });
-        if (!progress) return { success: false, error: "Workflow has no progress graph" };
+        const progress = projectExecutionProgress(graph, execution, { at: params.at });
+        if (progress.source === "metadata") return { success: true, data: progress };
         const { ProgressStatisticsService } = await import("@mcp-moira/workflow-engine");
         const statistics = progress.executionWorkflowVersion
           ? await new ProgressStatisticsService(repository).forVersion(

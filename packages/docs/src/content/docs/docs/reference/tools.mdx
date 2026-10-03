@@ -81,7 +81,26 @@ During ordinary progression, an original `step` advances the execution revision 
 
 When `current_step` presents a paused materialization node, it returns a fresh five-minute archive command rather than file contents. The grant is bound to the current user, execution, node, and context snapshot and can be downloaded repeatedly only while that execution remains waiting on the node with the same context. Run or retry the returned command exactly, then complete the node with `null` or `{}`; advancing the execution or changing its context invalidates the URL. A host that cannot run the command or reach the network uses `materialize` instead, which returns the same file bodies in the response under the same bindings and window, subject to a smaller total-size ceiling, and completes the node the same way.
 
-Progress-image grants are bound to the execution owner, workflow version, workflow-step revision, context revision, and normalized render options. Failed rendering or failed HTTP delivery does not consume the grant; successful response completion does.
+`update-task-title` establishes or renames the owner's active task independently of arbitrary notes.
+Read `execution_context` and pass its `revision` and `metadataRevisions.taskIdentity` as
+`expectedRevision` and `expectedTaskIdentityRevision`. The normalized nonempty title is bounded to
+500 JavaScript string code units; Unicode control/formatting characters are rejected before trimming.
+Both guards apply even to an identical normalized name, whose successful no-op changes no activity
+or events. Naming preserves the step attempt and other metadata. Completed/stopped runs refuse it.
+See [execution task naming](/docs/concepts/workflows/#execution-task-name) for the call and fallback.
+Progress reads without an authored process return `source: "metadata"`, not invented blocks or an
+error; authored projections retain `source: "trace"`.
+
+Recovery to a materialize target keeps that node paused for delivery. Its grant resolves current
+registry defaults; context changes alone do not refresh caller files. Execute the delivery before
+completing the node.
+
+Progress-image grants require authored progress and bind the execution owner, workflow version,
+step revision, context revision, independent task identity revision and normalized render options.
+A rename, including a same-clock change back to the original text, invalidates a prior grant.
+Stale redemption does not successfully consume it; obtain a fresh grant, also when its identity
+binding is absent. Failed rendering or HTTP delivery releases reservation; successful response
+completion consumes the grant once.
 
 ### Stopping a run
 

@@ -568,7 +568,7 @@ another's statistics, and a run still stepping is not sampled), projected onto t
 and joined by block id; the asking run is excluded so its own timing does not move the value it is
 compared with, and a completed run without a version stamp is counted as `versionNotRecorded` and
 never sampled. `session progress` and
-`GET /api/executions/:id/progress` return this aggregate as `statistics`;
+`GET /api/executions/:id/progress` return this aggregate as `statistics` for authored trace progress;
 `GET /api/workflows/:id/statistics?version=` returns it for any version (`docs/API.md`).
 
 A notification node runs inside the cycle that reached it, before that cycle's visits, variables
@@ -591,7 +591,19 @@ template-enabled `progressActiveLabel`. The projection uses it only while that e
 current; the block otherwise keeps the stable base label from `progress.nodes`. The field requires `progressNodeId`, follows ordinary template validation, and
 never changes focus, state, connections, routing, or persistence.
 
-The execution `note` is projected separately as `taskTitle`. The same node may also set
+`taskTitle` uses persisted `taskIdentity.title`, then resolved authored `progress.title`, then the
+execution's own workflow name; arbitrary `note` stays independent. Task identity is optional
+`{ title, changedAt, changeId }`, with a separate metadata revision. The owner names active
+executions through guarded `session update-task-title` (see [API](API.md#execution-task-title)),
+without advancing or consuming the presented step. The first evidence-bearing intake establishes
+the name; an authorized actual scope owner updates it, while progress and tactics retain it.
+Notifications reconcile current identity into their unsaved live context at actual delivery,
+including queued waits and trusted PIN callbacks. Delivered messages retain historical names.
+Without authored progress, the transport result is `source: "metadata"` with identities and
+execution state, without invented process, route or statistics; `projectExecutionRun` itself
+continues to return `null`. Authored projection is `source: "trace"`. Heading-only resolution
+falls back to own flow for an unresolved or oversized authored title; full projection keeps
+its strict bounds and reports overflow. The same node may also set
 `progressActiveContent` with the same structured fields; while that exact node is current its
 fields replace the matching base fields of its block and omitted fields keep their base values. All nested
 strings use ordinary template validation and resolution. Content is bounded plain text, not HTML.
@@ -1490,7 +1502,9 @@ Special variables with automatic handling:
 
 When agent provides `execution_note`, it updates the execution record's note field for easier tracking in execution lists.
 
-**Note:** `execution_note` passes through inputSchema validation. You can include it in `required` array to enforce agents provide execution identification.
+**Note:** `execution_note` passes through inputSchema validation. An author may require an arbitrary
+note, but this neither requires nor establishes the task name. Use the independent guarded naming
+operation above. Standard flow intake notes are optional bounded text, separate from headings.
 
 ## JSON Schema
 

@@ -23,7 +23,10 @@ import type { WorkflowExecution } from "../types/base-types.js";
 import type { AgentDirectiveNode } from "../types/graph-nodes.js";
 import { humanGateRemindAfterMs } from "../utils/human-gate.js";
 import { notificationHeading, runPageUrl } from "../utils/notification-text.js";
-import { projectExecutionRun } from "../utils/execution-run-projection.js";
+import {
+  projectExecutionRun,
+  resolveExecutionTaskTitle,
+} from "../utils/execution-run-projection.js";
 import type { UserCommunicationService } from "./user-communication.js";
 import { getActiveUserCommunicationService } from "./user-communication-provider.js";
 
@@ -137,6 +140,24 @@ export class WaitingNotificationSender {
       const result = await this.communication.deliver(
         { userId: loaded.execution.userId, text, format: "plain", purpose: "notification" },
         this.repository,
+        async () => {
+          const current = await this.repository.getExecution(row.executionId);
+          if (
+            !current ||
+            current.userId !== loaded.execution.userId ||
+            current.workflowId !== loaded.execution.workflowId ||
+            !this.queue.holdsWait(row.executionId, row.waitKey)
+          ) {
+            this.queue.markSuperseded(row.id);
+            return null;
+          }
+          const currentText = waitingNotificationText(loaded.graph, current, row);
+          if (currentText === null) {
+            this.queue.markSuperseded(row.id);
+            return null;
+          }
+          return { text: currentText, format: "plain", purpose: "notification" };
+        },
       );
       status = result.status;
       channels = result.channels
@@ -175,7 +196,13 @@ export class WaitingNotificationSender {
     const execution = await this.repository.getExecution(executionId);
     if (!execution) return null;
     const graph = await this.repository.getWorkflowGraph(execution.workflowId, execution.userId);
-    return graph ? { execution, graph } : null;
+    const current = await this.repository.getExecution(executionId);
+    return graph &&
+      current &&
+      current.userId === execution.userId &&
+      current.workflowId === execution.workflowId
+      ? { execution: current, graph }
+      : null;
   }
 }
 
@@ -215,7 +242,7 @@ export function waitingNotificationText(
     return null;
   const heading = notificationHeading(
     graph.metadata.name,
-    execution.note,
+    resolveExecutionTaskTitle(graph, execution),
     runPageUrl({ executionId: execution.executionId }),
     "plain",
   );

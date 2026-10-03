@@ -51,6 +51,17 @@ const approveAccount = jest.fn(async (adminId: string, userId: string) => {
   return { status: "approved", approvedAt };
 });
 
+// Execution headings belong to the execution routes, not these account/status/statistics
+// handlers. Keep their database dependencies outside this fixture and fail if a tested
+// handler unexpectedly starts resolving headings.
+const executionTaskTitles = jest.fn(async (): Promise<Map<string, string>> => {
+  throw new Error("execution heading resolution entered the account approval fixture");
+});
+jest.unstable_mockModule(
+  "../../../packages/web-backend/src/utils/execution-task-titles.js",
+  () => ({ executionTaskTitles }),
+);
+
 jest.unstable_mockModule("@mcp-moira/workflow-engine", () => ({
   DatabaseRepository: class {
     async listWorkflows() {
@@ -211,6 +222,11 @@ describe("account approval route capability", () => {
     listExecutions.mockClear();
     getSettingDefinitions.mockClear();
     approveAccount.mockClear();
+    executionTaskTitles.mockClear();
+  });
+
+  afterEach(() => {
+    expect(executionTaskTitles).not.toHaveBeenCalled();
   });
   afterEach(() => {
     sqlite.close();

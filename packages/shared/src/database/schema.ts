@@ -624,7 +624,8 @@ export const workflowExecution = sqliteTable(
     context: text("context").notNull(), // JSON
     error: text("error"), // DEPRECATED: kept for migration, use errors array instead
     errors: text("errors"), // JSON array of ExecutionError (Issue #386)
-    note: text("note"), // User-provided note for identification (max 500 chars)
+    note: text("note"), // Arbitrary execution note (max 500 chars), independent of task identity
+    taskIdentity: text("taskIdentity"), // JSON ExecutionTaskIdentity; null before a task is named
     parentExecutionId: text("parentExecutionId"), // Links to parent execution for continuation
     revision: integer("revision").notNull().default(0), // Workflow-step generation
     reminders: text("reminders").notNull().default("[]"), // JSON ExecutionReminder[]
@@ -634,7 +635,7 @@ export const workflowExecution = sqliteTable(
     // JSON ExecutionAwaitingUser: the agent's open question (`session await-user`), null when none
     awaitingUser: text("awaitingUser"),
     workflowVersion: text("workflowVersion"), // metadata.version of the definition the run started on
-    // Epoch ms of the last event of work (visits' enteredAt/leftAt, completedAt); see execution-activity.ts
+    // Epoch ms of meaningful visit, completion or title activity; see execution-activity.ts
     lastActivityAt: integer("lastActivityAt"),
     // How many journal entries are refusals (countRefusals over `errors`)
     refusalCount: integer("refusalCount").notNull().default(0),

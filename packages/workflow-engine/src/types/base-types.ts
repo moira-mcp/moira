@@ -3,7 +3,11 @@
  * Foundation types for the new graph-based execution engine
  */
 
-import type { ExecutionError, LegacyExecutionStatus } from "@mcp-moira/shared";
+import type {
+  ExecutionError,
+  LegacyExecutionStatus,
+  ExecutionTaskIdentity,
+} from "@mcp-moira/shared";
 
 // Execution context and state management
 export interface ExecutionContext {
@@ -99,7 +103,9 @@ export interface WorkflowExecution {
   waitingForInputNodeId?: string | null; // Which node is waiting for agent input
   globalContext: ExecutionContext;
   status: LegacyExecutionStatus; // TODO(#386): Change to ExecutionStatus after migration
-  note?: string | null; // User-provided note for identification (max 500 chars)
+  note?: string | null; // Arbitrary execution note, independent of the task name (max 500 chars)
+  /** Independently guarded runtime task name; unrelated to note or context. */
+  taskIdentity?: ExecutionTaskIdentity | null;
   /** Required explanation of an explicit stop; null for ordinary completion. */
   stopReason?: string | null;
   parentExecutionId?: string | null; // Links to parent execution for continuation
@@ -114,7 +120,7 @@ export interface WorkflowExecution {
    */
   gateWaiting?: boolean;
   /**
-   * Epoch ms of the run's last event of work (its visits' `enteredAt`/`leftAt`, `completedAt`), and
+   * Epoch ms of the run's last event of work (visits, completion or task identity change), and
    * how many journal entries are refusals — derived by `executionActivity` and stored by every writer
    * that changes the facts they come from. Read-only for callers.
    */

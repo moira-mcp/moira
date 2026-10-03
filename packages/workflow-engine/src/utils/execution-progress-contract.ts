@@ -1,10 +1,14 @@
 import type { ProgressFactTone } from "../types/base-types.js";
 import type { ExecutionVisitActorRole } from "../types/base-types.js";
 import type { ProcessProjection } from "./process-derivation.js";
+import {
+  EXECUTION_TASK_TITLE_LIMIT,
+  type ExecutionTaskIdentity,
+} from "@mcp-moira/shared/execution-task-identity";
 export type { ProgressFactTone } from "../types/base-types.js";
 
 export const EXECUTION_PROGRESS_TEXT_LIMITS = {
-  taskTitle: 500,
+  taskTitle: EXECUTION_TASK_TITLE_LIMIT,
   title: 200,
   goal: 1000,
   factLabel: 100,
@@ -143,6 +147,11 @@ export interface ExecutionProgressNode {
 
 export interface ExecutionProgress {
   taskTitle: string | null;
+  taskIdentity?: ExecutionTaskIdentity | null;
+  taskIdentityRevision?: string;
+  executionId?: string;
+  workflowId?: string;
+  workflowName?: string;
   title: string | null;
   goal: string | null;
   facts: ExecutionProgressFact[];
@@ -185,6 +194,23 @@ export interface ExecutionProgress {
    */
   waitingForUser: ExecutionWaitingForUser | null;
 }
+
+/** Identity remains inspectable when the definition authors no process view. */
+export interface ExecutionProgressMetadata {
+  source: "metadata";
+  taskTitle: string;
+  taskIdentity: ExecutionTaskIdentity | null;
+  taskIdentityRevision: string;
+  executionId: string;
+  workflowId: string;
+  workflowName: string;
+  workflowVersion: string;
+  executionWorkflowVersion: string | null;
+  executionRevision: number;
+  executionStatus: string;
+}
+
+export type ExecutionProgressResult = ExecutionProgress | ExecutionProgressMetadata;
 
 /** Why a run waits for a person, worded for them. */
 export type ExecutionWaitingForUser =

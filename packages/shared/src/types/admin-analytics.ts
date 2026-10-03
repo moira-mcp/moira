@@ -1,4 +1,6 @@
 /** Bounded, context-free projections consumed by the administration UI. */
+import type { ExecutionTaskIdentity } from "./execution-task-identity.js";
+
 export type AnalyticsRange =
   "15m" | "30m" | "hour" | "day" | "today" | "week" | "month" | "year" | "all";
 export type AnalyticsExclusions =
@@ -148,6 +150,7 @@ export interface ExecutionSummary {
   status: "running" | "completed" | "locked";
   currentNodeId: string | null;
   note: string | null;
+  taskIdentity: ExecutionTaskIdentity | null;
   stopReason: string | null;
   createdAt: number | null;
   updatedAt: number | null;

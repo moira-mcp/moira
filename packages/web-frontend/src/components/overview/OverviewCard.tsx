@@ -401,8 +401,8 @@ function Footer({ run, now }: { run: OverviewRun; now: number }): React.JSX.Elem
             </span>
           </Hint>
         ) : null}
-        {/* The note is usually the task's title already; only a note that differs is flagged. */}
-        {run.note && run.note !== run.title ? (
+        {/* Notes remain independently inspectable even when their text matches the task title. */}
+        {run.note ? (
           <Hint
             content={t("pages.overview.card.noteFlag", { note: run.note })}
             side="top"

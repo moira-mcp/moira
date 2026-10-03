@@ -265,14 +265,27 @@ export function EditBar({
             <ul className="mt-1 space-y-0.5 pl-5">
               {runWarnings.map((warning) => (
                 <li key={warning.executionId} data-run-warning={warning.executionId}>
-                  {t("pages.flowPage.edit.pausedRuns.item", {
-                    id: warning.note ?? warning.executionId.slice(0, 8),
-                    node: warning.nodeId,
-                    change:
-                      warning.change === "renamed"
-                        ? t("pages.flowPage.edit.pausedRuns.renamed", { to: warning.to })
-                        : t("pages.flowPage.edit.pausedRuns.removed"),
-                  })}
+                  <span data-testid={`flow-edit-run-task-${warning.executionId}`}>
+                    {t("pages.flowPage.edit.pausedRuns.item", {
+                      id:
+                        warning.taskTitle ??
+                        warning.workflowName ??
+                        warning.executionId.slice(0, 8),
+                      node: warning.nodeId,
+                      change:
+                        warning.change === "renamed"
+                          ? t("pages.flowPage.edit.pausedRuns.renamed", { to: warning.to })
+                          : t("pages.flowPage.edit.pausedRuns.removed"),
+                    })}
+                  </span>
+                  {warning.note ? (
+                    <p
+                      className="text-muted-foreground"
+                      data-testid={`flow-edit-run-note-${warning.executionId}`}
+                    >
+                      {t("pages.overview.panel.note")}: {warning.note}
+                    </p>
+                  ) : null}
                 </li>
               ))}
             </ul>

@@ -17,11 +17,9 @@ import {
   observeReadCapabilities,
   retireReads,
 } from "./read-scope";
-import type {
-  ExecutionProgress,
-  WorkflowVersionStatistics,
-} from "@mcp-moira/workflow-engine/progress-visual";
+import type { WorkflowVersionStatistics } from "@mcp-moira/workflow-engine/progress-visual";
 import type { ProcessProjection } from "@mcp-moira/workflow-engine/process";
+import type { ExecutionProgressResult } from "@mcp-moira/workflow-engine";
 import type {
   CodespaceConnectionView,
   CodespaceControlView,
@@ -37,6 +35,8 @@ import type {
   AdminUserLookup,
   AdminUserListFilter,
   AnalyticsSeriesWindow,
+  ExecutionTaskIdentity,
+  ExecutionTaskTitleMutationResult,
 } from "@mcp-moira/shared";
 
 /** The latest notification about the wait a run stands in: what the run page shows under its banner. */
@@ -254,6 +254,8 @@ export interface WorkRun {
   executionId: string;
   workflowId: string;
   workflowName: string | null;
+  taskTitle?: string;
+  taskIdentity?: ExecutionTaskIdentity | null;
   note?: string | null;
   status: string;
   hasActiveLock: boolean;
@@ -1829,6 +1831,8 @@ export class MoiraApiClient {
       executionId: string;
       workflowId: string;
       workflowName?: string | null; // Issue #421
+      taskTitle?: string;
+      taskIdentity?: ExecutionTaskIdentity | null;
       userId: string;
       status: string;
       currentNodeId: string | null;
@@ -1852,6 +1856,8 @@ export class MoiraApiClient {
           executionId: string;
           workflowId: string;
           workflowName?: string | null; // Issue #421
+          taskTitle?: string;
+          taskIdentity?: ExecutionTaskIdentity | null;
           userId: string;
           status: string;
           currentNodeId: string | null;
@@ -1955,13 +1961,21 @@ export class MoiraApiClient {
     executionId: string;
     workflowId: string;
     workflowName?: string | null;
+    taskTitle?: string;
+    taskIdentity?: ExecutionTaskIdentity | null;
+    note?: string | null;
     userId: string;
     status: string;
     stopReason?: string | null;
     currentNodeId: string | null;
     waitingForInputNodeId: string | null;
     revision: number;
-    metadataRevisions?: { parent: string; context: string; reminders: string };
+    metadataRevisions?: {
+      parent: string;
+      context: string;
+      reminders: string;
+      taskIdentity?: string;
+    };
     context: {
       variables: Record<string, unknown>;
       nodeStates: Record<string, unknown>;
@@ -1983,13 +1997,21 @@ export class MoiraApiClient {
           executionId: string;
           workflowId: string;
           workflowName?: string | null;
+          taskTitle?: string;
+          taskIdentity?: ExecutionTaskIdentity | null;
+          note?: string | null;
           userId: string;
           status: string;
           stopReason?: string | null;
           currentNodeId: string | null;
           waitingForInputNodeId: string | null;
           revision: number;
-          metadataRevisions?: { parent: string; context: string; reminders: string };
+          metadataRevisions?: {
+            parent: string;
+            context: string;
+            reminders: string;
+            taskIdentity?: string;
+          };
           context: {
             variables: Record<string, unknown>;
             nodeStates: Record<string, unknown>;
@@ -2016,14 +2038,14 @@ export class MoiraApiClient {
 
   /**
    * The run projection of an execution; `at` (a visit sequence number) projects the run as it
-   * stood at that visit. Null when the workflow has no process view.
+   * stood at that visit. A definition without a process view returns task metadata alone.
    */
   async getExecutionProgress(
     executionId: string,
     at?: number | null,
-  ): Promise<ExecutionProgress | null> {
+  ): Promise<ExecutionProgressResult | null> {
     try {
-      const response = await this.client.get<ApiResponse<ExecutionProgress>>(
+      const response = await this.client.get<ApiResponse<ExecutionProgressResult>>(
         `/executions/${executionId}/progress`,
         { params: at === undefined || at === null ? undefined : { at } },
       );
@@ -2053,7 +2075,7 @@ export class MoiraApiClient {
     status: string;
     currentNodeId: string | null;
     waitingForInputNodeId: string | null;
-    progress: ExecutionProgress | null;
+    progress: ExecutionProgressResult | null;
   }> {
     type AnswerResponse = {
       executionId: string;
@@ -2061,7 +2083,7 @@ export class MoiraApiClient {
       status: string;
       currentNodeId: string | null;
       waitingForInputNodeId: string | null;
-      progress: ExecutionProgress | null;
+      progress: ExecutionProgressResult | null;
     };
     const response = await this.client.post<ApiResponse<AnswerResponse>>(
       `/executions/${executionId}/answer`,
@@ -2075,6 +2097,22 @@ export class MoiraApiClient {
       `/executions/${executionId}/variables`,
     );
     return response.data.data!;
+  }
+
+  /** Rename owned running task metadata independently of the workflow step and arbitrary note. */
+  async updateExecutionTaskTitle(
+    executionId: string,
+    taskTitle: string,
+    expectedRevision: number,
+    expectedTaskIdentityRevision: string,
+  ): Promise<ExecutionTaskTitleMutationResult> {
+    return this.wrapFailure("rename the task", async () => {
+      const response = await this.client.put<ApiResponse<ExecutionTaskTitleMutationResult>>(
+        `/executions/${encodeURIComponent(executionId)}/task-title`,
+        { taskTitle, expectedRevision, expectedTaskIdentityRevision },
+      );
+      return response.data.data!;
+    });
   }
 
   /**
@@ -2147,6 +2185,8 @@ export class MoiraApiClient {
       executionId: string;
       workflowId: string;
       workflowName?: string | null;
+      taskTitle?: string;
+      taskIdentity?: ExecutionTaskIdentity | null;
       userId: string;
       userEmail: string | null;
       userName: string | null;
@@ -2172,6 +2212,8 @@ export class MoiraApiClient {
           executionId: string;
           workflowId: string;
           workflowName?: string | null;
+          taskTitle?: string;
+          taskIdentity?: ExecutionTaskIdentity | null;
           userId: string;
           userEmail: string | null;
           userName: string | null;
@@ -2297,6 +2339,9 @@ export class MoiraApiClient {
     executionId: string;
     workflowId: string;
     workflowName?: string | null;
+    taskTitle?: string;
+    taskIdentity?: ExecutionTaskIdentity | null;
+    note?: string | null;
     userId: string;
     userEmail: string | null;
     userName: string | null;
@@ -2326,6 +2371,9 @@ export class MoiraApiClient {
         executionId: string;
         workflowId: string;
         workflowName?: string | null;
+        taskTitle?: string;
+        taskIdentity?: ExecutionTaskIdentity | null;
+        note?: string | null;
         userId: string;
         userEmail: string | null;
         userName: string | null;

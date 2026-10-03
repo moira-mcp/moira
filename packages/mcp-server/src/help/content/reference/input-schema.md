@@ -281,7 +281,8 @@ Add descriptions to help agents understand fields:
 
 ## Magic Variables
 
-Special variable `execution_note` updates execution tracking:
+Special variable `execution_note` updates an arbitrary execution note, independently of
+[the task name](/docs/concepts/workflows/#execution-task-name):
 
 ```json
 {

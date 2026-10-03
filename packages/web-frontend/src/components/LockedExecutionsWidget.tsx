@@ -13,13 +13,16 @@ import { apiClient } from "../services/api-client";
 import { ROUTES } from "../constants/routes";
 import { useResource } from "../hooks/useResource";
 import { DataRegion } from "./DataRegion";
+import type { ExecutionTaskIdentity } from "@mcp-moira/shared";
 
 interface LockedExecution {
   executionId: string;
   workflowId: string;
   workflowName?: string | null;
+  taskTitle?: string;
+  taskIdentity?: ExecutionTaskIdentity | null;
   status: string;
-  note?: string;
+  note?: string | null;
   createdAt?: number | null;
   updatedAt?: number | null;
   hasActiveLock?: boolean;
@@ -107,8 +110,16 @@ export const LockedExecutionsWidget: React.FC<LockedExecutionsWidgetProps> = ({
                       <Lock className="w-3 h-3" />
                     </Badge>
                     <span className="text-sm truncate">
-                      {exec.workflowName || exec.note || exec.executionId.slice(0, 8)}
+                      {exec.taskTitle ??
+                        exec.taskIdentity?.title ??
+                        exec.workflowName ??
+                        exec.workflowId}
                     </span>
+                    {exec.taskTitle && exec.taskTitle !== (exec.workflowName ?? exec.workflowId) ? (
+                      <span className="text-xs text-muted-foreground truncate">
+                        {exec.workflowName ?? exec.workflowId}
+                      </span>
+                    ) : null}
                     {admin && exec.userEmail && (
                       <span className="text-xs text-muted-foreground truncate">
                         ({exec.userEmail})

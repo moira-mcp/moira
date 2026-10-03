@@ -20,7 +20,7 @@ import {
   stepAttemptContinuationMatches,
 } from "../../types/step-attempt-binding.js";
 import { drizzle } from "drizzle-orm/better-sqlite3";
-import { executionRowFields } from "../execution-row.js";
+import { executionRowFields, STORED_TASK_ACTIVITY_SQL } from "../execution-row.js";
 import { enqueueWaitingNotification } from "../execution-notification.js";
 import { recordExecutionChange, trackExecutionChange } from "../execution-change.js";
 import { executionActivity, parseStoredVisits } from "../execution-activity.js";
@@ -203,10 +203,10 @@ export class ExecutionAttemptRepository {
           .prepare(
             `INSERT INTO workflowExecution (
               executionId, workflowId, userId, state, currentNodeId, waitingForInputNodeId,
-              context, error, errors, note, parentExecutionId, revision, reminders, visits,
+              context, error, errors, note, taskIdentity, parentExecutionId, revision, reminders, visits,
               gateWaiting, lastActivityAt, refusalCount, workflowVersion, createdAt, updatedAt,
               completedAt
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           )
           .run(
             input.execution.executionId,
@@ -219,6 +219,7 @@ export class ExecutionAttemptRepository {
             execution.error,
             execution.errors,
             execution.note,
+            execution.taskIdentity,
             execution.parentExecutionId,
             input.execution.revision,
             execution.reminders,
@@ -354,13 +355,14 @@ export class ExecutionAttemptRepository {
           this.sqlite
             .prepare(
               `UPDATE workflowExecution SET state = 'completed', gateWaiting = 0, awaitingUser = NULL,
-             error = ?, errors = ?, lastActivityAt = ?, refusalCount = ?,
+             error = ?, errors = ?, lastActivityAt = ${STORED_TASK_ACTIVITY_SQL}, refusalCount = ?,
              completedAt = ?, updatedAt = ?
              WHERE executionId = ? AND userId = ? AND state = 'running' AND revision = ?`,
             )
             .run(
               error.message,
               JSON.stringify(errors),
+              activity.lastActivityAt,
               activity.lastActivityAt,
               activity.refusalCount,
               error.timestamp,
@@ -430,10 +432,10 @@ export class ExecutionAttemptRepository {
             .prepare(
               `UPDATE workflowExecution SET state = 'completed', stopReason = ?, revision = revision + 1,
          waitingForInputNodeId = NULL, gateWaiting = 0, awaitingUser = NULL,
-         completedAt = ?, updatedAt = ?, lastActivityAt = ?
+         completedAt = ?, updatedAt = ?, lastActivityAt = ${STORED_TASK_ACTIVITY_SQL}
          WHERE executionId = ? AND userId = ? AND revision = ? AND state IN ('running', 'waiting')`,
             )
-            .run(reason, now, now, now, executionId, userId, expectedRevision),
+            .run(reason, now, now, now, now, executionId, userId, expectedRevision),
         );
         this.sqlite
           .prepare(
@@ -703,7 +705,7 @@ export class ExecutionAttemptRepository {
             .prepare(
               `UPDATE workflowExecution SET state = ?, currentNodeId = ?, waitingForInputNodeId = ?,
                context = ?, visits = ?, gateWaiting = ?, awaitingUser = NULL, updatedAt = ?,
-               lastActivityAt = ?, revision = revision + 1
+               lastActivityAt = ${STORED_TASK_ACTIVITY_SQL}, revision = revision + 1
              WHERE executionId = ? AND revision = ? AND state = ?
                AND currentNodeId IS ? AND waitingForInputNodeId IS ? AND context = ?`,
             )
@@ -715,6 +717,7 @@ export class ExecutionAttemptRepository {
               execution.visits,
               execution.gateWaiting,
               now,
+              execution.lastActivityAt,
               execution.lastActivityAt,
               input.execution.executionId,
               input.expectedExecution.revision,
@@ -767,7 +770,7 @@ export class ExecutionAttemptRepository {
                WHEN json_valid(awaitingUser) = 0 THEN NULL
                WHEN json_extract(awaitingUser, '$.nodeId') IS ? THEN awaitingUser
                ELSE NULL END, updatedAt = ?, completedAt = ?,
-             lastActivityAt = ?, revision = revision + 1
+             lastActivityAt = ${STORED_TASK_ACTIVITY_SQL}, revision = revision + 1
            WHERE executionId = ? AND revision = ? AND state = ?
              AND currentNodeId IS ? AND waitingForInputNodeId IS ? AND context = ?
              AND (? = 0 OR note IS ?)`,
@@ -786,6 +789,7 @@ export class ExecutionAttemptRepository {
               execution.currentNodeId,
               execution.updatedAt,
               execution.completedAt,
+              execution.lastActivityAt,
               execution.lastActivityAt,
               input.execution.executionId,
               input.execution.revision,

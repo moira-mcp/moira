@@ -13,10 +13,19 @@ import {
   internalValues,
   runNotificationScenario,
   type NotificationMockContext,
+  type NotificationScenario,
   type NotificationScenarioResult,
 } from "../../helpers/notification-scenario.js";
 
 const workflow = catalogGraph("robust-task");
+const taskTitle = "Reconcile the September ledger";
+const note = "The bank statement may arrive as two separate files";
+const runScenario = (scenario: NotificationScenario) =>
+  runNotificationScenario(workflow, {
+    ...scenario,
+    note,
+    taskTitle: { atNode: "initialize-workspace", title: taskTitle },
+  });
 const plan = [{ title: "Parse the ledger" }, { title: "Reconcile the entries" }];
 const revised = [{ title: "Parse the ledger" }, { title: "Match entries by date" }];
 const QUESTION = /\b(?:choose|approve|reject)\b|\?/iu;
@@ -27,7 +36,7 @@ function answers(mode: "interactive" | "autonomous", extra: Record<string, unkno
       workspace_path: "./moira-ws/robust-task-ledger-20260926-1200/",
       operating_mode: mode,
       progress_intake_outcome: `Task contract established, ${mode}`,
-      execution_note: "Reconcile the September ledger",
+      execution_note: note,
       goal_summary: "Every September ledger entry matches the bank statement",
     },
     "create-plan": {
@@ -81,6 +90,8 @@ const gateMarks = (run: NotificationScenarioResult, nodeId: string) =>
 const WAITING_FOR_YOU = /🙋 waiting for you: [^\n]+$/u;
 
 function expectClean(run: NotificationScenarioResult) {
+  expect(run.taskIdentity?.title).toBe(taskTitle);
+  expect(run.note).toBe(note);
   for (const { text } of run.notifications) {
     expect(
       text.startsWith(
@@ -99,7 +110,7 @@ function expectClean(run: NotificationScenarioResult) {
 
 describe("Robust Task notifications", () => {
   test("interactive: the plan to approve, then the finish with every step done", async () => {
-    const run = await runNotificationScenario(workflow, { mockInputs: answers("interactive") });
+    const run = await runScenario({ mockInputs: answers("interactive") });
     expect(run.notifications.map((message) => message.nodeId)).toEqual([
       "notify-plan-approval",
       "notify-completion",
@@ -117,7 +128,7 @@ describe("Robust Task notifications", () => {
   });
 
   test("autonomous: work goes ahead with the plan, and nothing asks for a decision", async () => {
-    const run = await runNotificationScenario(workflow, { mockInputs: answers("autonomous") });
+    const run = await runScenario({ mockInputs: answers("autonomous") });
     expect(run.notifications.map((message) => message.nodeId)).toEqual([
       "notify-work-started",
       "notify-completion",
@@ -132,7 +143,7 @@ describe("Robust Task notifications", () => {
   });
 
   test("a replan announces the new plan in the next message", async () => {
-    const run = await runNotificationScenario(workflow, {
+    const run = await runScenario({
       mockInputs: answers("autonomous", {
         "review-step": (ctx: { visit: number }) => ({
           verdict_file: "steps/1/plans/001/attempts/1/verdict.md",
@@ -166,7 +177,7 @@ describe("Robust Task notifications", () => {
 
   test("a plan repaired before approval is announced, and run, with its new length", async () => {
     const repaired = [...plan, { title: "Write the reconciliation report" }];
-    const run = await runNotificationScenario(workflow, {
+    const run = await runScenario({
       mockInputs: answers("interactive", {
         "review-plan": (ctx: NotificationMockContext) => ({
           ...(ctx.visit === 1
@@ -220,7 +231,7 @@ describe("Robust Task notifications", () => {
   };
 
   test("interactive: an exhausted step asks the person, naming the step, the failure and the choices", async () => {
-    const run = await runNotificationScenario(workflow, {
+    const run = await runScenario({
       mockInputs: answers("interactive", exhausted),
     });
     expect(run.notifications.map((message) => message.nodeId)).toEqual([
@@ -245,7 +256,7 @@ describe("Robust Task notifications", () => {
   });
 
   test("autonomous: exactly one message about the exhausted step, sent after the decision", async () => {
-    const run = await runNotificationScenario(workflow, {
+    const run = await runScenario({
       mockInputs: answers("autonomous", exhausted),
     });
     expect(run.notifications.map((message) => message.nodeId)).toEqual([
@@ -306,7 +317,7 @@ describe("Robust Task notifications", () => {
       "the refunds data is not available",
     ],
   ] as const)("%s: the plan review bound", async (mode, sequence, words, detail) => {
-    const run = await runNotificationScenario(workflow, { mockInputs: answers(mode, planStuck) });
+    const run = await runScenario({ mockInputs: answers(mode, planStuck) });
     expect(run.notifications.map((message) => message.nodeId)).toEqual(sequence);
     expectClean(run);
     expect(run.notifications[0].text).toContain(words);
@@ -345,7 +356,7 @@ describe("Robust Task notifications", () => {
     ["interactive", "notify-final-review-limit", "Choose: fix the result once more, or accept it"],
     ["autonomous", "notify-final-limit-decided", "accepting the result with its open items"],
   ] as const)("%s: the final review bound", async (mode, node, words) => {
-    const run = await runNotificationScenario(workflow, { mockInputs: answers(mode, resultStuck) });
+    const run = await runScenario({ mockInputs: answers(mode, resultStuck) });
     const ids = run.notifications.map((message) => message.nodeId);
     expect(ids.slice(-2)).toEqual([node, "notify-completion"]);
     expect(ids.filter((id) => id === node)).toHaveLength(1);
@@ -457,7 +468,7 @@ describe("Robust Task notifications", () => {
   ] as const)(
     "autonomous: the decision to %s is worded in its one message",
     async (_decision, extra, node, words) => {
-      const run = await runNotificationScenario(workflow, {
+      const run = await runScenario({
         mockInputs: answers("autonomous", extra),
       });
       const messages = run.notifications.filter((message) => message.nodeId === node);
@@ -476,7 +487,7 @@ describe("Robust Task notifications", () => {
         workspace_path: "./moira-ws/robust-task-ledger-20260926-1200/",
         operating_mode: "interactive",
         progress_intake_outcome: "Task contract established",
-        execution_note: "Reconcile the September ledger",
+        execution_note: note,
       },
     ],
     ["review-plan", { review_outcome: "repair", progress_plan_outcome: "Plan review: repair" }],
@@ -508,7 +519,7 @@ describe("Robust Task notifications", () => {
     ],
   ])("%s refuses an answer without its reader field", async (node, answer) => {
     await expect(
-      runNotificationScenario(workflow, {
+      runScenario({
         mockInputs: answers("interactive", { [node]: answer }),
       }),
     ).rejects.toThrow(new RegExp(`The answer for ${node} \\(visit 1\\) was rejected`, "u"));

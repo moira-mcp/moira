@@ -267,7 +267,12 @@ describe("GET /api/executions/overview", () => {
     const all = flatten(runs);
     expect(all.map((run) => run.executionId)).not.toContain(ids.finishedParent);
     const child = runs.find((run) => run.executionId === ids.orphanChild);
-    expect(child?.parent).toEqual({ executionId: ids.finishedParent, title: "finished parent" });
+    expect(child?.parent).toEqual({
+      executionId: ids.finishedParent,
+      title: `Order import ${stamp}`,
+    });
+    expect(child?.title).toBe(`Order import ${stamp}`);
+    expect(child?.note).toBe("child of a finished parent");
   });
 
   test("with finished runs included, each run appears once, under its parent", async () => {

@@ -10,6 +10,12 @@ declares. Everything on the page comes from the run's recorded route; nothing is
 block order. A workflow without a process view (`progress`) shows the technical node graph and the
 variables panel instead.
 
+The header shows the canonical task name, the run's own flow name and its arbitrary note separately.
+An own-run live rename refreshes the name without reloading the definition or resetting reading
+position. Responses from a run you have left cannot replace the current run or redirect its answer
+and variable-edit controls. Without authored progress, the page retains the technical graph and
+variables, with metadata identity but no invented process stages.
+
 ## Opening a run from the list
 
 Open **Runs** and choose its card. The card keeps the known start time separately from the last

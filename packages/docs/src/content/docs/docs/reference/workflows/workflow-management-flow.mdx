@@ -92,10 +92,13 @@ revision after a rejected result, a process revision, and a lowering of the leve
 approval — so the changed plan is announced again. It reads as not yet done whenever a plan is
 announced, and as done once the build has run. A complex edit is audited without the question.
 The reader lines come from one-sentence fields the steps write for a person:
-- `execution_note`, the task, from the first step;
+
 - `decision_summary` from the audit, upload and upload-error decisions;
 - `workflow_name` and `workflow_version` from the upload decision;
 - `failure_summary` from a failed upload.
+
+Intake may return an optional arbitrary `execution_note` of at most 120 characters. It is separate
+from the persisted task name and does not supply these notification reader fields.
 
 A revised plan is announced again. Because the flow notifies, starting it for a user with no
 configured channel is refused with an instruction; an agent that wants to run without
@@ -106,8 +109,11 @@ notifications prepares the start again with `skipNotificationCheck: true`.
 WMF teaches the same rules for every notification in a workflow it creates or edits. The rules
 live in the engine reference, `reference/engine.md`:
 
-- The engine adds the heading. It is set through `execution_note` on the first agent step, and a
-  message does not repeat it.
+- The engine adds the heading from the independently persisted task name. Intake sets it through
+  [guarded Progress/session metadata](/docs/concepts/workflows/#execution-task-name) before
+  completing; bootstrap then delivers `reference/progress.md` as the canonical naming guide for
+  authoring consumers. Authorized actual scope changes update the same name; ordinary progress
+  and tactical repair retain it. A message does not repeat the heading.
 - The plan list comes from the list bound on the working block through `planList`: `full` at plan
   ready and at every finish, `progress` elsewhere. A message never writes the list by hand.
 - No internal value reaches the reader: no path or file name, template syntax, node id, variable

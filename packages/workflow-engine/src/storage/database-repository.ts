@@ -30,6 +30,7 @@ import {
   type AdminWorkflowFilter,
   type AdminWorkflowListResult,
   type ExecutionError,
+  type ExecutionTaskTitleMutationResult,
 } from "@mcp-moira/shared";
 import { IDataRepository, WorkflowInfo, SettingDefinition } from "../interfaces/data-repository.js";
 import { WorkflowGraph } from "../interfaces/core-interfaces.js";
@@ -306,6 +307,22 @@ export class DatabaseRepository implements IDataRepository {
 
   async updateExecutionNote(executionId: string, note: string): Promise<void> {
     await this.executionRepo.updateNote(executionId, note);
+  }
+
+  async updateExecutionTaskTitle(
+    executionId: string,
+    userId: string,
+    expectedRevision: number,
+    expectedTaskIdentityRevision: string,
+    taskTitle: string,
+  ): Promise<ExecutionTaskTitleMutationResult> {
+    return this.executionService.updateExecutionTaskTitle(
+      executionId,
+      userId,
+      expectedRevision,
+      expectedTaskIdentityRevision,
+      taskTitle,
+    );
   }
 
   async setExecutionAwaitingUser(

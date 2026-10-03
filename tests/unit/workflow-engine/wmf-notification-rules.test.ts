@@ -28,7 +28,7 @@ const rendered = (id: string, variables: Record<string, unknown>): string =>
     nodeStates: {},
   });
 
-async function engineReference(): Promise<string> {
+async function materializedReference(name: "engine" | "progress" = "engine"): Promise<string> {
   const node = wmf.nodes.find(
     (candidate) => candidate.id === "materialize-workspace-bootstrap",
   ) as MaterializeNode;
@@ -40,20 +40,20 @@ async function engineReference(): Promise<string> {
     nodeStates: {},
   };
   const files = await renderMaterializeFiles(node, wmf.variableRegistry ?? {}, context);
-  const engine = files.find((file) => file.path.endsWith("reference/engine.md"));
-  expect(engine).toBeDefined();
-  return engine!.content.toString();
+  const reference = files.find((file) => file.path.endsWith(`reference/${name}.md`));
+  expect(reference).toBeDefined();
+  return reference!.content.toString();
 }
 
 describe("Workflow Management Flow teaches the notification content rules", () => {
   test.each([
     [
       "the heading is the engine's",
-      "opens every message with the flow name and the run's task note,\n    linked to the run page; the message does not repeat them",
+      "opens every message with the flow name and the run's canonical task\n    name, linked to the run page; the message does not repeat them",
     ],
     [
-      "the note comes from the first agent step",
-      "through `execution_note` on its first agent step",
+      "task naming uses independent Progress/session identity",
+      "uses execution-owned Progress/session identity as specified in the canonical\n    progress reference. Arbitrary execution notes never determine that heading.",
     ],
     [
       "the list comes from the binding",
@@ -85,7 +85,18 @@ describe("Workflow Management Flow teaches the notification content rules", () =
     ["the last message goes straight to end", "The run's last message connects straight to `end`"],
     ["the deprecated node too", "The notification content rules above apply to it too"],
   ])("the materialized engine reference states that %s", async (_rule, text) => {
-    expect(await engineReference()).toContain(text);
+    expect(await materializedReference()).toContain(text);
+  });
+
+  test("the materialized progress reference names the real guarded API and keeps notes independent", async () => {
+    const text = await materializedReference("progress");
+    expect(text).toContain('Read session({ action: "execution_context", executionId })');
+    expect(text).toContain(
+      'session({ action: "update-task-title", executionId, taskTitle, expectedRevision,\nexpectedTaskIdentityRevision })',
+    );
+    expect(text).toContain("metadataRevisions.taskIdentity");
+    expect(text).toContain("They never extract a title from execution.note.");
+    expect(text).toContain("Notes remain separately inspectable arbitrary text.");
   });
 
   test("the light review on the simple level checks every notification against the reference it reads", () => {

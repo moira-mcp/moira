@@ -69,6 +69,33 @@ describe("WorkArea", () => {
     ).toBeVisible();
   });
 
+  test("task names, own flow names and notes remain separately readable for active and recent runs", () => {
+    draw({
+      activeRuns: [
+        run("named-task", {
+          taskTitle: "Publish the October release",
+          note: "Waiting for artifact checks",
+        }),
+      ],
+      recentRuns: [
+        run("recent-task", {
+          status: "completed",
+          taskTitle: "Publish the September release",
+          note: "Historical deployment note",
+        }),
+      ],
+      topFlows: [],
+    });
+    const active = screen.getByTestId("work-active-named-task");
+    expect(within(active).getByText("Publish the October release")).toBeVisible();
+    expect(within(active).getByText("Release checklist")).toBeVisible();
+    expect(within(active).getByText("Waiting for artifact checks")).toBeVisible();
+    const recent = screen.getByTestId("work-recent");
+    expect(within(recent).getByText("Publish the September release")).toBeVisible();
+    expect(within(recent).getByText("Release checklist")).toBeVisible();
+    expect(within(recent).getByText("Historical deployment note")).toBeVisible();
+  });
+
   test("a step with a name shows it; one without reads as words from its id, not the raw id", () => {
     draw({
       activeRuns: [run("named-0000"), run("unnamed-00", { stepId: "get-task", stepName: null })],
