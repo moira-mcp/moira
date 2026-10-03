@@ -16,6 +16,8 @@ import {
   prepareExecutionVariableWrite,
   queryExecutionVariables,
   ProgressStatisticsService,
+  ExecutionStopService,
+  readExecutionManagement,
 } from "@mcp-moira/workflow-engine";
 import { AuthenticatedRequest } from "../types/express-types.js";
 import {
@@ -44,7 +46,13 @@ import {
 } from "@mcp-moira/shared";
 import { overviewPage, overviewRows } from "../services/execution-overview.js";
 import { changeCursor, changesAfter } from "../services/execution-change-stream.js";
-import { executionTaskTitles } from "../utils/execution-task-titles.js";
+import { executionTaskTitles, withExecutionTaskTitles } from "../utils/execution-task-titles.js";
+import {
+  resolveOverviewQuery,
+  OVERVIEW_IDLE_MS,
+  type OverviewPeriod,
+  type OverviewIdle,
+} from "@mcp-moira/shared/execution-management";
 
 /**
  * Whether this user may act on the execution **as its owner would**.
@@ -331,29 +339,33 @@ router.get(
     const offset = Math.max(0, parseInt(req.query.offset as string) || 0);
     // `mine=true` narrows an admin's list to their own runs, as every other user's list already is.
     const mine = req.query.mine === "true";
+    const includeStopped = statusParam?.split(",").includes("stopped")
+      ? true
+      : rawStatus?.length
+        ? false
+        : undefined;
 
     // Get executions with filters
-    const result = await new ExecutionRepository(getDatabase()).listSummaries({
-      userId: isAdmin && !mine ? undefined : userId, // Admins see all unless `mine`, users see only their own
-      status: dbStatuses,
-      workflowId,
-      search,
-      sort,
-      sortOrder,
-      limit,
-      offset,
-      locked: hasLockedFilter && !originalIncludedRunning,
-    });
-
-    const enrichedExecutions = result.executions.map((execution) => ({
-      ...execution,
-      taskTitle: execution.taskIdentity?.title ?? execution.workflowName ?? "Workflow unavailable",
-    }));
+    const result = await withExecutionTaskTitles(() =>
+      new ExecutionRepository(getDatabase()).listSummaries({
+        userId: isAdmin && !mine ? undefined : userId, // Admins see all unless `mine`, users see only their own
+        status: dbStatuses,
+        workflowId,
+        search,
+        sort,
+        sortOrder,
+        limit,
+        offset,
+        locked: hasLockedFilter && !originalIncludedRunning,
+        includeStopped,
+        actorId: userId,
+      }),
+    );
 
     res.json({
       success: true,
       data: {
-        executions: enrichedExecutions,
+        executions: result.executions,
         total: result.total,
         limit,
         offset,
@@ -363,14 +375,6 @@ router.get(
   }),
 );
 
-/** Idle presets of the overview: no activity for longer than this. */
-const OVERVIEW_IDLE_MS: Record<string, number> = {
-  "1h": 3_600_000,
-  "1d": 86_400_000,
-  "3d": 3 * 86_400_000,
-  "7d": 7 * 86_400_000,
-  "30d": 30 * 86_400_000,
-};
 const OVERVIEW_STATUSES: OverviewStatusFilter[] = [
   "active",
   "waiting-user",
@@ -386,9 +390,9 @@ const OVERVIEW_MAX_LIMIT = 100;
 /** An epoch-ms or ISO date query value, or undefined; anything else is a 400. */
 function overviewInstant(value: unknown, name: string): number | undefined {
   if (value === undefined || value === "") return undefined;
-  const text = String(value);
-  const parsed = /^\d+$/.test(text) ? Number(text) : Date.parse(text);
-  if (!Number.isFinite(parsed)) throw createApiError.badRequest(`Invalid ${name}`);
+  if (typeof value !== "string") throw createApiError.badRequest(`Invalid ${name}`);
+  const parsed = /^-?\d+$/.test(value) ? Number(value) : Date.parse(value);
+  if (!Number.isFinite(parsed) || parsed < 0) throw createApiError.badRequest(`Invalid ${name}`);
   return parsed;
 }
 
@@ -425,6 +429,7 @@ router.get(
       res.json({ success: true, data: { runs }, timestamp: new Date().toISOString() });
       return;
     }
+    if (req.query.ids !== undefined) throw createApiError.badRequest("Invalid ids");
 
     const status = (req.query.status ?? "active") as OverviewStatusFilter;
     if (!OVERVIEW_STATUSES.includes(status)) throw createApiError.badRequest("Invalid status");
@@ -434,39 +439,46 @@ router.get(
     if (idle !== undefined && idle !== "" && !Object.hasOwn(OVERVIEW_IDLE_MS, idle)) {
       throw createApiError.badRequest("Invalid idle");
     }
+    const period = req.query.period as OverviewPeriod | undefined;
+    if (period !== undefined && !["7d", "30d", "all"].includes(period))
+      throw createApiError.badRequest("Invalid period");
+    for (const name of ["limit", "offset", "search", "workflowId", "idle", "period"] as const)
+      if (req.query[name] !== undefined && typeof req.query[name] !== "string")
+        throw createApiError.badRequest(`Invalid ${name}`);
     const limit = req.query.limit === undefined ? 50 : Number(req.query.limit);
     const offset = req.query.offset === undefined ? 0 : Number(req.query.offset);
-    if (!Number.isInteger(limit) || limit < 1 || limit > OVERVIEW_MAX_LIMIT) {
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > OVERVIEW_MAX_LIMIT) {
       throw createApiError.badRequest("Invalid limit");
     }
-    if (!Number.isInteger(offset) || offset < 0) throw createApiError.badRequest("Invalid offset");
+    if (!Number.isSafeInteger(offset) || offset < 0)
+      throw createApiError.badRequest("Invalid offset");
     const search = typeof req.query.search === "string" ? req.query.search.trim() : "";
     if (search.length > 200) throw createApiError.badRequest("Search is too long");
     const now = Date.now();
-    const idleCut = idle ? now - OVERVIEW_IDLE_MS[idle] : undefined;
-    const activeTo = overviewInstant(req.query.activeTo, "activeTo");
-    const idleSince =
-      idleCut === undefined
-        ? activeTo
-        : activeTo === undefined
-          ? idleCut
-          : Math.min(idleCut, activeTo);
-
-    const data = await overviewPage(
-      {
-        userId,
-        status,
-        refusalsOnly: req.query.refusals === "true" || req.query.refusals === "1",
-        workflowId: typeof req.query.workflowId === "string" ? req.query.workflowId : undefined,
-        search: search || undefined,
-        idleSince,
-        activeSince: overviewInstant(req.query.activeFrom, "activeFrom"),
-        sort,
-        limit,
-        offset,
-      },
-      deps,
-    );
+    let query;
+    try {
+      query = resolveOverviewQuery(
+        {
+          userId,
+          status,
+          refusalsOnly: req.query.refusals === "true" || req.query.refusals === "1",
+          workflowId: typeof req.query.workflowId === "string" ? req.query.workflowId : undefined,
+          search: search || undefined,
+          period,
+          idle: idle ? (idle as OverviewIdle) : undefined,
+          activeFrom: overviewInstant(req.query.activeFrom, "activeFrom"),
+          activeTo: overviewInstant(req.query.activeTo, "activeTo"),
+          sort,
+          limit,
+          offset,
+        },
+        now,
+      );
+    } catch (error) {
+      if (error instanceof RangeError) throw createApiError.badRequest(error.message);
+      throw error;
+    }
+    const data = await overviewPage(query, deps);
     res.json({ success: true, data, timestamp: new Date().toISOString() });
   }),
 );
@@ -523,6 +535,12 @@ router.get(
     const lockService = getLockService();
     const activeLock = await lockService.getActiveLock(executionId);
     const isLocked = execution.status === "running" && activeLock !== null;
+    const management = await readExecutionManagement(
+      repository,
+      [execution],
+      userId,
+      new Set(activeLock ? [executionId] : []),
+    );
     // The latest notification about the wait the run stands in, if it waits for its person.
     const waitingNotification = new ExecutionNotificationRepository(db).latestForCurrentWait(
       executionId,
@@ -537,6 +555,7 @@ router.get(
           workflowName: workflowNameMap.get(execution.workflowId) || null,
           userId: execution.userId,
           status: isLocked ? ("locked" as const) : execution.status,
+          ...management.get(executionId),
           currentNodeId: execution.currentNodeId,
           waitingForInputNodeId: execution.waitingForInputNodeId,
           note: execution.note,
@@ -547,7 +566,6 @@ router.get(
           taskIdentity: execution.taskIdentity ?? null,
           stopReason: execution.stopReason ?? null,
           parentExecutionId: execution.parentExecutionId ?? null,
-          revision: execution.revision,
           metadataRevisions: {
             parent: metadataRevision(execution.parentExecutionId ?? null),
             context: metadataRevision(execution.globalContext),
@@ -585,6 +603,28 @@ router.get(
       },
       timestamp: new Date().toISOString(),
     });
+  }),
+);
+
+router.post(
+  "/:id/stop",
+  asyncHandler(async (req: Request, res: Response) => {
+    const body = req.body as unknown;
+    if (
+      body === null ||
+      typeof body !== "object" ||
+      Array.isArray(body) ||
+      Object.keys(body).some((key) => key !== "expectedRevision" && key !== "reason")
+    )
+      throw createApiError.validationFailed("expectedRevision and reason are required");
+    const { expectedRevision, reason } = body as { expectedRevision: number; reason: string };
+    const result = await new ExecutionStopService(repository).stop(
+      req.params.id,
+      (req as AuthenticatedRequest).userId,
+      { expectedRevision, reason },
+      "api",
+    );
+    res.json({ success: true, data: result, timestamp: new Date().toISOString() });
   }),
 );
 

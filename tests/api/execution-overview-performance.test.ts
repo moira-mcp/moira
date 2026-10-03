@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { dockerExecSync } from "../utils/docker-command.js";
 import { createTestUserViaApi, formatSessionCookie, signInUser } from "../utils/mcp-auth.js";
 import { getTestBaseUrl, isExternalTarget } from "../utils/test-config.js";
+import type { OverviewChildCounts } from "@mcp-moira/shared/execution-management";
 
 const baseUrl = getTestBaseUrl();
 const workflowId = randomUUID();
@@ -20,7 +21,9 @@ let cookie: string;
 
 interface Run {
   executionId: string;
-  children: { total: number };
+  title: string;
+  children: OverviewChildCounts;
+  childrenTotal: OverviewChildCounts;
   childRuns: Run[];
   stages: { labels: string[] };
   list: { items: unknown[]; total: number; done: number };
@@ -188,7 +191,16 @@ describe("bounded overview HTTP workload", () => {
             expect(row.list.total).toBe(600);
             expect(row.list.done).toBe(499);
           }
-          expect(data.runs[0].children.total).toBe(1);
+          // Creation/hour order can move roots; measure the known parent from the fixed fixture.
+          const parent = data.runs.find((row: Run) => row.executionId === `${prefix}-0000`);
+          expect(parent).toBeDefined();
+          expect(parent.children.total).toBe(kind === "overview" ? 1 : 0);
+          expect(parent.childrenTotal).toEqual({ total: 1, unfinished: 1 });
+          expect(parent.childRuns.map((row: Run) => row.executionId)).toEqual(
+            kind === "overview" ? [`${prefix}-0050`] : [],
+          );
+          if (kind === "detail")
+            expect(rows.map((row) => row.executionId)).not.toContain(`${prefix}-0050`);
         }
         if (sample === 0) firstRequestMs = elapsed;
         if (sample >= 4) {
@@ -232,4 +244,133 @@ describe("bounded overview HTTP workload", () => {
       expect(p95).toBeLessThanOrEqual(budget);
     },
   );
+
+  test("the separate populated Cyrillic heading search edition retains its representative HTTP P95 budget", async () => {
+    // The four original measurements are unchanged. Populate legal explicit identities before
+    // timing: authored progress titles retain their separate, shorter limit and original inputs.
+    for (let index = 0; index < 60; index++) {
+      const executionId = `${prefix}-${String(index).padStart(4, "0")}`;
+      const taskTitle =
+        ("Подробный импорт квартального архива " + "данные ".repeat(100)).slice(0, 492) +
+        " " +
+        String(index).padStart(7, "0");
+      expect(taskTitle.length).toBe(500);
+      const detailResponse = await fetch(`${baseUrl}/api/executions/${executionId}`, {
+        headers: { Cookie: formatSessionCookie(baseUrl, cookie) },
+      });
+      expect(detailResponse.status).toBe(200);
+      const execution = (
+        (await detailResponse.json()) as {
+          data: { execution: { revision: number; metadataRevisions: { taskIdentity: string } } };
+        }
+      ).data.execution;
+      const updated = await fetch(`${baseUrl}/api/executions/${executionId}/task-title`, {
+        method: "PUT",
+        headers: {
+          Cookie: formatSessionCookie(baseUrl, cookie),
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          taskTitle,
+          expectedRevision: execution.revision,
+          expectedTaskIdentityRevision: execution.metadataRevisions.taskIdentity,
+        }),
+      });
+      expect(updated.status).toBe(200);
+      expect(
+        ((await updated.json()) as { data: { taskIdentity: { title: string } } }).data.taskIdentity
+          .title,
+      ).toBe(taskTitle);
+    }
+    const search = "ПОДРОБНЫЙ ИМПОРТ";
+    const samples: number[] = [];
+    const responseBytes: number[] = [];
+    let firstRequestMs = 0;
+    for (let sample = 0; sample < 34; sample++) {
+      const started = performance.now();
+      const response = await fetch(
+        `${baseUrl}/api/executions/overview?status=active&limit=50&workflowId=${workflowId}&search=${encodeURIComponent(search)}`,
+        {
+          headers: { Cookie: formatSessionCookie(baseUrl, cookie) },
+        },
+      );
+      const text = await response.text();
+      const elapsed = performance.now() - started;
+      expect(response.status).toBe(200);
+      const data = JSON.parse(text).data as { total: number; runs: Run[] };
+      const rows = flatten(data.runs);
+      expect(data.total).toBe(50);
+      expect(data.runs).toHaveLength(50);
+      expect(rows).toHaveLength(60);
+      expect(
+        rows.every(
+          (row) => row.executionId.startsWith(prefix) && !row.executionId.endsWith("-1999"),
+        ),
+      ).toBe(true);
+      expect(
+        rows.every(
+          (row) =>
+            row.title.length === 500 &&
+            row.title.startsWith("Подробный импорт квартального архива "),
+        ),
+      ).toBe(true);
+      for (const row of rows) {
+        expect(row.stages.labels).toHaveLength(2);
+        expect(row.list.items).toHaveLength(5);
+        expect(row.list.total).toBe(600);
+        expect(row.list.done).toBe(499);
+      }
+      const parent = data.runs.find((row) => row.executionId === `${prefix}-0000`)!;
+      expect(parent.children.total).toBe(1);
+      expect(parent.childrenTotal).toEqual({ total: 1, unfinished: 1 });
+      expect(parent.childRuns.map((row) => row.executionId)).toEqual([`${prefix}-0050`]);
+      if (sample === 0) firstRequestMs = elapsed;
+      if (sample >= 4) {
+        samples.push(elapsed);
+        responseBytes.push(Buffer.byteLength(text));
+      }
+    }
+    const sorted = [...samples].sort((a, b) => a - b);
+    const p95 = sorted[Math.ceil(sorted.length * 0.95) - 1];
+    const evidence = {
+      kind: "overview-heading-search",
+      edition: "search-populated",
+      runtime: process.version,
+      fixture: {
+        rows: 2000,
+        selectedRoots: 50,
+        selectedRows: 60,
+        visitsPerSelected: 500,
+        unusedBytesPerSelected: 262144,
+        titleCodeUnitsPerSelected: 500,
+        titleSource: "explicit-task-identity",
+        search,
+      },
+      firstRequestMs,
+      warmupRequests: 3,
+      samples,
+      sampleCount: samples.length,
+      medianMs: sorted[15],
+      p95Ms: p95,
+      budgetMs: 500,
+      responseBytes,
+    };
+    const directory = join(
+      process.cwd(),
+      "agent_temp_files_local",
+      "http-performance",
+      process.env.OVERVIEW_PERF_EDITION || "current",
+      "search-populated",
+    );
+    mkdirSync(directory, { recursive: true });
+    writeFileSync(
+      join(directory, "overview-heading-search.json"),
+      JSON.stringify(evidence, null, 2),
+    );
+    console.log(
+      JSON.stringify({ ...evidence, samples: undefined, responseBytes: responseBytes[0] }),
+    );
+    expect(samples).toHaveLength(30);
+    expect(p95).toBeLessThanOrEqual(500);
+  });
 });

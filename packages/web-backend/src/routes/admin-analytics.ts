@@ -13,6 +13,8 @@ import {
 } from "@mcp-moira/shared";
 import { DatabaseRepository } from "@mcp-moira/workflow-engine";
 import { and, gte, lt, count, desc, sql, eq, type SQL, type SQLWrapper } from "drizzle-orm";
+import type { AuthenticatedRequest } from "../types/express-types.js";
+import { withExecutionTaskTitles } from "../utils/execution-task-titles.js";
 const router = Router();
 const repository = new DatabaseRepository();
 const analytics = () => new AdminAnalyticsRepository(getDatabase());
@@ -65,9 +67,15 @@ router.get(
 router.get(
   "/attention",
   asyncHandler(async (req: Request, res: Response) => {
+    const data = await withExecutionTaskTitles(() =>
+      analytics().attention(
+        parseAnalyticsQuery(req.query, "week"),
+        (req as AuthenticatedRequest).userId,
+      ),
+    );
     res.json({
       success: true,
-      data: analytics().attention(parseAnalyticsQuery(req.query, "week")),
+      data,
       timestamp: new Date().toISOString(),
     });
   }),
@@ -96,12 +104,14 @@ router.get(
         total: overview.totalExecutions,
         completed: overview.completedExecutions,
         failed: overview.failedExecutions,
+        stopped: overview.stoppedExecutions,
         active: overview.activeExecutions,
         byWorkflow: workflows.workflows.map((w) => ({
           workflowId: w.workflowId,
           count: w.executionCount,
           completed: w.completedCount,
           failed: w.failedCount,
+          stopped: w.stoppedCount,
         })),
         byWorkflowTotal: workflows.total,
         byWorkflowLimited: workflows.total > workflows.workflows.length,
@@ -341,7 +351,8 @@ router.get(
     const [completion] = await db
       .select({
         total: count(),
-        completed: sql<number>`coalesce(sum(${workflowExecution.state}='completed'),0)`,
+        completed: sql<number>`coalesce(sum(${workflowExecution.state}='completed' AND ${workflowExecution.stopReason} IS NULL),0)`,
+        stopped: sql<number>`coalesce(sum(${workflowExecution.stopReason} IS NOT NULL),0)`,
       })
       .from(workflowExecution)
       .where(
@@ -353,6 +364,7 @@ router.get(
         ),
       );
     const completedCount = completion?.completed ?? 0;
+    const stoppedCount = completion?.stopped ?? 0;
     const totalCount = completion?.total ?? 0;
     const completionRate =
       totalCount > 0 ? Math.round((completedCount / totalCount) * 10000) / 100 : 0;
@@ -366,6 +378,7 @@ router.get(
         completionRate,
         totalExecutions: totalCount,
         completedExecutions: completedCount,
+        stoppedExecutions: stoppedCount,
         hotSteps,
         deadSteps,
         problematicSteps,

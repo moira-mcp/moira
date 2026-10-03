@@ -14,6 +14,47 @@ export interface ProgressReadDependencies {
   }>;
 }
 
+/** Conservative storage dependencies of templates; rendering and fragment trust stay canonical. */
+function collectTemplateDependencies(
+  sourceTemplates: readonly string[],
+  registry: Record<string, { default?: unknown }> = {},
+  loadedVariables: Record<string, unknown> = {},
+  initialNames: ReadonlySet<string> = new Set(),
+) {
+  const names = new Set<string>(initialNames);
+  const templateNames = new Set<string>();
+  const expanded = new Set<string>();
+  const templates = [...sourceTemplates];
+  let all = false;
+  for (let index = 0; index < templates.length; index++) {
+    for (const match of templates[index].matchAll(/(?<!\\)\{\{([^{}]*)\}\}/gu)) {
+      if (/\bcontext\.variables\b/u.test(match[1])) all = true;
+      for (const token of match[1].matchAll(/[A-Za-z_][A-Za-z0-9_-]*/gu)) {
+        names.add(token[0]);
+        templateNames.add(token[0]);
+      }
+    }
+    for (const name of names) {
+      if (expanded.has(name)) continue;
+      expanded.add(name);
+      const value = Object.hasOwn(loadedVariables, name)
+        ? loadedVariables[name]
+        : registry[name]?.default;
+      if (typeof value === "string" && value.includes("{{")) templates.push(value);
+    }
+  }
+  return { names, templateNames, all };
+}
+
+export function templateReadDependencies(
+  templates: readonly string[],
+  registry: Record<string, { default?: unknown }> = {},
+  loadedVariables: Record<string, unknown> = {},
+): string[] | null {
+  const { names, all } = collectTemplateDependencies(templates, registry, loadedVariables);
+  return all ? null : [...names];
+}
+
 /**
  * Conservative template dependencies: helper arguments, nested paths and dynamic indices all
  * contribute names. Extra names from literals cost no data when absent. A variable-bag template
@@ -28,7 +69,6 @@ export function progressReadDependencies(
   const names = new Set<string>();
   const historyRoots = new Set<string>();
   const counterRoots = new Set<string>();
-  let all = false;
   const templates: string[] = [];
   if (workflow.progress?.title) templates.push(workflow.progress.title);
   for (const block of workflow.progress?.nodes ?? []) {
@@ -49,26 +89,12 @@ export function progressReadDependencies(
   for (const node of workflow.nodes) {
     if (node.progressActiveLabel) templates.push(node.progressActiveLabel);
   }
-  const expanded = new Set<string>();
-  const templateNames = new Set<string>();
-  for (let index = 0; index < templates.length; index++) {
-    for (const match of templates[index].matchAll(/(?<!\\)\{\{([^{}]*)\}\}/gu)) {
-      const expression = match[1];
-      if (/\bcontext\.variables\b/u.test(expression)) all = true;
-      for (const token of expression.matchAll(/[A-Za-z_][A-Za-z0-9_-]*/gu)) {
-        names.add(token[0]);
-        templateNames.add(token[0]);
-      }
-    }
-    for (const name of names) {
-      if (expanded.has(name)) continue;
-      expanded.add(name);
-      const value = Object.hasOwn(loadedVariables, name)
-        ? loadedVariables[name]
-        : workflow.variableRegistry?.[name]?.default;
-      if (typeof value === "string" && value.includes("{{")) templates.push(value);
-    }
-  }
+  const {
+    names: discovered,
+    templateNames,
+    all,
+  } = collectTemplateDependencies(templates, workflow.variableRegistry, loadedVariables, names);
+  for (const name of discovered) names.add(name);
   const lists = workflow.progress?.nodes.flatMap((node) => (node.list ? [node.list] : [])) ?? [];
   const arrayWindows = all
     ? []

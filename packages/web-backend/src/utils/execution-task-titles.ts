@@ -1,33 +1,82 @@
-import { getDatabase, WorkflowRepository } from "@mcp-moira/shared";
-import { resolveExecutionTaskTitle, type WorkflowExecution } from "@mcp-moira/workflow-engine";
+import {
+  ConflictError,
+  getDatabase,
+  getSqliteInstance,
+  ExecutionRepository,
+  ExecutionOverviewRepository,
+  WorkflowRepository,
+} from "@mcp-moira/shared";
+import type { WorkflowExecution } from "@mcp-moira/workflow-engine";
+import { readExecutionTaskTitles } from "../services/execution-overview.js";
 
-/** Resolve headings for an already-authorized execution list, loading each owner's flows in bulk. */
-export async function executionTaskTitles(
-  executions: WorkflowExecution[],
+type HeadingReference = Pick<WorkflowExecution, "executionId" | "workflowId" | "userId"> & {
+  workflowName?: string | null;
+  taskTitle?: string;
+};
+
+async function titleValues(
+  executions: readonly HeadingReference[],
+  check: () => void,
 ): Promise<Map<string, string>> {
-  const owners = new Map<string, WorkflowExecution[]>();
+  const owners = new Map<string, string[]>();
   for (const execution of executions) {
     const owned = owners.get(execution.userId) ?? [];
-    owned.push(execution);
+    owned.push(execution.executionId);
     owners.set(execution.userId, owned);
   }
-  const workflows = new WorkflowRepository(getDatabase());
-  const titles = new Map<string, string>();
-  await Promise.all(
-    [...owners].map(async ([ownerId, owned]) => {
-      const graphs = await workflows.getManyForUser(
-        [...new Set(owned.map((execution) => execution.workflowId))],
-        ownerId,
-      );
-      for (const execution of owned) {
-        const flow = graphs.get(execution.workflowId);
-        if (flow) {
-          titles.set(execution.executionId, resolveExecutionTaskTitle(flow.graph, execution));
-        } else if (execution.taskIdentity) {
-          titles.set(execution.executionId, execution.taskIdentity.title);
-        }
-      }
-    }),
+  const db = getDatabase();
+  const deps = { executions: new ExecutionRepository(db), workflows: new WorkflowRepository(db) };
+  const titles = await Promise.all(
+    [...owners].map(([ownerId, ids]) => readExecutionTaskTitles(ids, ownerId, deps, check)),
   );
-  return titles;
+  check();
+  return new Map(titles.flatMap((values) => [...values]));
+}
+
+/** The existing generation guard includes the caller's native inventory/count/page read. */
+async function coherentRead<T>(read: (check: () => void) => Promise<T>): Promise<T> {
+  const overview = new ExecutionOverviewRepository(getSqliteInstance());
+  for (let attempt = 0; ; attempt++) {
+    const version = overview.readVersion();
+    const check = () => {
+      if (overview.readVersion() !== version)
+        throw new ConflictError("Execution headings changed while reading; retry");
+    };
+    try {
+      const result = await read(check);
+      check();
+      return result;
+    } catch (error) {
+      if (!(error instanceof ConflictError) || attempt >= 3) throw error;
+    }
+  }
+}
+
+/** Resolve already-authorized rows through the same selective heading reader as overview search. */
+export function executionTaskTitles(
+  executions: readonly HeadingReference[],
+): Promise<Map<string, string>> {
+  return coherentRead((check) => titleValues(executions, check));
+}
+
+/** Preserve every native wrapper field while returning its identity and heading from one generation. */
+export function withExecutionTaskTitles<T extends { executions: readonly HeadingReference[] }>(
+  read: () => T | Promise<T>,
+): Promise<T> {
+  return coherentRead(async (check) => {
+    const data = await read();
+    check();
+    const titles = await titleValues(data.executions, check);
+    return {
+      ...data,
+      executions: data.executions.map((execution) => ({
+        ...execution,
+        taskTitle:
+          titles.get(execution.executionId) ??
+          execution.taskTitle ??
+          execution.workflowName ??
+          "Workflow unavailable",
+      })),
+    };
+  });
 }

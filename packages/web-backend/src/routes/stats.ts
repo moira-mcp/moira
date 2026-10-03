@@ -7,7 +7,11 @@
 import { Router, Request, Response } from "express";
 import { eq, inArray } from "drizzle-orm";
 import { asyncHandler, createApiError } from "../middleware/error-middleware.js";
-import { DatabaseRepository, WorkflowExecution } from "@mcp-moira/workflow-engine";
+import {
+  DatabaseRepository,
+  WorkflowExecution,
+  readExecutionManagement,
+} from "@mcp-moira/workflow-engine";
 import { countRefusals, getDatabase, getLockService, user, workflow } from "@mcp-moira/shared";
 import { currentStep } from "../utils/current-step.js";
 import { executionTaskTitles } from "../utils/execution-task-titles.js";
@@ -47,6 +51,7 @@ router.get(
       repository.listExecutionsWithFilters({
         userId,
         status: ["running"],
+        includeStopped: false,
         sort: "updatedAt",
         sortOrder: "desc",
         limit: ACTIVE_LIMIT,
@@ -55,6 +60,7 @@ router.get(
       repository.listExecutionsWithFilters({
         userId,
         status: ["completed"],
+        includeStopped: true,
         sort: "updatedAt",
         sortOrder: "desc",
         limit: RECENT_LIMIT,
@@ -99,6 +105,12 @@ router.get(
             .where(inArray(workflow.id, activeFlowIds));
     const graphById = new Map(graphs.map((row) => [row.id, row.graph]));
     const taskTitles = await executionTaskTitles([...active.executions, ...recent.executions]);
+    const management = await readExecutionManagement(
+      repository,
+      [...active.executions, ...recent.executions],
+      userId,
+      lockedIds,
+    );
 
     const status = (e: WorkflowExecution) =>
       e.status === "running" && lockedIds.has(e.executionId) ? "locked" : e.status;
@@ -111,6 +123,7 @@ router.get(
       taskIdentity: e.taskIdentity ?? null,
       note: e.note ?? null,
       status: status(e),
+      ...management.get(e.executionId),
       hasActiveLock: lockedIds.has(e.executionId),
       errorCount: countRefusals(e.errors),
       ...currentStep(e, graphById.get(e.workflowId)),
@@ -126,6 +139,7 @@ router.get(
       taskIdentity: e.taskIdentity ?? null,
       note: e.note ?? undefined,
       status: status(e),
+      ...management.get(e.executionId),
       hasActiveLock: lockedIds.has(e.executionId),
       errorCount: countRefusals(e.errors),
       createdAt: e.createdAt,

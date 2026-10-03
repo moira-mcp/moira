@@ -7,6 +7,7 @@
 
 import type {
   OverviewIdle,
+  OverviewPeriod,
   OverviewQuery,
   OverviewRun,
   OverviewSort,
@@ -96,13 +97,14 @@ export function planLines(rows: readonly PlanRow[]): number {
 /** The stages of a run as plan items, for a flow that keeps stages but no list. */
 export function stageItems(run: OverviewRun): PlanItem[] {
   if (!run.stages) return [];
-  const finished = run.status === "completed";
-  const active = run.stages.activeIndex;
-  return run.stages.labels.map((title, index) => ({
+  return run.stages.entries.map((stage, index) => ({
     index,
-    title,
-    done: finished || (active !== null ? index < active : index < run.stages!.doneCount),
-    current: !finished && run.status !== "stopped" && active === index,
+    title: stage.label,
+    done: stage.status === "done" || stage.status === "repeated",
+    current:
+      run.status !== "stopped" &&
+      run.status !== "completed" &&
+      (stage.status === "active" || stage.status === "waiting"),
     durationMs: null,
   }));
 }
@@ -126,7 +128,7 @@ export function cardPlan(run: OverviewRun): CardPlan {
           : run.list.items,
     };
   }
-  if (run.stages && run.stages.labels.length > 0) {
+  if (run.stages && run.stages.entries.length > 0) {
     const items = stageItems(run);
     return {
       kind: "stages",
@@ -163,7 +165,7 @@ export type BoardNode =
       kind: "group";
       run: OverviewRun;
       depth: number;
-      /** Children without children of their own first (they share a row), then nested groups. */
+      /** Children retain the server's stable order. */
       children: BoardNode[];
       /** Every run below this one. */
       descendants: number;
@@ -180,19 +182,15 @@ function countDescendants(run: OverviewRun): number {
 
 /**
  * The board node of a run: a card when it has no child runs, else a group of its card and its
- * children. The children keep the order the overview sends (unfinished first, then by latest
- * activity); those without children of their own come before nested groups, so they fill the row
- * beside the parent's card and no card stands alone between two full-width groups.
+ * children. Root and sibling order comes from the server before pagination.
  */
 export function boardNode(run: OverviewRun, depth = 0): BoardNode {
   if (run.childRuns.length === 0) return { kind: "card", run, depth };
-  const leaves = run.childRuns.filter((child) => child.childRuns.length === 0);
-  const branches = run.childRuns.filter((child) => child.childRuns.length > 0);
   return {
     kind: "group",
     run,
     depth,
-    children: [...leaves, ...branches].map((child) => boardNode(child, depth + 1)),
+    children: run.childRuns.map((child) => boardNode(child, depth + 1)),
     descendants: countDescendants(run),
     foldable: depth >= FOLD_FROM_DEPTH,
   };
@@ -237,7 +235,14 @@ export function replaceRows(
     const childRuns = replaceRows(run.childRuns, fresh);
     const row = fresh.get(run.executionId);
     return row
-      ? { ...row, matches: run.matches, parent: run.parent, childRuns }
+      ? {
+          ...row,
+          matches: run.matches,
+          parent: run.parent,
+          children: run.children,
+          subtreeActivityAt: run.subtreeActivityAt,
+          childRuns,
+        }
       : { ...run, childRuns };
   });
 }
@@ -257,6 +262,7 @@ export type OverviewLayout = "grid" | "lanes";
 
 export interface OverviewFilters {
   status: OverviewStatusFilter;
+  period: OverviewPeriod;
   idle: OverviewIdle | null;
   activeFrom: number | null;
   activeTo: number | null;
@@ -270,6 +276,7 @@ export interface OverviewFilters {
 
 export const DEFAULT_FILTERS: OverviewFilters = {
   status: "active",
+  period: "7d",
   idle: null,
   activeFrom: null,
   activeTo: null,
@@ -291,6 +298,7 @@ export const STATUS_FILTERS: readonly OverviewStatusFilter[] = [
   "all",
 ];
 export const IDLE_FILTERS: readonly OverviewIdle[] = ["1h", "1d", "3d", "7d", "30d"];
+export const PERIOD_FILTERS: readonly OverviewPeriod[] = ["7d", "30d", "all"];
 export const SORTS: readonly OverviewSort[] = ["activity", "idle", "created"];
 /** The idle interval of the "no movement for more than a week" chip. */
 export const STALE_IDLE: OverviewIdle = "7d";
@@ -310,11 +318,18 @@ function epoch(value: string | null): number | null {
 /** The filters a URL carries; anything unknown or malformed reads as the default. */
 export function filtersFromParams(params: URLSearchParams): OverviewFilters {
   const page = Number(params.get("page"));
+  const idle = oneOf(params.get("idle"), IDLE_FILTERS);
+  const activeFrom = idle ? null : epoch(params.get("activeFrom"));
+  const activeTo = idle ? null : epoch(params.get("activeTo"));
+  const advancedTime = idle !== null || activeFrom !== null || activeTo !== null;
   return {
     status: oneOf(params.get("status"), STATUS_FILTERS) ?? DEFAULT_FILTERS.status,
-    idle: oneOf(params.get("idle"), IDLE_FILTERS),
-    activeFrom: epoch(params.get("activeFrom")),
-    activeTo: epoch(params.get("activeTo")),
+    period: advancedTime
+      ? "all"
+      : (oneOf(params.get("period"), PERIOD_FILTERS) ?? DEFAULT_FILTERS.period),
+    idle,
+    activeFrom,
+    activeTo,
     workflowId: params.get("workflowId") || null,
     sort: oneOf(params.get("sort"), SORTS) ?? DEFAULT_FILTERS.sort,
     refusals: params.get("refusals") === "true",
@@ -338,6 +353,7 @@ export function paramsWithFilters(
     else next.set(key, value);
   };
   set("status", filters.status === DEFAULT_FILTERS.status ? null : filters.status);
+  set("period", filters.period === DEFAULT_FILTERS.period ? null : filters.period);
   set("idle", filters.idle);
   set("activeFrom", filters.activeFrom === null ? null : String(filters.activeFrom));
   set("activeTo", filters.activeTo === null ? null : String(filters.activeTo));
@@ -350,10 +366,10 @@ export function paramsWithFilters(
   return next;
 }
 
-/** The number of filters set in the popover (the status switch and the search are outside it). */
+/** The number of extra filters in the popover; status, period and search have their own controls. */
 export function popoverFilterCount(filters: OverviewFilters): number {
   return [
-    filters.idle !== null && filters.idle !== STALE_IDLE,
+    filters.idle !== null,
     filters.activeFrom !== null || filters.activeTo !== null,
     filters.workflowId !== null,
     filters.sort !== DEFAULT_FILTERS.sort,
@@ -365,6 +381,7 @@ export function popoverFilterCount(filters: OverviewFilters): number {
 export function overviewQuery(filters: OverviewFilters, pageSize: number): OverviewQuery {
   return {
     status: filters.status,
+    period: filters.period,
     ...(filters.refusals ? { refusals: true } : {}),
     ...(filters.workflowId ? { workflowId: filters.workflowId } : {}),
     ...(filters.search.trim() ? { search: filters.search.trim() } : {}),
@@ -395,13 +412,17 @@ export function ageOf(ms: number): { unit: AgeUnit; count: number } {
 }
 
 /** The moment a card's age counts from: the latest activity of the run and all its descendants. */
-export function activityOf(run: OverviewRun): number {
+export function activityOf(run: OverviewRun): number | null {
   return run.subtreeActivityAt ?? run.lastActivityAt ?? run.createdAt;
 }
 
 /** Unfinished and without movement for longer than `STALE_AFTER_MS`. */
 export function isStale(run: OverviewRun, now: number): boolean {
+  const activity = activityOf(run);
   return (
-    run.status !== "completed" && run.status !== "stopped" && now - activityOf(run) > STALE_AFTER_MS
+    activity !== null &&
+    run.status !== "completed" &&
+    run.status !== "stopped" &&
+    now - activity > STALE_AFTER_MS
   );
 }

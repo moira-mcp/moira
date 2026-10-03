@@ -1,5 +1,7 @@
 /** Bounded, context-free projections consumed by the administration UI. */
 import type { ExecutionTaskIdentity } from "./execution-task-identity.js";
+import type { ExecutionManagementFields } from "./execution-management.js";
+import type { LegacyExecutionStatus } from "./execution-error.js";
 
 export type AnalyticsRange =
   "15m" | "30m" | "hour" | "day" | "today" | "week" | "month" | "year" | "all";
@@ -64,10 +66,17 @@ export interface AnalyticsOverview {
   activeExecutions: number;
   completedExecutions: number;
   failedExecutions: number;
+  stoppedExecutions: number;
   successfulExecutions: number;
   successRate: number;
   avgDurationMs: number;
-  overTime: Array<{ date: string; count: number; completed: number; failed: number }>;
+  overTime: Array<{
+    date: string;
+    count: number;
+    completed: number;
+    failed: number;
+    stopped: number;
+  }>;
   overTimeWindow: AnalyticsSeriesWindow;
 }
 export interface AnalyticsUsers {
@@ -94,14 +103,16 @@ export interface AnalyticsRegistrations {
   users: AnalyticsPerson[];
   total: number;
 }
-export interface AttentionExecution {
+export interface AttentionExecution extends ExecutionManagementFields {
   executionId: string;
   workflowId: string;
   workflowName: string;
   userId: string;
   userName: string | null;
   userEmail: string | null;
-  status: "running" | "completed" | "locked";
+  status: LegacyExecutionStatus;
+  taskTitle: string;
+  taskIdentity: ExecutionTaskIdentity | null;
   note: string | null;
   currentNodeId: string | null;
   lastStepAt: number | null;
@@ -122,6 +133,7 @@ export interface AnalyticsTopWorkflow {
   executionCount: number;
   completedCount: number;
   failedCount: number;
+  stoppedCount: number;
   successRate: number;
   avgDurationMs: number;
   participantCount: number;
@@ -140,15 +152,17 @@ export interface AdminUserActivity {
   executionsCount: number;
   topWorkflows: FlowUsage[];
 }
-export interface ExecutionSummary {
+export interface ExecutionSummary extends ExecutionManagementFields {
   executionId: string;
   workflowId: string;
   workflowName: string | null;
   userId: string;
   userEmail: string | null;
   userName: string | null;
-  status: "running" | "completed" | "locked";
+  status: LegacyExecutionStatus;
+  taskTitle?: string;
   currentNodeId: string | null;
+  waitingForInputNodeId: string | null;
   note: string | null;
   taskIdentity: ExecutionTaskIdentity | null;
   stopReason: string | null;

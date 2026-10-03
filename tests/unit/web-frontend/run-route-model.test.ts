@@ -191,6 +191,17 @@ function progress(): ExecutionProgress {
 }
 
 describe("run blocks from the projection", () => {
+  test("a stored stop marker preserves the projected frontier and results without advertising current work", () => {
+    const trace = { ...progress(), executionStatus: "completed", stopReason: "" };
+    const before = JSON.stringify(trace);
+    const blocks = runBlocks(trace);
+    expect(blocks.map((block) => block.status)).toEqual(["done", "waiting", "done", "pending"]);
+    expect(currentBlockId(blocks)).toBeNull();
+    expect(blocks[1].timing).toBe(trace.nodes[1].timing);
+    expect(JSON.stringify(trace)).toBe(before);
+    // A historical cursor can explicitly show where the run stood at that earlier point.
+    expect(currentBlockId(runBlocks(trace, undefined, false))).toBe("review");
+  });
   test("joins process blocks with their run state in process order", () => {
     const blocks = runBlocks(progress());
     expect(

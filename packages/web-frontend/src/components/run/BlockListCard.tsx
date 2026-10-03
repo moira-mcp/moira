@@ -18,11 +18,13 @@ export function BlockListCard({
   block,
   className,
   highlight = null,
+  stopped = block.stopped ?? false,
 }: {
   block: RunBlock;
   className?: string;
   /** The item (by index) to scroll to and mark. */
   highlight?: HighlightRequest | null;
+  stopped?: boolean;
 }): React.JSX.Element | null {
   const { t } = useTranslation();
   const list = block.list ?? null;
@@ -48,29 +50,30 @@ export function BlockListCard({
       </div>
       {list.items === null ? (
         <p className="text-sm text-muted-foreground" data-testid="block-list-counters-only">
-          {list.currentTitle
+          {list.currentTitle && !stopped
             ? t("pages.runPage.list.countersOnlyCurrent", { title: list.currentTitle })
             : t("pages.runPage.list.countersOnly")}
         </p>
       ) : (
         <ol className="space-y-0.5 text-sm">
           {list.items.map((item) => {
+            const current = item.current && !stopped;
             return (
               <li
                 key={item.index}
                 className={cn(
                   "flex items-baseline gap-2 rounded-md px-1.5 py-0.5",
-                  item.current && "bg-primary/5 font-medium",
-                  !item.current && item.done && "text-muted-foreground",
+                  current && "bg-primary/5 font-medium",
+                  !current && item.done && "text-muted-foreground",
                 )}
                 data-testid="block-list-item"
                 data-index={item.index}
-                data-current={item.current ? "true" : "false"}
+                data-current={current ? "true" : "false"}
                 data-done={item.done ? "true" : "false"}
               >
-                <ListMarker done={item.done} current={item.current} className="self-center" />
-                <span className="min-w-0 flex-1 break-words">{item.title}</span>
-                {item.current && (
+                <ListMarker done={item.done} current={current} className="self-center" />
+                <span className="min-w-0 flex-1 [overflow-wrap:anywhere]">{item.title}</span>
+                {current && (
                   <span className="text-[11px] text-primary">
                     {t("pages.runPage.list.current")}
                   </span>

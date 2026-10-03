@@ -87,6 +87,7 @@ test.describe("Admin Executions Page", () => {
     const shortId = executionId.substring(0, 8);
     const targetCard = page.getByTestId("execution-card").filter({ hasText: shortId }).first();
     await expect(targetCard).toBeVisible({ timeout: 10000 });
+    await expect(targetCard.getByTestId(`execution-stop-${executionId}`)).toHaveCount(0);
     await targetCard.click();
     await expect(page).toHaveURL(`/admin/executions/${executionId}`, { timeout: 10000 });
 
@@ -106,6 +107,7 @@ test.describe("Admin Executions Page", () => {
     ).toBeVisible({ timeout: 10000 });
 
     console.log(`✓ Admin can view execution details for other user's execution`);
+    await expect(page.getByTestId(`execution-stop-${executionId}`)).toHaveCount(0);
   });
 
   test("Admin can filter executions by user", async ({ page }) => {
@@ -134,6 +136,62 @@ test.describe("Admin Executions Page", () => {
         .filter({ hasText: executionId.substring(0, 8) })
         .first(),
     ).toBeVisible({ timeout: 10000 });
+  });
+
+  test("the administrator can stop an owned locked run from the shared banner while foreign controls stay absent", async ({
+    page,
+  }) => {
+    const ownMcp = await createAuthenticatedMCPClient();
+    try {
+      const run = await startWorkflowExecutionState(ownMcp.client, TEST_WORKFLOW_ID, {
+        skipNotificationCheck: true,
+      });
+      const currentResponse = await page.request.get(`${BASE_URL}/api/executions/${run.processId}`);
+      expect(currentResponse.status()).toBe(200);
+      const current = (await currentResponse.json()).data.execution;
+      const title = `Administrator owned task ${run.processId}`;
+      const renamed = await page.request.put(
+        `${BASE_URL}/api/executions/${run.processId}/task-title`,
+        {
+          data: {
+            taskTitle: title,
+            expectedRevision: current.revision,
+            expectedTaskIdentityRevision: current.metadataRevisions.taskIdentity,
+          },
+        },
+      );
+      expect(renamed.status()).toBe(200);
+      const locked = await page.request.post(`${BASE_URL}/api/executions/${run.processId}/lock`, {
+        data: { reason: "Pause this owned task" },
+      });
+      expect(locked.status()).toBe(200);
+      await page.reload();
+      const ownCard = page
+        .getByTestId("execution-card")
+        .filter({ hasText: run.processId.slice(0, 8) });
+      await expect(ownCard.getByTestId(`execution-stop-${run.processId}`)).toBeEnabled();
+      const banner = page.getByTestId("locked-executions-widget");
+      const stop = banner.getByTestId(`execution-stop-${run.processId}`);
+      await expect(stop).toBeEnabled();
+      await stop.click();
+      await expect(page).toHaveURL(`${BASE_URL}/admin/executions`);
+      const confirmation = page.getByRole("alertdialog");
+      await expect(confirmation).toContainText(title);
+      await confirmation
+        .getByRole("textbox", { name: "Reason for stopping" })
+        .fill("The administrator stopped their own task");
+      await confirmation.getByRole("button", { name: "Stop task", exact: true }).click();
+      await expect(confirmation).toHaveCount(0);
+      await expect(ownCard).toContainText("Stopped");
+      await expect(ownCard.getByTestId(`execution-stop-${run.processId}`)).toHaveCount(0);
+      await expect(banner.getByTestId(`execution-stop-${run.processId}`)).toHaveCount(0);
+      const foreignCard = page
+        .getByTestId("execution-card")
+        .filter({ hasText: executionId.slice(0, 8) });
+      await expect(foreignCard.getByTestId(`execution-stop-${executionId}`)).toHaveCount(0);
+    } finally {
+      await ownMcp.cleanup();
+    }
   });
 
   test("Admin can search executions by ID", async ({ page }) => {

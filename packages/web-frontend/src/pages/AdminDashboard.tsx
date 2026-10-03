@@ -8,6 +8,7 @@ import { PageShell } from "../components/PageShell";
 import { ROUTES } from "../constants/routes";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { StatusBadge, isExecutionStatus } from "../components/status-badge";
 import { Badge } from "@/components/ui/badge";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { InlineError } from "@/components/inline-error";
@@ -83,7 +84,12 @@ export const AdminDashboard: React.FC = () => {
               ? t("adminOverview.defaultExclusions")
               : t("adminOverview.customExclusions", { count: exclusions.value.userIds.length })}
           </p>
-          <AdminOverview key={accountId} accountId={accountId} exclusions={exclusions.value} />
+          <AdminOverview
+            key={accountId}
+            accountId={accountId}
+            exclusions={exclusions.value}
+            onStopped={stats.refresh}
+          />
         </>
       )}
       <Card className="mt-4" data-testid="admin-system-health">
@@ -203,6 +209,29 @@ export const AdminDashboard: React.FC = () => {
               >
                 <span>
                   {activity.action} · {activity.workflowId}
+                  {isExecutionStatus(
+                    activity.stopReason != null
+                      ? "stopped"
+                      : activity.status === "failed"
+                        ? "failed"
+                        : (activity.displayStatus ?? activity.status),
+                  ) && (
+                    <StatusBadge
+                      status={
+                        (activity.stopReason != null
+                          ? "stopped"
+                          : activity.status === "failed"
+                            ? "failed"
+                            : (activity.displayStatus ??
+                              activity.status)) as import("../components/status-badge").ExecutionStatus
+                      }
+                    />
+                  )}
+                  {activity.stopReason != null && (
+                    <span className="block whitespace-pre-wrap">
+                      {t("components.executionStop.reason")}: {activity.stopReason}
+                    </span>
+                  )}
                 </span>
                 <span className="text-muted-foreground">
                   {formatDate(activity.timestamp ?? undefined)}

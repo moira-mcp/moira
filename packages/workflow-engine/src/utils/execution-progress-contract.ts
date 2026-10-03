@@ -145,6 +145,15 @@ export interface ExecutionProgressNode {
   list: ExecutionBlockList | null;
 }
 
+/** Exact recorded block states for compact management readers, never a completed prefix. */
+export type ExecutionStageEntry = Pick<ExecutionProgressNode, "id" | "label" | "status">;
+export interface ExecutionStages {
+  entries: ExecutionStageEntry[];
+  labels: string[];
+  activeIndex: number | null;
+  doneCount: number;
+}
+
 export interface ExecutionProgress {
   taskTitle: string | null;
   taskIdentity?: ExecutionTaskIdentity | null;
@@ -163,6 +172,8 @@ export interface ExecutionProgress {
   executionWorkflowVersion: string | null;
   executionRevision: number;
   executionStatus: string;
+  /** Stored intentional-stop marker; absent on older producers, null on an ordinary run. */
+  stopReason?: string | null;
   diagnostics: string[];
   /** The derived process the run is projected onto. */
   process: ProcessProjection;
@@ -208,6 +219,8 @@ export interface ExecutionProgressMetadata {
   executionWorkflowVersion: string | null;
   executionRevision: number;
   executionStatus: string;
+  /** Stored intentional-stop marker; absent on older producers, null on an ordinary run. */
+  stopReason?: string | null;
 }
 
 export type ExecutionProgressResult = ExecutionProgress | ExecutionProgressMetadata;

@@ -262,6 +262,14 @@ export class DatabaseRepository implements IDataRepository {
     return await this.executionRepo.get(executionId);
   }
 
+  async getExecutionManagementHeaders(executionIds: string[]) {
+    return this.executionRepo.getManyManagementHeaders(executionIds);
+  }
+
+  async getExecutingExecutionIds(executionIds: string[]): Promise<string[]> {
+    return this.executionRepo.getExecutingIds(executionIds);
+  }
+
   async listExecutions(): Promise<WorkflowExecution[]> {
     return await this.executionRepo.list();
   }

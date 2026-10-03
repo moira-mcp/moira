@@ -27,6 +27,7 @@ interface OverviewData {
   activeExecutions: number;
   completedExecutions: number;
   failedExecutions: number;
+  stoppedExecutions: number;
   timeRange: string;
 }
 
@@ -34,6 +35,7 @@ interface ExecutionsData {
   total: number;
   completed: number;
   failed: number;
+  stopped: number;
   active: number;
   successRate: number;
   avgDurationMs: number | null;

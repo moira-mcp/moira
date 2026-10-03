@@ -4,14 +4,14 @@
  */
 
 import type { ExecutionTaskIdentity } from "@mcp-moira/shared";
+import type { ExecutionManagementFields } from "@mcp-moira/shared/execution-management";
 
-export interface NormalizedExecution {
+export interface NormalizedExecution extends Partial<ExecutionManagementFields> {
   id: string;
   workflowId: string;
   workflowName?: string | null;
   taskTitle?: string;
   status: string;
-  stopReason?: string | null;
   note?: string | null;
   errorCount?: number;
   error?: string;
@@ -27,7 +27,7 @@ export interface NormalizedExecution {
   hasActiveLock?: boolean;
 }
 
-interface ExecutionListItem {
+interface ExecutionListItem extends Partial<ExecutionManagementFields> {
   executionId: string;
   workflowId: string;
   workflowName?: string | null;
@@ -44,7 +44,7 @@ interface ExecutionListItem {
   hasActiveLock?: boolean;
 }
 
-interface AdminExecution {
+interface AdminExecution extends Partial<ExecutionManagementFields> {
   executionId: string;
   workflowId: string;
   workflowName?: string | null;
@@ -70,6 +70,18 @@ function isAdminExecution(e: AnyExecution): e is AdminExecution {
 }
 
 export function normalizeExecution(execution: AnyExecution): NormalizedExecution {
+  const management = {
+    revision: execution.revision,
+    stopCapability: execution.stopCapability,
+    stopReason: execution.stopReason,
+    displayStatus: execution.displayStatus,
+  };
+  const status =
+    execution.stopReason != null
+      ? "stopped"
+      : execution.status === "failed"
+        ? "failed"
+        : (execution.displayStatus ?? execution.status);
   const taskTitle =
     execution.taskTitle ??
     execution.taskIdentity?.title ??
@@ -77,12 +89,12 @@ export function normalizeExecution(execution: AnyExecution): NormalizedExecution
     execution.workflowId;
   if (isAdminExecution(execution)) {
     return {
+      ...management,
       id: execution.executionId,
       workflowId: execution.workflowId,
       workflowName: execution.workflowName,
       taskTitle,
-      status: execution.status,
-      stopReason: execution.stopReason,
+      status,
       userDisplay: execution.userName || execution.userEmail || null,
       createdAt: execution.createdAt,
       lastStepAt: execution.lastStepAt,
@@ -95,12 +107,12 @@ export function normalizeExecution(execution: AnyExecution): NormalizedExecution
   }
 
   return {
+    ...management,
     id: execution.executionId,
     workflowId: execution.workflowId,
     workflowName: execution.workflowName,
     taskTitle,
-    status: execution.status,
-    stopReason: execution.stopReason,
+    status,
     note: execution.note,
     errorCount: execution.errorCount,
     createdAt: execution.createdAt,

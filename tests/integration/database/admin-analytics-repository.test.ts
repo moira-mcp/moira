@@ -139,7 +139,7 @@ describe("Bounded administrative analytics on actual migrated SQLite", () => {
     sqlite.prepare("UPDATE user SET isAdmin=1 WHERE id='old'").run();
     expect(repository.overview(query()).totalExecutions).toBe(0);
   });
-  test("actual stops count as completed without inventing success or a refusal", () => {
+  test("native outcome scalars and series distinguish genuine completion, refusals and every stop marker", () => {
     const stops = new ExecutionAttemptRepository(sqlite);
     run("clean-stop");
     expect(stops.stopExecution("clean-stop", "old", 0, "Task deliberately abandoned")).toEqual({
@@ -148,31 +148,107 @@ describe("Bounded administrative analytics on actual migrated SQLite", () => {
     });
     expect(repository.overview(query())).toMatchObject({
       totalExecutions: 1,
-      completedExecutions: 1,
+      completedExecutions: 0,
       failedExecutions: 0,
+      stoppedExecutions: 1,
       successfulExecutions: 0,
       successRate: 0,
-      overTime: [{ count: 1, completed: 1, failed: 0 }],
+      avgDurationMs: 0,
+      overTime: [{ count: 1, completed: 0, failed: 0, stopped: 1 }],
     });
     expect(repository.topWorkflows(query()).workflows[0]).toMatchObject({
-      completedCount: 1,
+      completedCount: 0,
       failedCount: 0,
+      stoppedCount: 1,
       successRate: 0,
+      avgDurationMs: 0,
     });
     run("success", { state: "completed", errors: '[{"errorType":"degradation"}]' });
     run("failure", { state: "completed", errors: '[{"message":"legacy refusal"}]' });
     run("stop-with-refusal", { errors: '[{"errorType":"validation"}]' });
     stops.stopExecution("stop-with-refusal", "old", 0, "No further work");
+    run("empty-running-marker", { errors: '[{"errorType":"validation"}]' });
+    sqlite
+      .prepare("UPDATE workflowExecution SET stopReason='' WHERE executionId=?")
+      .run("empty-running-marker");
+    run("raw-failed", { state: "failed", errors: '[{"errorType":"validation"}]' });
     expect(repository.overview(query())).toMatchObject({
-      completedExecutions: 4,
-      failedExecutions: 2,
+      totalExecutions: 6,
+      activeExecutions: 0,
+      completedExecutions: 2,
+      failedExecutions: 1,
+      stoppedExecutions: 3,
       successfulExecutions: 1,
-      successRate: 25,
+      successRate: 50,
+      avgDurationMs: 9900,
+      overTime: [{ count: 6, completed: 2, failed: 1, stopped: 3 }],
     });
     expect(repository.topWorkflows(query()).workflows[0]).toMatchObject({
-      completedCount: 4,
-      failedCount: 2,
-      successRate: 25,
+      executionCount: 6,
+      completedCount: 2,
+      failedCount: 1,
+      stoppedCount: 3,
+      successRate: 50,
+      avgDurationMs: 9900,
+    });
+    expect(
+      sqlite
+        .prepare("SELECT state, stopReason FROM workflowExecution WHERE executionId=?")
+        .get("empty-running-marker"),
+    ).toEqual({ state: "running", stopReason: "" });
+  });
+  test("stopped buckets preserve the bounded chart window independently of full-period scoped outcomes", () => {
+    for (let index = 0; index < 400; index++) {
+      const createdAt = NOW - (400 - index) * 24 * HOUR;
+      run(`bucket-${index}`, {
+        createdAt,
+        state: index % 4 === 3 ? "running" : "completed",
+        errors: index % 4 === 1 ? '[{"errorType":"validation"}]' : '[{"errorType":"degradation"}]',
+      });
+      sqlite
+        .prepare("UPDATE workflowExecution SET completedAt=?, stopReason=? WHERE executionId=?")
+        .run(
+          createdAt + (index % 4 < 2 ? 100 : 999999),
+          index % 4 < 2 ? null : "",
+          `bucket-${index}`,
+        );
+    }
+    const result = repository.overview(query("all"));
+    expect(result).toMatchObject({
+      totalExecutions: 400,
+      completedExecutions: 200,
+      failedExecutions: 100,
+      stoppedExecutions: 200,
+      successfulExecutions: 100,
+      activeExecutions: 0,
+      successRate: 50,
+      avgDurationMs: 100,
+      scope: {
+        startAt: 0,
+        endAt: NOW,
+        asOf: NOW,
+        exclusions: { mode: "default-admins", effectiveCount: 1 },
+      },
+      overTimeWindow: { granularity: "daily", limit: 366, totalBuckets: 400, limited: true },
+    });
+    expect(result.overTime).toHaveLength(366);
+    expect(result.overTime.reduce((count, bucket) => count + bucket.count, 0)).toBe(366);
+    expect(result.overTime.map((bucket) => bucket.date)).toEqual(
+      [...result.overTime.map((bucket) => bucket.date)].sort(),
+    );
+    expect(result.overTimeWindow.firstDate).toBe(result.overTime[0].date);
+    expect(result.overTimeWindow.lastDate).toBe(result.overTime.at(-1)?.date);
+    for (const bucket of result.overTime) {
+      expect(bucket.completed + bucket.stopped).toBe(1);
+      expect(bucket.failed).toBeLessThanOrEqual(bucket.completed);
+    }
+    expect(repository.overview(query("all", "old"))).toMatchObject({
+      totalExecutions: 0,
+      completedExecutions: 0,
+      stoppedExecutions: 0,
+      avgDurationMs: 0,
+      overTime: [],
+      overTimeWindow: { totalBuckets: 0, limited: false, firstDate: null, lastDate: null },
     });
   });
   test("reports old accounts with recent accepted steps and fresh sessions, never mere registration, blocked login or expired session", () => {
@@ -394,12 +470,31 @@ describe("Bounded administrative analytics on actual migrated SQLite", () => {
         createdAt: new Date(NOW - 500),
       })
       .run();
+    const identity = {
+      title: "Review this task",
+      changedAt: NOW - 1000,
+      changeId: "attention-title",
+    };
+    sqlite
+      .prepare("UPDATE workflowExecution SET taskIdentity=?, note=? WHERE executionId='locked'")
+      .run(JSON.stringify(identity), "Separate operational note");
     const result = repository.attention(query("week", undefined, "2"));
     expect(result.total).toBe(3);
     expect(result.executions.map((item) => [item.executionId, item.reason])).toEqual([
       ["locked", "locked"],
       ["failure", "refusal"],
     ]);
+    expect(result.executions[0]).toMatchObject({
+      taskTitle: identity.title,
+      taskIdentity: identity,
+      note: "Separate operational note",
+      displayStatus: "locked",
+      revision: 0,
+      stopCapability: { available: false, revision: 0, reason: "not-owner" },
+    });
+    expect(
+      repository.attention(query("week", undefined, "2"), "old").executions[0].stopCapability,
+    ).toEqual({ available: true, revision: 0 });
     expect(repository.attention(query("week", undefined, "2", "2")).executions).toEqual([
       expect.objectContaining({
         executionId: "stale",

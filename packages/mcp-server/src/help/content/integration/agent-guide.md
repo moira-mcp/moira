@@ -279,8 +279,11 @@ finish a cancelled workflow. If an execution operation, including recovery or a 
 is still in progress, stopping is refused:
 wait for it to finish and read the context again. A stale revision or an already finished run is
 also refused. After a lost response, repeat the original revision and reason to receive the same
-stopped result without another change. Stopped runs are hidden in the default overview, including
-children; use **Stopped** or **All** to find them. Their active child runs continue independently.
+stopped result without another change. Stopped runs do not match the default active overview;
+use **Stopped** or **All** to find them and choose **All time** for older runs. A stopped ancestor
+can remain as labelled context for an eligible child. Their active child runs continue independently.
+The web UI's owner stop controls use the same guarded operation. Read `stopCapability` as an advisory
+snapshot; the stored mutation repeats ownership, revision and executing-operation checks.
 
 ## Finding Workflows
 

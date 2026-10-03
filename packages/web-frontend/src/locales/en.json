@@ -590,6 +590,7 @@
       }
     },
     "runPage": {
+      "stoppedHere": "Stopped here",
       "title": "Run",
       "modeLabel": "View",
       "modes": {
@@ -714,6 +715,7 @@
       "answer": {
         "title": "Answer the waiting step",
         "body": "The run is waiting at {{step}} in \"{{block}}\". Supply the evidence the step demands; Moira validates it like an agent's answer and continues the route.",
+        "bodyNoBlock": "The run is waiting at {{step}}. Supply the evidence the step demands; Moira validates it like an agent's answer and continues the route.",
         "noFields": "This step needs no fields: continuing records an empty answer.",
         "recorded": "Recorded in the route as an adjustment by you.",
         "submit": "Continue the run",
@@ -1543,7 +1545,7 @@
           "expressions": "Expressions (one per line)"
         },
         "pausedRuns": {
-          "title": "Your paused runs wait on steps this save renames or removes",
+          "title": "Paused runs wait on steps this save renames or removes",
           "item": "Run {{id}} waits on {{node}}, which is {{change}}.",
           "renamed": "renamed to {{to}}",
           "removed": "removed",
@@ -1766,7 +1768,7 @@
         "waiting-agent": "The agent has a directive to work on; the move is the agent's.",
         "locked": "The run stands on a lock and waits for a person to enter its PIN.",
         "completed": "The flow reached its end.",
-        "stopped": "The agent stopped this run with a recorded reason. It did not complete the flow."
+        "stopped": "This run was stopped with a recorded reason. It did not complete the flow."
       },
       "stale": {
         "chip": "No movement > 7 days",
@@ -1774,10 +1776,19 @@
       },
       "search": {
         "placeholder": "Search",
-        "label": "Search by note, flow name or run id"
+        "label": "Search by task name, flow name, note or run id"
       },
       "filters": {
         "button": "Filters",
+        "period": "Activity period",
+        "periodOptions": { "7d": "Last 7 days", "30d": "Last 30 days", "all": "All time" },
+        "meaning": "Showing {{status}} · {{period}}",
+        "idleMeaning": "No activity {{idle}} · all time",
+        "rangeMeaning": "Custom activity range · your local time",
+        "defaults": "Current work from the last 7 days",
+        "allTime": "Show older runs too",
+        "advanced": "Custom dates (optional)",
+        "timeZone": "Dates use your local time. Recent periods are rolling intervals; ordering uses UTC hour buckets.",
         "idle": "No movement",
         "idleAny": "any time",
         "idleOptions": {
@@ -1794,7 +1805,7 @@
         "allFlows": "all flows",
         "sort": "Order",
         "sortOptions": {
-          "activity": "latest step first",
+          "activity": "Latest activity hour first (stable within the hour)",
           "idle": "longest without movement first",
           "created": "newest first"
         },
@@ -1836,7 +1847,12 @@
         "childOf": "↳ child of “{{title}}”",
         "flowHint": "Flow: {{name}}",
         "stage": "Stage {{number}} of {{total}}",
-        "stagesDone": "all stages passed",
+        "stagesDone": "all stages completed",
+        "stagesProgress": "{{done}} of {{total}} stages completed",
+        "activityUnknown": "activity time unknown",
+        "stoppedUnknown": "stopped · time unknown",
+        "completedUnknown": "completed · time unknown",
+        "context": "Parent context",
         "stages": "Stages",
         "plan": "Plan",
         "doneOf": "{{done}} of {{total}}",
@@ -1861,7 +1877,7 @@
           "failed": "notification failed",
           "none": "not notified"
         },
-        "childrenFlag": "Child runs: {{total}}, in progress: {{unfinished}}",
+        "childrenFlag": "Showing {{shown}} of {{total}} child runs after filtering. All child runs in progress: {{unfinished}}.",
         "refusalsFlag": "Refusals: {{count}}. The engine refused a handed-in step; the run goes on.",
         "noteFlag": "Note: {{note}}",
         "muted": "Shown because another run of this group matches the filters"
@@ -2144,6 +2160,8 @@
     },
     "analytics": {
       "title": "Analytics Dashboard",
+      "successRateHint": "Share of genuine completions without refusals. Completions with refusals are a subset of completed runs; stopped runs are excluded.",
+      "noCompletions": "No genuine completions in this period",
       "loading": "Loading analytics...",
       "selectTimeRange": "Select time range",
       "timeRanges": {
@@ -2162,7 +2180,8 @@
       "status": {
         "completed": "Completed",
         "active": "Active",
-        "failed": "Failed"
+        "failed": "Of completed: with refusals",
+        "stopped": "Stopped"
       },
       "executionsOverTime": "Executions Over Time",
       "topWorkflows": "Top 10 Workflows",
@@ -2171,7 +2190,8 @@
         "workflow": "Workflow",
         "executions": "Executions",
         "completed": "Completed",
-        "failed": "Failed",
+        "failed": "Of completed: with refusals",
+        "stopped": "Stopped",
         "successRate": "Success Rate",
         "avgDuration": "Avg Duration"
       },
@@ -2860,7 +2880,7 @@
         "total_calls_per_day": "Total Calls / Day",
         "calls_per_second": "Calls / Second",
         "workflows_started_per_day": "Workflows Started / Day",
-        "workflows_completed_per_day": "Workflows Completed / Day",
+        "workflows_completed_per_day": "Genuine Completions / Day",
         "mcp_calls_per_second": "MCP Calls / Second"
       },
       "filters": {
@@ -2909,6 +2929,23 @@
     }
   },
   "components": {
+    "executionStop": {
+      "title": "Stop this task?",
+      "description": "“{{title}}” will stop with its recorded progress preserved. Its child runs continue independently.",
+      "reason": "Reason for stopping",
+      "hint": "Required: 1–500 characters after trimming. Entered: {{count}}.",
+      "confirm": "Stop task",
+      "busy": "Stop unavailable while a step is executing",
+      "review": "Use the current state for a new decision",
+      "errors": {
+        "review": "The current task could not be loaded. Your reason is kept; try reviewing again.",
+        "stale": "The run changed. Review its current state before confirming again; your reason is kept.",
+        "in-flight": "A step is executing. Refresh the run after it finishes; your reason is kept.",
+        "terminal": "This run has already ended. Refresh to see its current result.",
+        "failed": "The task could not be stopped. Your reason is kept; try again.",
+        "length": "The reason must contain no more than 500 characters after trimming."
+      }
+    },
     "workflowCard": {
       "valid": "Valid",
       "invalid": "Invalid",
@@ -3411,7 +3448,7 @@
         },
         "work": {
           "title": "Your work",
-          "body": "The runs in progress, the ones that finished recently and the flows you use most. Open a run to see where it is, or copy a prompt that lets your agent continue it."
+          "body": "The runs in progress, recent results and the flows you use most update as your work changes. Open a run or copy a prompt to continue it. When Stop task is available on an active run, give a reason and confirm. Stopping preserves its progress and leaves child runs independent."
         },
         "show-me-around": {
           "title": "Tours of every page",
@@ -3465,11 +3502,11 @@
         },
         "status": {
           "title": "Filter by status",
-          "body": "Show only the runs that are Active, Locked, Completed, Failed or Waiting — or all of them."
+          "body": "Filter by Active, Locked, Completed, Failed, Waiting or Stopped, or show all. Completed excludes intentionally stopped runs; Failed keeps its separate meaning."
         },
         "list": {
           "title": "Open a run",
-          "body": "Open a run to see where it is, what each step asked and what the agent answered. Your first run appears here as soon as your agent starts one."
+          "body": "Open a run to see its progress and answers. An active run you own can offer Stop task: enter a reason and confirm. This stops only that run. The control is unavailable while a step is executing, and foreign runs cannot be stopped here even by an administrator."
         }
       }
     },
@@ -3545,11 +3582,11 @@
         },
         "agent": {
           "title": "An agent runs it, one step at a time",
-          "body": "An AI agent executes the process. Inside every block are steps: one step is one instruction Moira hands the agent, with a condition for when it counts as done. Moira gives out exactly one step at a time; the agent cannot skip ahead. The highlight is the step the agent is on right now, in the Steps section of the block panel — click it and the panel opens the node level for that step, with a breadcrumb back to the block and its directive, completion condition, cases and connections in full."
+          "body": "An AI agent executes the process. Inside every block are steps: one step is one instruction Moira hands the agent, with a condition for when it counts as done. Moira gives out exactly one step at a time; the agent cannot skip ahead. While the run is active, the highlight is the step the agent is on right now, in the Steps section of the block panel — click it and the panel opens the node level for that step, with a breadcrumb back to the block and its directive, completion condition, cases and connections in full."
         },
         "evidence": {
           "title": "It must return evidence",
-          "body": "To finish a step, the agent must return evidence: the fields the step asks for, checked against a schema before Moira lets the run continue. The highlighted list is exactly what this step demands back; the Returns section of the node level names each field with its type and whether it is required. No matching evidence, no next step."
+          "body": "To finish a step, the agent must return evidence: the fields the step asks for, checked against a schema before Moira lets the run continue. While the run is active, the highlighted list is exactly what this step demands back; the Returns section of the node level names each field with its type and whether it is required. No matching evidence, no next step."
         },
         "loop": {
           "title": "A failed review sends the work back",
@@ -3577,7 +3614,7 @@
         },
         "notifications": {
           "title": "Where notifications lead",
-          "body": "When this run needs you or moves on — a plan ready for approval, a result ready for review, the work finished — Moira can notify you. Each notification opens with the flow and the task, and its heading links to this page."
+          "body": "Notifications name the flow and the current task and link here. When Stop task is available in the header, enter a reason and confirm to preserve the run's partial results; children continue independently. If the run changed or a step is executing, review the current state before a new decision. Stopped and completed runs have separate statuses."
         }
       }
     },
@@ -3780,7 +3817,7 @@
       "steps": {
         "bar": {
           "title": "Your edits, before they are saved",
-          "body": "Every change collects here, not in the saved flow: the count, what exactly changes (the export), Undo for the last change and Reset for all of them. Nothing reaches the flow until you save."
+          "body": "Every edit collects here until Save; Undo and Reset affect the draft. Warnings name actual paused runs whose waiting step would change. When a warning offers Stop task, give a reason and confirm for that run only. Saving a definition does not stop its runs."
         },
         "add-step": {
           "title": "Add a step",
@@ -3937,19 +3974,19 @@
       "steps": {
         "intro": {
           "title": "Everything in progress",
-          "body": "Each card is one of your runs that has not finished: where it stands, what it waits for and how far it got. Child runs stand in a group with their parent."
+          "body": "By default, these are your unfinished runs with activity in the last 7 days. Choose 30 days or All time to find older work. Search checks task titles, flow names, notes and run IDs. Child runs stand with their parent; a dimmed parent is context for a matching child."
         },
         "status": {
           "title": "Who has the move",
-          "body": "Waiting for you means a flow waits for your decision or the agent asked you something — answer the agent in the chat. Waiting for the agent, Locked (a PIN), Completed and Stopped are the other states. Stopped runs have a reason in their panel and are hidden from In progress. Runs waiting for you always come first."
+          "body": "Waiting for you means a flow waits for your decision or the agent asked you something — answer in the chat. Waiting for the agent, Locked, Completed and Stopped are separate states. In progress excludes completed and stopped runs. Recent activity sorts groups and children by UTC hour, then creation time and ID, so updates within an hour do not keep moving cards."
         },
         "idle": {
           "title": "Find what stalled",
-          "body": "No movement > 7 days shows unfinished tasks where nothing, not even a child run, took a step for a week. Filters holds other intervals, a date range, the flow, the order and runs with refusals. What you set stays in the address, so a saved link keeps it."
+          "body": "No movement > 7 days searches all time for runs where neither the run nor any of its children had activity for a week. Filters offers other idle intervals, custom dates in your local time, a flow, order and refusals. Idle and custom dates replace the recent-activity period. Reset restores In progress, Last 7 days and Recent activity and clears search. The address keeps your filters."
         },
         "board": {
           "title": "Open a card",
-          "body": "A card shows the stage and the plan around the current item. Its title opens a panel with everything else and a link to the run. The last step is when the run last did work: a step handed in, a directive shown, a variable changed."
+          "body": "A card names the task and its own flow, with its parent shown separately. Open it for the full text and actual stage outcomes in a larger dialog. Last activity includes task naming and progress changes. When Stop task is available, supply a reason and confirm; it stops this run only, not its children. An in-flight step can temporarily prevent stopping. Stopped work retains its partial results."
         },
         "live": {
           "title": "Live updates",

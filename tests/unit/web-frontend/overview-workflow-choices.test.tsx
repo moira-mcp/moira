@@ -51,9 +51,14 @@ describe("overview workflow choice failure recovery", () => {
     "keeps the overview usable and retries the choice list in %s",
     async (language, title, message, retry, filters) => {
       await i18n.changeLanguage(language);
-      jest
-        .spyOn(apiClient, "getOverview")
-        .mockResolvedValue({ runs: [], total: 0, limit: 50, offset: 0 });
+      jest.spyOn(apiClient, "getOverview").mockResolvedValue({
+        runs: [],
+        total: 0,
+        limit: 50,
+        offset: 0,
+        evaluatedAt: 1,
+        effectiveTime: { kind: "period", period: "7d" },
+      });
       const choices = jest
         .spyOn(apiClient, "getWorkflows")
         .mockRejectedValueOnce(new Error("Internal pagination failure"));

@@ -29,6 +29,10 @@ function run(id: string, extra: Partial<ActiveWorkRun> = {}): ActiveWorkRun {
     workflowName: "Release checklist",
     note: null,
     status: "running",
+    revision: 1,
+    displayStatus: "waiting-agent",
+    stopReason: null,
+    stopCapability: { available: true, revision: 1 },
     hasActiveLock: false,
     errorCount: 0,
     stepId: "notes",
@@ -54,7 +58,7 @@ describe("WorkArea", () => {
     draw({
       activeRuns: [
         run("plain-0000"),
-        run("locked-000", { status: "locked", hasActiveLock: true }),
+        run("locked-000", { status: "locked", displayStatus: "locked", hasActiveLock: true }),
         run("errors-000", { errorCount: 2 }),
       ],
       recentRuns: [],
@@ -80,6 +84,8 @@ describe("WorkArea", () => {
       recentRuns: [
         run("recent-task", {
           status: "completed",
+          displayStatus: "completed",
+          stopCapability: { available: false, revision: 1, reason: "terminal" },
           taskTitle: "Publish the September release",
           note: "Historical deployment note",
         }),

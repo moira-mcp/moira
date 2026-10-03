@@ -2,7 +2,16 @@ import { sql, type SQL } from "drizzle-orm";
 import type { BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
 import type * as schema from "../schema.js";
 import { analyticsBounds } from "../admin-analytics-query.js";
-import { refusalCount, latestRefusalAt, successfulExecution } from "../execution-summary-sql.js";
+import {
+  refusalCount,
+  latestRefusalAt,
+  successfulExecution,
+  genuinelyCompletedExecution,
+  stoppedExecution,
+  activeExecution,
+} from "../execution-summary-sql.js";
+import { executionManagementFields } from "../../types/execution-management.js";
+import { parseExecutionTaskIdentity } from "../../types/execution-task-identity.js";
 import { storedTimestampMs } from "../timestamp-sql.js";
 import { boundedAnalyticsSeries } from "../analytics-series.js";
 import type {
@@ -23,6 +32,9 @@ import type {
 const successfulActivity = sql`a.action != 'auth:sign_up' AND NOT (a.action = 'auth:sign_in' AND CASE WHEN json_valid(a.metadata) THEN coalesce(json_extract(a.metadata, '$.blocked'), 0) ELSE 0 END = 1)`;
 const refusals = refusalCount(sql`e.errors`);
 const successful = successfulExecution(sql`e.state`, sql`e.stopReason`, sql`e.errors`);
+const genuine = genuinelyCompletedExecution(sql`e.state`, sql`e.stopReason`);
+const stopped = stoppedExecution(sql`e.stopReason`);
+const active = activeExecution(sql`e.state`, sql`e.stopReason`);
 const lastError = latestRefusalAt(sql`e.errors`);
 const lastStep = sql`(SELECT max(a.createdAt) FROM auditLog a WHERE a.resourceId = e.executionId AND a.resource = 'execution' AND a.action = 'execution:step')`;
 const sessionActivity = (now: number) =>
@@ -76,11 +88,12 @@ export class AdminAnalyticsRepository {
       activeExecutions: number;
       completedExecutions: number;
       failedExecutions: number;
+      stoppedExecutions: number;
       successfulExecutions: number;
       activeUsers: number;
       avgDurationMs: number;
     }>(
-      sql`SELECT count(*) AS totalExecutions, coalesce(sum(e.state='running'),0) AS activeExecutions, coalesce(sum(e.state='completed'),0) AS completedExecutions, coalesce(sum(e.state='completed' AND ${refusals}>0),0) AS failedExecutions, coalesce(sum(${successful}),0) AS successfulExecutions, count(DISTINCT e.userId) AS activeUsers, coalesce(round(avg(CASE WHEN e.state='completed' AND e.completedAt >= e.createdAt THEN e.completedAt-e.createdAt END)),0) AS avgDurationMs FROM workflowExecution e JOIN user u ON u.id=e.userId WHERE ${this.included(query)} AND ${this.period(query, now)}`,
+      sql`SELECT count(*) AS totalExecutions, coalesce(sum(${active}),0) AS activeExecutions, coalesce(sum(${genuine}),0) AS completedExecutions, coalesce(sum(${genuine} AND ${refusals}>0),0) AS failedExecutions, coalesce(sum(${stopped}),0) AS stoppedExecutions, coalesce(sum(${successful}),0) AS successfulExecutions, count(DISTINCT e.userId) AS activeUsers, coalesce(round(avg(CASE WHEN ${genuine} AND e.completedAt >= e.createdAt THEN e.completedAt-e.createdAt END)),0) AS avgDurationMs FROM workflowExecution e JOIN user u ON u.id=e.userId WHERE ${this.included(query)} AND ${this.period(query, now)}`,
     )!;
     const totalUsers = this.db.get<{ count: number }>(
       sql`SELECT count(*) AS count FROM user u WHERE ${this.included(query)}`,
@@ -90,7 +103,7 @@ export class AdminAnalyticsRepository {
     )!.count;
     const history = boundedAnalyticsSeries<AnalyticsOverview["overTime"][number]>(
       this.db,
-      sql`SELECT date(e.createdAt/1000,'unixepoch') AS date, count(*) AS count, sum(e.state='completed') AS completed, sum(e.state='completed' AND ${refusals}>0) AS failed FROM workflowExecution e JOIN user u ON u.id=e.userId WHERE ${this.included(query)} AND ${this.period(query, now)} GROUP BY date ORDER BY date`,
+      sql`SELECT date(e.createdAt/1000,'unixepoch') AS date, count(*) AS count, sum(${genuine}) AS completed, sum(${genuine} AND ${refusals}>0) AS failed, sum(${stopped}) AS stopped FROM workflowExecution e JOIN user u ON u.id=e.userId WHERE ${this.included(query)} AND ${this.period(query, now)} GROUP BY date ORDER BY date`,
     );
     return {
       scope,
@@ -117,7 +130,7 @@ export class AdminAnalyticsRepository {
       sql`SELECT count(*) AS count FROM user u WHERE ${where}`,
     )!.count;
     const users = this.db.all<AnalyticsPerson>(
-      sql`SELECT u.id AS userId,u.name,u.email,${registrationAt} AS registeredAt, ${userActivity(now)} AS lastActivityAt, (SELECT max(a.createdAt) FROM auditLog a WHERE a.userId=u.id AND a.action='execution:step' AND a.resource='execution') AS lastStepAt, ${sessionActivity(now)} AS recentSessionAt, (SELECT count(*) FROM workflowExecution e WHERE e.userId=u.id AND ${this.period(query, now)}) AS executionCount, (SELECT count(*) FROM workflowExecution e WHERE e.userId=u.id AND e.state='running') AS runningExecutions FROM user u WHERE ${where} ORDER BY ${order},u.id LIMIT ${Math.min(query.limit, 100)} OFFSET ${query.offset}`,
+      sql`SELECT u.id AS userId,u.name,u.email,${registrationAt} AS registeredAt, ${userActivity(now)} AS lastActivityAt, (SELECT max(a.createdAt) FROM auditLog a WHERE a.userId=u.id AND a.action='execution:step' AND a.resource='execution') AS lastStepAt, ${sessionActivity(now)} AS recentSessionAt, (SELECT count(*) FROM workflowExecution e WHERE e.userId=u.id AND ${this.period(query, now)}) AS executionCount, (SELECT count(*) FROM workflowExecution e WHERE e.userId=u.id AND (${active})) AS runningExecutions FROM user u WHERE ${where} ORDER BY ${order},u.id LIMIT ${Math.min(query.limit, 100)} OFFSET ${query.offset}`,
     );
     const flows = this.flowUsage(
       users.map((person) => person.userId),
@@ -127,7 +140,7 @@ export class AdminAnalyticsRepository {
     const current = new Map<string, AnalyticsPerson["currentExecutions"]>();
     if (users.length) {
       const rows = this.db.all<AnalyticsPerson["currentExecutions"][number] & { userId: string }>(
-        sql`SELECT userId,executionId,workflowId,workflowName,currentNodeId,lastStepAt FROM (SELECT e.userId,e.executionId,e.workflowId,coalesce(w.name,e.workflowId) AS workflowName,e.currentNodeId,${lastStep} AS lastStepAt,row_number() OVER (PARTITION BY e.userId ORDER BY ${lastStep} DESC,e.executionId) AS rank FROM workflowExecution e LEFT JOIN workflow w ON w.id=e.workflowId WHERE e.state='running' AND e.userId IN (${sql.join(
+        sql`SELECT userId,executionId,workflowId,workflowName,currentNodeId,lastStepAt FROM (SELECT e.userId,e.executionId,e.workflowId,coalesce(w.name,e.workflowId) AS workflowName,e.currentNodeId,${lastStep} AS lastStepAt,row_number() OVER (PARTITION BY e.userId ORDER BY ${lastStep} DESC,e.executionId) AS rank FROM workflowExecution e LEFT JOIN workflow w ON w.id=e.workflowId WHERE (${active}) AND e.userId IN (${sql.join(
           users.map((person) => sql`${person.userId}`),
           sql`,`,
         )})) WHERE rank<=2`,
@@ -356,7 +369,7 @@ export class AdminAnalyticsRepository {
       sql`SELECT round(count(*)/60.0,2) AS value FROM auditLog a WHERE ${currentAudit}`,
     );
     const started = sql`SELECT ${grouping(sql`e.createdAt`)} AS date,count(*) AS value FROM workflowExecution e WHERE e.createdAt>=${bounds.startAt} AND e.createdAt<${bounds.endAt} GROUP BY date`;
-    const completed = sql`SELECT ${grouping(sql`e.completedAt`)} AS date,count(*) AS value FROM workflowExecution e WHERE e.state='completed' AND e.completedAt>=${bounds.startAt} AND e.completedAt<${bounds.endAt} GROUP BY date`;
+    const completed = sql`SELECT ${grouping(sql`e.completedAt`)} AS date,count(*) AS value FROM workflowExecution e WHERE (${genuine}) AND e.completedAt>=${bounds.startAt} AND e.completedAt<${bounds.endAt} GROUP BY date`;
     metric("workflows_started_per_day", "workflows", started);
     metric("workflows_completed_per_day", "workflows", completed);
     metric(
@@ -407,11 +420,12 @@ export class AdminAnalyticsRepository {
       completedCount: number;
       failedCount: number;
       successfulCount: number;
+      stoppedCount: number;
       avgDurationMs: number;
       participantCount: number;
       lastRunAt: number | null;
     }>(
-      sql`SELECT e.workflowId,coalesce(w.name,e.workflowId) AS workflowName,count(*) AS executionCount,sum(e.state='completed') AS completedCount,sum(e.state='completed' AND ${refusals}>0) AS failedCount,sum(${successful}) AS successfulCount,count(DISTINCT e.userId) AS participantCount,max(e.createdAt) AS lastRunAt,coalesce(round(avg(CASE WHEN e.state='completed' AND e.completedAt>=e.createdAt THEN e.completedAt-e.createdAt END)),0) AS avgDurationMs FROM workflowExecution e JOIN user u ON u.id=e.userId LEFT JOIN workflow w ON w.id=e.workflowId WHERE ${this.included(query)} AND ${this.period(query, now)} GROUP BY e.workflowId ORDER BY executionCount DESC,e.workflowId LIMIT ${Math.min(query.limit, 20)} OFFSET ${query.offset}`,
+      sql`SELECT e.workflowId,coalesce(w.name,e.workflowId) AS workflowName,count(*) AS executionCount,sum(${genuine}) AS completedCount,sum(${genuine} AND ${refusals}>0) AS failedCount,sum(${successful}) AS successfulCount,sum(${stopped}) AS stoppedCount,count(DISTINCT e.userId) AS participantCount,max(e.createdAt) AS lastRunAt,coalesce(round(avg(CASE WHEN ${genuine} AND e.completedAt>=e.createdAt THEN e.completedAt-e.createdAt END)),0) AS avgDurationMs FROM workflowExecution e JOIN user u ON u.id=e.userId LEFT JOIN workflow w ON w.id=e.workflowId WHERE ${this.included(query)} AND ${this.period(query, now)} GROUP BY e.workflowId ORDER BY executionCount DESC,e.workflowId LIMIT ${Math.min(query.limit, 20)} OFFSET ${query.offset}`,
     );
     const owners = new Map<string, AnalyticsTopWorkflows["workflows"][number]["topUsers"]>();
     if (rows.length) {
@@ -443,26 +457,61 @@ export class AdminAnalyticsRepository {
       })),
     };
   }
-  attention(query: AnalyticsQuery): AnalyticsAttention {
+  attention(query: AnalyticsQuery, actorId = ""): AnalyticsAttention {
     const now = this.clock();
     const scope = this.scope(query, now);
     const lockTime = sql`(SELECT max(l.createdAt) FROM executionLock l WHERE l.executionId=e.executionId AND l.status='active')`;
     const inPeriod = (value: SQL) => sql`${value} >= ${scope.startAt} AND ${value} < ${now}`;
-    const locked = sql`e.state='running' AND ${inPeriod(lockTime)}`;
+    const locked = sql`(${active}) AND ${inPeriod(lockTime)}`;
     const refusal = sql`${inPeriod(lastError)}`;
-    const stale = sql`e.state='running' AND e.waitingForInputNodeId IS NOT NULL AND ${lastStep}<${now - 3600000} AND ${inPeriod(lastStep)}`;
+    const stale = sql`(${active}) AND e.waitingForInputNodeId IS NOT NULL AND ${lastStep}<${now - 3600000} AND ${inPeriod(lastStep)}`;
     const where = sql`${this.included(query)} AND ((${locked}) OR (${refusal}) OR (${stale}))`;
     const total = this.db.get<{ count: number }>(
       sql`SELECT count(*) AS count FROM workflowExecution e JOIN user u ON u.id=e.userId WHERE ${where}`,
     )!.count;
-    const rows = this.db.all<Omit<AttentionExecution, "hasActiveLock"> & { hasActiveLock: number }>(
-      sql`SELECT e.executionId,e.workflowId,coalesce(w.name,e.workflowId) AS workflowName,e.userId,u.name AS userName,u.email AS userEmail,CASE WHEN e.state='running' AND ${lockTime} IS NOT NULL THEN 'locked' ELSE e.state END AS status,e.note,e.currentNodeId,${lastStep} AS lastStepAt,${lastError} AS lastErrorAt,(e.state='running' AND ${lockTime} IS NOT NULL) AS hasActiveLock,${refusals} AS errorCount,CASE WHEN ${locked} THEN 'locked' WHEN ${refusal} THEN 'refusal' ELSE 'stale-input' END AS reason FROM workflowExecution e JOIN user u ON u.id=e.userId LEFT JOIN workflow w ON w.id=e.workflowId WHERE ${where} ORDER BY CASE WHEN ${locked} THEN ${lockTime} WHEN ${refusal} THEN ${lastError} ELSE ${lastStep} END DESC,e.executionId LIMIT ${query.limit} OFFSET ${query.offset}`,
+    const rows = this.db.all<
+      Omit<
+        AttentionExecution,
+        "hasActiveLock" | "taskIdentity" | "taskTitle" | "displayStatus" | "stopCapability"
+      > & {
+        hasActiveLock: number;
+        taskIdentity: string | null;
+        rawState: string;
+        gateWaiting: number;
+        awaitingUser: number;
+        hasExecutingAttempt: number;
+      }
+    >(
+      sql`SELECT e.executionId,e.workflowId,coalesce(w.name,e.workflowId) AS workflowName,e.userId,u.name AS userName,u.email AS userEmail,CASE WHEN (${active}) AND ${lockTime} IS NOT NULL THEN 'locked' ELSE e.state END AS status,e.state AS rawState,e.revision,e.stopReason,e.taskIdentity,e.gateWaiting,e.awaitingUser IS NOT NULL AS awaitingUser,EXISTS(SELECT 1 FROM executionMutationAttempt attempt WHERE attempt.executionId=e.executionId AND attempt.userId=e.userId AND attempt.state='executing') AS hasExecutingAttempt,e.note,e.currentNodeId,${lastStep} AS lastStepAt,${lastError} AS lastErrorAt,((${active}) AND ${lockTime} IS NOT NULL) AS hasActiveLock,${refusals} AS errorCount,CASE WHEN ${locked} THEN 'locked' WHEN ${refusal} THEN 'refusal' ELSE 'stale-input' END AS reason FROM workflowExecution e JOIN user u ON u.id=e.userId LEFT JOIN workflow w ON w.id=e.workflowId WHERE ${where} ORDER BY CASE WHEN ${locked} THEN ${lockTime} WHEN ${refusal} THEN ${lastError} ELSE ${lastStep} END DESC,e.executionId LIMIT ${query.limit} OFFSET ${query.offset}`,
     );
     return {
       scope,
       timeRange: query.range,
       total,
-      executions: rows.map((row) => ({ ...row, hasActiveLock: Boolean(row.hasActiveLock) })),
+      executions: rows.map(
+        ({ rawState, gateWaiting, awaitingUser, hasExecutingAttempt, taskIdentity, ...row }) => {
+          const identity = parseExecutionTaskIdentity(taskIdentity);
+          return {
+            ...row,
+            taskIdentity: identity,
+            taskTitle: identity?.title ?? row.workflowName,
+            hasActiveLock: Boolean(row.hasActiveLock),
+            ...executionManagementFields(
+              {
+                status: rawState,
+                revision: row.revision,
+                stopReason: row.stopReason,
+                userId: row.userId,
+                hasActiveLock: Boolean(row.hasActiveLock),
+                hasExecutingAttempt: Boolean(hasExecutingAttempt),
+                gateWaiting: Boolean(gateWaiting),
+                awaitingUser: Boolean(awaitingUser),
+              },
+              actorId,
+            ),
+          };
+        },
+      ),
     };
   }
   /** Page-scoped lifetime management enrichment, independent of analytics exclusions. */

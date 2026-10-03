@@ -120,6 +120,15 @@ beforeAll(async () => {
 });
 
 describe("BlockTimings", () => {
+  test("a stopped frontier retains the recorded open pass and its time without claiming work is in progress", () => {
+    view(<BlockTimings block={block({ stopped: true, timing: MEASURED })} cursor={null} />);
+    const passes = screen.getAllByTestId("block-timing-pass");
+    expect(passes[2].getAttribute("data-open")).toBe("true");
+    expect(passes[2].textContent).toContain("5 s");
+    expect(passes[2].textContent).toContain("Stopped here");
+    expect(screen.queryByText("in progress")).toBeNull();
+    expect(screen.queryByTestId("block-timing-current")).toBeNull();
+  });
   test("lists every pass with its duration, marks the open one and totals them", () => {
     view(<BlockTimings block={block({ timing: MEASURED })} cursor={null} />);
     const passes = screen.getAllByTestId("block-timing-pass");
@@ -223,6 +232,18 @@ describe("BlockListCard", () => {
     expect(
       rows.map((row) => within(row).getByTestId("block-list-item-duration").textContent),
     ).toEqual(["12 s", "1 min 20 s", "—"]);
+  });
+
+  test("a stopped list preserves completed items and durations while suppressing every current item", () => {
+    view(<BlockListCard block={block({ stopped: true, list: items })} />);
+    expect(screen.getByTestId("block-list-progress").textContent).toBe("1 of 3 done");
+    const rows = screen.getAllByTestId("block-list-item");
+    expect(rows.map((row) => row.getAttribute("data-current"))).toEqual([
+      "false",
+      "false",
+      "false",
+    ]);
+    expect(within(rows[1]).getByTestId("block-list-item-duration").textContent).toBe("1 min 20 s");
   });
 
   test("a binding that resolves counters but no items shows the counters alone", () => {

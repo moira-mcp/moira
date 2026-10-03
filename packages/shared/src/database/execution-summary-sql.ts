@@ -20,9 +20,23 @@ export function refusalCount(errors: SQL): SQL<number> {
   )`;
 }
 
-/** Stopping is a terminal completion, but never successful work or an invented refusal. */
+/** SQL counterparts of the shared outcome classifier, preserving raw historical states. */
+export function genuinelyCompletedExecution(state: SQL, stopReason: SQL): SQL {
+  return sql`${state} = 'completed' AND ${stopReason} IS NULL`;
+}
+
+export function stoppedExecution(stopReason: SQL): SQL {
+  return sql`${stopReason} IS NOT NULL`;
+}
+
+/** These operational inventories have always counted running-only active work. */
+export function activeExecution(state: SQL, stopReason: SQL): SQL {
+  return sql`${state} = 'running' AND ${stopReason} IS NULL`;
+}
+
+/** Genuine completion without a refused-step journal entry. */
 export function successfulExecution(state: SQL, stopReason: SQL, errors: SQL): SQL {
-  return sql`${state} = 'completed' AND ${stopReason} IS NULL AND ${refusalCount(errors)} = 0`;
+  return sql`${genuinelyCompletedExecution(state, stopReason)} AND ${refusalCount(errors)} = 0`;
 }
 
 /** Latest recorded refusal timestamp; malformed/non-object entries cannot invent a time. */

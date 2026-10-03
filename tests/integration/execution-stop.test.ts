@@ -5,12 +5,15 @@ import {
   getDatabase,
   getSqliteInstance,
   getWorkflowService,
+  getLockService,
   user,
 } from "@mcp-moira/shared";
 import {
   DatabaseRepository,
+  ExecutionStopService,
   InMemoryRepository,
   projectExecutionRun,
+  readExecutionManagement,
   type WorkflowExecution,
   type WorkflowGraph,
 } from "@mcp-moira/workflow-engine";
@@ -65,10 +68,10 @@ describe("explicit execution stop", () => {
     MCPEngine.resetInstance();
   });
 
-  async function start(parentExecutionId?: string) {
+  async function start(parentExecutionId?: string, definition = workflow) {
     const engine = MCPEngine.getInstance(repository);
     const id = await engine.executor.startWorkflow(
-      workflow,
+      definition,
       {},
       USER,
       undefined,
@@ -96,6 +99,74 @@ describe("explicit execution stop", () => {
       }),
     );
   }
+
+  test("the shared API/MCP stop facade emits effects once for a changed persisted stop", async () => {
+    const { id, run } = await start();
+    const audit = jest.fn(async () => {});
+    const stopped = jest.fn((_workflowId: string) => {});
+    const service = new ExecutionStopService(repository, { audit, stopped });
+    const input = { expectedRevision: run.revision, reason: "  Scope replaced  " };
+    const changed = await service.stop(id, USER, input, "api");
+    const replay = await service.stop(id, USER, input, "mcp");
+    expect(changed).toMatchObject({
+      changed: true,
+      stopReason: "Scope replaced",
+      revision: run.revision + 1,
+    });
+    expect(replay).toEqual({ ...changed, changed: false });
+    expect(stopped.mock.calls).toEqual([[run.workflowId]]);
+    expect(audit).toHaveBeenCalledTimes(1);
+    expect(audit.mock.calls[0]).toEqual([
+      expect.objectContaining({
+        userId: USER,
+        resourceId: id,
+        source: "api",
+        metadata: { reason: "Scope replaced", outcome: "stopped" },
+      }),
+    ]);
+    await expect(
+      service.stop(id, USER, { ...input, reason: "Different reason" }, "api"),
+    ).rejects.toMatchObject({ statusCode: 409 });
+    await expect(service.stop(id, "foreign-actor", input, "api")).rejects.toMatchObject({
+      statusCode: 403,
+    });
+    await expect(service.stop("missing-stop-execution", USER, input, "mcp")).rejects.toMatchObject({
+      statusCode: 404,
+    });
+    expect(stopped).toHaveBeenCalledTimes(1);
+    expect(audit).toHaveBeenCalledTimes(1);
+  });
+
+  test("the actual MCP active list excludes a marked legacy row and the Home query keeps it in recent work", async () => {
+    const { id } = await start();
+    getSqliteInstance()
+      .prepare("UPDATE workflowExecution SET stopReason=? WHERE executionId=?")
+      .run("", id);
+    const listed = await requestContext.run({ userId: USER }, () =>
+      getSessionInfo({ action: "executions", workflowId: workflow.id, limit: 100 }),
+    );
+    expect(listed.success).toBe(true);
+    const data = listed.data as { executions: Array<{ executionId: string }> };
+    expect(data.executions.map((item) => item.executionId)).not.toContain(id);
+    const active = await repository.listExecutionsWithFilters({
+      userId: USER,
+      status: ["running"],
+      includeStopped: false,
+      limit: 100,
+    });
+    expect(active.executions.map((item) => item.executionId)).not.toContain(id);
+    const recent = await repository.listExecutionsWithFilters({
+      userId: USER,
+      status: ["completed"],
+      includeStopped: true,
+      limit: 100,
+    });
+    expect(recent.executions.map((item) => item.executionId)).toContain(id);
+    expect((await repository.getExecution(id))!).toMatchObject({
+      status: "running",
+      stopReason: "",
+    });
+  });
 
   test("stores an explicit reason, invalidates the step, clears waits, emits one status event and replays", async () => {
     const { id, run, attemptId } = await start();
@@ -125,7 +196,8 @@ describe("explicit execution stop", () => {
         .get(id),
     ).toEqual({ waitingForInputNodeId: null });
     expect((await repository.getExecutionAttempt(attemptId))?.state).toBe("superseded");
-    expect(await stop(run)).toEqual(result);
+    expect(result.data).toMatchObject({ changed: true });
+    expect((await stop(run)).data).toEqual({ ...(result.data as object), changed: false });
     const events = getSqliteInstance()
       .prepare("SELECT kind FROM executionChange WHERE executionId = ? AND seq > ?")
       .all(id, seq);
@@ -164,11 +236,13 @@ describe("explicit execution stop", () => {
     expect((await repository.getExecutionAttempt(attemptId))?.state).toBe("superseded");
   });
 
-  test("active overview hides stopped descendants and exposes their active children as roots", async () => {
+  test("active work retains its stopped ancestor only as context and omits a standalone stopped run", async () => {
     const parent = await start();
     const stopped = await start(parent.id);
     const child = await start(stopped.id);
+    const standalone = await start();
     expect((await stop(stopped.run)).success).toBe(true);
+    expect((await stop(standalone.run)).success).toBe(true);
     const overview = new ExecutionOverviewRepository(getSqliteInstance());
     const query = {
       userId: USER,
@@ -178,11 +252,28 @@ describe("explicit execution stop", () => {
       offset: 0,
     };
     const active = overview.page(query);
-    expect(active.nodes.map((row) => row.executionId)).not.toContain(stopped.id);
-    expect(active.roots).toContain(child.id);
+    expect(active.nodes.map((row) => row.executionId)).not.toContain(standalone.id);
+    expect(active.nodes.find((row) => row.executionId === stopped.id)).toMatchObject({
+      status: "stopped",
+      matches: false,
+    });
+    expect(active.roots).toContain(parent.id);
+    expect(active.roots).not.toContain(child.id);
     expect(active.nodes.find((row) => row.executionId === child.id)?.parentExecutionId).toBe(
       stopped.id,
     );
+    const selected = overview.page({ ...query, search: child.id });
+    expect(selected.total).toBe(1);
+    expect(selected.roots).toEqual([parent.id]);
+    expect(selected.nodes.map((row) => [row.executionId, row.matches])).toEqual(
+      expect.arrayContaining([
+        [parent.id, false],
+        [stopped.id, false],
+        [child.id, true],
+      ]),
+    );
+    expect(selected.nodes).toHaveLength(3);
+    expect((await repository.getExecution(child.id))?.status).toBe("running");
     expect(
       overview
         .page({ ...query, status: "stopped" })
@@ -208,10 +299,79 @@ describe("explicit execution stop", () => {
     await expect(memory.saveExecution(run)).rejects.toThrow("state changed");
   });
 
+  test.each(["gate", "question", "lock"] as const)(
+    "published management readers compose actual %s facts with raw running status",
+    async (kind) => {
+      let definition = workflow;
+      if (kind === "gate") {
+        const gated = structuredClone(graph);
+        gated.metadata.name = "Management gate";
+        const work = gated.nodes.find((node) => node.id === "work")!;
+        if (work.type !== "agent-directive") throw new Error("Expected directive fixture");
+        work.humanGate = { label: "Approve the work" };
+        const saved = await getWorkflowService().save({
+          graph: gated,
+          userId: USER,
+          visibility: "private",
+        });
+        definition = (await repository.getWorkflowGraph(saved.id, USER))!;
+      }
+      const { id } = await start(undefined, definition);
+      if (kind === "question")
+        await repository.setExecutionAwaitingUser(id, USER, {
+          id: "management-question",
+          question: "Which input?",
+          since: Date.now(),
+        });
+      const lock =
+        kind === "lock"
+          ? await getLockService().createLock({
+              executionId: id,
+              nodeId: "work",
+              reason: "Confirm the work",
+              lockedBy: USER,
+            })
+          : null;
+      try {
+        const current = (await repository.getExecution(id))!;
+        expect(current.status).toBe("running");
+        const memory = new InMemoryRepository();
+        await memory.saveExecution(current);
+        const lockedIds = await getLockService().getActiveExecutionIds();
+        const stored = await readExecutionManagement(repository, [current], USER, lockedIds);
+        const inMemory = await readExecutionManagement(
+          memory,
+          [(await memory.getExecution(id))!],
+          USER,
+          lockedIds,
+        );
+        const expected = {
+          revision: current.revision,
+          displayStatus: kind === "lock" ? "locked" : "waiting-user",
+          stopReason: null,
+          stopCapability: { available: true, revision: current.revision },
+        };
+        expect(stored.get(id)).toEqual(expected);
+        expect(inMemory.get(id)).toEqual(expected);
+      } finally {
+        if (lock) await getLockService().ownerUnlock(lock.lockId, USER);
+      }
+    },
+  );
+
   test("stopped progress freezes time without inventing completed work or entering duration statistics", async () => {
     const { id, run } = await start();
     expect((await stop(run)).success).toBe(true);
     const stopped = (await repository.getExecution(id))!;
+    const progress = await requestContext.run({ userId: USER }, () =>
+      getSessionInfo({ action: "progress", executionId: id }),
+    );
+    expect(progress.success).toBe(true);
+    expect(progress.data).toMatchObject({
+      source: "trace",
+      executionStatus: "completed",
+      stopReason: "User changed the task",
+    });
     const first = projectExecutionRun(workflow, stopped, { now: stopped.completedAt! + 10_000 })!;
     const later = projectExecutionRun(workflow, stopped, { now: stopped.completedAt! + 90_000 })!;
     expect(first.nodes.map((node) => node.status)).toEqual(["active", "pending"]);
@@ -222,6 +382,47 @@ describe("explicit execution stop", () => {
         (sample) => sample.executionId,
       ),
     ).not.toContain(id);
+  });
+
+  test("metadata-only published progress distinguishes stopping without inventing blocks", async () => {
+    const plain = structuredClone(graph);
+    plain.metadata.name = "Stopped metadata";
+    delete plain.progress;
+    for (const node of plain.nodes) delete node.progressNodeId;
+    const saved = await getWorkflowService().save({
+      graph: plain,
+      userId: USER,
+      visibility: "private",
+    });
+    const definition = (await repository.getWorkflowGraph(saved.id, USER))!;
+    const { id, run } = await start(undefined, definition);
+    expect((await stop(run, "Scope replaced")).success).toBe(true);
+    const result = await requestContext.run({ userId: USER }, () =>
+      getSessionInfo({ action: "progress", executionId: id }),
+    );
+    expect(result.success).toBe(true);
+    expect(result.data).toMatchObject({
+      source: "metadata",
+      taskTitle: "Stopped metadata",
+      executionStatus: "completed",
+      stopReason: "Scope replaced",
+    });
+    expect(result.data).not.toHaveProperty("nodes");
+    expect(result.data).not.toHaveProperty("process");
+  });
+
+  test("a legacy empty stored stop marker remains visible and freezes the open partial frontier", async () => {
+    const { id, run } = await start();
+    expect((await stop(run)).success).toBe(true);
+    getSqliteInstance()
+      .prepare("UPDATE workflowExecution SET stopReason='' WHERE executionId=?")
+      .run(id);
+    const current = (await repository.getExecution(id))!;
+    const first = projectExecutionRun(workflow, current, { now: current.completedAt! + 10_000 })!;
+    const later = projectExecutionRun(workflow, current, { now: current.completedAt! + 90_000 })!;
+    expect(first.nodes.map((node) => node.status)).toEqual(["active", "pending"]);
+    expect(first.nodes.map((node) => node.timing)).toEqual(later.nodes.map((node) => node.timing));
+    expect(first).toHaveProperty("stopReason", "");
   });
 
   test("a run-page answer holds an executing claim before dispatch, so stop refuses until it finishes", async () => {

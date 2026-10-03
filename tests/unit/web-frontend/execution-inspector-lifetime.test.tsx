@@ -66,6 +66,7 @@ jest.unstable_mockModule(
 
 let Inspector: typeof import("../../../packages/web-frontend/src/components/execution/ExecutionInspector").ExecutionInspector;
 let GuideProvider: typeof import("../../../packages/web-frontend/src/guides/GuideContext").GuideProvider;
+const originalReact = (globalThis as typeof globalThis & { React?: typeof React }).React;
 beforeAll(async () => {
   ({ ExecutionInspector: Inspector } =
     await import("../../../packages/web-frontend/src/components/execution/ExecutionInspector"));
@@ -73,6 +74,7 @@ beforeAll(async () => {
   await i18n.changeLanguage("en");
 });
 beforeEach(() => {
+  (globalThis as typeof globalThis & { React?: typeof React }).React = React;
   window.history.replaceState(null, "", "/executions/A");
   jest.spyOn(apiClient, "getWorkflow").mockImplementation(async (id) => definition(id));
   jest.spyOn(apiClient, "getExecutionVariables").mockResolvedValue({ variables: [], revision: 0 });
@@ -93,6 +95,9 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   jest.restoreAllMocks();
+  const target = globalThis as typeof globalThis & { React?: typeof React };
+  if (originalReact) target.React = originalReact;
+  else delete target.React;
 });
 
 function graph(id: string): WorkflowGraph {
@@ -142,6 +147,9 @@ function execution(id: string, revision = 1): ExecutionData {
     currentNodeId: "work",
     waitingForInputNodeId: "work",
     revision,
+    displayStatus: "waiting-user",
+    stopReason: null,
+    stopCapability: { available: true, revision },
     metadataRevisions: {
       parent: "parent",
       reminders: "reminders",
@@ -172,6 +180,74 @@ function mount(fetch: (id: string) => Promise<ExecutionData>) {
   const view = render(node("A"));
   return { ...view, go: (id: string) => view.rerender(node(id)) };
 }
+
+test("the inspector uses its authoritative capability and refreshes the same run after stopping", async () => {
+  let current = execution("A");
+  const stop = jest.spyOn(apiClient, "stopExecution").mockImplementation(async (id, request) => {
+    current = {
+      ...execution("A", 2),
+      status: "completed",
+      displayStatus: "stopped",
+      stopReason: request.reason,
+      stopCapability: { available: false, revision: 2, reason: "terminal" },
+    };
+    return {
+      executionId: id,
+      stopped: true,
+      stopReason: request.reason,
+      revision: 2,
+      changed: true,
+      displayStatus: "stopped",
+      stopCapability: { available: false, revision: 2, reason: "terminal" },
+    };
+  });
+  mount(async () => current);
+  await shown("A");
+  fireEvent.click(screen.getByTestId("execution-stop-A"));
+  fireEvent.change(screen.getByRole("textbox", { name: "Reason for stopping" }), {
+    target: { value: "The owner changed the task" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Stop task" }));
+  await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+  expect(stop).toHaveBeenCalledWith("A", {
+    expectedRevision: 1,
+    reason: "The owner changed the task",
+  });
+  expect(screen.getByTestId("run-status")).toHaveTextContent("Stopped");
+  expect(screen.getByTestId("run-stop-reason")).toHaveTextContent("The owner changed the task");
+  expect(screen.queryByTestId("execution-stop-A")).toBeNull();
+});
+
+test("foreign capability cannot expose a stop action even on an editable inspector", async () => {
+  mount(async (id) => ({
+    ...execution(id),
+    stopCapability: { available: false, revision: 1, reason: "not-owner" },
+  }));
+  await shown("A");
+  expect(screen.queryByTestId("execution-stop-A")).toBeNull();
+});
+
+test("an authoritative metadata stop marker is shown even when the separate detail read is still active", async () => {
+  jest.spyOn(apiClient, "getExecutionProgress").mockResolvedValue({
+    source: "metadata",
+    executionId: "A",
+    workflowId: "A",
+    workflowName: "Flow A",
+    workflowVersion: "1.0.0",
+    executionWorkflowVersion: null,
+    executionRevision: 2,
+    executionStatus: "completed",
+    stopReason: "",
+    taskTitle: "Task A 1",
+    taskIdentity: null,
+    taskIdentityRevision: "legacy",
+  });
+  mount(async (id) => execution(id));
+  await shown("A");
+  expect(screen.getByTestId("run-status")).toHaveTextContent("Stopped");
+  expect(screen.getByTestId("run-stop-reason")).toBeInTheDocument();
+  expect(screen.queryByTestId("execution-stop-A")).toBeNull();
+});
 
 test.each(["good", "error"])(
   "lock history after A's %s result shows a single B pending read and then B's own error",

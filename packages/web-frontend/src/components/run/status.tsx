@@ -5,7 +5,15 @@
 
 import React from "react";
 import { useTranslation } from "react-i18next";
-import { Check, CircleDashed, Hourglass, Loader2, RotateCcw, SkipForward } from "lucide-react";
+import {
+  Check,
+  CircleDashed,
+  Hourglass,
+  Loader2,
+  OctagonPause,
+  RotateCcw,
+  SkipForward,
+} from "lucide-react";
 import { useEditing } from "../flow/editing";
 import { cn } from "@/lib/utils";
 import { blockStatusLabel, type WaitingFor } from "./waiting";
@@ -83,15 +91,18 @@ export const STATUS_ORDER: ExecutionBlockStatus[] = [
 
 export function StatusIcon({
   status,
+  stopped = false,
   className,
 }: {
   status: ExecutionBlockStatus;
+  stopped?: boolean;
   className?: string;
 }): React.JSX.Element | null {
   const { definition } = useEditing();
   if (definition) return null;
-  const style = STATUS_STYLE[status];
-  const Icon = style.icon;
+  const frontier = stopped && (status === "active" || status === "waiting");
+  const style = STATUS_STYLE[frontier ? "pending" : status];
+  const Icon = frontier ? OctagonPause : style.icon;
   return (
     <Icon
       className={cn("size-4 shrink-0", style.tint, style.spin && "animate-spin", className)}
@@ -103,10 +114,12 @@ export function StatusIcon({
 /** Compact chip: icon + status word. The pass count is secondary text on the card, not here. */
 export function StatusChip({
   status,
+  stopped = false,
   waitingFor = null,
   className,
 }: {
   status: ExecutionBlockStatus;
+  stopped?: boolean;
   /** Who the run waits for (`progress.waitingFor`); only a person reads as "waiting for you". */
   waitingFor?: WaitingFor;
   className?: string;
@@ -115,8 +128,9 @@ export function StatusChip({
   const { definition } = useEditing();
   // A definition has no run: no block is "not reached", so nothing is shown.
   if (definition) return null;
-  const style = STATUS_STYLE[status];
-  const Icon = style.icon;
+  const frontier = stopped && (status === "active" || status === "waiting");
+  const style = STATUS_STYLE[frontier ? "pending" : status];
+  const Icon = frontier ? OctagonPause : style.icon;
   return (
     <span
       className={cn(
@@ -127,7 +141,7 @@ export function StatusChip({
       data-status={status}
     >
       <Icon className={cn("size-3", style.spin && "animate-spin")} aria-hidden="true" />
-      {blockStatusLabel(status, waitingFor, t)}
+      {frontier ? t("pages.runPage.stoppedHere") : blockStatusLabel(status, waitingFor, t)}
     </span>
   );
 }

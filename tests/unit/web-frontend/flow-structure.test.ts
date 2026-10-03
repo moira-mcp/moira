@@ -261,7 +261,13 @@ describe("new step types", () => {
 
 describe("paused-run warning", () => {
   const runs: RunOnNode[] = [
-    { executionId: "run-on-x", status: "running", currentNodeId: "create-plan", note: "Task A" },
+    {
+      executionId: "run-on-x",
+      status: "running",
+      currentNodeId: "create-plan",
+      waitingForInputNodeId: "create-plan",
+      note: "Task A",
+    },
     { executionId: "run-elsewhere", status: "running", currentNodeId: "get-task" },
     { executionId: "run-done", status: "completed", currentNodeId: "create-plan" },
   ];
@@ -293,5 +299,23 @@ describe("paused-run warning", () => {
         { kind: "change", path: "nodes[create-plan].directive", before: "a", after: "b" },
       ]),
     ).toEqual([]);
+  });
+
+  test("only actual paused active runs warn, carrying the authoritative stop capability without assuming ownership", () => {
+    const stopCapability = { available: false as const, revision: 7, reason: "not-owner" as const };
+    const paused = { ...runs[0], status: "locked", revision: 7, stopCapability };
+    const [warning] = pausedRunWarnings(
+      [
+        paused,
+        { ...runs[0], executionId: "executing", waitingForInputNodeId: null },
+        { ...runs[0], executionId: "different-step", waitingForInputNodeId: "another" },
+        { ...runs[0], executionId: "stopped", stopReason: "" },
+      ],
+      removed,
+    );
+    expect(warning.executionId).toBe("run-on-x");
+    expect(warning.revision).toBe(7);
+    expect(warning.stopCapability).toBe(stopCapability);
+    expect(pausedRunWarnings([{ ...paused, status: "waiting" }], removed)).toHaveLength(1);
   });
 });

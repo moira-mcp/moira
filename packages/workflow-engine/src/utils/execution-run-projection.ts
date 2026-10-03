@@ -48,6 +48,8 @@ export type {
   ExecutionProgressNode,
   ExecutionProgressState,
   ExecutionRouteEntry,
+  ExecutionStageEntry,
+  ExecutionStages,
   ExecutionVariableState,
 } from "./execution-progress-contract.js";
 
@@ -99,7 +101,16 @@ function enforceResolvedLimit(value: string, maxLength: number, field: string): 
   return value;
 }
 
-function progressTemplateContext(workflow: WorkflowGraph, execution: WorkflowExecution) {
+export interface ExecutionTaskTitleDefinition {
+  metadata: Pick<WorkflowGraph["metadata"], "name">;
+  variableRegistry?: Record<string, { default?: unknown }>;
+  progress?: { title?: string };
+}
+
+function progressTemplateContext(
+  workflow: ExecutionTaskTitleDefinition,
+  execution: WorkflowExecution,
+) {
   const defaults = Object.fromEntries(
     Object.entries(workflow.variableRegistry ?? {})
       .filter(([, variable]) => variable.default !== undefined)
@@ -113,7 +124,7 @@ function progressTemplateContext(workflow: WorkflowGraph, execution: WorkflowExe
 }
 
 function taskTitleFrom(
-  workflow: WorkflowGraph | undefined,
+  workflow: ExecutionTaskTitleDefinition | undefined,
   execution: WorkflowExecution,
   authoredTitle: string | null,
 ): string {
@@ -131,7 +142,7 @@ function taskTitleFrom(
 
 /** A task's own identity; arbitrary notes and parent names never supply its heading. */
 export function resolveExecutionTaskTitle(
-  workflow: WorkflowGraph | undefined,
+  workflow: ExecutionTaskTitleDefinition | undefined,
   execution: WorkflowExecution,
 ): string {
   if (execution.taskIdentity) return taskTitleFrom(workflow, execution, null);
@@ -167,6 +178,7 @@ function executionTaskMetadata(
     executionWorkflowVersion: execution.workflowVersion ?? null,
     executionRevision: execution.revision,
     executionStatus: execution.status,
+    stopReason: execution.stopReason ?? null,
   };
 }
 
@@ -668,7 +680,7 @@ function projectRun(
   // Timings and bound lists: the variables at the cursor, the passes of every block, and — for
   // a bound block — the item each pass worked on.
   const now =
-    execution.stopReason && cursor === null
+    execution.stopReason != null && cursor === null
       ? (execution.completedAt ?? execution.updatedAt)
       : (options.now ?? Date.now());
   const bindings = new Map(

@@ -62,8 +62,8 @@ test.describe("Executions Page", () => {
     expect(cardText).toBeTruthy();
     expect(cardText!.length).toBeGreaterThan(0);
 
-    // Card should show a status (completed, waiting, running, failed)
-    const hasStatus = /completed|waiting|running|failed/i.test(cardText || "");
+    // Reader states include intentional stops and locks, alongside completion and waiting.
+    const hasStatus = /completed|waiting|running|failed|stopped|locked/i.test(cardText || "");
     expect(hasStatus).toBe(true);
 
     console.log(`✓ Execution card displays: ${cardText?.substring(0, 80)}`);

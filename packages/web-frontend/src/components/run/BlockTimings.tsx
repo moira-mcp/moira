@@ -56,7 +56,7 @@ export function BlockTimings({
               key={`${pass.seq}-${pass.nodeId}`}
               className={cn(
                 "flex flex-wrap items-baseline gap-x-2 gap-y-0.5 rounded-md px-1.5 py-0.5",
-                pass.open && "bg-primary/5",
+                pass.open && !block.stopped && "bg-primary/5",
                 cursor !== null && pass.seq > cursor && "opacity-50",
               )}
               data-testid="block-timing-pass"
@@ -71,14 +71,22 @@ export function BlockTimings({
                 {pass.open ? "…" : formatClock(pass.leftAt, i18n.language)}
               </span>
               <span
-                className={cn("font-medium tabular-nums", pass.open && "text-primary")}
+                className={cn(
+                  "font-medium tabular-nums",
+                  pass.open && !block.stopped && "text-primary",
+                )}
                 data-testid="block-timing-pass-duration"
               >
                 {formatDuration(pass.durationMs, t)}
               </span>
               {pass.open && (
-                <span className="text-[11px] text-primary">
-                  {t("pages.runPage.timing.running")}
+                <span
+                  className={cn(
+                    "text-[11px]",
+                    block.stopped ? "text-muted-foreground" : "text-primary",
+                  )}
+                >
+                  {t(block.stopped ? "pages.runPage.stoppedHere" : "pages.runPage.timing.running")}
                 </span>
               )}
             </li>
@@ -92,7 +100,7 @@ export function BlockTimings({
             {formatDuration(timing?.totalMs ?? null, t)}
           </dd>
         </div>
-        {timing?.currentMs !== null && timing?.currentMs !== undefined && (
+        {!block.stopped && timing?.currentMs !== null && timing?.currentMs !== undefined && (
           <div className="flex items-baseline gap-1">
             <dt className="text-muted-foreground">{t("pages.runPage.timing.current")}</dt>
             <dd

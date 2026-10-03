@@ -14,7 +14,7 @@ import { BLOCK_TONE, PassCount, StatusIcon } from "./status";
 import { IndexBadge } from "../diagram/IndexBadge";
 import { INTERACTIVE } from "../diagram/interactive";
 import { formatDuration } from "./duration";
-import { listProgressLabel, type RunBlock } from "./model";
+import { blockIsCurrent, listProgressLabel, type RunBlock } from "./model";
 import { AddBlock, DeleteBlock } from "../flow/StructureControls";
 import { guideAnchor } from "../../guides/anchors";
 
@@ -42,7 +42,7 @@ export function ContentsRow({
         type="button"
         onClick={() => onSelect(block.id)}
         aria-pressed={selected}
-        aria-current={block.status === "active" || block.status === "waiting" ? "step" : undefined}
+        aria-current={blockIsCurrent(block) ? "step" : undefined}
         data-block-id={block.id}
         data-status={block.status}
         data-testid={`map-contents-${block.id}`}
@@ -56,8 +56,16 @@ export function ContentsRow({
           block.status === "pending" && "text-muted-foreground",
         )}
       >
-        <StatusIcon status={block.status} className="size-3.5" />
-        <IndexBadge index={block.index + 1} tone={BLOCK_TONE[block.status]} size="sm" />
+        <StatusIcon status={block.status} stopped={block.stopped} className="size-3.5" />
+        <IndexBadge
+          index={block.index + 1}
+          tone={
+            block.stopped && (block.status === "active" || block.status === "waiting")
+              ? "neutral"
+              : BLOCK_TONE[block.status]
+          }
+          size="sm"
+        />
         <span className="min-w-0 flex-1 truncate">{block.name}</span>
         <PassCount iterations={block.iterations} />
         {bound && (

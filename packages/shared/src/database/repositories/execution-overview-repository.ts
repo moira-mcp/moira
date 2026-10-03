@@ -1,46 +1,21 @@
 /**
- * The overview of a person's runs: which runs a page shows, how they nest, and in what order.
- *
- * Everything that decides membership and order is SQL, so filters and pagination agree:
- *
- * - **Status** is one of four, each a predicate on the stored row: `completed` (the run ended),
- *   `locked` (running with an active execution lock), `waiting-user` (running, not locked, paused on
- *   a gate the engine marked or with the agent's open question), `waiting-agent` (every other running
- *   run). The status filter defines the candidate set.
- * - **Placement.** A root is a run in the candidate set with no ancestor in it: its parent is absent,
- *   deleted, or outside the set, and so is every ancestor above. Under a root the tree holds all its
- *   descendants of any status, so every run appears exactly once.
- * - **Filters by subtree.** Refusals-only, flow and search decide whether a run *matches*; a root is
- *   shown when some run of its tree is in the candidate set and matches. Runs of a shown tree that do
- *   not match are returned with `matches: false` (shown muted), not dropped.
- * - **Idleness** reads subtree activity: the latest `lastActivityAt` of the root and all descendants.
- * - **Order.** Trees holding a run that waits for its person come first; then the chosen sort.
- *
- * Only the owner's runs are read. The page's rows are projected elsewhere; this module returns ids,
- * placement and the per-tree facts that need the whole tree.
+ * Current work is selected before pagination. Only eligible owned runs and their required owned
+ * ancestors remain; unrelated descendants never become visible merely because a parent matched.
  */
-
 import type Database from "better-sqlite3";
-
-export type OverviewStatus = "waiting-user" | "waiting-agent" | "locked" | "completed" | "stopped";
-export type OverviewStatusFilter = "active" | OverviewStatus | "all";
-export type OverviewSort = "activity" | "idle" | "created";
-
-export interface OverviewQuery {
-  userId: string;
-  status: OverviewStatusFilter;
-  refusalsOnly?: boolean;
-  workflowId?: string;
-  /** Matched against the note, the run id and the flow's name. */
-  search?: string;
-  /** Show a tree only when its latest activity is at or before this moment (epoch ms). */
-  idleSince?: number;
-  /** Show a tree only when its latest activity is at or after this moment (epoch ms). */
-  activeSince?: number;
-  sort: OverviewSort;
-  limit: number;
-  offset: number;
-}
+import { registerExecutionManagementFunctions } from "../connection.js";
+import type {
+  OverviewChildCounts,
+  OverviewQuery,
+  OverviewStatus,
+  OverviewStatusFilter,
+} from "../../types/execution-management.js";
+export type {
+  OverviewQuery,
+  OverviewStatus,
+  OverviewStatusFilter,
+  OverviewSort,
+} from "../../types/execution-management.js";
 
 export interface OverviewNode {
   executionId: string;
@@ -48,258 +23,284 @@ export interface OverviewNode {
   rootId: string;
   depth: number;
   status: OverviewStatus;
-  /** In the candidate set and passing the filters; a tree's other runs are shown muted. */
   matches: boolean;
+  createdAt: number | null;
   lastActivityAt: number | null;
+  subtreeActivityAt: number | null;
+  idleActivityAt: number | null;
+  childrenTotal: OverviewChildCounts;
 }
-
-/** A refreshed row's own facts and the facts of its subtree. */
 export interface OverviewRowFacts {
   executionId: string;
   status: OverviewStatus;
+  createdAt: number | null;
   lastActivityAt: number | null;
   subtreeActivityAt: number | null;
-  children: { total: number; unfinished: number };
+  idleActivityAt: number | null;
+  children: OverviewChildCounts;
 }
-
 export interface OverviewPage {
-  /** Number of trees (roots) the filters show. */
   total: number;
-  /** The page's roots, in order. */
   roots: string[];
-  /** Every run of the page's trees, roots included. */
   nodes: OverviewNode[];
 }
-
-/** SQL for the status of the run aliased `r`. */
+/** Private native transport: repeated field names never cross SQLite for every selected row. */
+type StoredOverviewNode = [
+  executionId: string,
+  parentExecutionId: string | null,
+  rootId: string,
+  depth: number,
+  status: OverviewStatus,
+  matches: 0 | 1,
+  createdAt: number | null,
+  lastActivityAt: number | null,
+  subtreeActivityAt: number | null,
+  idleActivityAt: number | null,
+  childrenTotal: number,
+  childrenUnfinished: number,
+];
 const STATUS_SQL = `CASE
-  WHEN r.stopReason IS NOT NULL THEN 'stopped'
-  WHEN r.state IN ('completed', 'failed') THEN 'completed'
-  WHEN EXISTS (
-    SELECT 1 FROM executionLock l WHERE l.executionId = r.executionId AND l.status = 'active'
-  ) THEN 'locked'
-  WHEN r.gateWaiting = 1 OR r.awaitingUser IS NOT NULL THEN 'waiting-user'
-  ELSE 'waiting-agent'
-END`;
-
-/** Deep enough for any real nesting; bounds a malformed parent chain. */
-const MAX_DEPTH = 32;
-
+ WHEN r.stopReason IS NOT NULL THEN 'stopped'
+ WHEN r.state IN ('completed', 'failed') THEN 'completed'
+ WHEN EXISTS (SELECT 1 FROM executionLock l WHERE l.executionId=r.executionId AND l.status='active') THEN 'locked'
+ WHEN r.gateWaiting=1 OR r.awaitingUser IS NOT NULL THEN 'waiting-user'
+ ELSE 'waiting-agent' END`;
+const ACTIVITY_SQL = "COALESCE(r.lastActivityAt,r.createdAt)";
 function statusPredicate(filter: OverviewStatusFilter): string {
-  switch (filter) {
-    case "all":
-      return "1";
-    case "active":
-      return "m.status NOT IN ('completed', 'stopped')";
-    default:
-      return "m.status = @status";
-  }
+  return filter === "all"
+    ? "1"
+    : filter === "active"
+      ? "m.status NOT IN ('completed','stopped')"
+      : "m.status=@status";
 }
-
 function escapeLike(value: string): string {
   return value.replace(/[\\%_]/g, (character) => `\\${character}`);
 }
-
 export class ExecutionOverviewRepository {
-  constructor(private readonly sqlite: Database.Database) {}
+  constructor(private readonly sqlite: Database.Database) {
+    registerExecutionManagementFunctions(sqlite);
+  }
 
-  page(query: OverviewQuery): OverviewPage {
-    const filters: string[] = [];
-    if (query.refusalsOnly) filters.push("m.refusalCount > 0");
-    if (query.workflowId) filters.push("m.workflowId = @workflowId");
-    if (query.search) {
-      filters.push(
-        "(m.note LIKE @search ESCAPE '\\' OR m.executionId LIKE @search ESCAPE '\\' OR w.name LIKE @search ESCAPE '\\')",
-      );
-    }
-    const matchWhere = [statusPredicate(query.status), ...filters].join(" AND ");
-    const idle: string[] = [];
-    if (query.idleSince !== undefined) idle.push("COALESCE(s.subtreeActivity, 0) <= @idleSince");
-    if (query.activeSince !== undefined) idle.push("s.subtreeActivity >= @activeSince");
-    const order =
-      query.sort === "idle"
-        ? "COALESCE(s.subtreeActivity, 0) ASC, root.createdAt ASC"
-        : query.sort === "created"
-          ? "root.createdAt DESC"
-          : "COALESCE(s.subtreeActivity, 0) DESC, root.createdAt DESC";
-
-    const params = {
-      userId: query.userId,
-      status: query.status,
-      workflowId: query.workflowId ?? null,
-      search: query.search ? `%${escapeLike(query.search)}%` : null,
-      idleSince: query.idleSince ?? null,
-      activeSince: query.activeSince ?? null,
-      maxDepth: MAX_DEPTH,
-      limit: query.limit,
-      offset: query.offset,
+  /** Snapshot changes across awaited authorized metadata/dependency discovery, including same-ms writes. */
+  readVersion(): string {
+    const external = this.sqlite.pragma("data_version", { simple: true });
+    const own = this.sqlite.prepare("SELECT total_changes() AS changes").get() as {
+      changes: number;
     };
+    return `${external}:${own.changes}`;
+  }
 
-    const shown = `
-      WITH RECURSIVE
-        mine AS MATERIALIZED (
-          SELECT r.executionId, r.parentExecutionId, r.workflowId, r.note, r.refusalCount,
-                 r.lastActivityAt, r.createdAt, ${STATUS_SQL} AS status
-          FROM workflowExecution r
-          WHERE r.userId = @userId ${query.status === "active" ? "AND r.stopReason IS NULL" : ""}
-        ),
-        candidate AS (
-          SELECT m.executionId FROM mine m WHERE ${statusPredicate(query.status)}
-        ),
-        ancestry(id, ancestor, depth) AS (
-          SELECT m.executionId, m.parentExecutionId, 1
-            FROM mine m JOIN candidate c ON c.executionId = m.executionId
-            WHERE m.parentExecutionId IS NOT NULL
-          UNION
-          SELECT a.id, p.parentExecutionId, a.depth + 1
-            FROM ancestry a JOIN mine p ON p.executionId = a.ancestor
-            WHERE p.parentExecutionId IS NOT NULL AND a.depth < @maxDepth
-        ),
-        roots AS (
-          SELECT c.executionId FROM candidate c
-          WHERE NOT EXISTS (
-            SELECT 1 FROM ancestry a JOIN candidate up ON up.executionId = a.ancestor
-            WHERE a.id = c.executionId
-          )
-        ),
-        tree(rootId, executionId, depth) AS (
-          SELECT executionId, executionId, 0 FROM roots
-          UNION ALL
-          SELECT t.rootId, child.executionId, t.depth + 1
-            FROM tree t JOIN mine child ON child.parentExecutionId = t.executionId
-            WHERE t.depth < @maxDepth AND child.executionId <> t.rootId
-        ),
-        matched AS (
-          SELECT m.executionId FROM mine m LEFT JOIN workflow w ON w.id = m.workflowId
-          WHERE ${matchWhere}
-        ),
-        s AS (
-          SELECT t.rootId,
-                 MAX(m.lastActivityAt) AS subtreeActivity,
-                 MAX(CASE WHEN x.executionId IS NOT NULL THEN 1 ELSE 0 END) AS anyMatch,
-                 MAX(CASE WHEN m.status = 'waiting-user' THEN 1 ELSE 0 END) AS anyWaitingUser
-          FROM tree t
-            JOIN mine m ON m.executionId = t.executionId
-            LEFT JOIN matched x ON x.executionId = t.executionId
-          GROUP BY t.rootId
-        ),
-        shown AS (
-          SELECT s.rootId, s.subtreeActivity, s.anyWaitingUser, root.createdAt
-          FROM s JOIN mine root ON root.executionId = s.rootId
-          WHERE s.anyMatch = 1 ${idle.length ? `AND ${idle.join(" AND ")}` : ""}
-        )`;
-
-    // Membership and its exact count share the materialized CTE in one statement. A page
-    // beyond the end still carries its count, without traversing every owned tree twice.
-    const selected = this.sqlite
+  /** Scalar identities for canonical heading discovery; no execution payload is transferred. */
+  searchCandidates(query: OverviewQuery): Array<{ executionId: string; workflowId: string }> {
+    const conditions = [statusPredicate(query.status)];
+    if (query.refusalsOnly) conditions.push("m.refusalCount>0");
+    if (query.workflowId) conditions.push("m.workflowId=@workflowId");
+    if (query.activeSince !== undefined) conditions.push("m.activity>=@activeSince");
+    if (query.activeUntil !== undefined) conditions.push("m.activity<=@activeUntil");
+    return this.sqlite
       .prepare(
-        `${shown}
-      SELECT (SELECT COUNT(*) FROM shown) AS total,
-        (SELECT json_group_array(rootId) FROM (
-          SELECT s.rootId FROM shown s JOIN mine root ON root.executionId = s.rootId
-          ORDER BY s.anyWaitingUser DESC, ${order}, root.executionId
-          LIMIT @limit OFFSET @offset
-        )) AS roots`,
+        `WITH mine AS MATERIALIZED (
+      SELECT r.executionId,r.workflowId,r.refusalCount,${ACTIVITY_SQL} AS activity,
+        ${STATUS_SQL} AS status FROM workflowExecution r WHERE r.userId=@userId
+    ) SELECT m.executionId,m.workflowId FROM mine m WHERE ${conditions.join(" AND ")}`,
       )
-      .get(params) as { total: number; roots: string };
-    const total = selected.total;
-    const roots = JSON.parse(selected.roots) as string[];
-    if (roots.length === 0) return { total, roots, nodes: [] };
+      .all({
+        userId: query.userId,
+        status: query.status,
+        workflowId: query.workflowId ?? null,
+        activeSince: query.activeSince ?? null,
+        activeUntil: query.activeUntil ?? null,
+      }) as Array<{ executionId: string; workflowId: string }>;
+  }
 
-    const nodes = this.sqlite
+  /** Canonical heading matches are resolved in batch before this exact count/page selection. */
+  page(query: OverviewQuery, headingMatches: readonly string[] = []): OverviewPage {
+    // Corrupt ancestry is displayed without changing stored links: missing/foreign parents end
+    // the owned path; each cycle is cut at its lexicographically smallest member. UNION closes
+    // ancestry/subtree sets finitely, while the resulting display forest retains every eligible
+    // member and all required ancestors. Valid deep paths have no artificial depth limit.
+    const conditions = [statusPredicate(query.status)];
+    if (query.refusalsOnly) conditions.push("m.refusalCount>0");
+    if (query.workflowId) conditions.push("m.workflowId=@workflowId");
+    if (query.activeSince !== undefined) conditions.push("m.activity>=@activeSince");
+    if (query.activeUntil !== undefined) conditions.push("m.activity<=@activeUntil");
+    if (query.search)
+      conditions.push(`(moira_lower(m.note) LIKE @search ESCAPE '\\'
+      OR moira_lower(m.executionId) LIKE @search ESCAPE '\\'
+      OR moira_lower(w.name) LIKE @search ESCAPE '\\'
+      OR m.executionId IN (SELECT executionId FROM heading_matches))`);
+    const order =
+      query.sort === "created"
+        ? "COALESCE(createdAt,0) DESC, executionId ASC"
+        : query.sort === "idle"
+          ? "COALESCE(idleActivityAt,0) ASC, COALESCE(createdAt,0) DESC, executionId ASC"
+          : "CAST(COALESCE(subtreeActivityAt,0)/3600000 AS INTEGER) DESC, COALESCE(createdAt,0) DESC, executionId ASC";
+    const result = this.sqlite
       .prepare(
         `WITH RECURSIVE
-           mine AS MATERIALIZED (
-             SELECT r.executionId, r.parentExecutionId, r.workflowId, r.note, r.refusalCount,
-                    r.lastActivityAt, ${STATUS_SQL} AS status
-             FROM workflowExecution r
-             WHERE r.userId = @userId ${query.status === "active" ? "AND r.stopReason IS NULL" : ""}
-           ),
-           tree(rootId, executionId, depth) AS (
-             SELECT value, value, 0 FROM json_each(@roots)
-             UNION ALL
-             SELECT t.rootId, child.executionId, t.depth + 1
-               FROM tree t JOIN mine child ON child.parentExecutionId = t.executionId
-               WHERE t.depth < @maxDepth AND child.executionId <> t.rootId
-           )
-         SELECT t.rootId, t.executionId, t.depth, m.parentExecutionId, m.status, m.lastActivityAt,
-                CASE WHEN ${matchWhere} THEN 1 ELSE 0 END AS matches
-         FROM tree t
-           JOIN mine m ON m.executionId = t.executionId
-           LEFT JOIN workflow w ON w.id = m.workflowId`,
+      mine AS MATERIALIZED (
+        SELECT r.executionId,r.parentExecutionId,r.workflowId,r.note,r.refusalCount,r.createdAt,
+          r.lastActivityAt,${ACTIVITY_SQL} AS activity,${STATUS_SQL} AS status
+        FROM workflowExecution r WHERE r.userId=@userId
+      ),
+      heading_matches AS MATERIALIZED (SELECT value AS executionId FROM json_each(@headingMatches)),
+      potential AS MATERIALIZED (
+        SELECT m.executionId FROM mine m LEFT JOIN workflow w ON w.id=m.workflowId
+        WHERE ${conditions.join(" AND ")}
+      ),
+      idle_tree(rootId,executionId) AS (
+        SELECT executionId,executionId FROM potential WHERE @idleSince IS NOT NULL
+        UNION
+        SELECT t.rootId,c.executionId FROM idle_tree t JOIN mine c ON c.parentExecutionId=t.executionId
+      ),
+      eligible AS MATERIALIZED (
+        SELECT p.executionId FROM potential p
+        WHERE @idleSince IS NULL OR COALESCE((SELECT MAX(m.activity) FROM idle_tree t JOIN mine m ON m.executionId=t.executionId WHERE t.rootId=p.executionId),0)<=@idleSince
+      ),
+      retained(executionId) AS (
+        SELECT executionId FROM eligible
+        UNION
+        SELECT m.parentExecutionId FROM retained t JOIN mine m ON m.executionId=t.executionId
+          JOIN mine parent ON parent.executionId=m.parentExecutionId
+      ),
+      ancestry(executionId,ancestorId) AS (
+        SELECT m.executionId,m.parentExecutionId FROM mine m JOIN retained t ON t.executionId=m.executionId
+          JOIN retained parent ON parent.executionId=m.parentExecutionId
+        UNION
+        SELECT a.executionId,m.parentExecutionId FROM ancestry a JOIN mine m ON m.executionId=a.ancestorId
+          JOIN retained parent ON parent.executionId=m.parentExecutionId
+      ),
+      placement AS MATERIALIZED (
+        SELECT m.*,
+          CASE WHEN parent.executionId IS NULL THEN NULL
+            WHEN EXISTS(SELECT 1 FROM ancestry a WHERE a.executionId=m.executionId AND a.ancestorId=m.executionId)
+              AND m.executionId=(SELECT MIN(a.ancestorId) FROM ancestry a WHERE a.executionId=m.executionId)
+            THEN NULL ELSE m.parentExecutionId END AS shownParent,
+          CASE WHEN e.executionId IS NULL THEN 0 ELSE 1 END AS matches
+        FROM mine m JOIN retained t ON t.executionId=m.executionId
+          LEFT JOIN retained parent ON parent.executionId=m.parentExecutionId
+          LEFT JOIN eligible e ON e.executionId=m.executionId
+      ),
+      tree(rootId,executionId,depth) AS (
+        SELECT executionId,executionId,0 FROM placement WHERE shownParent IS NULL
+        UNION ALL SELECT t.rootId,c.executionId,t.depth+1 FROM tree t JOIN placement c ON c.shownParent=t.executionId
+      ),
+      visible_subtree(rootId,executionId) AS (
+        SELECT executionId,executionId FROM placement
+        UNION SELECT t.rootId,c.executionId FROM visible_subtree t JOIN placement c ON c.shownParent=t.executionId
+      ),
+      visible_activity AS MATERIALIZED (
+        SELECT t.rootId,MAX(CASE WHEN m.matches=1 THEN m.activity ELSE NULL END) AS subtreeActivityAt
+        FROM visible_subtree t JOIN placement m ON m.executionId=t.executionId GROUP BY t.rootId
+      ),
+      owned_subtree(rootId,executionId) AS (
+        SELECT executionId,executionId FROM placement
+        UNION SELECT t.rootId,c.executionId FROM owned_subtree t JOIN mine c ON c.parentExecutionId=t.executionId
+      ),
+      owned_activity AS MATERIALIZED (
+        SELECT t.rootId,MAX(m.activity) AS idleActivityAt FROM owned_subtree t JOIN mine m ON m.executionId=t.executionId GROUP BY t.rootId
+      ),
+      children AS MATERIALIZED (
+        SELECT parentExecutionId,COUNT(*) AS total,
+          SUM(CASE WHEN status NOT IN ('completed','stopped') THEN 1 ELSE 0 END) AS unfinished
+        FROM mine GROUP BY parentExecutionId
+      ),
+      facts AS MATERIALIZED (
+        SELECT p.*,v.subtreeActivityAt,o.idleActivityAt,
+          COALESCE(c.total,0) AS childrenTotal,COALESCE(c.unfinished,0) AS childrenUnfinished
+        FROM placement p JOIN visible_activity v ON v.rootId=p.executionId
+          JOIN owned_activity o ON o.rootId=p.executionId LEFT JOIN children c ON c.parentExecutionId=p.executionId
+      ),
+      roots AS MATERIALIZED (SELECT * FROM facts WHERE shownParent IS NULL),
+      page AS MATERIALIZED (SELECT * FROM roots ORDER BY ${order} LIMIT @limit OFFSET @offset)
+      SELECT (SELECT COUNT(*) FROM roots) AS total,
+        (SELECT json_group_array(executionId) FROM (SELECT * FROM page ORDER BY ${order})) AS roots,
+        (SELECT json_group_array(json_array(
+          m.executionId,m.shownParent,t.rootId,t.depth,m.status,m.matches,
+          m.createdAt,m.lastActivityAt,m.subtreeActivityAt,m.idleActivityAt,m.childrenTotal,m.childrenUnfinished
+        )) FROM tree t JOIN facts m ON m.executionId=t.executionId JOIN page p ON p.executionId=t.rootId) AS nodes`,
       )
-      .all({ ...params, roots: JSON.stringify(roots) }) as Array<{
-      rootId: string;
-      executionId: string;
-      depth: number;
-      parentExecutionId: string | null;
-      status: OverviewStatus;
-      lastActivityAt: number | null;
-      matches: number;
-    }>;
-
+      .get({
+        userId: query.userId,
+        status: query.status,
+        workflowId: query.workflowId ?? null,
+        search: query.search ? `%${escapeLike(query.search.toLowerCase())}%` : null,
+        activeSince: query.activeSince ?? null,
+        activeUntil: query.activeUntil ?? null,
+        idleSince: query.idleSince ?? null,
+        headingMatches: JSON.stringify([...new Set(headingMatches)]),
+        limit: query.limit,
+        offset: query.offset,
+      }) as { total: number; roots: string; nodes: string };
     return {
-      total,
-      roots,
-      nodes: nodes.map((node) => ({
-        executionId: node.executionId,
-        parentExecutionId: node.parentExecutionId,
-        rootId: node.rootId,
-        depth: node.depth,
-        status: node.status,
-        matches: node.matches === 1,
-        lastActivityAt: node.lastActivityAt,
-      })),
+      total: result.total,
+      roots: JSON.parse(result.roots),
+      nodes: (JSON.parse(result.nodes) as StoredOverviewNode[]).map(
+        ([
+          executionId,
+          parentExecutionId,
+          rootId,
+          depth,
+          status,
+          matches,
+          createdAt,
+          lastActivityAt,
+          subtreeActivityAt,
+          idleActivityAt,
+          childrenTotal,
+          childrenUnfinished,
+        ]) => ({
+          executionId,
+          parentExecutionId,
+          rootId,
+          depth,
+          status,
+          matches: matches === 1,
+          createdAt,
+          lastActivityAt,
+          subtreeActivityAt,
+          idleActivityAt,
+          childrenTotal: { total: childrenTotal, unfinished: childrenUnfinished },
+        }),
+      ),
     };
   }
 
-  /**
-   * The owner's runs with these ids, for refreshing single rows: each run's status and activity, the
-   * latest activity of its whole subtree, and its direct children counted in total and unfinished —
-   * in one query, whatever the number of ids. Runs of other users and unknown ids are left out.
-   */
+  /** Owner-only unfiltered row refresh. Whole-subtree idle facts are not page eligibility. */
   statuses(userId: string, executionIds: string[]): OverviewRowFacts[] {
-    if (executionIds.length === 0) return [];
+    if (!executionIds.length) return [];
     const rows = this.sqlite
       .prepare(
-        `WITH RECURSIVE
-           mine AS MATERIALIZED (
-             SELECT r.executionId, r.parentExecutionId, r.lastActivityAt, ${STATUS_SQL} AS status
-             FROM workflowExecution r
-             WHERE r.userId = @userId
-           ),
-           tree(rootId, executionId, depth) AS (
-             SELECT m.executionId, m.executionId, 0
-               FROM mine m WHERE m.executionId IN (SELECT value FROM json_each(@ids))
-             UNION ALL
-             SELECT t.rootId, child.executionId, t.depth + 1
-               FROM tree t JOIN mine child ON child.parentExecutionId = t.executionId
-               WHERE t.depth < @maxDepth AND child.executionId <> t.rootId
-           )
-         SELECT root.executionId, root.status, root.lastActivityAt,
-                MAX(m.lastActivityAt) AS subtreeActivityAt,
-                SUM(CASE WHEN t.depth = 1 THEN 1 ELSE 0 END) AS childrenTotal,
-                SUM(CASE WHEN t.depth = 1 AND m.status NOT IN ('completed', 'stopped') THEN 1 ELSE 0 END)
-                  AS childrenUnfinished
-         FROM tree t
-           JOIN mine m ON m.executionId = t.executionId
-           JOIN mine root ON root.executionId = t.rootId
-         GROUP BY t.rootId`,
+        `WITH RECURSIVE mine AS MATERIALIZED (
+      SELECT r.executionId,r.parentExecutionId,r.createdAt,r.lastActivityAt,
+        ${ACTIVITY_SQL} AS activity,${STATUS_SQL} AS status
+      FROM workflowExecution r WHERE r.userId=@userId
+    ), tree(rootId,executionId) AS (
+      SELECT executionId,executionId FROM mine WHERE executionId IN(SELECT value FROM json_each(@ids))
+      UNION SELECT t.rootId,c.executionId FROM tree t JOIN mine c ON c.parentExecutionId=t.executionId
+    ), children AS (
+      SELECT parentExecutionId,COUNT(*) AS total,
+        SUM(CASE WHEN status NOT IN('completed','stopped') THEN 1 ELSE 0 END) AS unfinished
+      FROM mine GROUP BY parentExecutionId
+    )
+    SELECT root.executionId,root.status,root.createdAt,root.lastActivityAt,MAX(m.activity) AS idleActivityAt,
+      COALESCE(c.total,0) AS total,COALESCE(c.unfinished,0) AS unfinished
+    FROM tree t JOIN mine m ON m.executionId=t.executionId JOIN mine root ON root.executionId=t.rootId
+      LEFT JOIN children c ON c.parentExecutionId=t.rootId GROUP BY t.rootId`,
       )
-      .all({ userId, ids: JSON.stringify(executionIds), maxDepth: MAX_DEPTH }) as Array<{
+      .all({ userId, ids: JSON.stringify(executionIds) }) as Array<{
       executionId: string;
       status: OverviewStatus;
+      createdAt: number | null;
       lastActivityAt: number | null;
-      subtreeActivityAt: number | null;
-      childrenTotal: number;
-      childrenUnfinished: number;
+      idleActivityAt: number | null;
+      total: number;
+      unfinished: number;
     }>;
-    return rows.map((row) => ({
-      executionId: row.executionId,
-      status: row.status,
-      lastActivityAt: row.lastActivityAt,
-      subtreeActivityAt: row.subtreeActivityAt,
-      children: { total: row.childrenTotal, unfinished: row.childrenUnfinished },
+    return rows.map(({ total, unfinished, ...row }) => ({
+      ...row,
+      subtreeActivityAt: row.idleActivityAt,
+      children: { total, unfinished },
     }));
   }
 }

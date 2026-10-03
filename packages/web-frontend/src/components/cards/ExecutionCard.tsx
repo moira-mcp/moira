@@ -8,10 +8,11 @@ import React from "react";
 import { useTranslation } from "react-i18next";
 import { Play, AlertTriangle, Clock, Lock } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
-import { StatusBadge, type ExecutionStatus } from "@/components/status-badge";
+import { StatusBadge, isExecutionStatus } from "@/components/status-badge";
 import { type NormalizedExecution } from "./normalize-execution";
 import { formatRelativeTime } from "./format-utils";
 import { CardShell } from "./CardShell";
+import { useExecutionStopAction } from "../execution/ExecutionStop";
 
 interface ExecutionCardProps {
   execution: NormalizedExecution;
@@ -19,23 +20,17 @@ interface ExecutionCardProps {
   compact?: boolean;
 }
 
-const validStatuses: ExecutionStatus[] = [
-  "running",
-  "waiting",
-  "completed",
-  "failed",
-  "locked",
-  "stopped",
-];
-
 export const ExecutionCard: React.FC<ExecutionCardProps> = ({
   execution,
   onClick,
   compact = false,
 }) => {
   const { t } = useTranslation();
-  const displayedStatus = execution.stopReason ? "stopped" : execution.status;
-  const isValidStatus = validStatuses.includes(displayedStatus as ExecutionStatus);
+  const stop = useExecutionStopAction({
+    executionId: execution.id,
+    title: execution.taskTitle ?? execution.workflowName ?? execution.workflowId,
+    stopCapability: execution.stopCapability,
+  });
 
   return (
     <CardShell
@@ -45,6 +40,14 @@ export const ExecutionCard: React.FC<ExecutionCardProps> = ({
       icon={<Play aria-hidden="true" />}
       title={execution.taskTitle ?? execution.workflowName ?? execution.workflowId}
       description={execution.note || undefined}
+      note={
+        execution.stopReason != null ? (
+          <span className="line-clamp-2 [overflow-wrap:anywhere]">
+            {t("pages.overview.panel.stopReason")}: {execution.stopReason}
+          </span>
+        ) : undefined
+      }
+      actions={stop ? [stop] : undefined}
       badges={
         <>
           {execution.hasActiveLock && (
@@ -65,18 +68,10 @@ export const ExecutionCard: React.FC<ExecutionCardProps> = ({
               {execution.errorCount} {t("common.errorsLabel", { defaultValue: "errors" })}
             </Badge>
           )}
-          {isValidStatus && (
-            <StatusBadge
-              status={displayedStatus as ExecutionStatus}
-              className="h-5 px-1.5 text-[11px]"
-            />
+          {isExecutionStatus(execution.status) && (
+            <StatusBadge status={execution.status} className="h-5 px-1.5 text-[11px]" />
           )}
         </>
-      }
-      note={
-        execution.stopReason
-          ? `${t("pages.overview.panel.stopReason")}: ${execution.stopReason}`
-          : undefined
       }
       meta={
         <>

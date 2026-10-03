@@ -56,7 +56,7 @@ export const homeGuide: GuideDefinition = {
       optional: true,
       absentWhen: { panelHidden: "home-recommended" },
     },
-    { id: "work", anchor: "home.work", kind: "look", revision: 1 },
+    { id: "work", anchor: "home.work", kind: "look", revision: 2 },
     {
       id: "show-me-around",
       anchor: "home.show-me-around",

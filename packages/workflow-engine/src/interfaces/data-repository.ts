@@ -218,6 +218,10 @@ export interface IDataRepository {
    * Get execution by ID
    */
   getExecution(executionId: string): Promise<WorkflowExecution | null>;
+  getExecutionManagementHeaders(
+    executionIds: string[],
+  ): Promise<import("@mcp-moira/shared/execution-management").ExecutionManagementHeader[]>;
+  getExecutingExecutionIds(executionIds: string[]): Promise<string[]>;
 
   /**
    * List all executions (for admin/debugging)

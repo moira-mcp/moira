@@ -119,12 +119,12 @@ describe("authorized workflow summaries and batched reads", () => {
     expect(Buffer.byteLength(JSON.stringify(native), "utf8")).toBeLessThan(2000);
     expect(JSON.stringify(native)).not.toContain("x".repeat(1000));
     expect(summary.total).toBe(2);
-    expect(summary.workflows[0].id).toBe("late"); // Retain the existing updated-time full-list order.
+    expect(summary.workflows[0].id).toBe("early"); // Creation order differs from update order in this fixture.
     expect(summary.workflows[0]).not.toHaveProperty("workflow");
     expect(summary.workflows[0].metadata).toHaveProperty("schemaVersion");
     expect(summary.workflows[0].size).toBe(Buffer.byteLength(graph, "utf8"));
     const full = await repository.listWithFilters(filter);
-    expect(full.workflows[0].id).toBe("late");
+    expect(full.workflows[0].id).toBe("early");
     expect(full.workflows[0].workflow.nodes).toHaveLength(1);
     expect(full.workflows[0].size).toBe(summary.workflows[0].size);
   });

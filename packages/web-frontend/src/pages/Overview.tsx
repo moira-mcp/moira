@@ -1,7 +1,7 @@
 /**
  * The overview: every run of the signed-in person that is in progress, as cards of one size — a run
- * with child runs as a group with them — kept current live. Runs waiting for the person come first.
- * The filters live in the URL, so a link keeps them; a card's title opens a side panel with the
+ * with child runs as a group with them — kept current live in stable activity-hour order.
+ * The filters live in the URL, so a link keeps them; a card's title opens a spacious modal with the
  * rest. The page only tells the person that the move is theirs and what is asked: the answer goes
  * to the agent in the chat, never through this page.
  */
@@ -12,6 +12,13 @@ import { useTranslation } from "react-i18next";
 import { LayoutGrid, Rows3, Search, Timer } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import { guideAnchor } from "@/guides/anchors";
 import { PageShell } from "../components/PageShell";
@@ -20,7 +27,13 @@ import { DataRegion } from "../components/DataRegion";
 import { ServerPagination } from "../components/ServerPagination";
 import { useDebounce } from "../hooks/useDebounce";
 import { useResource } from "../hooks/useResource";
-import { apiClient, type OverviewPage, type OverviewQuery } from "../services/api-client";
+import {
+  apiClient,
+  type OverviewPage,
+  type OverviewQuery,
+  type OverviewPeriod,
+} from "../services/api-client";
+import { ExecutionStopProvider } from "../components/execution/ExecutionStop";
 import { loadWorkflowChoices } from "../services/workflow-choices";
 import { OverviewBoard } from "../components/overview/OverviewBoard";
 import { OverviewPanel } from "../components/overview/OverviewPanel";
@@ -37,6 +50,7 @@ import {
   paramsWithFilters,
   STALE_IDLE,
   STATUS_FILTERS,
+  PERIOD_FILTERS,
   type OverviewFilters,
 } from "../components/overview/model";
 
@@ -55,17 +69,31 @@ export const Overview: React.FC = () => {
   const filters = useMemo(() => filtersFromParams(params), [params]);
   const paramsRef = useRef(params);
   paramsRef.current = params;
+  const [search, setSearch] = useState(filters.search);
 
   const setFilters = useCallback(
     (next: Partial<OverviewFilters>) => {
       const current = filtersFromParams(paramsRef.current);
-      setParams(paramsWithFilters(paramsRef.current, { ...current, ...next }), { replace: true });
+      const coordinated = { ...current, ...next };
+      if (next.period !== undefined) {
+        coordinated.idle = null;
+        coordinated.activeFrom = null;
+        coordinated.activeTo = null;
+      } else if (next.idle) {
+        coordinated.period = "all";
+        coordinated.activeFrom = null;
+        coordinated.activeTo = null;
+      } else if (next.activeFrom !== undefined || next.activeTo !== undefined) {
+        coordinated.period = "all";
+        coordinated.idle = null;
+      }
+      if (next.search !== undefined) setSearch(next.search);
+      setParams(paramsWithFilters(paramsRef.current, coordinated), { replace: true });
     },
     [setParams],
   );
 
   // The search box types freely; the URL (and the request) follow once typing pauses.
-  const [search, setSearch] = useState(filters.search);
   const debouncedSearch = useDebounce(search, 300);
   // A URL changed from outside (the browser's Back, a link) brings its own search text.
   useEffect(() => {
@@ -129,7 +157,8 @@ export const Overview: React.FC = () => {
   const totalPages = Math.max(1, Math.ceil(total / acceptedPageSize));
   const filtered =
     !!acceptedQuery &&
-    ((acceptedQuery.status ?? DEFAULT_FILTERS.status) !== DEFAULT_FILTERS.status ||
+    ((acceptedQuery.period ?? DEFAULT_FILTERS.period) !== DEFAULT_FILTERS.period ||
+      (acceptedQuery.status ?? DEFAULT_FILTERS.status) !== DEFAULT_FILTERS.status ||
       acceptedQuery.idle !== undefined ||
       acceptedQuery.activeFrom !== undefined ||
       acceptedQuery.activeTo !== undefined ||
@@ -137,6 +166,17 @@ export const Overview: React.FC = () => {
       acceptedQuery.refusals ||
       !!acceptedQuery.search?.trim());
   const stale = filters.idle === STALE_IDLE;
+  const reset = () => setFilters({ ...DEFAULT_FILTERS, layout: filters.layout });
+  const describedQuery = acceptedQuery ?? query;
+  const filterMeaning = describedQuery.idle
+    ? t("pages.overview.filters.idleMeaning", {
+        idle: t(`pages.overview.filters.idleOptions.${describedQuery.idle}`),
+      })
+    : describedQuery.activeFrom !== undefined || describedQuery.activeTo !== undefined
+      ? t("pages.overview.filters.rangeMeaning")
+      : t(
+          `pages.overview.filters.periodOptions.${describedQuery.period ?? DEFAULT_FILTERS.period}`,
+        );
 
   // The page's state beside its tour button: whether changes arrive live, and how many runs match.
   const pageState = (
@@ -164,6 +204,25 @@ export const Overview: React.FC = () => {
     <div className="@container mb-4">
       <div className="flex flex-wrap items-center gap-2">
         <div className="flex flex-wrap items-center gap-2">
+          <Select
+            value={filters.period}
+            onValueChange={(period) => setFilters({ period: period as OverviewPeriod, page: 1 })}
+          >
+            <SelectTrigger
+              className="w-[170px]"
+              aria-label={t("pages.overview.filters.period")}
+              data-testid="overview-period"
+            >
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {PERIOD_FILTERS.map((period) => (
+                <SelectItem key={period} value={period}>
+                  {t(`pages.overview.filters.periodOptions.${period}`)}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
           <div
             className={cn(
               segment,
@@ -230,6 +289,7 @@ export const Overview: React.FC = () => {
             />
             <Input
               type="search"
+              maxLength={200}
               value={search}
               onChange={(event) => setSearch(event.target.value)}
               placeholder={t("pages.overview.search.placeholder")}
@@ -267,6 +327,27 @@ export const Overview: React.FC = () => {
           </div>
         </div>
       </div>
+      <div
+        className="mt-2 flex min-w-0 flex-wrap items-center gap-2 text-xs text-muted-foreground"
+        data-testid="overview-filter-meaning"
+      >
+        <span>
+          {t("pages.overview.filters.meaning", {
+            status: t(`pages.overview.status.${describedQuery.status ?? DEFAULT_FILTERS.status}`),
+            period: filterMeaning,
+          })}
+        </span>
+        {describedQuery.search?.trim() ? (
+          <span className="min-w-0 max-w-full [overflow-wrap:anywhere]">
+            “{describedQuery.search.trim()}”
+          </span>
+        ) : null}
+        {filtered ? (
+          <Button type="button" variant="link" className="h-auto p-0 text-xs" onClick={reset}>
+            {t("pages.overview.filters.defaults")}
+          </Button>
+        ) : null}
+      </div>
     </div>
   );
 
@@ -274,12 +355,29 @@ export const Overview: React.FC = () => {
     if (!page.data) return null;
     if (runs.length === 0)
       return filtered ? (
-        <EmptyState title={t("pages.overview.empty.filtered")} />
+        <div>
+          <EmptyState title={t("pages.overview.empty.filtered")} />
+          <div className="flex flex-wrap justify-center gap-2">
+            <Button variant="outline" onClick={reset}>
+              {t("pages.overview.filters.defaults")}
+            </Button>
+            <Button variant="outline" onClick={() => setFilters({ period: "all", page: 1 })}>
+              {t("pages.overview.filters.allTime")}
+            </Button>
+          </div>
+        </div>
       ) : (
-        <EmptyState
-          title={t("pages.overview.empty.none")}
-          description={t("pages.overview.empty.noneHint")}
-        />
+        <div>
+          <EmptyState
+            title={t("pages.overview.empty.none")}
+            description={t("pages.overview.empty.noneHint")}
+          />
+          <div className="flex justify-center">
+            <Button variant="outline" onClick={() => setFilters({ period: "all", page: 1 })}>
+              {t("pages.overview.filters.allTime")}
+            </Button>
+          </div>
+        </div>
       );
     return <OverviewBoard runs={runs} layout={filters.layout} now={now} onOpen={openRun} />;
   })();
@@ -288,84 +386,87 @@ export const Overview: React.FC = () => {
   const panelAncestors = openRunId ? (ancestorsOf(runs, openRunId) ?? []) : [];
 
   return (
-    <PageShell
-      title={t("pages.overview.title")}
-      description={t("pages.overview.subtitle")}
-      guide={guideAnchor("overview.header")}
-      actions={pageState}
-    >
-      {toolbar}
-      <DataRegion
-        hasResult={workflowChoices.data !== undefined}
-        pending={workflowChoices.pending}
-        error={
-          workflowChoices.error
-            ? `${t("pages.overview.workflowChoicesErrorTitle")}. ${t("pages.overview.workflowChoicesError")}`
-            : null
-        }
-        onRetry={workflowChoices.refresh}
-        retryLabel={t("pages.overview.retry")}
-        testId="overview-workflow-choices-region"
-      />
-      <DataRegion
-        hasResult={page.data !== undefined}
-        pending={page.pending}
-        error={page.error ? t("pages.overview.error") : null}
-        onRetry={page.refresh}
-        retryLabel={t("pages.overview.retry")}
-        testId="overview-results-region"
-        resultScope={
-          acceptedQuery && (
-            <span>
-              {t("common.pagination.page", { current: acceptedPage, total: totalPages })}
-              {` · ${t(`pages.overview.status.${acceptedQuery.status ?? DEFAULT_FILTERS.status}`)}`}
-              {acceptedQuery.search &&
-                ` · ${t("pages.overview.search.label")}: ${acceptedQuery.search}`}
-              {acceptedQuery.workflowId &&
-                ` · ${t("pages.overview.filters.flow")}: ${workflows.find((workflow) => workflow.id === acceptedQuery.workflowId)?.name ?? acceptedQuery.workflowId}`}
-              {acceptedQuery.idle &&
-                ` · ${t("pages.overview.filters.idle")}: ${t(`pages.overview.filters.idleOptions.${acceptedQuery.idle}`)}`}
-              {acceptedQuery.activeFrom !== undefined &&
-                ` · ${t("pages.overview.filters.from")}: ${new Date(acceptedQuery.activeFrom).toLocaleDateString()}`}
-              {acceptedQuery.activeTo !== undefined &&
-                ` · ${t("pages.overview.filters.to")}: ${new Date(acceptedQuery.activeTo).toLocaleDateString()}`}
-              {acceptedQuery.refusals && ` · ${t("pages.overview.filters.refusals")}`}
-              {` · ${t(`pages.overview.filters.sortOptions.${acceptedQuery.sort ?? "activity"}`)}`}
-            </span>
-          )
-        }
+    <ExecutionStopProvider onStopped={refreshPage}>
+      <PageShell
+        title={t("pages.overview.title")}
+        description={t("pages.overview.subtitle")}
+        guide={guideAnchor("overview.header")}
+        actions={pageState}
       >
-        <section
-          className="min-h-[120px]"
-          aria-label={t("pages.overview.board")}
-          aria-busy={page.pending || undefined}
-          {...guideAnchor("overview.board")}
+        {toolbar}
+        <DataRegion
+          hasResult={workflowChoices.data !== undefined}
+          pending={workflowChoices.pending}
+          error={
+            workflowChoices.error
+              ? `${t("pages.overview.workflowChoicesErrorTitle")}. ${t("pages.overview.workflowChoicesError")}`
+              : null
+          }
+          onRetry={workflowChoices.refresh}
+          retryLabel={t("pages.overview.retry")}
+          testId="overview-workflow-choices-region"
+        />
+        <DataRegion
+          hasResult={page.data !== undefined}
+          pending={page.pending}
+          error={page.error ? t("pages.overview.error") : null}
+          onRetry={page.refresh}
+          retryLabel={t("pages.overview.retry")}
+          testId="overview-results-region"
+          resultScope={
+            acceptedQuery && (
+              <span>
+                {t("common.pagination.page", { current: acceptedPage, total: totalPages })}
+                {` · ${t(`pages.overview.status.${acceptedQuery.status ?? DEFAULT_FILTERS.status}`)}`}
+                {` · ${t(`pages.overview.filters.periodOptions.${acceptedQuery.period ?? DEFAULT_FILTERS.period}`)}`}
+                {acceptedQuery.search &&
+                  ` · ${t("pages.overview.search.label")}: ${acceptedQuery.search}`}
+                {acceptedQuery.workflowId &&
+                  ` · ${t("pages.overview.filters.flow")}: ${workflows.find((workflow) => workflow.id === acceptedQuery.workflowId)?.name ?? acceptedQuery.workflowId}`}
+                {acceptedQuery.idle &&
+                  ` · ${t("pages.overview.filters.idle")}: ${t(`pages.overview.filters.idleOptions.${acceptedQuery.idle}`)}`}
+                {acceptedQuery.activeFrom !== undefined &&
+                  ` · ${t("pages.overview.filters.from")}: ${new Date(acceptedQuery.activeFrom).toLocaleDateString()}`}
+                {acceptedQuery.activeTo !== undefined &&
+                  ` · ${t("pages.overview.filters.to")}: ${new Date(acceptedQuery.activeTo).toLocaleDateString()}`}
+                {acceptedQuery.refusals && ` · ${t("pages.overview.filters.refusals")}`}
+                {` · ${t(`pages.overview.filters.sortOptions.${acceptedQuery.sort ?? "activity"}`)}`}
+              </span>
+            )
+          }
         >
-          {board}
-        </section>
-        {page.data && (totalPages > 1 || acceptedPage > 1) ? (
-          <ServerPagination
-            currentPage={acceptedPage}
-            totalPages={totalPages}
-            totalItems={total}
-            pageSize={acceptedPageSize}
-            itemCount={runs.length}
-            onPageChange={(next) => setFilters({ page: next })}
-          />
-        ) : null}
-      </DataRegion>
-      <OverviewPanel
-        runId={openRunId}
-        run={panelRun}
-        ancestors={panelAncestors}
-        now={now}
-        // An off-page run's row is fetched again at most every few seconds, not on every change.
-        refreshKey={
-          live.lastEventAt === null ? null : Math.floor(live.lastEventAt / PANEL_REFRESH_MS)
-        }
-        onOpen={openRun}
-        onClose={closeRun}
-      />
-    </PageShell>
+          <section
+            className="min-h-[120px]"
+            aria-label={t("pages.overview.board")}
+            aria-busy={page.pending || undefined}
+            {...guideAnchor("overview.board")}
+          >
+            {board}
+          </section>
+          {page.data && (totalPages > 1 || acceptedPage > 1) ? (
+            <ServerPagination
+              currentPage={acceptedPage}
+              totalPages={totalPages}
+              totalItems={total}
+              pageSize={acceptedPageSize}
+              itemCount={runs.length}
+              onPageChange={(next) => setFilters({ page: next })}
+            />
+          ) : null}
+        </DataRegion>
+        <OverviewPanel
+          runId={openRunId}
+          run={panelRun}
+          ancestors={panelAncestors}
+          now={now}
+          // An off-page run's row is fetched again at most every few seconds, not on every change.
+          refreshKey={
+            live.lastEventAt === null ? null : Math.floor(live.lastEventAt / PANEL_REFRESH_MS)
+          }
+          onOpen={openRun}
+          onClose={closeRun}
+        />
+      </PageShell>
+    </ExecutionStopProvider>
   );
 };

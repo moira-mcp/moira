@@ -1,18 +1,19 @@
-/* eslint-disable no-console */
 /**
  * Dashboard Page — the home page.
  * Leads with how Moira is meant to be used: connect your agent, describe the task in plain words,
  * and let the agent pick a ready flow or build one — learning flows is optional. Then the agent
  * connection (per-client setup), a prompt to try, the recommended flows, and the work area: the
  * runs in progress with their step, the latest runs and the flows the user runs most.
- *
- * Note: console.error used for browser debugging of API errors
  */
 
-import React, { useState, useEffect, useCallback } from "react";
+import React from "react";
 import { useTranslation } from "react-i18next";
 import { Plug, MessageSquareText, Route } from "lucide-react";
-import apiClient, { type WorkSummary } from "../services/api-client";
+import apiClient from "../services/api-client";
+import { useResource } from "../hooks/useResource";
+import { useLiveOverview } from "../components/overview/useLiveOverview";
+import { ExecutionStopProvider } from "../components/execution/ExecutionStop";
+import { InlineError } from "../components/inline-error";
 import { HidePanelButton } from "../components/onboarding/HidePanelButton";
 import { usePanelVisible } from "../components/onboarding/beginnerPanels";
 import { QuickStartCard } from "../components/QuickStartCard";
@@ -86,35 +87,23 @@ function HowItWorks(): React.JSX.Element | null {
 
 export const Dashboard: React.FC = () => {
   const { t } = useTranslation();
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [data, setData] = useState<WorkSummary | null>(null);
+  const summary = useResource(
+    "home-work",
+    () => apiClient.getStatsSummary(),
+    () => t("pages.dashboard.error"),
+  );
+  const data = summary.data;
+  const error = summary.error;
+  const loadDashboardData = summary.refresh;
+  useLiveOverview({ refetchPage: loadDashboardData, removeRun: () => undefined });
 
-  const loadDashboardData = useCallback(async () => {
-    try {
-      setLoading(true);
-      const statsData = await apiClient.getStatsSummary();
-      setData(statsData);
-      setError(null);
-    } catch (err) {
-      console.error("Failed to load dashboard data:", err);
-      setError(t("pages.dashboard.error"));
-    } finally {
-      setLoading(false);
-    }
-  }, [t]);
-
-  useEffect(() => {
-    loadDashboardData();
-  }, [loadDashboardData]);
-
-  if (loading) {
+  if (summary.pending && !data) {
     return (
       <PageShell title={t("pages.dashboard.title")} guide={guideAnchor("home.header")} loading />
     );
   }
 
-  if (error || !data) {
+  if (!data) {
     return (
       <PageShell
         title={t("pages.dashboard.title")}
@@ -127,16 +116,19 @@ export const Dashboard: React.FC = () => {
   }
 
   return (
-    <PageShell title={t("pages.dashboard.title")} guide={guideAnchor("home.header")}>
-      <FirstRunPrompt />
-      <HowItWorks />
+    <ExecutionStopProvider onStopped={loadDashboardData}>
+      <PageShell title={t("pages.dashboard.title")} guide={guideAnchor("home.header")}>
+        {error ? <InlineError message={error} onRetry={loadDashboardData} /> : null}
+        <FirstRunPrompt />
+        <HowItWorks />
 
-      {/* Step 1 — connect the agent: per-client MCP configuration */}
-      <QuickStartCard />
+        {/* Step 1 — connect the agent: per-client MCP configuration */}
+        <QuickStartCard />
 
-      <RecommendedFlows variant="compact" />
+        <RecommendedFlows variant="compact" />
 
-      <WorkArea summary={data} />
-    </PageShell>
+        <WorkArea summary={data} />
+      </PageShell>
+    </ExecutionStopProvider>
   );
 };
