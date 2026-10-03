@@ -12,6 +12,9 @@
     "moira-cli": "./dist/cli.js"
   },
   "scripts": {
+    "local": "node packages/local/dist/cli.js",
+    "local:build": "node scripts/build-local.js",
+    "typecheck:local": "tsc --noEmit -p packages/local/tsconfig.json",
     "test": "testfold unit workflow integration api e2e mcp-tools -e local",
     "test:unit": "testfold unit",
     "test:workflow": "testfold workflow",
