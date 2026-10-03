@@ -9,6 +9,7 @@ import * as schema from "../../../packages/shared/src/database/schema.js";
 import { AdminAnalyticsRepository } from "../../../packages/shared/src/database/repositories/admin-analytics-repository.js";
 import { ExecutionRepository } from "../../../packages/shared/src/database/repositories/execution-repository.js";
 import { parseUserIdSelection } from "../../../packages/shared/src/database/admin-analytics-query.js";
+import { clampPagination } from "../../../packages/shared/src/database/list-query-builder.js";
 
 let sqlite: Database.Database;
 let db: BetterSQLite3Database<typeof schema>;
@@ -75,6 +76,7 @@ jest.unstable_mockModule("@mcp-moira/shared", () => ({
   AdminAnalyticsRepository,
   ExecutionRepository,
   parseUserIdSelection,
+  clampPagination,
   getDatabase: () => db,
   workflow: schema.workflow,
   workflowExecution: schema.workflowExecution,
