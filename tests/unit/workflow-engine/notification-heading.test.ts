@@ -12,6 +12,10 @@ import {
   GraphTemplateProcessor,
   GraphValidator,
   UserNotificationHandler,
+  TelegramNotificationHandler,
+  UserCommunicationService as CommunicationService,
+  setTestClientFactory,
+  resetClientFactory,
   composeNotification,
   notificationHeading,
   registerActiveCommunicationChannel,
@@ -27,6 +31,7 @@ import {
 } from "@mcp-moira/workflow-engine";
 import { UniversalGraphExecutor } from "../../../packages/workflow-engine/src/core/universal-graph-executor.js";
 import { InMemoryRepository } from "../../../packages/workflow-engine/src/storage/in-memory-repository.js";
+import { metadataRevision } from "@mcp-moira/shared";
 
 const RUN = "0d7c5a9e-2f4b-4c1d-9a8e-3b6f1c2d4e5f";
 
@@ -62,6 +67,161 @@ describe("run page URL", () => {
     expect(grandchild._rootExecutionId).toBe(RUN);
     expect(grandchild._parentExecutionId).toBe("child-run");
   });
+});
+
+describe("current identity at notification delivery", () => {
+  test.each([
+    ["user", "graph"],
+    ["user", "availability"],
+    ["user", "render"],
+    ["telegram", "graph"],
+    ["telegram", "render"],
+  ] as const)(
+    "%s refreshes a rename during %s while preserving unsaved progress",
+    async (kind, phase) => {
+      let identity = { title: "Before", changedAt: 1, changeId: "before" };
+      const rename = () => {
+        identity = { title: "Current task", changedAt: 1, changeId: "after" };
+      };
+      const node = {
+        id: "notify",
+        type: kind === "user" ? "user-notification" : "telegram-notification",
+        message: "Checkpoint",
+        attachProgressImage: true,
+        planList: "full",
+        progressNodeId: "work",
+        connections: { default: "work" },
+      };
+      const graph = {
+        metadata: { name: "Own flow", version: "1.0.0", description: "" },
+        progress: {
+          nodes: [
+            {
+              id: "work",
+              label: "Work",
+              list: { items: "tasks", title: "title", current: "cursor" },
+            },
+          ],
+        },
+        nodes: [
+          node,
+          {
+            id: "work",
+            type: "agent-directive",
+            progressNodeId: "work",
+            directive: "Do",
+            completionCondition: "Done",
+            connections: { success: "end" },
+          },
+          { id: "end", type: "end", progressNodeId: "work" },
+        ],
+      } as WorkflowGraph;
+      const context = {
+        executionId: RUN,
+        workflowId: "wf",
+        userId: "u",
+        variables: { tasks: [{ title: "Unsaved plan" }], cursor: 1 },
+        nodeStates: {},
+      };
+      const live = {
+        executionId: RUN,
+        workflowId: "wf",
+        userId: "u",
+        status: "running",
+        revision: 1,
+        currentNodeId: "notify",
+        note: "Not a task title",
+        taskIdentity: identity,
+        globalContext: context,
+        visits: [],
+      } as unknown as WorkflowExecution;
+      const repository = {
+        getWorkflow: async () => ({ metadata: graph.metadata }),
+        getWorkflowGraph: async () => {
+          if (phase === "graph") rename();
+          return graph;
+        },
+        getExecution: async () => ({
+          ...live,
+          taskIdentity: identity,
+          globalContext: { ...context, variables: {} },
+        }),
+        getSetting: async (_u: string, key: string) =>
+          key === "telegram.bot_token" ? "123:token" : key === "telegram.chat_id" ? "42" : null,
+      } as unknown as IDataRepository;
+      const delivered: Array<{ text: string; picture?: string }> = [];
+      const renderer = async (_graph: WorkflowGraph, run: WorkflowExecution) => {
+        const title = run.taskIdentity!.title;
+        if (phase === "render" && title === "Before") rename();
+        expect(run.globalContext.variables.tasks).toEqual([{ title: "Unsaved plan" }]);
+        return {
+          buffer: Buffer.from(title),
+          mimeType: "image/png" as const,
+          width: 1,
+          height: 1,
+          workflowVersion: "1.0.0",
+          executionRevision: 1,
+        };
+      };
+      const communication = new CommunicationService([
+        {
+          id: "capture",
+          provider: "capture",
+          capabilities: { text: true, image: true, document: true, trusted: false },
+          metadata: { title: "Capture", origin: "builtin", settingKeys: [] },
+          isConfigured: async () => {
+            if (phase === "availability") rename();
+            return true;
+          },
+          deliver: async (message) => {
+            delivered.push({
+              text: message.text,
+              picture: message.attachment
+                ? Buffer.from(message.attachment.bytes).toString()
+                : undefined,
+            });
+          },
+        },
+      ]);
+      if (kind === "telegram")
+        setTestClientFactory(
+          () =>
+            ({
+              getDefaultChatId: () => "42",
+              sendPhoto: async (message: { caption: string; photo: Uint8Array }) => {
+                delivered.push({
+                  text: message.caption,
+                  picture: Buffer.from(message.photo).toString(),
+                });
+                return { ok: true };
+              },
+            }) as never,
+        );
+      try {
+        const handler =
+          kind === "user"
+            ? new UserNotificationHandler(communication, renderer)
+            : new TelegramNotificationHandler(renderer);
+        await handler.execute(
+          node as never,
+          context,
+          new AgentMessageQueue(),
+          repository,
+          {} as IGraphExecutionEngine,
+          undefined,
+          undefined,
+          () => live,
+        );
+      } finally {
+        resetClientFactory();
+      }
+      expect(delivered).toHaveLength(1);
+      expect(delivered[0].text).toContain("Own flow · Current task");
+      expect(delivered[0].text).toContain("Unsaved plan");
+      expect(delivered[0].text).not.toContain("Not a task title");
+      expect(delivered[0].picture).toBe("Current task");
+    },
+  );
 });
 
 describe("heading", () => {
@@ -428,18 +588,26 @@ describe("a notification reads the run as of the node that sends it", () => {
     } as unknown as WorkflowGraph;
   }
 
-  test("the plan and the note written earlier in the sending cycle appear; the item finished in it reads ✓", async () => {
+  test("independent task identity accompanies the unsaved live plan; arbitrary notes never head it", async () => {
     const repository = new InMemoryRepository();
     const executor = new UniversalGraphExecutor(repository);
     const workflow = planWorkflow();
     await repository.saveWorkflow(workflow, "owner");
     const executionId = await executor.startWorkflow(workflow, undefined, "owner");
     await executor.executeStep(executionId);
+    const running = (await repository.getExecution(executionId))!;
+    await repository.updateExecutionTaskTitle(
+      executionId,
+      "owner",
+      running.revision,
+      metadataRevision(null),
+      "Ship the_parser",
+    );
 
     // One step writes the note and the plan; the notification after it runs in the same cycle,
     // before anything of that cycle is saved.
     await executor.executeStep(executionId, {
-      execution_note: "Ship the_parser",
+      execution_note: "Arbitrary note, not the task heading",
       tasks: [{ title: "Parse" }, { title: "Ship_it" }],
     });
     expect(delivered).toHaveLength(1);

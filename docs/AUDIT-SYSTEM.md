@@ -307,7 +307,12 @@ call that inserted the audit row.
 - `EXECUTION_UPDATE_CONTEXT` - execution context changed
 - `EXECUTION_RECOVER` - a recovery attempt on a run that could not continue. A successful one records the node it was re-presented at and the variable names written; a refused one records the reason it was refused and the node that was asked for, because repeated refusals on one execution are what misuse of this action looks like and a trail holding only successes cannot show them
 
-**Logged via:** MCPEngine (for MCP tools: EXECUTION_START, EXECUTION_STEP, EXECUTION_COMPLETE, EXECUTION_STEP_FAIL). ExecutionService provides database operations but does NOT log audit events - MCPEngine is the single audit logging point for MCP execution operations. REST API routes log EXECUTION_DELETE, EXECUTION_CANCEL, EXECUTION_UPDATE_CONTEXT separately.
+**Logged via:** MCPEngine owns MCP EXECUTION_START, EXECUTION_STEP, EXECUTION_COMPLETE and
+EXECUTION_STEP_FAIL. The shared `ExecutionService.updateExecutionTaskTitle` owns the task-name
+mutation audit for both HTTP and MCP: exactly one EXECUTION_UPDATE_CONTEXT entry when `changed`
+is true, with `action: "update-task-title"` and the content-free `taskIdentityRevision`. A normalized
+no-op records no entry; the HTTP route does not duplicate the service audit. REST routes own their
+other EXECUTION_DELETE, EXECUTION_CANCEL and context-write audit entries.
 
 ### Attempt Events
 

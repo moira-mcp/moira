@@ -102,7 +102,6 @@ describe("SDF's reader fields are required where a message reads them", () => {
     ["create-final-report", {}, "final_report_url"],
     ["create-final-report", {}, "outcome_summary"],
     ["create-final-report", {}, "limitations_summary"],
-    ["capture-task-and-context", {}, "execution_note"],
     ["capture-task-and-context", {}, "goal_summary"],
     ["revise-requirements", {}, "goal_summary"],
     ["create-plan", {}, "plan_units"],
@@ -110,5 +109,29 @@ describe("SDF's reader fields are required where a message reads them", () => {
     const complete = answer(nodeId, { ...chosen });
     expect(accepts(nodeId, complete)).toBe(true);
     expect(accepts(nodeId, without(complete, field))).toBe(false);
+  });
+
+  test("intake accepts an omitted or arbitrary bounded note independently of the mandatory goal", () => {
+    const nodeId = "capture-task-and-context";
+    const complete = answer(nodeId, { goal_summary: "Users can export their data" });
+    expect(complete).not.toHaveProperty("execution_note");
+    expect(accepts(nodeId, complete)).toBe(true);
+    for (const execution_note of [
+      "The test environment differs from production",
+      "N",
+      "N".repeat(120),
+    ]) {
+      expect(accepts(nodeId, { ...complete, execution_note })).toBe(true);
+    }
+    expect(accepts(nodeId, without(complete, "goal_summary"))).toBe(false);
+  });
+
+  test.each([
+    ["non-string", 17],
+    ["empty", ""],
+    ["over maximum", "N".repeat(121)],
+  ])("intake still rejects a supplied %s note", (_kind, execution_note) => {
+    const nodeId = "capture-task-and-context";
+    expect(accepts(nodeId, { ...answer(nodeId, {}), execution_note })).toBe(false);
   });
 });

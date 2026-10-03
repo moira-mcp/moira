@@ -118,7 +118,7 @@ function PanelBody({
     `${run.executionId}@${run.lastActivityAt ?? 0}`,
     useCallback(() => apiClient.getExecutionProgress(run.executionId), [run.executionId]),
   );
-  const blocks = progress.data ? runBlocks(progress.data) : [];
+  const blocks = progress.data?.source === "trace" ? runBlocks(progress.data) : [];
   const currentId = currentBlockId(blocks);
   const current = blocks.find((block) => block.id === currentId) ?? null;
   const listBlock = current?.list ? current : (blocks.find((block) => block.list) ?? null);
@@ -134,7 +134,7 @@ function PanelBody({
           </p>
         </Section>
       ) : null}
-      {run.note && run.note !== run.title ? (
+      {run.note ? (
         <div
           className="rounded-md bg-secondary px-2.5 py-2 text-sm"
           data-testid="overview-panel-note"

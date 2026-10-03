@@ -272,8 +272,12 @@ export class TokenManager {
              JOIN workflow ON workflow.id = execution.workflowId
              WHERE execution.executionId = workflow_tokens.execution_id
                AND execution.userId = workflow_tokens.user_id
+               AND execution.workflowId = workflow_tokens.workflow_id
                AND execution.revision = workflow_tokens.execution_revision
                AND workflow.version = workflow_tokens.workflow_version
+               AND json_extract(execution.taskIdentity, '$.changeId') IS json_extract(workflow_tokens.options_json, '$.taskIdentity.changeId')
+               AND json_extract(execution.taskIdentity, '$.title') IS json_extract(workflow_tokens.options_json, '$.taskIdentity.title')
+               AND json_extract(execution.taskIdentity, '$.changedAt') IS json_extract(workflow_tokens.options_json, '$.taskIdentity.changedAt')
            )`,
       )
       .run(claimId, Date.now(), token, Date.now());

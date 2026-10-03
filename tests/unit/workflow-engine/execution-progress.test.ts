@@ -2,6 +2,9 @@ import { describe, expect, test } from "@jest/globals";
 import {
   GraphValidator,
   projectExecutionRun,
+  projectExecutionRunSummary,
+  projectExecutionProgress,
+  resolveExecutionTaskTitle,
   type ExecutionVisit,
   type WorkflowExecution,
   type WorkflowGraph,
@@ -165,7 +168,7 @@ describe("execution run projection", () => {
   test("renders templates and projects statuses from the recorded route", () => {
     const projected = projectExecutionRun(graph(), atReviewTwo());
     expect(projected).toMatchObject({
-      taskTitle: "Implement rich execution progress without hiding essential information",
+      taskTitle: "Development · unit 2 of 5",
       title: "Development · unit 2 of 5",
       goal: "Deliver a content-rich progress map",
       facts: [
@@ -284,13 +287,13 @@ describe("execution run projection", () => {
     expect(projectExecutionRun(graph(), source)?.title).toBe("Development · unit 2 of 5");
   });
 
-  test("falls back to the workflow progress title when an execution has no note", () => {
+  test("uses the workflow progress title independently of arbitrary execution notes", () => {
     const source = atImplement();
     source.note = null;
     expect(projectExecutionRun(graph(), source)?.taskTitle).toBe("Development · unit 2 of 5");
   });
 
-  test("falls back to the workflow name when note and rendered progress title are empty", () => {
+  test("uses the own workflow name when the rendered progress title is empty", () => {
     const workflow = graph();
     workflow.progress!.title = "{{activity}}";
     const source = atImplement();
@@ -299,6 +302,104 @@ describe("execution run projection", () => {
     expect(projectExecutionRun(workflow, source)?.taskTitle).toBe("Progress");
     expect(projectExecutionRun(workflow, source)?.title).toBeNull();
   });
+
+  test("explicit task identity reaches full, summary and cursor progress while notes remain independent", () => {
+    const workflow = graph();
+    const source = atReviewTwo();
+    source.taskIdentity = {
+      title: "Repair checkout authentication",
+      changedAt: 10,
+      changeId: "title-a",
+    };
+    const first = projectExecutionProgress(workflow, source);
+    expect(first.taskTitle).toBe("Repair checkout authentication");
+    expect(first.taskIdentity).toEqual(source.taskIdentity);
+    expect(first.source).toBe("trace");
+    expect(projectExecutionRunSummary(workflow, source)?.taskTitle).toBe(first.taskTitle);
+    expect(projectExecutionRun(workflow, source, { at: 1 })?.taskTitle).toBe(first.taskTitle);
+    const revision = first.taskIdentityRevision;
+    source.note = "Arbitrary diagnostic text, not the task name";
+    expect(projectExecutionProgress(workflow, source).taskTitle).toBe(first.taskTitle);
+    expect(projectExecutionProgress(workflow, source).taskIdentityRevision).toBe(revision);
+    source.taskIdentity = {
+      title: "Repair checkout login and logout",
+      changedAt: 10,
+      changeId: "title-b",
+    };
+    const renamed = projectExecutionProgress(workflow, source);
+    expect(renamed.taskTitle).toBe("Repair checkout login and logout");
+    expect(renamed.taskIdentityRevision).not.toBe(revision);
+    expect(projectExecutionRunSummary(workflow, source)?.taskTitle).toBe(renamed.taskTitle);
+    expect(source.note).toBe("Arbitrary diagnostic text, not the task name");
+  });
+
+  test("an authored task title with an unset variable falls back to the own flow name", () => {
+    const workflow = graph();
+    workflow.progress!.title = "Repair {{task_detail}}";
+    workflow.variableRegistry!.task_detail = { type: "string", description: "Filled at intake" };
+    const source = atImplement();
+    expect(resolveExecutionTaskTitle(workflow, source)).toBe("Progress");
+    expect(projectExecutionRun(workflow, source)?.taskTitle).toBe("Progress");
+    expect(projectExecutionRunSummary(workflow, source)?.taskTitle).toBe("Progress");
+  });
+
+  test.each([200, 201, 501])(
+    "legacy heading resolution with %i Unicode characters keeps the full progress limit strict",
+    (length) => {
+      const workflow = graph();
+      workflow.progress!.title = "{{overflow}}";
+      const source = atImplement();
+      source.globalContext.variables.overflow = "🧭".repeat(length);
+      expect(resolveExecutionTaskTitle(workflow, source)).toBe(
+        length <= 200 ? source.globalContext.variables.overflow : "Progress",
+      );
+      if (length <= 200) {
+        expect(projectExecutionRun(workflow, source)?.title).toBe(
+          source.globalContext.variables.overflow,
+        );
+      } else {
+        expect(() => projectExecutionRun(workflow, source)).toThrow(
+          /title exceeds 200 characters after template resolution/,
+        );
+      }
+    },
+  );
+
+  test("an oversized explicit identity is rejected by heading-only consumers too", () => {
+    const source = atImplement();
+    source.taskIdentity = { title: "🧭".repeat(501), changedAt: 1, changeId: "oversized" };
+    expect(() => resolveExecutionTaskTitle(graph(), source)).toThrow(
+      /taskTitle exceeds 500 characters after template resolution/,
+    );
+  });
+
+  test.each([true, false])(
+    "without authored progress, identity=%s returns metadata without an invented process",
+    (named) => {
+      const workflow = graph();
+      delete workflow.progress;
+      const source = atImplement();
+      source.workflowVersion = "0.9.0";
+      source.taskIdentity = named
+        ? { title: "Repair child indexing", changedAt: 12, changeId: "child" }
+        : null;
+      expect(projectExecutionRun(workflow, source)).toBeNull();
+      const result = projectExecutionProgress(workflow, source);
+      expect(result).toMatchObject({
+        source: "metadata",
+        taskTitle: named ? "Repair child indexing" : "Progress",
+        workflowName: "Progress",
+        executionWorkflowVersion: "0.9.0",
+        executionRevision: 7,
+      });
+      expect(result).not.toHaveProperty("process");
+      expect(result).not.toHaveProperty("nodes");
+      expect(result).not.toHaveProperty("route");
+      expect(result).not.toHaveProperty("variables");
+      expect(result).not.toHaveProperty("statistics");
+      expect(resolveExecutionTaskTitle(workflow, source)).toBe(result.taskTitle);
+    },
+  );
 
   test("does not mutate the execution or the workflow", () => {
     const workflow = graph();
@@ -886,7 +987,12 @@ describe("execution run projection", () => {
   test.each<
     [string, number, (workflow: WorkflowGraph, source: WorkflowExecution, variable: string) => void]
   >([
-    ["taskTitle", 500, (_workflow, source, variable) => (source.note = variable)],
+    [
+      "taskTitle",
+      500,
+      (_workflow, source, variable) =>
+        (source.taskIdentity = { title: variable, changedAt: 1, changeId: "oversized" }),
+    ],
     ["title", 200, (workflow, _source, _variable) => (workflow.progress!.title = "{{overflow}}")],
     ["goal", 1000, (workflow, _source, _variable) => (workflow.progress!.goal = "{{overflow}}")],
     [

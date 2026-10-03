@@ -136,6 +136,52 @@ describe("the overview's side panel", () => {
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     await waitFor(() => expect(opener).toHaveFocus());
   });
+
+  test("a metadata-only result keeps task, flow and note visible without inventing stages", async () => {
+    jest.spyOn(apiClient, "getExecutionProgress").mockResolvedValue({
+      source: "metadata",
+      executionId: "run-1",
+      workflowId: "wf",
+      workflowName: "Order import",
+      workflowVersion: "1.0.0",
+      executionWorkflowVersion: "1.0.0",
+      executionRevision: 2,
+      executionStatus: "running",
+      taskTitle: "Import March orders",
+      taskIdentity: { title: "Import March orders", changedAt: NOW, changeId: "named" },
+      taskIdentityRevision: "named-revision",
+    });
+    wrap(<Harness shown={run({ note: "Waiting for delimiter verification" })} />);
+    fireEvent.click(screen.getByRole("button", { name: "Open the card" }));
+    const dialog = await screen.findByRole("dialog");
+    await waitFor(() => expect(screen.queryByText("Loading the full plan…")).toBeNull());
+    expect(dialog).toHaveAccessibleName("Import March orders");
+    expect(dialog).toHaveTextContent("Order import");
+    expect(dialog).toHaveTextContent("Waiting for delimiter verification");
+    expect(screen.queryByTestId("overview-panel-stages")).toBeNull();
+    expect(screen.queryByTestId("overview-panel-list")).toBeNull();
+  });
+
+  test("a note matching the task title remains separately available on the card and in full detail", async () => {
+    jest.spyOn(apiClient, "getExecutionProgress").mockResolvedValue(null);
+    const shown = run({ note: "Import March orders" });
+    wrap(
+      <>
+        <OverviewCard run={shown} parentTitle={null} now={NOW} onOpen={() => undefined} />
+        <Harness shown={shown} />
+      </>,
+    );
+    const noteFlag = screen.getByTestId("overview-flag-note");
+    expect(noteFlag).toBeVisible();
+    act(() => noteFlag.focus());
+    expect(await screen.findByRole("tooltip")).toHaveTextContent("Import March orders");
+    fireEvent.click(screen.getByRole("button", { name: "Open the card" }));
+    await screen.findByRole("dialog");
+    expect(screen.getByTestId("overview-panel-title")).toHaveTextContent("Import March orders");
+    expect(screen.getByTestId("overview-panel-note")).toHaveTextContent(
+      "Note: Import March orders",
+    );
+  });
 });
 
 describe("the panel when its run leaves the page", () => {
@@ -412,6 +458,28 @@ describe("the live hook", () => {
     });
     act(() => jest.advanceTimersByTime(PAGE_REFETCH_MS));
     expect(calls.refetches).toBe(1);
+  });
+
+  test("a detail consumer ignores other runs and refreshes its own renamed heading", () => {
+    jest.useFakeTimers();
+    const { deps, stream } = dependencies();
+    const refresh = jest.fn<() => Promise<void>>().mockResolvedValue();
+    renderHook(() =>
+      useLiveOverview(
+        { executionId: "own-run", refetchPage: refresh, removeRun: () => undefined },
+        () => deps,
+      ),
+    );
+    act(() => {
+      stream().change(1, "other-run", "activity");
+      jest.advanceTimersByTime(PAGE_REFETCH_MS);
+    });
+    expect(refresh).not.toHaveBeenCalled();
+    act(() => {
+      stream().change(2, "own-run", "activity");
+      jest.advanceTimersByTime(PAGE_REFETCH_MS);
+    });
+    expect(refresh).toHaveBeenCalledTimes(1);
   });
 });
 

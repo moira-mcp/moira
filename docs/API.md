@@ -308,6 +308,40 @@ route applies the same policy/schema to its top-level declared variable.
 
 Authentication: Required
 
+### Execution task title
+
+`PUT /api/executions/:id/task-title` names or renames an active execution owned by the authenticated
+user. Its body is `{ taskTitle, expectedRevision, expectedTaskIdentityRevision }`. Read the step
+`revision` and `metadataRevisions.taskIdentity` from execution detail before writing.
+`expectedRevision` is a nonnegative integer; the identity revision is an opaque lowercase
+64-character hexadecimal value. The title is trimmed and must contain 1–500 JavaScript string
+code units after trimming; Unicode `Cc`/`Cf` characters are rejected before trimming.
+
+The ordinary response envelope carries:
+
+```typescript
+interface ExecutionTaskTitleMutationResult {
+  executionId: string;
+  taskIdentity: {
+    title: string;
+    changedAt: number;
+    changeId: string;
+  };
+  revision: number;
+  taskIdentityRevision: string;
+  changed: boolean;
+}
+```
+
+Only the owner of a `running` execution (including stored `waiting`) may mutate it; completed or
+stopped runs refuse changes. Malformed bodies and unauthorized ownership are refused without
+mutation; malformed HTTP input is 400 and stale revisions are 409. Both guards apply before an
+identical normalized-title no-op. Such a no-op leaves timestamps, identity revision, activity and
+events unchanged. A real rename receives server-owned epoch-millisecond `changedAt` and fresh
+`changeId`, contributes activity, emits a change-feed event and one service-owned audit entry, and preserves the step
+attempt, revision, question and unrelated metadata. Read again and reconcile on a conflict.
+MCP `session update-task-title` uses the same mutation contract.
+
 ### Execution progress
 
 `GET /api/executions/:id/progress` returns the execution's read-only run projection for the
@@ -318,7 +352,14 @@ waiting on that visit's node, later blocks pending, and every variable carrying 
 up to that visit (its registry default when the route wrote it only later). The cursor is echoed
 as `cursor`; a cursor at or beyond the last visit projects the whole route with `cursor: null`. A
 negative or non-integer `at` is a validation error.
-It contains the execution-note `taskTitle`, rendered workflow title and goal, bounded generic
+The result discriminates `source: "trace"` from `source: "metadata"`. Both expose `taskTitle`,
+`taskIdentity` (or `null`), its opaque `taskIdentityRevision`, own workflow identity/version and
+execution revision/status. Task title precedence is persisted identity, resolved authored
+`progress.title`, then own workflow name; arbitrary notes never supply it. Cursor reads retain
+the current task identity. Without authored progress, MCP succeeds and HTTP returns 200 with
+metadata only: no `process`, `nodes`, `route`, `variables` or `statistics`.
+
+An authored trace contains rendered workflow title and goal, bounded generic
 facts, `activeNodeId`, the ordered blocks (`nodes`) with rendered structured content, display
 connections (the next block in process order), deterministic primary-node focus targets, workflow
 version, execution revision, execution status and diagnostics, plus:
@@ -395,7 +436,7 @@ enforced again after template interpolation; an oversized resolved value fails p
 of being silently truncated.
 
 `POST /api/executions/:id/progress-image-token` mints an owner-only, five-minute, single-use PNG
-grant with `downloadUrl`, `expiresAt`, `mimeType`, `executionRevision` and the normalised
+grant with `downloadUrl`, `expiresAt`, `mimeType`, `executionRevision`, `taskIdentityRevision` and the normalised
 `options`. The optional body accepts `theme: "light"|"dark"`, `viewportWidth` from 480 through
 4096, `view: "cards"|"process"`, `hide` and `collapse` (arrays of up to 100 block ids or authored
 node ids). Both views draw the run page's map: every block as a ported card (index badge, name, pass count
@@ -414,9 +455,13 @@ band alone. An id that names no block or node of the workflow's
 process is refused at mint (400), as is an invalid `view`; the stored options are the resolved
 block ids, so a grant is always honourable. `GET
 /api/public/execution-progress-image/:token` uses the token as authorization and returns the exact
-step revision/context revision/workflow version image once with `Cache-Control: no-store`; expired, stale,
+step revision/context revision/task identity revision/workflow version image once with `Cache-Control: no-store`; expired, stale,
 foreign, or reused grants return 401. Rendering or a failed/closed HTTP response releases the
-reservation; successful response completion consumes it.
+reservation; successful response completion consumes it. Mint requires authored progress.
+A rename invalidates a prior grant even when the name changes back at the same clock time.
+Stale grants are not successfully consumed; request a fresh grant, including when a token lacks
+the independent identity binding. Current identity is checked at atomic reservation and after
+asynchronous rendering.
 
 The PNG adapter consumes the wrapped visual model; the run page reads the projection directly. Both
 expose the complete task, goal, facts and ordered block content; no essential field is available
@@ -2541,6 +2586,8 @@ Response:
       executionId: string;
       workflowId: string;
       workflowName: string | null; // Resolved from workflow table, null if workflow deleted
+      taskTitle: string; // Canonical identity, authored title, then own flow name
+      taskIdentity: { title: string; changedAt: number; changeId: string } | null;
       userId: string;
       status: "running" | "completed" | "locked";
       currentNodeId: string;
@@ -2735,6 +2782,8 @@ Response:
       executionId: string;
       workflowId: string;
       workflowName: string | null; // Resolved from workflow table, null if workflow deleted
+      taskTitle: string; // Canonical task name, independent of note
+      taskIdentity: { title: string; changedAt: number; changeId: string } | null;
       userId: string;
       status: "running" | "completed" | "locked";
       currentNodeId: string | null;
@@ -2744,6 +2793,7 @@ Response:
       parentExecutionId: string | null; // null for a standalone execution
       revision: number; // expectedRevision source for step-generation guards
       metadataRevisions: {
+        taskIdentity: string;
         parent: string;
         context: string;
         reminders: string;

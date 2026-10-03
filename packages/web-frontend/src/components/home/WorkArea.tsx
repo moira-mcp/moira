@@ -74,12 +74,13 @@ function ActiveRunItem({ run }: { run: ActiveWorkRun }): React.JSX.Element {
   const resume = t("pages.dashboard.work.inProgress.resumePrompt", { id: run.executionId });
   const open = () => navigate(`${ROUTES.EXECUTIONS}/${run.executionId}`);
   const needsAttention = run.status === "locked" || run.errorCount > 0;
+  const normalized = normalizeExecution({ ...run, note: run.note ?? undefined });
   return (
     <CardShell
       testId={`work-active-${run.executionId}`}
       onClick={open}
       icon={<Play aria-hidden="true" />}
-      title={run.workflowName ?? run.workflowId}
+      title={normalized.taskTitle ?? run.workflowName ?? run.workflowId}
       description={
         step ? (
           <span data-testid="work-active-step">
@@ -90,6 +91,9 @@ function ActiveRunItem({ run }: { run: ActiveWorkRun }): React.JSX.Element {
       note={run.note ?? undefined}
       meta={
         <>
+          {normalized.taskTitle !== (run.workflowName ?? run.workflowId) ? (
+            <span>{run.workflowName ?? run.workflowId}</span>
+          ) : null}
           <span className="inline-flex items-center gap-1">
             <Clock className="size-3" aria-hidden="true" />
             {formatRelativeTime(run.updatedAt)}

@@ -11,6 +11,7 @@ import {
   WorkflowExecution,
   adjustmentVisit,
   projectExecutionRun,
+  projectExecutionProgress,
   ProgressImageService,
   prepareExecutionVariablePathWrite,
   prepareExecutionVariableWrite,
@@ -44,6 +45,7 @@ import {
 } from "@mcp-moira/shared";
 import { overviewPage, overviewRows } from "../services/execution-overview.js";
 import { changeCursor, changesAfter } from "../services/execution-change-stream.js";
+import { executionTaskTitles } from "../utils/execution-task-titles.js";
 
 /**
  * Whether this user may act on the execution **as its owner would**.
@@ -155,8 +157,11 @@ router.get(
     }
     const graph = await repository.getWorkflowGraph(execution.workflowId, execution.userId);
     if (!graph) throw createApiError.notFound("Workflow not found");
-    const progress = projectExecutionRun(graph, execution, { at: parseCursor(req.query.at) });
-    if (!progress) throw createApiError.notFound("Workflow has no progress graph");
+    const progress = projectExecutionProgress(graph, execution, { at: parseCursor(req.query.at) });
+    if (progress.source === "metadata") {
+      res.json({ success: true, data: progress, timestamp: new Date().toISOString() });
+      return;
+    }
     // Typical durations of the version this run started on over its owner's completed runs,
     // without the run itself.
     const statistics = progress.executionWorkflowVersion
@@ -354,6 +359,7 @@ router.get(
     const lockService = getLockService();
     const lockedExecutionIds = await lockService.getActiveExecutionIds();
 
+    const taskTitles = await executionTaskTitles(result.executions);
     let enrichedExecutions = result.executions.map((exec: WorkflowExecution) => {
       const isLocked = exec.status === "running" && lockedExecutionIds.has(exec.executionId);
       return {
@@ -365,6 +371,11 @@ router.get(
         status: isLocked ? ("locked" as const) : exec.status,
         currentNodeId: exec.currentNodeId,
         note: exec.note,
+        taskTitle:
+          taskTitles.get(exec.executionId) ??
+          workflowNameMap.get(exec.workflowId) ??
+          "Workflow unavailable",
+        taskIdentity: exec.taskIdentity ?? null,
         stopReason: exec.stopReason ?? null,
         createdAt: exec.createdAt,
         updatedAt: exec.updatedAt,
@@ -551,6 +562,7 @@ router.get(
     const db = getDatabase();
     const allWorkflows = await db.select({ id: workflow.id, name: workflow.name }).from(workflow);
     const workflowNameMap = new Map(allWorkflows.map((w) => [w.id, w.name]));
+    const taskTitles = await executionTaskTitles([execution]);
 
     // Lock enrichment for detail endpoint
     const lockService = getLockService();
@@ -573,6 +585,11 @@ router.get(
           currentNodeId: execution.currentNodeId,
           waitingForInputNodeId: execution.waitingForInputNodeId,
           note: execution.note,
+          taskTitle:
+            taskTitles.get(executionId) ??
+            workflowNameMap.get(execution.workflowId) ??
+            "Workflow unavailable",
+          taskIdentity: execution.taskIdentity ?? null,
           stopReason: execution.stopReason ?? null,
           parentExecutionId: execution.parentExecutionId ?? null,
           revision: execution.revision,
@@ -580,6 +597,7 @@ router.get(
             parent: metadataRevision(execution.parentExecutionId ?? null),
             context: metadataRevision(execution.globalContext),
             reminders: metadataRevision(execution.reminders ?? []),
+            taskIdentity: metadataRevision(execution.taskIdentity ?? null),
           },
           reminders: execution.reminders ?? [],
           context: execution.globalContext,
@@ -612,6 +630,33 @@ router.get(
       },
       timestamp: new Date().toISOString(),
     });
+  }),
+);
+
+router.put(
+  "/:id/task-title",
+  asyncHandler(async (req: Request, res: Response) => {
+    const { taskTitle, expectedRevision, expectedTaskIdentityRevision } = req.body ?? {};
+    if (
+      typeof taskTitle !== "string" ||
+      !Number.isInteger(expectedRevision) ||
+      expectedRevision < 0 ||
+      typeof expectedTaskIdentityRevision !== "string" ||
+      !/^[a-f0-9]{64}$/.test(expectedTaskIdentityRevision)
+    ) {
+      throw createApiError.validationFailed(
+        "taskTitle, non-negative integer expectedRevision and expectedTaskIdentityRevision are required",
+      );
+    }
+    const userId = (req as AuthenticatedRequest).userId;
+    const result = await repository.updateExecutionTaskTitle(
+      req.params.id,
+      userId,
+      expectedRevision,
+      expectedTaskIdentityRevision,
+      taskTitle,
+    );
+    res.json({ success: true, data: result, timestamp: new Date().toISOString() });
   }),
 );
 

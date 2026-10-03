@@ -9,6 +9,9 @@ import { buildApproveKeyboard } from "../types/telegram-types.js";
 import { getTelegramClient } from "./telegram-client-factory.js";
 import { notificationHeading, runPageUrl } from "../utils/notification-text.js";
 import type { TelegramClient } from "./telegram-client.js";
+import type { WorkflowExecution, WorkflowGraph } from "../types/index.js";
+import { currentNotificationRun } from "./notification-frame.js";
+import { resolveExecutionTaskTitle } from "../utils/execution-run-projection.js";
 
 const logger = createLogger({ component: "TrustedLockDelivery" });
 
@@ -48,8 +51,8 @@ export interface CreateTrustedExecutionLockOptions {
   nodeId: string;
   reason: string;
   userId: string;
-  /** The run's task note as of the lock; read from the saved run when omitted. */
-  note?: string | null;
+  /** The sending cycle's unsaved context; task identity is reconciled from storage. */
+  liveRun?: () => WorkflowExecution;
   /** The top-level run page to link, for a lock inside an inline subgraph child. */
   rootExecutionId?: string;
 }
@@ -136,21 +139,6 @@ export async function createTrustedExecutionLock(
   } catch {
     // The workflow identity is only presentation metadata for the trusted message.
   }
-  let note = options.note;
-  if (note === undefined) {
-    try {
-      note = (await repository.getExecution(options.executionId))?.note ?? null;
-    } catch {
-      note = null;
-    }
-  }
-  // Plain text, like the rest of the PIN message: the heading and the run page on its own line.
-  const heading = notificationHeading(
-    workflowName,
-    note,
-    runPageUrl({ executionId: options.executionId, _rootExecutionId: options.rootExecutionId }),
-    "plain",
-  );
 
   const lockService = dependencies.lockService ?? getLockService();
   try {
@@ -162,6 +150,28 @@ export async function createTrustedExecutionLock(
         lockedBy: options.userId,
       },
       async ({ lockId, pin }) => {
+        let taskTitle: string | null = null;
+        let graph: WorkflowGraph | null = null;
+        try {
+          graph = await repository.getWorkflowGraph(options.workflowId, options.userId);
+        } catch {
+          // A task's identity does not depend on an available authored progress graph.
+        }
+        try {
+          const run = await currentNotificationRun(repository, options, options.liveRun);
+          if (run) taskTitle = resolveExecutionTaskTitle(graph ?? undefined, run);
+        } catch {
+          // Presentation lookup failure leaves the trusted message's flow identity intact.
+        }
+        const heading = notificationHeading(
+          workflowName,
+          taskTitle,
+          runPageUrl({
+            executionId: options.executionId,
+            _rootExecutionId: options.rootExecutionId,
+          }),
+          "plain",
+        );
         const message = `🔒 ${heading}\n\nReason: ${options.reason}\nPIN: ${pin}`;
 
         await client.sendMessage({

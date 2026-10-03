@@ -34,9 +34,9 @@ const WRITE_PATTERNS = [
 /** Every file that writes the execution table, with how many write sites it has and what they are. */
 const INVENTORY: Record<string, { sites: number; writers: string }> = {
   "packages/shared/src/database/repositories/execution-repository.ts": {
-    sites: 12,
+    sites: 13,
     writers:
-      "save (update, insert), delete, deleteCompletedOlderThan, updateNote, setAwaitingUser, setParent, updateReminders, updateContext, appendError, cancelExecution, clearErrors",
+      "save (update, insert), delete, deleteCompletedOlderThan, updateNote, updateExecutionTaskTitle, setAwaitingUser, setParent, updateReminders, updateContext, appendError, cancelExecution, clearErrors",
   },
   "packages/shared/src/database/repositories/execution-attempt-repository.ts": {
     sites: 5,

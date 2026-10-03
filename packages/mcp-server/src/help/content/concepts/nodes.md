@@ -489,12 +489,12 @@ choose a provider, recipient, or credential:
 | `connections.default` | Yes      | Full, partial, or no-eligible-channel continuation          |
 | `connections.error`   | No       | Total attempted failure; otherwise it also uses `default`   |
 
-Every delivered message opens with a heading — the workflow's name and the run's task note (the
-note set with `execution_note`), linked to the run page — followed by `message`, the run's plan,
+Every delivered message opens with a heading — the workflow's name and the run's canonical task
+name ([execution task identity](/docs/concepts/workflows/#execution-task-name)), linked to the run page — followed by `message`, the run's plan,
 and, when the node leads straight to a step the run pauses on, who is waited for there:
 `⏳ agent on the step: <block>` or `🙋 waiting for you: <block>` (a lock gate or a step marked
-`humanGate`). A run without a note
-is headed by the workflow name alone, still linked. The plan comes from the bound list nearest the
+`humanGate`). Arbitrary notes do not supply the heading. Without explicit identity the resolved
+authored progress title, then the run's own workflow name supplies it. The plan comes from the bound list nearest the
 run as of this node, including what the current step has just written; `planList` chooses how much
 of it the message carries:
 
@@ -675,7 +675,10 @@ downloaded repeatedly while the execution remains waiting on that node and is in
 after the execution advances. The generated directive explains this retry window and reminds the
 agent that delivery does not prove reading; each later consumer must still explicitly require the
 files it uses to be read. Calling `session({ action: "current_step" })` while paused issues a fresh
-URL without advancing the graph. There is intentionally no textual content fallback.
+URL without advancing the graph. Hosts unable to execute the command use `session materialize`
+for the existing bounded context-delivery fallback. Recovery to this node re-presents its delivery
+without advancing it; delivery resolves current registry defaults, while changing context alone
+does not rewrite the caller's files.
 
 See [Materialize Files](/docs/reference/materialize/) for the complete archive, path, grant, error,
 and Workflow Management Flow contracts.

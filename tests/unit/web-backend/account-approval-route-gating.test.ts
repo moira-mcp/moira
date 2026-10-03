@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, jest } from "@jest/globals";
+import { afterEach, beforeEach, describe, expect, it, jest } from "@jest/globals";
 import express, { type NextFunction, type Request, type Response } from "express";
 import request from "supertest";
 
@@ -38,6 +38,17 @@ const approveAccount = jest.fn(async (adminId: string, userId: string) => {
   auditEvents.push({ action: "account.approved", adminId, userId });
   return { status: "approved", approvedAt };
 });
+
+// Execution headings belong to the execution routes, not these account/status/statistics
+// handlers. Keep their database dependencies outside this fixture and fail if a tested
+// handler unexpectedly starts resolving headings.
+const executionTaskTitles = jest.fn(async (): Promise<Map<string, string>> => {
+  throw new Error("execution heading resolution entered the account approval fixture");
+});
+jest.unstable_mockModule(
+  "../../../packages/web-backend/src/utils/execution-task-titles.js",
+  () => ({ executionTaskTitles }),
+);
 
 jest.unstable_mockModule("@mcp-moira/workflow-engine", () => ({
   DatabaseRepository: class {
@@ -189,6 +200,11 @@ describe("account approval route capability", () => {
     listExecutions.mockClear();
     getSettingDefinitions.mockClear();
     approveAccount.mockClear();
+    executionTaskTitles.mockClear();
+  });
+
+  afterEach(() => {
+    expect(executionTaskTitles).not.toHaveBeenCalled();
   });
 
   it("returns 403 in SaaS before the mutation service can change storage or audit state", async () => {

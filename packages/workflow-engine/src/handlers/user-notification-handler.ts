@@ -1,4 +1,9 @@
-import { createLogger, InternalError, type WorkflowLogger } from "@mcp-moira/shared";
+import {
+  createLogger,
+  InternalError,
+  metadataRevision,
+  type WorkflowLogger,
+} from "@mcp-moira/shared";
 import type { INodeHandler } from "../interfaces/core-interfaces.js";
 import type { IDataRepository } from "../interfaces/data-repository.js";
 import type { IGraphExecutionEngine } from "../interfaces/graph-execution-engine.js";
@@ -13,13 +18,17 @@ import { isUserNotificationNode } from "../types/index.js";
 import { NodeResultBuilder, type NodeExecutionResult } from "../types/node-execution.js";
 import type { AgentMessageQueue } from "../services/agent-message-queue.js";
 import { getActiveUserCommunicationService } from "../services/user-communication-provider.js";
-import type { UserCommunicationService } from "../services/user-communication.js";
+import type {
+  UserCommunicationService,
+  CommunicationAttachment,
+} from "../services/user-communication.js";
 import { renderExecutionProgressStepsImage } from "../utils/execution-progress-steps.js";
 import { withInFlightPause } from "../utils/execution-visits.js";
 import { textEscaper } from "../utils/notification-text.js";
 import {
   frameNotification,
   resolveNotificationFrame,
+  prepareNotificationFrame,
   type NotificationFrame,
 } from "../services/notification-frame.js";
 
@@ -59,15 +68,8 @@ export class UserNotificationHandler implements INodeHandler {
     try {
       const body = this.messageProcessor(node.format).processDirective(node.message, context);
       const frame = await resolveNotificationFrame(repository, context, node.id, liveRun);
-      const text = frameNotification(frame, body, {
-        format: node.format,
-        planList: node.planList,
-        limit: this.communication.maxTextLength,
-      });
-      let attachment;
-      if (node.attachProgressImage) {
-        attachment = await this.renderProgressAttachment(node, frame);
-      } else if (node.attachment) {
+      let attachment: CommunicationAttachment | undefined;
+      if (node.attachment) {
         const encoded = this.templateProcessor.processDirective(node.attachment.data, context);
         if (encoded.length % 4 !== 0 || !/^[A-Za-z0-9+/]*={0,2}$/.test(encoded))
           throw new Error("attachment_encoding_invalid");
@@ -78,16 +80,43 @@ export class UserNotificationHandler implements INodeHandler {
           mimeType: node.attachment.mimeType,
         } as const;
       }
+      let attachmentIdentity: string | undefined;
+      const prepare = async () => {
+        const prepared = await prepareNotificationFrame(
+          repository,
+          context,
+          node.id,
+          frame,
+          async (current) => {
+            if (!node.attachProgressImage) return attachment;
+            const identity = metadataRevision(current.run?.taskIdentity ?? null);
+            if (identity !== attachmentIdentity) {
+              attachment = await this.renderProgressAttachment(node, current);
+              attachmentIdentity = identity;
+            }
+            return attachment;
+          },
+        );
+        return {
+          text: frameNotification(prepared.frame, body, {
+            format: node.format,
+            planList: node.planList,
+            limit: this.communication.maxTextLength,
+          }),
+          format: node.format,
+          silent: node.silent,
+          attachment: prepared.value,
+          purpose: "notification" as const,
+        };
+      };
+      const prepared = await prepare();
       const result = await this.communication.deliver(
         {
           userId: context.userId,
-          text,
-          format: node.format,
-          silent: node.silent,
-          attachment,
-          purpose: "notification",
+          ...prepared,
         },
         repository,
+        prepare,
       );
       if (result.status === "no_configured_channels") {
         messageQueue.addNotification(

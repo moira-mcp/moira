@@ -13,9 +13,18 @@
  * view shows the technical node graph alone.
  */
 
-import React, { useState, useEffect, useCallback, useMemo, Suspense, useRef } from "react";
+import React, {
+  useState,
+  useEffect,
+  useLayoutEffect,
+  useCallback,
+  useMemo,
+  Suspense,
+  useRef,
+} from "react";
 import { toast } from "sonner";
 import { useResource } from "../../hooks/useResource";
+import { useLatestRequest } from "../../hooks/useLatestRequest";
 import { DiagramSkeleton } from "../route-skeleton";
 import { TabBadge } from "../run/TabBadge";
 
@@ -89,7 +98,10 @@ import { DiagramGuide } from "../run/DiagramGuide";
 import { currentBlockId, runBlocks, stepsOf, waitingStep } from "../run/model";
 import { StepCard, StepCardList } from "../run/StepCard";
 import type { RunBlock, RunProgress } from "../run/model";
+import type { ExecutionProgressResult } from "@mcp-moira/workflow-engine";
+import type { ExecutionTaskIdentity } from "@mcp-moira/shared";
 import { clampCursor } from "../run/route";
+import { useLiveOverview } from "../overview/useLiveOverview";
 import { guideAnchor } from "../../guides/anchors";
 
 // The technical graph is a large chunk: it is loaded lazily, but requested as soon as the page
@@ -110,6 +122,9 @@ export interface ExecutionData {
   executionId: string;
   workflowId: string;
   workflowName?: string | null; // Issue #421: Resolved from workflow table
+  taskTitle?: string;
+  taskIdentity?: ExecutionTaskIdentity | null;
+  note?: string | null;
   userId: string;
   status: string;
   /** Present when the agent stopped the execution before reaching the flow's end. */
@@ -118,7 +133,7 @@ export interface ExecutionData {
   waitingForInputNodeId: string | null;
   revision: number;
   /** Target-specific revisions of the detail response; the context one guards per-path saves. */
-  metadataRevisions?: { parent: string; context: string; reminders: string };
+  metadataRevisions?: { parent: string; context: string; reminders: string; taskIdentity?: string };
   context: {
     variables: Record<string, unknown>;
     nodeStates: Record<string, unknown>;
@@ -162,8 +177,21 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
   const { t } = useTranslation();
   const [searchParams, setSearchParams] = useSearchParams();
 
-  const [execution, setExecution] = useState<ExecutionData | null>(null);
-  const [workflow, setWorkflow] = useState<{
+  // Route identity is a lifetime, not just an ID: A→B→A must retire the first A's reads.
+  const lifetime = useMemo(() => ({ executionId }), [executionId]);
+  const lifetimeRef = useRef<typeof lifetime | null>(null);
+  useLayoutEffect(() => {
+    lifetimeRef.current = lifetime;
+    return () => {
+      lifetimeRef.current = null;
+    };
+  }, [lifetime]);
+  const relevant = useCallback(() => lifetimeRef.current === lifetime, [lifetime]);
+  const beginExecutionRequest = useLatestRequest();
+  const beginWorkflowRequest = useLatestRequest();
+  const beginProgressRequest = useLatestRequest();
+  const beginCursorRequest = useLatestRequest();
+  type WorkflowData = {
     workflow: WorkflowGraphType;
     validation?: {
       isValid: boolean;
@@ -171,21 +199,61 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
       globalWarnings: string[];
       nodeValidation: Record<string, { isValid: boolean; errors: string[]; warnings: string[] }>;
     };
-  } | null>(null);
+  };
+  type ReadState = {
+    lifetime: typeof lifetime;
+    execution: ExecutionData | null;
+    workflow: WorkflowData | null;
+    progress: RunProgress | null;
+    taskProgress: ExecutionProgressResult | null;
+    cursorProgress: RunProgress | null;
+  };
+  const [readState, setReadState] = useState<ReadState | null>(null);
+  const read = readState?.lifetime === lifetime ? readState : null;
+  const execution = read?.execution ?? null;
+  const workflow = read?.workflow ?? null;
+  const progress = read?.progress ?? null;
+  const taskProgress = read?.taskProgress ?? null;
+  const cursorProgress = read?.cursorProgress ?? null;
+  const publish = useCallback(
+    (patch: Partial<Omit<ReadState, "lifetime">>) => {
+      if (!relevant()) return;
+      setReadState((previous) => ({
+        execution: null,
+        workflow: null,
+        progress: null,
+        taskProgress: null,
+        cursorProgress: null,
+        ...(previous?.lifetime === lifetime ? previous : {}),
+        ...patch,
+        lifetime,
+      }));
+    },
+    [lifetime, relevant],
+  );
+  const setExecution = useCallback(
+    (value: ExecutionData) => publish({ execution: value }),
+    [publish],
+  );
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [errorState, setErrorState] = useState<{
+    lifetime: typeof lifetime;
+    message: string | null;
+  } | null>(null);
+  const error = errorState?.lifetime === lifetime ? errorState.message : null;
+  const setError = useCallback(
+    (message: string | null) => {
+      if (relevant()) setErrorState({ lifetime, message });
+    },
+    [lifetime, relevant],
+  );
   const [refreshing, setRefreshing] = useState(false);
   /** The whole run's projection, with the version statistics the API attaches to it. */
-  const [progress, setProgress] = useState<RunProgress | null>(null);
-  /** The projection at the route cursor, when one is set. */
-  const [cursorProgress, setCursorProgress] = useState<RunProgress | null>(null);
   const [progressError, setProgressError] = useState(false);
   const [progressLoading, setProgressLoading] = useState(false);
   const [editableVariableNames, setEditableVariableNames] = useState<ReadonlySet<string>>(
     new Set(),
   );
-  const progressRequestRef = useRef(0);
-  const cursorRequestRef = useRef(0);
 
   // The variables panel opened as a dialog (the same panel, more room).
   const [variablesFullscreen, setVariablesFullscreen] = useState(false);
@@ -219,22 +287,37 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
   // Copy to clipboard state
   const [copied, setCopied] = useState(false);
 
-  const loadProgress = useCallback(async (id: string): Promise<void> => {
-    const request = ++progressRequestRef.current;
-    setProgressLoading(true);
-    try {
-      const next = await apiClient.getExecutionProgress(id);
-      if (request === progressRequestRef.current) {
-        setProgress(next);
-        setProgressError(false);
+  const loadProgress = useCallback(
+    async (id: string): Promise<void> => {
+      if (!relevant() || id !== executionId) return;
+      const isCurrent = beginProgressRequest();
+      setProgressLoading(true);
+      try {
+        const next = await apiClient.getExecutionProgress(id);
+        if (relevant() && isCurrent()) {
+          publish({ taskProgress: next, progress: next?.source === "trace" ? next : null });
+          setProgressError(false);
+        }
+      } catch {
+        // A failed refetch keeps the projection already on screen; only a first load has none.
+        if (relevant() && isCurrent()) setProgressError(true);
+      } finally {
+        if (relevant() && isCurrent()) setProgressLoading(false);
       }
-    } catch {
-      // A failed refetch keeps the projection already on screen; only a first load has none.
-      if (request === progressRequestRef.current) setProgressError(true);
-    } finally {
-      if (request === progressRequestRef.current) setProgressLoading(false);
-    }
-  }, []);
+    },
+    [beginProgressRequest, executionId, publish, relevant],
+  );
+
+  useLiveOverview({
+    executionId,
+    refetchPage: async () => {
+      if (!execution) return;
+      const isCurrent = beginExecutionRequest();
+      const [fresh] = await Promise.all([fetchExecution(executionId), loadProgress(executionId)]);
+      if (relevant() && isCurrent() && fresh.executionId === executionId) setExecution(fresh);
+    },
+    removeRun: () => undefined,
+  });
 
   // Extract error node IDs from errors array for graph highlighting
   const errorNodeIds = useMemo(() => {
@@ -245,6 +328,9 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
 
   const loadExecution = useCallback(
     async (isRefresh = false) => {
+      if (!relevant()) return;
+      const isCurrent = beginExecutionRequest();
+      const isCurrentWorkflow = beginWorkflowRequest();
       try {
         if (isRefresh) {
           setRefreshing(true);
@@ -252,14 +338,16 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
           setLoading(true);
         }
         const execData = await fetchExecution(executionId);
-        setExecution(execData);
+        if (!relevant() || execData.executionId !== executionId) return;
+        if (isCurrent()) setExecution(execData);
 
         // Load workflow for visualization
         const [workflowData, variableAccess] = await Promise.all([
           apiClient.getWorkflow(execData.workflowId),
           editable ? apiClient.getExecutionVariables(execData.executionId) : Promise.resolve(null),
         ]);
-        setWorkflow(workflowData);
+        if (!relevant() || !isCurrentWorkflow()) return;
+        publish({ workflow: workflowData });
         setEditableVariableNames(
           new Set(
             variableAccess?.variables
@@ -270,17 +358,32 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
         setError(null);
         void loadProgress(execData.executionId);
       } catch (err: unknown) {
+        if (!relevant() || !isCurrentWorkflow()) return;
         const message = err instanceof Error ? err.message : t("common.errors.failedToLoad");
         // A failed refresh keeps the run on screen and says so once; only a first load has
         // nothing to keep.
         if (isRefresh) toast.error(message);
         else setError(message);
       } finally {
-        setLoading(false);
-        setRefreshing(false);
+        if (relevant() && isCurrentWorkflow()) {
+          setLoading(false);
+          setRefreshing(false);
+        }
       }
     },
-    [editable, executionId, fetchExecution, loadProgress, t],
+    [
+      beginExecutionRequest,
+      beginWorkflowRequest,
+      editable,
+      executionId,
+      fetchExecution,
+      loadProgress,
+      publish,
+      relevant,
+      setError,
+      setExecution,
+      t,
+    ],
   );
 
   // The first load happens once per execution. `loadExecution` is recreated whenever one of its
@@ -289,8 +392,20 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
   const loadExecutionRef = useRef(loadExecution);
   loadExecutionRef.current = loadExecution;
   useEffect(() => {
+    setLoading(true);
+    setError(null);
+    setProgressError(false);
+    setProgressLoading(false);
+    setEditableVariableNames(new Set());
+    setUnlocking(null);
+    setLocking(false);
+    setLockDialogOpen(false);
+    setLockReason("");
+    setLockResult(null);
+    setVariablesFullscreen(false);
+    setCopied(false);
     void loadExecutionRef.current();
-  }, [executionId]);
+  }, [executionId, setError]);
 
   // Fetch the graph's chunk while the run is loading, so the first switch to the graph view has
   // nothing to download and shows no skeleton.
@@ -338,20 +453,24 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
   // The projection at the cursor comes from the server too; the whole run stays loaded for the
   // scrubber's range and for the modes once the cursor is cleared.
   useEffect(() => {
+    const isCurrent = beginCursorRequest();
     if (!execution || cursor === null) {
-      setCursorProgress(null);
+      publish({ cursorProgress: null });
       return;
     }
-    const request = ++cursorRequestRef.current;
     void apiClient
       .getExecutionProgress(execution.executionId, cursor)
       .then((next) => {
-        if (request === cursorRequestRef.current) setCursorProgress(next);
+        if (relevant() && isCurrent())
+          publish({ cursorProgress: next?.source === "trace" ? next : null });
       })
       .catch(() => {
-        if (request === cursorRequestRef.current) setCursorProgress(null);
+        if (relevant() && isCurrent()) publish({ cursorProgress: null });
       });
-  }, [execution, cursor, progress]);
+    return () => {
+      beginCursorRequest();
+    };
+  }, [beginCursorRequest, execution, cursor, progress, publish, relevant]);
 
   const shownProgress = cursor !== null && cursorProgress ? cursorProgress : progress;
   const shownBlocks = useMemo(
@@ -380,11 +499,16 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
         : await apiClient.getUserExecutionLocks(executionId)
       ).locks,
   );
-  const locks = lockHistory.data ?? [];
-  const locksLoading = lockHistory.data === undefined && lockHistory.pending;
+  const locksCurrent =
+    lockHistory.dataKey === `${executionId}:${showOwnerInfo ? "admin" : "owner"}`;
+  const locks = locksCurrent ? (lockHistory.data ?? []) : [];
+  const locksLoading = !locksCurrent && lockHistory.pending;
+  // The resource retains an old key's error during a new read. Once the new read settles,
+  // its error is current even when no value (and therefore no matching dataKey) was obtained.
+  const locksError = lockHistory.pending ? null : lockHistory.error;
   const loadLocks = lockHistory.refresh;
   const locksHeldRef = useRef(false);
-  locksHeldRef.current = lockHistory.data !== undefined;
+  locksHeldRef.current = locksCurrent;
   useEffect(() => {
     if (activeTab !== "locks") return;
     setLocksWanted(true);
@@ -393,53 +517,61 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
 
   const handleAdminUnlock = useCallback(
     async (lockId: string) => {
+      if (!relevant() || !execution) return;
       setUnlocking(lockId);
       try {
         await apiClient.adminUnlockExecution(executionId, lockId);
+        if (!relevant()) return;
         await loadLocks();
+        if (!relevant()) return;
         await loadExecution(true);
       } catch {
         // Error handled by api client
       } finally {
-        setUnlocking(null);
+        if (relevant()) setUnlocking(null);
       }
     },
-    [executionId, loadLocks, loadExecution],
+    [execution, executionId, loadLocks, loadExecution, relevant],
   );
 
   const handleOwnerUnlock = useCallback(
     async (lockId: string) => {
+      if (!relevant() || !execution) return;
       setUnlocking(lockId);
       try {
         await apiClient.ownerUnlockExecution(executionId, lockId);
+        if (!relevant()) return;
         await loadLocks();
+        if (!relevant()) return;
         await loadExecution(true);
       } catch {
         // Error handled by api client
       } finally {
-        setUnlocking(null);
+        if (relevant()) setUnlocking(null);
       }
     },
-    [executionId, loadLocks, loadExecution],
+    [execution, executionId, loadLocks, loadExecution, relevant],
   );
 
   const handleCreateLock = useCallback(async () => {
-    if (!lockReason.trim()) return;
+    if (!relevant() || !execution || !lockReason.trim()) return;
     setLocking(true);
     try {
       const result = await apiClient.createLock(executionId, lockReason.trim());
+      if (!relevant()) return;
       setLockResult({ lockId: result.lockId, pin: result.pin });
       setLockReason("");
       await loadExecution(true);
+      if (!relevant()) return;
       if (activeTab === "locks") {
         await loadLocks();
       }
     } catch {
       // Error handled by api client
     } finally {
-      setLocking(false);
+      if (relevant()) setLocking(false);
     }
-  }, [executionId, lockReason, loadExecution, loadLocks, activeTab]);
+  }, [execution, executionId, lockReason, loadExecution, loadLocks, activeTab, relevant]);
 
   // A step clicked on the graph opens as the second level of the block panel: its block becomes
   // the selected block, the panel shows the step with a breadcrumb back to the block.
@@ -517,12 +649,15 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
   }, [execution?.currentNodeId, focusNode]);
 
   const handleCopyExecutionId = useCallback(async () => {
-    if (execution?.executionId) {
+    if (relevant() && execution?.executionId) {
       await navigator.clipboard.writeText(execution.executionId);
+      if (!relevant()) return;
       setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
+      setTimeout(() => {
+        if (relevant()) setCopied(false);
+      }, 2000);
     }
-  }, [execution?.executionId]);
+  }, [execution?.executionId, relevant]);
 
   const canEdit = editable;
   const answerable = canAnswer ?? editable;
@@ -533,7 +668,7 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
   // failure never tears down the editor while the save's PUT is still settling.
   const handleSavePath = useCallback(
     async (path: Array<string | number>, value: unknown): Promise<boolean> => {
-      if (!editable || !execution || !execution.metadataRevisions) return false;
+      if (!relevant() || !editable || !execution || !execution.metadataRevisions) return false;
       const success = await apiClient.updateExecutionContextPath(
         execution.executionId,
         path,
@@ -541,10 +676,12 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
         execution.revision,
         execution.metadataRevisions.context,
       );
-      if (success) {
+      if (success && relevant()) {
         try {
+          const isCurrent = beginExecutionRequest();
           const execData = await fetchExecution(execution.executionId);
-          setExecution(execData);
+          if (!relevant()) return success;
+          if (isCurrent() && execData.executionId === executionId) setExecution(execData);
           await loadProgress(execData.executionId);
         } catch {
           /* keep existing execution state; save already persisted */
@@ -552,32 +689,53 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
       }
       return success;
     },
-    [editable, execution, fetchExecution, loadProgress],
+    [
+      beginExecutionRequest,
+      editable,
+      execution,
+      executionId,
+      fetchExecution,
+      loadProgress,
+      relevant,
+      setExecution,
+    ],
   );
 
   /** Answer the waiting step; resolves to null on success or the server's refusal message. */
   const handleAnswer = useCallback(
     async (input: Record<string, unknown>): Promise<string | null> => {
-      if (!execution) return t("pages.runPage.answer.notLoaded");
+      if (!relevant() || !execution) return t("pages.runPage.answer.notLoaded");
       let failure: string | null = null;
       try {
         await apiClient.answerExecutionStep(execution.executionId, input, execution.revision);
       } catch (caught) {
         failure = caught instanceof Error ? caught.message : String(caught);
       }
+      if (!relevant()) return failure;
       // A rejected answer still ran a step (the rejection is logged on the execution and bumps
       // its revision), and a conflict means the run moved: reload either way so the next attempt
       // is written against the current revision.
       try {
+        const isCurrent = beginExecutionRequest();
         const execData = await fetchExecution(execution.executionId);
-        setExecution(execData);
+        if (!relevant()) return failure;
+        if (isCurrent() && execData.executionId === executionId) setExecution(execData);
         await loadProgress(execData.executionId);
       } catch {
         /* keep the current state; the next refresh shows the server's */
       }
       return failure;
     },
-    [execution, fetchExecution, loadProgress, t],
+    [
+      beginExecutionRequest,
+      execution,
+      executionId,
+      fetchExecution,
+      loadProgress,
+      relevant,
+      setExecution,
+      t,
+    ],
   );
 
   const waiting = useMemo(
@@ -656,7 +814,7 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
   };
 
   // A page-wide loader only while there is nothing to show yet; a refresh keeps the page.
-  if (loading && !execution) {
+  if ((!read && !error) || (loading && (!execution || !workflow))) {
     return (
       <div className="flex items-center justify-center h-full">
         <div className="text-muted-foreground">{t("pages.executionInspector.loading")}</div>
@@ -684,6 +842,12 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
   const errorsCount = journal.filter(isRefusalEntry).length;
   const degradationsCount = journal.length - errorsCount;
   const displayedStatus = execution.stopReason ? "stopped" : execution.status;
+  const taskHeading =
+    (taskProgress?.executionId === execution.executionId ? taskProgress.taskTitle : null) ??
+    execution.taskTitle ??
+    execution.taskIdentity?.title ??
+    execution.workflowName ??
+    workflow.workflow.metadata.name;
   // The run's own controls live in the diagram toolbar with the map's and the graph's, so the
   // page has one row above the diagram: view tabs and route cursor first, legend and guide last.
   const runModes = progress ? (
@@ -791,7 +955,7 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
     <div className="h-full flex flex-col" data-testid="run-page">
       {/* The header: what is being looked at, and the page's own actions. */}
       <PageHeader
-        description={progress?.goal ?? progress?.taskTitle ?? undefined}
+        description={progress?.goal ?? undefined}
         testId="run-header"
         guide={guideAnchor("run.header")}
       >
@@ -822,6 +986,12 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
           </Tooltip>
           {copied && <Check className="h-3 w-3 text-chart-2" />}
         </div>
+
+        <span className="text-muted-foreground">•</span>
+
+        <span className="text-sm font-semibold" data-testid="run-task-title">
+          {taskHeading}
+        </span>
 
         <span className="text-muted-foreground">•</span>
 
@@ -922,6 +1092,13 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
           {errorsCount > 0 && <ErrorCountBadge count={errorsCount} />}
         </div>
       </PageHeader>
+
+      {execution.note ? (
+        <p className="border-b px-4 py-2 text-sm text-muted-foreground" data-testid="run-note">
+          <span className="font-medium">{t("pages.overview.panel.note")}: </span>
+          {execution.note}
+        </p>
+      ) : null}
 
       {execution.stopReason ? (
         <div
@@ -1266,13 +1443,13 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
                 data-testid="locks-panel"
                 data-pending={lockHistory.pending ? "true" : undefined}
               >
-                {lockHistory.error && (
+                {locksError && (
                   <div
                     className="mb-3 text-xs text-destructive"
                     role="alert"
                     data-testid="locks-error"
                   >
-                    {lockHistory.error}
+                    {locksError}
                   </div>
                 )}
                 {locksLoading ? (
@@ -1282,7 +1459,7 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
                   >
                     <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
                   </div>
-                ) : locks.length === 0 ? (
+                ) : locks.length === 0 && !locksError ? (
                   <div className="text-center py-8 text-muted-foreground text-sm">
                     {t("pages.executionInspector.locks.noHistory")}
                   </div>

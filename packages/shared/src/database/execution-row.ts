@@ -21,13 +21,14 @@ export interface ExecutionRowFields {
   error: string | null;
   errors: string | null;
   note: string | null;
+  taskIdentity: string | null;
   stopReason: string | null;
   parentExecutionId: string | null;
   reminders: string;
   visits: string;
   /** SQLite boolean: 1 while the run is paused on a step that waits for a person. */
   gateWaiting: 0 | 1;
-  /** Derived from `visits` and `completedAt` (see execution-activity.ts). */
+  /** Derived from visits, completion and task identity (see execution-activity.ts). */
   lastActivityAt: number | null;
   /** Derived from `errors`; only a writer that stores `errors` stores it. */
   refusalCount: number;
@@ -45,6 +46,7 @@ export function executionRowFields(execution: WorkflowExecution): ExecutionRowFi
     errors:
       execution.errors && execution.errors.length > 0 ? JSON.stringify(execution.errors) : null,
     note: execution.note || null,
+    taskIdentity: execution.taskIdentity ? JSON.stringify(execution.taskIdentity) : null,
     stopReason: execution.stopReason ?? null,
     parentExecutionId: execution.parentExecutionId || null,
     reminders: JSON.stringify(execution.reminders ?? []),
@@ -54,10 +56,29 @@ export function executionRowFields(execution: WorkflowExecution): ExecutionRowFi
       visits: execution.visits,
       completedAt: execution.completedAt ?? null,
       errors: execution.errors,
+      taskIdentity: execution.taskIdentity,
     }),
     updatedAt: execution.updatedAt,
     completedAt: execution.completedAt ?? null,
   };
+}
+
+/**
+ * Merge the current persisted name's activity into a stale cursor write. One expression is used
+ * by Drizzle and raw attempt writers; two parameters are the same proposed activity timestamp.
+ */
+export const STORED_TASK_ACTIVITY_SQL = `CASE
+  WHEN json_extract(CASE WHEN json_valid(taskIdentity) THEN taskIdentity ELSE '{}' END, '$.changedAt') IS NULL THEN ?
+  ELSE max(COALESCE(?, json_extract(taskIdentity, '$.changedAt')), json_extract(taskIdentity, '$.changedAt'))
+END`;
+
+export function activityAfterTaskIdentityWrite(activity: number | null): SQL {
+  return sql.join(
+    STORED_TASK_ACTIVITY_SQL.split("?").flatMap((part, index) =>
+      index < 2 ? [sql.raw(part), sql`${activity}`] : [sql.raw(part)],
+    ),
+    sql``,
+  );
 }
 
 /**

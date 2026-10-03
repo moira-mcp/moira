@@ -10,6 +10,7 @@
  */
 
 import type { WorkflowGraph } from "../interfaces/core-interfaces.js";
+import { metadataRevision } from "@mcp-moira/shared";
 import { GraphTemplateProcessor } from "../templates/graph-template-processor.js";
 import type {
   ExecutionVisit,
@@ -19,6 +20,8 @@ import type {
 import type {
   ExecutionBlockStatus,
   ExecutionProgress,
+  ExecutionProgressMetadata,
+  ExecutionProgressResult,
   ExecutionProgressContent,
   ExecutionProgressNode,
   ExecutionProgressState,
@@ -40,6 +43,8 @@ import {
 export type {
   ExecutionBlockStatus,
   ExecutionProgress,
+  ExecutionProgressMetadata,
+  ExecutionProgressResult,
   ExecutionProgressNode,
   ExecutionProgressState,
   ExecutionRouteEntry,
@@ -81,13 +86,88 @@ export function passSelector(
   };
 }
 
+function withinResolvedLimit(value: string, maxLength: number): boolean {
+  return [...value].length <= maxLength;
+}
+
 function enforceResolvedLimit(value: string, maxLength: number, field: string): string {
-  if ([...value].length > maxLength) {
+  if (!withinResolvedLimit(value, maxLength)) {
     throw new Error(
       `Execution progress ${field} exceeds ${maxLength} characters after template resolution`,
     );
   }
   return value;
+}
+
+function progressTemplateContext(workflow: WorkflowGraph, execution: WorkflowExecution) {
+  const defaults = Object.fromEntries(
+    Object.entries(workflow.variableRegistry ?? {})
+      .filter(([, variable]) => variable.default !== undefined)
+      .map(([name, variable]) => [name, variable.default]),
+  );
+  return {
+    ...execution.globalContext,
+    variables: { ...defaults, ...execution.globalContext.variables },
+    _templateFragmentVars: GraphTemplateProcessor.computeFragmentVars(workflow.variableRegistry),
+  };
+}
+
+function taskTitleFrom(
+  workflow: WorkflowGraph | undefined,
+  execution: WorkflowExecution,
+  authoredTitle: string | null,
+): string {
+  return enforceResolvedLimit(
+    execution.taskIdentity?.title ??
+      (authoredTitle?.includes(GraphTemplateProcessor.UNDEFINED_PLACEHOLDER)
+        ? null
+        : authoredTitle) ??
+      workflow?.metadata.name.trim() ??
+      execution.workflowId,
+    EXECUTION_PROGRESS_TEXT_LIMITS.taskTitle,
+    "taskTitle",
+  );
+}
+
+/** A task's own identity; arbitrary notes and parent names never supply its heading. */
+export function resolveExecutionTaskTitle(
+  workflow: WorkflowGraph | undefined,
+  execution: WorkflowExecution,
+): string {
+  if (execution.taskIdentity) return taskTitleFrom(workflow, execution, null);
+  if (!workflow) return taskTitleFrom(workflow, execution, null);
+  const authoredTitle = workflow.progress?.title
+    ? new GraphTemplateProcessor()
+        .processDirective(workflow.progress.title, progressTemplateContext(workflow, execution))
+        .trim()
+    : null;
+  // A legacy authored title can expand beyond its render limit. Heading-only consumers retain
+  // the own-flow fallback; the full progress projection still rejects the oversized text.
+  return taskTitleFrom(
+    workflow,
+    execution,
+    authoredTitle && withinResolvedLimit(authoredTitle, EXECUTION_PROGRESS_TEXT_LIMITS.title)
+      ? authoredTitle
+      : null,
+  );
+}
+
+function executionTaskMetadata(
+  workflow: WorkflowGraph,
+  execution: WorkflowExecution,
+): Omit<ExecutionProgressMetadata, "source" | "taskTitle"> {
+  const taskIdentity = execution.taskIdentity ? { ...execution.taskIdentity } : null;
+  return {
+    taskIdentity,
+    taskIdentityRevision: metadataRevision(taskIdentity),
+    executionId: execution.executionId,
+    workflowId: execution.workflowId,
+    workflowName: workflow.metadata.name,
+    workflowVersion: workflow.metadata.version,
+    executionWorkflowVersion: execution.workflowVersion ?? null,
+    executionRevision: execution.revision,
+    executionStatus: execution.status,
+  };
 }
 
 function resolveOptional(
@@ -451,6 +531,21 @@ export function projectExecutionRun(
   return projectRun(workflow, source, options, false);
 }
 
+/** Progress transports also expose task metadata for definitions without an authored process. */
+export function projectExecutionProgress(
+  workflow: WorkflowGraph,
+  execution: WorkflowExecution,
+  options: ProjectExecutionRunOptions = {},
+): ExecutionProgressResult {
+  return (
+    projectExecutionRun(workflow, execution, options) ?? {
+      source: "metadata",
+      ...executionTaskMetadata(workflow, execution),
+      taskTitle: resolveExecutionTaskTitle(workflow, execution),
+    }
+  );
+}
+
 function projectRun(
   workflow: WorkflowGraph,
   source: WorkflowExecution,
@@ -475,11 +570,7 @@ function projectRun(
       .filter(([, variable]) => variable.default !== undefined)
       .map(([name, variable]) => [name, variable.default]),
   );
-  const context = {
-    ...execution.globalContext,
-    variables: { ...registryDefaults, ...execution.globalContext.variables },
-    _templateFragmentVars: GraphTemplateProcessor.computeFragmentVars(workflow.variableRegistry),
-  };
+  const context = progressTemplateContext(workflow, execution);
   const nodeTypes = new Map(workflow.nodes.map((node) => [node.id, node.type]));
   const owner = new Map<string, string>();
   for (const block of process.blocks) for (const id of block.nodeIds) owner.set(id, block.id);
@@ -661,18 +752,8 @@ function projectRun(
   });
 
   return {
-    taskTitle: execution.note?.trim()
-      ? enforceResolvedLimit(
-          execution.note.trim(),
-          EXECUTION_PROGRESS_TEXT_LIMITS.taskTitle,
-          "taskTitle",
-        )
-      : (renderedTitle ??
-        enforceResolvedLimit(
-          workflow.metadata.name.trim(),
-          EXECUTION_PROGRESS_TEXT_LIMITS.taskTitle,
-          "taskTitle",
-        )),
+    ...executionTaskMetadata(workflow, execution),
+    taskTitle: taskTitleFrom(workflow, execution, renderedTitle),
     title: renderedTitle,
     goal: summary
       ? null

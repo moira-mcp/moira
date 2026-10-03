@@ -1,0 +1,364 @@
+{
+  "metadata": {
+    "name": "Todo List",
+    "version": "3.10.0",
+    "description": "Executes a finite caller-owned checklist sequentially with minimal orchestration. It materializes one canonical domain-neutral guide before intake, requires every substantive agent responsibility to read it, and keeps checklist, evidence, progress, revision and authority rules in one source without suppressing requested inventories, metrics or log analysis. It accepts an already supplied typed task list or gathers one bounded list, separates content ownership from dependency ordering, derives total and one-based cursor in the engine, projects exactly the current task, advances only after concise verified evidence, and asks for no approval between items. A guarded mid-run revision preserves completed positions and resumes from an explicit task number while the engine recomputes derived state. Todo List intentionally has no plan-design review, per-item retry budget, recovery protocol, aggregate result report or final semantic reviewer. Choose it when the caller already knows the checklist and needs durable cursor progress; use Quick Task when a bounded task needs planning and independent review, Robust Task for retry/recovery and critical work, or Software Development Flow for repository implementation.",
+    "tags": ["чеклист", "задачи", "последовательность"],
+    "schemaVersion": 1
+  },
+  "nodes": [
+    {
+      "id": "start",
+      "type": "start",
+      "connections": {
+        "default": "materialize-workflow-guide"
+      },
+      "progressNodeId": "checklist"
+    },
+    {
+      "id": "materialize-workflow-guide",
+      "type": "materialize",
+      "basePath": "./moira-ws/todo-list-{{executionId}}/",
+      "files": [
+        {
+          "path": "workflow-guide.md",
+          "from": "workflow_guide"
+        }
+      ],
+      "connections": {
+        "success": "obtain-tasks"
+      },
+      "progressNodeId": "checklist",
+      "progressActiveLabel": "Materialize checklist guide",
+      "progressActiveContent": {
+        "summary": "Materialize the canonical Todo List guide for this execution",
+        "next": "Read the guide and establish the authoritative checklist"
+      }
+    },
+    {
+      "id": "obtain-tasks",
+      "type": "agent-directive",
+      "directive": "Read `./moira-ws/todo-list-{{executionId}}/workflow-guide.md`, the user's complete request, and applicable primary sources. Obtain the complete authoritative ordered checklist under that guide.\n\nReuse a caller-supplied schema-valid task array when one is already present; otherwise plan the checklist once. If no valid dependency order exists, report the exact cycle to the author and do not submit an invalid checklist. Do not execute any task in this step.\n\nReturn `tasks` and replace `progress_checklist_outcome` with a concise bounded synopsis of the authoritative checklist. Return `execution_note`: the run's task in a few words, as a person would name it — it heads every notification of this run; reuse the caller's note when one was given. Do not predict execution or treat the synopsis as proof that work is complete.",
+      "completionCondition": "One guide-compliant bounded typed task array, one bounded checklist synopsis and a short task note are returned without executing tasks; an unsatisfiable dependency cycle is reported instead of submitted.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "execution_note": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120,
+            "description": "The run's task in a few words, shown as the heading of every notification of this run; the caller's note when one was given"
+          }
+        },
+        "required": ["execution_note", "progress_checklist_outcome", "tasks"],
+        "globalInputs": ["progress_checklist_outcome", "tasks"]
+      },
+      "connections": {
+        "success": "notify-checklist-ready"
+      },
+      "progressNodeId": "checklist",
+      "progressActiveLabel": "Build checklist",
+      "progressActiveContent": {
+        "summary": "Capture or order the complete bounded checklist",
+        "next": "Derive the first current task"
+      },
+      "connectionLabels": {
+        "success": "checklist confirmed"
+      },
+      "expressions": ["total_tasks = tasks.length", "current_task = 1"]
+    },
+    {
+      "id": "check-tasks-remaining",
+      "type": "condition",
+      "progressNodeId": "prepare",
+      "cases": [
+        {
+          "when": {
+            "operator": "lte",
+            "left": {
+              "contextPath": "current_task"
+            },
+            "right": {
+              "contextPath": "total_tasks"
+            }
+          },
+          "output": "true"
+        }
+      ],
+      "connections": {
+        "true": "project-current-task",
+        "default": "notify-finished"
+      },
+      "connectionLabels": {
+        "default": "no tasks remain"
+      }
+    },
+    {
+      "id": "project-current-task",
+      "type": "expression",
+      "expressions": [
+        "projection_index = current_task - 1",
+        "current_task_action = tasks[projection_index].action",
+        "current_task_expected_result = tasks[projection_index].expected_result"
+      ],
+      "connections": {
+        "default": "execute-task"
+      },
+      "progressNodeId": "prepare",
+      "connectionLabels": {
+        "default": "current task projected"
+      }
+    },
+    {
+      "id": "execute-task",
+      "type": "agent-directive",
+      "directive": "Read `./moira-ws/todo-list-{{executionId}}/workflow-guide.md`. Execute task {{current_task}} of {{total_tasks}} under its actual authority.\n\nAction: {{current_task_action}}\n\nExpected result: {{current_task_expected_result}}\n\nPerform the real work and verify the expected result before calling `step()`. If the task is incomplete or blocked, do not call `step()`; report the verified blocker to the user and keep this task current.\n\nAfter successful completion, return one concise `evidence` string naming the concrete observation that passed and replace `progress_execution_outcome` with a bounded synopsis of the task outcome. After the last task, let the workflow end; do not ask for approval between tasks or add an aggregate result report.",
+      "completionCondition": "The guide-compliant current task is complete, its expected result is verified, and one bounded evidence acknowledgement plus the current Work outcome are returned before cursor advancement.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "evidence": {
+            "type": "string",
+            "description": "Concise evidence that the current task expected result was verified",
+            "minLength": 1,
+            "maxLength": 500
+          }
+        },
+        "required": ["evidence", "progress_execution_outcome"],
+        "globalInputs": ["progress_execution_outcome"]
+      },
+      "connections": {
+        "success": "check-tasks-remaining"
+      },
+      "progressNodeId": "work",
+      "progressActiveLabel": "Task {{current_task}}/{{total_tasks}}",
+      "progressActiveContent": {
+        "summary": "{{current_task_action}}",
+        "next": "Verify the expected result stated in the current directive"
+      },
+      "expressions": ["current_task = current_task + 1"],
+      "connectionLabels": {
+        "success": {
+          "label": "task done, prepare the next one",
+          "cycle": {
+            "cause": "The current task is done, so the cursor advances and the next task is prepared.",
+            "exit": "No tasks remain on the checklist."
+          }
+        }
+      }
+    },
+    {
+      "id": "end",
+      "type": "end",
+      "finalOutput": [],
+      "progressNodeId": "work"
+    },
+    {
+      "id": "teleport-revise-tasks",
+      "type": "teleport",
+      "hint": "Jump here when the checklist itself no longer describes the work that must happen: remaining tasks turned out wrong, obsolete, missing, or in the wrong order. Not for a task that is merely hard, blocked, or failing — report that blocker to the user and stay on the task.",
+      "directive": "Read `./moira-ws/todo-list-{{executionId}}/workflow-guide.md`. You jumped here because the authoritative checklist no longer matches the work that must happen. Return the complete corrected `tasks` array and `resume_from_task`, the first position that still requires execution.\n\nKeep the completed positional prefix unchanged in meaning and change only unfinished work. Do not use this jump to escape a task that is merely hard, blocked, or failing.\n\nAtomically replace `progress_checklist_outcome` with a bounded synopsis of the corrected checklist and replace `progress_execution_outcome` with only the latest completed-task outcome that remains true for the preserved prefix, or `Pending` when none remains. Do not predict unfinished work.",
+      "completionCondition": "A guide-compliant corrected checklist preserves the completed positional prefix, returns the explicit resume position, and atomically replaces both bounded progress outcomes with only current truth.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "required": [
+          "progress_checklist_outcome",
+          "progress_execution_outcome",
+          "resume_from_task",
+          "tasks"
+        ],
+        "globalInputs": [
+          "progress_checklist_outcome",
+          "progress_execution_outcome",
+          "resume_from_task",
+          "tasks"
+        ]
+      },
+      "connections": {
+        "success": "derive-revised-plan-state"
+      },
+      "progressNodeId": "work",
+      "progressActiveLabel": "Revise checklist",
+      "progressActiveContent": {
+        "summary": "Correct the remaining checklist while preserving completed positions",
+        "next": "Resume from the first task that still requires work, or finish if none remains"
+      },
+      "connectionLabels": {
+        "success": {
+          "label": "checklist revised",
+          "cycle": {
+            "cause": "The remaining checklist changed, so the plan state is derived again from the revised list.",
+            "exit": "The revised checklist is exhausted."
+          }
+        }
+      }
+    },
+    {
+      "id": "derive-revised-plan-state",
+      "type": "expression",
+      "expressions": ["total_tasks = tasks.length", "current_task = resume_from_task"],
+      "connections": {
+        "default": "check-tasks-remaining"
+      },
+      "progressNodeId": "prepare"
+    },
+    {
+      "id": "notify-checklist-ready",
+      "type": "user-notification",
+      "progressNodeId": "checklist",
+      "format": "markdown",
+      "planList": "full",
+      "message": "✅ *Checklist ready* — work has started on the first task.",
+      "connections": {
+        "default": "check-tasks-remaining"
+      },
+      "connectionLabels": {
+        "default": "checklist confirmed"
+      }
+    },
+    {
+      "id": "notify-finished",
+      "type": "user-notification",
+      "progressNodeId": "work",
+      "format": "markdown",
+      "planList": "full",
+      "message": "🏁 *All tasks done.*",
+      "connections": {
+        "default": "end"
+      }
+    }
+  ],
+  "variableRegistry": {
+    "tasks": {
+      "type": "array",
+      "description": "Bounded ordered checklist; position is task identity",
+      "minItems": 1,
+      "maxItems": 100,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "type": "string",
+            "description": "Concrete self-contained work to perform",
+            "minLength": 1,
+            "maxLength": 1000
+          },
+          "expected_result": {
+            "type": "string",
+            "description": "Observable result that proves the task is complete",
+            "minLength": 1,
+            "maxLength": 1000
+          }
+        },
+        "required": ["action", "expected_result"]
+      }
+    },
+    "total_tasks": {
+      "type": "integer",
+      "description": "Engine-derived checklist length",
+      "minimum": 1,
+      "maximum": 100
+    },
+    "current_task": {
+      "type": "integer",
+      "description": "Engine-owned one-based checklist cursor",
+      "minimum": 1,
+      "maximum": 101
+    },
+    "projection_index": {
+      "type": "integer",
+      "description": "Engine-derived zero-based projection index",
+      "minimum": 0,
+      "maximum": 99
+    },
+    "current_task_action": {
+      "type": "string",
+      "description": "Projected action for the current task",
+      "minLength": 1,
+      "maxLength": 1000
+    },
+    "current_task_expected_result": {
+      "type": "string",
+      "description": "Projected expected result for the current task",
+      "minLength": 1,
+      "maxLength": 1000
+    },
+    "resume_from_task": {
+      "type": "integer",
+      "description": "Position to continue from after a checklist revision",
+      "minimum": 1,
+      "maximum": 101
+    },
+    "progress_checklist_outcome": {
+      "type": "string",
+      "description": "Current bounded semantic outcome projected into Todo List progress",
+      "default": "Pending",
+      "minLength": 1,
+      "maxLength": 500
+    },
+    "progress_execution_outcome": {
+      "type": "string",
+      "description": "Current bounded semantic outcome projected into Todo List progress",
+      "default": "Pending",
+      "minLength": 1,
+      "maxLength": 500
+    },
+    "workflow_guide": {
+      "type": "string",
+      "description": "Canonical domain-neutral Todo List checklist, evidence, revision, record-boundary, and authority guide.",
+      "minLength": 1,
+      "default": "# Todo List guide\n\nThese rules define outcomes for a general Todo List run. A rule that does not apply to the current task is already satisfied and requires no artifact or evidence of inapplicability.\n\n## Preserve content while ordering work\n\nA caller-supplied schema-valid checklist keeps every item, its wording, and its scope; nothing is dropped or added. The executor may reorder unfinished items so each prerequisite exists before its consumer, must expose that reordering before work starts, and must report a real dependency cycle instead of silently choosing an invalid order. Content and order are separate responsibilities: freezing written order can execute work before its prerequisites, while rewriting content silently changes the caller's request.\n\nA remark that governs several items remains a constraint on those items rather than becoming decorative work of its own. When no ready checklist exists, create the complete bounded checklist once without executing it. Each item carries enough goal, applicable constraint, and observable expected result to be executable on its own, but does not repeat unrelated shared doctrine; unconditional redundancy creates drifting copies and turns the checklist into the deliverable.\n\n## Complete and evidence the real task\n\nPerform the projected task under its actual requirements and verify the expected result before reporting success. Evidence names the concrete observation that distinguishes completion from a plausible incomplete state; a success-shaped acknowledgement without that observation can advance the cursor while the work remains undone. A blocked or incomplete task remains current and is reported truthfully rather than submitted as success.\n\n## Keep process records useful\n\nChecklist items contain the work, its applicable constraints, and its expected result. Evidence contains the result and distinguishing observation. Progress contains only the bounded current synopsis needed by the user. Exclude tool transcripts, copied raw output, search history, timings, hashes, decorative command/file/action inventories, activity diaries, and nonfunctional volume counts because they do not help a later reader execute, route, or judge the task.\n\nAn inventory, metric, test count, log analysis, or similar material remains valid when it is the requested domain result. Only incidental process narration about producing it is excluded; otherwise an anti-noise rule would silently narrow the caller's task.\n\n## Revise by positional identity\n\nUse checklist revision only when the checklist itself no longer describes the required remaining work, never to escape a task that is merely hard, blocked, or failing. Preserve completed items at their original positions and unchanged in meaning, change only the unfinished tail, and return the first position that still requires execution. Position is task identity; changing the completed prefix or restarting it loses reliable knowledge of what has already happened.\n\nReplace checklist and progress state atomically with the new truth, retaining only a latest completed outcome that remains true. The engine derives totals, projection indices, and cursors from the checklist and resume position; parallel IDs, counts, statuses, result codes, or histories can disagree with the route and make resumption ambiguous.\n\n## Preserve authority\n\nThe originating request is the authority ceiling. Checklist acquisition, autonomous execution, or tool availability does not authorize unrelated publication, destructive action, environment change, deployment, or version-control work. This prevents a convenient tool or a broad task description from becoming permission for a different external effect."
+    }
+  },
+  "progress": {
+    "title": "Todo List",
+    "goal": "Complete the authoritative checklist in order with visible current work and truthful revision handling.",
+    "nodes": [
+      {
+        "id": "checklist",
+        "label": "Checklist",
+        "content": {
+          "summary": "Establish the bounded ordered checklist and retain its latest confirmed synopsis",
+          "outcome": "{{progress_checklist_outcome}}",
+          "next": "Prepare and perform the current checklist"
+        },
+        "connections": {
+          "default": "prepare"
+        }
+      },
+      {
+        "id": "prepare",
+        "label": "Prepare",
+        "content": {
+          "summary": "Derive the current task position, action, and expected result from the authoritative checklist",
+          "next": "Perform and verify the projected work"
+        },
+        "connections": {
+          "default": "work"
+        }
+      },
+      {
+        "id": "work",
+        "label": "Work",
+        "content": {
+          "summary": "Perform or correct the remaining checklist work",
+          "outcome": "{{progress_execution_outcome}}",
+          "next": "Continue, revise the remaining checklist when necessary, or finish"
+        },
+        "list": {
+          "items": "tasks",
+          "title": "action",
+          "current": "current_task",
+          "total": "total_tasks"
+        }
+      }
+    ]
+  },
+  "systemReminder": null,
+  "id": "93609982-70c9-4089-b8c9-19815d8da87b"
+}

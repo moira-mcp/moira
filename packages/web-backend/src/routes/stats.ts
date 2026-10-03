@@ -10,6 +10,7 @@ import { asyncHandler, createApiError } from "../middleware/error-middleware.js"
 import { DatabaseRepository, WorkflowExecution } from "@mcp-moira/workflow-engine";
 import { countRefusals, getDatabase, getLockService, user, workflow } from "@mcp-moira/shared";
 import { currentStep } from "../utils/current-step.js";
+import { executionTaskTitles } from "../utils/execution-task-titles.js";
 
 const router = Router();
 const repository = new DatabaseRepository();
@@ -97,6 +98,7 @@ router.get(
             .from(workflow)
             .where(inArray(workflow.id, activeFlowIds));
     const graphById = new Map(graphs.map((row) => [row.id, row.graph]));
+    const taskTitles = await executionTaskTitles([...active.executions, ...recent.executions]);
 
     const status = (e: WorkflowExecution) =>
       e.status === "running" && lockedIds.has(e.executionId) ? "locked" : e.status;
@@ -105,6 +107,8 @@ router.get(
       executionId: e.executionId,
       workflowId: e.workflowId,
       workflowName: flowById.get(e.workflowId)?.name ?? null,
+      taskTitle: taskTitles.get(e.executionId),
+      taskIdentity: e.taskIdentity ?? null,
       note: e.note ?? null,
       status: status(e),
       hasActiveLock: lockedIds.has(e.executionId),
@@ -118,6 +122,8 @@ router.get(
       executionId: e.executionId,
       workflowId: e.workflowId,
       workflowName: flowById.get(e.workflowId)?.name ?? null,
+      taskTitle: taskTitles.get(e.executionId),
+      taskIdentity: e.taskIdentity ?? null,
       note: e.note ?? undefined,
       status: status(e),
       hasActiveLock: lockedIds.has(e.executionId),

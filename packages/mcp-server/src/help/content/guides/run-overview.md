@@ -28,8 +28,9 @@ Runs waiting for you always come first, whatever the order you chose.
 ## What a card shows
 
 Every card has the same height and the same rows, whatever the run: the status and how long ago its
-last step was, the task's title, the flow's name (or, for a child run, «↳ child of …» naming its
-parent), then the progress the flow declares. A flow with progress blocks shows its stages; a stage
+last step was, the canonical task name, the flow name or, for a child run, a «↳ child of …»
+relationship with the child's own flow name in its hover/focus hint, then the declared progress. The arbitrary note is separately
+available even when it matches the title. A flow with progress blocks shows its stages; a stage
 that works through a list — a plan or a checklist bound to the block — shows the items around the
 current one, the done ones above and the next ones below, with the rest folded into «↑ N» and «↓ N».
 A flow that declares neither says so instead of guessing a percentage. The footer says when the
@@ -39,7 +40,8 @@ title opens a side panel with everything else — the parent runs, the question 
 current step, the whole list and every stage, the child runs, the dates — and **Open run**.
 
 **The last step** is the last time the run did work: a step handed in, a directive shown, or a
-variable changed by the agent or by you. A note, a reminder, a lock or a change of parent does not
+variable changed by the agent or by you, or the task was meaningfully renamed. An identical normalized
+title, a note, a reminder, a lock or a change of parent does not
 count. For a run with child runs the card counts the latest step of the whole tree, so a parent
 waiting on a busy child does not look idle.
 
@@ -69,7 +71,7 @@ horizontal strip.
 - The flow filter offers every flow you can read, including choices beyond the first page of
   flows. If the list cannot be loaded, **Flow filter unavailable** appears with **Try again**;
   the overview remains available while you retry loading the choices.
-- The search matches a run's note (which is also its task title when the agent gave one), its flow's
+- The search matches a run's arbitrary note, its flow's
   name and the run's id.
 
 Everything you set stays in the page's address, so a saved link — «my runs without movement for a

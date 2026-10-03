@@ -316,6 +316,8 @@ export interface RunOnNode {
   executionId: string;
   status: string;
   currentNodeId: string | null;
+  taskTitle?: string;
+  workflowName?: string | null;
   note?: string;
 }
 
@@ -325,6 +327,8 @@ export interface PausedRunWarning {
   change: "renamed" | "removed";
   /** The node's new id, for a rename. */
   to?: string;
+  taskTitle?: string;
+  workflowName?: string | null;
   note?: string;
 }
 
@@ -352,6 +356,8 @@ export function pausedRunWarnings(
             executionId: run.executionId,
             nodeId: run.currentNodeId,
             ...hit,
+            ...(run.taskTitle ? { taskTitle: run.taskTitle } : {}),
+            ...(run.workflowName ? { workflowName: run.workflowName } : {}),
             ...(run.note ? { note: run.note } : {}),
           },
         ]

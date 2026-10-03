@@ -17,6 +17,7 @@ import {
   type SQL,
 } from "drizzle-orm";
 import type { BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
+import { randomUUID } from "node:crypto";
 import { workflowExecution } from "../schema.js";
 import type { ExecutionAwaitingUser, WorkflowExecution } from "@mcp-moira/workflow-engine";
 import type * as schema from "../schema.js";
@@ -24,7 +25,16 @@ import { type ExecutionError, type LegacyExecutionStatus } from "../../types/exe
 import { executeListQuery, type ListQueryConfig } from "../list-query-builder.js";
 import { ConflictError, ValidationError } from "../../errors/index.js";
 import { metadataRevision } from "../../utils/metadata-revision.js";
-import { awaitingUserAfterWrite, executionRowFields } from "../execution-row.js";
+import {
+  awaitingUserAfterWrite,
+  executionRowFields,
+  activityAfterTaskIdentityWrite,
+} from "../execution-row.js";
+import {
+  normalizeExecutionTaskTitle,
+  parseExecutionTaskIdentity,
+  type ExecutionTaskTitleMutationResult,
+} from "../../types/execution-task-identity.js";
 import { executionActivity, parseStoredErrors, parseStoredVisits } from "../execution-activity.js";
 
 import { enqueueWaitingNotification } from "../execution-notification.js";
@@ -135,7 +145,7 @@ export class ExecutionRepository {
                   reminders: row.reminders,
                   visits: row.visits,
                   gateWaiting: row.gateWaiting === 1,
-                  lastActivityAt: row.lastActivityAt,
+                  lastActivityAt: activityAfterTaskIdentityWrite(row.lastActivityAt),
                   refusalCount: row.refusalCount,
                   // The agent's question is not the saver's to write: it stays while the run stays on its
                   // node and is cleared when the run leaves it or finishes (see awaitingUserAfterMove).
@@ -180,6 +190,7 @@ export class ExecutionRepository {
               error: row.error,
               errors: row.errors,
               note: row.note,
+              taskIdentity: row.taskIdentity,
               stopReason: row.stopReason,
               parentExecutionId: row.parentExecutionId,
               revision: execution.revision,
@@ -330,6 +341,7 @@ export class ExecutionRepository {
         currentNodeId: workflowExecution.currentNodeId,
         waitingForInputNodeId: workflowExecution.waitingForInputNodeId,
         note: workflowExecution.note,
+        taskIdentity: workflowExecution.taskIdentity,
         stopReason: workflowExecution.stopReason,
         parentExecutionId: workflowExecution.parentExecutionId,
         revision: workflowExecution.revision,
@@ -474,6 +486,7 @@ export class ExecutionRepository {
       globalContext,
       status: row.state as LegacyExecutionStatus,
       note: row.note ?? undefined,
+      taskIdentity: parseExecutionTaskIdentity(row.taskIdentity),
       stopReason: row.stopReason ?? null,
       parentExecutionId: row.parentExecutionId ?? undefined,
       revision: row.revision,
@@ -729,6 +742,90 @@ export class ExecutionRepository {
               .run(),
           (written) => written.changes > 0,
         ),
+      { behavior: "immediate" },
+    );
+  }
+
+  /** Rename independent metadata without consuming the workflow's presented step. */
+  async updateExecutionTaskTitle(
+    executionId: string,
+    userId: string,
+    expectedRevision: number,
+    expectedTaskIdentityRevision: string,
+    taskTitle: string,
+  ): Promise<ExecutionTaskTitleMutationResult> {
+    const title = normalizeExecutionTaskTitle(taskTitle);
+    return this.db.transaction(
+      (tx) => {
+        const row = tx
+          .select()
+          .from(workflowExecution)
+          .where(eq(workflowExecution.executionId, executionId))
+          .get();
+        if (!row || row.userId !== userId)
+          throw new ValidationError("Execution must belong to the authenticated user");
+        if (!["running", "waiting"].includes(row.state))
+          throw new ValidationError("Only active executions accept task title changes");
+        if (row.revision !== expectedRevision)
+          throw new ConflictError("Execution state changed; reload before changing task title");
+        const current = parseExecutionTaskIdentity(row.taskIdentity);
+        if (metadataRevision(current) !== expectedTaskIdentityRevision)
+          throw new ConflictError(
+            "Execution task identity changed; reload before changing task title",
+          );
+        if (current?.title === title)
+          return {
+            executionId,
+            taskIdentity: current,
+            revision: row.revision,
+            taskIdentityRevision: metadataRevision(current),
+            changed: false,
+          };
+        const now = Date.now();
+        const taskIdentity = { title, changedAt: now, changeId: randomUUID() };
+        const lastActivityAt = executionActivity({
+          visits: parseStoredVisits(row.visits),
+          completedAt: row.completedAt?.getTime() ?? null,
+          taskIdentity,
+        }).lastActivityAt;
+        const written = trackExecutionChange(
+          tx,
+          executionId,
+          () =>
+            tx
+              .update(workflowExecution)
+              .set({
+                taskIdentity: JSON.stringify(taskIdentity),
+                lastActivityAt,
+                updatedAt: new Date(now),
+              })
+              .where(
+                and(
+                  eq(workflowExecution.executionId, executionId),
+                  eq(workflowExecution.userId, userId),
+                  eq(workflowExecution.revision, expectedRevision),
+                  inArray(workflowExecution.state, ["running", "waiting"]),
+                  row.taskIdentity === null
+                    ? isNull(workflowExecution.taskIdentity)
+                    : eq(workflowExecution.taskIdentity, row.taskIdentity),
+                ),
+              )
+              .run(),
+          (written) => written.changes === 1,
+          now,
+        );
+        if (written.changes !== 1)
+          throw new ConflictError(
+            "Execution task identity changed; reload before changing task title",
+          );
+        return {
+          executionId,
+          taskIdentity,
+          revision: row.revision,
+          taskIdentityRevision: metadataRevision(taskIdentity),
+          changed: true,
+        };
+      },
       { behavior: "immediate" },
     );
   }
@@ -1004,6 +1101,7 @@ export class ExecutionRepository {
                       lastActivityAt: executionActivity({
                         visits: nextVisits,
                         completedAt: execution.completedAt ?? null,
+                        taskIdentity: execution.taskIdentity,
                       }).lastActivityAt,
                     }
                   : {}),
@@ -1115,7 +1213,7 @@ export class ExecutionRepository {
                 gateWaiting: false,
                 awaitingUser: null,
                 errors: JSON.stringify(errors),
-                lastActivityAt: activity.lastActivityAt,
+                lastActivityAt: activityAfterTaskIdentityWrite(activity.lastActivityAt),
                 refusalCount: activity.refusalCount,
                 updatedAt: now,
                 completedAt: now,

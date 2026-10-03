@@ -18,6 +18,7 @@ import type {
   WorkflowFilter,
   WorkflowListResult,
   ExecutionError,
+  ExecutionTaskTitleMutationResult,
 } from "@mcp-moira/shared";
 import type {
   CompleteExecutionAttemptInput,
@@ -272,6 +273,15 @@ export interface IDataRepository {
    * Used by: session(action: "update-note") and magic variable execution_note
    */
   updateExecutionNote(executionId: string, note: string): Promise<void>;
+
+  /** Owner-only independent task naming, guarded by step and identity revisions. */
+  updateExecutionTaskTitle(
+    executionId: string,
+    userId: string,
+    expectedRevision: number,
+    expectedTaskIdentityRevision: string,
+    taskTitle: string,
+  ): Promise<ExecutionTaskTitleMutationResult>;
 
   /**
    * Raise, replace or clear (null) the agent's open question on a running run it owns. Raising binds

@@ -13,6 +13,7 @@ import {
   TokenManager,
 } from "@mcp-moira/shared";
 import type { WorkflowExecution, WorkflowGraph } from "@mcp-moira/workflow-engine";
+import { ProgressImageService, type IDataRepository } from "@mcp-moira/workflow-engine";
 import { createExecutionMaterializeRoutes } from "../../packages/web-backend/src/routes/execution-materialize.js";
 
 describe("Workflow File Tokens", () => {
@@ -291,6 +292,110 @@ describe("Workflow File Tokens", () => {
       .run();
     expect(tokenManager.claimProgressImageToken(staleRevision)).toBe(false);
     clock.mockRestore();
+  });
+
+  test("atomic image reservation refuses title ABA without claiming or consuming the stale grant", () => {
+    seedProgressExecution();
+    const db = getSqliteInstance();
+    const identity = { title: "A", changedAt: 1, changeId: "a1" };
+    db.prepare(
+      "UPDATE workflowExecution SET taskIdentity = ? WHERE executionId = 'progress-token-execution'",
+    ).run(JSON.stringify(identity));
+    const token = tokenManager.createProgressImageToken(
+      "progress-token-execution",
+      "progress-token-workflow",
+      testUserId,
+      "2.0.0",
+      3,
+      JSON.stringify({ taskIdentity: identity }),
+    );
+    // The same title and timestamp are insufficient: a different changeId is a new identity.
+    const current = { ...identity, changeId: "a2" };
+    db.prepare(
+      "UPDATE workflowExecution SET taskIdentity = ? WHERE executionId = 'progress-token-execution'",
+    ).run(JSON.stringify({ ...identity, title: "B", changeId: "b" }));
+    db.prepare(
+      "UPDATE workflowExecution SET taskIdentity = ? WHERE executionId = 'progress-token-execution'",
+    ).run(JSON.stringify(current));
+    expect(tokenManager.reserveProgressImageToken(token, "stale")).toBe(false);
+    expect(tokenManager.getTokenData(token)).toMatchObject({ used: false, claimId: null });
+    const fresh = tokenManager.createProgressImageToken(
+      "progress-token-execution",
+      "progress-token-workflow",
+      testUserId,
+      "2.0.0",
+      3,
+      JSON.stringify({ taskIdentity: current }),
+    );
+    expect(tokenManager.reserveProgressImageToken(fresh, "fresh")).toBe(true);
+    expect(tokenManager.completeProgressImageToken(fresh, "fresh")).toBe(true);
+    expect(tokenManager.reserveProgressImageToken(fresh, "again")).toBe(false);
+  });
+
+  test("a rename between image service validation and reservation is refused by the actual SQL guard", async () => {
+    seedProgressExecution();
+    const db = getSqliteInstance();
+    const setIdentity = (changeId: string) =>
+      db
+        .prepare(
+          "UPDATE workflowExecution SET taskIdentity = ? WHERE executionId = 'progress-token-execution'",
+        )
+        .run(JSON.stringify({ title: "Same title", changedAt: 1, changeId }));
+    setIdentity("before");
+    const graph: WorkflowGraph = {
+      metadata: { name: "Progress", version: "2.0.0", description: "" },
+      progress: { nodes: [{ id: "work", label: "Work" }] },
+      nodes: [
+        { id: "start", type: "start", connections: { default: "work" } },
+        {
+          id: "work",
+          type: "agent-directive",
+          progressNodeId: "work",
+          directive: "Do",
+          completionCondition: "Done",
+          connections: { success: "end" },
+        },
+        { id: "end", type: "end" },
+      ],
+    };
+    const repository = {
+      getWorkflowGraph: async () => graph,
+      getExecution: async () => {
+        const row = db
+          .prepare(
+            "SELECT taskIdentity FROM workflowExecution WHERE executionId = 'progress-token-execution'",
+          )
+          .get() as { taskIdentity: string };
+        return {
+          executionId: "progress-token-execution",
+          workflowId: "progress-token-workflow",
+          userId: testUserId,
+          currentNodeId: "work",
+          status: "running",
+          revision: 3,
+          taskIdentity: JSON.parse(row.taskIdentity),
+          createdAt: 1,
+          updatedAt: 1,
+          globalContext: {
+            executionId: "progress-token-execution",
+            workflowId: "progress-token-workflow",
+            userId: testUserId,
+            variables: {},
+            nodeStates: {},
+          },
+        };
+      },
+    } as unknown as IDataRepository;
+    const service = new ProgressImageService(repository, tokenManager);
+    const minted = await service.mint("progress-token-execution", testUserId);
+    const token = minted.downloadUrl.split("/").at(-1)!;
+    const reserve = tokenManager.reserveProgressImageToken.bind(tokenManager);
+    jest.spyOn(tokenManager, "reserveProgressImageToken").mockImplementationOnce((value, claim) => {
+      setIdentity("after");
+      return reserve(value, claim);
+    });
+    expect(await service.redeem(token)).toBeNull();
+    expect(tokenManager.getTokenData(token)).toMatchObject({ used: false, claimId: null });
   });
 
   test("materialize authorization is reusable during its TTL and checks every binding", () => {

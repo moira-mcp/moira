@@ -5,6 +5,7 @@
  */
 
 import { describe, expect, test } from "@jest/globals";
+import { runPageUrl } from "@mcp-moira/workflow-engine";
 import { catalogGraph } from "../../helpers/catalog-graphs.js";
 import { internalValues, runNotificationScenario } from "../../helpers/notification-scenario.js";
 
@@ -49,13 +50,37 @@ describe("the harness", () => {
     await expect(
       runNotificationScenario(catalogGraph("todo-list"), {
         mockInputs: {
-          // execution_note is missing: the flow refuses the answer and stays on the step.
+          // tasks is missing: the flow refuses the answer and stays on the step.
           "obtain-tasks": {
-            tasks: [{ action: "Do it", expected_result: "Done" }],
+            execution_note: "An arbitrary note cannot replace the checklist",
             progress_checklist_outcome: "One task",
           },
         },
       }),
     ).rejects.toThrow(/The answer for obtain-tasks \(visit 1\) was rejected/u);
+  });
+
+  test("persists an explicit title independently and leaves already delivered unnamed headings unchanged", async () => {
+    const note = "Keep the release unpublished until Friday";
+    const title = "Review the release checklist";
+    const run = await runNotificationScenario(catalogGraph("todo-list"), {
+      note,
+      // The task is named after the initial checklist message has already been delivered.
+      taskTitle: { atNode: "execute-task", title },
+      mockInputs: {
+        "obtain-tasks": {
+          tasks: [{ action: "Review the checklist", expected_result: "Checked" }],
+          progress_checklist_outcome: "One task",
+        },
+        "execute-task": { evidence: "Checked", progress_execution_outcome: "Done" },
+      },
+    });
+    const link = runPageUrl({ executionId: run.executionId });
+    expect(run.taskIdentity).toMatchObject({ title });
+    expect(run.taskIdentity?.changeId).toEqual(expect.any(String));
+    expect(run.note).toBe(note);
+    expect(run.notifications[0].text.startsWith(`[Todo List](${link})`)).toBe(true);
+    expect(run.notifications[1].text.startsWith(`[Todo List · ${title}](${link})`)).toBe(true);
+    for (const message of run.notifications) expect(message.text).not.toContain(note);
   });
 });

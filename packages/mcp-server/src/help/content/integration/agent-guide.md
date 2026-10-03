@@ -183,9 +183,27 @@ session({ action: "execution_context", executionId: "abc-123" })
 ```
 
 Returns execution state including context variables, history, the workflow-step `revision`, and
-independent parent, context, and reminder revisions. Supply the matching target revision together
+independent task-identity, parent, context, and reminder revisions. Supply the matching target revision together
 with `expectedRevision` when changing that metadata; successful writes return the next target
 revision without changing the step revision.
+
+## Naming the task
+
+At intake, read execution context and persist the actual name before submitting the step:
+
+```javascript
+session({
+  action: "update-task-title",
+  executionId,
+  taskTitle: "Implement authentication",
+  expectedRevision: current.revision,
+  expectedTaskIdentityRevision: current.metadataRevisions.taskIdentity,
+});
+```
+
+`current` is the execution-context result. Apply the [task-name contract](/docs/concepts/workflows/#execution-task-name)
+for limits, stale guards and no-op behavior. Rename at an authorized actual scope change;
+ordinary progress retains the name and the current step attempt. Notes below remain separate.
 
 ## Execution Notes
 

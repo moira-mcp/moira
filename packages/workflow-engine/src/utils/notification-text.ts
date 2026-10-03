@@ -2,7 +2,7 @@
  * The text of a notification a person receives: a heading that names the flow and the task and
  * links to the run page, the author's message, the plan, and who the run waits for. Every piece
  * that does not come from the author's own markup is written for the message's format, so a task
- * note or an item title containing `_`, `*` or `<` reaches the reader as written instead of
+ * title or an item title containing `_`, `*` or `<` reaches the reader as written instead of
  * breaking the parse. Pure except `runPageUrl`, which reads the configured host and base path
  * (`MOIRA_HOST`, `APP_BASE_PATH`); the sender resolves the run and the channel limit.
  */
@@ -13,8 +13,8 @@ import type { TextEscaper } from "./execution-progress-lists.js";
 
 export type NotificationFormat = "plain" | "markdown" | "html";
 
-/** The longest task note the heading shows; longer notes are shortened with `…`. */
-export const HEADING_NOTE_LIMIT = 200;
+/** The longest task title the heading shows; longer titles are shortened with `…`. */
+export const HEADING_TITLE_LIMIT = 200;
 
 const escapeHtml: TextEscaper = (text) =>
   text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -42,20 +42,21 @@ export function runPageUrl(context: Pick<ExecutionContext, "executionId" | "_roo
 
 /**
  * `<flow> · <task>` linked to the run page; the flow name alone, still linked, when the run has no
- * note. In legacy Markdown the link text takes no escapes (a backslash stays visible) and must not
+ * distinct task title. In legacy Markdown the link text takes no escapes (a backslash stays visible) and must not
  * contain square brackets, so brackets become parentheses there. Plain text has no links: the URL
  * follows on its own line.
  */
 export function notificationHeading(
   flowName: string,
-  note: string | null | undefined,
+  taskTitle: string | null | undefined,
   url: string,
   format: NotificationFormat | undefined,
 ): string {
-  const task = (note ?? "").replace(/\s+/g, " ").trim();
+  const task = (taskTitle ?? "").replace(/\s+/g, " ").trim();
   const shortTask =
-    task.length > HEADING_NOTE_LIMIT ? `${task.slice(0, HEADING_NOTE_LIMIT - 1)}…` : task;
-  const title = shortTask ? `${flowName.trim()} · ${shortTask}` : flowName.trim();
+    task.length > HEADING_TITLE_LIMIT ? `${task.slice(0, HEADING_TITLE_LIMIT - 1)}…` : task;
+  const title =
+    shortTask && task !== flowName.trim() ? `${flowName.trim()} · ${shortTask}` : flowName.trim();
   if (format === "markdown") {
     return `[${title.replace(/\[/g, "(").replace(/\]/g, ")")}](${url})`;
   }

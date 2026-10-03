@@ -22,6 +22,7 @@ import type { AuthorizationService } from "../authorization/authorization-servic
 import { RESOURCE_TYPES } from "../authorization/authorization-policy.js";
 import { metadataRevision } from "../utils/metadata-revision.js";
 import { applyExecutionReminderMutation } from "./execution-reminder-domain.js";
+import type { ExecutionTaskTitleMutationResult } from "../types/execution-task-identity.js";
 
 export class ExecutionService {
   private logger = createLogger({ component: Component.Execution });
@@ -336,6 +337,35 @@ export class ExecutionService {
       }),
     });
     return updated;
+  }
+
+  async updateExecutionTaskTitle(
+    executionId: string,
+    userId: string,
+    expectedRevision: number,
+    expectedTaskIdentityRevision: string,
+    taskTitle: string,
+  ): Promise<ExecutionTaskTitleMutationResult> {
+    const result = await this.executionRepo.updateExecutionTaskTitle(
+      executionId,
+      userId,
+      expectedRevision,
+      expectedTaskIdentityRevision,
+      taskTitle,
+    );
+    if (result.changed)
+      await this.auditRepo.log({
+        userId,
+        action: AuditAction.EXECUTION_UPDATE_CONTEXT,
+        resource: "execution",
+        resourceId: executionId,
+        source: getAuditSource(),
+        metadata: JSON.stringify({
+          action: "update-task-title",
+          taskIdentityRevision: result.taskIdentityRevision,
+        }),
+      });
+    return result;
   }
 
   async mutateReminder(

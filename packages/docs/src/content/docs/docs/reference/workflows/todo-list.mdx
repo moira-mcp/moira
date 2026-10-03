@@ -26,8 +26,11 @@ Each task contains only:
 
 Both strings are non-empty and limited to 1,000 characters. Array position is the task identity; the agent does not supply IDs, cursors, totals, statuses, or result codes.
 
-The same step returns `execution_note`: the run's task in a few words (at most 120 characters), the
-caller's note when one was given. It heads every notification of the run.
+Before completing checklist intake, the agent persists the actual [task name](/docs/concepts/workflows/#execution-task-name)
+through the guarded naming contract in the already materialized `workflow-guide.md`. Optional
+`execution_note` is arbitrary nonempty text of at most 120 characters and never a heading source.
+An authorized checklist revision updates the name only when actual scope changes; ordering alone
+retains it. Naming does not change completed positional identity or grant new authority.
 
 ## Execution
 

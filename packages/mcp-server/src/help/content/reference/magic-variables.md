@@ -9,7 +9,8 @@ Magic variables are special input fields that trigger automatic behavior beyond 
 
 ## execution_note
 
-Updates the execution's note field for tracking purposes.
+Updates the execution's arbitrary note field for tracking purposes. It never supplies the task
+heading. Set or rename the task through [execution task identity](/docs/concepts/workflows/#execution-task-name).
 
 ### Usage
 
@@ -69,7 +70,7 @@ When agent provides `execution_note`:
 
 :::note
 `execution_note` passes through inputSchema validation. Include in `required` array to enforce
-agents provide execution identification.
+agents provide a note under this node's contract; it does not require or establish a task name.
 :::
 
 ### Querying Notes

@@ -222,12 +222,13 @@ export class UserCommunicationService {
   async deliver(
     request: UserCommunicationRequest,
     repository: IDataRepository,
+    prepare?: () => Promise<PortableCommunicationMessage | null>,
   ): Promise<UserCommunicationResult> {
     this.validateRequest(request);
     const configuration: CommunicationConfigurationResolver = {
       get: <T>(key: string) => repository.getSetting<T>(request.userId, key),
     };
-    const message: PortableCommunicationMessage = {
+    let message: PortableCommunicationMessage = {
       text: request.text,
       format: request.format,
       silent: request.silent,
@@ -245,6 +246,14 @@ export class UserCommunicationService {
       if ("result" in entry) channels.push(entry.result);
       else if (entry.configured) configured.push(entry.adapter);
       else channels.push({ channelId: entry.adapter.id, status: "not_configured" });
+    }
+
+    // Availability can await settings or a provider. Resolve mutable content at adapter handoff.
+    if (prepare && configured.length) {
+      const prepared = await prepare();
+      if (!prepared) return this.aggregate(channels, configured.length, 0);
+      this.validateRequest({ ...prepared, userId: request.userId });
+      message = { ...prepared };
     }
 
     channels.push(

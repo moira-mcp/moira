@@ -3,10 +3,13 @@
  * Maps the user and admin execution list items to a single normalized shape
  */
 
+import type { ExecutionTaskIdentity } from "@mcp-moira/shared";
+
 export interface NormalizedExecution {
   id: string;
   workflowId: string;
   workflowName?: string | null;
+  taskTitle?: string;
   status: string;
   note?: string;
   errorCount?: number;
@@ -26,6 +29,8 @@ interface ExecutionListItem {
   executionId: string;
   workflowId: string;
   workflowName?: string | null;
+  taskTitle?: string;
+  taskIdentity?: ExecutionTaskIdentity | null;
   status: string;
   note?: string;
   createdAt?: number;
@@ -39,6 +44,9 @@ interface AdminExecution {
   executionId: string;
   workflowId: string;
   workflowName?: string | null;
+  taskTitle?: string;
+  taskIdentity?: ExecutionTaskIdentity | null;
+  note?: string;
   userEmail: string | null;
   userName: string | null;
   status: string;
@@ -55,11 +63,18 @@ function isAdminExecution(e: AnyExecution): e is AdminExecution {
 }
 
 export function normalizeExecution(execution: AnyExecution): NormalizedExecution {
+  const taskTitle =
+    execution.taskTitle ??
+    execution.taskIdentity?.title ??
+    execution.workflowName ??
+    execution.workflowId;
   if (isAdminExecution(execution)) {
     return {
       id: execution.executionId,
       workflowId: execution.workflowId,
       workflowName: execution.workflowName,
+      taskTitle,
+      note: execution.note,
       status: execution.status,
       userDisplay: execution.userName || execution.userEmail || null,
       createdAt: execution.createdAt,
@@ -73,6 +88,7 @@ export function normalizeExecution(execution: AnyExecution): NormalizedExecution
     id: execution.executionId,
     workflowId: execution.workflowId,
     workflowName: execution.workflowName,
+    taskTitle,
     status: execution.status,
     note: execution.note,
     errorCount: execution.errorCount,

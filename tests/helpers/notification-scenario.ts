@@ -4,7 +4,7 @@
  * delivery path (the active communication registry). Answers come from per-node mock inputs.
  *
  * Unlike `scenario-runner.ts`, which drives the stateless engine with an unsaved context, this
- * harness has a real run: a task note, a persisted route and the live run a notification reads,
+ * harness has a real run: independent task identity and note, a persisted route and the live run a notification reads,
  * so a scenario can assert the delivered text itself.
  */
 
@@ -17,6 +17,7 @@ import {
   type WorkflowGraph,
 } from "@mcp-moira/workflow-engine";
 import { migrateWorkflowGraph } from "@mcp-moira/workflow-engine/migration";
+import { metadataRevision, type ExecutionTaskIdentity } from "@mcp-moira/shared";
 import { UniversalGraphExecutor } from "../../packages/workflow-engine/src/core/universal-graph-executor.js";
 
 export const NOTIFICATION_TEST_USER = "notification-scenario-user";
@@ -38,8 +39,10 @@ export interface NotificationScenario {
   mockInputs: Record<string, NotificationMockInput>;
   /** Instead of answering the given visit of a node, jump to a teleport node (once). */
   teleportAt?: { node: string; visit?: number; teleportTo: string };
-  /** Note given at start; flows set their own at their first step when absent. */
+  /** Arbitrary note given at start, independent of the task title. */
   note?: string;
+  /** Persist the explicitly supplied task title at this intake pause, before answering it. */
+  taskTitle?: { atNode: string; title: string };
   maxSteps?: number;
 }
 
@@ -68,6 +71,8 @@ export interface NotificationScenarioResult {
   pauses: ScenarioPause[];
   notifications: DeliveredNotification[];
   variables: Record<string, unknown>;
+  taskIdentity: ExecutionTaskIdentity | null;
+  note?: string | null;
 }
 
 function answer(
@@ -125,6 +130,7 @@ export async function runNotificationScenario(
     const visits = new Map<string, number>();
     const pauses: ScenarioPause[] = [];
     let teleported = false;
+    let taskTitleSet = false;
     const maxSteps = scenario.maxSteps ?? 200;
     for (let step = 0; step < maxSteps; step++) {
       const execution = await repository.getExecution(executionId);
@@ -134,6 +140,16 @@ export async function runNotificationScenario(
       const visit = (visits.get(nodeId) ?? 0) + 1;
       visits.set(nodeId, visit);
       pauses.push({ nodeId, visit, gateWaiting: execution.gateWaiting === true });
+      if (scenario.taskTitle && !taskTitleSet && nodeId === scenario.taskTitle.atNode) {
+        await repository.updateExecutionTaskTitle(
+          executionId,
+          NOTIFICATION_TEST_USER,
+          execution.revision,
+          metadataRevision(execution.taskIdentity ?? null),
+          scenario.taskTitle.title,
+        );
+        taskTitleSet = true;
+      }
       const jump = scenario.teleportAt;
       if (jump && !teleported && nodeId === jump.node && visit === (jump.visit ?? 1)) {
         teleported = true;
@@ -163,6 +179,9 @@ export async function runNotificationScenario(
       );
     }
     const route = (execution.visits ?? []).filter((visit) => !visit.adjusted).map((v) => v.nodeId);
+    if (scenario.taskTitle && !taskTitleSet) {
+      throw new Error(`Task title intake ${scenario.taskTitle.atNode} was never reached`);
+    }
     const senders = route.filter((nodeId) => types.get(nodeId) === "user-notification");
     if (senders.length !== delivered.length) {
       throw new Error(
@@ -180,6 +199,8 @@ export async function runNotificationScenario(
         format: message.format,
       })),
       variables: execution.globalContext.variables,
+      taskIdentity: execution.taskIdentity ?? null,
+      note: execution.note,
     };
   } finally {
     unregisterActiveCommunicationChannel(channelId);

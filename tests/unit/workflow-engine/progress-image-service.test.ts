@@ -120,6 +120,7 @@ describe("progress image grants", () => {
       workflowVersion: "2.0.0",
       executionRevision: 4,
       contextRevision: expect.stringMatching(/^[a-f0-9]{64}$/),
+      taskIdentityRevision: expect.stringMatching(/^[a-f0-9]{64}$/),
       options: { theme: "dark", viewportWidth: 480 },
       mimeType: "image/png",
     });
@@ -189,6 +190,90 @@ describe("progress image grants", () => {
     expect(await service.redeem("opaque")).toBeNull();
     expect(f.wasClaimed()).toBe(false);
   });
+
+  test.each(["owner", "workflow"] as const)(
+    "refuses a grant whose %s binding changed without reservation",
+    async (binding) => {
+      const f = fixture();
+      const service = new ProgressImageService(f.repository, f.tokens);
+      await service.mint("execution", "owner");
+      if (binding === "owner") f.execution.userId = "other";
+      else f.execution.workflowId = "other";
+      expect(await service.redeem("opaque")).toBeNull();
+      expect(f.isReserved()).toBe(false);
+      expect(f.wasClaimed()).toBe(false);
+    },
+  );
+
+  test("refuses same-clock title ABA and leaves the grant unreserved; fresh title renders once", async () => {
+    const f = fixture();
+    f.execution.note = "Unrelated note";
+    f.execution.taskIdentity = { title: "A", changedAt: 1, changeId: "a1" };
+    const titles: string[] = [];
+    const service = new ProgressImageService(
+      f.repository,
+      f.tokens,
+      undefined,
+      async (_graph, execution) => {
+        titles.push(execution.taskIdentity!.title);
+        return {
+          buffer: Buffer.from("png"),
+          mimeType: "image/png",
+          width: 1,
+          height: 1,
+          workflowVersion: "2.0.0",
+          executionRevision: 4,
+        };
+      },
+    );
+    await service.mint("execution", "owner");
+    f.execution.taskIdentity = { title: "B", changedAt: 1, changeId: "b1" };
+    f.execution.taskIdentity = { title: "A", changedAt: 1, changeId: "a2" };
+    expect(await service.redeem("opaque")).toBeNull();
+    expect(f.isReserved()).toBe(false);
+    expect(f.wasClaimed()).toBe(false);
+    expect(titles).toEqual([]);
+    await service.mint("execution", "owner");
+    const redeemed = await service.redeem("opaque");
+    expect(titles).toEqual(["A"]);
+    expect(service.complete("opaque", redeemed!.claimId)).toBe(true);
+    expect(await service.redeem("opaque")).toBeNull();
+  });
+
+  test.each(["graph", "render"] as const)(
+    "a rename during awaited %s refuses stale output without consumption",
+    async (phase) => {
+      const f = fixture();
+      f.execution.taskIdentity = { title: "Before", changedAt: 1, changeId: "before" };
+      let rename = false;
+      const repository = {
+        ...f.repository,
+        getExecution: async () => structuredClone(f.execution),
+        getWorkflowGraph: async () => {
+          if (rename && phase === "graph")
+            f.execution.taskIdentity = { title: "After", changedAt: 1, changeId: "after" };
+          return f.graph;
+        },
+      } as IDataRepository;
+      const service = new ProgressImageService(repository, f.tokens, undefined, async () => {
+        if (phase === "render")
+          f.execution.taskIdentity = { title: "After", changedAt: 1, changeId: "after" };
+        return {
+          buffer: Buffer.from("png"),
+          mimeType: "image/png",
+          width: 1,
+          height: 1,
+          workflowVersion: "2.0.0",
+          executionRevision: 4,
+        };
+      });
+      await service.mint("execution", "owner");
+      rename = true;
+      expect(await service.redeem("opaque")).toBeNull();
+      expect(f.isReserved()).toBe(false);
+      expect(f.wasClaimed()).toBe(false);
+    },
+  );
 
   test("reports an expiry no later than the persisted token expiry", async () => {
     const f = fixture();

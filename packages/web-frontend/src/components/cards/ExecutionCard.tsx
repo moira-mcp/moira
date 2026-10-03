@@ -1,5 +1,5 @@
 /**
- * An execution as a CardShell item: the workflow it runs as the title, its note as the
+ * An execution as a CardShell item: its task as the title, its note as the
  * description, the status and anything wrong (a lock, errors) as badges, and who started it, when
  * and its short id as the meta line. Handles 3 data interfaces via normalizeExecution().
  */
@@ -35,7 +35,7 @@ export const ExecutionCard: React.FC<ExecutionCardProps> = ({
       onClick={onClick ? () => onClick(execution) : undefined}
       testId="execution-card"
       icon={<Play aria-hidden="true" />}
-      title={execution.workflowName || execution.workflowId}
+      title={execution.taskTitle ?? execution.workflowName ?? execution.workflowId}
       description={execution.note || undefined}
       badges={
         <>
@@ -67,6 +67,9 @@ export const ExecutionCard: React.FC<ExecutionCardProps> = ({
       }
       meta={
         <>
+          {execution.taskTitle !== (execution.workflowName ?? execution.workflowId) ? (
+            <span>{execution.workflowName ?? execution.workflowId}</span>
+          ) : null}
           <span className="inline-flex items-center gap-1">
             <Clock className="size-3" aria-hidden="true" />
             {formatRelativeTime(execution.createdAt)}

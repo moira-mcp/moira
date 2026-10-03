@@ -24,6 +24,7 @@ export interface ProgressImageGrant {
   workflowVersion: string;
   executionRevision: number;
   contextRevision: string;
+  taskIdentityRevision: string;
 }
 
 export interface ProgressImageTokenStore {
@@ -62,10 +63,18 @@ export class ProgressImageService {
     // The caller decides whether this user may act on the execution; what this service enforces is
     // the binding the minted token depends on — the execution it names is the one it was minted
     // for, owned by the identity the token will carry.
-    const execution = await this.repository.getExecution(executionId);
+    let execution = await this.repository.getExecution(executionId);
     if (!execution || execution.userId !== ownerUserId) throw new ValidationError("Access denied");
     const graph = await this.repository.getWorkflowGraph(execution.workflowId, execution.userId);
     if (!graph?.progress) throw new ValidationError("Workflow has no progress graph");
+    const initialWorkflowId = execution.workflowId;
+    execution = await this.repository.getExecution(executionId);
+    if (
+      !execution ||
+      execution.userId !== ownerUserId ||
+      execution.workflowId !== initialWorkflowId
+    )
+      throw new ValidationError("Access denied");
     const requested = normalizeProgressVisualOptions(options);
     // `hide` and `collapse` name blocks or authored nodes of this workflow's process; a name the
     // image could not honour is refused now, so a token never carries one.
@@ -89,6 +98,7 @@ export class ProgressImageService {
     const ttlMs = TokenManager.PROGRESS_IMAGE_TTL_MS;
     const issuedAt = Date.now();
     const contextRevision = metadataRevision(execution.globalContext);
+    const taskIdentityRevision = metadataRevision(execution.taskIdentity ?? null);
     const token = this.tokens.createProgressImageToken(
       execution.executionId,
       execution.workflowId,
@@ -98,6 +108,8 @@ export class ProgressImageService {
       JSON.stringify({
         options: normalized,
         contextRevision,
+        taskIdentity: execution.taskIdentity ?? null,
+        taskIdentityRevision,
       }),
       ttlMs,
     );
@@ -109,6 +121,7 @@ export class ProgressImageService {
       workflowVersion: graph.metadata.version,
       executionRevision: execution.revision,
       contextRevision,
+      taskIdentityRevision,
     };
   }
 
@@ -122,7 +135,7 @@ export class ProgressImageService {
       !grant.optionsJson
     )
       return null;
-    const execution = await this.repository.getExecution(grant.executionId);
+    let execution = await this.repository.getExecution(grant.executionId);
     if (
       !execution ||
       execution.userId !== grant.userId ||
@@ -133,24 +146,49 @@ export class ProgressImageService {
     const graph = await this.repository.getWorkflowGraph(execution.workflowId, execution.userId);
     if (!graph?.progress || graph.metadata.version !== grant.workflowVersion) return null;
     let options: ProgressVisualOptions;
+    let contextRevision: string;
+    let taskIdentityRevision: string;
     try {
-      const stored = JSON.parse(grant.optionsJson) as
-        ProgressVisualOptions | { options: ProgressVisualOptions; contextRevision: string };
-      if ("options" in stored) {
-        if (metadataRevision(execution.globalContext) !== stored.contextRevision) return null;
-        options = stored.options;
-      } else {
-        options = stored;
-      }
+      const stored = JSON.parse(grant.optionsJson) as {
+        options: ProgressVisualOptions;
+        contextRevision: string;
+        taskIdentityRevision: string;
+      };
+      if (
+        !stored.options ||
+        typeof stored.contextRevision !== "string" ||
+        typeof stored.taskIdentityRevision !== "string"
+      )
+        return null;
+      contextRevision = stored.contextRevision;
+      taskIdentityRevision = stored.taskIdentityRevision;
+      options = stored.options;
     } catch {
       return null;
     }
+    const currentBinding = async () => {
+      const current = await this.repository.getExecution(grant.executionId!);
+      return current &&
+        current.userId === grant.userId &&
+        current.workflowId === grant.workflowId &&
+        current.revision === grant.executionRevision &&
+        metadataRevision(current.globalContext) === contextRevision &&
+        metadataRevision(current.taskIdentity ?? null) === taskIdentityRevision
+        ? current
+        : null;
+    };
+    execution = await currentBinding();
+    if (!execution) return null;
     const claimId = randomUUID();
     if (!this.tokens.reserveProgressImageToken(token, claimId)) return null;
     try {
       const statistics = await statisticsForRun(this.statistics, graph, execution);
+      if (!(await currentBinding())) {
+        this.tokens.releaseProgressImageToken(token, claimId);
+        return null;
+      }
       const rendered = await this.renderer(graph, execution, options, statistics);
-      if (!rendered) {
+      if (!rendered || !(await currentBinding())) {
         this.tokens.releaseProgressImageToken(token, claimId);
         return null;
       }

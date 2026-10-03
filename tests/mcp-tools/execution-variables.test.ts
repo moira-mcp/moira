@@ -855,13 +855,14 @@ describe("runtime execution variables", () => {
       await callMCPTool<any>(client, "session", { action: "progress", executionId }),
     ).toMatchObject({ title: "Edited runtime progress", activeNodeId: "first" });
 
+    const noProgressWorkflowName = `No Progress ${randomUUID()}`;
     const noProgressWorkflow = await callMCPTool<any>(client, "manage", {
       action: "create",
       workflow: {
         metadata: {
-          name: `No Progress ${randomUUID()}`,
+          name: noProgressWorkflowName,
           version: "1.0.0",
-          description: "No progress error fixture",
+          description: "Completed execution without authored progress",
         },
         nodes: [
           { id: "start", type: "start", connections: { default: "end" } },
@@ -874,17 +875,39 @@ describe("runtime execution variables", () => {
     });
     const noProgressExecutionId = noProgressStarted.match(/Process ID: ([a-f0-9-]+)/)?.[1];
     expect(noProgressExecutionId).toBeDefined();
-    expect(
-      await callMCPToolRaw(client, "session", {
-        action: "progress",
-        executionId: noProgressExecutionId,
-      }),
-    ).toContain("no progress graph");
+    const noProgressContext = await callMCPTool<any>(client, "session", {
+      action: "execution_context",
+      executionId: noProgressExecutionId,
+    });
+    const noProgressMetadata = await callMCPTool<Record<string, unknown>>(client, "session", {
+      action: "progress",
+      executionId: noProgressExecutionId,
+    });
+    expect(noProgressMetadata).toMatchObject({
+      source: "metadata",
+      executionId: noProgressExecutionId,
+      workflowId: noProgressWorkflow.workflowId,
+      workflowName: noProgressWorkflowName,
+      workflowVersion: "1.0.0",
+      executionWorkflowVersion: "1.0.0",
+      executionRevision: noProgressContext.revision,
+      executionStatus: "completed",
+      taskTitle: noProgressWorkflowName,
+      taskIdentity: null,
+      taskIdentityRevision: noProgressContext.metadataRevisions.taskIdentity,
+    });
+    for (const field of ["process", "nodes", "route", "variables", "statistics"]) {
+      expect(noProgressMetadata).not.toHaveProperty(field);
+    }
     const noProgressHttp = await fetch(
       `${getTestBaseUrl()}/api/executions/${noProgressExecutionId}/progress`,
       { headers: { Cookie: `better-auth.session_token=${cookie}` } },
     );
-    expect(noProgressHttp.status).toBe(404);
+    expect(noProgressHttp.status).toBe(200);
+    const noProgressHttpBody = (await noProgressHttp.json()) as {
+      data: Record<string, unknown>;
+    };
+    expect(noProgressHttpBody.data).toEqual(noProgressMetadata);
 
     const imageGrant = await callMCPTool<any>(client, "session", {
       action: "progress-image-token",

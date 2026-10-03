@@ -1,11 +1,11 @@
 /**
- * What every notification of a run is framed with: the flow's name, the run's task note, the run
+ * What every notification of a run is framed with: the flow's name, the run's task title, the run
  * page, and the run's progress as of the sending node. One implementation for the
  * `user-notification` node, the deprecated `telegram-notification` node and the lock PIN message.
  *
  * The run is read as of the node that sends: inside an executor cycle that is the live run (the
  * persisted state plus what the cycle changed before this node — a plan the agent just submitted,
- * an item it just finished, a note it just set); elsewhere the persisted run.
+ * an item it just finished); independently mutable task identity comes from the current stored run.
  */
 
 import type { IDataRepository } from "../interfaces/data-repository.js";
@@ -17,7 +17,11 @@ import {
   waitingActorLine,
   type PlanListMode,
 } from "../utils/execution-progress-lists.js";
-import { projectExecutionRun } from "../utils/execution-run-projection.js";
+import {
+  projectExecutionRun,
+  resolveExecutionTaskTitle,
+} from "../utils/execution-run-projection.js";
+import { metadataRevision, ConflictError } from "@mcp-moira/shared";
 import { withInFlightPause } from "../utils/execution-visits.js";
 import {
   composeNotification,
@@ -29,7 +33,7 @@ import {
 
 export interface NotificationFrame {
   flowName: string;
-  note: string | null;
+  taskTitle: string | null;
   url: string;
   graph: WorkflowGraph | null;
   /** The run as of the sending node, before its in-flight visit; null for an unsaved inline run. */
@@ -45,7 +49,7 @@ export interface NotificationFrame {
 
 /**
  * Resolve the frame. Lookups that fail leave their part at its fallback — the workflow id for the
- * name, no note, no progress — because a notification is still worth sending without them.
+ * name, no task title, no progress — because a notification is still worth sending without them.
  */
 export async function resolveNotificationFrame(
   repository: IDataRepository,
@@ -56,7 +60,7 @@ export async function resolveNotificationFrame(
   const userId = context.userId || "system";
   const frame: NotificationFrame = {
     flowName: context.workflowId || "Workflow",
-    note: null,
+    taskTitle: null,
     url: runPageUrl(context),
     graph: null,
     run: null,
@@ -70,9 +74,15 @@ export async function resolveNotificationFrame(
     // The workflow id is an intentional non-secret fallback for the name.
   }
   try {
-    frame.run = liveRun ? liveRun() : await repository.getExecution(context.executionId);
-    frame.note = frame.run?.note ?? null;
     frame.graph = await repository.getWorkflowGraph(context.workflowId, userId);
+  } catch {
+    // Independent task identity remains usable without the authored graph.
+  }
+  try {
+    frame.run = await currentNotificationRun(repository, context, liveRun);
+    frame.taskTitle = frame.run
+      ? resolveExecutionTaskTitle(frame.graph ?? undefined, frame.run)
+      : null;
     const sender = frame.graph?.nodes.find((node) => node.id === nodeId);
     const next = (sender?.connections as Record<string, string | undefined> | undefined)?.default;
     frame.closing = frame.graph?.nodes.find((node) => node.id === next)?.type === "end";
@@ -97,7 +107,7 @@ export function frameNotification(
   const escape = textEscaper(options.format);
   const mode = options.planList ?? "progress";
   return composeNotification({
-    heading: notificationHeading(frame.flowName, frame.note, frame.url, options.format),
+    heading: notificationHeading(frame.flowName, frame.taskTitle, frame.url, options.format),
     body,
     planList: (budget) => {
       const ended = frame.closing;
@@ -109,4 +119,56 @@ export function frameNotification(
     waitingLine: waitingActorLine(frame.progress, escape),
     limit: options.limit,
   });
+}
+
+/** Keep the sending cycle's context and visits, but reconcile independently mutable identity. */
+export async function currentNotificationRun(
+  repository: IDataRepository,
+  context: Pick<ExecutionContext, "executionId" | "workflowId" | "userId">,
+  liveRun?: () => WorkflowExecution,
+): Promise<WorkflowExecution | null> {
+  const stored = await repository.getExecution(context.executionId);
+  const live = liveRun?.();
+  if (!stored) return live ?? null;
+  const owned =
+    stored.executionId === context.executionId &&
+    stored.workflowId === context.workflowId &&
+    stored.userId === context.userId;
+  const source = live ?? stored;
+  return { ...source, taskIdentity: owned ? (stored.taskIdentity ?? null) : null };
+}
+
+/** A picture and its caption use one current identity even when rendering yields to a rename. */
+export async function prepareNotificationFrame<T>(
+  repository: IDataRepository,
+  context: ExecutionContext,
+  nodeId: string,
+  frame: NotificationFrame,
+  render: (frame: NotificationFrame) => Promise<T>,
+): Promise<{ frame: NotificationFrame; value: T }> {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const refresh = async () => {
+      if (!frame.run) return;
+      const run = await currentNotificationRun(
+        repository,
+        context,
+        frame.run ? () => frame.run! : undefined,
+      );
+      if (run)
+        frame = {
+          ...frame,
+          run,
+          taskTitle: resolveExecutionTaskTitle(frame.graph ?? undefined, run),
+          progress: frame.graph?.progress
+            ? projectExecutionRun(frame.graph, withInFlightPause(frame.graph, run, nodeId))
+            : null,
+        };
+    };
+    await refresh();
+    const before = metadataRevision(frame.run?.taskIdentity ?? null);
+    const value = await render(frame);
+    await refresh();
+    if (before === metadataRevision(frame.run?.taskIdentity ?? null)) return { frame, value };
+  }
+  throw new ConflictError("Task identity changed while preparing notification");
 }

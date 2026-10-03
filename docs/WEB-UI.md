@@ -597,6 +597,10 @@ Active route highlighting via NavLink isActive.
 
 ### Home page
 
+Run headings use explicit task identity, resolved authored progress title, then own flow name.
+The task name, own workflow name and arbitrary note remain separately readable in active and
+recent work, execution cards and lock/edit warnings; equal note/title text is still inspectable.
+
 The home page (`pages/Dashboard.tsx`, route `/`) opens, for an account with no guide progress at all,
 with the one-time first-run prompt (`first-run-prompt`, see "Guides"). It then leads with how Moira
 is meant to be used (`home-how-it-works`). It shows three numbered steps (`home-steps`):
@@ -896,9 +900,10 @@ own runs from `GET /api/executions/overview`, 50 trees a page, runs waiting for 
 - **Card** (`OverviewCard.tsx`, `data-testid="overview-card"`, `data-run-id`, `data-status`): a
   constant 340 px height with fixed rows — status (its meaning in a hint) and the age of the subtree's
   last step (dates in the hint), the two-line title as the button that opens the panel
-  (`overview-card-open`), the flow or «↳ child of «…»», then the waiting banner (`overview-waiting`)
+  (`overview-card-open`), the flow name or a «↳ child of «…»» relationship (the child's own flow
+  name is available in its hover/focus hint), then the waiting banner (`overview-waiting`)
   or the stage strip, the plan (`overview-plan`) and the footer with flags for child runs and
-  refusals (and the note when it differs from the title). The plan window (`planRows`) is centred on
+  refusals (and an arbitrary note, even when it matches the title). The plan window (`planRows`) is centred on
   the current item in five or six one-line slots (six without the strip row); a current item longer
   than one line takes two; what does not fit folds into «↑ N» / «↓ N». The list items come from the
   overview's five-item window; a flow with stages but no list shows the stages as the plan.
@@ -911,6 +916,8 @@ own runs from `GET /api/executions/overview`, 50 trees a page, runs waiting for 
   notification line (`waitingNotificationText`, shared with the run page), the current step, refusals,
   the active block's list through `BlockListCard` and all stages from `GET /api/executions/:id/progress`,
   child runs, dates and **Open run**. No answer form.
+  Metadata-only progress keeps task, flow and note visible without inventing stage or list panels.
+  Its own live identity event refreshes the open detail; unrelated run events do not refetch it.
 - **Live updates** (`liveConnection.ts`, `useLiveOverview.ts`, `useOverviewRows.ts`): one tab per
   browser leads through Web Locks (`moira-overview-stream`) and holds the `EventSource` on
   `/api/executions/overview/stream`; the others receive changes and the connection state over the
@@ -1230,6 +1237,15 @@ is shown only on a wide screen; a reader's says that only the owner edits and th
 Template** makes their own copy.
 
 ### Run page (ExecutionInspector component)
+
+The task header, own flow name and arbitrary note remain separate with either trace or metadata
+progress. A graphless metadata response keeps the technical graph/variables without map/block tabs.
+Live same-run renames preserve the loaded definition, diagram DOM and scroll position. Reads and
+answer/context-write continuations belong to the committed execution lifetime: delayed prior-run
+detail, definition, progress and cursor responses cannot install old state or redirect actions,
+including A→B→A navigation. Pending lock history uses the current resource key, retains its own
+error and does not show previous-run data. Clearing a cursor prevents a deferred cursor read from
+restoring it.
 
 The execution page shows one run as the process its workflow declares. One component serves the
 user and admin routes through dependency injection.

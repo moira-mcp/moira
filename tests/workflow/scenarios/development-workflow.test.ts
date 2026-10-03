@@ -4,7 +4,6 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { findCatalogEntryBySlug } from "@mcp-moira/shared";
 import {
   GraphExecutionEngine,
   GraphValidator,
@@ -17,6 +16,7 @@ import {
   type WorkflowGraph,
 } from "@mcp-moira/workflow-engine";
 import { calculateCoverage, exportCoverageReport } from "../../helpers/coverage-calculator.js";
+import { catalogGraph } from "../../helpers/catalog-graphs.js";
 import {
   runScenario as runScenarioBase,
   type MockInput,
@@ -58,9 +58,9 @@ function inputSchemaOf(node: PresentingNode): ReadableInputSchema {
 }
 
 function loadWorkflow(): WorkflowGraph {
-  return structuredClone(
-    findCatalogEntryBySlug("software-development-flow")!.graph,
-  ) as unknown as WorkflowGraph;
+  return catalogGraph("software-development-flow", {
+    baseDir: process.env.TASK_IDENTITY_CATALOG_DIR,
+  });
 }
 
 function useScenarioMaterializeGrant(engine: GraphExecutionEngine): void {

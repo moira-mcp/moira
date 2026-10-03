@@ -81,14 +81,25 @@ with a monotonically increasing token. The worker opens one lease handle with an
 compare-and-set renewal; a five-second heartbeat then renews the 30-second lease.
 
 Materialize and progress-image grants bind context-derived content to an independent context
-revision as well as their execution/node or workflow-step constraints. Metadata changes therefore
+revision as well as their execution/node or workflow-step constraints. Progress images additionally
+bind independent task identity, including its change token and absent identity. Metadata changes therefore
 do not masquerade as step transitions, while a URL cannot render different context after issuance.
 
 The execution revision is the workflow-step generation. It advances when an original `step`
 persists workflow state or an explicit stop ends the run; receipt replay and session mutations such as note, parent, reminder, or
 runtime-variable changes do not advance it or invalidate the presented attempt. Those mutations
 guard the field or stored snapshot they actually change with independent opaque parent, context,
-and reminder revisions returned by the corresponding read and mutation surfaces.
+reminder and task-identity revisions returned by the corresponding read and mutation surfaces.
+
+Execution task naming uses the common `ExecutionService.updateExecutionTaskTitle` mutation and optional
+persisted `taskIdentity: { title, changedAt, changeId }`. Both the step revision and opaque identity
+revision guard the owner-only active (`running`, including stored `waiting`) write before no-op
+comparison. A trimmed identical title changes no activity/event; a real rename receives server time
+and a fresh change token, including same-clock A→B→A. Completed/stopped runs reject it. Text must
+have 1–500 JavaScript string code units after trimming, with Unicode controls/formatting characters
+rejected before trimming. Existing execution writers preserve current identity and its activity
+when committing an older context snapshot. Naming preserves the presented step, question and other
+metadata revisions; it is not a variable or note mutation.
 
 A person may answer the waiting step from the run page (`POST /api/executions/:id/answer`). That
 runs the step through an internal durable attempt: the agent's presentation is superseded before
@@ -306,7 +317,8 @@ why in the pull request. Workflow version pinning and blanket migration do not r
 
 Two columns of `workflowExecution` feed the overview's filters and order. `lastActivityAt` is the
 run's last event of work — the latest `enteredAt` or `leftAt` of its visits (a step handed in, a
-directive shown, a variable adjustment by the agent or a person) or `completedAt`; a note, reminders,
+directive shown, a variable adjustment by the agent or a person), `completedAt` or a meaningful
+`taskIdentity.changedAt`; a normalized no-op title, a note, reminders,
 a new parent, a journal entry, a lock or the agent's `await-user` do not move it. `refusalCount` is
 `countRefusals` over the journal. One function, `executionActivity`
 (`packages/shared/src/database/execution-activity.ts`), derives both, and every writer that stores the
@@ -599,7 +611,7 @@ step({
     execution_note: "Step 3: API integration done",
   },
 });
-// Note: execution_note is stripped from input passed to workflow
+// execution_note remains subject to the node inputSchema; it never supplies a task heading
 ```
 
 ### Teleport (Jump to Different Workflow Branch)
@@ -929,7 +941,8 @@ interface WorkflowExecution {
   globalContext: ExecutionContext;
   status: "running" | "completed";
   errors?: ExecutionError[]; // Persistent error log
-  note?: string | null; // User-provided note for identification (max 500 chars)
+  note?: string | null; // Arbitrary operational note (max 500 chars), never a task heading
+  taskIdentity?: { title: string; changedAt: number; changeId: string } | null;
   stopReason?: string | null; // Explicit stop explanation; null for ordinary completion
   createdAt: number;
   updatedAt: number;
@@ -1361,9 +1374,10 @@ interface ValidationError {
 - **Auto-execution** - renders the portable message and invokes the shared user communication service
 - **Notification frame** (`services/notification-frame.ts` over `utils/notification-text.ts`,
   shared with the deprecated handler and the lock PIN message) - the delivered text is the heading
-  `<workflow name> · <run note>` linked to `runPageUrl` (Markdown `[…](url)` with brackets turned
-  into parentheses, HTML `<a href>`, plain text with the URL on the next line; the name alone when
-  the run has no note), then the rendered `message`, then the plan by `planList`
+  `<workflow name> · <canonical task name>` linked to `runPageUrl` (Markdown `[…](url)` with brackets
+  turned into parentheses, HTML `<a href>`, plain text with the URL on the next line). Canonical
+  precedence is explicit identity, resolved authored progress title, then own flow name; a duplicate
+  flow/task label is not repeated. Notes remain separate. Then come the rendered `message` and plan by `planList`
   (`progress`: `📝 done/total: current item`; `full`: `📝 done/total` and numbered `✓`/`▶`/`○` items,
   folded around the current item into `… N earlier` / `… N more` to fit; `none` — and when the
   node's `default` connection leads straight to an `end` node, the run's last message, no item is
@@ -1381,7 +1395,10 @@ interface ValidationError {
 - **Run as of the node** - the frame and an attached image read the handler's `liveRun()` — the
   persisted run with the current cycle's visits, variables and note folded in as the executor will
   save them — projected with the node in flight (`withInFlightPause`); without a live run (an inline
-  subgraph child) the persisted run
+  subgraph child) the persisted run. Reconcile only current authoritative task identity into that
+  live copy, preserving unsaved variables and visits. Compose headings after awaited channel and
+  rendering dependencies; trusted PIN composition occurs inside its existing delivery callback.
+  Sent historical notices retain their original name
 - **Plan selection** - the bound list nearest the run (the active block's, else the most recently
   passed bound block's, else — before any bound block is reached — the first bound block whose
   items resolve); an empty plan or an unbound run adds no plan lines
@@ -1766,15 +1783,17 @@ Action-based tool for session-related information.
 // Parameters
 {
   action: 'user' | 'executions' | 'execution_context' | 'current_step' | 'diagnose' | 'recover'
-        | 'update-note' | 'await-user' | 'stop-execution';
-  executionId?: string;  // Required for execution_context, current_step, diagnose, recover, update-note, await-user
+        | 'update-note' | 'update-task-title' | 'await-user' | 'stop-execution';
+  executionId?: string;  // Required for execution reads, update-note, update-task-title, await-user, stop-execution
   nodeId?: string;       // Required for recover: the node the run must resume from
   variableValues?: Record<string, unknown>; // recover: values written into the execution context
   note?: string;         // Required for update-note (max 500 chars)
+  taskTitle?: string;    // update-task-title: normalized nonempty text, max 500 JS code units
+  expectedTaskIdentityRevision?: string; // update-task-title: opaque revision from execution_context
   question?: string;     // await-user: what the agent needs from the person (1-500 chars)
   options?: string[];    // await-user: up to 4 choices (1-200 chars each)
   resolve?: true;        // await-user: clear the open question instead of raising one
-  expectedRevision?: number; // stop-execution: required step revision from execution_context
+  expectedRevision?: number; // stop-execution and update-task-title: required step revision
   reason?: string;       // stop-execution: required trimmed explanation, 1-500 chars
 }
 
@@ -1792,6 +1811,8 @@ Action-based tool for session-related information.
     workflowId: string;
     workflowSlug: string;         // Human-readable workflow identifier
     workflowOwnerHandle: string;  // Workflow owner's handle
+    taskTitle: string; // Canonical task name, independent of note
+    taskIdentity: { title: string; changedAt: number; changeId: string } | null;
     status: 'running' | 'completed' | 'locked';  // "locked" = running + active lock
     currentNodeId: string;
     note?: string | null;
@@ -1811,6 +1832,10 @@ Action-based tool for session-related information.
   workflowId: string;
   workflowSlug: string;         // Human-readable workflow identifier
   workflowOwnerHandle: string;  // Workflow owner's handle
+  taskTitle: string;
+  taskIdentity: { title: string; changedAt: number; changeId: string } | null;
+  revision: number;
+  metadataRevisions: { taskIdentity: string; parent: string; context: string; reminders: string };
   status: 'running' | 'completed' | 'locked';  // "locked" = running + active lock
   currentNodeId: string | null;
   waitingForInputNodeId: string | null;
@@ -1829,6 +1854,15 @@ Action-based tool for session-related information.
 
 // action: 'current_step' - Returns the authoritative current presentation
 string  // Formatted directive including Process ID and Step attempt ID
+
+// action: 'update-task-title' - Guarded active-owner naming; no step transition
+{
+  executionId: string;
+  taskIdentity: { title: string; changedAt: number; changeId: string };
+  revision: number;
+  taskIdentityRevision: string;
+  changed: boolean;
+}
 
 // action: 'stop-execution' - Ends an owned active run; exact repeats return the same data
 {

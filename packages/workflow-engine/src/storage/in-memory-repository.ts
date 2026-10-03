@@ -28,6 +28,8 @@ import {
   metadataRevision,
   stepAttemptBindingMatches,
   stepAttemptContinuationMatches,
+  normalizeExecutionTaskTitle,
+  type ExecutionTaskTitleMutationResult,
 } from "@mcp-moira/shared";
 import { encryptValue, decryptValue } from "../utils/encryption.js";
 import { humanGateChanged, humanGateWaiting } from "../utils/human-gate.js";
@@ -364,6 +366,7 @@ export class InMemoryRepository implements IDataRepository {
       execution.revision += 1;
       // The agent's question is not the saver's to write (as in the database's save).
       execution.awaitingUser = awaitingUserAfterMove(current.awaitingUser, execution);
+      execution.taskIdentity = structuredClone(current.taskIdentity ?? null);
     }
     this.executions.set(execution.executionId, structuredClone(execution));
 
@@ -525,6 +528,39 @@ export class InMemoryRepository implements IDataRepository {
       execution.note = note;
       execution.updatedAt = Date.now();
     }
+  }
+
+  async updateExecutionTaskTitle(
+    executionId: string,
+    userId: string,
+    expectedRevision: number,
+    expectedTaskIdentityRevision: string,
+    taskTitle: string,
+  ): Promise<ExecutionTaskTitleMutationResult> {
+    const title = normalizeExecutionTaskTitle(taskTitle);
+    const execution = this.executions.get(executionId);
+    if (!execution || execution.userId !== userId)
+      throw new ValidationError("Execution must belong to the authenticated user");
+    if (!["running", "waiting"].includes(execution.status))
+      throw new ValidationError("Only active executions accept task title changes");
+    if (execution.revision !== expectedRevision)
+      throw new ConflictError("Execution state changed; reload before changing task title");
+    if (metadataRevision(execution.taskIdentity ?? null) !== expectedTaskIdentityRevision)
+      throw new ConflictError("Execution task identity changed; reload before changing task title");
+    const changed = execution.taskIdentity?.title !== title;
+    if (changed) {
+      execution.taskIdentity = { title, changedAt: Date.now(), changeId: randomUUID() };
+      execution.updatedAt = execution.taskIdentity.changedAt;
+      Object.assign(execution, executionActivity(execution));
+    }
+    const taskIdentity = structuredClone(execution.taskIdentity!);
+    return {
+      executionId,
+      taskIdentity,
+      revision: execution.revision,
+      taskIdentityRevision: metadataRevision(taskIdentity),
+      changed,
+    };
   }
 
   async setExecutionAwaitingUser(
@@ -1197,6 +1233,7 @@ export class InMemoryRepository implements IDataRepository {
 
     this.executions.set(input.execution.executionId, {
       ...structuredClone(input.execution),
+      taskIdentity: structuredClone(stored.taskIdentity ?? null),
       revision: stored.revision + 1,
       awaitingUser: null,
       updatedAt: Date.now(),
@@ -1243,6 +1280,7 @@ export class InMemoryRepository implements IDataRepository {
     updatedExecution.errors = structuredClone(current.errors);
     updatedExecution.reminders = structuredClone(current.reminders);
     updatedExecution.parentExecutionId = current.parentExecutionId;
+    updatedExecution.taskIdentity = structuredClone(current.taskIdentity ?? null);
     updatedExecution.awaitingUser = input.answeredByUser
       ? awaitingUserAfterMove(current.awaitingUser, updatedExecution)
       : null;
