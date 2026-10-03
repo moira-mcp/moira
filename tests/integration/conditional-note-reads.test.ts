@@ -37,8 +37,8 @@ test("authenticated conditional reads preserve note audit and see changes from a
           email: `conditional-${randomUUID()}@example.test`,
           name: "Conditional Reader",
           password: "ReadProtocol123!",
-          termsAccepted: true,
-          nonResidentAccepted: true,
+          acceptedTermsAt: new Date().toISOString(),
+          acceptedNotRussianResidentAt: new Date().toISOString(),
         }),
       }),
     );

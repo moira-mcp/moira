@@ -34,8 +34,8 @@ test("mounted workflow list and sharing aliases consume one admission and one AP
           email: `mounted-${randomUUID()}@example.test`,
           name: "Mounted Reader",
           password: "ReadProtocol123!",
-          termsAccepted: true,
-          nonResidentAccepted: true,
+          acceptedTermsAt: new Date().toISOString(),
+          acceptedNotRussianResidentAt: new Date().toISOString(),
         }),
       }),
     );
@@ -122,8 +122,8 @@ test("mounted user routes consume one quota and admission, preserve standalone g
           email: `mounted-user-${randomUUID()}@example.test`,
           name: "User Reader",
           password: "ReadProtocol123!",
-          termsAccepted: true,
-          nonResidentAccepted: true,
+          acceptedTermsAt: new Date().toISOString(),
+          acceptedNotRussianResidentAt: new Date().toISOString(),
         }),
       }),
     );

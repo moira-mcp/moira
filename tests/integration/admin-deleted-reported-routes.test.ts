@@ -24,8 +24,8 @@ test("deleted admin route forwards date bounds before paging and retains email d
         email: `deleted-${randomUUID()}@example.test`,
         name: "Deletion Reader",
         password: "ReadProtocol123!",
-        termsAccepted: true,
-        nonResidentAccepted: true,
+        acceptedTermsAt: new Date().toISOString(),
+        acceptedNotRussianResidentAt: new Date().toISOString(),
       }),
     }),
   );
@@ -166,8 +166,8 @@ test("reported admin pages preserve read audit, validated takedown and active in
         email: `reported-${randomUUID()}@example.test`,
         name: "Abuse Reader",
         password: "ReadProtocol123!",
-        termsAccepted: true,
-        nonResidentAccepted: true,
+        acceptedTermsAt: new Date().toISOString(),
+        acceptedNotRussianResidentAt: new Date().toISOString(),
       }),
     }),
   );

@@ -28,8 +28,8 @@ test("admin user lookup stays compact, revalidates current identity and never by
           email: `lookup-${randomUUID()}@example.test`,
           name: "Lookup Reader",
           password: "ReadProtocol123!",
-          termsAccepted: true,
-          nonResidentAccepted: true,
+          acceptedTermsAt: new Date().toISOString(),
+          acceptedNotRussianResidentAt: new Date().toISOString(),
         }),
       }),
     );
