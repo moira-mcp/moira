@@ -33,9 +33,17 @@ RUN apk add --no-cache \
 RUN npm install -g tsx serve
 
 # ===================================
+# Native dependency build tools - excluded from runtime
+# ===================================
+FROM core AS dependency-build
+
+# Native modules fall back to compilation when a prebuilt binary is unavailable.
+RUN apk add --no-cache python3 make g++
+
+# ===================================
 # Base stage - dependencies
 # ===================================
-FROM core AS base
+FROM dependency-build AS base
 
 # Copy package files for dependency resolution
 COPY package*.json ./
@@ -113,7 +121,7 @@ RUN npx tsc --noEmit --project packages/web-backend/tsconfig.json
 # and test tooling (webpack, astro, jest, playwright, eslint, drizzle-kit, …)
 # has no job at runtime, so none of it is installed here. The services run
 # through the globally installed `tsx`, which needs no local typescript.
-FROM core AS runtime-deps
+FROM dependency-build AS runtime-deps
 
 COPY package*.json ./
 COPY packages/workflow-engine/package.json ./packages/workflow-engine/
