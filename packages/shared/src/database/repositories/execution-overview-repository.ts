@@ -137,7 +137,7 @@ export class ExecutionOverviewRepository {
 
     const shown = `
       WITH RECURSIVE
-        mine AS (
+        mine AS MATERIALIZED (
           SELECT r.executionId, r.parentExecutionId, r.workflowId, r.note, r.refusalCount,
                  r.lastActivityAt, r.createdAt, ${STATUS_SQL} AS status
           FROM workflowExecution r
@@ -189,27 +189,27 @@ export class ExecutionOverviewRepository {
           WHERE s.anyMatch = 1 ${idle.length ? `AND ${idle.join(" AND ")}` : ""}
         )`;
 
-    const total = (
-      this.sqlite.prepare(`${shown} SELECT COUNT(*) AS n FROM shown s`).get(params) as {
-        n: number;
-      }
-    ).n;
-    const roots = (
-      this.sqlite
-        .prepare(
-          `${shown}
-           SELECT s.rootId FROM shown s JOIN mine root ON root.executionId = s.rootId
-           ORDER BY s.anyWaitingUser DESC, ${order}, root.executionId
-           LIMIT @limit OFFSET @offset`,
-        )
-        .all(params) as Array<{ rootId: string }>
-    ).map((row) => row.rootId);
+    // Membership and its exact count share the materialized CTE in one statement. A page
+    // beyond the end still carries its count, without traversing every owned tree twice.
+    const selected = this.sqlite
+      .prepare(
+        `${shown}
+      SELECT (SELECT COUNT(*) FROM shown) AS total,
+        (SELECT json_group_array(rootId) FROM (
+          SELECT s.rootId FROM shown s JOIN mine root ON root.executionId = s.rootId
+          ORDER BY s.anyWaitingUser DESC, ${order}, root.executionId
+          LIMIT @limit OFFSET @offset
+        )) AS roots`,
+      )
+      .get(params) as { total: number; roots: string };
+    const total = selected.total;
+    const roots = JSON.parse(selected.roots) as string[];
     if (roots.length === 0) return { total, roots, nodes: [] };
 
     const nodes = this.sqlite
       .prepare(
         `WITH RECURSIVE
-           mine AS (
+           mine AS MATERIALIZED (
              SELECT r.executionId, r.parentExecutionId, r.workflowId, r.note, r.refusalCount,
                     r.lastActivityAt, ${STATUS_SQL} AS status
              FROM workflowExecution r
@@ -263,7 +263,7 @@ export class ExecutionOverviewRepository {
     const rows = this.sqlite
       .prepare(
         `WITH RECURSIVE
-           mine AS (
+           mine AS MATERIALIZED (
              SELECT r.executionId, r.parentExecutionId, r.lastActivityAt, ${STATUS_SQL} AS status
              FROM workflowExecution r
              WHERE r.userId = @userId

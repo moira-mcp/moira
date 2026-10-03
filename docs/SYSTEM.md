@@ -320,10 +320,36 @@ in SQL and adds the indexes `(userId, state, lastActivityAt)` and `(parentExecut
 decides the overview's membership, nesting and order in SQL: the status predicate, the candidate set,
 roots (candidates with no candidate ancestor, found by a recursive CTE), each root's tree, the subtree
 facts (a match anywhere, the latest activity, a run waiting for its person) and paging over roots.
-`packages/web-backend/src/services/execution-overview.ts` projects the page's runs into rows in batch —
-the runs in one query, each flow's definition once (`WorkflowRepository.getManyForUser`), the
-notification marks in two (`ExecutionNotificationRepository.latestForCurrentWaits`) — so the number of
-queries does not grow with the page; the projection is `projectExecutionRun`.
+The owner's scalar rows are materialized before recursive traversal, and exact root count and
+root pagination share one SQL statement, including an empty page beyond the last root.
+`packages/web-backend/src/services/execution-overview.ts` reads execution identities and current
+progress inputs in batches, loads each flow's definition once (`WorkflowRepository.getManyForUser`),
+and reads notification marks through `ExecutionNotificationRepository.latestForCurrentWaits`.
+Batch definition access uses `AuthorizationService.canMany` with the same central policy as a
+single-resource read, including the strongest direct or group grant; it does not give an operator
+the owner's authority.
+
+`progressReadDependencies` determines the variables, counter histories and list windows needed
+for the compact projection. `ExecutionRepository.getManyForProgress` selects those values before
+they cross SQLite: unrelated variables, node states, journals and reminders are not returned.
+List windows preserve array length, item indices, counter semantics and JSON value types. Runtime
+fragment dependencies are discovered in additional batches; their depth, rather than the number of
+page rows, determines these reads. Changing snapshots receive bounded retries and a `ConflictError`
+if they do not settle. A moving cursor can require the needed list in full to keep its counters and
+items coherent. These narrowed execution objects are read-only inputs and must never be saved.
+
+`projectExecutionRunSummary` shares the full projection's route, stage, wait and list rules while
+omitting narrative content, facts, route output and inactive lists. The active list carries its
+window around the current item. Shared historical item lookup finds the predecessor write by visit
+sequence, including when a reader moves the cursor backward. Full execution reads and
+`projectExecutionRun` retain the engine, MCP and detailed-progress contracts.
+
+`GET /api/workflows` uses `DatabaseRepository.listWorkflowSummaries`, delegated to
+`WorkflowRepository.listSummaries`. The query returns authored metadata and listing facts without
+executable nodes crossing SQLite. Full and summary lists share access, filters, exact counts,
+pagination bounds and deterministic ID tie-breaking. Metadata receives the same schema stamping;
+the reported size is the UTF-8 byte length of the stored workflow JSON. Full workflow retrieval
+continues to return the executable definition.
 
 The overview derives `stopped` from a non-null `stopReason` (migration `0049_execution_stop`),
 separately from `completed`. Its default `active` filter removes stopped roots and descendants;

@@ -1733,6 +1733,8 @@
       "subtitle": "Your runs in progress: what each one waits for and how far it got.",
       "total": "Tasks shown: {{count}}",
       "error": "The overview could not be loaded.",
+      "workflowChoicesErrorTitle": "Flow filter unavailable",
+      "workflowChoicesError": "The flow list could not be loaded. Try again to filter by flow.",
       "retry": "Try again",
       "board": "Tasks",
       "status": {

@@ -205,20 +205,31 @@ export function itemIndexResolver(
   const root = path.split(/[.[]/u)[0];
   const rest = path.slice(root.length);
   const byName = new Map(states.map((state) => [state.name, state]));
+  const direct = byName.get(root);
+  const localStates = direct ? [] : states.filter((state) => state.name.startsWith(`${root}.`));
+  const beforeVisit = (state: ExecutionVariableState, seq: number): unknown => {
+    // Histories follow the recorded route. A predecessor lookup also works when callers move
+    // their cursor backwards, without rescanning every write for every pass.
+    let low = 0;
+    let high = state.history.length;
+    while (low < high) {
+      const middle = (low + high) >>> 1;
+      if (state.history[middle].seq < seq) low = middle + 1;
+      else high = middle;
+    }
+    return low ? state.history[low - 1].value : undefined;
+  };
   return (visit) => {
     // The root may be a global (history by name) or a node-local output (history by `node.field`).
-    const direct = byName.get(root);
     let rootValue: unknown;
     if (direct) {
-      const before = direct.history.filter((change) => change.seq < visit.seq);
-      rootValue = before.length ? before[before.length - 1].value : defaults[root];
+      rootValue = beforeVisit(direct, visit.seq);
+      if (!direct.history.length || direct.history[0].seq >= visit.seq) rootValue = defaults[root];
     } else {
-      const nodeScope: Record<string, unknown> = {};
-      for (const state of states) {
-        if (!state.name.startsWith(`${root}.`)) continue;
-        const before = state.history.filter((change) => change.seq < visit.seq);
-        if (before.length) {
-          nodeScope[state.name.slice(root.length + 1)] = before[before.length - 1].value;
+      const nodeScope: Record<string, unknown> = Object.create(null);
+      for (const state of localStates) {
+        if (state.history.length && state.history[0].seq < visit.seq) {
+          nodeScope[state.name.slice(root.length + 1)] = beforeVisit(state, visit.seq);
         }
       }
       rootValue = Object.keys(nodeScope).length ? nodeScope : undefined;

@@ -2447,7 +2447,10 @@ Authentication: Via token (no session required)
 
 ### GET /api/workflows
 
-List workflows with filtering, sorting, and pagination.
+List readable workflow metadata with filtering, sorting, and pagination. Executable node bodies
+are not included or loaded into the listing result; retrieve a workflow's complete definition
+through its detail endpoint. The list uses the same owner, public, direct-grant and group-grant
+access decisions and filters as full workflow reads.
 
 Query parameters:
 
@@ -2463,7 +2466,8 @@ Query parameters:
   total counts the scope
 - `validationStatus`: Filter by the cached validation status (valid, invalid, unknown, all), applied
   in the query so the page and the total agree with it. Default: all
-- `sort`: Sort field (createdAt, name). Default: createdAt
+- `sort`: Selector (`createdAt`, `name`). Default: `createdAt`; that selector orders by the stored
+  update time, while `name` orders by the stored name. Equal values use workflow ID ascending.
 - `sortOrder`: Sort direction (asc, desc). Default: desc
 - `limit`: Results per page (1-100). Default: 20
 - `offset`: Skip results. Default: 0
@@ -2489,11 +2493,12 @@ Response:
         errors: string[];
       };
       lastModified: number;
-      fileSize: number;
+      fileSize: number; // UTF-8 byte length of the stored workflow JSON, not the metadata response
     }>;
-    total: number;
-    validWorkflows: number;
-    invalidWorkflows: number;
+    totalWorkflows: number; // exact count of every matching readable workflow before pagination
+    validWorkflows: number; // cached-valid workflows on this page
+    invalidWorkflows: number; // other workflows on this page, including not checked
+    lastScan: number; // response time, epoch ms
   }
 }
 ```
@@ -2647,6 +2652,11 @@ interface OverviewRun {
 
 The step is named as the run page names it (the node's active label or display name, else its
 block's label) and never by a node id. Invalid parameters return 400.
+
+Rows carry compact current progress, including the active list's item window. The detailed
+`GET /api/executions/:id/progress` response retains the full authored-progress projection, lists
+and recorded route. A run changing repeatedly during dependency or list-window reads can return
+409; request the overview again rather than combining values from different reads.
 
 Authentication: Required
 

@@ -193,7 +193,7 @@ router.get(
     const offset = Math.max(0, parseInt(query.offset as string) || 0);
 
     // Get workflows with filters from repository
-    const result = await repository.listWorkflowsWithFilters({
+    const result = await repository.listWorkflowSummaries({
       userId,
       search,
       slugs,

@@ -92,6 +92,8 @@ export type {
   WorkflowInfo,
   WorkflowFilter,
   WorkflowListResult,
+  WorkflowSummary,
+  WorkflowSummaryListResult,
   WorkflowOwnership,
   SaveWorkflowOptions as RepoSaveWorkflowOptions,
   ValidationStatus,

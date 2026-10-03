@@ -21,6 +21,7 @@ import { ServerPagination } from "../components/ServerPagination";
 import { useDebounce } from "../hooks/useDebounce";
 import { useResource } from "../hooks/useResource";
 import { apiClient, type OverviewPage } from "../services/api-client";
+import { loadWorkflowChoices } from "../services/workflow-choices";
 import { OverviewBoard } from "../components/overview/OverviewBoard";
 import { OverviewPanel } from "../components/overview/OverviewPanel";
 import { OverviewFiltersPopover } from "../components/overview/OverviewFilters";
@@ -82,22 +83,11 @@ export const Overview: React.FC = () => {
     return () => window.clearInterval(timer);
   }, []);
 
-  const [workflows, setWorkflows] = useState<Array<{ id: string; name: string }>>([]);
-  useEffect(() => {
-    apiClient
-      .getWorkflows()
-      .then((response) =>
-        setWorkflows(
-          response.workflows.map((workflow) => ({
-            id: workflow.id,
-            name: workflow.metadata?.name || workflow.id,
-          })),
-        ),
-      )
-      .catch(() => {
-        // Without the list the flow filter is simply not offered.
-      });
-  }, []);
+  const workflowChoices = useResource(
+    "overview-workflow-choices",
+    useCallback(() => loadWorkflowChoices((request) => apiClient.getWorkflows(request)), []),
+  );
+  const workflows = workflowChoices.data ?? [];
 
   const query = overviewQuery(filters, PAGE_SIZE);
   const page = useResource<OverviewPage>(
@@ -308,6 +298,14 @@ export const Overview: React.FC = () => {
       actions={pageState}
     >
       {toolbar}
+      {workflowChoices.error ? (
+        <InlineError
+          title={t("pages.overview.workflowChoicesErrorTitle")}
+          message={t("pages.overview.workflowChoicesError")}
+          onRetry={() => void workflowChoices.refresh()}
+          retryLabel={t("pages.overview.retry")}
+        />
+      ) : null}
       <section
         className="min-h-[120px]"
         aria-label={t("pages.overview.board")}

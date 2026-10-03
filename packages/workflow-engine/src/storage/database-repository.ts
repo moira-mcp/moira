@@ -26,6 +26,7 @@ import {
   type ExecutionListResult,
   type WorkflowFilter,
   type WorkflowListResult,
+  type WorkflowSummaryListResult,
   type AdminWorkflowFilter,
   type AdminWorkflowListResult,
   type ExecutionError,
@@ -122,6 +123,10 @@ export class DatabaseRepository implements IDataRepository {
 
   async listWorkflowsWithFilters(filter: WorkflowFilter): Promise<WorkflowListResult> {
     return await this.workflowRepo.listWithFilters(filter);
+  }
+
+  async listWorkflowSummaries(filter: WorkflowFilter): Promise<WorkflowSummaryListResult> {
+    return this.workflowRepo.listSummaries(filter);
   }
 
   async getWorkflowGraph(workflowId: string, userId: string): Promise<WorkflowGraph | null> {

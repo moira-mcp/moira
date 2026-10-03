@@ -2,9 +2,10 @@
  * The rows of the overview of a person's runs.
  *
  * `ExecutionOverviewRepository` decides which runs a page shows and how they nest; this module
- * projects each of them into what a card shows. The page is projected in batch: its runs in one
- * query, the definitions of their flows in one (each loaded once, however many rows run it), the
- * notification marks in two — so the number of queries does not grow with the page. Node ids never
+ * projects each of them into what a card shows. Execution identities, definition-dependent values
+ * and relevant visits are read in batches; fragment depth determines additional discovery reads,
+ * not the number of rows. Flow definitions are loaded once per page and notification marks in two
+ * batch queries. Node ids never
  * reach the row: the step is named as the run page names it, else by its block, else not at all.
  */
 
@@ -12,6 +13,7 @@ import {
   ExecutionNotificationRepository,
   ExecutionOverviewRepository,
   ExecutionRepository,
+  ConflictError,
   WorkflowRepository,
   type ExecutionNotificationRow,
   type OverviewNode,
@@ -20,15 +22,19 @@ import {
 } from "@mcp-moira/shared";
 import {
   isAgentDirectiveNode,
-  projectExecutionRun,
-  type ExecutionProgress,
+  projectExecutionRunSummary,
+  progressReadDependencies,
+  PROGRESS_SUMMARY_LIST_WINDOW,
+  type ExecutionProgressSummary,
   type WorkflowExecution,
   type WorkflowGraph,
 } from "@mcp-moira/workflow-engine";
 import { stepNameIn } from "../utils/current-step.js";
 
 /** Items of the active block's list shown around the current one. */
-export const LIST_WINDOW = 5;
+export const LIST_WINDOW = PROGRESS_SUMMARY_LIST_WINDOW;
+
+const MAX_PROGRESS_READ_RETRIES = 3;
 
 export interface OverviewNotificationMark {
   kind: "first" | "remind";
@@ -171,10 +177,10 @@ function projectRow(
   notification: ExecutionNotificationRow | undefined,
   now: number,
 ): OverviewRun {
-  let progress: ExecutionProgress | null = null;
+  let progress: ExecutionProgressSummary | null = null;
   if (flow) {
     try {
-      progress = projectExecutionRun(flow.graph, execution, { now });
+      progress = projectExecutionRunSummary(flow.graph, execution, { now });
     } catch {
       progress = null;
     }
@@ -257,12 +263,126 @@ async function projectNodes(
   const rootParents = nodes
     .filter((node) => roots.includes(node.executionId) && node.parentExecutionId)
     .map((node) => node.parentExecutionId!);
-  const executions = await deps.executions.getMany([...ids, ...rootParents]);
-  const byId = new Map(executions.map((execution) => [execution.executionId, execution]));
+  const references = await deps.executions.getManyWorkflowReferences([...ids, ...rootParents]);
+  let executions: WorkflowExecution[] = [];
   const flows = await deps.workflows.getManyForUser(
-    executions.map((execution) => execution.workflowId),
+    references.map((execution) => execution.workflowId),
     userId,
   );
+  // Expand runtime fragment dependencies in batches. Already-read values decide only what
+  // additional inputs are needed; rendering and fragment trust remain the shared engine's job.
+  const requested = new Map<string, string>();
+  const unstableDiscoveryReads = new Map<string, number>();
+  for (;;) {
+    const loadedById = new Map(executions.map((execution) => [execution.executionId, execution]));
+    const reads = references.map((execution) => {
+      const flow = flows.get(execution.workflowId);
+      const dependencies = flow
+        ? progressReadDependencies(
+            flow.graph,
+            loadedById.get(execution.executionId)?.globalContext.variables,
+          )
+        : { variables: [] as string[], historyRoots: [] as string[], arrayWindows: [] };
+      return {
+        executionId: execution.executionId,
+        ...dependencies,
+        visits: false,
+        arrayWindows: dependencies.arrayWindows.map((window) => ({ ...window, start: 0, size: 0 })),
+      };
+    });
+    const missing = reads.filter((read) => {
+      return requested.get(read.executionId) !== JSON.stringify(read);
+    });
+    if (!missing.length) break;
+    const previousRequests = new Map(requested);
+    const missingById = new Map(missing.map((read) => [read.executionId, read]));
+    for (const read of missing) requested.set(read.executionId, JSON.stringify(read));
+    const loaded = await deps.executions.getManyForProgress(
+      missing.map((read) => read.executionId),
+      missing,
+    );
+    for (const execution of loaded) {
+      const previous = loadedById.get(execution.executionId);
+      if (!previous) continue;
+      const previousScope = JSON.parse(previousRequests.get(execution.executionId)!) as {
+        variables: string[] | null;
+      };
+      const scope = missingById.get(execution.executionId)!;
+      const previousVariables = previous.globalContext.variables;
+      const currentVariables = execution.globalContext.variables;
+      const sharedNames = (previousScope.variables ?? Object.keys(previousVariables)).filter(
+        (name) => scope.variables === null || scope.variables.includes(name),
+      );
+      const fragmentsChanged = sharedNames.some((name) => {
+        const before = Object.hasOwn(previousVariables, name) ? previousVariables[name] : undefined;
+        const after = Object.hasOwn(currentVariables, name) ? currentVariables[name] : undefined;
+        return (
+          before !== after &&
+          ((typeof before === "string" && before.includes("{{")) ||
+            (typeof after === "string" && after.includes("{{")))
+        );
+      });
+      // Stable dependency growth can need many batches. Bound changing snapshots instead of
+      // cutting off a valid static closure; a writer extending the next unseen dependency is
+      // also detected by the row's state generation/write timestamp.
+      if (
+        previous.revision !== execution.revision ||
+        previous.updatedAt !== execution.updatedAt ||
+        fragmentsChanged
+      ) {
+        const attempts = (unstableDiscoveryReads.get(execution.executionId) ?? 0) + 1;
+        unstableDiscoveryReads.set(execution.executionId, attempts);
+        if (attempts > MAX_PROGRESS_READ_RETRIES) {
+          throw new ConflictError("Execution progress changed while reading; retry");
+        }
+      }
+    }
+    const next = new Map(loaded.map((execution) => [execution.executionId, execution]));
+    executions = executions.length
+      ? executions.map((execution) => next.get(execution.executionId) ?? execution)
+      : loaded;
+  }
+  const finalReadsFor = (rows: WorkflowExecution[]) =>
+    rows.map((execution) => {
+      const flow = flows.get(execution.workflowId);
+      return {
+        executionId: execution.executionId,
+        visits: ids.includes(execution.executionId),
+        ...(flow
+          ? progressReadDependencies(flow.graph, execution.globalContext.variables)
+          : { variables: [], historyRoots: [], arrayWindows: [] }),
+      };
+    });
+  let finalReads = finalReadsFor(executions);
+  for (let attempt = 0; ; attempt++) {
+    executions = await deps.executions.getManyForProgress(
+      executions.map((execution) => execution.executionId),
+      finalReads,
+    );
+    const observed = finalReadsFor(executions);
+    const requestedById = new Map(finalReads.map((read) => [read.executionId, read]));
+    const changed = observed.some((read) => {
+      const requested = requestedById.get(read.executionId)!;
+      const missingVariable =
+        requested.variables !== null &&
+        (read.variables === null ||
+          read.variables.some((name) => !requested.variables!.includes(name)));
+      return (
+        missingVariable ||
+        (requested.arrayWindows.length > 0 &&
+          JSON.stringify(requested.arrayWindows) !== JSON.stringify(read.arrayWindows))
+      );
+    });
+    if (!changed) break;
+    if (attempt >= MAX_PROGRESS_READ_RETRIES)
+      throw new ConflictError("Execution progress changed while reading; retry");
+    // A moving cursor can invalidate a discovered window. Under sustained updates read the
+    // needed list as a whole once, so its counters and items come from the same SQLite row.
+    // Unrelated context and journals remain excluded. Changing fragment dependencies still
+    // requires a stable read; never return a heading assembled from missing inputs.
+    finalReads = attempt >= 1 ? observed.map((read) => ({ ...read, arrayWindows: [] })) : observed;
+  }
+  const byId = new Map(executions.map((execution) => [execution.executionId, execution]));
   const marks = deps.notifications.latestForCurrentWaits(
     nodes.filter((node) => node.status === "waiting-user").map((node) => node.executionId),
     now,

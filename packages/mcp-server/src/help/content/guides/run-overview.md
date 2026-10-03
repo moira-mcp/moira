@@ -66,6 +66,9 @@ horizontal strip.
   step for a week. The status does not change with age; such a task can go on from where it stopped.
 - **Filters** holds other intervals without movement, a range of the last step's date, the flow, the
   order (latest step, longest without movement, newest) and «only with refusals».
+- The flow filter offers every flow you can read, including choices beyond the first page of
+  flows. If the list cannot be loaded, **Flow filter unavailable** appears with **Try again**;
+  the overview remains available while you retry loading the choices.
 - The search matches a run's note (which is also its task title when the agent gave one), its flow's
   name and the run's id.
 
