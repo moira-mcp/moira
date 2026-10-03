@@ -952,6 +952,11 @@ own runs from `GET /api/executions/overview`, 50 trees a page, runs waiting for 
   malformed value reads as its default. The status switch and the «No movement > 7 days» chip
   (`idle=7d`) sit in the toolbar, the rest in the Filters popover; the search box follows the URL
   when a link or the browser changes it.
+- **Flow choices** (`services/workflow-choices.ts`): the workflow filter reads all accessible
+  choices from `GET /api/workflows` in bounded, name-sorted pages. A failed or inconsistent page
+  read shows a localized **Flow filter unavailable** alert with **Try again**; the overview
+  remains usable while the list is unavailable. Only a complete successful read supplies the
+  choices, and retry reloads them through the page's existing `useResource` store.
 - **Stopped runs**: `session stop-execution` records a reason and stops further execution. The
   overview distinguishes `stopped` from `completed`; the default **In progress** and the
   **Completed** filter exclude stopped runs. **Stopped** and **All** include them. Their neutral
@@ -2255,7 +2260,7 @@ interface WorkflowFileInfo {
   metadata: WorkflowGraph["metadata"];
   validation: WorkflowValidationStatus;
   lastModified: number;
-  fileSize: number;
+  fileSize: number; // UTF-8 byte length of the stored workflow JSON
 }
 
 // Workflow detail response
@@ -2974,7 +2979,8 @@ interface StatisticsCounts {
 
 The flow list's search box sends `search` to `GET /api/workflows`, debounced. The server matches it
 as a substring of the flow's slug, name and description (`listWorkflowsWithFilters` in
-`packages/shared/src/database/repositories/workflow-repository.ts`). Tags are never searched, so a
+`DatabaseRepository` for full reads, and `listWorkflowSummaries` for the HTTP list). Both use
+`WorkflowRepository`'s shared list predicates. Tags are never searched, so a
 flow's level tag (`complexity:<level>`) can never make it a search match.
 
 ### Validation Filtering

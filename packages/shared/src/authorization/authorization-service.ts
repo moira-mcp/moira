@@ -56,6 +56,61 @@ export class AuthorizationService {
     return actions.some((action) => decideAccess(subject, action, resource, grant));
   }
 
+  /** Same policy as can, with one subject and batched grants for already-loaded resources. */
+  async canMany(
+    userId: string,
+    action: AuthorizationAction,
+    resources: readonly AuthorizationResource[],
+  ): Promise<boolean[]> {
+    const unowned = resources.filter((resource) => resource.ownerId !== userId);
+    if (unowned.length === 0) {
+      return resources.map((resource) => decideAccess({ userId }, action, resource));
+    }
+    const subject = await this.subject(userId);
+    const grouped = new Map<AuthorizationResource["type"], Set<string>>();
+    for (const resource of unowned) {
+      const ids = grouped.get(resource.type) ?? new Set<string>();
+      ids.add(resource.id);
+      grouped.set(resource.type, ids);
+    }
+    const grants = new Map<AuthorizationResource["type"], Map<string, GrantLevel>>();
+    for (const [type, identifiers] of grouped) {
+      const ids = [...identifiers];
+      // Bound SQLite parameters without issuing a query per resource.
+      for (let start = 0; start < ids.length; start += 500) {
+        const rows = await this.db
+          .select({ id: accessGrant.resourceId, level: accessGrant.level })
+          .from(accessGrant)
+          .where(
+            and(
+              eq(accessGrant.resourceType, type),
+              inArray(accessGrant.resourceId, ids.slice(start, start + 500)),
+              this.reachesSubject(subject),
+            ),
+          );
+        const levels = grants.get(type) ?? new Map<string, GrantLevel>();
+        for (const row of rows) {
+          levels.set(
+            row.id,
+            row.level === "edit" || levels.get(row.id) === "edit" ? "edit" : "use",
+          );
+        }
+        grants.set(type, levels);
+      }
+    }
+    return resources.map((resource) => {
+      const level = grants.get(resource.type)?.get(resource.id);
+      return decideAccess(subject, action, resource, level ? { level } : null);
+    });
+  }
+
+  private reachesSubject(subject: AuthorizationSubject) {
+    const groupIds = subject.groupIds ?? [];
+    return groupIds.length
+      ? or(eq(accessGrant.userId, subject.userId), inArray(accessGrant.groupId, groupIds))
+      : eq(accessGrant.userId, subject.userId);
+  }
+
   /** The subject as the policy sees it: the acting user, their operator status and their groups. */
   async subject(userId: string): Promise<AuthorizationSubject> {
     const [account] = await this.db
@@ -86,11 +141,6 @@ export class AuthorizationService {
     subject: AuthorizationSubject,
     resource: AuthorizationResource,
   ): Promise<AccessGrant | null> {
-    const groupIds = subject.groupIds ?? [];
-    const reachesSubject = groupIds.length
-      ? or(eq(accessGrant.userId, subject.userId), inArray(accessGrant.groupId, groupIds))
-      : eq(accessGrant.userId, subject.userId);
-
     const rows = await this.db
       .select({ level: accessGrant.level })
       .from(accessGrant)
@@ -98,7 +148,7 @@ export class AuthorizationService {
         and(
           eq(accessGrant.resourceType, resource.type),
           eq(accessGrant.resourceId, resource.id),
-          reachesSubject,
+          this.reachesSubject(subject),
         ),
       );
 

@@ -21,6 +21,7 @@ import { ServerPagination } from "../components/ServerPagination";
 import { useDebounce } from "../hooks/useDebounce";
 import { useResource } from "../hooks/useResource";
 import { apiClient, type OverviewPage, type OverviewQuery } from "../services/api-client";
+import { loadWorkflowChoices } from "../services/workflow-choices";
 import { OverviewBoard } from "../components/overview/OverviewBoard";
 import { OverviewPanel } from "../components/overview/OverviewPanel";
 import { OverviewFiltersPopover } from "../components/overview/OverviewFilters";
@@ -82,11 +83,11 @@ export const Overview: React.FC = () => {
     return () => window.clearInterval(timer);
   }, []);
 
-  const workflowChoices = useResource("overview-workflow-choices", () => apiClient.getWorkflows());
-  const workflows = (workflowChoices.data?.workflows ?? []).map((workflow) => ({
-    id: workflow.id,
-    name: workflow.metadata?.name || workflow.id,
-  }));
+  const workflowChoices = useResource(
+    "overview-workflow-choices",
+    useCallback(() => loadWorkflowChoices((request) => apiClient.getWorkflows(request)), []),
+  );
+  const workflows = workflowChoices.data ?? [];
 
   const query = overviewQuery(filters, PAGE_SIZE);
   const page = useResource<OverviewPage>(
@@ -297,8 +298,13 @@ export const Overview: React.FC = () => {
       <DataRegion
         hasResult={workflowChoices.data !== undefined}
         pending={workflowChoices.pending}
-        error={workflowChoices.error}
+        error={
+          workflowChoices.error
+            ? `${t("pages.overview.workflowChoicesErrorTitle")}. ${t("pages.overview.workflowChoicesError")}`
+            : null
+        }
         onRetry={workflowChoices.refresh}
+        retryLabel={t("pages.overview.retry")}
         testId="overview-workflow-choices-region"
       />
       <DataRegion

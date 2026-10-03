@@ -34,8 +34,7 @@ import {
   validateSlug,
   normalizeSlug,
 } from "../../validation/slug-handle.js";
-import { executeListQuery, type ListQueryConfig } from "../list-query-builder.js";
-import { clampPagination } from "../list-query-builder.js";
+import { executeListQuery, clampPagination, type ListQueryConfig } from "../list-query-builder.js";
 import { WorkflowRevisionConflictError } from "../../errors/domain-errors.js";
 import { recomputeGateWaiting, storedGraphNodes } from "../gate-waiting.js";
 
@@ -757,8 +756,8 @@ export class WorkflowRepository {
   // ===== Get Operations =====
 
   /**
-   * The definitions with these ids the user may view, with their names, in one query (the access
-   * decision is `mayView`, as for `get`); deleted and inaccessible workflows are left out.
+   * The definitions with these ids the user may view, with their names, through bounded batch
+   * authorization using the same policy as `get`; deleted and inaccessible workflows are left out.
    */
   async getManyForUser(
     workflowIds: string[],
@@ -781,8 +780,18 @@ export class WorkflowRepository {
           or(eq(workflow.deleted, false), isNull(workflow.deleted)),
         ),
       );
-    for (const row of rows) {
-      if (await this.mayView(userId, row)) {
+    const allowed = await this.authorization.canMany(
+      userId,
+      "view",
+      rows.map((row) => ({
+        type: RESOURCE_TYPES.workflow,
+        id: row.id,
+        ownerId: row.userId,
+        visibility: row.visibility === "public" ? "public" : "private",
+      })),
+    );
+    for (const [index, row] of rows.entries()) {
+      if (allowed[index]) {
         result.set(row.id, { name: row.name, graph: parseStoredGraph(row.graph) });
       }
     }

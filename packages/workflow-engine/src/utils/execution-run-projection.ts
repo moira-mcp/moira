@@ -29,6 +29,7 @@ import { EXECUTION_PROGRESS_TEXT_LIMITS } from "./execution-progress-contract.js
 import { deriveProcess, type ProcessProjection } from "./process-derivation.js";
 import { currentGatedNode, humanGateWaiting } from "./human-gate.js";
 import { awaitingUserAfterMove } from "./awaiting-user.js";
+import { PROGRESS_SUMMARY_LIST_WINDOW } from "./execution-progress-read.js";
 import {
   blockTimings,
   itemIndexResolver,
@@ -389,6 +390,41 @@ export interface ProjectExecutionRunOptions {
   now?: number;
 }
 
+export type ExecutionProgressSummary = Pick<
+  ExecutionProgress,
+  "taskTitle" | "activeNodeId" | "waitingForUser"
+> & {
+  nodes: Array<Pick<ExecutionProgressNode, "id" | "label" | "status" | "list">>;
+};
+
+/** A current-state summary shares the full projection's route, list and wait rules. */
+export function projectExecutionRunSummary(
+  workflow: WorkflowGraph,
+  execution: WorkflowExecution,
+  options: Pick<ProjectExecutionRunOptions, "now"> = {},
+): ExecutionProgressSummary | null {
+  const progress = projectRun(workflow, execution, options, true);
+  if (!progress) return null;
+  return {
+    taskTitle: progress.taskTitle,
+    activeNodeId: progress.activeNodeId,
+    waitingForUser: progress.waitingForUser,
+    nodes: progress.nodes.map(({ id, label, status, list }) => {
+      if (!list?.items) return { id, label, status, list };
+      const start = Math.min(
+        Math.max(0, (list.current ?? 0) - Math.floor(PROGRESS_SUMMARY_LIST_WINDOW / 2)),
+        Math.max(0, list.items.length - PROGRESS_SUMMARY_LIST_WINDOW),
+      );
+      return {
+        id,
+        label,
+        status,
+        list: { ...list, items: list.items.slice(start, start + PROGRESS_SUMMARY_LIST_WINDOW) },
+      };
+    }),
+  };
+}
+
 /**
  * The execution as it stood when the visit at the cursor was the last one: the route cut there,
  * the run still running on that visit's node, waiting there if the visit paused.
@@ -411,6 +447,15 @@ export function projectExecutionRun(
   workflow: WorkflowGraph,
   source: WorkflowExecution,
   options: ProjectExecutionRunOptions = {},
+): ExecutionProgress | null {
+  return projectRun(workflow, source, options, false);
+}
+
+function projectRun(
+  workflow: WorkflowGraph,
+  source: WorkflowExecution,
+  options: ProjectExecutionRunOptions,
+  summary: boolean,
 ): ExecutionProgress | null {
   const definition = workflow.progress;
   const process = deriveProcess(workflow);
@@ -536,7 +581,9 @@ export function projectExecutionRun(
       ? (execution.completedAt ?? execution.updatedAt)
       : (options.now ?? Date.now());
   const bindings = new Map(
-    definition.nodes.filter((node) => node.list).map((node) => [node.id, node.list!]),
+    definition.nodes
+      .filter((node) => node.list && (!summary || node.id === activeNodeId))
+      .map((node) => [node.id, node.list!]),
   );
   const itemResolvers = new Map(
     [...bindings].map(([blockId, binding]) => [
@@ -577,12 +624,14 @@ export function projectExecutionRun(
       isActive && activeLabelNode?.progressActiveLabel
         ? activeLabelNode.progressActiveLabel
         : node.label;
-    const content = resolveContent(
-      node.content,
-      isActive ? activeLabelNode?.progressActiveContent : undefined,
-      templateProcessor,
-      context,
-    );
+    const content = summary
+      ? { summary: null, details: [], outcome: null, next: null }
+      : resolveContent(
+          node.content,
+          isActive ? activeLabelNode?.progressActiveContent : undefined,
+          templateProcessor,
+          context,
+        );
     if (run.status === "pending" || run.status === "skipped") content.outcome = null;
     const next = definition.nodes[index + 1];
     return {
@@ -625,16 +674,18 @@ export function projectExecutionRun(
           "taskTitle",
         )),
     title: renderedTitle,
-    goal: resolveOptional(
-      definition.goal,
-      templateProcessor,
-      context,
-      EXECUTION_PROGRESS_TEXT_LIMITS.goal,
-      "goal",
-    ),
+    goal: summary
+      ? null
+      : resolveOptional(
+          definition.goal,
+          templateProcessor,
+          context,
+          EXECUTION_PROGRESS_TEXT_LIMITS.goal,
+          "goal",
+        ),
     // A fact over a variable the run has not set yet (the template processor's undefined
     // marker) or that resolves to nothing is left out rather than shown as a marker.
-    facts: (definition.facts ?? [])
+    facts: (summary ? [] : (definition.facts ?? []))
       .map((fact) => ({
         label: enforceResolvedLimit(
           templateProcessor.processDirective(fact.label, context).trim(),
@@ -663,8 +714,8 @@ export function projectExecutionRun(
     executionStatus: execution.status,
     diagnostics,
     process,
-    route: projectRoute(process, visits),
-    variables: variableStates,
+    route: summary ? [] : projectRoute(process, visits),
+    variables: summary ? [] : variableStates,
     routeRecorded,
     cursor,
     source: "trace",

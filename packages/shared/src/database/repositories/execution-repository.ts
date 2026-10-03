@@ -3,7 +3,19 @@
  * Drizzle ORM queries for execution operations
  */
 
-import { eq, ne, and, or, like, inArray, isNotNull, isNull, sql, desc } from "drizzle-orm";
+import {
+  eq,
+  ne,
+  and,
+  or,
+  like,
+  inArray,
+  isNotNull,
+  isNull,
+  sql,
+  desc,
+  type SQL,
+} from "drizzle-orm";
 import type { BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
 import { workflowExecution, workflow, user, auditLog, executionLock } from "../schema.js";
 import type { ExecutionSummary } from "../../types/admin-analytics.js";
@@ -55,6 +67,29 @@ export interface ExecutionFilter {
 export interface ExecutionListResult {
   executions: WorkflowExecution[];
   total: number;
+}
+
+/** Variables and write histories required by a current progress projection. Null means all variables. */
+export interface ExecutionProgressRead {
+  executionId: string;
+  visits?: boolean;
+  variables: string[] | null;
+  historyRoots: string[];
+  arrayWindows?: Array<{
+    name: string;
+    start: number;
+    size: number;
+  }>;
+}
+
+/** Preserve JSON scalar types when SQLite exposes booleans as integer values. */
+function storedJsonValue(type: SQL, value: SQL): SQL {
+  return sql`CASE ${type}
+    WHEN 'true' THEN json('true')
+    WHEN 'false' THEN json('false')
+    WHEN 'array' THEN json(${value})
+    WHEN 'object' THEN json(${value})
+    ELSE ${value} END`;
 }
 
 export class ExecutionRepository {
@@ -195,6 +230,186 @@ export class ExecutionRepository {
       .from(workflowExecution)
       .where(inArray(workflowExecution.executionId, executionIds));
     return rows.map((row) => this.rowToExecution(row));
+  }
+
+  /** Definition identities for a bounded set, before selecting definition-dependent progress inputs. */
+  async getManyWorkflowReferences(
+    executionIds: string[],
+  ): Promise<Array<{ executionId: string; workflowId: string }>> {
+    if (!executionIds.length) return [];
+    return this.db
+      .select({
+        executionId: workflowExecution.executionId,
+        workflowId: workflowExecution.workflowId,
+      })
+      .from(workflowExecution)
+      .where(inArray(workflowExecution.executionId, executionIds));
+  }
+
+  /**
+   * Current progress inputs, without journals, reminders, node states or unrelated variables.
+   * With no read specification this returns only scalar headers. Full engine/detail reads use
+   * get/getMany; the narrowed values here are never saved back as an execution.
+   */
+  async getManyForProgress(
+    executionIds: string[],
+    reads?: ExecutionProgressRead[],
+  ): Promise<WorkflowExecution[]> {
+    if (!executionIds.length) return [];
+    const historyGroups: string[][] = [];
+    const historyGroupIds = new Map<string, number>();
+    const readById = new Map(reads?.map((read) => [read.executionId, read]));
+    const specifications = JSON.stringify(
+      Object.fromEntries(
+        (reads ?? []).map((read) => {
+          const key = JSON.stringify(read.historyRoots);
+          let historyGroup = historyGroupIds.get(key);
+          if (historyGroup === undefined) {
+            historyGroup = historyGroups.length;
+            historyGroupIds.set(key, historyGroup);
+            historyGroups.push(read.historyRoots);
+          }
+          return [read.executionId, { ...read, historyGroup }];
+        }),
+      ),
+    );
+    const spec = sql`requested.value`;
+    const contextJson = sql`stored_context.value`;
+    const historyArray = (names: string[]) =>
+      sql`json_array(${sql.join(
+        names.map((name) => {
+          const path = `$.changes.${JSON.stringify(name)}`;
+          return sql`json_array(CASE WHEN json_type(v.value, ${path}) IS NOT NULL THEN 1 ELSE 0 END, ${storedJsonValue(sql`json_type(v.value, ${path})`, sql`json_extract(v.value, ${path})`)})`;
+        }),
+        sql`, `,
+      )})`;
+    const historyValues =
+      historyGroups.length <= 1
+        ? historyArray(historyGroups[0] ?? [])
+        : sql`CASE json_extract(${spec}, '$.historyGroup') ${sql.join(
+            historyGroups.map((names, index) => sql`WHEN ${index} THEN ${historyArray(names)}`),
+            sql` `,
+          )} ELSE json('[]') END`;
+    const variables = reads
+      ? sql`COALESCE((SELECT json_group_object(key,
+          ${storedJsonValue(sql`type`, sql`value`)})
+        FROM jsonb_each(${contextJson}, '$.variables')
+        WHERE (json_type(${spec}, '$.variables') = 'null'
+          OR key IN (SELECT value FROM json_each(${spec}, '$.variables')))
+          AND NOT (type = 'array' AND key IN (SELECT json_extract(value, '$.name') FROM json_each(${spec}, '$.arrayWindows')))), '{}')`
+      : sql`'{}'`;
+    const compactVisits = reads
+      ? sql`COALESCE((SELECT json_group_array(json_array(
+          json(json_extract(v.value, '$.seq', '$.nodeId', '$.exitKey', '$.enteredAt', '$.leftAt')),
+          (CASE WHEN json_extract(v.value, '$.waited') THEN 1 ELSE 0 END)
+            + (CASE WHEN json_extract(v.value, '$.adjusted') THEN 2 ELSE 0 END),
+          ${historyValues}))
+        FROM jsonb_each(jsonb(CASE WHEN json_valid(${workflowExecution.visits})
+          AND json_type(${workflowExecution.visits}) = 'array'
+          THEN ${workflowExecution.visits} ELSE '[]' END)) v), '[]')`
+      : sql`'[]'`;
+    const arrayWindows = reads
+      ? sql<string>`(
+      WITH arrays AS MATERIALIZED (
+        SELECT json_extract(w.value, '$.name') AS name,
+          jsonb_extract(${contextJson}, '$.variables.' || json_quote(json_extract(w.value, '$.name'))) AS items,
+          json_extract(w.value, '$.start') AS start,
+          json_extract(w.value, '$.size') AS size
+        FROM json_each(${spec}, '$.arrayWindows') w
+      )
+      SELECT json_group_array(json_object('name', name, 'length', json_array_length(items), 'start', start,
+        'items', json((SELECT json_group_array(${storedJsonValue(sql`type`, sql`value`)})
+          FROM json_each(items) WHERE key >= start AND key < start + size)))) FROM arrays
+          WHERE json_type(CASE WHEN typeof(items) = 'blob' THEN items ELSE NULL END) = 'array'
+    )`
+      : sql<string>`'[]'`;
+    const rows = await this.db
+      .select({
+        executionId: workflowExecution.executionId,
+        workflowId: workflowExecution.workflowId,
+        userId: workflowExecution.userId,
+        state: workflowExecution.state,
+        currentNodeId: workflowExecution.currentNodeId,
+        waitingForInputNodeId: workflowExecution.waitingForInputNodeId,
+        note: workflowExecution.note,
+        stopReason: workflowExecution.stopReason,
+        parentExecutionId: workflowExecution.parentExecutionId,
+        revision: workflowExecution.revision,
+        gateWaiting: workflowExecution.gateWaiting,
+        lastActivityAt: workflowExecution.lastActivityAt,
+        refusalCount: workflowExecution.refusalCount,
+        awaitingUser: workflowExecution.awaitingUser,
+        workflowVersion: workflowExecution.workflowVersion,
+        createdAt: workflowExecution.createdAt,
+        updatedAt: workflowExecution.updatedAt,
+        completedAt: workflowExecution.completedAt,
+        context: sql<string>`json_object('variables', json(${variables}), 'nodeStates', json('{}'),
+        'executionId', ${workflowExecution.executionId}, 'workflowId', ${workflowExecution.workflowId},
+        'userId', ${workflowExecution.userId})`,
+        visits:
+          sql`CASE WHEN json_extract(${spec}, '$.visits') = 0 THEN '[]' ELSE ${compactVisits} END`.mapWith(
+            String,
+          ),
+        arrayWindows,
+        error: sql<null>`NULL`,
+        errors: sql<null>`NULL`,
+        reminders: sql<string>`'[]'`,
+      })
+      .from(workflowExecution)
+      .leftJoin(
+        sql`json_each(${specifications}) AS requested`,
+        sql`requested.key = ${workflowExecution.executionId}`,
+      )
+      .leftJoin(
+        sql`jsonb_each(jsonb_array(jsonb(${reads ? sql`CASE WHEN json_valid(${workflowExecution.context}) THEN ${workflowExecution.context} ELSE '{}' END` : sql`'{}'`}))) AS stored_context`,
+        sql`1`,
+      )
+      .where(inArray(workflowExecution.executionId, executionIds));
+    return rows.map((row) => {
+      const execution = this.rowToExecution({ ...row, visits: "[]" });
+      for (const window of JSON.parse(row.arrayWindows) as Array<{
+        name: string;
+        length: number;
+        start: number;
+        items: unknown[];
+      }>) {
+        const items = new Array<unknown>(window.length);
+        window.items.forEach((item, index) => {
+          items[window.start + index] = item;
+        });
+        Object.defineProperty(execution.globalContext.variables, window.name, {
+          value: items,
+          enumerable: true,
+          writable: true,
+          configurable: true,
+        });
+      }
+      const tuples = JSON.parse(row.visits) as Array<
+        [
+          [number, string, string | null, number | null, number | null],
+          number,
+          Array<[number, unknown]>,
+        ]
+      >;
+      const historyRoots = readById.get(row.executionId)?.historyRoots ?? [];
+      execution.visits = tuples.map(
+        ([[seq, nodeId, exitKey, enteredAt, leftAt], flags, values]) => ({
+          seq,
+          nodeId,
+          exitKey,
+          changes: Object.fromEntries(
+            values.flatMap(([present, value], index) =>
+              present ? [[historyRoots[index], value]] : [],
+            ),
+          ),
+          ...(enteredAt !== null ? { enteredAt } : {}),
+          ...(leftAt !== null ? { leftAt } : {}),
+          ...(flags & 1 ? { waited: true } : {}),
+          ...(flags & 2 ? { adjusted: true } : {}),
+        }),
+      );
+      return execution;
+    });
   }
 
   /**

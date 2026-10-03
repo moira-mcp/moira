@@ -2486,9 +2486,10 @@ Authentication: Via token (no session required)
 
 ### GET /api/workflows
 
-List workflows with filtering, sorting, and pagination. The HTTP list selects metadata and scalar
-summaries in SQL without transferring executable nodes to the application. Access, direct/group
-grants, visibility, search and validation predicates determine both count and page. Detail/raw
+List readable workflow metadata with filtering, sorting, and pagination. The HTTP list selects
+metadata and scalar summaries in SQL without transferring executable nodes to the application.
+Owner, public, direct-grant and group-grant access decisions and visibility, search and validation
+filters determine both count and page, using the same policy as full workflow reads. Detail/raw
 reads and engine consumers retain the full definition. Creation sorting uses stored creation time,
 with workflow-ID ties for deterministic pages.
 
@@ -2506,7 +2507,8 @@ Query parameters:
   total counts the scope
 - `validationStatus`: Filter by the cached validation status (valid, invalid, unknown, all), applied
   in the query so the page and the total agree with it. Default: all
-- `sort`: Sort field (createdAt, name). Default: createdAt
+- `sort`: Selector (`createdAt`, `name`). Default: `createdAt`; that selector orders by the stored
+  creation time, while `name` orders by the stored name. Equal values use workflow ID ascending.
 - `sortOrder`: Sort direction (asc, desc). Default: desc
 - `limit`: Results per page (1-100). Default: 20
 - `offset`: Skip results. Default: 0
@@ -2532,12 +2534,12 @@ Response:
         errors: string[];
       };
       lastModified: number;
-      fileSize: number; // UTF-8 bytes of stored workflow JSON
+      fileSize: number; // UTF-8 byte length of the stored workflow JSON, not the metadata response
     }>;
-    totalWorkflows: number; // All matching workflows before pagination
-    validWorkflows: number; // Valid entries on this page
-    invalidWorkflows: number; // Remaining page entries, including unknown status
-    lastScan: number; // Epoch milliseconds at response construction
+    totalWorkflows: number; // exact count of every matching readable workflow before pagination
+    validWorkflows: number; // cached-valid workflows on this page
+    invalidWorkflows: number; // other workflows on this page, including not checked
+    lastScan: number; // response time, epoch ms
   }
   timestamp: string;
 }
@@ -2703,6 +2705,11 @@ interface OverviewRun {
 
 The step is named as the run page names it (the node's active label or display name, else its
 block's label) and never by a node id. Invalid parameters return 400.
+
+Rows carry compact current progress, including the active list's item window. The detailed
+`GET /api/executions/:id/progress` response retains the full authored-progress projection, lists
+and recorded route. A run changing repeatedly during dependency or list-window reads can return
+409; request the overview again rather than combining values from different reads.
 
 Authentication: Required
 
