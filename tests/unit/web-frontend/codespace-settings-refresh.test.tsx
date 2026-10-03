@@ -2,7 +2,7 @@
 
 import React from "react";
 import { afterEach, beforeEach, describe, expect, jest, test } from "@jest/globals";
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import "@testing-library/jest-dom/jest-globals";
 import { I18nextProvider } from "react-i18next";
 import {
@@ -137,5 +137,34 @@ describe("GitHub Codespaces Settings", () => {
     const link = await screen.findByTestId("github-codespace-add-installation");
     expect(link).toHaveTextContent("Add account or organization");
     expect(link).toHaveAttribute("href", connection.installationUrl);
+  });
+
+  test("provider refresh failure keeps codespaces, the branch draft and focus, then retries", async () => {
+    let reject!: (error: unknown) => void;
+    jest.mocked(apiClient.refreshGitHubCodespaces).mockImplementationOnce(
+      () =>
+        new Promise((_yes, no) => {
+          reject = no;
+        }),
+    );
+    renderSettings(<GitHubCodespaceManagement />);
+    const row = await screen.findByTestId(`github-codespace-${CODESPACE_ID}`);
+    const branch = screen.getByTestId("github-codespace-ref");
+    fireEvent.change(branch, { target: { value: "feature/draft" } });
+    branch.focus();
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+    expect(screen.getByTestId(`github-codespace-${CODESPACE_ID}`)).toBe(row);
+    expect(screen.getByTestId("github-codespace-ref")).toBe(branch);
+    expect(branch).toHaveFocus();
+    await act(async () => reject(new Error("GitHub unavailable")));
+    expect(await screen.findByText("Failed to load cloud codespaces")).toBeInTheDocument();
+    expect(row).toBeInTheDocument();
+    expect(branch).toHaveValue("feature/draft");
+    expect(branch).toHaveFocus();
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    await waitFor(() =>
+      expect(screen.getByTestId("github-management-region")).toHaveAttribute("aria-busy", "false"),
+    );
+    expect(branch).toHaveValue("feature/draft");
   });
 });

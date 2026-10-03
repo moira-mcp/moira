@@ -83,6 +83,8 @@ describe("self-host capability authorization", () => {
     ["/api/admin/analytics/executions", "adminAnalytics"],
     ["/api/admin/analytics/top-workflows", "adminAnalytics"],
     ["/api/admin/analytics/users", "adminAnalytics"],
+    ["/api/admin/analytics/registrations", "adminAnalytics"],
+    ["/api/admin/analytics/attention", "adminAnalytics"],
     ["/api/admin/analytics/audit-summary", "adminAnalytics"],
     ["/api/admin/analytics/workflow-quality/not-a-workflow", "adminAnalytics"],
     ["/api/admin/analytics/conversion-funnel", "adminAnalytics"],

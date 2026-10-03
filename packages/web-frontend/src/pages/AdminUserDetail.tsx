@@ -3,6 +3,7 @@
  * Detailed user management with actions
  */
 
+import { productFetch } from "@/services/product-fetch";
 import React, { useState, useEffect, useRef } from "react";
 import { useParams, Link } from "react-router-dom";
 import { PageShell } from "../components/PageShell";
@@ -43,6 +44,10 @@ import {
 import { toast } from "sonner";
 import { apiClient } from "../services/api-client";
 import { useFeatures } from "../hooks/useFeatures";
+import { useResource } from "../hooks/useResource";
+import { useReadOwnerGuard } from "../auth/ReadScopeBoundary";
+import { DataRegion } from "@/components/DataRegion";
+import { InlineError } from "@/components/inline-error";
 
 interface UserDetails {
   user: {
@@ -88,59 +93,87 @@ interface UserDetails {
   }>;
 }
 
+type SecurityActivity = { sessionsCount: number; oauthTokensCount: number };
+type DetailedSession = UserDetails["sessions"][number] & {
+  token: string;
+  country: string | null;
+  updatedAt: string;
+};
+interface OAuthConnection {
+  consentId: string;
+  clientId: string;
+  scopes: string;
+  consentGiven: boolean;
+  createdAt: string;
+  updatedAt: string;
+  tokens: Array<{
+    id: string;
+    accessToken: string;
+    refreshToken: string | null;
+    expiresAt: string;
+    createdAt: string;
+  }>;
+}
+interface ArtifactQuota {
+  overrides: { quotaMb: number | null; maxFiles: number | null };
+  effective: { storageLimit: number; countLimit: number };
+  usage: {
+    totalSize: number;
+    totalArtifacts: number;
+    storageUsedPercent: number;
+    countUsedPercent: number;
+  };
+}
+
+async function readUserData<T>(id: string, suffix: string, fallback: string): Promise<T> {
+  const response = await productFetch(`/api/admin/users/${encodeURIComponent(id)}${suffix}`, {
+    credentials: "include",
+  });
+  const result = await response.json();
+  if (!response.ok) {
+    throw new Error(
+      typeof result.error === "string" ? result.error : result.error?.message || fallback,
+    );
+  }
+  if (result.data === undefined || result.data === null) throw new Error(fallback);
+  return result.data;
+}
+
 export const AdminUserDetail: React.FC = () => {
-  const { t } = useTranslation();
   const { id } = useParams<{ id: string }>();
+  return <AdminUserDetailContent key={id} id={id} />;
+};
+
+const AdminUserDetailContent: React.FC<{ id: string | undefined }> = ({ id }) => {
+  const { t } = useTranslation();
   const { isEnabled, emailDelivery } = useFeatures();
   const accountApprovalEnabled = isEnabled("accountApproval");
   const multiUserAdminEnabled = isEnabled("multiUserAdmin");
-  const [data, setData] = useState<UserDetails | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const guardOwner = useReadOwnerGuard();
+  const userResource = useResource<UserDetails>(id ?? null, (key) =>
+    readUserData(key, "", t("admin.userDetail.errors.loadFailed")),
+  );
+  const securityResource = useResource<SecurityActivity>(id ?? null, (key) =>
+    readUserData(key, "/security-activity", t("common.errors.failedToLoad")),
+  );
+  const sessionsResource = useResource<DetailedSession[]>(id ?? null, (key) =>
+    readUserData(key, "/sessions", t("common.errors.failedToLoad")),
+  );
+  const oauthResource = useResource<OAuthConnection[]>(id ?? null, (key) =>
+    readUserData(key, "/oauth-tokens", t("common.errors.failedToLoad")),
+  );
+  const quotaResource = useResource<ArtifactQuota>(
+    multiUserAdminEnabled ? (id ?? null) : null,
+    (key) => readUserData(key, "/artifact-quota", t("common.errors.failedToLoad")),
+  );
+  const data = userResource.data ?? null;
+  const loading = userResource.pending;
+  const error = userResource.error;
+  const securityActivity = securityResource.data ?? null;
+  const detailedSessions = sessionsResource.data ?? [];
+  const oauthConnections = oauthResource.data ?? [];
+  const artifactQuota = quotaResource.data ?? null;
   const [actionLoading, setActionLoading] = useState<string | null>(null);
-  const [securityActivity, setSecurityActivity] = useState<{
-    sessionsCount: number;
-    oauthTokensCount: number;
-  } | null>(null);
-  const [detailedSessions, setDetailedSessions] = useState<
-    Array<{
-      id: string;
-      token: string;
-      ipAddress: string | null;
-      userAgent: string | null;
-      country: string | null;
-      createdAt: string;
-      expiresAt: string;
-      updatedAt: string;
-    }>
-  >([]);
-  const [oauthConnections, setOauthConnections] = useState<
-    Array<{
-      consentId: string;
-      clientId: string;
-      scopes: string;
-      consentGiven: boolean;
-      createdAt: string;
-      updatedAt: string;
-      tokens: Array<{
-        id: string;
-        accessToken: string;
-        refreshToken: string | null;
-        expiresAt: string;
-        createdAt: string;
-      }>;
-    }>
-  >([]);
-  const [artifactQuota, setArtifactQuota] = useState<{
-    overrides: { quotaMb: number | null; maxFiles: number | null };
-    effective: { storageLimit: number; countLimit: number };
-    usage: {
-      totalSize: number;
-      totalArtifacts: number;
-      storageUsedPercent: number;
-      countUsedPercent: number;
-    };
-  } | null>(null);
   const [quotaEditMode, setQuotaEditMode] = useState(false);
   const [quotaForm, setQuotaForm] = useState<{
     quotaMb: string;
@@ -165,177 +198,110 @@ export const AdminUserDetail: React.FC = () => {
     onConfirm: () => void | Promise<void>;
   }>({ open: false, title: "", description: "", confirmLabel: "", onConfirm: () => {} });
 
-  const loadUser = async () => {
-    if (!id) return;
-    setLoading(true);
-    try {
-      const response = await fetch(`/api/admin/users/${id}`, {
-        credentials: "include",
-      });
-      if (!response.ok) {
-        throw new Error(t("admin.userDetail.errors.loadFailed"));
-      }
-      const result = await response.json();
-      setData(result.data);
-      setError(null);
-
-      // Load security activity and detailed data
-      await Promise.all([
-        loadSecurityActivity(),
-        loadDetailedSessions(),
-        loadOAuthConnections(),
-        multiUserAdminEnabled ? loadArtifactQuota() : Promise.resolve(),
-      ]);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : t("admin.userDetail.errors.loadFailed"));
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const loadSecurityActivity = async () => {
-    if (!id) return;
-    try {
-      const response = await fetch(`/api/admin/users/${id}/security-activity`, {
-        credentials: "include",
-      });
-      if (response.ok) {
-        const result = await response.json();
-        setSecurityActivity({
-          sessionsCount: result.data.sessionsCount,
-          oauthTokensCount: result.data.oauthTokensCount,
-        });
-      }
-    } catch (err) {
-      // Ignore security activity errors - not critical for page load
-      // eslint-disable-next-line no-console
-      console.error("Failed to load security activity:", err);
-    }
-  };
-
-  const loadDetailedSessions = async () => {
-    if (!id) return;
-    try {
-      const response = await fetch(`/api/admin/users/${id}/sessions`, {
-        credentials: "include",
-      });
-      if (response.ok) {
-        const result = await response.json();
-        setDetailedSessions(result.data);
-      }
-    } catch (err) {
-      // eslint-disable-next-line no-console
-      console.error("Failed to load sessions:", err);
-    }
-  };
-
-  const loadOAuthConnections = async () => {
-    if (!id) return;
-    try {
-      const response = await fetch(`/api/admin/users/${id}/oauth-tokens`, {
-        credentials: "include",
-      });
-      if (response.ok) {
-        const result = await response.json();
-        setOauthConnections(result.data);
-      }
-    } catch (err) {
-      // eslint-disable-next-line no-console
-      console.error("Failed to load OAuth connections:", err);
-    }
-  };
-
-  const loadArtifactQuota = async () => {
-    if (!id || !multiUserAdminEnabled) return;
-    try {
-      const response = await fetch(`/api/admin/users/${id}/artifact-quota`, {
-        credentials: "include",
-      });
-      if (response.ok) {
-        const result = await response.json();
-        setArtifactQuota(result.data);
-        // Initialize form with current overrides
-        setQuotaForm({
-          quotaMb: result.data.overrides.quotaMb?.toString() ?? "",
-          maxFiles: result.data.overrides.maxFiles?.toString() ?? "",
-        });
-      }
-    } catch (err) {
-      // eslint-disable-next-line no-console
-      console.error("Failed to load artifact quota:", err);
-    }
-  };
-
-  const handleSaveQuota = async () => {
-    if (!id || !multiUserAdminEnabled) return;
-    setQuotaSaving(true);
-    try {
-      const response = await fetch(`/api/admin/users/${id}/artifact-quota`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify({
-          quotaMb: quotaForm.quotaMb === "" ? null : parseInt(quotaForm.quotaMb, 10),
-          maxFiles: quotaForm.maxFiles === "" ? null : parseInt(quotaForm.maxFiles, 10),
-        }),
-      });
-      if (!response.ok) {
-        const data = await response.json().catch(() => ({}));
-        throw new Error(data.error || "Failed to update quota");
-      }
-      await loadArtifactQuota();
-      setQuotaEditMode(false);
-    } catch (err) {
-      // eslint-disable-next-line no-console
-      console.error("Failed to save quota:", err);
-      toast.error(err instanceof Error ? err.message : "Failed to save quota");
-    } finally {
-      setQuotaSaving(false);
-    }
-  };
-
-  const handleResetQuota = async () => {
-    if (!id || !multiUserAdminEnabled) return;
-    setQuotaSaving(true);
-    try {
-      const response = await fetch(`/api/admin/users/${id}/artifact-quota`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify({ quotaMb: null, maxFiles: null }),
-      });
-      if (!response.ok) {
-        const data = await response.json().catch(() => ({}));
-        throw new Error(data.error || "Failed to reset quota");
-      }
-      await loadArtifactQuota();
-      setQuotaEditMode(false);
-    } catch (err) {
-      // eslint-disable-next-line no-console
-      console.error("Failed to reset quota:", err);
-      toast.error(err instanceof Error ? err.message : "Failed to reset quota");
-    } finally {
-      setQuotaSaving(false);
-    }
-  };
+  const loadUser = userResource.refresh;
+  const loadSecurityActivity = securityResource.refresh;
+  const loadDetailedSessions = sessionsResource.refresh;
+  const loadOAuthConnections = oauthResource.refresh;
+  const loadArtifactQuota = quotaResource.refresh;
+  const quotaFormRef = useRef(quotaForm);
+  quotaFormRef.current = quotaForm;
+  const [quotaActionError, setQuotaActionError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (id) {
-      loadUser();
+    if (artifactQuota && !quotaEditMode) {
+      setQuotaForm({
+        quotaMb: artifactQuota.overrides.quotaMb?.toString() ?? "",
+        maxFiles: artifactQuota.overrides.maxFiles?.toString() ?? "",
+      });
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [id]);
+  }, [artifactQuota, quotaEditMode]);
+
+  const savedQuotaRef = useRef<{ before: string; expected: typeof quotaForm } | null>(null);
+  useEffect(() => {
+    if (quotaResource.pending || quotaResource.error || !artifactQuota || !savedQuotaRef.current)
+      return;
+    const submitted = savedQuotaRef.current;
+    savedQuotaRef.current = null;
+    const actual = {
+      quotaMb: artifactQuota.overrides.quotaMb?.toString() ?? "",
+      maxFiles: artifactQuota.overrides.maxFiles?.toString() ?? "",
+    };
+    if (
+      JSON.stringify(quotaFormRef.current) === submitted.before &&
+      JSON.stringify(actual) === JSON.stringify(submitted.expected)
+    ) {
+      setQuotaForm(actual);
+      setQuotaEditMode(false);
+    }
+  }, [artifactQuota, quotaResource.pending, quotaResource.error]);
+
+  const saveQuota = async (reset: boolean) => {
+    if (!id || !multiUserAdminEnabled) return;
+    const ownsOperation = guardOwner(false);
+    const ownsAuthority = guardOwner();
+    const submitted = { ...quotaForm };
+    setQuotaSaving(true);
+    setQuotaActionError(null);
+    try {
+      const parseValue = (value: string) => {
+        if (value === "") return null;
+        const parsed = Number(value);
+        if (!Number.isFinite(parsed) || parsed < 0)
+          throw new Error(t("admin.userDetail.artifactQuota.invalidValue"));
+        return parsed;
+      };
+      const values = reset
+        ? { quotaMb: null, maxFiles: null }
+        : { quotaMb: parseValue(submitted.quotaMb), maxFiles: parseValue(submitted.maxFiles) };
+      const response = await productFetch(`/api/admin/users/${id}/artifact-quota`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify(values),
+      });
+      const result = await response.json();
+      if (!response.ok)
+        throw new Error(
+          typeof result.error === "string"
+            ? result.error
+            : result.error?.message ||
+                t(reset ? "admin.settingsRegions.resetFailed" : "admin.settingsRegions.saveFailed"),
+        );
+      if (!ownsOperation()) return;
+      savedQuotaRef.current = {
+        before: JSON.stringify(submitted),
+        expected: {
+          quotaMb: result.data.quotaMb?.toString() ?? "",
+          maxFiles: result.data.maxFiles?.toString() ?? "",
+        },
+      };
+      await loadArtifactQuota();
+    } catch (err) {
+      if (!ownsOperation()) return;
+      const message = err instanceof Error ? err.message : t("admin.settingsRegions.saveFailed");
+      setQuotaActionError(message);
+      if (ownsAuthority()) toast.error(message);
+    } finally {
+      if (ownsOperation()) setQuotaSaving(false);
+    }
+  };
+  const handleSaveQuota = () => saveQuota(false);
+  const handleResetQuota = () => saveQuota(true);
 
   const handleAction = async (
     action: string,
     endpoint: string,
     method: string = "POST",
     body?: object,
+    refresh: Array<() => Promise<void>> = [loadUser],
+    failureMessage = t("admin.userDetail.errors.actionFailed", { action }),
   ) => {
     if (!id) return;
+    const ownsOperation = guardOwner(false);
+    const ownsAuthority = guardOwner();
     setActionLoading(action);
     try {
-      const response = await fetch(endpoint, {
+      const response = await productFetch(endpoint, {
         method,
         headers: { "Content-Type": "application/json" },
         credentials: "include",
@@ -343,15 +309,17 @@ export const AdminUserDetail: React.FC = () => {
       });
       if (!response.ok) {
         const data = await response.json().catch(() => ({}));
-        throw new Error(data.error || t("admin.userDetail.errors.actionFailed", { action }));
+        throw new Error(
+          typeof data.error === "string" ? data.error : data.error?.message || failureMessage,
+        );
       }
-      await loadUser();
+      if (!ownsOperation()) return;
+      await Promise.all(refresh.map((refreshSource) => refreshSource()));
     } catch (err) {
-      toast.error(
-        err instanceof Error ? err.message : t("admin.userDetail.errors.actionFailed", { action }),
-      );
+      if (ownsAuthority()) toast.error(err instanceof Error ? err.message : failureMessage);
+      throw err;
     } finally {
-      setActionLoading(null);
+      if (ownsOperation()) setActionLoading(null);
     }
   };
 
@@ -360,92 +328,75 @@ export const AdminUserDetail: React.FC = () => {
     setBlockDialogOpen(true);
   };
 
-  const handleBlockConfirm = () => {
-    setBlockDialogOpen(false);
+  const handleBlockConfirm = () =>
     handleAction("block", `/api/admin/users/${id}/block`, "POST", { reason: blockReason || null });
-  };
 
   const handleUnblock = () => {
-    handleAction("unblock", `/api/admin/users/${id}/unblock`);
+    return handleAction("unblock", `/api/admin/users/${id}/unblock`);
   };
 
   const handleSendVerification = () => {
-    handleAction("send verification", `/api/admin/users/${id}/send-verification`);
+    return handleAction("send verification", `/api/admin/users/${id}/send-verification`);
   };
 
   const handleVerifyEmail = () => {
-    handleAction("verify email", `/api/admin/users/${id}/verify-email`);
+    return handleAction("verify email", `/api/admin/users/${id}/verify-email`);
   };
 
   const handleApprove = async () => {
     if (!id || !accountApprovalEnabled) return;
+    const ownsOperation = guardOwner(false);
+    const ownsAuthority = guardOwner();
     setActionLoading("approve");
     try {
       const result = await apiClient.approveUser(id);
-      setData((current) =>
-        current
-          ? { ...current, user: { ...current.user, approvedAt: result.approvedAt } }
-          : current,
-      );
-      toast.success(t("admin.userDetail.actions.approveSuccess", { email: data?.user.email }));
+      if (!ownsOperation()) return;
+      userResource.update((current) => ({
+        ...current,
+        user: { ...current.user, approvedAt: result.approvedAt },
+      }));
+      if (ownsAuthority())
+        toast.success(t("admin.userDetail.actions.approveSuccess", { email: data?.user.email }));
     } catch (err) {
-      toast.error(t("admin.userDetail.actions.approveError"));
+      if (ownsAuthority()) toast.error(t("admin.userDetail.actions.approveError"));
       throw err;
     } finally {
-      setActionLoading(null);
+      if (ownsOperation()) setActionLoading(null);
     }
   };
 
   const handleSendReset = () => {
-    handleAction("send reset", `/api/admin/users/${id}/send-reset`);
+    return handleAction("send reset", `/api/admin/users/${id}/send-reset`);
   };
 
-  const handleRevokeSession = async (sessionId: string) => {
-    if (!id) return;
-    setActionLoading(`revoke-session-${sessionId}`);
-    try {
-      const response = await fetch(`/api/admin/users/${id}/sessions/${sessionId}`, {
-        method: "DELETE",
-        credentials: "include",
-      });
-      if (!response.ok) {
-        const data = await response.json().catch(() => ({}));
-        throw new Error(data.error || t("admin.userDetail.errors.revokeSessionFailed"));
-      }
-      await Promise.all([loadSecurityActivity(), loadDetailedSessions()]);
-    } catch (err) {
-      toast.error(
-        err instanceof Error ? err.message : t("admin.userDetail.errors.revokeSessionFailed"),
-      );
-    } finally {
-      setActionLoading(null);
-    }
-  };
+  const handleRevokeSession = (sessionId: string) =>
+    handleAction(
+      `revoke-session-${sessionId}`,
+      `/api/admin/users/${id}/sessions/${sessionId}`,
+      "DELETE",
+      undefined,
+      [loadUser, loadSecurityActivity, loadDetailedSessions],
+      t("admin.userDetail.errors.revokeSessionFailed"),
+    );
 
-  const handleRevokeSessions = async () => {
-    if (!id) return;
-    setActionLoading("revoke-all-sessions");
-    try {
-      const response = await fetch(`/api/admin/users/${id}/sessions`, {
-        method: "DELETE",
-        credentials: "include",
-      });
-      if (!response.ok) {
-        const data = await response.json().catch(() => ({}));
-        throw new Error(data.error || t("admin.userDetail.errors.revokeSessionsFailed"));
-      }
-      await Promise.all([loadUser(), loadDetailedSessions()]);
-    } catch (err) {
-      toast.error(
-        err instanceof Error ? err.message : t("admin.userDetail.errors.revokeSessionsFailed"),
-      );
-    } finally {
-      setActionLoading(null);
-    }
-  };
+  const handleRevokeSessions = () =>
+    handleAction(
+      "revoke-all-sessions",
+      `/api/admin/users/${id}/sessions`,
+      "DELETE",
+      undefined,
+      [loadUser, loadSecurityActivity, loadDetailedSessions],
+      t("admin.userDetail.errors.revokeSessionsFailed"),
+    );
 
   const handleForcePasswordReset = () => {
-    handleAction("force password reset", `/api/admin/users/${id}/force-password-reset`, "POST");
+    return handleAction(
+      "force password reset",
+      `/api/admin/users/${id}/force-password-reset`,
+      "POST",
+      undefined,
+      [loadUser, loadSecurityActivity, loadDetailedSessions],
+    );
   };
 
   const handleTemporaryPassword = async () => {
@@ -459,10 +410,12 @@ export const AdminUserDetail: React.FC = () => {
       return;
     }
 
+    const ownsOperation = guardOwner(false);
+    const ownsAuthority = guardOwner();
     setActionLoading("temporary password");
     setTemporaryPasswordError(null);
     try {
-      const response = await fetch(`/api/admin/users/${id}/temporary-password`, {
+      const response = await productFetch(`/api/admin/users/${id}/temporary-password`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
@@ -472,79 +425,63 @@ export const AdminUserDetail: React.FC = () => {
       if (!response.ok) {
         throw new Error(result.error?.message || t("admin.userDetail.recovery.failed"));
       }
+      if (!ownsOperation()) return;
       setTemporaryPassword("");
       setTemporaryPasswordConfirm("");
       setTemporaryPasswordDialogOpen(false);
-      toast.success(t("admin.userDetail.recovery.success"));
-      await loadUser();
+      if (ownsAuthority()) toast.success(t("admin.userDetail.recovery.success"));
+      await Promise.all([
+        loadUser(),
+        loadSecurityActivity(),
+        loadDetailedSessions(),
+        loadOAuthConnections(),
+      ]);
     } catch (err) {
+      if (!ownsOperation()) return;
       setTemporaryPasswordError(
         err instanceof Error ? err.message : t("admin.userDetail.recovery.failed"),
       );
     } finally {
-      setActionLoading(null);
+      if (ownsOperation()) setActionLoading(null);
     }
   };
 
   const handleClearPasswordReset = () => {
-    handleAction("clear password reset", `/api/admin/users/${id}`, "PUT", {
+    return handleAction("clear password reset", `/api/admin/users/${id}`, "PUT", {
       passwordResetRequired: false,
     });
   };
 
-  const handleRevokeOAuthProvider = async (provider: string) => {
-    if (!id) return;
-    setActionLoading(`revoke-oauth-${provider}`);
-    try {
-      const response = await fetch(`/api/admin/users/${id}/oauth-tokens/${provider}`, {
-        method: "DELETE",
-        credentials: "include",
-      });
-      if (!response.ok) {
-        const data = await response.json().catch(() => ({}));
-        throw new Error(data.error || t("admin.userDetail.errors.revokeOAuthFailed"));
-      }
-      await Promise.all([loadSecurityActivity(), loadOAuthConnections()]);
-    } catch (err) {
-      toast.error(
-        err instanceof Error ? err.message : t("admin.userDetail.errors.revokeOAuthFailed"),
-      );
-    } finally {
-      setActionLoading(null);
-    }
-  };
+  const handleRevokeOAuthProvider = (provider: string) =>
+    handleAction(
+      `revoke-oauth-${provider}`,
+      `/api/admin/users/${id}/oauth-tokens/${provider}`,
+      "DELETE",
+      undefined,
+      [loadUser, loadSecurityActivity, loadOAuthConnections],
+      t("admin.userDetail.errors.revokeOAuthFailed"),
+    );
 
-  const handleRevokeOAuthTokens = async () => {
-    if (!id) return;
-    setActionLoading("revoke-all-oauth");
-    try {
-      const response = await fetch(`/api/admin/users/${id}/oauth-tokens`, {
-        method: "DELETE",
-        credentials: "include",
-      });
-      if (!response.ok) {
-        const data = await response.json().catch(() => ({}));
-        throw new Error(data.error || t("admin.userDetail.errors.revokeOAuthFailed"));
-      }
-      await Promise.all([loadUser(), loadOAuthConnections()]);
-    } catch (err) {
-      toast.error(
-        err instanceof Error ? err.message : t("admin.userDetail.errors.revokeOAuthFailed"),
-      );
-    } finally {
-      setActionLoading(null);
-    }
-  };
+  const handleRevokeOAuthTokens = () =>
+    handleAction(
+      "revoke-all-oauth",
+      `/api/admin/users/${id}/oauth-tokens`,
+      "DELETE",
+      undefined,
+      [loadUser, loadSecurityActivity, loadOAuthConnections],
+      t("admin.userDetail.errors.revokeOAuthFailed"),
+    );
 
-  if (loading) {
+  if (loading && !data) {
     return <PageShell title={t("admin.userDetail.title")} loading />;
   }
 
-  if (error || !data) {
+  if (!data) {
     return (
       <PageShell
         title={t("admin.userDetail.title")}
         error={error || t("admin.userDetail.notFound")}
+        onRetry={() => void loadUser()}
       />
     );
   }
@@ -855,23 +792,30 @@ export const AdminUserDetail: React.FC = () => {
         <CardContent>
           <div className="space-y-4">
             {/* Security Activity Stats */}
-            {securityActivity && (
-              <div className="grid grid-cols-2 gap-4 p-4 bg-muted/50 rounded-lg">
-                <div>
-                  <p className="text-sm text-muted-foreground">
-                    {t("admin.userDetail.security.activeSessions")}
-                  </p>
-                  <p className="text-2xl font-bold">{securityActivity.sessionsCount}</p>
+            <DataRegion
+              hasResult={securityResource.data !== undefined}
+              pending={securityResource.pending}
+              error={securityResource.error}
+              onRetry={loadSecurityActivity}
+              testId="user-security-region"
+            >
+              {securityActivity && (
+                <div className="grid grid-cols-2 gap-4 p-4 bg-muted/50 rounded-lg">
+                  <div>
+                    <p className="text-sm text-muted-foreground">
+                      {t("admin.userDetail.security.activeSessions")}
+                    </p>
+                    <p className="text-2xl font-bold">{securityActivity.sessionsCount}</p>
+                  </div>
+                  <div>
+                    <p className="text-sm text-muted-foreground">
+                      {t("admin.userDetail.security.oauthTokens")}
+                    </p>
+                    <p className="text-2xl font-bold">{securityActivity.oauthTokensCount}</p>
+                  </div>
                 </div>
-                <div>
-                  <p className="text-sm text-muted-foreground">
-                    {t("admin.userDetail.security.oauthTokens")}
-                  </p>
-                  <p className="text-2xl font-bold">{securityActivity.oauthTokensCount}</p>
-                </div>
-              </div>
-            )}
-
+              )}
+            </DataRegion>
             {/* Security Action Buttons */}
             <div className="flex flex-wrap gap-3">
               {emailDelivery.available && !user.isAdmin && (
@@ -977,46 +921,54 @@ export const AdminUserDetail: React.FC = () => {
           <CardTitle>{t("admin.userDetail.userInfo.title")}</CardTitle>
         </CardHeader>
         <CardContent>
-          <dl className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <dt className="text-sm text-muted-foreground">
-                {t("admin.userDetail.userInfo.userId")}
-              </dt>
-              <dd className="font-mono text-sm">{user.id}</dd>
-            </div>
-            <div>
-              <dt className="text-sm text-muted-foreground">
-                {t("admin.userDetail.userInfo.email")}
-              </dt>
-              <dd>{user.email}</dd>
-            </div>
-            <div>
-              <dt className="text-sm text-muted-foreground">
-                {t("admin.userDetail.userInfo.created")}
-              </dt>
-              <dd>{new Date(user.createdAt).toLocaleString()}</dd>
-            </div>
-            <div>
-              <dt className="text-sm text-muted-foreground">
-                {t("admin.userDetail.userInfo.updated")}
-              </dt>
-              <dd>{new Date(user.updatedAt).toLocaleString()}</dd>
-            </div>
-            {accountApprovalEnabled && (
+          <DataRegion
+            hasResult={true}
+            pending={loading}
+            error={error}
+            onRetry={loadUser}
+            testId="user-info-region"
+          >
+            <dl className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
                 <dt className="text-sm text-muted-foreground">
-                  {t("admin.userDetail.userInfo.approval")}
+                  {t("admin.userDetail.userInfo.userId")}
                 </dt>
-                <dd>
-                  {user.approvedAt
-                    ? `${t("admin.userDetail.userInfo.approvedAt")} ${new Date(
-                        user.approvedAt,
-                      ).toLocaleString()}`
-                    : t("admin.userDetail.status.pendingApproval")}
-                </dd>
+                <dd className="font-mono text-sm">{user.id}</dd>
               </div>
-            )}
-          </dl>
+              <div>
+                <dt className="text-sm text-muted-foreground">
+                  {t("admin.userDetail.userInfo.email")}
+                </dt>
+                <dd>{user.email}</dd>
+              </div>
+              <div>
+                <dt className="text-sm text-muted-foreground">
+                  {t("admin.userDetail.userInfo.created")}
+                </dt>
+                <dd>{new Date(user.createdAt).toLocaleString()}</dd>
+              </div>
+              <div>
+                <dt className="text-sm text-muted-foreground">
+                  {t("admin.userDetail.userInfo.updated")}
+                </dt>
+                <dd>{new Date(user.updatedAt).toLocaleString()}</dd>
+              </div>
+              {accountApprovalEnabled && (
+                <div>
+                  <dt className="text-sm text-muted-foreground">
+                    {t("admin.userDetail.userInfo.approval")}
+                  </dt>
+                  <dd>
+                    {user.approvedAt
+                      ? `${t("admin.userDetail.userInfo.approvedAt")} ${new Date(
+                          user.approvedAt,
+                        ).toLocaleString()}`
+                      : t("admin.userDetail.status.pendingApproval")}
+                  </dd>
+                </div>
+              )}
+            </dl>
+          </DataRegion>
         </CardContent>
       </Card>
 
@@ -1025,7 +977,8 @@ export const AdminUserDetail: React.FC = () => {
         <CardHeader>
           <div className="flex justify-between items-center">
             <CardTitle>
-              {t("admin.userDetail.webSessions.title")} ({detailedSessions.length})
+              {t("admin.userDetail.webSessions.title")} (
+              {sessionsResource.data === undefined ? "—" : detailedSessions.length})
             </CardTitle>
             {detailedSessions.length > 0 && (
               <Button
@@ -1050,67 +1003,75 @@ export const AdminUserDetail: React.FC = () => {
           </div>
         </CardHeader>
         <CardContent>
-          {detailedSessions.length === 0 ? (
-            <p className="text-muted-foreground">{t("admin.userDetail.sessions.noSessions")}</p>
-          ) : (
-            <div className="space-y-3">
-              {detailedSessions.map((session) => (
-                <div key={session.id} className="p-3 border rounded-lg">
-                  <div className="flex justify-between items-start gap-4">
-                    <div className="flex-1">
-                      <p className="text-sm font-mono mb-1">{session.id.slice(0, 12)}...</p>
-                      <div className="grid grid-cols-2 gap-2 text-xs text-muted-foreground">
-                        <div>
-                          <p>
-                            {t("admin.userDetail.webSessions.ip")}:{" "}
-                            {session.ipAddress || t("admin.userDetail.sessions.unknown")}
-                          </p>
-                          {session.country && (
+          <DataRegion
+            hasResult={sessionsResource.data !== undefined}
+            pending={sessionsResource.pending}
+            error={sessionsResource.error}
+            onRetry={loadDetailedSessions}
+            testId="user-sessions-region"
+          >
+            {detailedSessions.length === 0 ? (
+              <p className="text-muted-foreground">{t("admin.userDetail.sessions.noSessions")}</p>
+            ) : (
+              <div className="space-y-3">
+                {detailedSessions.map((session) => (
+                  <div key={session.id} className="p-3 border rounded-lg">
+                    <div className="flex justify-between items-start gap-4">
+                      <div className="flex-1">
+                        <p className="text-sm font-mono mb-1">{session.id.slice(0, 12)}...</p>
+                        <div className="grid grid-cols-2 gap-2 text-xs text-muted-foreground">
+                          <div>
                             <p>
-                              {t("admin.userDetail.webSessions.country")}: {session.country}
+                              {t("admin.userDetail.webSessions.ip")}:{" "}
+                              {session.ipAddress || t("admin.userDetail.sessions.unknown")}
                             </p>
-                          )}
+                            {session.country && (
+                              <p>
+                                {t("admin.userDetail.webSessions.country")}: {session.country}
+                              </p>
+                            )}
+                          </div>
+                          <div>
+                            <p>
+                              {t("admin.userDetail.webSessions.created")}:{" "}
+                              {new Date(session.createdAt).toLocaleString()}
+                            </p>
+                            <p>
+                              {t("admin.userDetail.webSessions.expires")}:{" "}
+                              {new Date(session.expiresAt).toLocaleString()}
+                            </p>
+                          </div>
                         </div>
-                        <div>
-                          <p>
-                            {t("admin.userDetail.webSessions.created")}:{" "}
-                            {new Date(session.createdAt).toLocaleString()}
+                        {session.userAgent && (
+                          <p className="text-xs text-muted-foreground truncate mt-1">
+                            {session.userAgent}
                           </p>
-                          <p>
-                            {t("admin.userDetail.webSessions.expires")}:{" "}
-                            {new Date(session.expiresAt).toLocaleString()}
-                          </p>
-                        </div>
+                        )}
                       </div>
-                      {session.userAgent && (
-                        <p className="text-xs text-muted-foreground truncate mt-1">
-                          {session.userAgent}
-                        </p>
-                      )}
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={actionLoading === `revoke-session-${session.id}`}
+                        onClick={() =>
+                          setConfirmDialog({
+                            open: true,
+                            title: t("admin.userDetail.webSessions.revoke"),
+                            description: t("admin.userDetail.webSessions.confirmRevokeSession"),
+                            confirmLabel: t("admin.userDetail.webSessions.revoke"),
+                            variant: "destructive",
+                            onConfirm: () => handleRevokeSession(session.id),
+                          })
+                        }
+                      >
+                        <LogOut className="h-4 w-4 mr-1" />
+                        {t("admin.userDetail.webSessions.revoke")}
+                      </Button>
                     </div>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      disabled={actionLoading === `revoke-session-${session.id}`}
-                      onClick={() =>
-                        setConfirmDialog({
-                          open: true,
-                          title: t("admin.userDetail.webSessions.revoke"),
-                          description: t("admin.userDetail.webSessions.confirmRevokeSession"),
-                          confirmLabel: t("admin.userDetail.webSessions.revoke"),
-                          variant: "destructive",
-                          onConfirm: () => handleRevokeSession(session.id),
-                        })
-                      }
-                    >
-                      <LogOut className="h-4 w-4 mr-1" />
-                      {t("admin.userDetail.webSessions.revoke")}
-                    </Button>
                   </div>
-                </div>
-              ))}
-            </div>
-          )}
+                ))}
+              </div>
+            )}
+          </DataRegion>
         </CardContent>
       </Card>
 
@@ -1119,7 +1080,8 @@ export const AdminUserDetail: React.FC = () => {
         <CardHeader>
           <div className="flex justify-between items-center">
             <CardTitle>
-              {t("admin.userDetail.oauthConnections.title")} ({oauthConnections.length})
+              {t("admin.userDetail.oauthConnections.title")} (
+              {oauthResource.data === undefined ? "—" : oauthConnections.length})
             </CardTitle>
             {oauthConnections.length > 0 && (
               <Button
@@ -1144,70 +1106,78 @@ export const AdminUserDetail: React.FC = () => {
           </div>
         </CardHeader>
         <CardContent>
-          {oauthConnections.length === 0 ? (
-            <p className="text-muted-foreground">
-              {t("admin.userDetail.oauthConnections.noConnections")}
-            </p>
-          ) : (
-            <div className="space-y-3">
-              {oauthConnections.map((connection) => (
-                <div key={connection.consentId} className="p-3 border rounded-lg">
-                  <div className="flex justify-between items-start gap-4">
-                    <div className="flex-1">
-                      <p className="text-sm font-medium mb-1">{connection.clientId}</p>
-                      <div className="text-xs text-muted-foreground space-y-1">
-                        <p>
-                          {t("admin.userDetail.oauthConnections.scopes")}:{" "}
-                          {connection.scopes || "None"}
-                        </p>
-                        <p>
-                          {t("admin.userDetail.oauthConnections.connected")}:{" "}
-                          {new Date(connection.createdAt).toLocaleString()}
-                        </p>
-                        <p>
-                          {t("admin.userDetail.oauthConnections.tokens")}:{" "}
-                          {connection.tokens.length}
-                        </p>
+          <DataRegion
+            hasResult={oauthResource.data !== undefined}
+            pending={oauthResource.pending}
+            error={oauthResource.error}
+            onRetry={loadOAuthConnections}
+            testId="user-oauth-region"
+          >
+            {oauthConnections.length === 0 ? (
+              <p className="text-muted-foreground">
+                {t("admin.userDetail.oauthConnections.noConnections")}
+              </p>
+            ) : (
+              <div className="space-y-3">
+                {oauthConnections.map((connection) => (
+                  <div key={connection.consentId} className="p-3 border rounded-lg">
+                    <div className="flex justify-between items-start gap-4">
+                      <div className="flex-1">
+                        <p className="text-sm font-medium mb-1">{connection.clientId}</p>
+                        <div className="text-xs text-muted-foreground space-y-1">
+                          <p>
+                            {t("admin.userDetail.oauthConnections.scopes")}:{" "}
+                            {connection.scopes || "None"}
+                          </p>
+                          <p>
+                            {t("admin.userDetail.oauthConnections.connected")}:{" "}
+                            {new Date(connection.createdAt).toLocaleString()}
+                          </p>
+                          <p>
+                            {t("admin.userDetail.oauthConnections.tokens")}:{" "}
+                            {connection.tokens.length}
+                          </p>
+                        </div>
                       </div>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={actionLoading === `revoke-oauth-${connection.clientId}`}
+                        onClick={() =>
+                          setConfirmDialog({
+                            open: true,
+                            title: t("admin.userDetail.oauthConnections.revoke"),
+                            description: t(
+                              "admin.userDetail.oauthConnections.confirmRevokeProvider",
+                              {
+                                provider: connection.clientId,
+                              },
+                            ),
+                            confirmLabel: t("admin.userDetail.oauthConnections.revoke"),
+                            variant: "destructive",
+                            onConfirm: () => handleRevokeOAuthProvider(connection.clientId),
+                          })
+                        }
+                      >
+                        <Key className="h-4 w-4 mr-1" />
+                        {t("admin.userDetail.oauthConnections.revoke")}
+                      </Button>
                     </div>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      disabled={actionLoading === `revoke-oauth-${connection.clientId}`}
-                      onClick={() =>
-                        setConfirmDialog({
-                          open: true,
-                          title: t("admin.userDetail.oauthConnections.revoke"),
-                          description: t(
-                            "admin.userDetail.oauthConnections.confirmRevokeProvider",
-                            {
-                              provider: connection.clientId,
-                            },
-                          ),
-                          confirmLabel: t("admin.userDetail.oauthConnections.revoke"),
-                          variant: "destructive",
-                          onConfirm: () => handleRevokeOAuthProvider(connection.clientId),
-                        })
-                      }
-                    >
-                      <Key className="h-4 w-4 mr-1" />
-                      {t("admin.userDetail.oauthConnections.revoke")}
-                    </Button>
                   </div>
-                </div>
-              ))}
-            </div>
-          )}
+                ))}
+              </div>
+            )}
+          </DataRegion>
         </CardContent>
       </Card>
 
       {/* Artifact Quota */}
-      {multiUserAdminEnabled && artifactQuota && (
+      {multiUserAdminEnabled && (
         <Card className="mb-6" data-testid="artifact-quota-card">
           <CardHeader>
             <div className="flex justify-between items-center">
               <CardTitle>{t("admin.userDetail.artifactQuota.title")}</CardTitle>
-              {!quotaEditMode && (
+              {artifactQuota && !quotaEditMode && (
                 <Button
                   variant="outline"
                   size="sm"
@@ -1220,147 +1190,174 @@ export const AdminUserDetail: React.FC = () => {
             </div>
           </CardHeader>
           <CardContent>
-            {/* Usage display */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-              <div>
-                <div className="flex items-center gap-2 mb-2">
-                  <HardDrive className="h-4 w-4 text-muted-foreground" />
-                  <span className="text-sm font-medium">
-                    {t("admin.userDetail.artifactQuota.storage")}
-                  </span>
-                </div>
-                <Progress value={artifactQuota.usage.storageUsedPercent} className="h-2 mb-1" />
-                <div className="flex justify-between text-xs text-muted-foreground">
-                  <span>
-                    {formatSize(artifactQuota.usage.totalSize)} /{" "}
-                    {formatSize(artifactQuota.effective.storageLimit)}
-                  </span>
-                  <span>
-                    {artifactQuota.usage.storageUsedPercent.toFixed(1)}%{" "}
-                    {t("admin.userDetail.artifactQuota.used")}
-                  </span>
-                </div>
-              </div>
-              <div>
-                <div className="flex items-center gap-2 mb-2">
-                  <FileText className="h-4 w-4 text-muted-foreground" />
-                  <span className="text-sm font-medium">
-                    {t("admin.userDetail.artifactQuota.files")}
-                  </span>
-                </div>
-                <Progress value={artifactQuota.usage.countUsedPercent} className="h-2 mb-1" />
-                <div className="flex justify-between text-xs text-muted-foreground">
-                  <span>
-                    {artifactQuota.usage.totalArtifacts} / {artifactQuota.effective.countLimit}
-                  </span>
-                  <span>
-                    {artifactQuota.usage.countUsedPercent.toFixed(1)}%{" "}
-                    {t("admin.userDetail.artifactQuota.used")}
-                  </span>
-                </div>
-              </div>
-            </div>
+            <DataRegion
+              hasResult={quotaResource.data !== undefined}
+              pending={quotaResource.pending}
+              error={quotaResource.error}
+              onRetry={loadArtifactQuota}
+              testId="user-quota-region"
+            >
+              {artifactQuota && (
+                <>
+                  {/* Usage display */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                    <div>
+                      <div className="flex items-center gap-2 mb-2">
+                        <HardDrive className="h-4 w-4 text-muted-foreground" />
+                        <span className="text-sm font-medium">
+                          {t("admin.userDetail.artifactQuota.storage")}
+                        </span>
+                      </div>
+                      <Progress
+                        value={artifactQuota.usage.storageUsedPercent}
+                        className="h-2 mb-1"
+                      />
+                      <div className="flex justify-between text-xs text-muted-foreground">
+                        <span>
+                          {formatSize(artifactQuota.usage.totalSize)} /{" "}
+                          {formatSize(artifactQuota.effective.storageLimit)}
+                        </span>
+                        <span>
+                          {artifactQuota.usage.storageUsedPercent.toFixed(1)}%{" "}
+                          {t("admin.userDetail.artifactQuota.used")}
+                        </span>
+                      </div>
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2 mb-2">
+                        <FileText className="h-4 w-4 text-muted-foreground" />
+                        <span className="text-sm font-medium">
+                          {t("admin.userDetail.artifactQuota.files")}
+                        </span>
+                      </div>
+                      <Progress value={artifactQuota.usage.countUsedPercent} className="h-2 mb-1" />
+                      <div className="flex justify-between text-xs text-muted-foreground">
+                        <span>
+                          {artifactQuota.usage.totalArtifacts} /{" "}
+                          {artifactQuota.effective.countLimit}
+                        </span>
+                        <span>
+                          {artifactQuota.usage.countUsedPercent.toFixed(1)}%{" "}
+                          {t("admin.userDetail.artifactQuota.used")}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
 
-            {/* Override status */}
-            <div className="p-3 bg-muted/50 rounded-lg mb-4">
-              {artifactQuota.overrides.quotaMb !== null ||
-              artifactQuota.overrides.maxFiles !== null ? (
-                <span className="text-sm text-info">
-                  {t("admin.userDetail.artifactQuota.customQuota")}:{" "}
-                  {artifactQuota.overrides.quotaMb !== null &&
-                    `${artifactQuota.overrides.quotaMb} MB`}
-                  {artifactQuota.overrides.quotaMb !== null &&
-                    artifactQuota.overrides.maxFiles !== null &&
-                    ", "}
-                  {artifactQuota.overrides.maxFiles !== null &&
-                    `${artifactQuota.overrides.maxFiles} files`}
-                </span>
-              ) : (
-                <span className="text-sm text-muted-foreground">
-                  {t("admin.userDetail.artifactQuota.usingDefault")}
-                </span>
+                  {/* Override status */}
+                  <div className="p-3 bg-muted/50 rounded-lg mb-4">
+                    {artifactQuota.overrides.quotaMb !== null ||
+                    artifactQuota.overrides.maxFiles !== null ? (
+                      <span className="text-sm text-info">
+                        {t("admin.userDetail.artifactQuota.customQuota")}:{" "}
+                        {artifactQuota.overrides.quotaMb !== null &&
+                          `${artifactQuota.overrides.quotaMb} MB`}
+                        {artifactQuota.overrides.quotaMb !== null &&
+                          artifactQuota.overrides.maxFiles !== null &&
+                          ", "}
+                        {artifactQuota.overrides.maxFiles !== null &&
+                          `${artifactQuota.overrides.maxFiles} files`}
+                      </span>
+                    ) : (
+                      <span className="text-sm text-muted-foreground">
+                        {t("admin.userDetail.artifactQuota.usingDefault")}
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Edit form */}
+                  {quotaEditMode && (
+                    <div className="space-y-4 p-4 border rounded-lg" data-testid="quota-edit-form">
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                          <label className="text-sm font-medium mb-1 block">
+                            {t("admin.userDetail.artifactQuota.overrideQuotaMb")}
+                          </label>
+                          <Input
+                            type="number"
+                            min="0"
+                            placeholder={
+                              artifactQuota.effective.storageLimit / (1024 * 1024) + " (default)"
+                            }
+                            value={quotaForm.quotaMb}
+                            onChange={(e) => {
+                              const quotaMb = e.currentTarget.value;
+                              setQuotaForm((prev) => ({ ...prev, quotaMb }));
+                            }}
+                            data-testid="quota-mb-input"
+                          />
+                          <p className="text-xs text-muted-foreground mt-1">
+                            {t("admin.userDetail.artifactQuota.nullHint")}
+                          </p>
+                        </div>
+                        <div>
+                          <label className="text-sm font-medium mb-1 block">
+                            {t("admin.userDetail.artifactQuota.overrideMaxFiles")}
+                          </label>
+                          <Input
+                            type="number"
+                            min="0"
+                            placeholder={artifactQuota.effective.countLimit + " (default)"}
+                            value={quotaForm.maxFiles}
+                            onChange={(e) => {
+                              const maxFiles = e.currentTarget.value;
+                              setQuotaForm((prev) => ({ ...prev, maxFiles }));
+                            }}
+                            data-testid="quota-max-files-input"
+                          />
+                          <p className="text-xs text-muted-foreground mt-1">
+                            {t("admin.userDetail.artifactQuota.nullHint")}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="flex gap-2">
+                        <Button
+                          onClick={handleSaveQuota}
+                          disabled={quotaSaving}
+                          data-testid="save-quota-button"
+                        >
+                          {quotaSaving
+                            ? t("admin.userDetail.artifactQuota.saving")
+                            : t("admin.userDetail.artifactQuota.save")}
+                        </Button>
+                        <Button
+                          variant="outline"
+                          onClick={handleResetQuota}
+                          disabled={quotaSaving}
+                          data-testid="reset-quota-button"
+                        >
+                          <RotateCcw className="h-4 w-4 mr-2" />
+                          {t("admin.userDetail.artifactQuota.resetToDefault")}
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          onClick={() => {
+                            savedQuotaRef.current = null;
+                            setQuotaActionError(null);
+                            setQuotaEditMode(false);
+                            // Reset form to current values
+                            setQuotaForm({
+                              quotaMb: artifactQuota.overrides.quotaMb?.toString() ?? "",
+                              maxFiles: artifactQuota.overrides.maxFiles?.toString() ?? "",
+                            });
+                          }}
+                          disabled={quotaSaving}
+                        >
+                          {t("common.cancel")}
+                        </Button>
+                      </div>
+                      {quotaActionError && (
+                        <InlineError
+                          message={quotaActionError}
+                          onRetry={() => void handleSaveQuota()}
+                          retryLabel={t("common.dataRegion.retry")}
+                        />
+                      )}
+                    </div>
+                  )}
+                </>
               )}
-            </div>
-
-            {/* Edit form */}
-            {quotaEditMode && (
-              <div className="space-y-4 p-4 border rounded-lg" data-testid="quota-edit-form">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <label className="text-sm font-medium mb-1 block">
-                      {t("admin.userDetail.artifactQuota.overrideQuotaMb")}
-                    </label>
-                    <Input
-                      type="number"
-                      min="0"
-                      placeholder={
-                        artifactQuota.effective.storageLimit / (1024 * 1024) + " (default)"
-                      }
-                      value={quotaForm.quotaMb}
-                      onChange={(e) =>
-                        setQuotaForm((prev) => ({ ...prev, quotaMb: e.target.value }))
-                      }
-                      data-testid="quota-mb-input"
-                    />
-                    <p className="text-xs text-muted-foreground mt-1">
-                      {t("admin.userDetail.artifactQuota.nullHint")}
-                    </p>
-                  </div>
-                  <div>
-                    <label className="text-sm font-medium mb-1 block">
-                      {t("admin.userDetail.artifactQuota.overrideMaxFiles")}
-                    </label>
-                    <Input
-                      type="number"
-                      min="0"
-                      placeholder={artifactQuota.effective.countLimit + " (default)"}
-                      value={quotaForm.maxFiles}
-                      onChange={(e) =>
-                        setQuotaForm((prev) => ({ ...prev, maxFiles: e.target.value }))
-                      }
-                      data-testid="quota-max-files-input"
-                    />
-                    <p className="text-xs text-muted-foreground mt-1">
-                      {t("admin.userDetail.artifactQuota.nullHint")}
-                    </p>
-                  </div>
-                </div>
-                <div className="flex gap-2">
-                  <Button
-                    onClick={handleSaveQuota}
-                    disabled={quotaSaving}
-                    data-testid="save-quota-button"
-                  >
-                    {quotaSaving
-                      ? t("admin.userDetail.artifactQuota.saving")
-                      : t("admin.userDetail.artifactQuota.save")}
-                  </Button>
-                  <Button
-                    variant="outline"
-                    onClick={handleResetQuota}
-                    disabled={quotaSaving}
-                    data-testid="reset-quota-button"
-                  >
-                    <RotateCcw className="h-4 w-4 mr-2" />
-                    {t("admin.userDetail.artifactQuota.resetToDefault")}
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    onClick={() => {
-                      setQuotaEditMode(false);
-                      // Reset form to current values
-                      setQuotaForm({
-                        quotaMb: artifactQuota.overrides.quotaMb?.toString() ?? "",
-                        maxFiles: artifactQuota.overrides.maxFiles?.toString() ?? "",
-                      });
-                    }}
-                    disabled={quotaSaving}
-                  >
-                    {t("common.cancel")}
-                  </Button>
-                </div>
-              </div>
-            )}
+            </DataRegion>
           </CardContent>
         </Card>
       )}
@@ -1409,43 +1406,41 @@ export const AdminUserDetail: React.FC = () => {
       </Card>
 
       {/* Block User Dialog */}
-      <Dialog open={blockDialogOpen} onOpenChange={setBlockDialogOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>{t("admin.userDetail.actions.blockUser")}</DialogTitle>
-          </DialogHeader>
-          <div className="py-4">
-            <label className="text-sm font-medium mb-2 block">
-              {t("admin.userDetail.actions.blockReason")}
-            </label>
-            <Input
-              value={blockReason}
-              onChange={(e) => setBlockReason(e.target.value)}
-              placeholder={t("admin.userDetail.actions.blockReason")}
-              autoFocus
-            />
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setBlockDialogOpen(false)}>
-              {t("common.cancel")}
-            </Button>
-            <Button variant="destructive" onClick={handleBlockConfirm}>
-              {t("admin.userDetail.actions.blockUser")}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <ConfirmDialog
+        open={blockDialogOpen}
+        onOpenChange={setBlockDialogOpen}
+        title={t("admin.userDetail.actions.blockUser")}
+        description={t("admin.userDetail.actions.blockReason")}
+        confirmLabel={t("admin.userDetail.actions.blockUser")}
+        variant="destructive"
+        onConfirm={handleBlockConfirm}
+      >
+        <div className="py-4">
+          <Input
+            aria-label={t("admin.userDetail.actions.blockReason")}
+            value={blockReason}
+            onChange={(e) => setBlockReason(e.target.value)}
+            placeholder={t("admin.userDetail.actions.blockReason")}
+            disabled={actionLoading === "block"}
+            autoFocus
+          />
+        </div>
+      </ConfirmDialog>
 
       <Dialog
         open={temporaryPasswordDialogOpen}
-        onOpenChange={(open) => {
-          setTemporaryPasswordDialogOpen(open);
-          if (!open) {
-            setTemporaryPassword("");
-            setTemporaryPasswordConfirm("");
-            setTemporaryPasswordError(null);
-          }
-        }}
+        onOpenChange={
+          actionLoading === "temporary password"
+            ? undefined
+            : (open) => {
+                setTemporaryPasswordDialogOpen(open);
+                if (!open) {
+                  setTemporaryPassword("");
+                  setTemporaryPasswordConfirm("");
+                  setTemporaryPasswordError(null);
+                }
+              }
+        }
       >
         <DialogContent data-testid="temporary-password-dialog">
           <DialogHeader>
@@ -1466,6 +1461,7 @@ export const AdminUserDetail: React.FC = () => {
                 minLength={8}
                 maxLength={128}
                 value={temporaryPassword}
+                disabled={actionLoading === "temporary password"}
                 onChange={(event) => setTemporaryPassword(event.target.value)}
                 autoFocus
               />
@@ -1479,6 +1475,7 @@ export const AdminUserDetail: React.FC = () => {
                 type="password"
                 autoComplete="new-password"
                 value={temporaryPasswordConfirm}
+                disabled={actionLoading === "temporary password"}
                 onChange={(event) => setTemporaryPasswordConfirm(event.target.value)}
               />
             </div>
@@ -1489,7 +1486,11 @@ export const AdminUserDetail: React.FC = () => {
             )}
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setTemporaryPasswordDialogOpen(false)}>
+            <Button
+              variant="outline"
+              disabled={actionLoading === "temporary password"}
+              onClick={() => setTemporaryPasswordDialogOpen(false)}
+            >
               {t("common.cancel")}
             </Button>
             <Button

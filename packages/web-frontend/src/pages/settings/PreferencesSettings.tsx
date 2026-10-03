@@ -24,6 +24,7 @@ import {
 } from "@/components/onboarding/beginnerPanels";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import { DataRegion } from "@/components/DataRegion";
 import { useGuides } from "@/guides/GuideContext";
 import { changeProgress, forgetProgress, restartGuides } from "@/guides/progress";
 import { tourGuideIds } from "@/guides/fullTour";
@@ -44,7 +45,7 @@ const THEMES = [
 
 function BeginnerPanelsSettings(): React.JSX.Element {
   const { t } = useTranslation();
-  const { loaded, isHidden } = useBeginnerPanels();
+  const { accepted, pending, error, refresh, isHidden } = useBeginnerPanels();
   return (
     <div className="space-y-3 p-4 sm:p-5" data-testid="preferences-beginner-panels">
       <div className="space-y-0.5">
@@ -55,39 +56,47 @@ function BeginnerPanelsSettings(): React.JSX.Element {
           {t("pages.settings.preferences.beginnerPanels.description")}
         </p>
       </div>
-      <ul className="divide-y rounded-lg border">
-        {BEGINNER_PANELS.map((panel) => {
-          const shown = loaded && !isHidden(panel);
-          const id = `beginner-panel-${panel}`;
-          return (
-            <li key={panel} className="flex items-center justify-between gap-4 px-3 py-2.5">
-              <Label htmlFor={id} className="text-sm font-normal">
-                {t(`onboarding.panels.names.${panel}`)}
-              </Label>
-              <span className="flex items-center gap-2 text-xs text-muted-foreground">
-                {loaded &&
-                  t(
-                    shown
-                      ? "pages.settings.preferences.beginnerPanels.shown"
-                      : "pages.settings.preferences.beginnerPanels.hidden",
-                  )}
-                <Switch
-                  id={id}
-                  checked={shown}
-                  disabled={!loaded}
-                  onCheckedChange={(checked) => {
-                    setPanelHidden(panel, !checked).catch(() =>
-                      toast.error(t("onboarding.panels.failed")),
-                    );
-                  }}
-                  data-testid="beginner-panel-switch"
-                  data-panel={panel}
-                />
-              </span>
-            </li>
-          );
-        })}
-      </ul>
+      <DataRegion
+        hasResult={accepted}
+        pending={pending}
+        error={error ? t("pages.settings.loadFailed") : null}
+        onRetry={refresh}
+        testId="preferences-panels-region"
+      >
+        <ul className="divide-y rounded-lg border">
+          {BEGINNER_PANELS.map((panel) => {
+            const shown = accepted && !isHidden(panel);
+            const id = `beginner-panel-${panel}`;
+            return (
+              <li key={panel} className="flex items-center justify-between gap-4 px-3 py-2.5">
+                <Label htmlFor={id} className="text-sm font-normal">
+                  {t(`onboarding.panels.names.${panel}`)}
+                </Label>
+                <span className="flex items-center gap-2 text-xs text-muted-foreground">
+                  {accepted &&
+                    t(
+                      shown
+                        ? "pages.settings.preferences.beginnerPanels.shown"
+                        : "pages.settings.preferences.beginnerPanels.hidden",
+                    )}
+                  <Switch
+                    id={id}
+                    checked={shown}
+                    disabled={!accepted}
+                    onCheckedChange={(checked) => {
+                      setPanelHidden(panel, !checked).catch(() =>
+                        toast.error(t("onboarding.panels.failed")),
+                      );
+                    }}
+                    data-testid="beginner-panel-switch"
+                    data-panel={panel}
+                  />
+                </span>
+              </li>
+            );
+          })}
+        </ul>
+      </DataRegion>
     </div>
   );
 }

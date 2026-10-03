@@ -135,7 +135,7 @@ export interface AdminStatsResponse extends AdminSystemStatusResponse {
     id: string;
     workflowId: string;
     status: string;
-    timestamp: number;
+    timestamp: number | null;
     action: string;
   }>;
 }

@@ -5,7 +5,8 @@ MCP Moira Web UI design system built on shadcn/ui + Tailwind CSS v4.
 ## Color Tokens
 
 All colors use OKLCH format defined in `packages/web-frontend/src/styles/globals.css`.
-Theme switching is handled via CSS custom properties — **never use `dark:` prefix classes**.
+Theme switching is handled via CSS custom properties; first-party components use semantic classes
+instead of separate `dark:` color choices. Installed Tremor variants use the shared aliases below.
 
 | Token                                | Purpose                            |
 | ------------------------------------ | ---------------------------------- |
@@ -20,6 +21,18 @@ Theme switching is handled via CSS custom properties — **never use `dark:` pre
 | `--muted` / `--muted-foreground`     | Secondary text and surfaces        |
 | `--border`                           | Default borders                    |
 | `--ring`                             | Focus rings                        |
+
+Charts and sparklines share `CHART_COLORS` from `lib/chart-colors.ts`, backed by `--chart-1` through
+`--chart-5`. `globals.css` generates a finite set of Tremor's dynamically constructed utilities
+with `@source inline`. Vendor content, emphasis, border and background aliases reference the live
+muted-foreground, foreground, border and card tokens through `@theme inline`; their light/dark
+class names resolve to the same changing variables. Keep library colors inside this integration
+rather than overriding the global built-in palette or scanning the whole dependency.
+
+When comparing independently bounded series, an absent point before that series's limited window
+is unknown (`null`), while an observed zero and absence within covered history remain zero. Keep
+the clipping notice separate from full-period totals; it cannot justify drawing excluded history
+as a numeric value.
 
 ## Typography
 
@@ -49,21 +62,24 @@ Font: **Inter Variable** (`--font-sans`), monospace: `--font-mono`.
 
 ## Component Mapping
 
-| UI Need                   | Component            | Import                         |
-| ------------------------- | -------------------- | ------------------------------ |
-| Page wrapper (data pages) | `PageShell`          | `@/components/PageShell`       |
-| Page title + description  | `PageHeader`         | `@/components/page-header`     |
-| Filter toolbar            | `FilterBar`          | `@/components/FilterBar`       |
-| Card wrapper (list/grid)  | `CardShell`          | `@/components/cards/CardShell` |
-| Data list with pagination | `DataListView`       | `@/components/DataListView`    |
-| Loading spinner           | `PageLoader`         | `@/components/page-loader`     |
-| Inline error with retry   | `InlineError`        | `@/components/inline-error`    |
-| Empty state               | `EmptyState`         | `@/components/empty-state`     |
-| Confirmation dialog       | `ConfirmDialog`      | `@/components/confirm-dialog`  |
-| Debounced input value     | `useDebounce`        | `@/hooks/useDebounce`          |
-| List page size            | `useListPageSize`    | `@/hooks/useListPageSize`      |
-| Drop stale list answers   | `useLatestRequest`   | `@/hooks/useLatestRequest`     |
-| Table page size (rows)    | `useDynamicPageSize` | `@/hooks/useDynamicPageSize`   |
+| UI Need                     | Component            | Import                              |
+| --------------------------- | -------------------- | ----------------------------------- |
+| Page wrapper (data pages)   | `PageShell`          | `@/components/PageShell`            |
+| Page title + description    | `PageHeader`         | `@/components/page-header`          |
+| Shared header presentation  | `PageHeaderContent`  | `@/components/page-header-content`  |
+| Retained data region        | `DataRegion`         | `@/components/DataRegion`           |
+| Settings section navigation | `SettingsNav`        | `@/components/settings/SettingsNav` |
+| Filter toolbar              | `FilterBar`          | `@/components/FilterBar`            |
+| Card wrapper (list/grid)    | `CardShell`          | `@/components/cards/CardShell`      |
+| Data list with pagination   | `DataListView`       | `@/components/DataListView`         |
+| Loading spinner             | `PageLoader`         | `@/components/page-loader`          |
+| Inline error with retry     | `InlineError`        | `@/components/inline-error`         |
+| Empty state                 | `EmptyState`         | `@/components/empty-state`          |
+| Confirmation dialog         | `ConfirmDialog`      | `@/components/confirm-dialog`       |
+| Debounced input value       | `useDebounce`        | `@/hooks/useDebounce`               |
+| List page size              | `useListPageSize`    | `@/hooks/useListPageSize`           |
+| Drop stale list answers     | `useLatestRequest`   | `@/hooks/useLatestRequest`          |
+| Table page size (rows)      | `useDynamicPageSize` | `@/hooks/useDynamicPageSize`        |
 
 ### DO NOT use directly:
 
@@ -89,6 +105,7 @@ Standardized page layout. Handles loading and error states automatically.
   title="Executions"
   description="Your workflow runs"
   loading={isLoading}
+  hasResult={resource.data !== undefined}
   error={errorMessage}
   onRetry={reload}
 >
@@ -96,7 +113,94 @@ Standardized page layout. Handles loading and error states automatically.
 </PageShell>
 ```
 
+With explicit `hasResult`, the shell keeps accepted children mounted during loading or failure,
+including a successful empty result. Without it, `loading` or `error` selects the initial-load
+presentation. Keep filters outside a smaller pending region when only its data is refreshing.
 Auth pages, detail pages, and Settings have justified different layouts.
+
+The standard `PageHeader` wrapper supplies the route's screen tour. The compact
+`diagram/PageHeader` wrapper preserves process back navigation, facts, badges and actions.
+Both compose the Router-free `PageHeaderContent`; do not replace a process header with a generic
+title that loses its facts or guide identity.
+
+`SettingsNav` renders caller-provided `items`, `active`, `onSelect`, `label` and optional `getHref`,
+`testIdPrefix` and `guide`. It does not write history or supply a settings guide by default.
+The user settings caller owns hash navigation and scrolling; administrator settings own the
+`tab` query parameter. Preserve native modified-link clicks.
+
+### Loading and partial updates
+
+Loading belongs to the smallest region whose data is being requested. Keep the application frame,
+page header, tabs, filters and independent panels mounted. Preserve focus, scroll position,
+selected tabs and unsaved input while that region updates.
+
+- A skeleton belongs only to a region with no loaded value. An empty successful result is a loaded
+  value; an empty list must not make its next request an initial page load.
+- A refresh or mutation keeps the last usable value with a local pending indicator. A failed
+  refresh keeps that value and shows a local error with retry. An independent successful panel
+  must not disappear because another request failed.
+- Period, filter and selection controls remain usable. If their new request retains the previous
+  result, its visible scope must continue to describe that result until the new one arrives.
+- A confirmed mutation updates the affected resource and refreshes its actual dependencies.
+  Disable only actions made invalid by the pending operation; do not block unrelated controls.
+- Account or resource changes must not show the previous identity's private data as the new one.
+  Clear or hide incompatible data while preserving the stable frame.
+
+Compose existing `useResource`, `DataRegion`, `PageShell`, `InlineError`, skeleton and button primitives.
+`useResource.data`, `dataKey`, `pending` and `error` distinguish the held result from the requested
+one. Do not use `items.length === 0` as proof that no result has loaded. Apply this contract to
+every data surface.
+
+`DataRegion` takes explicit `hasResult` and `pending`, with optional `error`, `onRetry`,
+`resultScope`, `initialContent`, `retryLabel`, `testId` and `className`. It keeps accepted children
+mounted, marks the region `aria-busy`, and presents pending/error feedback locally. Its retry
+callback reads that region's source; it must not reload unrelated successful panels.
+
+`DataListView` requires `hasResult`; `loading`, `error`, `onRetry`, `onRefresh` and `resultScope`
+use the same region contract. Its toolbar stays mounted even before the first result. Keep the
+accepted items, total, page, page size and filters together, separately from requested controls.
+The caption and pagination describe that accepted response until its successor arrives.
+An empty out-of-range page retains first/previous navigation and reports its actual zero items,
+rather than hiding the only route back to a populated page.
+
+When a confirmed mutation changes accepted facts, use `useResource.update` or the existing
+request guard to supersede older reads. Update untouched fields from accepted source data while
+preserving independently edited fields. A confirmation callback must await the operation and
+reject on failure so `ConfirmDialog` keeps the dialog open. Present its error inside the dialog's
+`children` slot: an error behind a modal is unavailable to the reader. Retry keeps the typed value;
+callers use `returnFocusRef` or `onReturnFocus` to restore focus to the initiating control on close.
+
+Code loading follows the same region boundary: route code waits inside the existing layout;
+an editor, Markdown preview or history dialog waits inside its own surface. Opening a preview
+must not remove the draft or its independent editing controls.
+
+`SettingsEditor` keeps the full setting label, description, help, badges and actions readable.
+Its header stacks on narrow screens and wraps metadata and actions; long storage keys wrap rather
+than widening the card. Keep the shared editor instead of shortening translated labels to fit.
+A successful save clears only the draft value submitted by that operation. A newer edit made
+while the save is pending remains dirty and can be saved separately.
+
+Private authority uncertainty is a security boundary, not an ordinary data refresh. The existing
+private holding boundary may hide and make its contents inert while preserving same-owner
+drafts for revalidation. Confirmed account/backend replacement resets private state. Public
+authentication operations remain outside that private ownership key so their successful
+continuation can finish. Use the shared admission/holding primitives described in
+[Web UI](WEB-UI.md#routes) and [Authentication](AUTHENTICATION.md), rather than adding a page-local
+copy of session state or retaining exposed private content during uncertain access.
+
+Layout measurements follow the same visibility boundary. A hidden retained card's zero height
+is not usable geometry: `useListPageSize` waits for positive heights across the drawn items and
+retries on the box's resize notification after disclosure. The accepted row height remains stable
+for that view while available capacity can change on resize. Do not reveal private content to
+make a layout measurement succeed.
+
+### AnalyticsCard
+
+`components/admin/AnalyticsCard.tsx` composes a `Card` header, an independent button group and a
+`useResource` result. Each period button exposes `aria-pressed`; the group has a translated name.
+The header's period, excluded-user count and observation time come from the returned `scope`.
+Pending and retryable errors stay inside the card, with its previous data retained. Person and run
+rows inside an analytical section still use `CardShell`.
 
 ### FilterBar
 
@@ -377,5 +481,6 @@ The same state reads the same way on every surface.
 ## Dark/Light Theme
 
 - Colors switch via CSS custom properties in `globals.css`
-- **Never** use `dark:` prefix — all theming is through CSS variables
+- First-party colors use CSS variables; installed chart variants resolve through the shared live
+  theme aliases rather than a separate palette
 - Test both themes when adding new components

@@ -40,6 +40,9 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { SearchableSelect } from "@/components/SearchableSelect";
+import { DataRegion } from "@/components/DataRegion";
+import { useResource } from "@/hooks/useResource";
+import { localDayRange } from "@/lib/local-date-range";
 
 interface AuditChange {
   field: string;
@@ -78,12 +81,30 @@ export const AuditLog: React.FC = () => {
     containerRef,
     onViewModeChange,
   } = useListPageSize(() => setCurrentPage(1));
-  const [entries, setEntries] = useState<AuditLogCardData[]>([]);
-  const [users, setUsers] = useState<{ id: string; email: string; name: string | null }[]>([]);
-  const [auditActions, setAuditActions] = useState<string[]>([]);
+  const [accepted, setAccepted] = useState<{
+    entries: AuditLogCardData[];
+    total: number;
+    page: number;
+    pageSize: number;
+    userId: string;
+    actions: string[];
+    resource: string;
+    source: string;
+    from: string;
+    to: string;
+    sortBy: string;
+    sortOrder: string;
+  } | null>(null);
+  const entries = accepted?.entries ?? [];
+  const total = accepted?.total ?? 0;
+  const choices = useResource("admin-user-choices", () =>
+    apiClient.getAdminUserChoices({ limit: 100 }),
+  );
+  const users = choices.data?.users ?? [];
+  const actions = useResource("admin-audit-actions", () => apiClient.getAuditActions());
+  const auditActions = actions.data?.actions ?? [];
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [total, setTotal] = useState(0);
   const [selectedEntry, setSelectedEntry] = useState<AuditLogCardData | null>(null);
 
   // Filter state (immediate UI values)
@@ -117,19 +138,6 @@ export const AuditLog: React.FC = () => {
     setCurrentPage(1);
   }, [debouncedUserId, debouncedActions, debouncedResource, debouncedSource]);
 
-  // Load audit actions on mount (once)
-  useEffect(() => {
-    const loadAuditActions = async () => {
-      try {
-        const actionsData = await apiClient.getAuditActions();
-        setAuditActions(actionsData.actions);
-      } catch {
-        // Fallback to empty array - user can still see entries, just no filter options
-      }
-    };
-    loadAuditActions();
-  }, []);
-
   const beginRequest = useLatestRequest();
   const loadData = useCallback(async () => {
     const isCurrent = beginRequest();
@@ -158,27 +166,28 @@ export const AuditLog: React.FC = () => {
       if (debouncedActions.length > 0) filters.action = debouncedActions.join(",");
       if (debouncedResource) filters.resource = debouncedResource;
       if (debouncedSource) filters.source = debouncedSource;
-      if (fromDate) filters.fromDate = new Date(fromDate).getTime();
-      if (toDate) {
-        // Set to end of day
-        const endOfDay = new Date(toDate);
-        endOfDay.setHours(23, 59, 59, 999);
-        filters.toDate = endOfDay.getTime();
-      }
-
-      const [auditData, usersData] = await Promise.all([
-        apiClient.getAuditLogs(filters),
-        apiClient.getAdminUsers(),
-      ]);
+      Object.assign(filters, localDayRange(fromDate, toDate));
+      const auditData = await apiClient.getAuditLogs(filters);
 
       if (!isCurrent()) return;
-      setEntries(auditData.entries);
-      setTotal(auditData.total);
-      setUsers(usersData.users.map((u) => ({ id: u.id, email: u.email, name: u.name })));
+      setAccepted({
+        entries: auditData.entries,
+        total: auditData.total,
+        page: currentPage,
+        pageSize: itemsPerPage,
+        userId: debouncedUserId,
+        actions: [...debouncedActions],
+        resource: debouncedResource,
+        source: debouncedSource,
+        from: fromDate,
+        to: toDate,
+        sortBy,
+        sortOrder,
+      });
       setError(null);
     } catch (err: unknown) {
       if (!isCurrent()) return;
-      const message = err instanceof Error ? err.message : "Failed to load audit log";
+      const message = err instanceof Error ? err.message : t("common.errors.failedToLoad");
       setError(message);
     } finally {
       if (isCurrent()) setLoading(false);
@@ -195,6 +204,7 @@ export const AuditLog: React.FC = () => {
     sortOrder,
     fromDate,
     toDate,
+    t,
   ]);
 
   useEffect(() => {
@@ -247,27 +257,6 @@ export const AuditLog: React.FC = () => {
     return <Badge variant="secondary">{action}</Badge>;
   };
 
-  if (loading && entries.length === 0) {
-    return (
-      <PageShell
-        title={t("admin.auditLog.title")}
-        description={t("admin.auditLog.subtitle")}
-        loading
-      />
-    );
-  }
-
-  if (error && entries.length === 0) {
-    return (
-      <PageShell
-        title={t("admin.auditLog.title")}
-        description={t("admin.auditLog.subtitle")}
-        error={error}
-        onRetry={loadData}
-      />
-    );
-  }
-
   return (
     <PageShell title={t("admin.auditLog.title")} description={t("admin.auditLog.subtitle")}>
       <FilterBar
@@ -286,8 +275,9 @@ export const AuditLog: React.FC = () => {
                   { value: "__all__", label: t("admin.auditLog.filters.allUsers") },
                   ...users.map((user) => ({ value: user.id, label: user.email })),
                 ]}
-                placeholder={t("admin.auditLog.filters.allUsers")}
+                placeholder={userIdInput || t("admin.auditLog.filters.allUsers")}
                 searchPlaceholder={t("common.filters.search")}
+                emptyMessage={t("admin.userManagement.noSearchResults")}
               />
             </LabeledFilter>
 
@@ -317,7 +307,7 @@ export const AuditLog: React.FC = () => {
                   <Command>
                     <CommandInput placeholder={t("admin.auditLog.filters.searchActions")} />
                     <CommandList>
-                      <CommandEmpty>No actions found.</CommandEmpty>
+                      <CommandEmpty>{t("admin.auditLog.filters.noActions")}</CommandEmpty>
                       <CommandGroup>
                         {auditActions.map((action) => (
                           <CommandItem
@@ -426,6 +416,20 @@ export const AuditLog: React.FC = () => {
           </>
         }
       />
+      <DataRegion
+        hasResult={choices.data !== undefined}
+        pending={choices.pending}
+        error={choices.error}
+        onRetry={choices.refresh}
+        testId="admin-user-choices-region"
+      />
+      <DataRegion
+        hasResult={actions.data !== undefined}
+        pending={actions.pending}
+        error={actions.error}
+        onRetry={actions.refresh}
+        testId="audit-actions-region"
+      />
 
       {/* Entries */}
       <DataListView
@@ -437,15 +441,40 @@ export const AuditLog: React.FC = () => {
         keyExtractor={(e) => e.id}
         storageKey="audit-log-view-mode"
         loading={loading}
+        hasResult={accepted !== null}
+        error={error}
+        onRetry={loadData}
+        onRefresh={loadData}
+        resultScope={
+          accepted && (
+            <span>
+              {t("common.pagination.page", {
+                current: accepted.page,
+                total: Math.max(1, Math.ceil(total / accepted.pageSize)),
+              })}
+              {accepted.userId &&
+                ` · ${t("common.filters.user")}: ${users.find((u) => u.id === accepted.userId)?.email ?? accepted.userId}`}
+              {accepted.actions.length > 0 &&
+                ` · ${t("common.filters.action")}: ${accepted.actions.join(", ")}`}
+              {accepted.resource &&
+                ` · ${t("admin.auditLog.table.resource")}: ${accepted.resource}`}
+              {accepted.source &&
+                ` · ${t("common.filters.source")}: ${accepted.source.toUpperCase()}`}
+              {accepted.from && ` · ${t("common.filters.dateFrom")}: ${accepted.from}`}
+              {accepted.to && ` · ${t("common.filters.dateTo")}: ${accepted.to}`}
+              {` · ${t(`admin.auditLog.table.${accepted.sortBy === "createdAt" ? "timestamp" : accepted.sortBy}`)} ${accepted.sortOrder === "desc" ? "↓" : "↑"}`}
+            </span>
+          )
+        }
         emptyTitle={t("admin.auditLog.noEntries")}
         emptyDescription={t("admin.auditLog.subtitle")}
         containerRef={containerRef}
         pagination={{
           mode: "total",
-          currentPage,
-          totalPages: Math.ceil(total / itemsPerPage),
+          currentPage: accepted?.page ?? currentPage,
+          totalPages: Math.ceil(total / (accepted?.pageSize ?? itemsPerPage)),
           totalItems: total,
-          pageSize: itemsPerPage,
+          pageSize: accepted?.pageSize ?? itemsPerPage,
           onPageChange: setCurrentPage,
         }}
         className="flex-1 min-h-0 flex flex-col"

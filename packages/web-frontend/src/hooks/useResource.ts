@@ -10,7 +10,14 @@
  * is true — the only state in which a full-page loader belongs.
  */
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import {
+  getReadOwner,
+  getReadScopeVersion,
+  isPrivateReadSuspended,
+  retireReads,
+  subscribeReadScope,
+} from "../services/read-scope";
 import { ApiErrorUtils } from "../services/api-client";
 import { useLatestRequest } from "./useLatestRequest";
 
@@ -31,13 +38,19 @@ export function useResource<T>(
   key: string | null,
   fetcher: (key: string) => Promise<T>,
   describeError: (error: unknown) => string = defaultDescribeError,
-): Resource<T> {
+): Resource<T> & { update: (updateValue: (value: T) => T) => void } {
+  const scope = useSyncExternalStore(subscribeReadScope, getReadScopeVersion, getReadScopeVersion);
+  const owner = getReadOwner();
+  const requestedKeyRef = useRef(key);
+  requestedKeyRef.current = key;
+  const readable = !isPrivateReadSuspended();
   const [state, setState] = useState<{
+    owner: string;
     data: T | undefined;
     dataKey: string | null;
     pending: boolean;
     error: string | null;
-  }>({ data: undefined, dataKey: null, pending: key !== null, error: null });
+  }>({ owner, data: undefined, dataKey: null, pending: key !== null, error: null });
   const beginRequest = useLatestRequest();
   const fetcherRef = useRef(fetcher);
   fetcherRef.current = fetcher;
@@ -47,13 +60,31 @@ export function useResource<T>(
   const load = useCallback(
     async (target: string) => {
       const isCurrent = beginRequest();
-      setState((previous) => ({ ...previous, pending: true }));
+      const capturedScope = getReadScopeVersion();
+      const capturedOwner = getReadOwner();
+      if (isPrivateReadSuspended()) {
+        setState((previous) => ({ ...previous, pending: true }));
+        return;
+      }
+      setState((previous) =>
+        previous.owner === capturedOwner
+          ? { ...previous, pending: true }
+          : { owner: capturedOwner, data: undefined, dataKey: null, pending: true, error: null },
+      );
       try {
         const value = await fetcherRef.current(target);
-        if (!isCurrent()) return;
-        setState({ data: value, dataKey: target, pending: false, error: null });
+        if (!isCurrent() || capturedScope !== getReadScopeVersion() || isPrivateReadSuspended())
+          return;
+        setState({
+          owner: capturedOwner,
+          data: value,
+          dataKey: target,
+          pending: false,
+          error: null,
+        });
       } catch (caught) {
-        if (!isCurrent()) return;
+        if (!isCurrent() || capturedScope !== getReadScopeVersion() || isPrivateReadSuspended())
+          return;
         setState((previous) => ({
           ...previous,
           pending: false,
@@ -70,24 +101,52 @@ export function useResource<T>(
     if (key === null) {
       // A request still in flight for the previous key must not land
       beginRequest();
-      setState({ data: undefined, dataKey: null, pending: false, error: null });
+      setState({ owner, data: undefined, dataKey: null, pending: false, error: null });
       return;
     }
     void load(key);
-  }, [key, load, beginRequest]);
+  }, [key, load, beginRequest, scope, owner]);
 
-  const refresh = useCallback(() => (key === null ? Promise.resolve() : load(key)), [key, load]);
+  const refresh = useCallback(() => {
+    retireReads();
+    return key === null ? Promise.resolve() : load(key);
+  }, [key, load]);
+
+  // A confirmed mutation can publish the fields it returned without waiting for another read.
+  // It belongs only to this accepted key and owner, and supersedes any older pending read.
+  const update = useCallback(
+    (updateValue: (value: T) => T) => {
+      if (
+        key === null ||
+        requestedKeyRef.current !== key ||
+        owner !== getReadOwner() ||
+        isPrivateReadSuspended() ||
+        state.owner !== owner ||
+        state.dataKey !== key ||
+        state.data === undefined
+      )
+        return;
+      beginRequest();
+      setState((previous) =>
+        previous.owner === owner && previous.dataKey === key && previous.data !== undefined
+          ? { ...previous, data: updateValue(previous.data), pending: false, error: null }
+          : previous,
+      );
+    },
+    [key, owner, state, beginRequest],
+  );
 
   // A key whose request has not started yet is pending from the first render, not from the
   // effect that starts it: a consumer never sees a frame where the previous key's value looks
   // current for the new key. Once the request has started (or failed) the state speaks.
   const pending = state.pending || (key !== null && startedKeyRef.current !== key);
   return {
-    data: state.data,
-    dataKey: state.dataKey,
-    pending,
-    error: state.error,
+    data: state.owner === owner && readable ? state.data : undefined,
+    dataKey: state.owner === owner && readable ? state.dataKey : null,
+    pending: pending || (key !== null && (state.owner !== owner || !readable)),
+    error: state.owner === owner && readable ? state.error : null,
     refresh,
+    update,
   };
 }
 

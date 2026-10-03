@@ -400,12 +400,9 @@ class MoiraApiServer {
     // Protected API routes (require authentication + rate limiting)
     // Each route declares its admission level. `/me` is the sole session-only
     // status endpoint available while an account is pending approval.
-    this.app.use("/api/user", apiLimiter, userInfoRoutes);
-    this.app.use("/api/user", userProfileRoutes); // Already has apiLimiter and requireAuth inside
-    this.app.use("/api/user", userOAuthSessionsRoutes); // Already has apiLimiter and requireAuth inside
+    this.app.use("/api/user", userInfoRoutes, userProfileRoutes, userOAuthSessionsRoutes);
     // Workflow sharing routes MUST be before main workflow routes (more specific patterns first)
-    this.app.use("/api/workflows", apiLimiter, requireAuth, workflowSharingRoutes);
-    this.app.use("/api/workflows", apiLimiter, requireAuth, workflowRoutes);
+    this.app.use("/api/workflows", apiLimiter, requireAuth, workflowSharingRoutes, workflowRoutes);
     this.app.use("/api/invites", apiLimiter, optionalAuth, inviteAcceptRoutes); // Auth optional for GET, checked inside for POST
     // Limit stream admission before authentication: each open or reconnect consumes one API request.
     // The stream also limits simultaneous authenticated connections per user.

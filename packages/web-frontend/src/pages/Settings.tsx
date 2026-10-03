@@ -12,11 +12,11 @@
  * is exactly the kind of page that component's contract excludes.
  */
 
+import { productFetch } from "@/services/product-fetch";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import {
-  AlertCircle,
   AppWindow,
   Bell,
   CircleHelp,
@@ -28,9 +28,10 @@ import {
 } from "lucide-react";
 import { apiClient } from "../services/api-client";
 import { PageHeader } from "@/components/page-header";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import { Skeleton } from "@/components/ui/skeleton";
+import { DataRegion } from "@/components/DataRegion";
+import { useResource } from "@/hooks/useResource";
+import { getReadOwner, isPrivateReadSuspended } from "@/services/read-scope";
 import { EmptyState } from "@/components/empty-state";
 import {
   SettingsEditor,
@@ -92,48 +93,57 @@ export const Settings: React.FC = () => {
   const { t } = useTranslation();
   const { start: startGuide } = useGuides();
 
-  const [profile, setProfile] = useState<UserProfile | null>(null);
-  const [definitions, setDefinitions] = useState<SettingDefinition[]>([]);
-  const [channels, setChannels] = useState<CommunicationChannelDescriptor[]>([]);
   const [values, setValues] = useState<Record<string, unknown>>({});
-  const [loading, setLoading] = useState(true);
-  const [loadFailed, setLoadFailed] = useState(false);
   const [testingChannel, setTestingChannel] = useState<string | null>(null);
   const contentRef = useRef<HTMLDivElement>(null);
 
-  const loadChannels = useCallback(async () => {
-    const response = await fetch("/api/notifications/channels");
+  const profileResource = useResource<UserProfile>("user-settings-profile", async () => {
+    const response = await productFetch("/api/user/profile", { credentials: "include" });
     const data = await response.json();
-    if (!response.ok) throw new Error("channels");
-    setChannels(data.data || []);
-  }, []);
-
-  const loadAll = useCallback(async () => {
-    setLoading(true);
-    setLoadFailed(false);
-    const results = await Promise.allSettled([
-      (async () => {
-        const response = await fetch("/api/user/profile", { credentials: "include" });
+    if (!response.ok || !data.success) throw new Error(t("pages.settings.loadFailed"));
+    return data.data;
+  });
+  // Keep accepted props mounted behind the private boundary during a same-owner check.
+  // Only the resource publishes profile facts; this ref cannot accept mutation results.
+  const owner = getReadOwner();
+  const retainedProfile = useRef<{ owner: string; value: UserProfile | null }>({
+    owner,
+    value: null,
+  });
+  if (retainedProfile.current.owner !== owner) retainedProfile.current = { owner, value: null };
+  if (profileResource.data) retainedProfile.current.value = profileResource.data;
+  const profile =
+    profileResource.data ?? (isPrivateReadSuspended() ? retainedProfile.current.value : null);
+  const channelsResource = useResource<CommunicationChannelDescriptor[]>(
+    "user-settings-channels",
+    async () => {
+      const response = await productFetch("/api/notifications/channels");
+      const data = await response.json();
+      if (!response.ok) throw new Error(t("pages.settings.loadFailed"));
+      return data.data || [];
+    },
+  );
+  const settingsResource = useResource<{
+    definitions: SettingDefinition[];
+    values: Record<string, unknown>;
+  }>("user-settings-editor-data", async () => {
+    const [definitions, values] = await Promise.all([
+      (async (): Promise<SettingDefinition[]> => {
+        const response = await productFetch("/api/settings/definitions");
         const data = await response.json();
-        if (!response.ok || !data.success) throw new Error("profile");
-        setProfile(data.data);
+        if (!response.ok) throw new Error(t("pages.settings.loadFailed"));
+        return data.data || [];
       })(),
-      (async () => {
-        const response = await fetch("/api/settings/definitions");
-        const data = await response.json();
-        if (!response.ok) throw new Error("definitions");
-        setDefinitions(data.data || []);
-      })(),
-      loadChannels(),
-      (async () => setValues(await apiClient.getUserSettings()))(),
+      apiClient.getUserSettings(),
     ]);
-    setLoadFailed(results.some((result) => result.status === "rejected"));
-    setLoading(false);
-  }, [loadChannels]);
-
+    return { definitions, values };
+  });
+  const definitions = settingsResource.data?.definitions ?? [];
+  const channels = useMemo(() => channelsResource.data ?? [], [channelsResource.data]);
+  const refreshChannels = channelsResource.refresh;
   useEffect(() => {
-    void loadAll();
-  }, [loadAll]);
+    if (settingsResource.data) setValues(settingsResource.data.values);
+  }, [settingsResource.data]);
 
   const channelSettingKeys = useMemo(
     () => new Set(channels.flatMap((channel) => channel.settingKeys)),
@@ -171,19 +181,15 @@ export const Settings: React.FC = () => {
       if (refusal) throw new Error(refusal.reason);
       setValues((previous) => ({ ...previous, [key]: value }));
       // A channel's readiness depends on its settings; show the new state without a reload.
-      try {
-        await loadChannels();
-      } catch {
-        // The saved value stands; the channel state catches up on the next load.
-      }
+      await refreshChannels();
     },
-    [loadChannels],
+    [refreshChannels],
   );
 
   const handleTestNotification = async (channel: CommunicationChannelDescriptor) => {
     try {
       setTestingChannel(channel.id);
-      const response = await fetch(
+      const response = await productFetch(
         `/api/notifications/channels/${encodeURIComponent(channel.id)}/test`,
         { method: "POST", headers: { "Content-Type": "application/json" } },
       );
@@ -227,17 +233,13 @@ export const Settings: React.FC = () => {
     [t],
   );
   const sectionIds = useMemo(() => navItems.map((item) => item.id), [navItems]);
-  const active = useActiveSection(sectionIds, !loading);
-  const { highlight } = useSectionHighlight(contentRef, !loading);
+  const active = useActiveSection(sectionIds, true);
+  const { highlight } = useSectionHighlight(
+    contentRef,
+    !profileResource.pending && !settingsResource.pending && !channelsResource.pending,
+  );
 
   const hasTelegram = channels.some((channel) => channel.id === "telegram");
-
-  const sectionSkeleton = (
-    <div className="space-y-3" aria-busy="true">
-      <Skeleton className="h-28 w-full rounded-xl" />
-      <Skeleton className="h-20 w-full rounded-xl" />
-    </div>
-  );
 
   return (
     <div className="px-4 py-6 sm:px-6 md:px-8 md:py-8">
@@ -247,8 +249,12 @@ export const Settings: React.FC = () => {
         <SettingsNav
           items={navItems}
           active={active}
-          onSelect={highlight}
+          onSelect={(id) => {
+            window.history.replaceState(window.history.state, "", `#${id}`);
+            highlight(id);
+          }}
           label={t("pages.settings.navLabel")}
+          guide={guideAnchor("settings.nav")}
         />
 
         <div
@@ -256,19 +262,6 @@ export const Settings: React.FC = () => {
           className="min-w-0 max-w-3xl space-y-14 pb-24"
           data-testid="settings-flat-layout"
         >
-          {loadFailed && (
-            <Alert variant="destructive" data-testid="settings-load-failed">
-              <AlertCircle aria-hidden="true" />
-              <AlertTitle>{t("pages.settings.loadFailed")}</AlertTitle>
-              <AlertDescription className="space-y-2">
-                <p>{t("pages.settings.loadFailedDescription")}</p>
-                <Button variant="outline" size="sm" onClick={() => void loadAll()}>
-                  {t("pages.settings.retry")}
-                </Button>
-              </AlertDescription>
-            </Alert>
-          )}
-
           <SettingsSection
             id="account"
             icon={UserRound}
@@ -277,11 +270,20 @@ export const Settings: React.FC = () => {
             data-testid="settings-section-profile"
             {...guideAnchor("settings.account")}
           >
-            {profile ? (
-              <ProfileSettings profile={profile} onProfileUpdate={setProfile} />
-            ) : (
-              sectionSkeleton
-            )}
+            <DataRegion
+              hasResult={profile !== null}
+              pending={profileResource.pending}
+              error={profileResource.error}
+              onRetry={profileResource.refresh}
+              testId="settings-profile-region"
+            >
+              {profile && (
+                <ProfileSettings
+                  profile={profile}
+                  onProfileUpdate={(next) => profileResource.update(() => next)}
+                />
+              )}
+            </DataRegion>
           </SettingsSection>
 
           <SettingsSection
@@ -341,29 +343,40 @@ export const Settings: React.FC = () => {
             data-testid="settings-section-dynamic"
             {...guideAnchor("settings.notifications")}
           >
-            {loading ? (
-              sectionSkeleton
-            ) : channels.length === 0 ? (
-              <EmptyState
-                icon={Bell}
-                title={t("pages.settings.sections.notifications.empty")}
-                description={t("pages.settings.sections.notifications.emptyDescription")}
-              />
-            ) : (
-              channels.map((channel) => (
-                <CommunicationChannelCard
-                  key={channel.id}
-                  channel={channel}
-                  definitions={pageDefinitions
-                    .filter((definition) => channel.settingKeys.includes(definition.key))
-                    .map(editorDefinition)}
-                  values={values}
-                  testing={testingChannel === channel.id}
-                  onSave={saveSetting}
-                  onTest={handleTestNotification}
+            <DataRegion
+              hasResult={channelsResource.data !== undefined && settingsResource.data !== undefined}
+              pending={channelsResource.pending || settingsResource.pending}
+              error={channelsResource.error || settingsResource.error}
+              onRetry={() =>
+                Promise.all([
+                  ...(channelsResource.error ? [channelsResource.refresh()] : []),
+                  ...(settingsResource.error ? [settingsResource.refresh()] : []),
+                ])
+              }
+              testId="settings-notifications-region"
+            >
+              {channels.length === 0 ? (
+                <EmptyState
+                  icon={Bell}
+                  title={t("pages.settings.sections.notifications.empty")}
+                  description={t("pages.settings.sections.notifications.emptyDescription")}
                 />
-              ))
-            )}
+              ) : (
+                channels.map((channel) => (
+                  <CommunicationChannelCard
+                    key={channel.id}
+                    channel={channel}
+                    definitions={pageDefinitions
+                      .filter((definition) => channel.settingKeys.includes(definition.key))
+                      .map(editorDefinition)}
+                    values={values}
+                    testing={testingChannel === channel.id}
+                    onSave={saveSetting}
+                    onTest={handleTestNotification}
+                  />
+                ))
+              )}
+            </DataRegion>
           </SettingsSection>
 
           <SettingsSection
@@ -397,7 +410,15 @@ export const Settings: React.FC = () => {
             <GitHubCodespacesProvider>
               <GitHubCodespaceSettings />
               <GitHubCodespaceManagement />
-              <CodespaceAutoPause values={values} onSave={saveSetting} />
+              <DataRegion
+                hasResult={settingsResource.data !== undefined}
+                pending={settingsResource.pending}
+                error={settingsResource.error}
+                onRetry={settingsResource.refresh}
+                testId="settings-autopause-region"
+              >
+                <CodespaceAutoPause values={values} onSave={saveSetting} />
+              </DataRegion>
               <CodespaceLimitsFromData />
             </GitHubCodespacesProvider>
           </SettingsSection>
@@ -452,20 +473,28 @@ export const Settings: React.FC = () => {
             {...guideAnchor("settings.preferences")}
           >
             <PreferencesSettings />
-            {otherDefinitions.length > 0 && (
-              // Each extension category is its own titled card, like the cards above it.
-              <div className="space-y-4" data-testid="settings-section-other">
-                <SettingsEditor
-                  definitions={otherDefinitions.map(editorDefinition)}
-                  values={values}
-                  onSave={saveSetting}
-                  testIdPrefix="user-setting"
-                  enableFullscreenEdit
-                  collapsible={false}
-                  showKeys={false}
-                />
-              </div>
-            )}
+            <DataRegion
+              hasResult={settingsResource.data !== undefined}
+              pending={settingsResource.pending}
+              error={settingsResource.error}
+              onRetry={settingsResource.refresh}
+              testId="settings-other-region"
+            >
+              {otherDefinitions.length > 0 && (
+                // Each extension category is its own titled card, like the cards above it.
+                <div className="space-y-4" data-testid="settings-section-other">
+                  <SettingsEditor
+                    definitions={otherDefinitions.map(editorDefinition)}
+                    values={values}
+                    onSave={saveSetting}
+                    testIdPrefix="user-setting"
+                    enableFullscreenEdit
+                    collapsible={false}
+                    showKeys={false}
+                  />
+                </div>
+              )}
+            </DataRegion>
           </SettingsSection>
         </div>
       </div>

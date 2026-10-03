@@ -21,6 +21,41 @@ beforeAll(async () => {
 });
 
 describe("Global Settings Admin API", () => {
+  test("registration notification preference is a global boolean that preserves explicit false and true", async () => {
+    const key = "system.notify_admins_on_registration";
+    const readSetting = async () => {
+      const response = await fetch(`${BASE_URL}/api/admin/global-settings`, {
+        headers: { Cookie: adminCookie },
+      });
+      expect(response.status).toBe(200);
+      const result = (await response.json()) as {
+        data: { settings: { key: string; type: string; category: string; value: string | null }[] };
+      };
+      const setting = result.data.settings.find((entry) => entry.key === key);
+      expect(setting).toBeDefined();
+      return setting!;
+    };
+    const original = await readSetting();
+    expect(original.type).toBe("boolean");
+    expect(original.category).toBe("system");
+    const write = async (value: string | null) => {
+      const response = await fetch(`${BASE_URL}/api/admin/global-settings/${key}`, {
+        method: "PUT",
+        headers: { Cookie: adminCookie, "Content-Type": "application/json" },
+        body: JSON.stringify({ value }),
+      });
+      expect(response.status).toBe(200);
+    };
+    try {
+      for (const value of ["false", "true"]) {
+        await write(value);
+        expect((await readSetting()).value).toBe(value);
+      }
+    } finally {
+      await write(original.value);
+    }
+  });
+
   describe("GET /api/admin/global-settings", () => {
     test("returns 401 for unauthenticated request", async () => {
       const res = await fetch(`${BASE_URL}/api/admin/global-settings`);
@@ -350,6 +385,30 @@ describe("Global Settings Admin API", () => {
       });
 
       expect(res.status).toBe(403);
+    });
+
+    test("a non-admin cannot switch off installation registration notifications", async () => {
+      const key = "system.notify_admins_on_registration";
+      const read = async () => {
+        const response = await fetch(`${BASE_URL}/api/admin/global-settings`, {
+          headers: { Cookie: adminCookie },
+        });
+        expect(response.status).toBe(200);
+        const result = (await response.json()) as {
+          data: { settings: { key: string; value: string | null }[] };
+        };
+        const setting = result.data.settings.find((entry) => entry.key === key);
+        expect(setting).toBeDefined();
+        return setting!.value;
+      };
+      const original = await read();
+      const response = await fetch(`${BASE_URL}/api/admin/global-settings/${key}`, {
+        method: "PUT",
+        headers: { Cookie: regularUserCookie, "Content-Type": "application/json" },
+        body: JSON.stringify({ value: "false" }),
+      });
+      expect(response.status).toBe(403);
+      expect(await read()).toBe(original);
     });
 
     test("denies the value history to a non-admin user", async () => {

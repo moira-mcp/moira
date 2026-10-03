@@ -57,9 +57,20 @@ export function setPanelHidden(panel: BeginnerPanel, hide: boolean): Promise<voi
 export function useBeginnerPanels(): {
   loaded: boolean;
   isHidden: (panel: BeginnerPanel) => boolean;
+  accepted: boolean;
+  pending: boolean;
+  error: string | null;
+  refresh: () => Promise<void>;
 } {
-  const { loaded, value } = store.useValue();
-  return { loaded, isHidden: (panel) => value?.has(panel) ?? false };
+  const { loaded, value, accepted, pending, error, refresh } = store.useValue();
+  return {
+    loaded,
+    accepted,
+    pending,
+    error,
+    refresh,
+    isHidden: (panel) => value?.has(panel) ?? false,
+  };
 }
 
 /**

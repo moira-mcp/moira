@@ -3,7 +3,7 @@
  * Handles display name, email verification, handle management
  */
 
-import React, { useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -11,10 +11,12 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { ConfirmDialog } from "@/components/confirm-dialog";
+import { InlineError } from "@/components/inline-error";
 import { CheckCircle, AlertTriangle } from "lucide-react";
 import { toast } from "sonner";
 import { useFeatures } from "@/hooks/useFeatures";
 import { HelpPopover } from "@/components/settings/HelpPopover";
+import { productFetch } from "@/services/product-fetch";
 
 export interface UserProfile {
   id: string;
@@ -44,17 +46,23 @@ export const ProfileSettings: React.FC<ProfileSettingsProps> = ({ profile, onPro
   const [handleError, setHandleError] = useState<string | null>(null);
   const [sendingVerification, setSendingVerification] = useState(false);
   const [showHandleConfirm, setShowHandleConfirm] = useState(false);
+  const acceptedProfile = useRef(profile);
+  useEffect(() => {
+    const previous = acceptedProfile.current;
+    const nextName = profile.name || "";
+    const nextHandle = profile.handle || "";
+    setName((current) => (current === (previous.name || "") ? nextName : current));
+    setHandle((current) => (current === (previous.handle || "") ? nextHandle : current));
+    acceptedProfile.current = profile;
+  }, [profile]);
 
   const reloadProfile = async () => {
-    const response = await fetch("/api/user/profile", { credentials: "include" });
-    if (response.ok) {
-      const data = await response.json();
-      if (data.success && data.data) {
-        onProfileUpdate(data.data);
-        setName(data.data.name || "");
-        setHandle(data.data.handle || "");
-      }
-    }
+    const response = await productFetch("/api/user/profile", { credentials: "include" });
+    const data = await response.json();
+    if (!response.ok || !data.success || !data.data)
+      throw new Error(t("pages.settings.profile.updateFailed"));
+    onProfileUpdate(data.data);
+    return data.data as UserProfile;
   };
 
   const handleSaveProfile = async (e: React.FormEvent) => {
@@ -68,7 +76,8 @@ export const ProfileSettings: React.FC<ProfileSettingsProps> = ({ profile, onPro
 
     try {
       setSavingProfile(true);
-      const response = await fetch("/api/user/profile", {
+      const submittedName = name;
+      const response = await productFetch("/api/user/profile", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
@@ -81,7 +90,8 @@ export const ProfileSettings: React.FC<ProfileSettingsProps> = ({ profile, onPro
       }
 
       toast.success(t("pages.settings.profile.updateSuccess"));
-      await reloadProfile();
+      const accepted = await reloadProfile();
+      setName((current) => (current === submittedName ? accepted.name || "" : current));
     } catch (err) {
       setProfileError((err as Error).message);
     } finally {
@@ -106,10 +116,11 @@ export const ProfileSettings: React.FC<ProfileSettingsProps> = ({ profile, onPro
   };
 
   const confirmHandleChange = async () => {
-    setShowHandleConfirm(false);
+    setHandleError(null);
     try {
       setSavingHandle(true);
-      const response = await fetch("/api/user/handle", {
+      const submittedHandle = handle;
+      const response = await productFetch("/api/user/handle", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
@@ -118,13 +129,16 @@ export const ProfileSettings: React.FC<ProfileSettingsProps> = ({ profile, onPro
 
       const data = await response.json();
       if (!response.ok || !data.success) {
-        throw new Error(data.error || t("pages.settings.profile.handleUpdateFailed"));
+        const message = typeof data.error === "string" ? data.error : data.error?.message;
+        throw new Error(message || t("pages.settings.profile.handleUpdateFailed"));
       }
 
       toast.success(t("pages.settings.profile.handleUpdateSuccess"));
-      await reloadProfile();
+      const accepted = await reloadProfile();
+      setHandle((current) => (current === submittedHandle ? accepted.handle : current));
     } catch (err) {
       setHandleError((err as Error).message);
+      throw err;
     } finally {
       setSavingHandle(false);
     }
@@ -133,7 +147,7 @@ export const ProfileSettings: React.FC<ProfileSettingsProps> = ({ profile, onPro
   const handleResendVerification = async () => {
     try {
       setSendingVerification(true);
-      const response = await fetch("/api/user/resend-verification", {
+      const response = await productFetch("/api/user/resend-verification", {
         method: "POST",
         credentials: "include",
       });
@@ -315,7 +329,11 @@ export const ProfileSettings: React.FC<ProfileSettingsProps> = ({ profile, onPro
         confirmLabel={t("pages.settings.profile.changeHandle")}
         cancelLabel={t("common.cancel")}
         onConfirm={confirmHandleChange}
-      />
+      >
+        {handleError && (
+          <InlineError title={t("common.errors.failedToUpdate")} message={handleError} />
+        )}
+      </ConfirmDialog>
     </div>
   );
 };

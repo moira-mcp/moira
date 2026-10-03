@@ -1,13 +1,17 @@
 /**
- * Protected Route Component
- * Redirects unauthenticated users to login page
- * Optionally checks for admin privileges
+ * Protected routes own admission and private holdings; public auth operations stay outside.
  */
-
-import React, { useEffect, useState, useRef } from "react";
+import React, { useEffect, useState, useSyncExternalStore } from "react";
 import { Navigate, useNavigate, useLocation } from "react-router-dom";
-import { useSession, authClient } from "../auth/better-auth-client";
+import { useSession, authClient, revokeObservedSession } from "../auth/better-auth-client";
+import { PrivateReadScopeBoundary } from "../auth/ReadScopeBoundary";
 import { apiClient } from "../services/api-client";
+import {
+  getReadCredentialVersion,
+  getReadIdentity,
+  getReadOwner,
+  subscribeReadScope,
+} from "../services/read-scope";
 import { ROUTES, APP_PREFIX } from "../constants/routes";
 import { buildLoginUrlWithReturn } from "../utils/return-url";
 import { useFeatures } from "../hooks/useFeatures";
@@ -22,8 +26,16 @@ interface ProtectedRouteProps {
   requireEmailVerified?: boolean;
   requireCapability?: FeatureFlag;
 }
+type AdmissionFacts = Awaited<ReturnType<typeof apiClient.getUserInfo>>;
 
-export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
+/** Reset both guard facts and manual page state when the private owner/backend changes. */
+export const ProtectedRoute: React.FC<ProtectedRouteProps> = (props) => (
+  <PrivateReadScopeBoundary>
+    <ProtectedRouteContent {...props} />
+  </PrivateReadScopeBoundary>
+);
+
+const ProtectedRouteContent: React.FC<ProtectedRouteProps> = ({
   children,
   requireAdmin = false,
   requireEmailVerified = true,
@@ -39,172 +51,164 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
   const navigate = useNavigate();
   const location = useLocation();
   const { data: session, isPending } = useSession();
-  const [isAdmin, setIsAdmin] = useState<boolean | null>(null);
-  const [passwordResetRequired, setPasswordResetRequired] = useState<boolean | null>(null);
-  const [emailVerified, setEmailVerified] = useState<boolean | null>(null);
-  const [accountApproved, setAccountApproved] = useState<boolean | null>(null);
-  const [accountApprovalRequired, setAccountApprovalRequired] = useState<boolean | null>(null);
-  const [_blocked, setBlocked] = useState<boolean | null>(null);
+  const credentialVersion = useSyncExternalStore(
+    subscribeReadScope,
+    getReadCredentialVersion,
+    getReadCredentialVersion,
+  );
+  const [admission, setAdmission] = useState<{
+    facts: AdmissionFacts;
+    credentialVersion: number;
+  } | null>(null);
   const [checkingUser, setCheckingUser] = useState(false);
   const [userInfoError, setUserInfoError] = useState(false);
   const [retryKey, setRetryKey] = useState(0);
+  const [previouslyAdmitted, setPreviouslyAdmitted] = useState(false);
+  const userId = session?.user.id;
+  const sessionKey = session?.session.id;
 
-  // Track session to detect re-login (session token changes on signIn)
-  const fetchedSessionRef = useRef<string | null>(null);
-
-  // Fetch user info when session loads or session changes (re-login)
   useEffect(() => {
-    // Use session token to detect re-login (token changes, userId stays same)
-    const sessionKey = session?.session?.id || null;
-
-    // Fetch if: have session, not pending, and either haven't fetched or session changed
-    if (session && !isPending && fetchedSessionRef.current !== sessionKey) {
-      fetchedSessionRef.current = sessionKey;
-      setCheckingUser(true);
-      setUserInfoError(false);
-
-      apiClient
-        .getUserInfo()
-        .then((userInfo) => {
-          setIsAdmin(userInfo.isAdmin);
-          setPasswordResetRequired(userInfo.passwordResetRequired);
-          setEmailVerified(userInfo.emailVerified);
-          setAccountApproved(userInfo.accountApproved);
-          setAccountApprovalRequired(userInfo.accountApprovalRequired);
-          setBlocked(userInfo.blocked);
-          setCheckingUser(false);
-          setUserInfoError(false);
-
-          // Check if user is blocked
-          if (userInfo.blocked) {
-            // Force logout
-            authClient.signOut().then(() => {
-              navigate(ROUTES.LOGIN, { replace: true });
+    let active = true;
+    const owner = getReadOwner();
+    const capturedCredential = credentialVersion;
+    const isCurrent = () =>
+      active &&
+      owner === getReadOwner() &&
+      capturedCredential === getReadCredentialVersion() &&
+      getReadIdentity() !== null;
+    const observedData = authClient.$store.atoms.session.get().data;
+    const observedSession = observedData?.session;
+    if (
+      !userId ||
+      !sessionKey ||
+      isPending ||
+      !isCurrent() ||
+      observedData?.user.id !== userId ||
+      observedSession?.id !== sessionKey
+    ) {
+      return () => {
+        active = false;
+      };
+    }
+    setCheckingUser(true);
+    setUserInfoError(false);
+    apiClient
+      .getUserInfo()
+      .then((facts) => {
+        if (!isCurrent()) return;
+        if (facts.id !== userId) throw new Error("Admission belongs to a different account");
+        setAdmission({ facts, credentialVersion: capturedCredential });
+        setCheckingUser(false);
+        setUserInfoError(false);
+        if (facts.blocked) {
+          void revokeObservedSession(observedSession)
+            .then((owned) => {
+              // A newer login must not be redirected by an earlier blocked account's operation.
+              const currentUser = authClient.$store.atoms.session.get().data?.user.id;
+              if (owned && active && (!currentUser || currentUser === userId)) {
+                navigate(ROUTES.LOGIN, { replace: true });
+              }
+            })
+            .catch(() => {
+              if (active) setUserInfoError(true);
             });
-            return;
-          }
+          return;
+        }
+        if (
+          facts.passwordResetRequired &&
+          window.location.pathname !== ROUTES.FORCED_PASSWORD_RESET
+        ) {
+          navigate(ROUTES.FORCED_PASSWORD_RESET, { replace: true });
+        }
+      })
+      .catch(() => {
+        if (!isCurrent()) return;
+        // Keep prior admitted children mounted, hidden until a successful recheck or a real denial.
+        setCheckingUser(false);
+        setUserInfoError(true);
+      });
+    return () => {
+      active = false;
+    };
+  }, [userId, sessionKey, isPending, credentialVersion, retryKey, navigate]);
 
-          // Immediately redirect if password reset required
-          if (
-            userInfo.passwordResetRequired &&
-            window.location.pathname !== ROUTES.FORCED_PASSWORD_RESET
-          ) {
-            navigate(ROUTES.FORCED_PASSWORD_RESET, { replace: true });
-          }
-        })
-        .catch(() => {
-          setIsAdmin(false);
-          setPasswordResetRequired(false);
-          setEmailVerified(false);
-          setAccountApproved(null);
-          setAccountApprovalRequired(null);
-          setBlocked(false);
-          setCheckingUser(false);
-          setUserInfoError(true);
-          fetchedSessionRef.current = null; // Allow retry on error
-        });
-    } else if (!session) {
-      // Reset state when logged out
-      setIsAdmin(null);
-      setPasswordResetRequired(null);
-      setEmailVerified(null);
-      setAccountApproved(null);
-      setAccountApprovalRequired(null);
-      setBlocked(null);
-      setCheckingUser(false);
-      setUserInfoError(false);
-      fetchedSessionRef.current = null;
-    }
-  }, [session, isPending, navigate, retryKey]);
+  const facts = admission?.facts;
+  const revalidating =
+    isPending ||
+    checkingUser ||
+    admission?.credentialVersion !== credentialVersion ||
+    getReadIdentity() === null ||
+    !featuresLoaded;
+  const fresh = !revalidating && !userInfoError && !featuresError && !!facts;
+  const decision = facts
+    ? decideAdmissionRoute({
+        accountApprovalRequired: facts.accountApprovalRequired,
+        accountApproved: facts.accountApproved,
+        emailVerificationGate: requireEmailVerified && isFeatureEnabled("emailVerificationGate"),
+        emailVerified: facts.emailVerified,
+      })
+    : null;
+  const forcedReset =
+    !!facts?.passwordResetRequired && window.location.pathname !== ROUTES.FORCED_PASSWORD_RESET;
+  const roleDenied = requireAdmin && facts?.isAdmin === false;
+  const capabilityDenied = !!requireCapability && !isFeatureEnabled(requireCapability);
+  const allowed =
+    fresh &&
+    !facts.blocked &&
+    !forcedReset &&
+    decision === "allow" &&
+    !roleDenied &&
+    !capabilityDenied;
+  useEffect(() => {
+    if (fresh) setPreviouslyAdmitted(allowed);
+  }, [fresh, allowed]);
 
-  // Show loading while checking auth or user info
-  if (isPending || checkingUser) {
-    return (
-      <div className="flex min-h-screen items-center justify-center">
-        <div className="text-muted-foreground">Loading...</div>
-      </div>
-    );
-  }
-
-  // Not authenticated - redirect to login with returnUrl
-  if (!session) {
+  if (!session && !isPending) {
     const currentUrl = location.pathname + location.search;
-    const loginUrl = buildLoginUrlWithReturn(currentUrl, ROUTES.LOGIN);
-    return <Navigate to={loginUrl} replace />;
+    return <Navigate to={buildLoginUrlWithReturn(currentUrl, ROUTES.LOGIN)} replace />;
   }
-
-  if (userInfoError) {
-    return (
-      <div className="flex min-h-screen flex-col items-center justify-center gap-3" role="alert">
-        <p className="text-sm text-destructive">{t("pages.registrationSuccess.statusLoadError")}</p>
-        <Button variant="outline" onClick={() => setRetryKey((current) => current + 1)}>
-          {t("pages.registrationSuccess.retryStatus")}
-        </Button>
+  if (fresh) {
+    if (facts.blocked) return <Navigate to={ROUTES.LOGIN} replace />;
+    if (forcedReset) return <Navigate to={ROUTES.FORCED_PASSWORD_RESET} replace />;
+    if (decision !== "allow") return <Navigate to={`${APP_PREFIX}/registration-success`} replace />;
+    if (roleDenied) return <Navigate to={ROUTES.WORKFLOWS} replace />;
+    if (capabilityDenied) return <Navigate to={ROUTES.ADMIN} replace />;
+  }
+  const hidden = !allowed;
+  const accessibility = hidden ? { inert: "" } : {};
+  return (
+    <>
+      {userInfoError ? (
+        <div className="flex min-h-screen flex-col items-center justify-center gap-3" role="alert">
+          <p className="text-sm text-destructive">
+            {t("pages.registrationSuccess.statusLoadError")}
+          </p>
+          <Button variant="outline" onClick={() => setRetryKey((current) => current + 1)}>
+            {t("pages.registrationSuccess.retryStatus")}
+          </Button>
+        </div>
+      ) : featuresError ? (
+        <div className="flex min-h-screen flex-col items-center justify-center gap-3" role="alert">
+          <p className="text-sm text-destructive">
+            {t("pages.registrationSuccess.featuresLoadError")}
+          </p>
+          <Button variant="outline" onClick={retryFeatures}>
+            {t("pages.registrationSuccess.retryFeatures")}
+          </Button>
+        </div>
+      ) : revalidating ? (
+        <div className="flex min-h-screen items-center justify-center">
+          <div className="text-muted-foreground">{t("common.loading")}</div>
+        </div>
+      ) : null}
+      <div
+        {...accessibility}
+        style={{ display: hidden ? "none" : "contents" }}
+        hidden={hidden}
+        aria-hidden={hidden || undefined}
+      >
+        {allowed || previouslyAdmitted ? children : null}
       </div>
-    );
-  }
-
-  if (featuresError) {
-    return (
-      <div className="flex min-h-screen flex-col items-center justify-center gap-3" role="alert">
-        <p className="text-sm text-destructive">
-          {t("pages.registrationSuccess.featuresLoadError")}
-        </p>
-        <Button variant="outline" onClick={retryFeatures}>
-          {t("pages.registrationSuccess.retryFeatures")}
-        </Button>
-      </div>
-    );
-  }
-
-  // Password reset required - redirect to forced password reset page
-  // ONLY redirect after we have loaded user info (passwordResetRequired is not null)
-  if (passwordResetRequired === true && window.location.pathname !== ROUTES.FORCED_PASSWORD_RESET) {
-    return <Navigate to={ROUTES.FORCED_PASSWORD_RESET} replace />;
-  }
-
-  const admissionStateLoaded =
-    accountApproved !== null && accountApprovalRequired !== null && emailVerified !== null;
-  if (admissionStateLoaded && featuresLoaded) {
-    const admissionDecision = decideAdmissionRoute({
-      accountApprovalRequired,
-      accountApproved,
-      emailVerificationGate: requireEmailVerified && isFeatureEnabled("emailVerificationGate"),
-      emailVerified,
-    });
-    if (admissionDecision !== "allow") {
-      return <Navigate to={`${APP_PREFIX}/registration-success`} replace />;
-    }
-  }
-
-  // Require admin but user is not admin - redirect to workflows
-  if (requireAdmin && isAdmin === false) {
-    return <Navigate to={ROUTES.WORKFLOWS} replace />;
-  }
-
-  // Wait until both deployment capabilities and independent admission facts are known.
-  if (!featuresLoaded || !admissionStateLoaded) {
-    return (
-      <div className="flex min-h-screen items-center justify-center">
-        <div className="text-muted-foreground">Loading...</div>
-      </div>
-    );
-  }
-
-  // Still checking admin status - show loading
-  if (requireAdmin && isAdmin === null) {
-    return (
-      <div className="flex min-h-screen items-center justify-center">
-        <div className="text-muted-foreground">Loading...</div>
-      </div>
-    );
-  }
-
-  // Direct navigation consumes the same named capability as feature discovery,
-  // navigation and backend authorization.
-  if (requireCapability && !isFeatureEnabled(requireCapability)) {
-    return <Navigate to={ROUTES.ADMIN} replace />;
-  }
-
-  return <>{children}</>;
+    </>
+  );
 };

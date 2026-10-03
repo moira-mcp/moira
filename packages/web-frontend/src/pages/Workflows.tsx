@@ -13,6 +13,7 @@ import { RecommendedFlows } from "../components/onboarding/RecommendedFlows";
 import { apiClient } from "../services/api-client";
 import { ROUTES } from "../constants/routes";
 import { ConfirmDialog } from "../components/confirm-dialog";
+import { InlineError } from "../components/inline-error";
 import { PageShell } from "../components/PageShell";
 import { toast } from "sonner";
 import { guideAnchor } from "@/guides/anchors";
@@ -23,6 +24,7 @@ export const Workflows: React.FC = () => {
   const [currentUserHandle, setCurrentUserHandle] = useState<string | undefined>();
   const [isAdmin, setIsAdmin] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string } | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
 
   useEffect(() => {
@@ -46,17 +48,21 @@ export const Workflows: React.FC = () => {
   );
 
   const handleDeleteWorkflow = useCallback((workflowId: string, workflowName: string) => {
+    setDeleteError(null);
     setDeleteTarget({ id: workflowId, name: workflowName });
   }, []);
 
   const handleConfirmDelete = async () => {
     if (!deleteTarget) return;
+    setDeleteError(null);
     try {
       await apiClient.deleteWorkflow(deleteTarget.id);
       setRefreshKey((k) => k + 1);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : t("common.errors.failedToDelete");
+      setDeleteError(message);
       toast.error(message);
+      throw err;
     }
   };
 
@@ -79,7 +85,7 @@ export const Workflows: React.FC = () => {
       </h2>
       <div className="flex min-h-[560px] flex-1 flex-col">
         <WorkflowExplorer
-          key={refreshKey}
+          refreshKey={refreshKey}
           onWorkflowSelect={handleWorkflowSelect}
           onDelete={handleDeleteWorkflow}
           currentUserHandle={currentUserHandle}
@@ -88,14 +94,23 @@ export const Workflows: React.FC = () => {
       </div>
       <ConfirmDialog
         open={!!deleteTarget}
-        onOpenChange={(open) => !open && setDeleteTarget(null)}
+        onOpenChange={(open) => {
+          if (!open) {
+            setDeleteTarget(null);
+            setDeleteError(null);
+          }
+        }}
         title={t("pages.workflows.confirmDeleteTitle", { defaultValue: "Delete workflow" })}
         description={t("pages.workflows.confirmDelete", { name: deleteTarget?.name ?? "" })}
         confirmLabel={t("common.delete", { defaultValue: "Delete" })}
         cancelLabel={t("common.cancel", { defaultValue: "Cancel" })}
         variant="destructive"
         onConfirm={handleConfirmDelete}
-      />
+      >
+        {deleteError && (
+          <InlineError title={t("common.errors.failedToDelete")} message={deleteError} />
+        )}
+      </ConfirmDialog>
     </PageShell>
   );
 };

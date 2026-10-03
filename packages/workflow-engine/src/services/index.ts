@@ -17,6 +17,7 @@ export { TelegramClient } from "./telegram-client.js";
 export * from "./user-communication.js";
 export * from "./telegram-communication-adapter.js";
 export * from "./user-communication-provider.js";
+export * from "./registration-notification.js";
 export * from "./progress-image-service.js";
 export {
   AgentMessageQueue,

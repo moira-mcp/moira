@@ -190,6 +190,8 @@ export interface IDataRepository {
    */
   listAllDeletedWorkflowsPaginated(filter: {
     search?: string;
+    fromDate?: number;
+    toDate?: number;
     sort?: "name" | "deletedAt";
     sortOrder?: "asc" | "desc";
     limit?: number;

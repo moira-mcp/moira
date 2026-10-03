@@ -5,7 +5,7 @@
 
 import React, { useMemo } from "react";
 import { useSearchParams } from "react-router-dom";
-import { AuthView } from "@daveyplate/better-auth-ui";
+import { AuthView } from "../auth/LazyAuthView";
 import { AuthErrorDisplay } from "../components/auth/AuthErrorDisplay";
 import { AuthLayout } from "../components/AuthLayout";
 import { validateReturnUrl } from "../utils/return-url";

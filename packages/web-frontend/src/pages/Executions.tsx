@@ -28,6 +28,8 @@ import { ExecutionCard, normalizeExecution } from "../components/cards";
 import { DataListView } from "../components/DataListView";
 import { LockedExecutionsWidget } from "../components/LockedExecutionsWidget";
 import { guideAnchor } from "@/guides/anchors";
+import { useResource } from "@/hooks/useResource";
+import { DataRegion } from "@/components/DataRegion";
 
 interface ExecutionListItem {
   executionId: string;
@@ -35,18 +37,14 @@ interface ExecutionListItem {
   workflowName?: string | null; // Issue #421: Workflow name from API
   userId: string;
   status: string;
+  stopReason?: string | null;
   currentNodeId: string | null;
   note?: string;
-  createdAt?: number;
-  updatedAt?: number;
+  createdAt?: number | null;
+  updatedAt?: number | null;
   completedAt?: number;
   error?: string;
   errorCount?: number; // Issue #386: Error count for badge display
-}
-
-interface WorkflowInfo {
-  id: string;
-  name: string;
 }
 
 export const Executions: React.FC = () => {
@@ -55,9 +53,24 @@ export const Executions: React.FC = () => {
   const { pageSize, containerRef, onViewModeChange } = useListPageSize(() => setCurrentPage(1));
 
   // Data state
-  const [executions, setExecutions] = useState<ExecutionListItem[]>([]);
-  const [workflows, setWorkflows] = useState<WorkflowInfo[]>([]);
-  const [total, setTotal] = useState(0);
+  const [accepted, setAccepted] = useState<{
+    executions: ExecutionListItem[];
+    total: number;
+    page: number;
+    pageSize: number;
+    search: string;
+    status: string;
+    workflowId: string;
+    sortBy: string;
+    sortOrder: string;
+  } | null>(null);
+  const executions = accepted?.executions ?? [];
+  const total = accepted?.total ?? 0;
+  const choices = useResource("execution-workflow-choices", () => apiClient.getWorkflows());
+  const workflows = (choices.data?.workflows ?? []).map((w) => ({
+    id: w.id,
+    name: w.metadata?.name || w.id,
+  }));
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -94,24 +107,6 @@ export const Executions: React.FC = () => {
     setCurrentPage(1);
   }, [debouncedSearch]);
 
-  // Load workflows for filter dropdown
-  useEffect(() => {
-    const loadWorkflows = async () => {
-      try {
-        const response = await apiClient.getWorkflows();
-        setWorkflows(
-          response.workflows.map((w) => ({
-            id: w.id,
-            name: w.metadata?.name || w.id,
-          })),
-        );
-      } catch {
-        // Non-critical, just don't show workflow filter options
-      }
-    };
-    loadWorkflows();
-  }, []);
-
   const beginRequest = useLatestRequest();
   const loadExecutions = useCallback(async () => {
     const isCurrent = beginRequest();
@@ -134,8 +129,17 @@ export const Executions: React.FC = () => {
       });
 
       if (!isCurrent()) return;
-      setExecutions(result.executions);
-      setTotal(result.total);
+      setAccepted({
+        executions: result.executions,
+        total: result.total,
+        page: currentPage,
+        pageSize,
+        search: debouncedSearch,
+        status: statusFilter,
+        workflowId: workflowFilter,
+        sortBy,
+        sortOrder,
+      });
       setError(null);
     } catch (err: unknown) {
       if (!isCurrent()) return;
@@ -164,30 +168,7 @@ export const Executions: React.FC = () => {
     navigate(`${ROUTES.EXECUTIONS}/${executionId}`);
   };
 
-  const totalPages = Math.ceil(total / pageSize);
-
-  if (loading && executions.length === 0) {
-    return (
-      <PageShell
-        title={t("pages.executions.title")}
-        guide={guideAnchor("runs.header")}
-        description={t("pages.executions.subtitle")}
-        loading
-      />
-    );
-  }
-
-  if (error) {
-    return (
-      <PageShell
-        title={t("pages.executions.title")}
-        guide={guideAnchor("runs.header")}
-        error={error}
-        onRetry={loadExecutions}
-        retryLabel={t("pages.executions.retry")}
-      />
-    );
-  }
+  const totalPages = Math.ceil(total / (accepted?.pageSize ?? pageSize));
 
   return (
     <PageShell
@@ -231,24 +212,25 @@ export const Executions: React.FC = () => {
               </Select>
             </LabeledFilter>
 
-            {workflows.length > 0 && (
-              <LabeledFilter label={t("common.filters.workflow")}>
-                <SearchableSelect
-                  value={workflowFilter}
-                  onValueChange={(value) => {
-                    setWorkflowFilter(value);
-                    setCurrentPage(1);
-                  }}
-                  options={[
-                    { value: "all", label: t("pages.executions.filters.allWorkflows") },
-                    ...workflows.map((wf) => ({ value: wf.id, label: wf.name })),
-                  ]}
-                  placeholder={t("pages.executions.filters.workflow")}
-                  searchPlaceholder={t("common.filters.search")}
-                  testId="workflow-filter"
-                />
-              </LabeledFilter>
-            )}
+            <LabeledFilter label={t("common.filters.workflow")}>
+              <SearchableSelect
+                value={workflowFilter}
+                onValueChange={(value) => {
+                  setWorkflowFilter(value);
+                  setCurrentPage(1);
+                }}
+                options={[
+                  { value: "all", label: t("pages.executions.filters.allWorkflows") },
+                  ...workflows.map((wf) => ({ value: wf.id, label: wf.name })),
+                ]}
+                placeholder={
+                  workflowFilter !== "all" ? workflowFilter : t("pages.executions.filters.workflow")
+                }
+                searchPlaceholder={t("common.filters.search")}
+                emptyMessage={t("pages.workflows.explorer.noMatch")}
+                testId="workflow-filter"
+              />
+            </LabeledFilter>
 
             <SortSelect
               value={sortValue}
@@ -277,6 +259,13 @@ export const Executions: React.FC = () => {
           </>
         }
       />
+      <DataRegion
+        hasResult={choices.data !== undefined}
+        pending={choices.pending}
+        error={choices.error}
+        onRetry={choices.refresh}
+        testId="execution-workflow-choices-region"
+      />
 
       <LockedExecutionsWidget />
 
@@ -294,19 +283,41 @@ export const Executions: React.FC = () => {
         storageKey="executions-view-mode"
         guide={guideAnchor("runs.list")}
         loading={loading}
+        hasResult={accepted !== null}
+        error={error}
+        onRetry={loadExecutions}
+        onRefresh={loadExecutions}
+        resultScope={
+          accepted && (
+            <span>
+              {t("common.pagination.page", {
+                current: accepted.page,
+                total: Math.max(1, totalPages),
+              })}
+              {accepted.search && ` · ${t("common.filters.search")}: ${accepted.search}`}
+              {accepted.status !== "all" &&
+                ` · ${t("common.filters.status")}: ${t(accepted.status === "running" ? "pages.executions.filters.active" : `common.status.${accepted.status}`)}`}
+              {accepted.workflowId !== "all" &&
+                ` · ${t("common.filters.workflow")}: ${workflows.find((w) => w.id === accepted.workflowId)?.name ?? accepted.workflowId}`}
+              {` · ${t(accepted.sortBy === "createdAt" ? "pages.executions.filters.sortByCreated" : "pages.executions.filters.sortByUpdated")} ${accepted.sortOrder === "desc" ? "↓" : "↑"}`}
+            </span>
+          )
+        }
         emptyIcon={Play}
         emptyTitle={
-          debouncedSearch || statusFilter !== "all" || workflowFilter !== "all"
+          accepted?.search ||
+          (accepted && accepted.status !== "all") ||
+          (accepted && accepted.workflowId !== "all")
             ? t("pages.executions.noResults")
             : t("pages.executions.noExecutions")
         }
         containerRef={containerRef}
         pagination={{
           mode: "total",
-          currentPage,
+          currentPage: accepted?.page ?? currentPage,
           totalPages,
           totalItems: total,
-          pageSize,
+          pageSize: accepted?.pageSize ?? pageSize,
           onPageChange: setCurrentPage,
         }}
         className="flex-1 min-h-0 flex flex-col"

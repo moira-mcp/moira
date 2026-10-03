@@ -42,71 +42,126 @@ test.describe("Admin Monitoring Test Page", () => {
     await expect(page.locator('[data-testid="trigger-log-levels"]')).toBeVisible();
   });
 
+  test("a held slow action leaves logging available and history keyboard accessible", async ({
+    page,
+  }) => {
+    const features = (await (await page.request.get(`${BASE_URL}/api/features`)).json()).data
+      .features;
+    await page.goto(`${BASE_URL}/admin/monitoring-test?lang=en`);
+    if (!features.operationsDevelopment) {
+      await expect(page).toHaveURL(/\/admin(?:\?[^#]*)?$/);
+      return;
+    }
+    let release!: () => void;
+    let started!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const begun = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    const pattern = "**/api/admin/monitoring-test/slow";
+    await page.route(pattern, async (route) => {
+      started();
+      await gate;
+      await route.continue();
+    });
+    try {
+      await page.getByTestId("trigger-slow-request").click();
+      await begun;
+      await expect(page.getByTestId("trigger-slow-request")).toBeDisabled();
+      await expect(page.getByTestId("trigger-log-levels")).toBeEnabled();
+      await page.getByTestId("trigger-log-levels").click();
+      await expect(page.getByText("Generated 4 log entries.", { exact: true })).toBeVisible();
+      const history = page.getByLabel("Event History", { exact: true });
+      await history.focus();
+      await expect(history).toBeFocused();
+      release();
+      await expect(page.getByTestId("trigger-slow-request")).toBeEnabled();
+      await expect(page.getByText(/Slow request completed in \d+ ms\./)).toBeVisible();
+      await expect(history).toBeFocused();
+      await page.getByRole("button", { name: "Clear", exact: true }).click();
+      await expect(
+        page.getByText("No events generated yet. Click a button above to generate test events.", {
+          exact: true,
+        }),
+      ).toBeVisible();
+    } finally {
+      release();
+      await page.unroute(pattern);
+    }
+  });
+
   test("window error button sends request to /api/logs/client", async ({ page }) => {
     await page.goto(`${BASE_URL}/admin/monitoring-test`);
 
-    // Setup request listener for client logs endpoint
-    let clientLogRequest: { body: string } | null = null;
-    page.on("request", (request) => {
-      if (request.url().includes("/api/logs/client")) {
-        clientLogRequest = { body: request.postData() || "" };
-      }
-    });
+    const logged = page.waitForRequest(
+      (request) =>
+        request.url().includes("/api/logs/client") &&
+        request.method() === "POST" &&
+        Boolean(request.postData()?.includes("Test window.onerror - Monitoring Test")),
+    );
 
     // Click window error button (this triggers setTimeout error)
     await page.click('[data-testid="trigger-window-error"]');
 
-    // Wait for the request to be made (setTimeout delay + network)
-    await page.waitForTimeout(1000);
-
-    // Verify request was made to client logs endpoint
-    expect(clientLogRequest).not.toBeNull();
-    expect(clientLogRequest!.body).toContain("Monitoring Test");
+    const body = (await logged).postDataJSON();
+    expect(Array.isArray(body) ? body : [body]).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          level: "error",
+          message: expect.stringContaining("Test window.onerror - Monitoring Test"),
+        }),
+      ]),
+    );
   });
 
   test("promise error button sends request to /api/logs/client", async ({ page }) => {
     await page.goto(`${BASE_URL}/admin/monitoring-test`);
 
-    // Setup request listener for client logs endpoint
-    let clientLogRequest: { body: string } | null = null;
-    page.on("request", (request) => {
-      if (request.url().includes("/api/logs/client")) {
-        clientLogRequest = { body: request.postData() || "" };
-      }
-    });
+    const logged = page.waitForRequest(
+      (request) =>
+        request.url().includes("/api/logs/client") &&
+        request.method() === "POST" &&
+        Boolean(request.postData()?.includes("Test unhandledrejection - Monitoring Test")),
+    );
 
     // Click promise error button
     await page.click('[data-testid="trigger-promise-error"]');
 
-    // Wait for the request to be made
-    await page.waitForTimeout(500);
-
-    // Verify request was made to client logs endpoint
-    expect(clientLogRequest).not.toBeNull();
-    expect(clientLogRequest!.body).toContain("Monitoring Test");
+    const body = (await logged).postDataJSON();
+    expect(Array.isArray(body) ? body : [body]).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          level: "error",
+          message: expect.stringContaining("Test unhandledrejection - Monitoring Test"),
+        }),
+      ]),
+    );
   });
 
-  test("react error button triggers error boundary", async ({ page }) => {
+  test("react event-handler error is sent to client logging", async ({ page }) => {
     await page.goto(`${BASE_URL}/admin/monitoring-test`);
 
-    // Setup request listener for client logs endpoint
-    let clientLogRequest: { body: string } | null = null;
-    page.on("request", (request) => {
-      if (request.url().includes("/api/logs/client")) {
-        clientLogRequest = { body: request.postData() || "" };
-      }
-    });
+    const logged = page.waitForRequest(
+      (request) =>
+        request.url().includes("/api/logs/client") &&
+        request.method() === "POST" &&
+        Boolean(request.postData()?.includes("Test React error (ErrorBoundary) - Monitoring Test")),
+    );
 
-    // Click react error button - this triggers an error in React render
-    // which is caught by ErrorBoundary
+    // Event-handler throws reach the global error handler, not the render ErrorBoundary.
     await page.click('[data-testid="trigger-react-error"]');
 
-    // Wait for error boundary to catch and log
-    await page.waitForTimeout(500);
-
-    // Verify request was made to client logs endpoint
-    expect(clientLogRequest).not.toBeNull();
-    expect(clientLogRequest!.body).toContain("Monitoring Test");
+    const body = (await logged).postDataJSON();
+    expect(Array.isArray(body) ? body : [body]).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          level: "error",
+          message: expect.stringContaining("Test React error (ErrorBoundary) - Monitoring Test"),
+        }),
+      ]),
+    );
   });
 
   test("API error button triggers backend 500 error", async ({ page }) => {
@@ -127,7 +182,9 @@ test.describe("Admin Monitoring Test Page", () => {
     await page.click('[data-testid="trigger-api-error"]');
 
     // Wait for the response (use element-based wait instead of fixed timeout)
-    await expect(page.locator("text=API error triggered successfully")).toBeVisible({
+    await expect(
+      page.getByText("Expected test error received (500).", { exact: true }),
+    ).toBeVisible({
       timeout: 5000,
     });
 
@@ -171,7 +228,7 @@ test.describe("Admin Monitoring Test Page", () => {
 
   test("workflow button triggers workflow simulation", async ({ page }) => {
     await page.goto(`${BASE_URL}/admin/monitoring-test`);
-    await page.waitForLoadState("networkidle");
+    await expect(page.getByTestId("trigger-workflow")).toBeEnabled();
 
     // Click workflow button and wait for response simultaneously
     const [workflowResponse] = await Promise.all([
@@ -186,7 +243,9 @@ test.describe("Admin Monitoring Test Page", () => {
     expect(workflowResponse.status()).toBe(200);
 
     // Verify success event is shown in history
-    await expect(page.locator("text=Workflow start request logged")).toBeVisible({ timeout: 5000 });
+    await expect(
+      page.getByText("Workflow start simulation logged; no workflow was started.", { exact: true }),
+    ).toBeVisible({ timeout: 5000 });
   });
 
   test("MCP test section shows both buttons", async ({ page }) => {
@@ -215,7 +274,9 @@ test.describe("Admin Monitoring Test Page", () => {
     await page.click('[data-testid="trigger-mcp-success"]');
 
     // Wait for the response (use element-based wait instead of fixed timeout)
-    await expect(page.locator("text=simulated with success status")).toBeVisible({ timeout: 5000 });
+    await expect(page.getByText(/MCP success simulation completed in \d+ ms\./)).toBeVisible({
+      timeout: 5000,
+    });
 
     // Verify 200 response was received
     expect(mcpResponse).not.toBeNull();
@@ -240,7 +301,9 @@ test.describe("Admin Monitoring Test Page", () => {
     await page.click('[data-testid="trigger-mcp-error"]');
 
     // Wait for the response (use element-based wait instead of fixed timeout)
-    await expect(page.locator("text=simulated with error status")).toBeVisible({ timeout: 5000 });
+    await expect(page.getByText(/MCP error simulation completed in \d+ ms\./)).toBeVisible({
+      timeout: 5000,
+    });
 
     // Verify 200 response was received (endpoint returns 200, logs error internally)
     expect(mcpResponse).not.toBeNull();

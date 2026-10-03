@@ -6,10 +6,10 @@
 
 import React, { useState, useCallback, useEffect, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { List, LayoutGrid } from "lucide-react";
+import { List, LayoutGrid, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ServerPagination } from "@/components/ServerPagination";
-import { PageLoader } from "@/components/page-loader";
+import { DataRegion } from "@/components/DataRegion";
 import { EmptyState } from "@/components/empty-state";
 
 export type ViewMode = "list" | "grid";
@@ -48,6 +48,12 @@ export interface DataListViewProps<T> {
   storageKey: string;
   /** Loading state */
   loading?: boolean;
+  /** A successful result exists, including an empty list. */
+  hasResult: boolean;
+  error?: string | null;
+  onRetry?: () => void | Promise<unknown>;
+  onRefresh?: () => void | Promise<unknown>;
+  resultScope?: ReactNode;
   /** Pagination configuration */
   pagination?: PaginationConfig;
   /** Empty state icon component */
@@ -113,6 +119,11 @@ export function DataListView<T>({
   keyExtractor,
   storageKey,
   loading = false,
+  hasResult,
+  error,
+  onRetry,
+  onRefresh,
+  resultScope,
   pagination = { mode: "none" },
   emptyIcon,
   emptyTitle,
@@ -151,72 +162,93 @@ export function DataListView<T>({
     [storageKey],
   );
 
-  // Loading state (only when no items loaded yet)
-  if (loading && items.length === 0) {
-    return <PageLoader />;
-  }
-
   return (
     <div className={className}>
       {/* Toolbar with ViewToggle */}
       <div className="flex items-center gap-2 mb-4">
         {toolbar}
-        <div className="ml-auto">
+        <div className="ml-auto flex items-center gap-1">
+          {onRefresh && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8"
+              onClick={() => void onRefresh()}
+              aria-label={t("common.dataRegion.refresh")}
+            >
+              <RefreshCw className={loading ? "h-3.5 w-3.5 animate-spin" : "h-3.5 w-3.5"} />
+            </Button>
+          )}
           <ViewToggle viewMode={viewMode} onChange={handleViewModeChange} />
         </div>
       </div>
 
-      {/* Content area */}
-      <div
-        className="flex-1 min-h-0 overflow-auto"
-        ref={containerRef as React.Ref<HTMLDivElement>}
-        data-testid="data-list-items"
-        {...guide}
+      <DataRegion
+        hasResult={hasResult}
+        pending={loading}
+        error={error}
+        onRetry={onRetry}
+        resultScope={resultScope}
+        className="flex flex-1 min-h-0 flex-col"
       >
-        {items.length === 0 ? (
-          <EmptyState
-            icon={emptyIcon}
-            title={emptyTitle || t("common.noResults")}
-            description={emptyDescription}
-            action={emptyAction}
-          />
-        ) : (
-          <div
-            className={
-              viewMode === "grid"
-                ? "grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 p-1"
-                : "space-y-0"
-            }
-          >
-            {items.map((item) => (
-              <React.Fragment key={keyExtractor(item)}>{renderCard(item, viewMode)}</React.Fragment>
-            ))}
-          </div>
-        )}
-      </div>
+        {/* Content area */}
+        <div
+          className="flex-1 min-h-0 overflow-auto"
+          ref={containerRef as React.Ref<HTMLDivElement>}
+          data-testid="data-list-items"
+          {...guide}
+        >
+          {items.length === 0 ? (
+            <EmptyState
+              icon={emptyIcon}
+              title={emptyTitle || t("common.noResults")}
+              description={emptyDescription}
+              action={emptyAction}
+            />
+          ) : (
+            <div
+              className={
+                viewMode === "grid"
+                  ? "grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 p-1"
+                  : "space-y-0"
+              }
+            >
+              {items.map((item) => (
+                <React.Fragment key={keyExtractor(item)}>
+                  {renderCard(item, viewMode)}
+                </React.Fragment>
+              ))}
+            </div>
+          )}
+        </div>
 
-      {/* Pagination */}
-      {items.length > 0 && pagination.mode === "total" && (
-        <ServerPagination
-          currentPage={pagination.currentPage}
-          totalPages={pagination.totalPages}
-          totalItems={pagination.totalItems}
-          pageSize={pagination.pageSize}
-          onPageChange={pagination.onPageChange}
-          className="shrink-0 pt-4"
-          data-testid="data-list-pagination"
-        />
-      )}
-      {items.length > 0 && pagination.mode === "cursor" && (
-        <ServerPagination
-          currentPage={pagination.currentPage}
-          hasMore={pagination.hasMore}
-          itemCount={pagination.itemCount}
-          onPageChange={pagination.onPageChange}
-          className="shrink-0 pt-4"
-          data-testid="data-list-pagination"
-        />
-      )}
+        {/* Pagination */}
+        {pagination.mode === "total" &&
+          (pagination.totalItems > 0 || pagination.currentPage > 1) && (
+            <ServerPagination
+              currentPage={pagination.currentPage}
+              totalPages={pagination.totalPages}
+              totalItems={pagination.totalItems}
+              pageSize={pagination.pageSize}
+              itemCount={items.length}
+              onPageChange={pagination.onPageChange}
+              className="shrink-0 pt-4"
+              data-testid="data-list-pagination"
+            />
+          )}
+        {pagination.mode === "cursor" &&
+          (items.length > 0 || pagination.currentPage > 1 || pagination.hasMore) && (
+            <ServerPagination
+              currentPage={pagination.currentPage}
+              hasMore={pagination.hasMore}
+              itemCount={pagination.itemCount}
+              onPageChange={pagination.onPageChange}
+              className="shrink-0 pt-4"
+              data-testid="data-list-pagination"
+            />
+          )}
+      </DataRegion>
     </div>
   );
 }

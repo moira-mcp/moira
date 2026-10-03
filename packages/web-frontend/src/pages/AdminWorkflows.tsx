@@ -10,6 +10,9 @@ import { apiClient } from "../services/api-client";
 import { useListPageSize } from "../hooks/useListPageSize";
 import { useLatestRequest } from "../hooks/useLatestRequest";
 import { useDebounce } from "../hooks/useDebounce";
+import { useResource } from "../hooks/useResource";
+import { DataRegion } from "@/components/DataRegion";
+import { localDayRange } from "@/lib/local-date-range";
 import {
   Select,
   SelectContent,
@@ -25,19 +28,28 @@ import { LabeledFilter } from "@/components/LabeledFilter";
 import { DataListView } from "@/components/DataListView";
 import { AdminWorkflowCard, type AdminWorkflowCardData } from "@/components/cards";
 
-interface User {
-  id: string;
-  email: string;
-  name: string | null;
-}
-
 const ALL_FILTER = "__all__";
 
 export const AdminWorkflows: React.FC = () => {
   const { t } = useTranslation();
-  const [workflows, setWorkflows] = useState<AdminWorkflowCardData[]>([]);
-  const [users, setUsers] = useState<User[]>([]);
-  const [total, setTotal] = useState(0);
+  const [accepted, setAccepted] = useState<{
+    workflows: AdminWorkflowCardData[];
+    total: number;
+    page: number;
+    pageSize: number;
+    search: string;
+    userId: string;
+    visibility: string;
+    validation: string;
+    from: string;
+    to: string;
+  } | null>(null);
+  const workflows = accepted?.workflows ?? [];
+  const total = accepted?.total ?? 0;
+  const choices = useResource("admin-user-choices", () =>
+    apiClient.getAdminUserChoices({ limit: 100 }),
+  );
+  const users = choices.data?.users ?? [];
   const [currentPage, setCurrentPage] = useState(1);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -64,32 +76,31 @@ export const AdminWorkflows: React.FC = () => {
       setLoading(true);
       const offset = (currentPage - 1) * pageSize;
 
-      const [workflowsData, usersData] = await Promise.all([
-        apiClient.getAdminWorkflows({
-          userId: selectedUserId || undefined,
-          visibility: (selectedVisibility as "public" | "private" | "all") || undefined,
-          isValid: (selectedValidation as "true" | "false" | "unknown") || undefined,
-          search: debouncedSearch || undefined,
-          fromDate: fromDate ? new Date(fromDate).getTime() : undefined,
-          toDate: toDate
-            ? (() => {
-                const endOfDay = new Date(toDate);
-                endOfDay.setHours(23, 59, 59, 999);
-                return endOfDay.getTime();
-              })()
-            : undefined,
-          sort: "updatedAt",
-          sortOrder: "desc",
-          limit: pageSize,
-          offset,
-        }),
-        apiClient.getAdminUsers({ limit: 100 }),
-      ]);
+      const workflowsData = await apiClient.getAdminWorkflows({
+        userId: selectedUserId || undefined,
+        visibility: (selectedVisibility as "public" | "private" | "all") || undefined,
+        isValid: (selectedValidation as "true" | "false" | "unknown") || undefined,
+        search: debouncedSearch || undefined,
+        ...localDayRange(fromDate, toDate),
+        sort: "updatedAt",
+        sortOrder: "desc",
+        limit: pageSize,
+        offset,
+      });
 
       if (!isCurrent()) return;
-      setWorkflows(workflowsData.workflows);
-      setTotal(workflowsData.total);
-      setUsers(usersData.users.map((u) => ({ id: u.id, email: u.email, name: u.name })));
+      setAccepted({
+        workflows: workflowsData.workflows,
+        total: workflowsData.total,
+        page: currentPage,
+        pageSize,
+        search: debouncedSearch,
+        userId: selectedUserId,
+        visibility: selectedVisibility,
+        validation: selectedValidation,
+        from: fromDate,
+        to: toDate,
+      });
       setError(null);
     } catch (err: unknown) {
       if (!isCurrent()) return;
@@ -124,28 +135,7 @@ export const AdminWorkflows: React.FC = () => {
     setToDate("");
   };
 
-  const totalPages = Math.ceil(total / pageSize);
-
-  if (loading && workflows.length === 0) {
-    return (
-      <PageShell
-        title={t("admin.workflows.title")}
-        description={t("admin.workflows.subtitle")}
-        loading
-      />
-    );
-  }
-
-  if (error) {
-    return (
-      <PageShell
-        title={t("admin.workflows.title")}
-        error={error}
-        onRetry={loadData}
-        retryLabel={t("admin.workflows.retry")}
-      />
-    );
-  }
+  const totalPages = Math.ceil(total / (accepted?.pageSize ?? pageSize));
 
   return (
     <PageShell title={t("admin.workflows.title")} description={t("admin.workflows.subtitle")}>
@@ -165,8 +155,9 @@ export const AdminWorkflows: React.FC = () => {
                   { value: ALL_FILTER, label: t("admin.workflows.filters.allUsers") },
                   ...users.map((user) => ({ value: user.id, label: user.email })),
                 ]}
-                placeholder={t("admin.workflows.filters.allUsers")}
+                placeholder={selectedUserId || t("admin.workflows.filters.allUsers")}
                 searchPlaceholder={t("common.filters.search")}
+                emptyMessage={t("admin.userManagement.noSearchResults")}
                 testId="user-filter"
               />
             </LabeledFilter>
@@ -236,6 +227,14 @@ export const AdminWorkflows: React.FC = () => {
         }
       />
 
+      <DataRegion
+        hasResult={choices.data !== undefined}
+        pending={choices.pending}
+        error={choices.error}
+        onRetry={choices.refresh}
+        testId="admin-user-choices-region"
+      />
+
       <DataListView
         onViewModeChange={onViewModeChange}
         items={workflows}
@@ -245,12 +244,35 @@ export const AdminWorkflows: React.FC = () => {
         keyExtractor={(w) => w.id}
         storageKey="admin-workflows-view-mode"
         loading={loading}
+        hasResult={accepted !== null}
+        error={error}
+        onRetry={loadData}
+        onRefresh={loadData}
+        resultScope={
+          accepted && (
+            <span>
+              {t("common.pagination.page", {
+                current: accepted.page,
+                total: Math.max(1, totalPages),
+              })}
+              {accepted.search && ` · ${t("common.filters.search")}: ${accepted.search}`}
+              {accepted.userId &&
+                ` · ${t("common.filters.user")}: ${users.find((u) => u.id === accepted.userId)?.email ?? accepted.userId}`}
+              {accepted.visibility &&
+                ` · ${t("admin.workflows.filters.visibility")}: ${t(`admin.workflows.${accepted.visibility}`)}`}
+              {accepted.validation &&
+                ` · ${t("admin.workflows.filters.validation")}: ${t(`admin.workflows.filters.${accepted.validation === "true" ? "valid" : accepted.validation === "false" ? "invalid" : "unknown"}`)}`}
+              {accepted.from && ` · ${t("common.filters.dateFrom")}: ${accepted.from}`}
+              {accepted.to && ` · ${t("common.filters.dateTo")}: ${accepted.to}`}
+            </span>
+          )
+        }
         containerRef={containerRef}
         pagination={{
           mode: "total",
-          currentPage,
+          currentPage: accepted?.page ?? currentPage,
           totalPages,
-          pageSize,
+          pageSize: accepted?.pageSize ?? pageSize,
           totalItems: total,
           onPageChange: setCurrentPage,
         }}

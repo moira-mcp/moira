@@ -17,11 +17,64 @@ test.describe("Admin Panel", () => {
   test("admin can access admin dashboard", async ({ page }) => {
     await page.goto(`${BASE_URL}/admin`);
     await page.waitForLoadState("domcontentloaded");
-    // Wait for stats to load
-    await expect(page.locator("text=Total Workflows").first()).toBeVisible({ timeout: 10000 });
-    await expect(page.locator("text=Total Executions").first()).toBeVisible();
-    await expect(page.locator("text=Active Executions").first()).toBeVisible();
-    await expect(page.locator("text=Quick Links")).toBeVisible();
+    const health = page.getByTestId("admin-system-health");
+    await expect(health).toBeVisible();
+    await expect(health).toContainText("healthy");
+    await expect(page.getByText("Maintenance", { exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Logout All Users", exact: true })).toBeVisible();
+  });
+
+  test("system events retain unknown times and display a known epoch time", async ({ page }) => {
+    await page.route("**/api/admin/stats", async (route) => {
+      const response = await route.fetch();
+      const body = await response.json();
+      await route.fulfill({
+        response,
+        json: {
+          ...body,
+          data: {
+            ...body.data,
+            recentActivity: [
+              {
+                id: "system-event-undated",
+                workflowId: "undated-flow",
+                status: "paused",
+                timestamp: null,
+                action: "Workflow execution paused",
+              },
+              {
+                id: "system-event-epoch",
+                workflowId: "epoch-flow",
+                status: "completed",
+                timestamp: 0,
+                action: "Workflow execution completed",
+              },
+            ],
+          },
+        },
+      });
+    });
+
+    await page.goto(`${BASE_URL}/admin`);
+    const events = page.getByTestId("admin-recent-activity");
+    const unknown = events
+      .locator("div")
+      .filter({
+        has: page.getByText("Workflow execution paused · undated-flow", { exact: true }),
+      })
+      .last();
+    await expect(unknown).toBeVisible();
+    await expect(unknown.locator("span").last()).toHaveText("—");
+
+    const epoch = events
+      .locator("div")
+      .filter({
+        has: page.getByText("Workflow execution completed · epoch-flow", { exact: true }),
+      })
+      .last();
+    await expect(epoch).toBeVisible();
+    const epochTime = epoch.locator("span").last();
+    await expect(epochTime).toHaveText(/(?:Jan 1|Dec 31).*\d{2}:\d{2}/);
   });
 
   test("admin can navigate to users page", async ({ page }) => {
@@ -79,8 +132,10 @@ test.describe("Admin Panel", () => {
     await page.goto(`${BASE_URL}/admin/settings`);
     await page.waitForLoadState("networkidle");
 
-    // Click the Maintenance tab to reveal Database Maintenance section
-    await page.getByRole("tab", { name: "Maintenance" }).click();
+    // Use the caller-owned settings navigation to reveal Database Maintenance.
+    await page.getByTestId("admin-settings-nav-maintenance").click();
+    await expect(page.getByTestId("tab-maintenance")).toBeVisible();
+    expect(new URL(page.url()).searchParams.get("tab")).toBe("maintenance");
     await expect(page.locator("text=Database Maintenance")).toBeVisible({
       timeout: 15000,
     });

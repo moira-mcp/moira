@@ -23,7 +23,7 @@ import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { cn } from "@/lib/utils";
 import { type NormalizedUser } from "./normalize-user";
-import { formatDate } from "./format-utils";
+import { formatDate, formatRelativeTime } from "./format-utils";
 import { CardShell, type CardAction } from "./CardShell";
 
 interface UserCardProps {
@@ -145,6 +145,13 @@ export const UserCard: React.FC<UserCardProps> = ({
       }
       title={user.name || user.email}
       description={user.name ? user.email : undefined}
+      note={
+        user.topWorkflows && user.topWorkflows.length > 0
+          ? t("adminOverview.topFlows", {
+              names: user.topWorkflows.map((flow) => flow.workflowName).join(" · "),
+            })
+          : undefined
+      }
       badges={
         <>
           {user.isAdmin && (
@@ -188,6 +195,25 @@ export const UserCard: React.FC<UserCardProps> = ({
             {user.workflowsCount}
           </span>
           <span>{formatDate(user.createdAt)}</span>
+          {user.lastActivityAt !== undefined && (
+            <span>
+              {user.lastActivityAt === null
+                ? t("adminOverview.unknownActivity")
+                : t("adminOverview.lastActivity", {
+                    when: formatRelativeTime(user.lastActivityAt),
+                  })}
+            </span>
+          )}
+          {user.executionsCount !== undefined && (
+            <span>{t("adminOverview.runs", { count: user.executionsCount })}</span>
+          )}
+          {user.lastStepAt !== undefined && (
+            <span>
+              {user.lastStepAt === null
+                ? t("adminOverview.unknownStep")
+                : t("adminOverview.lastStep", { when: formatRelativeTime(user.lastStepAt) })}
+            </span>
+          )}
         </>
       }
     />

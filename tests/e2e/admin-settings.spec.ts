@@ -619,10 +619,24 @@ test.describe("Global Settings - Scope/Model Override Workflow", () => {
 
     // Click reset
     await resetBtn.click();
-    await page.waitForTimeout(1000);
+    const resetDialog = page.getByRole("alertdialog");
+    await expect(resetDialog).toBeVisible();
+    const [resetResponse] = await Promise.all([
+      page.waitForResponse(
+        (response) =>
+          new URL(response.url()).pathname === "/api/admin/global-settings/set-scope-value" &&
+          response.request().method() === "POST" &&
+          response.request().postDataJSON().value === null,
+      ),
+      resetDialog.getByRole("button", { name: "Reset", exact: true }).click(),
+    ]);
+    expect(resetResponse.ok()).toBe(true);
+    expect((await resetResponse.json()).success).toBe(true);
+    await expect(resetDialog).not.toBeVisible();
 
     // Reset button should no longer be visible (no override)
     await expect(resetBtn).not.toBeVisible();
+    await expect(textarea).toHaveValue("");
 
     // Reset scope to Default
     await scopeDropdown.click();

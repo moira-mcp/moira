@@ -28,7 +28,11 @@ import {
 const BASE_URL = getTestBaseUrl();
 
 /** Holds every `method` request matching `pattern` until `release()`; resolves `started` on the first. */
-async function holdRequests(page: Page, pattern: string | RegExp, method = "GET") {
+async function holdRequests(
+  page: Page,
+  pattern: string | RegExp | ((url: URL) => boolean),
+  method = "GET",
+) {
   let release: (() => void) | undefined;
   let markStarted: (() => void) | undefined;
   const started = new Promise<void>((resolve) => {
@@ -85,7 +89,23 @@ test("a direct load of a section whose code is still loading shows a skeleton in
 }) => {
   await loginAsAdmin(page);
   await page.setViewportSize({ width: 1440, height: 900 });
-  const chunk = await holdRequests(page, /\/\d+\.[0-9a-f]+\.js(\?|$)/);
+  // Numeric assets can also be initial shared entry scripts. Holding those prevents the
+  // application itself from mounting, rather than exercising its route Suspense boundary.
+  const document = await page.request.get(`${BASE_URL}/executions`);
+  expect(document.ok()).toBe(true);
+  const sources = await page.evaluate(
+    (html) =>
+      [...new DOMParser().parseFromString(html, "text/html").querySelectorAll("script[src]")].map(
+        (script) => script.getAttribute("src")!,
+      ),
+    await document.text(),
+  );
+  const entries = new Set(sources.map((source) => new URL(source, BASE_URL).pathname));
+  expect(entries.size).toBeGreaterThan(0);
+  const chunk = await holdRequests(
+    page,
+    (url) => /\/\d+\.[0-9a-f]+\.js$/.test(url.pathname) && !entries.has(url.pathname),
+  );
   await page.goto(`${BASE_URL}/executions`, { waitUntil: "commit" });
   await chunk.started;
   await expect(page.getByTestId("route-skeleton")).toBeVisible();

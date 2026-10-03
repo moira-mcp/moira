@@ -8,7 +8,7 @@
 import React from "react";
 import { PageHeader } from "@/components/page-header";
 import { PageLoader } from "@/components/page-loader";
-import { InlineError } from "@/components/inline-error";
+import { DataRegion } from "@/components/DataRegion";
 
 interface PageShellProps {
   title: string;
@@ -16,6 +16,8 @@ interface PageShellProps {
   /** Actions slot rendered to the right of the title */
   actions?: React.ReactNode;
   loading?: boolean;
+  /** Keeps an accepted result mounted during a subsequent request, including an empty result. */
+  hasResult?: boolean;
   error?: string | null;
   onRetry?: () => void;
   retryLabel?: string;
@@ -31,6 +33,7 @@ export const PageShell: React.FC<PageShellProps> = ({
   description,
   actions,
   loading,
+  hasResult,
   error,
   onRetry,
   retryLabel,
@@ -38,34 +41,22 @@ export const PageShell: React.FC<PageShellProps> = ({
   className,
   guide,
 }) => {
-  if (loading) {
-    return (
-      <div className={className || "h-full flex flex-col p-6 md:p-8"}>
-        <PageHeader title={title} description={description} guide={guide}>
-          {actions}
-        </PageHeader>
-        <PageLoader />
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className={className || "h-full flex flex-col p-6 md:p-8"}>
-        <PageHeader title={title} description={description} guide={guide}>
-          {actions}
-        </PageHeader>
-        <InlineError message={error} onRetry={onRetry} retryLabel={retryLabel} />
-      </div>
-    );
-  }
-
   return (
     <div className={className || "h-full flex flex-col p-6 md:p-8"}>
       <PageHeader title={title} description={description} guide={guide}>
         {actions}
       </PageHeader>
-      {children}
+      <DataRegion
+        hasResult={hasResult ?? !(loading || error)}
+        pending={Boolean(loading)}
+        error={error}
+        onRetry={onRetry}
+        retryLabel={retryLabel}
+        initialContent={<PageLoader />}
+        className="flex flex-1 min-h-0 flex-col"
+      >
+        {children}
+      </DataRegion>
     </div>
   );
 };

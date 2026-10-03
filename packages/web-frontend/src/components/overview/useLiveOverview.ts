@@ -9,7 +9,8 @@
  * browser's back-forward cache joins the live connection again.
  */
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { getReadIdentity, getReadOwner, subscribeReadScope } from "../../services/read-scope";
 import { apiClient, type OverviewChange } from "../../services/api-client";
 import {
   browserDependencies,
@@ -31,7 +32,7 @@ export interface LiveOverviewHandlers {
 
 /** The stream lives beside the rest of the API, which the app reaches at `/api` from any base path. */
 function streamUrl(after: number | null): string {
-  const base = "/api/executions/overview/stream";
+  const base = `${apiClient.getConfig().baseURL.replace(/\/$/, "")}/api/executions/overview/stream`;
   return after === null ? base : `${base}?after=${after}`;
 }
 
@@ -39,6 +40,7 @@ function defaultDependencies(): LiveDependencies {
   return browserDependencies(
     (after) => new EventSource(streamUrl(after), { withCredentials: true }),
     (after) => apiClient.getOverviewChanges(after),
+    getReadOwner(),
   );
 }
 
@@ -60,6 +62,7 @@ export function useLiveOverview(
   handlers: LiveOverviewHandlers,
   createDependencies: () => LiveDependencies = defaultDependencies,
 ): LiveSnapshot {
+  const identity = useSyncExternalStore(subscribeReadScope, getReadIdentity, getReadIdentity);
   const [snapshot, setSnapshot] = useState<LiveSnapshot>({
     state: "connecting",
     lastEventAt: null,
@@ -69,17 +72,19 @@ export function useLiveOverview(
   const createRef = useRef(createDependencies);
 
   useEffect(() => {
+    if (identity === null) return;
     let pageTimer: ReturnType<typeof setTimeout> | null = null;
     let refreshing = false;
     let dirty = false;
     let disposed = false;
+    const current = () => !disposed && identity === getReadIdentity();
     const schedule = () => {
-      if (disposed || refreshing || pageTimer !== null || !dirty) return;
+      if (!current() || refreshing || pageTimer !== null || !dirty) return;
       pageTimer = setTimeout(() => void refresh(), PAGE_REFETCH_MS);
     };
     const refresh = async () => {
       pageTimer = null;
-      if (disposed) return;
+      if (!current()) return;
       dirty = false;
       refreshing = true;
       try {
@@ -92,6 +97,7 @@ export function useLiveOverview(
       }
     };
     const onMessage = (message: LiveMessage) => {
+      if (!current()) return;
       routeLiveMessage(message, handlersRef.current);
       dirty = true;
       schedule();
@@ -99,7 +105,11 @@ export function useLiveOverview(
 
     let connection: LiveConnection | null = null;
     const join = () => {
-      connection = new LiveConnection(createRef.current(), onMessage, setSnapshot);
+      if (!current()) return;
+      setSnapshot({ state: "connecting", lastEventAt: null });
+      connection = new LiveConnection(createRef.current(), onMessage, (next) => {
+        if (current()) setSnapshot(next);
+      });
       connection.start();
     };
     const leave = () => {
@@ -120,7 +130,7 @@ export function useLiveOverview(
       leave();
       if (pageTimer) clearTimeout(pageTimer);
     };
-  }, []);
+  }, [identity]);
 
-  return snapshot;
+  return identity === null ? { state: "connecting", lastEventAt: null } : snapshot;
 }

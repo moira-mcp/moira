@@ -43,7 +43,8 @@ HTTP 429 Too Many Requests
 
 ### Workflow Size
 
-Maximum workflow JSON: 5MB
+Maximum workflow JSON: 5 MiB (5 × 1024 × 1024 UTF-8 bytes of the stored JSON).
+Workflow `fileSize` and repository `size` use the same byte unit, including non-ASCII text.
 
 Error on exceed:
 
@@ -118,6 +119,26 @@ test log and does not deliver them.
 
 Authentication: Not required.
 
+## Conditional List Reads
+
+`GET /api/node-types`, `GET /api/notes`, `GET /api/playbooks`, and
+`GET /api/admin/users?projection=lookup` support weak `ETag` revalidation. They return
+`Cache-Control: private, no-cache` and `Vary: Cookie, Authorization`. Send the representation's
+validator in `If-None-Match`; an unchanged authorized response is HTTP 304 with no body. Retain the
+previous successful body for that exact query and requesting account. A different page, filter or
+projection requires its own representation. An explicit request `Cache-Control: no-cache` forces
+HTTP 200 even when the validator matches.
+
+Authentication, current admission/role checks and the current source/service read happen before
+validator handling. Service effects still happen: a conditional note-list request writes its
+`note:list` audit event even when it returns 304. Database writes through another MCP/backend
+process are visible to the next source read; the node-type projection reads this process's active
+registry. A matching validator does not authorize stale or foreign data.
+These routes do not substitute a process-local cache for the source. Dynamic workflow scan,
+management enrichment, analytics and secret/authentication reads do not use this stable-list
+contract. HTTP 200 keeps each endpoint's usual wrapper: node types and notes have `timestamp`,
+playbooks and user lookup do not.
+
 ## Node Types API
 
 ### GET /api/node-types
@@ -158,6 +179,13 @@ Authentication: Required.
 User settings management with authentication and validation.
 
 Definitions are resolved from the database together with settings declared by installed extension manifests. Manifest definitions are not inserted into the database. Their per-user values are stored separately, remain after an extension is removed, and become accessible again if the declaration is reinstalled.
+
+An installed extension declaration owns its key, including its category and default. A colliding
+database definition never supplies a fallback when that declaration is unset or outside a category
+selection. Value presence is distinct from truthiness: stored empty strings, `false`, zero and JSON
+`null` remain present. Non-encrypted defaults are converted using the declared type; an extension
+empty-string default is present, while an unset database-backed empty default is omitted. An absent
+effective value omits the key rather than returning a fabricated null.
 
 ### GET /api/settings
 
@@ -907,13 +935,20 @@ All Notes API operations are logged to the audit trail:
 
 ### GET /api/notes
 
-List notes with optional filtering.
+List notes with optional filtering. Each preview comes from the note's current revision; full text
+is read through `GET /api/notes/:key`. `total` counts distinct matching notes before pagination;
+`allTags` includes the user's non-deleted notes independently of the selected page/filter.
+
+Note/playbook list and revision-history previews contain the first 100 UTF-16 code units, followed
+by literal `...` only when the text is longer. Empty or absent revision content has an empty
+preview. Full revision reads preserve the distinction between null and empty content. Preview
+length is not an HTTP query option.
 
 Query parameters:
 
 - `tag` (optional): Filter by tag
 - `keySearch` (optional): Search by key (prefix/contains)
-- `limit` (optional): Max results (default: 50)
+- `limit` (optional): Max results (default: 50, maximum: 100)
 - `offset` (optional): Pagination offset (default: 0)
 
 Response:
@@ -927,8 +962,8 @@ Response:
       key: string;
       tags: string[];
       size: number;
-      version: number;
-      preview?: string;
+      currentVersion: number;
+      preview: string;
       createdAt: number;
       updatedAt: number;
     }>;
@@ -1016,7 +1051,7 @@ Response:
   data: Array<{
     version: number;
     size: number;
-    preview?: string;
+    preview: string;
     createdAt: number;
   }>;
   timestamp: string;
@@ -1173,6 +1208,9 @@ policy. All routes require authentication.
 
 List the playbooks this user owns. Query: `search`, `limit`, `offset`. Each entry carries the
 machine name, human name, description, visibility, current revision, size and a short preview.
+The default page size is 50 and the maximum is 100. The matching total is calculated before
+pagination. List/history previews use the preview rule documented under Notes API; the content
+endpoint and comparison/restore operations read complete revisions.
 
 ### GET /api/playbooks/:name
 
@@ -1214,8 +1252,9 @@ How many of the caller's running executions read this playbook right now, and th
 workflows. Asked by the editor before a change is saved: content resolves at every step, so the
 edit reaches those executions at their next step. Response: `{ name, executions, workflows:
 [{ workflowId, name, executions }], complete }`. The walk reads one definition per workflow that
-has a running execution and stops at a bounded number of definitions; `complete: false` says the
-count is a lower bound. A reference counts however its owner is spelled (plainly, by handle or by
+has running/waiting executions and inspects at most 200 distinct workflow definitions. Counts
+include all current executions of each inspected workflow, rather than a sampled page of runs;
+`complete: false` says the count is a lower bound. A reference counts however its owner is spelled (plainly, by handle or by
 id); an escaped reference does not count.
 
 ## Artifacts API
@@ -2447,7 +2486,11 @@ Authentication: Via token (no session required)
 
 ### GET /api/workflows
 
-List workflows with filtering, sorting, and pagination.
+List workflows with filtering, sorting, and pagination. The HTTP list selects metadata and scalar
+summaries in SQL without transferring executable nodes to the application. Access, direct/group
+grants, visibility, search and validation predicates determine both count and page. Detail/raw
+reads and engine consumers retain the full definition. Creation sorting uses stored creation time,
+with workflow-ID ties for deterministic pages.
 
 Query parameters:
 
@@ -2489,19 +2532,21 @@ Response:
         errors: string[];
       };
       lastModified: number;
-      fileSize: number;
+      fileSize: number; // UTF-8 bytes of stored workflow JSON
     }>;
-    total: number;
-    validWorkflows: number;
-    invalidWorkflows: number;
+    totalWorkflows: number; // All matching workflows before pagination
+    validWorkflows: number; // Valid entries on this page
+    invalidWorkflows: number; // Remaining page entries, including unknown status
+    lastScan: number; // Epoch milliseconds at response construction
   }
+  timestamp: string;
 }
 ```
 
 Response headers:
 
 - `X-Total-Count`: Total workflows matching filter
-- `X-Valid-Count`: Valid workflows count
+- `X-Valid-Count`: Valid workflows on the returned page
 - `X-Limit`: Applied limit
 - `X-Offset`: Applied offset
 
@@ -2517,9 +2562,9 @@ List user's executions with filters, sorting, and pagination.
 
 Query parameters:
 
-- `status`: Comma-separated status filter (running, completed). Legacy values (waiting, failed) mapped automatically.
+- `status`: Comma-separated status filter (`running`, `completed`, `locked`). `waiting` maps to running and `failed` maps to completed. `locked` selects a running execution with an active lock before counting and pagination.
 - `workflowId`: Filter by workflow ID
-- `search`: Search in note field
+- `search`: Substring search in execution ID, workflow ID or note
 - `sort`: Sort field (createdAt, updatedAt). Default: createdAt
 - `sortOrder`: Sort direction (asc, desc). Default: desc
 - `limit`: Results per page (1-100). Default: 20
@@ -2535,14 +2580,19 @@ Response:
     executions: Array<{
       executionId: string;
       workflowId: string;
-      workflowName: string | null; // Resolved from workflow table, null if workflow deleted
+      workflowName: string | null; // Null when no workflow row/name can be resolved
       userId: string;
       status: "running" | "completed" | "locked";
-      currentNodeId: string;
-      note?: string;
-      createdAt: number;
-      updatedAt: number;
-      completedAt?: number;
+      currentNodeId: string | null;
+      note: string | null;
+      userEmail: string | null;
+      userName: string | null;
+      createdAt: number | null;
+      updatedAt: number | null;
+      completedAt: number | null;
+      hasActiveLock: boolean;
+      lastStepAt: number | null;
+      error: string | null;
       errorCount: number; // refusals in the errors array; degradation entries are not counted
     }>;
     total: number;
@@ -2554,6 +2604,12 @@ Response:
 
 Authentication: Required
 Admin users see all executions unless `mine=true`; regular users see only their own.
+
+List timestamps are epoch milliseconds. Missing or invalid stored creation/update timestamps are
+`null`; a recorded Unix epoch is `0`. `lastStepAt` is the latest accepted `execution:step` audit
+event for that run, or `null` when none is recorded. Editing a note or other run metadata does not
+advance it. Lists omit contexts, workflow graphs and raw error journals; detail routes load them
+when needed.
 
 ### GET /api/executions/overview
 
@@ -2724,7 +2780,7 @@ Response:
     execution: {
       executionId: string;
       workflowId: string;
-      workflowName: string | null; // Resolved from workflow table, null if workflow deleted
+      workflowName: string | null; // Null when no workflow row/name can be resolved
       userId: string;
       status: "running" | "completed" | "locked";
       currentNodeId: string | null;
@@ -3139,8 +3195,12 @@ Query parameters:
 - `resource` (optional): Filter by resource type
 - `resourceId` (optional): Filter by resource ID (e.g., specific setting key)
 - `source` (optional): Filter by source (web, mcp, api, system)
+- `fromDate` (optional): Inclusive lower bound on entry creation time, in epoch milliseconds
+- `toDate` (optional): Inclusive upper bound on entry creation time, in epoch milliseconds
 - `limit` (optional): Number of entries per page (default: 50)
 - `offset` (optional): Pagination offset (default: 0)
+
+Date bounds, including `0`, constrain the matching total and the returned page before pagination.
 
 Response:
 
@@ -3260,7 +3320,7 @@ Response:
       id: string;
       workflowId: string;
       status: string;
-      timestamp: number;
+      timestamp: number | null;
       action: string;
     }>;
   }
@@ -3268,12 +3328,39 @@ Response:
 }
 ```
 
+`recentActivity.timestamp` is the execution's recorded creation time in epoch milliseconds,
+or `null` when absent. An undated event is retained; a recorded Unix epoch remains `0`, not unknown.
+
 Authentication: Required (admin role and `adminAnalytics` capability)
 
 ### GET /api/admin/users
 
 List users. Optional query parameters are `search`, `sort` (`email`, `name`, or
-`createdAt`), `sortOrder` (`asc` or `desc`), `limit`, and `offset`.
+`createdAt`), `sortOrder` (`asc` or `desc`), `limit`, and `offset`. `ids` selects exact account IDs
+as a comma-separated string, combined with the other filters. It accepts at most 100 nonempty IDs
+of at most 200 characters each, trims and deduplicates them, and rejects malformed or repeated
+query-array values. Explicit `ids=` selects no users.
+
+`projection=lookup` selects compact identity choices on this same endpoint. It preserves the
+administrator permission and the same search/IDs/sort/page/count rules; default page size is 20,
+maximum 100. Unknown projections return 400. The default response below retains management
+enrichment and its timestamp. Lookup selects only these fields in SQL and returns no timestamp:
+
+```typescript
+{
+  success: true;
+  data: {
+    users: Array<{ id: string; email: string; name: string | null; isAdmin: boolean }>;
+    total: number;
+    limit: number;
+    offset: number;
+  }
+}
+```
+
+Lookup supports the conditional-list contract above, with validators scoped to the requesting
+administrator and current source facts. A revoked role or unauthenticated request is denied before
+304 handling; changes to names or administrator flags invalidate the representation.
 
 Response:
 
@@ -3291,6 +3378,15 @@ Response:
       blocked: boolean;
       createdAt: string;
       workflowsCount: number;
+      lastActivityAt: number | null;
+      lastStepAt: number | null;
+      executionsCount: number;
+      topWorkflows: Array<{
+        workflowId: string;
+        workflowName: string;
+        executionCount: number;
+        lastRunAt: number | null;
+      }>;
     }>;
     total: number;
     limit: number;
@@ -3306,6 +3402,16 @@ Authentication: Required (admin role)
 
 Return one user with workflow, active-session, and email-history counts plus the
 session and email records used by the administrator detail view.
+
+`workflowsCount` counts that account's own non-deleted workflows, private and public. It does not
+count other accounts' public workflows visible to that user. The same ownership rule applies to
+the list. List activity fields are lifetime management context, not an analytics exclusion scope:
+`executionsCount` counts the user's runs and `topWorkflows` contains up to three most-used flows.
+Activity/step times are nullable epoch milliseconds. Activity comes from recorded actions or an
+observed provider renewal of an unexpired session, excluding account creation and blocked sign-in.
+Initial or historical session creation/update stamps do not establish renewal; see **Admin
+Analytics API** for its observation boundary. This is coarse recent activity, not continuous
+online presence. Analytics exclusions never remove accounts from this API.
 
 ```typescript
 {
@@ -3700,8 +3806,14 @@ List all executions with user information.
 Query parameters:
 
 - `userId` (optional): Filter by user ID
-- `status` (optional): Filter by status (waiting, completed, error)
-- `search` (optional): Search by execution ID or workflow ID
+- `status` (optional): Comma-separated `running`, `completed`, `locked`; `waiting` maps to running and `failed` maps to completed
+- `search` (optional): Substring search in execution ID, workflow ID or note
+- `limit`: Page size (default 20, maximum 100)
+- `offset`: Pagination offset (default 0)
+
+The admin list is ordered by creation time, newest first. Active-lock filtering is applied before
+the matching total and page are calculated. The projected fields and nullable timestamp rules are
+the same as the user execution list; analytics exclusions do not apply.
 
 Response:
 
@@ -3712,17 +3824,24 @@ Response:
     executions: Array<{
       executionId: string;
       workflowId: string;
-      workflowName: string | null; // Resolved from workflow table, null if workflow deleted
+      workflowName: string | null; // Null when no workflow row/name can be resolved
       userId: string;
       userEmail: string | null; // null when the owning user no longer exists
       userName: string | null;
       status: string;
       currentNodeId: string | null;
       hasActiveLock: boolean; // true if execution has an active lock
-      createdAt: number;
-      updatedAt: number;
+      createdAt: number | null;
+      updatedAt: number | null;
+      completedAt: number | null;
+      lastStepAt: number | null;
+      note: string | null;
+      error: string | null;
+      errorCount: number;
     }>;
-    totalExecutions: number;
+    total: number;
+    limit: number;
+    offset: number;
   }
   timestamp: string;
 }
@@ -3938,12 +4057,15 @@ Query parameters:
 - `userId` (string) — filter by owner user ID
 - `visibility` (`public` | `private` | `all`) — filter by visibility
 - `isValid` (`true` | `false` | `unknown`) — filter by validation status (`unknown` = not yet validated)
-- `fromDate` (number) — filter workflows updated after this timestamp (ms)
-- `toDate` (number) — filter workflows updated before this timestamp (ms)
+- `fromDate` (integer) — inclusive lower bound on workflow update time, in epoch milliseconds
+- `toDate` (integer) — inclusive upper bound on workflow update time, in epoch milliseconds
 - `sort` (`createdAt` | `updatedAt` | `name`) — sort field (default: `updatedAt`)
 - `sortOrder` (`asc` | `desc`) — sort direction (default: `desc`)
 - `limit` (number) — page size (default: 20, max: 100)
 - `offset` (number) — pagination offset
+
+Date bounds accept `0` and apply before calculating the matching total and page. Empty,
+non-integer, unsafe-integer or repeated date query values return 400.
 
 Response:
 
@@ -3980,6 +4102,54 @@ Response:
 ```
 
 Authentication: Required (admin role and `multiUserAdmin` capability)
+
+### GET /api/admin/workflows/deleted
+
+List soft-deleted workflows across users. Search and date predicates apply to the complete
+deleted inventory before calculating `total` and selecting the page.
+
+Query parameters (all optional):
+
+- `search`: Substring search in workflow name or ID
+- `fromDate`: Inclusive lower bound on deletion time, in epoch milliseconds
+- `toDate`: Inclusive upper bound on deletion time, in epoch milliseconds
+- `sort`: `name` or `deletedAt` (default: `deletedAt`)
+- `sortOrder`: `asc` or `desc` (default: `desc`)
+- `limit`: Integer page size (default: 20), clamped to 1–100
+- `offset`: Integer number of rows to skip (default: 0), clamped to at least 0
+
+The date and pagination parameters must be single, nonempty safe-integer query values;
+malformed or repeated values return 400. Zero is a valid date bound. A missing deletion time
+is returned as `null` in the unfiltered inventory and is excluded when either date bound is set.
+Clients using calendar-day inputs convert both bounds in their local timezone: the start of the
+first day and the last millisecond before the next day after the final day. The server accepts
+absolute timestamps, not calendar-date strings.
+
+Response:
+
+```typescript
+{
+  success: true;
+  data: {
+    workflows: Array<{
+      id: string;
+      name: string;
+      deletedAt: number | null; // Epoch milliseconds; a recorded epoch is 0
+      deletedBy: string | null; // Deleting account's email, or its ID if no email resolves
+    }>;
+    total: number; // All matching deleted workflows before pagination
+    limit: number; // Effective clamped page size
+    offset: number; // Effective clamped offset
+  }
+  timestamp: string;
+}
+```
+
+Deleting-account enrichment is limited to accounts referenced by this page. `deletedBy` is
+`null` when no deleting account is recorded.
+
+Authentication: Required (admin role and `multiUserAdmin` capability). The default self-host
+policy denies this route family.
 
 ### POST /api/admin/monitoring-test/error
 
@@ -4226,22 +4396,54 @@ Authentication: Required (admin role)
 
 ### GET /api/admin/artifacts/reported
 
-List reported artifacts for abuse review (ordered by report count, then most
-recently reported).
+List artifacts with at least one abuse report. Results are ordered by report count descending,
+then last report time descending, with artifact UUID ascending to resolve ties.
 
-Query: `limit?`, `offset?`, `includeTakenDown?` (default `true`).
+Query parameters (all optional):
 
-Response: `{ success, data: { artifacts: ReportedArtifact[], total }, timestamp }`
-where `ReportedArtifact` includes `uuid`, `userId`, `name`, `reportCount`,
-`lastReportedAt`, `takenDown`, `takenDownAt/By/Reason`, `createdAt`.
+- `limit`: Integer page size (default: 50), clamped to 1–100
+- `offset`: Integer number of rows to skip (default: 0), clamped to at least 0
+- `includeTakenDown`: `true` (default) keeps taken-down artifacts; `false` excludes them
 
-Audit action: `ADMIN_ARTIFACT_LIST_REPORTED`. Authentication: admin.
+Pagination parameters must be single, nonempty safe-integer query values; malformed or repeated
+values return 400. Report and takedown predicates apply before both the matching total and page.
+The response does not include effective `limit` or `offset` fields.
+
+```typescript
+{
+  success: true;
+  data: {
+    artifacts: Array<{
+      uuid: string;
+      userId: string;
+      name: string;
+      reportCount: number;
+      lastReportedAt: number | null;
+      takenDown: boolean;
+      takenDownAt: number | null;
+      takenDownBy: string | null;
+      takenDownReason: string | null;
+      createdAt: number;
+    }>;
+    total: number; // All matching reported artifacts before pagination
+  }
+  timestamp: string;
+}
+```
+
+Timestamps are epoch milliseconds. Each successful list read writes
+`ADMIN_ARTIFACT_LIST_REPORTED` with `resultCount` and `totalCount`.
+
+Authentication: Required (admin role and `multiUserAdmin` capability).
 
 ### POST /api/admin/artifacts/:uuid/takedown
 
 Take down an artifact so it immediately stops being served publicly. Body:
-`{ reason: string }` (required). Records actor/time/reason; audit action
+`{ reason: string }` (required, trimmed and nonempty). Records actor/time/reason; audit action
 `ADMIN_ARTIFACT_TAKEDOWN` (metadata includes the artifact creator).
+
+Response data: `{ uuid, takenDown: true }`. A reported artifact remains in the default reported list;
+`includeTakenDown=false` excludes it from both the matching total and page.
 
 Errors: 400 (missing reason), 401, 403, 404. Authentication: admin.
 
@@ -4338,12 +4540,107 @@ Authentication: Required (admin role)
 
 Analytics endpoints for audit data aggregation and dashboards. Every route in this section requires
 `adminAnalytics`, except `/api/admin/analytics/operational`, which requires `adminOperations`. Both
-capabilities are denied by the default self-host policy. All endpoints support the `range` query
-parameter: `today`, `week`, `month`, `year`, `all` (default: `all`).
+capabilities are denied by the default self-host policy.
+
+The analytics query accepts `range`: `15m`, `30m`, `hour`, `day`, `today`, `week`, `month`, `year`,
+`all`. The interval is half-open `[startAt, endAt)`, ending at request time. `today` starts at UTC
+midnight; week/month/year are rolling 7/30/365-day intervals; `all` starts at epoch zero. Daily
+overview buckets use UTC.
+
+`excludeUserIds` is a comma-separated account-ID selection with the same bounds and normalization
+as `GET /api/admin/users?ids=…`. Omitting it excludes all accounts currently marked administrator.
+Explicit `excludeUserIds=` includes everyone; a nonempty value excludes exactly those IDs.
+Selection applies to user analytics, not management users/runs/flows, deployment-neutral health or
+the full installation statistics response. Invalid range, selection, limit or offset returns 400.
+
+Overview, executions, users, registrations, attention, top-workflows, conversion-funnel and
+engagement return this scope:
+
+```typescript
+interface AnalyticsScope {
+  timeRange: "15m" | "30m" | "hour" | "day" | "today" | "week" | "month" | "year" | "all";
+  startAt: number;
+  endAt: number;
+  asOf: number; // epoch milliseconds of the observation
+  exclusions:
+    | { mode: "default-admins"; effectiveCount: number }
+    | { mode: "custom"; userIds: string[]; effectiveCount: number };
+}
+```
+
+Business and operational time series select the latest 366 observed UTC buckets in SQL and return
+them in ascending order. Gaps are not filled with invented zeros. Scalar period totals cover the
+complete selected interval independently of that chart window. The response describes each window:
+
+```typescript
+interface AnalyticsSeriesWindow {
+  granularity: "daily" | "hourly";
+  limit: number; // 366
+  totalBuckets: number; // All observed buckets in the selected interval
+  limited: boolean; // Some earlier observed buckets are omitted
+  firstDate: string | null; // First returned bucket; null for an empty series
+  lastDate: string | null; // Last returned bucket; null for an empty series
+}
+```
+
+The field is `overTimeWindow` for overview/executions, `registrationTrendWindow` for conversion,
+`activeUsersTrendWindow` for engagement, and `timeSeriesWindow` on each available operational
+metric. Render `limited` beside the relevant chart; its displayed tail is not a substitute for
+the full-period scalar. This window contract does not apply to audit-summary or workflow-quality.
+
+`effectiveCount` counts existing accounts matching the exclusion policy. Default mode does not
+enumerate administrator IDs. `timeRange` is also returned at the top of those responses.
+For paged projections, `limit` is an integer from 1 through 100 and `offset` is a non-negative safe
+integer; both accept one decimal query string, not repeated values. Users, registrations and
+attention default to six rows; top-workflows defaults to ten and caps its page at twenty. Defaults
+for range are month (overview/executions/top-workflows), 30m (users), and week (registrations/attention).
+
+Person projections used by users and registrations have this shape:
+
+```typescript
+interface AnalyticsPerson {
+  userId: string;
+  name: string | null;
+  email: string;
+  registeredAt: number | null;
+  lastActivityAt: number | null;
+  lastStepAt: number | null;
+  recentSessionAt: number | null;
+  executionCount: number; // runs started in the selected interval
+  runningExecutions: number; // currently running, regardless of start time
+  topWorkflows: Array<{
+    workflowId: string;
+    workflowName: string;
+    executionCount: number;
+    lastRunAt: number | null;
+  }>;
+  currentExecutions: Array<{
+    executionId: string;
+    workflowId: string;
+    workflowName: string;
+    currentNodeId: string | null;
+    lastStepAt: number | null;
+  }>;
+}
+```
+
+`topWorkflows` holds at most three flows from the selected interval. `currentExecutions` holds at
+most two running executions, ordered by recorded step time; an old run with a new step remains
+current work. Activity uses recorded actions or observed provider renewal of an unexpired session,
+excluding registration itself and blocked sign-in. The auth provider records renewal in the nullable
+`session.refreshedAt` field when it renews expiry; clients cannot set it and it is not returned in
+the public auth session. Initial and historical `createdAt`/`updatedAt` stamps do not prove renewal,
+even when they differ. No renewal time is backfilled: the session source remains unknown until a
+renewal is observed. A read without provider renewal does not advance it. Expired sessions and
+future observations are excluded. Session renewal is coarse presence, not an online indicator.
+Missing recorded timestamps remain `null`; a recorded epoch zero remains `0`. Registration or
+general update time is never substituted for a missing activity or step observation.
 
 ### GET /api/admin/analytics/overview
 
-Get system totals.
+Get included-user totals. User and non-deleted owned workflow counts are lifetime inventory,
+including private workflows. Execution metrics and distinct execution owners use runs started in
+the selected interval.
 
 Response:
 
@@ -4351,12 +4648,19 @@ Response:
 {
   success: boolean;
   data: {
+    scope: AnalyticsScope;
     totalUsers: number;
     totalWorkflows: number;
     totalExecutions: number;
+    activeUsers: number;
     activeExecutions: number;
     completedExecutions: number;
     failedExecutions: number;
+    successfulExecutions: number;
+    successRate: number;
+    avgDurationMs: number;
+    overTime: Array<{ date: string; count: number; completed: number; failed: number }>;
+    overTimeWindow: AnalyticsSeriesWindow;
     timeRange: string;
   }
   timestamp: string;
@@ -4367,7 +4671,11 @@ Authentication: Required (admin role)
 
 ### GET /api/admin/analytics/executions
 
-Get execution statistics.
+Get the overview fields and compatible execution statistics aliases. A failed execution is a
+completed run with at least one refusal; degradation alone is not a failure. Explicitly stopped
+runs count as completed, but only completions without a stop reason or refusals are successful.
+Success rate is `successful / completed * 100`, or zero without completions. Average duration considers
+completed runs with a valid non-negative recorded duration, and is zero without a sample.
 
 Response:
 
@@ -4375,21 +4683,29 @@ Response:
 {
   success: boolean;
   data: {
+    scope: AnalyticsScope;
+    // Also includes every field of the overview response.
     total: number;
     completed: number;
     failed: number;
     active: number;
     successRate: number;
-    avgDurationMs: number | null;
+    avgDurationMs: number;
     byWorkflow: Array<{
       workflowId: string;
-      workflowName: string;
       count: number;
+      completed: number;
+      failed: number;
     }>;
+    byWorkflowTotal: number;
+    byWorkflowLimited: boolean;
     overTime: Array<{
       date: string;
       count: number;
+      completed: number;
+      failed: number;
     }>;
+    overTimeWindow: AnalyticsSeriesWindow;
     timeRange: string;
   }
   timestamp: string;
@@ -4402,9 +4718,15 @@ Authentication: Required (admin role)
 
 Get most used workflows.
 
+Participants and top users respect the same exclusions and interval as the run counts. Each flow
+has at most three top users. Success rate uses successful completions among all completions.
+`total` counts all matching distinct flows, not just this page. The executions endpoint's
+`byWorkflow` projection holds at most twenty flows and exposes `byWorkflowTotal`/`byWorkflowLimited`.
+
 Query parameters:
 
-- `limit`: Number of workflows to return (default: 10)
+- `limit`: Number of workflows to return (default 10, effective maximum 20)
+- `offset`: Number of ranked workflows to skip
 
 Response:
 
@@ -4412,6 +4734,8 @@ Response:
 {
   success: boolean;
   data: {
+    scope: AnalyticsScope;
+    total: number;
     workflows: Array<{
       workflowId: string;
       workflowName: string;
@@ -4419,7 +4743,15 @@ Response:
       completedCount: number;
       failedCount: number;
       successRate: number;
-      avgDurationMs: number | null;
+      avgDurationMs: number;
+      participantCount: number;
+      lastRunAt: number | null;
+      topUsers: Array<{
+        userId: string;
+        name: string | null;
+        email: string;
+        executionCount: number;
+      }>;
     }>;
     timeRange: string;
   }
@@ -4431,7 +4763,10 @@ Authentication: Required (admin role)
 
 ### GET /api/admin/analytics/users
 
-Get user activity statistics.
+Get recently active people and run-owner statistics. `activePeopleTotal` counts people whose
+recorded action or observed renewal of an unexpired session falls in the interval; `activeUsers` counts distinct
+owners of runs started in it. They measure different facts. People are sorted by last activity,
+with pagination; `topUsers` contains at most ten owners ranked by interval run count.
 
 Response:
 
@@ -4439,10 +4774,16 @@ Response:
 {
   success: boolean;
   data: {
+    scope: AnalyticsScope;
+    totalUsers: number;
     activeUsers: number;
     newUsers: number;
+    activePeople: AnalyticsPerson[];
+    activePeopleTotal: number;
     topUsers: Array<{
       userId: string;
+      email: string;
+      name: string | null;
       userEmail: string;
       userName: string | null;
       executionCount: number;
@@ -4455,6 +4796,47 @@ Response:
 ```
 
 Authentication: Required (admin role)
+
+### GET /api/admin/analytics/registrations
+
+List accounts created in the selected interval, newest first. Query: common analytics scope,
+`limit`, `offset`. Response data: `{ scope, timeRange, users: AnalyticsPerson[], total }`. A new
+account without recorded activity stays inactive; its registration date is not a last-action time.
+
+Authentication: Required (admin role and `adminAnalytics` capability)
+
+### GET /api/admin/analytics/attention
+
+List runs with an active lock, a recorded refusal, or a running input wait whose last accepted
+step is more than one hour old. The selected interval applies to the relevant lock/refusal/step
+event, not the run's creation time. Missing step history alone is not a stale-input reason.
+Results are newest relevant event first; reason priority is lock, refusal, stale input.
+
+```typescript
+{
+  scope: AnalyticsScope;
+  timeRange: string;
+  total: number;
+  executions: Array<{
+    executionId: string;
+    workflowId: string;
+    workflowName: string;
+    userId: string;
+    userName: string | null;
+    userEmail: string | null;
+    status: "running" | "completed" | "locked";
+    note: string | null;
+    currentNodeId: string | null;
+    lastStepAt: number | null;
+    lastErrorAt: number | null;
+    hasActiveLock: boolean;
+    errorCount: number;
+    reason: "locked" | "refusal" | "stale-input";
+  }>;
+}
+```
+
+Authentication: Required (admin role and `adminAnalytics` capability)
 
 ### GET /api/admin/analytics/audit-summary
 
@@ -4533,11 +4915,11 @@ Operational metrics: user activity, request rates, workflow throughput. All metr
 
 Parameters:
 
-- `range`: Time range filter (optional, values: `today`, `week`, `month`, `year`, `all`, default: `week`)
-- `granularity`: Time series granularity (optional, values: `auto`, `hourly`, `daily`, default: `auto`). Auto resolves to `hourly` for `today`, `daily` for other ranges.
-- `filterAction`: Filter audit-log metrics by action type (optional, exact match)
-- `filterSource`: Filter audit-log metrics by source (optional, exact match: `web`, `mcp`, `api`, `system`)
-- `filterResource`: Filter audit-log metrics by resource (optional, exact match)
+- `range`: Common analytics range (optional, default: `week`)
+- `granularity`: Time series granularity (optional, values: `auto`, `hourly`, `daily`, default: `auto`). Auto resolves to `hourly` for `today` and `week`, `daily` for other ranges.
+- `action`: Filter audit-log metrics by action type (optional, exact match)
+- `source`: Filter audit-log metrics by source (optional, exact match: `web`, `mcp`, `api`, `system`)
+- `resource`: Filter audit-log metrics by resource (optional, exact match)
 
 Response:
 
@@ -4551,7 +4933,8 @@ Response:
       unit: string; // users | calls | req/s | workflows
       available: boolean;
       unavailableReason?: string;
-      timeSeries: Array<{ date: string; value: number }>; // YYYY-MM-DD for daily, YYYY-MM-DD HH:00 for hourly
+      timeSeries?: Array<{ date: string; value: number }>; // YYYY-MM-DD for daily, YYYY-MM-DD HH:00 for hourly
+      timeSeriesWindow?: AnalyticsSeriesWindow;
     }>;
     breakdowns: {
       byAction: Array<{ label: string; count: number }>;
@@ -4572,26 +4955,41 @@ Response:
 
 Metrics:
 
-- `unique_users_per_day` — Unique users from audit log (daily time series)
-- `total_calls_per_day` — Total audit actions (daily time series)
-- `calls_per_second` — Current request rate from audit log last 60s (hourly time series)
-- `workflows_started_per_day` — Workflow executions started (daily time series)
-- `workflows_completed_per_day` — Workflow executions completed (daily time series)
-- `mcp_calls_per_second` — MCP call rate from audit log source=mcp (hourly time series)
+- `unique_users_per_day` — Sum of distinct-user counts per selected daily/hourly audit bucket;
+  the same user can contribute to several buckets. It is not a period-wide distinct-user count.
+- `total_calls_per_day` — All audit actions in the selected period.
+- `calls_per_second` — Current audit actions in the preceding 60 seconds divided by 60 and rounded
+  to two decimals, independently of the selected historical period.
+- `workflows_started_per_day` — All executions created in the selected period.
+- `workflows_completed_per_day` — Completed executions whose completion time falls in that period.
+- `mcp_calls_per_second` — The same current rate restricted to `source=mcp`.
+
+Every historical series follows the selected granularity, including the two rate metrics:
+their points are bucket event counts, not requests-per-second values. Series are bounded as
+described above; period scalar totals are not calculated from the returned tail. Operational
+system events do not inherit `excludeUserIds`.
 
 Filter params apply to audit-log-based metrics (`unique_users_per_day`, `total_calls_per_day`, `calls_per_second`, `mcp_calls_per_second`) and breakdowns. Workflow metrics (`workflows_started_per_day`, `workflows_completed_per_day`) are unaffected by filters (different data source).
 
-Graceful degradation: each metric has independent error handling. If a query fails, that metric returns `available: false` with `unavailableReason`.
+Graceful degradation: each metric has independent error handling. If a query fails, that metric
+returns `available: false`, `value: null` and `unavailableReason`; it may omit series/window rather
+than fabricating zero activity. `byAction` contains at most 15 entries; source/resource breakdowns
+retain their grouped results.
 
 Authentication: Required (admin role)
 
 ### GET /api/admin/analytics/conversion-funnel
 
-User conversion funnel: 4 stages from registration to active usage.
+Counts of included accounts registered in the selected interval. Stored ISO and SQLite creation
+timestamps share the common absolute-time normalization; unknown dates do not enter the cohort.
+`verified` counts the cohort's current email-verification state. `first_workflow` and `active` count
+that cohort's lifetime executions before observation (at least one and at least two), not only
+runs started in the selected interval. These are independent cohort properties; verification is
+not a prerequisite for counting an execution.
 
 Parameters:
 
-- `range`: Time range filter (optional, values: `today`, `week`, `month`, `year`, `all`, default: `month`)
+- Common analytics `range` and `excludeUserIds` (default range: `month`).
 
 Response:
 
@@ -4599,13 +4997,15 @@ Response:
 {
   success: boolean;
   data: {
-    funnel: {
-      registered: number; // Total registered users
-      emailVerified: number; // Users with verified email
-      firstWorkflow: number; // Users who started at least 1 workflow
-      active: number; // Users with 2+ workflow executions
-    }
-    registrationTrend: Array<{ date: string; count: number }>; // Daily registration counts
+    scope: AnalyticsScope;
+    timeRange: string;
+    funnel: Array<{
+      stage: "registered" | "verified" | "first_workflow" | "active";
+      label: string;
+      count: number;
+    }>;
+    registrationTrend: Array<{ date: string; value: number }>;
+    registrationTrendWindow: AnalyticsSeriesWindow;
   }
   timestamp: string;
 }
@@ -4616,10 +5016,16 @@ Authentication: Required (admin role)
 ### GET /api/admin/analytics/engagement
 
 User engagement metrics: returning users rate, average executions per user, time to first workflow.
+Active users are distinct included owners of runs created in the selected interval. For a finite
+range, returning users also ran in the adjacent preceding interval of equal duration; an empty
+current interval yields zero count/rate. For `all`, that comparison is unavailable and both values
+are null: display unknown rather than zero. First-workflow delay uses the included registration
+cohort and known, nonnegative time from registration to the first execution before observation;
+no eligible sample yields null. Execution averages and active-user totals use the complete period.
 
 Parameters:
 
-- `range`: Time range filter (optional, values: `today`, `week`, `month`, `year`, `all`, default: `month`)
+- Common analytics `range` and `excludeUserIds` (default range: `month`).
 
 Response:
 
@@ -4627,10 +5033,15 @@ Response:
 {
   success: boolean;
   data: {
-    returningUsersRate: number; // Percentage of users who returned (0-100)
+    scope: AnalyticsScope;
+    timeRange: string;
+    returningUsersCount: number | null;
+    returningUsersRate: number | null; // Percentage among current active execution owners
+    totalActiveUsers: number;
     avgExecutionsPerUser: number; // Average workflow executions per active user
-    timeToFirstWorkflowDays: number; // Average days from registration to first workflow
-    activeUsersTrend: Array<{ date: string; count: number }>; // Daily active user counts
+    avgTimeToFirstWorkflowDays: number | null;
+    activeUsersTrend: Array<{ date: string; value: number }>;
+    activeUsersTrendWindow: AnalyticsSeriesWindow;
   }
   timestamp: string;
 }
@@ -4660,6 +5071,17 @@ Authentication: Required (admin role)
 
 Get all global settings (admin-only system settings).
 
+`system.notify_admins_on_registration` is a boolean in category `system`, seeded with the string
+value `"true"` while preserving any existing operator value. It controls best-effort Telegram
+notifications for confirmed new email or OAuth accounts. Only a typed true value enables sending;
+`"false"`, null or absence disables it. Recipients must be administrators admitted by the
+deployment's account policy: unblocked, approved when approval is required, and email-verified
+when that gate is enabled. Each recipient uses their own enabled, configured Telegram bot and chat.
+The plain message contains the new account's name, email, recorded registration time and
+prefix-correct admin detail link. Delivery does not delay the auth response, failures do not affect
+registration or other recipients, and unknown outcomes are not retried. The communication service
+applies its shared channel limits; the event does not fan out to extension channels.
+
 Response:
 
 ```typescript
@@ -4688,6 +5110,10 @@ Authentication: Required (admin role)
 ### PUT /api/admin/global-settings/:key
 
 Update global setting value.
+
+To disable registration notifications, use the existing route
+`PUT /api/admin/global-settings/system.notify_admins_on_registration` with
+`{ "value": "false" }`; use `"true"` to enable them. The wire value is a string, not a JSON boolean.
 
 Parameters:
 
@@ -4722,6 +5148,9 @@ Authentication: Required (admin role)
 ### DELETE /api/admin/global-settings/:key
 
 Reset global setting override to null (deactivates override, falls back to default).
+
+For `system.notify_admins_on_registration`, null disables delivery; it does not restore the
+installation's seeded true value. Set `"true"` explicitly to enable it again.
 
 Parameters:
 

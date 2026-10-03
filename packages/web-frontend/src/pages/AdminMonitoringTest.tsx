@@ -13,7 +13,13 @@
 import React, { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
-import { apiClient } from "../services/api-client";
+import { apiClient, ApiClientError } from "../services/api-client";
+import { PageShell } from "@/components/PageShell";
+import { SettingsSubsection } from "@/components/settings/SettingsSection";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { EmptyState } from "@/components/empty-state";
+import { useReadOwnerGuard } from "@/auth/ReadScopeBoundary";
+import { Activity } from "lucide-react";
 
 interface TestEvent {
   id: string;
@@ -22,18 +28,21 @@ interface TestEvent {
   message: string;
   timestamp: Date;
   details?: string;
+  values?: Record<string, string | number>;
 }
 
 export const AdminMonitoringTest: React.FC = () => {
   const { t } = useTranslation();
   const [events, setEvents] = useState<TestEvent[]>([]);
   const [isLoading, setIsLoading] = useState<Record<string, boolean>>({});
+  const guardOwner = useReadOwnerGuard();
 
   const addEvent = (
     type: string,
     status: TestEvent["status"],
     message: string,
     details?: string,
+    values?: Record<string, string | number>,
   ) => {
     const event: TestEvent = {
       id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
@@ -42,6 +51,7 @@ export const AdminMonitoringTest: React.FC = () => {
       message,
       timestamp: new Date(),
       details,
+      values,
     };
     setEvents((prev) => [event, ...prev].slice(0, 20)); // Keep last 20 events
   };
@@ -52,67 +62,83 @@ export const AdminMonitoringTest: React.FC = () => {
 
   // Frontend error triggers
   const triggerReactError = () => {
-    addEvent("react-error", "pending", "Triggering React error...");
-    // This will be caught by ErrorBoundary
+    addEvent("react-error", "pending", "reactPending");
     throw new Error("Test React error (ErrorBoundary) - Monitoring Test");
   };
 
   const triggerWindowError = () => {
-    addEvent("window-error", "success", "Window error triggered (check console)");
+    addEvent("window-error", "success", "windowTriggered");
     setTimeout(() => {
       throw new Error("Test window.onerror - Monitoring Test");
     }, 0);
   };
 
   const triggerPromiseError = () => {
-    addEvent("promise-error", "success", "Promise rejection triggered (check console)");
+    addEvent("promise-error", "success", "promiseTriggered");
     Promise.reject(new Error("Test unhandledrejection - Monitoring Test"));
   };
 
   // Backend error triggers
   const triggerApiError = async () => {
+    const isCurrent = guardOwner();
+    const isMountedOwner = guardOwner(false);
     setLoading("api-error", true);
     try {
-      addEvent("api-error", "pending", "Triggering API error...");
+      addEvent("api-error", "pending", "apiPending");
       await apiClient.triggerMonitoringTestError("Test error from Monitoring Test page");
       // If we get here, something is wrong (should have returned 500)
-      addEvent("api-error", "error", "Expected 500 error but got success");
+      if (isCurrent()) addEvent("api-error", "error", "apiUnexpectedSuccess");
     } catch (error) {
-      addEvent(
-        "api-error",
-        "success",
-        "API error triggered successfully (500)",
-        error instanceof Error ? error.message : "Unknown error",
-      );
+      if (isCurrent())
+        addEvent(
+          "api-error",
+          error instanceof ApiClientError &&
+            error.status === 500 &&
+            String(error.code) === "TEST_ERROR"
+            ? "success"
+            : "error",
+          error instanceof ApiClientError &&
+            error.status === 500 &&
+            String(error.code) === "TEST_ERROR"
+            ? "apiExpectedError"
+            : "apiFailed",
+          error instanceof Error ? error.message : undefined,
+        );
     } finally {
-      setLoading("api-error", false);
+      if (isMountedOwner()) setLoading("api-error", false);
     }
   };
 
   const triggerSlowRequest = async () => {
+    const isCurrent = guardOwner();
+    const isMountedOwner = guardOwner(false);
     const delayMs = 3000;
     setLoading("slow-request", true);
-    addEvent("slow-request", "pending", `Triggering slow request (${delayMs}ms)...`);
+    addEvent("slow-request", "pending", "slowPending", undefined, { ms: delayMs });
     try {
       const startTime = Date.now();
       await apiClient.triggerMonitoringTestSlowRequest(delayMs);
       const duration = Date.now() - startTime;
-      addEvent("slow-request", "success", `Slow request completed in ${duration}ms`);
+      if (isCurrent())
+        addEvent("slow-request", "success", "slowCompleted", undefined, { ms: duration });
     } catch (error) {
-      addEvent(
-        "slow-request",
-        "error",
-        "Slow request failed",
-        error instanceof Error ? error.message : "Unknown error",
-      );
+      if (isCurrent())
+        addEvent(
+          "slow-request",
+          "error",
+          "slowFailed",
+          error instanceof Error ? error.message : undefined,
+        );
     } finally {
-      setLoading("slow-request", false);
+      if (isMountedOwner()) setLoading("slow-request", false);
     }
   };
 
   const triggerLogLevels = async () => {
+    const isCurrent = guardOwner();
+    const isMountedOwner = guardOwner(false);
     setLoading("log-levels", true);
-    addEvent("log-levels", "pending", "Generating logs at all levels...");
+    addEvent("log-levels", "pending", "logsPending");
     try {
       const data = await apiClient.triggerMonitoringTestLogLevels([
         "debug",
@@ -120,58 +146,71 @@ export const AdminMonitoringTest: React.FC = () => {
         "warn",
         "error",
       ]);
-      addEvent(
-        "log-levels",
-        "success",
-        `Generated ${data?.generatedLogs?.length || 0} log entries`,
-        `Levels: ${data?.generatedLogs?.join(", ") || "unknown"}`,
-      );
+      if (isCurrent())
+        addEvent("log-levels", "success", "logsCompleted", data.generatedLogs.join(", "), {
+          count: data.generatedLogs.length,
+        });
     } catch (error) {
-      addEvent(
-        "log-levels",
-        "error",
-        "Failed to generate logs",
-        error instanceof Error ? error.message : "Unknown error",
-      );
+      if (isCurrent())
+        addEvent(
+          "log-levels",
+          "error",
+          "logsFailed",
+          error instanceof Error ? error.message : undefined,
+        );
     } finally {
-      setLoading("log-levels", false);
+      if (isMountedOwner()) setLoading("log-levels", false);
     }
   };
 
   const triggerWorkflowExecution = async () => {
+    const isCurrent = guardOwner();
+    const isMountedOwner = guardOwner(false);
     setLoading("workflow", true);
-    addEvent("workflow", "pending", "Triggering workflow execution...");
+    addEvent("workflow", "pending", "workflowPending");
     try {
       const data = await apiClient.triggerMonitoringTestWorkflow("monitoring-test-workflow");
-      addEvent("workflow", "success", data.message, data.suggestion);
+      if (isCurrent())
+        addEvent("workflow", "success", "workflowCompleted", `${data.message}\n${data.suggestion}`);
     } catch (error) {
-      addEvent(
-        "workflow",
-        "error",
-        "Failed to trigger workflow",
-        error instanceof Error ? error.message : "Unknown error",
-      );
+      if (isCurrent())
+        addEvent(
+          "workflow",
+          "error",
+          "workflowFailed",
+          error instanceof Error ? error.message : undefined,
+        );
     } finally {
-      setLoading("workflow", false);
+      if (isMountedOwner()) setLoading("workflow", false);
     }
   };
 
   const triggerMcpCall = async (status: "success" | "error" = "success") => {
+    const isCurrent = guardOwner();
+    const isMountedOwner = guardOwner(false);
     const key = `mcp-call-${status}`;
     setLoading(key, true);
-    addEvent("mcp-call", "pending", `Simulating MCP tool call (${status})...`);
+    addEvent("mcp-call", "pending", "mcpPending");
     try {
-      const data = await apiClient.triggerMonitoringTestMcpCall("list_workflows", status);
-      addEvent("mcp-call", "success", data.message, `Execution time: ${data.executionTimeMs}ms`);
+      const data = await apiClient.triggerMonitoringTestMcpCall("list", status);
+      if (isCurrent())
+        addEvent(
+          "mcp-call",
+          "success",
+          data.status === "error" ? "mcpCompletedError" : "mcpCompletedSuccess",
+          data.message,
+          { ms: data.executionTimeMs },
+        );
     } catch (error) {
-      addEvent(
-        "mcp-call",
-        "error",
-        "Failed to simulate MCP call",
-        error instanceof Error ? error.message : "Unknown error",
-      );
+      if (isCurrent())
+        addEvent(
+          "mcp-call",
+          "error",
+          "mcpFailed",
+          error instanceof Error ? error.message : undefined,
+        );
     } finally {
-      setLoading(key, false);
+      if (isMountedOwner()) setLoading(key, false);
     }
   };
 
@@ -180,20 +219,18 @@ export const AdminMonitoringTest: React.FC = () => {
   };
 
   return (
-    <div className="p-8 max-w-6xl mx-auto">
-      <h1 className="text-3xl font-bold mb-2 text-foreground">{t("admin.monitoringTest.title")}</h1>
-      <p className="text-muted-foreground mb-6">{t("admin.monitoringTest.description")}</p>
-
+    <PageShell
+      title={t("admin.monitoringTest.title")}
+      description={t("admin.monitoringTest.description")}
+      className="p-6 md:p-8 space-y-6"
+    >
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Frontend Errors Section */}
-        <div className="bg-card border border-border rounded-lg p-6 shadow-sm">
-          <h2 className="text-xl font-semibold mb-4 text-foreground">
-            {t("admin.monitoringTest.frontendErrors.title")}
-          </h2>
-          <p className="text-sm text-muted-foreground mb-4">
-            {t("admin.monitoringTest.frontendErrors.description")}
-          </p>
-
+        <SettingsSubsection
+          headingLevel={2}
+          title={t("admin.monitoringTest.frontendErrors.title")}
+          description={t("admin.monitoringTest.frontendErrors.description")}
+        >
           <div className="flex flex-col gap-3">
             <Button
               onClick={triggerReactError}
@@ -217,17 +254,14 @@ export const AdminMonitoringTest: React.FC = () => {
               {t("admin.monitoringTest.frontendErrors.promiseError")}
             </Button>
           </div>
-        </div>
+        </SettingsSubsection>
 
         {/* Backend Errors Section */}
-        <div className="bg-card border border-border rounded-lg p-6 shadow-sm">
-          <h2 className="text-xl font-semibold mb-4 text-foreground">
-            {t("admin.monitoringTest.backendErrors.title")}
-          </h2>
-          <p className="text-sm text-muted-foreground mb-4">
-            {t("admin.monitoringTest.backendErrors.description")}
-          </p>
-
+        <SettingsSubsection
+          headingLevel={2}
+          title={t("admin.monitoringTest.backendErrors.title")}
+          description={t("admin.monitoringTest.backendErrors.description")}
+        >
           <div className="flex flex-col gap-3">
             <Button
               onClick={triggerApiError}
@@ -259,20 +293,17 @@ export const AdminMonitoringTest: React.FC = () => {
                 : t("admin.monitoringTest.backendErrors.logLevels")}
             </Button>
           </div>
-        </div>
+        </SettingsSubsection>
       </div>
 
       {/* Workflow & MCP Section */}
       <div className="mt-6 grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Workflow Execution Section */}
-        <div className="bg-card border border-border rounded-lg p-6 shadow-sm">
-          <h2 className="text-xl font-semibold mb-4 text-foreground">
-            {t("admin.monitoringTest.workflowTest.title")}
-          </h2>
-          <p className="text-sm text-muted-foreground mb-4">
-            {t("admin.monitoringTest.workflowTest.description")}
-          </p>
-
+        <SettingsSubsection
+          headingLevel={2}
+          title={t("admin.monitoringTest.workflowTest.title")}
+          description={t("admin.monitoringTest.workflowTest.description")}
+        >
           <div className="flex flex-col gap-3">
             <Button
               onClick={triggerWorkflowExecution}
@@ -285,17 +316,14 @@ export const AdminMonitoringTest: React.FC = () => {
                 : t("admin.monitoringTest.workflowTest.startWorkflow")}
             </Button>
           </div>
-        </div>
+        </SettingsSubsection>
 
         {/* MCP Tool Call Section */}
-        <div className="bg-card border border-border rounded-lg p-6 shadow-sm">
-          <h2 className="text-xl font-semibold mb-4 text-foreground">
-            {t("admin.monitoringTest.mcpTest.title")}
-          </h2>
-          <p className="text-sm text-muted-foreground mb-4">
-            {t("admin.monitoringTest.mcpTest.description")}
-          </p>
-
+        <SettingsSubsection
+          headingLevel={2}
+          title={t("admin.monitoringTest.mcpTest.title")}
+          description={t("admin.monitoringTest.mcpTest.description")}
+        >
           <div className="flex flex-col gap-3">
             <Button
               onClick={() => triggerMcpCall("success")}
@@ -318,26 +346,27 @@ export const AdminMonitoringTest: React.FC = () => {
                 : t("admin.monitoringTest.mcpTest.errorCall")}
             </Button>
           </div>
-        </div>
+        </SettingsSubsection>
       </div>
 
       {/* Events History Section */}
-      <div className="mt-6 bg-card border border-border rounded-lg p-6 shadow-sm">
-        <div className="flex justify-between items-center mb-4">
-          <h2 className="text-xl font-semibold text-foreground">
-            {t("admin.monitoringTest.eventHistory.title")}
-          </h2>
+      <SettingsSubsection
+        headingLevel={2}
+        title={t("admin.monitoringTest.eventHistory.title")}
+        actions={
           <Button onClick={clearEvents} variant="secondary" size="sm">
             {t("admin.monitoringTest.eventHistory.clear")}
           </Button>
-        </div>
-
+        }
+      >
         {events.length === 0 ? (
-          <p className="text-muted-foreground text-center py-4">
-            {t("admin.monitoringTest.eventHistory.empty")}
-          </p>
+          <EmptyState icon={Activity} title={t("admin.monitoringTest.eventHistory.empty")} />
         ) : (
-          <div className="space-y-2 max-h-64 overflow-y-auto">
+          <ScrollArea
+            className="space-y-2 max-h-64"
+            tabIndex={0}
+            aria-label={t("admin.monitoringTest.eventHistory.title")}
+          >
             {events.map((event) => (
               <div
                 key={event.id}
@@ -352,7 +381,9 @@ export const AdminMonitoringTest: React.FC = () => {
                 <div className="flex justify-between items-start">
                   <div>
                     <span className="font-medium text-foreground">{event.type}</span>
-                    <span className="ml-2 text-sm text-muted-foreground">{event.message}</span>
+                    <span className="ml-2 text-sm text-muted-foreground">
+                      {t(`admin.monitoringTest.events.${event.message}`, event.values)}
+                    </span>
                     {event.details && (
                       <p className="text-xs text-muted-foreground mt-1">{event.details}</p>
                     )}
@@ -363,22 +394,19 @@ export const AdminMonitoringTest: React.FC = () => {
                 </div>
               </div>
             ))}
-          </div>
+          </ScrollArea>
         )}
-      </div>
+      </SettingsSubsection>
 
       {/* Verification Commands Section */}
-      <div className="mt-6 bg-muted rounded-lg p-6">
-        <h2 className="font-semibold mb-4 text-foreground">
-          {t("admin.monitoringTest.verification.title")}
-        </h2>
+      <SettingsSubsection headingLevel={2} title={t("admin.monitoringTest.verification.title")}>
         <div className="space-y-4">
           <div>
             <h3 className="text-sm font-medium text-muted-foreground mb-1">
               {t("admin.monitoringTest.verification.dockerLogs")}
             </h3>
             <pre className="text-sm text-muted-foreground bg-card p-2 rounded overflow-x-auto">
-              {'docker logs mcp-moira-dev2 2>&1 | grep "MonitoringTest"'}
+              {'docker compose logs moira 2>&1 | grep "MonitoringTest"'}
             </pre>
           </div>
           <div>
@@ -386,7 +414,9 @@ export const AdminMonitoringTest: React.FC = () => {
               {t("admin.monitoringTest.verification.metricsEndpoint")}
             </h3>
             <pre className="text-sm text-muted-foreground bg-card p-2 rounded overflow-x-auto">
-              curl localhost:9090/metrics | grep http_request
+              {
+                "docker compose exec moira sh -c 'curl -fsS \"http://127.0.0.1:${METRICS_PORT:-9090}/metrics\" | grep http_request'"
+              }
             </pre>
           </div>
           <div>
@@ -394,11 +424,11 @@ export const AdminMonitoringTest: React.FC = () => {
               {t("admin.monitoringTest.verification.clientLogs")}
             </h3>
             <pre className="text-sm text-muted-foreground bg-card p-2 rounded overflow-x-auto">
-              {'docker logs mcp-moira-dev2 2>&1 | grep "client_log"'}
+              {'docker compose logs moira 2>&1 | grep "client_log"'}
             </pre>
           </div>
         </div>
-      </div>
-    </div>
+      </SettingsSubsection>
+    </PageShell>
   );
 };

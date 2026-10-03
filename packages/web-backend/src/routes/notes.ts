@@ -7,6 +7,7 @@
 import { Router, Request, Response } from "express";
 import { asyncHandler, createApiError } from "../middleware/error-middleware.js";
 import { AuthenticatedRequest } from "../types/express-types.js";
+import { sendConditionalRead } from "../utils/conditional-read.js";
 import {
   getNoteService,
   NoteNotFoundError,
@@ -45,9 +46,8 @@ router.get(
       offset: offset ? parseInt(offset as string, 10) : 0,
     });
 
-    res.json({
-      success: true,
-      data: result,
+    sendConditionalRead(req, res, result, {
+      scope: userId,
       timestamp: new Date().toISOString(),
     });
   }),

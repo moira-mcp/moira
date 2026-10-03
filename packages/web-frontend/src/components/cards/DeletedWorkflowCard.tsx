@@ -14,11 +14,8 @@ import { CardShell, type CardAction } from "./CardShell";
 export interface DeletedWorkflowCardData {
   id: string;
   name: string;
-  userId: string;
-  deleted: boolean;
   deletedAt: number | null;
   deletedBy: string | null;
-  createdAt?: number;
 }
 
 interface DeletedWorkflowCardProps {
@@ -77,8 +74,8 @@ export const DeletedWorkflowCard: React.FC<DeletedWorkflowCardProps> = ({
       }
       meta={
         <>
-          <span className="font-mono">{workflow.deletedBy || workflow.userId}</span>
-          {workflow.deletedAt && (
+          <span className="font-mono">{workflow.deletedBy}</span>
+          {workflow.deletedAt !== null && (
             <span className="inline-flex items-center gap-1">
               <Clock className="size-3" aria-hidden="true" />
               {formatRelativeTime(workflow.deletedAt)}

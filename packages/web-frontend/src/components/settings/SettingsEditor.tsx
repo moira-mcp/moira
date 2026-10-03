@@ -246,8 +246,9 @@ export const SettingsEditor: React.FC<SettingsEditorProps> = ({
     try {
       const value = changes[key] !== undefined ? changes[key] : values[key];
       await onSave(key, value);
-      // Clear change after successful save
+      // Clear only the submitted draft; a newer edit still needs its own save.
       setChanges((prev) => {
+        if (prev[key] !== value) return prev;
         const next = { ...prev };
         delete next[key];
         return next;
@@ -448,14 +449,16 @@ export const SettingsEditor: React.FC<SettingsEditorProps> = ({
     return (
       <div
         key={def.key}
-        className="p-4 border border-border rounded-lg"
+        className="min-w-0 p-4 border border-border rounded-lg"
         data-testid={`${testIdPrefix}-${def.key}`}
         {...guideAnchors?.[def.key]}
       >
-        <div className="flex justify-between items-start mb-2">
-          <div>
-            <div className="flex items-center gap-2">
-              <span className="font-medium text-foreground">{def.label}</span>
+        <div className="mb-2 flex min-w-0 flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div className="min-w-0 flex-1">
+            <div className="flex min-w-0 flex-wrap items-center gap-2">
+              <span className="min-w-0 max-w-full break-words font-medium text-foreground">
+                {def.label}
+              </span>
               {def.help && (
                 <HelpPopover title={def.label} data-testid={`${testIdPrefix}-${def.key}-help`}>
                   <p>{def.help}</p>
@@ -489,11 +492,13 @@ export const SettingsEditor: React.FC<SettingsEditorProps> = ({
               )}
             </div>
             {def.description && (
-              <div className="text-sm text-muted-foreground">{def.description}</div>
+              <div className="break-words text-sm text-muted-foreground">{def.description}</div>
             )}
-            {showKeys && <div className="text-xs text-muted-foreground mt-1">{def.key}</div>}
+            {showKeys && (
+              <div className="mt-1 break-all text-xs text-muted-foreground">{def.key}</div>
+            )}
           </div>
-          <div className="flex gap-2">
+          <div className="flex w-full flex-wrap gap-2 sm:w-auto sm:shrink-0">
             {showResetButton && (
               <Button
                 variant="outline"
@@ -576,7 +581,7 @@ export const SettingsEditor: React.FC<SettingsEditorProps> = ({
             data-testid={`${testIdPrefix}-category-${category}`}
           >
             <Card>
-              <CollapsibleTrigger asChild>
+              <CollapsibleTrigger className="w-full rounded-t-xl text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
                 <CardHeader className="cursor-pointer hover:bg-muted/50 transition-colors">
                   <div className="flex items-center justify-between">
                     <div>

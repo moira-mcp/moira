@@ -7,7 +7,7 @@
  * reader opens it or one of them is in effect.
  */
 
-import React, { useState, useMemo, useCallback, useEffect, useRef } from "react";
+import React, { useState, useMemo, useCallback, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { Folder } from "lucide-react";
 import { WorkflowFileInfo, WorkflowListRequest } from "types";
@@ -39,6 +39,7 @@ interface WorkflowExplorerProps {
   onDelete?: (workflowId: string, workflowName: string) => void;
   currentUserHandle?: string;
   isAdmin?: boolean;
+  refreshKey?: number;
 }
 
 export const WorkflowExplorer: React.FC<WorkflowExplorerProps> = ({
@@ -47,12 +48,12 @@ export const WorkflowExplorer: React.FC<WorkflowExplorerProps> = ({
   onDelete,
   currentUserHandle,
   isAdmin,
+  refreshKey = 0,
 }) => {
   const { t } = useTranslation();
   const { pageSize, containerRef, onViewModeChange } = useListPageSize(() => setCurrentPage(1));
-  const { workflows, loading, error, loadWorkflows, isAuthenticated } = useWorkflowList();
-
-  const hasLoadedOnce = useRef(false);
+  const { workflows, acceptedFilters, loading, error, loadWorkflows, isAuthenticated } =
+    useWorkflowList();
 
   // Filter state
   const [searchQuery, setSearchQuery] = useState("");
@@ -117,11 +118,7 @@ export const WorkflowExplorer: React.FC<WorkflowExplorerProps> = ({
   useEffect(() => {
     if (!isAuthenticated) return;
     loadWorkflows(requestParams);
-  }, [isAuthenticated, requestParams, loadWorkflows]);
-
-  useEffect(() => {
-    if (workflows) hasLoadedOnce.current = true;
-  }, [workflows]);
+  }, [isAuthenticated, requestParams, loadWorkflows, refreshKey]);
 
   const handleWorkflowSelect = useCallback(
     (workflow: WorkflowFileInfo) => {
@@ -132,20 +129,11 @@ export const WorkflowExplorer: React.FC<WorkflowExplorerProps> = ({
 
   const totalPages = useMemo(() => {
     if (!workflows) return 0;
-    return Math.ceil(workflows.totalWorkflows / pageSize);
-  }, [workflows, pageSize]);
+    return Math.ceil(workflows.totalWorkflows / (acceptedFilters?.limit ?? pageSize));
+  }, [workflows, acceptedFilters, pageSize]);
 
   const displayedWorkflows = workflows?.workflows || [];
   const totalWorkflows = workflows?.totalWorkflows || 0;
-
-  // Expose loading/error for parent PageShell
-  if (loading && !hasLoadedOnce.current) {
-    return null; // Parent handles loading state via PageShell
-  }
-
-  if (error) {
-    return null; // Parent handles error state via PageShell
-  }
 
   return (
     <div className="flex flex-col flex-1 min-h-0" data-testid="workflow-explorer">
@@ -250,22 +238,43 @@ export const WorkflowExplorer: React.FC<WorkflowExplorerProps> = ({
           keyExtractor={(w) => w.id}
           storageKey="workflows-view-mode"
           loading={loading}
+          hasResult={workflows !== null}
+          error={error}
+          onRetry={() => loadWorkflows(requestParams)}
+          onRefresh={() => loadWorkflows(requestParams)}
+          resultScope={
+            acceptedFilters && (
+              <span>
+                {t(`pages.workflows.scopes.${acceptedFilters.access ?? "all"}`)}
+                {` · ${t("common.pagination.page", { current: Math.floor((acceptedFilters.offset ?? 0) / (acceptedFilters.limit ?? pageSize)) + 1, total: Math.max(1, totalPages) })}`}
+                {acceptedFilters.search &&
+                  ` · ${t("common.filters.search")}: ${acceptedFilters.search}`}
+                {acceptedFilters.validationStatus &&
+                  ` · ${t("common.filters.status")}: ${t(`components.searchFilters.${acceptedFilters.validationStatus}`)}`}
+                {acceptedFilters.visibility &&
+                  ` · ${t("common.filters.visibility")}: ${t(`components.searchFilters.${acceptedFilters.visibility}`)}`}
+                {` · ${t(acceptedFilters.sort === "name" ? "components.searchFilters.sortByName" : "components.searchFilters.sortByDate")} ${acceptedFilters.sortOrder === "asc" ? "↑" : "↓"}`}
+              </span>
+            )
+          }
           emptyIcon={Folder}
           emptyTitle={
-            debouncedSearch ||
-            statusFilter !== "all" ||
-            visibilityFilter !== "all" ||
-            access !== "all"
+            acceptedFilters?.search ||
+            acceptedFilters?.validationStatus ||
+            acceptedFilters?.visibility ||
+            (acceptedFilters?.access && acceptedFilters.access !== "all")
               ? t("pages.workflows.explorer.noMatch")
               : t("pages.workflows.explorer.noWorkflows")
           }
           containerRef={containerRef}
           pagination={{
             mode: "total",
-            currentPage,
+            currentPage: acceptedFilters
+              ? Math.floor((acceptedFilters.offset ?? 0) / (acceptedFilters.limit ?? pageSize)) + 1
+              : currentPage,
             totalPages,
             totalItems: totalWorkflows,
-            pageSize,
+            pageSize: acceptedFilters?.limit ?? pageSize,
             onPageChange: setCurrentPage,
           }}
           className="flex-1 min-h-0 flex flex-col"

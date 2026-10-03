@@ -338,6 +338,8 @@ export class InMemoryRepository implements IDataRepository {
 
   async listAllDeletedWorkflowsPaginated(_filter: {
     search?: string;
+    fromDate?: number;
+    toDate?: number;
     sort?: "name" | "deletedAt";
     sortOrder?: "asc" | "desc";
     limit?: number;

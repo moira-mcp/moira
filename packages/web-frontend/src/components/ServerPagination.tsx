@@ -20,7 +20,8 @@ interface TotalPaginationProps extends BaseProps {
   totalItems: number;
   pageSize: number;
   hasMore?: never;
-  itemCount?: never;
+  /** Actual loaded rows, including an empty page after the result set shrinks. */
+  itemCount?: number;
 }
 
 interface CursorPaginationProps extends BaseProps {
@@ -39,18 +40,20 @@ export function ServerPagination(props: ServerPaginationProps) {
 
   const isCursor = "hasMore" in props && props.hasMore !== undefined;
 
-  if (!isCursor && props.totalPages <= 1) return null;
+  if (!isCursor && props.totalPages <= 1 && currentPage <= 1) return null;
   if (isCursor && currentPage === 1 && !props.hasMore) return null;
 
   const canGoBack = currentPage > 1;
   const canGoForward = isCursor ? props.hasMore : currentPage < props.totalPages;
+  const hasRows =
+    !isCursor && props.itemCount !== 0 && (currentPage - 1) * props.pageSize < props.totalItems;
 
   return (
     <div
       className={`${
         embedded
           ? "flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-t pt-3"
-          : "flex items-center justify-between px-2 sticky bottom-0 bg-background/95 backdrop-blur-sm z-10"
+          : "flex flex-wrap items-center justify-between gap-x-4 gap-y-2 px-2 sticky bottom-0 bg-background/95 backdrop-blur-sm z-10"
       } ${className ?? ""}`}
       data-testid={props["data-testid"]}
     >
@@ -58,15 +61,25 @@ export function ServerPagination(props: ServerPaginationProps) {
         {isCursor
           ? t("common.pagination.pageEntries", { page: currentPage, count: props.itemCount })
           : t("common.pagination.showing", {
-              from: (currentPage - 1) * props.pageSize + 1,
-              to: Math.min(currentPage * props.pageSize, props.totalItems),
+              from: hasRows ? (currentPage - 1) * props.pageSize + 1 : 0,
+              to: hasRows
+                ? Math.min(
+                    (currentPage - 1) * props.pageSize + (props.itemCount ?? props.pageSize),
+                    props.totalItems,
+                  )
+                : 0,
               total: props.totalItems,
             })}
       </div>
-      <div className="flex items-center space-x-6 lg:space-x-8">
+      <div className="flex flex-wrap items-center gap-2 sm:gap-6 lg:gap-8">
         {!isCursor && !embedded && (
           <div className="flex w-[100px] items-center justify-center text-sm font-medium">
-            {t("common.pagination.page", { current: currentPage, total: props.totalPages })}
+            {currentPage > props.totalPages
+              ? t("common.pagination.pageEntries", {
+                  page: currentPage,
+                  count: props.itemCount ?? 0,
+                })
+              : t("common.pagination.page", { current: currentPage, total: props.totalPages })}
           </div>
         )}
         <div className="flex items-center space-x-2">

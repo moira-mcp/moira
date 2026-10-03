@@ -4,6 +4,13 @@
  */
 
 export * from "./schema.js";
+export type * from "../types/admin-analytics.js";
+export {
+  parseAnalyticsQuery,
+  analyticsBounds,
+  parseUserIdSelection,
+} from "./admin-analytics-query.js";
+export { AdminAnalyticsRepository } from "./repositories/admin-analytics-repository.js";
 export { getDatabase, getSqliteInstance, closeDatabase } from "./connection.js";
 export {
   executeListQuery,
@@ -92,6 +99,8 @@ export type {
   WorkflowInfo,
   WorkflowFilter,
   WorkflowListResult,
+  WorkflowSummary,
+  WorkflowSummaryListResult,
   WorkflowOwnership,
   SaveWorkflowOptions as RepoSaveWorkflowOptions,
   ValidationStatus,
@@ -103,6 +112,8 @@ export type {
 export type {
   UserProfile,
   UserInfo,
+  AdminUserListFilter,
+  AdminUserLookup,
   UserSession,
   OAuthConsentInfo,
   SessionFilter,

@@ -3,12 +3,15 @@
  * Admin panel for restoring or permanently deleting workflows at /admin/deleted-workflows
  */
 
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { GitBranch } from "lucide-react";
+import { GitBranch, RotateCcw } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { apiClient } from "../services/api-client";
 import { useListPageSize } from "../hooks/useListPageSize";
-import { useLatestRequest } from "../hooks/useLatestRequest";
+import { useResource } from "../hooks/useResource";
+import { useReadOwnerGuard } from "../auth/ReadScopeBoundary";
+import { localDayRange } from "@/lib/local-date-range";
 import { useDebounce } from "../hooks/useDebounce";
 import { Input } from "@/components/ui/input";
 import { ConfirmDialog } from "@/components/confirm-dialog";
@@ -35,51 +38,44 @@ const initialDialogState: DialogState = {
 
 export const DeletedWorkflows: React.FC = () => {
   const { t } = useTranslation();
-  const [workflows, setWorkflows] = useState<DeletedWorkflowCardData[]>([]);
-  const [total, setTotal] = useState(0);
-  const [currentPage, setCurrentPage] = useState(1);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [query, setQuery] = useState({ page: 1, dateFrom: "", dateTo: "" });
+  const { dateFrom, dateTo } = query;
   const [searchTerm, setSearchTerm] = useState("");
   const debouncedSearch = useDebounce(searchTerm, 300);
-  const [dateFrom, setDateFrom] = useState("");
-  const [dateTo, setDateTo] = useState("");
   const [dialogState, setDialogState] = useState<DialogState>(initialDialogState);
 
-  const { pageSize, containerRef, onViewModeChange } = useListPageSize(() => setCurrentPage(1));
-
-  // Reset page when filters change
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [debouncedSearch]);
-
-  const beginRequest = useLatestRequest();
-  const loadDeletedWorkflows = useCallback(async () => {
-    const isCurrent = beginRequest();
-    setLoading(true);
-    try {
-      const offset = (currentPage - 1) * pageSize;
+  const { pageSize, containerRef, onViewModeChange } = useListPageSize(() =>
+    setQuery((value) => ({ ...value, page: 1 })),
+  );
+  const guardOwner = useReadOwnerGuard();
+  const resource = useResource(
+    JSON.stringify({ ...query, search: debouncedSearch, pageSize }),
+    async (key) => {
+      const requested = JSON.parse(key) as typeof query & { search: string; pageSize: number };
       const data = await apiClient.getDeletedWorkflows({
-        search: debouncedSearch || undefined,
-        limit: pageSize,
-        offset,
+        search: requested.search || undefined,
+        ...localDayRange(requested.dateFrom, requested.dateTo),
+        limit: requested.pageSize,
+        offset: (requested.page - 1) * requested.pageSize,
       });
-      if (!isCurrent()) return;
-      setWorkflows(data.workflows);
-      setTotal(data.total);
-      setError(null);
-    } catch (err: unknown) {
-      if (!isCurrent()) return;
-      const message = err instanceof Error ? err.message : t("common.errors.failedToLoad");
-      setError(message);
-    } finally {
-      if (isCurrent()) setLoading(false);
-    }
-  }, [beginRequest, currentPage, pageSize, debouncedSearch, t]);
-
-  useEffect(() => {
-    loadDeletedWorkflows();
-  }, [loadDeletedWorkflows]);
+      const lastPage = Math.max(1, Math.ceil(data.total / requested.pageSize));
+      if (requested.page > lastPage) {
+        const corrected = await apiClient.getDeletedWorkflows({
+          search: requested.search || undefined,
+          ...localDayRange(requested.dateFrom, requested.dateTo),
+          limit: requested.pageSize,
+          offset: (lastPage - 1) * requested.pageSize,
+        });
+        return { ...corrected, query: { ...requested, page: lastPage } };
+      }
+      return { ...data, query: requested };
+    },
+  );
+  const accepted = resource.data;
+  const workflows = accepted?.workflows ?? [];
+  const total = accepted?.total ?? 0;
+  const currentPage = accepted?.query.page ?? 1;
+  const acceptedPageSize = accepted?.query.pageSize ?? pageSize;
 
   const openRestoreDialog = (workflow: DeletedWorkflowCardData) => {
     setDialogState({
@@ -105,75 +101,66 @@ export const DeletedWorkflows: React.FC = () => {
 
   const handleConfirmAction = async () => {
     const { type, workflowId } = dialogState;
-    closeDialog();
+    const isCurrentOwner = guardOwner();
 
     if (type === "restore") {
       try {
         await apiClient.restoreWorkflow(workflowId);
+        if (!isCurrentOwner()) return;
         toast.success(t("admin.deletedWorkflows.actions.restore"));
-        await loadDeletedWorkflows();
+        await resource.refresh();
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : "Failed to restore workflow";
-        toast.error(message);
+        if (isCurrentOwner()) toast.error(message);
+        throw err;
       }
     } else {
       try {
         await apiClient.hardDeleteWorkflow(workflowId);
+        if (!isCurrentOwner()) return;
         toast.success(t("admin.deletedWorkflows.actions.permanentDelete"));
-        await loadDeletedWorkflows();
+        await resource.refresh();
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : "Failed to delete workflow";
-        toast.error(message);
+        if (isCurrentOwner()) toast.error(message);
+        throw err;
       }
     }
   };
 
-  // Client-side date filtering (dates not sent to server)
-  const filteredWorkflows = workflows.filter((wf) => {
-    if (wf.deletedAt && (dateFrom || dateTo)) {
-      const deletedDate = new Date(wf.deletedAt);
-      if (dateFrom && deletedDate < new Date(dateFrom)) return false;
-      if (dateTo && deletedDate > new Date(dateTo + "T23:59:59")) return false;
-    }
-    return true;
-  });
-
-  const totalPages = Math.ceil(total / pageSize);
-
-  if (loading && workflows.length === 0) {
-    return <PageShell title={t("admin.deletedWorkflows.title")} loading />;
-  }
-
-  if (error) {
-    return (
-      <PageShell
-        title={t("admin.deletedWorkflows.title")}
-        error={error}
-        onRetry={loadDeletedWorkflows}
-      />
-    );
-  }
+  const totalPages = Math.ceil(total / acceptedPageSize);
 
   return (
     <PageShell title={t("admin.deletedWorkflows.title")}>
       <FilterBar
+        actions={
+          <Button variant="outline" size="sm" onClick={() => void resource.refresh()}>
+            <RotateCcw className="size-4" />
+            {t("common.dataRegion.refresh")}
+          </Button>
+        }
         search={searchTerm}
-        onSearchChange={setSearchTerm}
+        onSearchChange={(value) => {
+          setSearchTerm(value);
+          setQuery((previous) => ({ ...previous, page: 1 }));
+        }}
         searchPlaceholder={t("admin.deletedWorkflows.searchPlaceholder")}
         searchTestId="deleted-workflows-search"
         onReset={() => {
           setSearchTerm("");
-          setDateFrom("");
-          setDateTo("");
-          setCurrentPage(1);
+          setQuery({ page: 1, dateFrom: "", dateTo: "" });
         }}
         filters={
           <>
             <LabeledFilter label={t("common.filters.dateFrom")}>
               <Input
                 type="date"
+                aria-label={t("common.filters.dateFrom")}
                 value={dateFrom}
-                onChange={(e) => setDateFrom(e.target.value)}
+                onChange={(e) => {
+                  const value = e.currentTarget.value;
+                  setQuery((previous) => ({ ...previous, dateFrom: value, page: 1 }));
+                }}
                 className="w-[160px]"
                 placeholder={t("admin.deletedWorkflows.filters.from")}
               />
@@ -181,8 +168,12 @@ export const DeletedWorkflows: React.FC = () => {
             <LabeledFilter label={t("common.filters.dateTo")}>
               <Input
                 type="date"
+                aria-label={t("common.filters.dateTo")}
                 value={dateTo}
-                onChange={(e) => setDateTo(e.target.value)}
+                onChange={(e) => {
+                  const value = e.currentTarget.value;
+                  setQuery((previous) => ({ ...previous, dateTo: value, page: 1 }));
+                }}
                 className="w-[160px]"
                 placeholder={t("admin.deletedWorkflows.filters.to")}
               />
@@ -193,7 +184,19 @@ export const DeletedWorkflows: React.FC = () => {
 
       <DataListView
         onViewModeChange={onViewModeChange}
-        items={filteredWorkflows}
+        items={workflows}
+        hasResult={accepted !== undefined}
+        error={resource.error}
+        onRetry={resource.refresh}
+        resultScope={
+          accepted && (
+            <span>
+              {t("common.filters.search")}: {accepted.query.search || "—"} ·{" "}
+              {t("common.filters.dateFrom")}: {accepted.query.dateFrom || "—"} ·{" "}
+              {t("common.filters.dateTo")}: {accepted.query.dateTo || "—"}
+            </span>
+          )
+        }
         renderCard={(workflow, viewMode) => (
           <DeletedWorkflowCard
             workflow={workflow}
@@ -204,19 +207,19 @@ export const DeletedWorkflows: React.FC = () => {
         )}
         keyExtractor={(wf) => wf.id}
         storageKey="deleted-workflows-view-mode"
-        loading={loading}
+        loading={resource.pending}
         containerRef={containerRef}
         pagination={{
           mode: "total",
           currentPage,
           totalPages,
-          pageSize,
+          pageSize: acceptedPageSize,
           totalItems: total,
-          onPageChange: setCurrentPage,
+          onPageChange: (page) => setQuery((previous) => ({ ...previous, page })),
         }}
         emptyIcon={GitBranch}
         emptyTitle={
-          searchTerm || dateFrom || dateTo
+          accepted && (accepted.query.search || accepted.query.dateFrom || accepted.query.dateTo)
             ? t("admin.deletedWorkflows.noMatchingWorkflows")
             : t("admin.deletedWorkflows.noDeletedWorkflows")
         }

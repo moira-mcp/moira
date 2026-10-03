@@ -46,39 +46,79 @@ Better Auth is created in each service with service-specific error logging:
 **Web Backend** (packages/web-backend/src/auth.ts):
 
 ```typescript
-import { createAuth, createLogger, Service } from "@mcp-moira/shared";
+import { createAuth, createLogger } from "@mcp-moira/shared";
+import { notifyAdminsOfRegistration } from "@mcp-moira/workflow-engine";
 
-const logger = createLogger({ service: Service.WEB_BACKEND, component: "BetterAuth" });
-export const auth = createAuth(logger);
+const logger = createLogger({ component: "BetterAuth" });
+export const auth = createAuth(logger, { onSuccessfulRegistration: notifyAdminsOfRegistration });
 ```
 
 **MCP Server** (packages/mcp-server/src/auth.ts):
 
 ```typescript
-import { createAuth, createLogger, Service } from "@mcp-moira/shared";
+import { createAuth, createLogger } from "@mcp-moira/shared";
+import { notifyAdminsOfRegistration } from "@mcp-moira/workflow-engine";
 
-const logger = createLogger({ service: Service.MCP_SERVER, component: "BetterAuth" });
-export const auth = createAuth(logger);
+const logger = createLogger({ component: "BetterAuth" });
+export const auth = createAuth(logger, { onSuccessfulRegistration: notifyAdminsOfRegistration });
 ```
 
 **Shared Config** (packages/shared/src/auth/better-auth-config.ts):
 
 ```typescript
-export function createAuth(logger: ServiceLogger) {
-  return betterAuth({
-    ...baseConfig,
-    onAPIError: {
-      throw: false,
-      onError: (error, ctx) => {
-        logger.error("Better Auth API error", error, {
-          path: ctx.request?.url,
-          status: error.status,
-        });
-      },
-    },
-  });
+export interface SuccessfulRegistration {
+  id: string;
+  name: string | null;
+  email: string;
+  createdAt: number; // Persisted registration time, epoch milliseconds
+}
+
+export interface AuthRegistrationOptions {
+  onSuccessfulRegistration?: (registration: SuccessfulRegistration) => void | Promise<void>;
 }
 ```
+
+`createAuth(logger, registration = {})` returns the Better Auth instance with its
+`api`, `options`, and `$context` surfaces intact. Both services inject the engine
+notifier through the optional callback; shared auth does not depend on the engine.
+
+### Successful Registration Notifications
+
+The callback applies to registrations through `auth.handler`: email signup and
+new social-provider accounts. Direct `auth.api` calls do not emit this event.
+Capture is private to each handler invocation, including concurrent registrations.
+The user-create hook records a candidate, not a committed registration result.
+After the original handler finishes, eligibility requires an issued session for
+that candidate, its persisted user record and registration timestamp, and a
+successful final body or matching success redirect. The observer runs after the
+MCP plugin and rejects its final semantic errors even with an HTTP 302 response.
+Error redirects and verification-email failures also prevent the event,
+including email failures swallowed by Better Auth. Login, account linking,
+duplicate signup, and failed validation or user/account/session creation do not
+notify. Registration is separate from subsequent email verification or self-host
+administrator approval.
+
+The capture is consumed before invoking the callback once. Notification work is
+detached: the registration response does not wait for Telegram acknowledgement.
+A thrown or rejected callback is logged without changing that response or retrying
+the callback. Event data comes from the persisted account and contains no session
+token, password, or provider credentials.
+
+`system.notify_admins_on_registration` is a global boolean setting, enabled by
+default and editable in administrative settings. Only an effective value of
+`true` permits delivery. Each recipient must be a persisted administrator admitted
+by the account policy, with personal `telegram.enabled`, `telegram.bot_token`, and
+`telegram.chat_id` settings configured. The notifier uses the existing
+communication service's Telegram channel only, including its configuration,
+validation, and delivery limits. It sends plain text containing name, email,
+registration time, and an account link built from `getBaseUrl()` and
+`getAppPrefix()`.
+
+Delivery is best-effort, with one attempt per eligible recipient. A recipient's
+failure does not prevent attempts for the others or roll back registration. A
+provider refusal or unknown outcome is not reported as delivered and is not
+automatically retried. There is no durable queue, crash recovery, or atomic
+exactly-once guarantee across the database and Telegram.
 
 ## Resource Authorization
 
@@ -188,6 +228,36 @@ session must be fresh; a stale one is refused with `SESSION_NOT_FRESH` and the u
 The change is audited as `USER_PASSWORD_CHANGED`. Accounts that already have a password keep the
 change-password form (`POST /api/user/change-password`).
 
+### Session observations and private state
+
+`AuthProvider` installs shared error handling independently of form presentation.
+`AuthForm`, loaded through `LazyAuthView` only when a form is rendered, owns the
+Better Auth UI provider, legal fields, localization, and form redirects. Opening
+an authenticated product page does not require loading the form library.
+
+The browser client uses Better Auth's session store and public broadcast channel.
+Credential-changing requests notify other tabs when dispatched and settled,
+including a network refusal. An accepted change of user or session also notifies
+peers, including the first observation after an OAuth return. Ordinary renewal of
+the same session does not emit another notification or create an echo loop.
+
+A received notification suspends private reads before the authoritative session
+check. Previously admitted content is hidden while identity or access is unknown;
+it is not treated as permission to keep showing private data. Confirmation of the
+same account restores the mounted content and drafts. A different account, logout,
+or backend resets the previous private state. Public login and registration forms
+remain outside this private retention boundary. Refetches that confirm unchanged
+session observations do not reset an admitted page or request its admission facts again.
+
+Automatic cleanup uses `revokeObservedSession` to target the session observed by
+the failing operation, rather than signing out whichever cookie later became
+current. Completion requires a settled authoritative check; a replacement or
+unknown session cannot authorize an earlier redirect. Tokens are not stored in
+the shared read cache. Better Auth's `/revoke-session` retains its session and
+target-owner checks, permits cleanup of a denied account, and returns no session
+cookie updates that could overwrite another tab's login. Successfully revoking
+the current session records `AUTH_SIGN_OUT`; a foreign target or refusal does not.
+
 ## Deep Link Preservation (returnUrl)
 
 When an unauthenticated user visits a protected route (e.g., `/app/admin/audit-log`), the system preserves the intended URL through the login flow:
@@ -234,7 +304,7 @@ if (!acceptedNotRussianResidentAt) {
 }
 ```
 
-**Frontend Implementation** (packages/web-frontend/src/auth/AuthProvider.tsx):
+**Frontend Implementation** (packages/web-frontend/src/auth/AuthForm.tsx):
 
 - Uses `@daveyplate/better-auth-ui` AuthUIProvider with `additionalFields`
 - Checkboxes rendered as boolean fields with required validation
@@ -243,7 +313,7 @@ if (!acceptedNotRussianResidentAt) {
 **Legal Documents:**
 
 The registration form links to legal documents at the `/terms` and `/privacy`
-paths (see `packages/web-frontend/src/auth/AuthProvider.tsx`). These pages are
+paths (see `packages/web-frontend/src/auth/AuthForm.tsx`). These pages are
 served by the deployment's front-of-house site, which is not part of this
 repository; self-hosters provide their own Terms of Service and Privacy Policy at
 those paths.
@@ -523,7 +593,7 @@ export const requireVerifiedAuth = async (req, res, next) => {
 - If user tries to register with an existing unverified email
 - Better Auth before hook intercepts the request
 - Returns error code `EMAIL_NOT_VERIFIED_RESEND`
-- Frontend AuthProvider detects this error and redirects to /app/registration-success
+- Frontend AuthForm detects this error and redirects to /app/registration-success
 - User can resend verification email from that page
 
 **Testing Email Verification:**
@@ -565,9 +635,10 @@ Blocked users cannot access the system through any method.
 - `requireAuth` middleware checks `user.blocked` flag on every request
 - Returns 403 Forbidden and invalidates current session
 - Non-public Better Auth session operations apply the same blocked-first decision in both deployment
-  modes and return `ACCOUNT_BLOCKED`; public sign-in/out and one-time-token lifecycle operations keep
-  their own authentication semantics
-- Immediate logout on next API call
+  modes and return `ACCOUNT_BLOCKED`; public sign-in/out, targeted session cleanup, and
+  one-time-token lifecycle operations keep their own authentication semantics
+- The next rejected product call starts cleanup of its observed session; it cannot
+  sign out or redirect a replacement account
 
 ## API Client Error Handling
 
@@ -575,8 +646,12 @@ Frontend API client (packages/web-frontend/src/services/api-client.ts) intercept
 
 **Behavior:**
 
-- 401 Unauthorized: Shows "Session Expired" toast, signs out, redirects to /login
-- 403 Forbidden: Shows "Access Denied" toast with server error message, signs out, redirects to /login
+- 401 Unauthorized: Shows "Session Expired" for the current request's authority,
+  cleans up its observed session, and redirects to login when that operation still owns the result
+- 403 Forbidden: Uses the same authority check and cleanup, with an "Access Denied"
+  toast and the server error message
+- A response belonging to retired account, credential, or capability state cannot
+  start the current account's cleanup or redirect
 - Public auth endpoints excluded from interception (login, register, forgot-password, etc.)
 
 **Implementation:**
@@ -596,7 +671,8 @@ export const setAuthErrorHandler = (handler: AuthErrorHandler | null): void => {
 
 **Infinite Redirect Prevention:**
 
-- Hook tracks if redirect is in progress (isHandlingRef)
+- The hook suppresses repeated handling for the same observed account and session;
+  replacement authority retires the earlier operation and its redirect timer
 - Skips redirect if already on auth pages (/login, /register, etc.)
 
 ## Forced Password Reset
@@ -613,7 +689,13 @@ temporary password:
 5. Auto-login with new credentials via `authClient.signIn.email()`
 6. Redirects to /app/workflows
 
-**Middleware:** packages/web-frontend/src/middleware/ForcedPasswordResetMiddleware.tsx
+**Frontend:** `ProtectedRoute` checks admission facts and redirects to
+`packages/web-frontend/src/pages/ForcedPasswordReset.tsx` when a reset is required.
+The form checks both request errors and Better Auth's returned error result.
+Failed automatic login or a missing email leads to login with the new password,
+using targeted cleanup of the original session. Responses and delayed redirects
+are bound to the initiating account and mounted form; they cannot change a later
+account's screen or terminate its session.
 
 **Admin Actions:**
 

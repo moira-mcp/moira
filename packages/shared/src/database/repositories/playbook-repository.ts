@@ -17,12 +17,13 @@ import { entityRevision, playbook } from "../schema.js";
 import type * as schema from "../schema.js";
 import { createLogger } from "../../logging/logger.js";
 import {
-  DEFAULT_REVISION_PREVIEW_CHARS,
   REVISION_ENTITY_TYPES,
   RevisionRepository,
   type RevisionSummary,
 } from "./revision-repository.js";
 import type { RevisionDiffPart } from "../../services/revision-diff.js";
+import { revisionPreviewPrefix, renderRevisionPreview } from "../revision-preview.js";
+import { clampPagination } from "../list-query-builder.js";
 
 /** How many past versions of one playbook are kept. */
 export const MAX_PLAYBOOK_REVISIONS = 50;
@@ -77,14 +78,6 @@ export interface PlaybookListResult {
 
 type PlaybookRow = typeof playbook.$inferSelect;
 
-/** Listing-sized rendering of a playbook's text. */
-function previewOf(content: string | null): string {
-  if (!content) return "";
-  return content.length > DEFAULT_REVISION_PREVIEW_CHARS
-    ? `${content.substring(0, DEFAULT_REVISION_PREVIEW_CHARS)}...`
-    : content;
-}
-
 export class PlaybookRepository {
   private logger = createLogger({ component: "PlaybookRepository" });
   private revisions: RevisionRepository;
@@ -105,7 +98,8 @@ export class PlaybookRepository {
    * would open.
    */
   async list(filter: PlaybookListFilter): Promise<PlaybookListResult> {
-    const { ownerId, search, limit = 50, offset = 0 } = filter;
+    const { ownerId, search } = filter;
+    const { limit, offset } = clampPagination({ defaultLimit: 50, maxLimit: 100 }, filter);
     const conditions = [eq(playbook.userId, ownerId)];
     if (search) {
       const pattern = `%${search}%`;
@@ -124,7 +118,7 @@ export class PlaybookRepository {
       .where(where);
 
     const rows = await this.db
-      .select({ row: playbook, content: entityRevision.content })
+      .select({ row: playbook, prefix: revisionPreviewPrefix(entityRevision.content) })
       .from(playbook)
       .leftJoin(
         entityRevision,
@@ -140,7 +134,7 @@ export class PlaybookRepository {
       .offset(offset);
 
     return {
-      playbooks: rows.map(({ row, content }) => this.toSummary(row, content)),
+      playbooks: rows.map(({ row, prefix }) => this.toSummary(row, renderRevisionPreview(prefix))),
       total: count?.total ?? 0,
     };
   }
@@ -157,7 +151,7 @@ export class PlaybookRepository {
     if (!stored) return null;
 
     return {
-      ...this.toSummary(row, stored.content),
+      ...this.toSummary(row, renderRevisionPreview(stored.content)),
       revision: stored.revision,
       size: stored.size,
       content: stored.content ?? "",
@@ -167,7 +161,7 @@ export class PlaybookRepository {
   /** One playbook by id, without its content. */
   async getById(playbookId: string): Promise<PlaybookSummary | null> {
     const [found] = await this.db
-      .select({ row: playbook, content: entityRevision.content })
+      .select({ row: playbook, prefix: revisionPreviewPrefix(entityRevision.content) })
       .from(playbook)
       .leftJoin(
         entityRevision,
@@ -179,7 +173,7 @@ export class PlaybookRepository {
       )
       .where(eq(playbook.id, playbookId))
       .limit(1);
-    return found ? this.toSummary(found.row, found.content) : null;
+    return found ? this.toSummary(found.row, renderRevisionPreview(found.prefix)) : null;
   }
 
   /** Create a playbook or write a new revision of an existing one. */
@@ -268,7 +262,7 @@ export class PlaybookRepository {
     return row ?? null;
   }
 
-  private toSummary(row: PlaybookRow, content: string | null): PlaybookSummary {
+  private toSummary(row: PlaybookRow, preview: string): PlaybookSummary {
     return {
       id: row.id,
       slug: row.slug,
@@ -278,7 +272,7 @@ export class PlaybookRepository {
       ownerId: row.userId,
       revision: row.currentRevision,
       size: row.size,
-      preview: previewOf(content),
+      preview,
       createdAt: (row.createdAt as Date).getTime(),
       updatedAt: (row.updatedAt as Date).getTime(),
     };

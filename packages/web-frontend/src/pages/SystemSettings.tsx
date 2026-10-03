@@ -4,12 +4,14 @@
  * Includes: definition CRUD, schema export/import, database maintenance
  */
 
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { apiClient } from "../services/api-client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Label } from "@/components/ui/label";
 import {
   Select,
   SelectContent,
@@ -28,6 +30,11 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Loader2, Download, FileCode, Plus, RotateCcw, Check, AlertTriangle } from "lucide-react";
+import { DataRegion } from "@/components/DataRegion";
+import { useResource } from "@/hooks/useResource";
+import { SettingsSubsection } from "@/components/settings/SettingsSection";
+import { PageHeader } from "@/components/page-header";
+import { useRefreshOnActivation } from "@/components/settings/useRefreshOnActivation";
 
 /**
  * Standalone Maintenance section (vacuum, backup)
@@ -170,15 +177,24 @@ interface SchemaImportChange {
 interface SystemSettingsProps {
   embedded?: boolean;
   hideMaintenance?: boolean;
+  active?: boolean;
 }
 
 export const SystemSettings: React.FC<SystemSettingsProps> = ({
   embedded = false,
   hideMaintenance = false,
+  active = true,
 }) => {
   const { t } = useTranslation();
-  const [definitions, setDefinitions] = useState<SettingDefinition[]>([]);
-  const [loading, setLoading] = useState(true);
+  const resource = useResource<SettingDefinition[]>(
+    "admin-setting-definitions",
+    () => apiClient.getSettingDefinitions(),
+    () => t("admin.settingsRegions.definitionLoadFailed"),
+  );
+  const definitions = resource.data ?? [];
+  const loadDefinitions = resource.refresh;
+  useRefreshOnActivation(active, loadDefinitions);
+  const [creating, setCreating] = useState(false);
   const [formData, setFormData] = useState<Partial<SettingDefinition>>({});
 
   // Confirmation dialog state
@@ -194,28 +210,13 @@ export const SystemSettings: React.FC<SystemSettingsProps> = ({
   const [schemaTypeChangeConfirmed, setSchemaTypeChangeConfirmed] = useState(false);
   const schemaFileInputRef = useRef<HTMLInputElement>(null);
 
-  useEffect(() => {
-    loadDefinitions();
-  }, []);
-
-  const loadDefinitions = async () => {
-    setLoading(true);
-    try {
-      const defs = await apiClient.getSettingDefinitions();
-      setDefinitions(defs);
-    } catch {
-      toast.error("Failed to load setting definitions");
-    } finally {
-      setLoading(false);
-    }
-  };
-
   const handleCreateDefinition = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formData.key || !formData.type || !formData.category || !formData.label) {
       toast.error(t("admin.systemSettings.fillRequired"));
       return;
     }
+    setCreating(true);
     try {
       interface SettingDefPayload {
         key: string;
@@ -229,10 +230,14 @@ export const SystemSettings: React.FC<SystemSettingsProps> = ({
         adminOnly?: boolean;
       }
       await apiClient.createSettingDefinition(formData as SettingDefPayload);
-      setFormData({});
+      setFormData((current) =>
+        JSON.stringify(current) === JSON.stringify(formData) ? {} : current,
+      );
       await loadDefinitions();
     } catch {
-      toast.error("Failed to create definition");
+      toast.error(t("admin.settingsRegions.createFailed"));
+    } finally {
+      setCreating(false);
     }
   };
 
@@ -245,9 +250,9 @@ export const SystemSettings: React.FC<SystemSettingsProps> = ({
     try {
       await apiClient.deleteSettingDefinition(deleteDialog.settingKey);
       await loadDefinitions();
-    } catch {
-      toast.error("Failed to delete definition");
-      throw new Error("delete failed");
+    } catch (error) {
+      toast.error(t("admin.settingsRegions.deleteFailed"));
+      throw error;
     }
   };
 
@@ -267,7 +272,7 @@ export const SystemSettings: React.FC<SystemSettingsProps> = ({
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
     } catch {
-      toast.error("Failed to export schema");
+      toast.error(t("admin.settingsRegions.schemaExportFailed"));
     } finally {
       setSchemaExportLoading(false);
     }
@@ -288,7 +293,7 @@ export const SystemSettings: React.FC<SystemSettingsProps> = ({
       const data = JSON.parse(text) as SchemaExportData;
 
       if (!data.definitions || !Array.isArray(data.definitions)) {
-        toast.error("Invalid schema file format: missing definitions");
+        toast.error(t("admin.settingsRegions.invalidImport"));
         return;
       }
 
@@ -307,7 +312,7 @@ export const SystemSettings: React.FC<SystemSettingsProps> = ({
           changes.push({
             key: newDef.key,
             type: "new",
-            changes: ["New definition"],
+            changes: [t("admin.systemSettings.schema.type.new")],
             newDefinition: newDef,
           });
         } else {
@@ -323,13 +328,17 @@ export const SystemSettings: React.FC<SystemSettingsProps> = ({
             changedFields.push(`category: ${existingDef.category} → ${newDef.category}`);
           }
           if (existingDef.label !== newDef.label) {
-            changedFields.push(`label changed`);
+            changedFields.push(t("admin.settingsRegions.schemaFieldChanged", { field: "label" }));
           }
           if (existingDef.description !== newDef.description) {
-            changedFields.push(`description changed`);
+            changedFields.push(
+              t("admin.settingsRegions.schemaFieldChanged", { field: "description" }),
+            );
           }
           if (existingDef.defaultValue !== newDef.defaultValue) {
-            changedFields.push(`defaultValue changed`);
+            changedFields.push(
+              t("admin.settingsRegions.schemaFieldChanged", { field: "defaultValue" }),
+            );
           }
           if (existingDef.adminOnly !== newDef.adminOnly) {
             changedFields.push(`adminOnly: ${existingDef.adminOnly} → ${newDef.adminOnly}`);
@@ -365,7 +374,7 @@ export const SystemSettings: React.FC<SystemSettingsProps> = ({
       setSchemaTypeChangeConfirmed(false);
       setSchemaImportPreviewOpen(true);
     } catch {
-      toast.error("Failed to parse schema file");
+      toast.error(t("admin.settingsRegions.invalidImport"));
     } finally {
       event.target.value = "";
     }
@@ -390,7 +399,8 @@ export const SystemSettings: React.FC<SystemSettingsProps> = ({
       setSchemaImportChanges([]);
       setSchemaTypeChangeConfirmed(false);
     } catch {
-      toast.error("Failed to import schema");
+      toast.error(t("admin.settingsRegions.schemaImportFailed"));
+      await loadDefinitions();
     } finally {
       setSchemaImportLoading(false);
     }
@@ -411,7 +421,7 @@ export const SystemSettings: React.FC<SystemSettingsProps> = ({
     <div className={embedded ? "" : "p-8"}>
       {!embedded && (
         <div className="flex items-center justify-between mb-6">
-          <h1 className="text-3xl font-bold text-foreground">{t("admin.systemSettings.title")}</h1>
+          <PageHeader title={t("admin.systemSettings.title")} />
           <div className="flex gap-2">
             <Button
               variant="outline"
@@ -472,88 +482,96 @@ export const SystemSettings: React.FC<SystemSettingsProps> = ({
       )}
 
       {/* Create New Form */}
-      <Card className="mb-6">
-        <CardHeader>
-          <CardTitle className="text-base">{t("admin.systemSettings.createNew")}</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <form onSubmit={handleCreateDefinition} className="space-y-3">
-            <div className="grid grid-cols-2 gap-3">
-              <Input
-                type="text"
-                placeholder={t("admin.systemSettings.keyPlaceholder")}
-                value={formData.key || ""}
-                onChange={(e) => setFormData({ ...formData, key: e.target.value })}
-                required
-              />
-              <Select
-                value={formData.type || undefined}
-                onValueChange={(value) => setFormData({ ...formData, type: value })}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder={t("admin.systemSettings.selectType")} />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="string">string</SelectItem>
-                  <SelectItem value="number">number</SelectItem>
-                  <SelectItem value="boolean">boolean</SelectItem>
-                  <SelectItem value="text">text</SelectItem>
-                  <SelectItem value="encrypted">encrypted</SelectItem>
-                </SelectContent>
-              </Select>
-              <Input
-                type="text"
-                placeholder={t("admin.systemSettings.categoryPlaceholder")}
-                value={formData.category || ""}
-                onChange={(e) => setFormData({ ...formData, category: e.target.value })}
-                required
-              />
-              <Input
-                type="text"
-                placeholder={t("admin.systemSettings.labelPlaceholder")}
-                value={formData.label || ""}
-                onChange={(e) => setFormData({ ...formData, label: e.target.value })}
-                required
-              />
-            </div>
+      <SettingsSubsection className="mb-6" title={t("admin.systemSettings.createNew")}>
+        <form onSubmit={handleCreateDefinition} className="space-y-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <Input
               type="text"
-              placeholder={t("admin.systemSettings.descriptionPlaceholder")}
-              className="w-full"
-              value={formData.description || ""}
-              onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+              placeholder={t("admin.systemSettings.keyPlaceholder")}
+              aria-label={t("admin.systemSettings.keyPlaceholder")}
+              value={formData.key || ""}
+              onChange={(e) => setFormData({ ...formData, key: e.target.value })}
+              required
             />
-            <div className="flex gap-3">
-              <label className="flex items-center gap-2">
-                <input
-                  type="checkbox"
-                  checked={formData.required || false}
-                  onChange={(e) => setFormData({ ...formData, required: e.target.checked })}
-                />
-                <span className="text-sm text-muted-foreground">
-                  {t("admin.systemSettings.required")}
-                </span>
-              </label>
-              <label className="flex items-center gap-2">
-                <input
-                  type="checkbox"
-                  checked={formData.adminOnly || false}
-                  onChange={(e) => setFormData({ ...formData, adminOnly: e.target.checked })}
-                />
-                <span className="text-sm text-muted-foreground">
-                  {t("admin.systemSettings.adminOnly")}
-                </span>
-              </label>
-            </div>
-            <Button type="submit">{t("admin.systemSettings.createButton")}</Button>
-          </form>
-        </CardContent>
-      </Card>
+            <Select
+              value={formData.type || undefined}
+              onValueChange={(value) => setFormData({ ...formData, type: value })}
+            >
+              <SelectTrigger aria-label={t("admin.systemSettings.selectType")}>
+                <SelectValue placeholder={t("admin.systemSettings.selectType")} />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="string">string</SelectItem>
+                <SelectItem value="number">number</SelectItem>
+                <SelectItem value="boolean">boolean</SelectItem>
+                <SelectItem value="text">text</SelectItem>
+                <SelectItem value="encrypted">encrypted</SelectItem>
+              </SelectContent>
+            </Select>
+            <Input
+              type="text"
+              placeholder={t("admin.systemSettings.categoryPlaceholder")}
+              aria-label={t("admin.systemSettings.categoryPlaceholder")}
+              value={formData.category || ""}
+              onChange={(e) => setFormData({ ...formData, category: e.target.value })}
+              required
+            />
+            <Input
+              type="text"
+              placeholder={t("admin.systemSettings.labelPlaceholder")}
+              aria-label={t("admin.systemSettings.labelPlaceholder")}
+              value={formData.label || ""}
+              onChange={(e) => setFormData({ ...formData, label: e.target.value })}
+              required
+            />
+          </div>
+          <Input
+            type="text"
+            placeholder={t("admin.systemSettings.descriptionPlaceholder")}
+            aria-label={t("admin.systemSettings.descriptionPlaceholder")}
+            className="w-full"
+            value={formData.description || ""}
+            onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+          />
+          <div className="flex gap-3">
+            <Label className="flex items-center gap-2">
+              <Checkbox
+                checked={formData.required || false}
+                onCheckedChange={(checked) =>
+                  setFormData({ ...formData, required: checked === true })
+                }
+              />
+              <span className="text-sm text-muted-foreground">
+                {t("admin.systemSettings.required")}
+              </span>
+            </Label>
+            <Label className="flex items-center gap-2">
+              <Checkbox
+                checked={formData.adminOnly || false}
+                onCheckedChange={(checked) =>
+                  setFormData({ ...formData, adminOnly: checked === true })
+                }
+              />
+              <span className="text-sm text-muted-foreground">
+                {t("admin.systemSettings.adminOnly")}
+              </span>
+            </Label>
+          </div>
+          <Button type="submit" disabled={creating}>
+            {creating && <Loader2 className="mr-2 size-4 animate-spin" />}
+            {t("admin.systemSettings.createButton")}
+          </Button>
+        </form>
+      </SettingsSubsection>
 
       {/* Definitions List */}
-      {loading ? (
-        <p className="text-muted-foreground">{t("admin.systemSettings.loading")}</p>
-      ) : (
+      <DataRegion
+        hasResult={resource.data !== undefined}
+        pending={resource.pending}
+        error={resource.error}
+        onRetry={loadDefinitions}
+        testId="admin-definitions-region"
+      >
         <div className="space-y-2">
           {definitions.map((def) => (
             <Card key={def.key} data-testid={`definition-${def.key}`}>
@@ -596,7 +614,7 @@ export const SystemSettings: React.FC<SystemSettingsProps> = ({
             </Card>
           ))}
         </div>
-      )}
+      </DataRegion>
 
       {/* Database Maintenance - shown when not hidden */}
       {!hideMaintenance && (
@@ -708,18 +726,17 @@ export const SystemSettings: React.FC<SystemSettingsProps> = ({
           </div>
           {hasTypeChanges && (
             <div className="border-t pt-4 mt-4">
-              <label className="flex items-center gap-2 text-sm">
-                <input
-                  type="checkbox"
+              <Label className="flex items-center gap-2 text-sm">
+                <Checkbox
                   checked={schemaTypeChangeConfirmed}
-                  onChange={(e) => setSchemaTypeChangeConfirmed(e.target.checked)}
+                  onCheckedChange={(checked) => setSchemaTypeChangeConfirmed(checked === true)}
                   className="w-4 h-4"
                   data-testid="schema-type-change-confirm"
                 />
                 <span className="text-destructive">
                   {t("admin.systemSettings.schema.confirmTypeChange")}
                 </span>
-              </label>
+              </Label>
             </div>
           )}
           <DialogFooter className="flex items-center justify-between">

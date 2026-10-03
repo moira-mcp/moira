@@ -2,6 +2,10 @@
 @import "@daveyplate/better-auth-ui/css";
 @import "tw-animate-css";
 
+/* Tremor constructs these finite chart utilities at runtime; vendor source is not scanned. */
+@source inline("{dark:,}{stroke,fill,text,bg}-chart-{1..5}");
+@source inline("stroke-tremor-border dark:stroke-dark-tremor-border fill-tremor-content dark:fill-dark-tremor-content fill-tremor-content-emphasis dark:fill-dark-tremor-content-emphasis text-tremor-content dark:text-dark-tremor-content text-tremor-content-emphasis dark:text-dark-tremor-content-emphasis stroke-tremor-background dark:stroke-dark-tremor-background border-tremor-background dark:border-dark-tremor-background border-tremor-border dark:border-dark-tremor-border bg-tremor-background dark:bg-dark-tremor-background");
+
 :root {
   --background: oklch(0.985 0.002 260);
   --foreground: oklch(0.145 0.015 260);
@@ -142,6 +146,16 @@
   --color-chart-3: var(--chart-3);
   --color-chart-4: var(--chart-4);
   --color-chart-5: var(--chart-5);
+
+  /* Installed chart axis, grid, legend and tooltip names resolve through the same live theme. */
+  --color-tremor-content: var(--muted-foreground);
+  --color-dark-tremor-content: var(--muted-foreground);
+  --color-tremor-content-emphasis: var(--foreground);
+  --color-dark-tremor-content-emphasis: var(--foreground);
+  --color-tremor-border: var(--border);
+  --color-dark-tremor-border: var(--border);
+  --color-tremor-background: var(--card);
+  --color-dark-tremor-background: var(--card);
 
   --color-sidebar: var(--sidebar);
   --color-sidebar-foreground: var(--sidebar-foreground);

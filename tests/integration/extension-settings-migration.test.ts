@@ -3,9 +3,9 @@
  *
  * A fresh database is green whatever the migration does, because everything is created at once.
  * The state that matters is an installation whose database was made before this change: the
- * migration must add the new table, leave every existing table exactly as it was, and leave the
- * data in them untouched — the container's start is gated on migrations succeeding, so a failure
- * here does not degrade an installation, it stops it.
+ * extension migration must add its table without changing existing ones or their data. The full
+ * journal also applies explicit later changes, accounted for below. Startup is migration-gated,
+ * so a failure here stops an installation rather than merely degrading it.
  */
 
 import { describe, test, expect } from "@jest/globals";
@@ -100,6 +100,11 @@ describe("Migrating a database created before the extension value store", () => 
       expect(schemaAfter.workflow).toContain("`revision` integer DEFAULT 0 NOT NULL");
       expect(schemaBefore.auditLog).not.toContain("`dedupeKey`");
       expect(schemaAfter.auditLog).toContain("`dedupeKey` text");
+      // The later renewal observation is nullable; compare every previous session
+      // column and constraint after accounting for exactly this addition.
+      expect(schemaBefore.session).not.toContain("`refreshedAt`");
+      expect(schemaAfter.session).toContain(", `refreshedAt` text");
+      schemaAfter.session = schemaAfter.session.replace(", `refreshedAt` text", "");
       delete schemaBefore.workflowExecution;
       delete schemaAfter.workflowExecution;
       delete schemaBefore.workflow;

@@ -175,10 +175,11 @@ test.describe("Admin UI Security Status", () => {
     // Initially should show Block button
     await expect(page.locator('button:has-text("Block User")')).toBeVisible();
 
-    // Click block button - opens Dialog with input for reason
+    // The shared confirmation keeps the block reason with the action.
     await page.click('button:has-text("Block User")');
-    await page.locator('[role="dialog"]').waitFor();
-    await page.locator('[role="dialog"] input').fill("Test block reason");
+    const blockDialog = page.getByRole("alertdialog", { name: "Block User", exact: true });
+    await expect(blockDialog).toBeVisible();
+    await blockDialog.getByRole("textbox").fill("Test block reason");
 
     // Click block confirm and wait for API response
     const blockResponsePromise = page.waitForResponse(
@@ -186,7 +187,7 @@ test.describe("Admin UI Security Status", () => {
         response.url().includes("/api/admin/users/") && response.url().includes("/block"),
     );
 
-    await page.locator('[role="dialog"] button:has-text("Block User")').click();
+    await blockDialog.getByRole("button", { name: "Block User", exact: true }).click();
     await blockResponsePromise;
 
     // Should now show Unblock button
@@ -195,7 +196,8 @@ test.describe("Admin UI Security Status", () => {
 
     // Click unblock button - opens AlertDialog
     await page.click('button:has-text("Unblock User")');
-    await page.locator('[role="alertdialog"]').waitFor();
+    const unblockDialog = page.getByRole("alertdialog", { name: "Unblock User", exact: true });
+    await expect(unblockDialog).toBeVisible();
 
     // Click confirm and wait for API response
     const unblockResponsePromise = page.waitForResponse(
@@ -203,7 +205,7 @@ test.describe("Admin UI Security Status", () => {
         response.url().includes("/api/admin/users/") && response.url().includes("/unblock"),
     );
 
-    await page.locator('[role="alertdialog"] button:has-text("Unblock User")').click();
+    await unblockDialog.getByRole("button", { name: "Unblock User", exact: true }).click();
     await unblockResponsePromise;
 
     // Should show Block button again

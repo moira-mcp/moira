@@ -33,6 +33,9 @@ import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
 import { Textarea } from "../components/ui/textarea";
 import { guideAnchor } from "@/guides/anchors";
+import { DataRegion } from "@/components/DataRegion";
+import { useResource } from "@/hooks/useResource";
+import { InlineError } from "@/components/inline-error";
 
 interface ArtifactListItem {
   uuid: string;
@@ -60,9 +63,18 @@ export const Artifacts: React.FC = () => {
   const { pageSize, containerRef, onViewModeChange } = useListPageSize(() => setCurrentPage(1));
 
   // Data state
-  const [artifacts, setArtifacts] = useState<ArtifactListItem[]>([]);
-  const [stats, setStats] = useState<ArtifactStats | null>(null);
-  const [total, setTotal] = useState(0);
+  const [accepted, setAccepted] = useState<{
+    artifacts: ArtifactListItem[];
+    total: number;
+    page: number;
+    pageSize: number;
+  } | null>(null);
+  const artifacts = accepted?.artifacts ?? [];
+  const total = accepted?.total ?? 0;
+  const statsResource = useResource<ArtifactStats>("artifact-stats", () =>
+    apiClient.getArtifactStats(),
+  );
+  const stats = statsResource.data;
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -74,6 +86,7 @@ export const Artifacts: React.FC = () => {
   const [editDialogOpen, setEditDialogOpen] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [selectedArtifact, setSelectedArtifact] = useState<ArtifactListItem | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const [_copiedUuid, setCopiedUuid] = useState<string | null>(null);
 
   // Create form state
@@ -88,16 +101,6 @@ export const Artifacts: React.FC = () => {
   const [editing, setEditing] = useState(false);
   const [loadingContent, setLoadingContent] = useState(false);
 
-  // Load stats
-  const loadStats = useCallback(async () => {
-    try {
-      const statsData = await apiClient.getArtifactStats();
-      setStats(statsData);
-    } catch {
-      // Stats are non-critical, don't show error
-    }
-  }, []);
-
   // Load artifacts
   const beginRequest = useLatestRequest();
   const loadArtifacts = useCallback(async () => {
@@ -111,8 +114,12 @@ export const Artifacts: React.FC = () => {
       });
 
       if (!isCurrent()) return;
-      setArtifacts(result.artifacts);
-      setTotal(result.total);
+      setAccepted({
+        artifacts: result.artifacts,
+        total: result.total,
+        page: currentPage,
+        pageSize,
+      });
       setError(null);
     } catch (err: unknown) {
       if (!isCurrent()) return;
@@ -125,8 +132,7 @@ export const Artifacts: React.FC = () => {
 
   useEffect(() => {
     loadArtifacts();
-    loadStats();
-  }, [loadArtifacts, loadStats]);
+  }, [loadArtifacts]);
 
   const handleCopyUrl = async (artifact: ArtifactListItem) => {
     try {
@@ -139,21 +145,24 @@ export const Artifacts: React.FC = () => {
   };
 
   const handleDeleteClick = (artifact: ArtifactListItem) => {
+    setDeleteError(null);
     setSelectedArtifact(artifact);
     setDeleteDialogOpen(true);
   };
 
   const handleDeleteConfirm = async () => {
     if (!selectedArtifact) return;
-
+    setDeleteError(null);
     try {
       await apiClient.deleteArtifact(selectedArtifact.uuid);
       setDeleteDialogOpen(false);
       setSelectedArtifact(null);
       loadArtifacts();
-      loadStats();
+      void statsResource.refresh();
     } catch (err) {
       console.error("Failed to delete artifact:", err);
+      setDeleteError(err instanceof Error ? err.message : t("common.errors.failedToDelete"));
+      throw err;
     }
   };
 
@@ -202,7 +211,7 @@ export const Artifacts: React.FC = () => {
       setSelectedArtifact(null);
       setEditArtifactContent("");
       loadArtifacts();
-      loadStats();
+      void statsResource.refresh();
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : t("common.errors.failedToSave");
       setEditError(message);
@@ -234,7 +243,7 @@ export const Artifacts: React.FC = () => {
       setNewArtifactName("");
       setNewArtifactContent("");
       loadArtifacts();
-      loadStats();
+      void statsResource.refresh();
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : t("common.errors.failedToSave");
       setCreateError(message);
@@ -243,51 +252,42 @@ export const Artifacts: React.FC = () => {
     }
   };
 
-  const totalPages = Math.ceil(total / pageSize);
-
-  if (loading && artifacts.length === 0) {
-    return (
-      <PageShell
-        title={t("pages.artifacts.title")}
-        guide={guideAnchor("artifacts.header")}
-        loading
-      />
-    );
-  }
-
-  if (error) {
-    return (
-      <PageShell
-        title={t("pages.artifacts.title")}
-        guide={guideAnchor("artifacts.header")}
-        error={error}
-        onRetry={loadArtifacts}
-        retryLabel={t("pages.artifacts.retry")}
-      />
-    );
-  }
+  const totalPages = Math.ceil(total / (accepted?.pageSize ?? pageSize));
 
   return (
     <PageShell title={t("pages.artifacts.title")} guide={guideAnchor("artifacts.header")}>
       <FilterBar
         filters={
-          stats ? (
-            <div className="w-64" data-testid="quota-indicator" {...guideAnchor("artifacts.quota")}>
-              <div className="flex justify-between text-sm text-muted-foreground mb-1">
-                <span>{t("pages.artifacts.quota.storage")}</span>
-                <span>
-                  {formatSize(stats.totalSize)} / {formatSize(stats.storageLimit)}
-                </span>
+          <DataRegion
+            hasResult={stats !== undefined}
+            pending={statsResource.pending}
+            error={statsResource.error}
+            onRetry={statsResource.refresh}
+            testId="artifact-stats-region"
+          >
+            {stats && (
+              <div
+                className="w-64"
+                data-testid="quota-indicator"
+                {...guideAnchor("artifacts.quota")}
+              >
+                <div className="flex justify-between text-sm text-muted-foreground mb-1">
+                  <span>{t("pages.artifacts.quota.storage")}</span>
+                  <span>
+                    {formatSize(stats.totalSize)} / {formatSize(stats.storageLimit)}
+                  </span>
+                </div>
+                <Progress value={stats.storageUsedPercent} className="h-2" />
+                <div className="flex justify-between text-xs text-muted-foreground mt-1">
+                  <span>
+                    {stats.totalArtifacts} / {stats.countLimit}{" "}
+                    {t("pages.artifacts.quota.artifacts")}
+                  </span>
+                  <span>{stats.storageUsedPercent.toFixed(1)}%</span>
+                </div>
               </div>
-              <Progress value={stats.storageUsedPercent} className="h-2" />
-              <div className="flex justify-between text-xs text-muted-foreground mt-1">
-                <span>
-                  {stats.totalArtifacts} / {stats.countLimit} {t("pages.artifacts.quota.artifacts")}
-                </span>
-                <span>{stats.storageUsedPercent.toFixed(1)}%</span>
-              </div>
-            </div>
-          ) : undefined
+            )}
+          </DataRegion>
         }
         actions={
           <Button
@@ -318,15 +318,23 @@ export const Artifacts: React.FC = () => {
         storageKey="artifacts-view-mode"
         guide={guideAnchor("artifacts.list")}
         loading={loading}
+        hasResult={accepted !== null}
+        error={error}
+        onRetry={loadArtifacts}
+        onRefresh={loadArtifacts}
+        resultScope={
+          accepted &&
+          t("common.pagination.page", { current: accepted.page, total: Math.max(1, totalPages) })
+        }
         emptyIcon={FileCode}
         emptyTitle={t("pages.artifacts.noArtifacts")}
         containerRef={containerRef}
         pagination={{
           mode: "total",
-          currentPage,
+          currentPage: accepted?.page ?? currentPage,
           totalPages,
           totalItems: total,
-          pageSize,
+          pageSize: accepted?.pageSize ?? pageSize,
           onPageChange: setCurrentPage,
         }}
         className="flex-1 min-h-0 flex flex-col"
@@ -445,7 +453,11 @@ export const Artifacts: React.FC = () => {
         cancelLabel={t("common.cancel")}
         variant="destructive"
         onConfirm={handleDeleteConfirm}
-      />
+      >
+        {deleteError && (
+          <InlineError title={t("common.errors.failedToDelete")} message={deleteError} />
+        )}
+      </ConfirmDialog>
     </PageShell>
   );
 };

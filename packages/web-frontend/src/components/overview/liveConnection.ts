@@ -57,6 +57,8 @@ export interface LiveDependencies {
   now(): number;
   /** Distinguishes the tabs on the channel. */
   tabId: string;
+  /** Public backend/account ownership, shared by tabs of the same owner. Never a credential. */
+  scope?: string;
 }
 
 export const LOCK_NAME = "moira-overview-stream";
@@ -125,7 +127,7 @@ export class LiveConnection {
     this.post({ type: "visibility", tabId: this.deps.tabId, visible: this.deps.isVisible() });
     void locks
       .request(
-        LOCK_NAME,
+        this.deps.scope ? `${LOCK_NAME}:${this.deps.scope}` : LOCK_NAME,
         () =>
           new Promise<void>((release) => {
             if (this.stopped) {
@@ -259,11 +261,13 @@ export class LiveConnection {
       if (this.stream === stream && !this.confirmedStream) this.streamFailed();
     }, READY_TIMEOUT_MS);
     stream.addEventListener("ready", (event) => {
+      if (this.stopped || this.stream !== stream) return;
       this.cursor = Number(event.lastEventId);
       this.confirmed();
       this.post({ type: "position", seq: this.cursor });
     });
     stream.addEventListener("change", (event) => {
+      if (this.stopped || this.stream !== stream) return;
       const data = JSON.parse(event.data) as Omit<OverviewChange, "seq">;
       const change: OverviewChange = { ...data, seq: Number(event.lastEventId) };
       this.cursor = change.seq;
@@ -272,6 +276,7 @@ export class LiveConnection {
       this.post({ type: "change", change });
     });
     stream.addEventListener("reset", (event) => {
+      if (this.stopped || this.stream !== stream) return;
       this.cursor = Number(event.lastEventId);
       this.confirmed();
       this.onMessage({ type: "reset" });
@@ -377,13 +382,16 @@ export class LiveConnection {
 export function browserDependencies(
   openStream: LiveDependencies["openStream"],
   pollChanges: LiveDependencies["pollChanges"],
+  scope?: string,
 ): LiveDependencies {
   const locks =
     typeof navigator !== "undefined" && "locks" in navigator
       ? (navigator.locks as unknown as LocksLike)
       : null;
   const channel =
-    typeof BroadcastChannel !== "undefined" ? new BroadcastChannel(CHANNEL_NAME) : null;
+    typeof BroadcastChannel !== "undefined"
+      ? new BroadcastChannel(scope ? `${CHANNEL_NAME}:${scope}` : CHANNEL_NAME)
+      : null;
   return {
     openStream,
     pollChanges,
@@ -400,5 +408,6 @@ export function browserDependencies(
     },
     now: () => Date.now(),
     tabId: Math.random().toString(36).slice(2),
+    scope,
   };
 }

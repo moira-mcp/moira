@@ -46,6 +46,7 @@ describe("CORS origin allowlist", () => {
     const res = await request(app).get("/api/ping").set("Origin", ALLOWED_EXTERNAL);
     expect(res.status).toBe(200);
     expect(res.headers["access-control-allow-origin"]).toBe(ALLOWED_EXTERNAL);
+    expect(res.headers["access-control-expose-headers"].split(/,\s*/)).toContain("ETag");
   });
 
   it("allows localhost origins by default", async () => {

@@ -3,6 +3,8 @@ import { initReactI18next } from "react-i18next";
 import LanguageDetector from "i18next-browser-languagedetector";
 import en from "./locales/en.json";
 import ru from "./locales/ru.json";
+import adminOverviewEn from "./locales/admin-overview.en.json";
+import adminOverviewRu from "./locales/admin-overview.ru.json";
 
 /**
  * Language configuration
@@ -31,10 +33,10 @@ i18n
   .init({
     resources: {
       en: {
-        translation: en,
+        translation: { ...en, adminOverview: adminOverviewEn },
       },
       ru: {
-        translation: ru,
+        translation: { ...ru, adminOverview: adminOverviewRu },
       },
     },
     supportedLngs: SUPPORTED_LANGUAGE_CODES,

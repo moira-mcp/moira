@@ -5,7 +5,8 @@
 
 import { eq, ne, and, or, like, inArray, isNotNull, isNull, sql, desc } from "drizzle-orm";
 import type { BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
-import { workflowExecution } from "../schema.js";
+import { workflowExecution, workflow, user, auditLog, executionLock } from "../schema.js";
+import type { ExecutionSummary } from "../../types/admin-analytics.js";
 import type { ExecutionAwaitingUser, WorkflowExecution } from "@mcp-moira/workflow-engine";
 import type * as schema from "../schema.js";
 import { type ExecutionError, type LegacyExecutionStatus } from "../../types/execution-error.js";
@@ -21,6 +22,7 @@ import {
   recordExecutionsDeleted,
   trackExecutionChange,
 } from "../execution-change.js";
+import { refusalCount } from "../execution-summary-sql.js";
 
 const EXECUTION_LIST_CONFIG: ListQueryConfig<"createdAt" | "updatedAt"> = {
   table: workflowExecution,
@@ -366,6 +368,32 @@ export class ExecutionRepository {
     }));
   }
 
+  /** Current run counts for a bounded set of workflows, with complete group count and no contexts. */
+  async runningCountsByWorkflow(
+    userId: string,
+    limit = 200,
+  ): Promise<{
+    workflows: Array<{ workflowId: string; executionCount: number }>;
+    totalWorkflows: number;
+  }> {
+    const where = and(
+      eq(workflowExecution.userId, userId),
+      inArray(workflowExecution.state, ["running", "waiting"]),
+    );
+    const [total] = await this.db
+      .select({ count: sql<number>`count(DISTINCT ${workflowExecution.workflowId})` })
+      .from(workflowExecution)
+      .where(where);
+    const workflows = await this.db
+      .select({ workflowId: workflowExecution.workflowId, executionCount: sql<number>`count(*)` })
+      .from(workflowExecution)
+      .where(where)
+      .groupBy(workflowExecution.workflowId)
+      .orderBy(desc(sql`count(*)`), workflowExecution.workflowId)
+      .limit(Math.min(Math.max(1, limit), 200));
+    return { workflows, totalWorkflows: total?.count ?? 0 };
+  }
+
   async listByUser(userId: string): Promise<WorkflowExecution[]> {
     const rows = await this.db
       .select()
@@ -385,7 +413,7 @@ export class ExecutionRepository {
    * - Legacy 'failed' → maps to 'completed' (failed = completed with errors)
    * This allows old clients to use legacy status values in queries.
    */
-  async listWithFilters(filter: ExecutionFilter): Promise<ExecutionListResult> {
+  private listConditions(filter: ExecutionFilter) {
     const { userId, status, workflowId, search } = filter;
 
     // Build WHERE conditions
@@ -422,15 +450,117 @@ export class ExecutionRepository {
       );
     }
 
+    return conditions;
+  }
+
+  async listWithFilters(filter: ExecutionFilter): Promise<ExecutionListResult> {
+    const { rows, total } = await executeListQuery(
+      this.db,
+      EXECUTION_LIST_CONFIG,
+      filter,
+      this.listConditions(filter),
+    );
+
+    const executions = rows.map((row) => this.rowToExecution(row));
+    return { executions, total };
+  }
+
+  /**
+   * Bounded management inventory without loading execution context or journals.
+   * `locked` narrows the active branch before count/pagination; selected completed
+   * statuses remain included. A running+locked request does not need this flag.
+   */
+  async listSummaries(
+    filter: ExecutionFilter & { locked?: boolean },
+  ): Promise<{ executions: ExecutionSummary[]; total: number }> {
+    const hasActiveLock = sql<number>`EXISTS (
+      SELECT 1 FROM ${executionLock}
+      WHERE ${executionLock.executionId} = ${workflowExecution.executionId}
+        AND ${executionLock.status} = 'active'
+    )`;
+    const conditions = this.listConditions(filter);
+    if (filter.locked) {
+      const includeCompleted = filter.status?.some((status) =>
+        ["completed", "failed"].includes(status),
+      );
+      conditions.push(
+        or(
+          and(eq(workflowExecution.state, "running"), hasActiveLock),
+          includeCompleted ? inArray(workflowExecution.state, ["completed", "failed"]) : undefined,
+        ),
+      );
+    }
     const { rows, total } = await executeListQuery(
       this.db,
       EXECUTION_LIST_CONFIG,
       filter,
       conditions,
+      { executionId: workflowExecution.executionId },
     );
+    if (!rows.length) return { executions: [], total };
 
-    const executions = rows.map((row) => this.rowToExecution(row));
-    return { executions, total };
+    // Enrich only the selected page, joining scalar names rather than reading
+    // the installation's complete workflow/user inventories.
+    const summaries = await this.db
+      .select({
+        executionId: workflowExecution.executionId,
+        workflowId: workflowExecution.workflowId,
+        workflowName: workflow.name,
+        userId: workflowExecution.userId,
+        userEmail: user.email,
+        userName: user.name,
+        state: workflowExecution.state,
+        currentNodeId: workflowExecution.currentNodeId,
+        note: workflowExecution.note,
+        stopReason: workflowExecution.stopReason,
+        createdAt: workflowExecution.createdAt,
+        updatedAt: workflowExecution.updatedAt,
+        completedAt: workflowExecution.completedAt,
+        error: workflowExecution.error,
+        hasActiveLock,
+        errorCount: refusalCount(sql`${workflowExecution.errors}`),
+        lastStepAt: sql<number | null>`(
+          SELECT max(${auditLog.createdAt}) FROM ${auditLog}
+          WHERE ${auditLog.resourceId} = ${workflowExecution.executionId}
+            AND ${auditLog.resource} = 'execution' AND ${auditLog.action} = 'execution:step'
+        )`,
+      })
+      .from(workflowExecution)
+      .leftJoin(workflow, eq(workflow.id, workflowExecution.workflowId))
+      .leftJoin(user, eq(user.id, workflowExecution.userId))
+      .where(
+        inArray(
+          workflowExecution.executionId,
+          rows.map((row) => String(row.executionId)),
+        ),
+      );
+    const byId = new Map(
+      summaries.map(({ state, hasActiveLock: activeLock, ...summary }) => {
+        const locked = state === "running" && Boolean(activeLock);
+        const execution: ExecutionSummary = {
+          ...summary,
+          status: locked
+            ? "locked"
+            : ["completed", "failed"].includes(state)
+              ? "completed"
+              : "running",
+          hasActiveLock: locked,
+          createdAt: summary.createdAt?.getTime() ?? null,
+          updatedAt: summary.updatedAt?.getTime() ?? null,
+          completedAt: summary.completedAt?.getTime() ?? null,
+          errorCount: Number(summary.errorCount),
+          lastStepAt: summary.lastStepAt === null ? null : Number(summary.lastStepAt),
+        };
+        return [execution.executionId, execution] as const;
+      }),
+    );
+    return {
+      executions: rows.flatMap((row) => {
+        const summary = byId.get(String(row.executionId));
+        return summary ? [summary] : [];
+      }),
+      total,
+    };
   }
 
   async delete(executionId: string): Promise<void> {

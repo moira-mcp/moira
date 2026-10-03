@@ -14,6 +14,8 @@ import { Router, Request, Response } from "express";
 import { buildNodeTypeCatalog, getActiveExtensionRegistry } from "@mcp-moira/workflow-engine";
 
 import { asyncHandler } from "../middleware/error-middleware.js";
+import { sendConditionalRead } from "../utils/conditional-read.js";
+import type { AuthenticatedRequest } from "../types/express-types.js";
 
 const router = Router();
 
@@ -22,12 +24,11 @@ const router = Router();
  */
 router.get(
   "/",
-  asyncHandler(async (_req: Request, res: Response) => {
+  asyncHandler(async (req: Request, res: Response) => {
     const catalog = buildNodeTypeCatalog(getActiveExtensionRegistry());
 
-    res.json({
-      success: true,
-      data: catalog,
+    sendConditionalRead(req, res, catalog, {
+      scope: (req as AuthenticatedRequest).userId,
       timestamp: new Date().toISOString(),
     });
   }),

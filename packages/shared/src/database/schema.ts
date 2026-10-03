@@ -12,54 +12,79 @@ import {
   index,
 } from "drizzle-orm/sqlite-core";
 import { sql } from "drizzle-orm";
+import { storedTimestampMs } from "./timestamp-sql.js";
 
 // ===== Better Auth Tables =====
 
-export const user = sqliteTable("user", {
-  id: text("id").primaryKey(),
-  email: text("email").notNull().unique(),
-  name: text("name"),
-  // Handle: unique user identifier for URLs and workflow references (e.g., @john-doe)
-  // Format: alphanumeric + hyphen, 4-40 chars, globally unique
-  // Derived from email prefix on registration, with collision resolution via random suffix
-  handle: text("handle").notNull().unique(),
-  emailVerified: integer("emailVerified", { mode: "boolean" }).default(false),
-  image: text("image"),
-  isAdmin: integer("isAdmin", { mode: "boolean" }).default(false),
-  // Independent account-admission decision. null means pending approval.
-  approvedAt: text("approvedAt"),
-  blocked: integer("blocked", { mode: "boolean" }).default(false),
-  blockedAt: text("blockedAt"),
-  blockedReason: text("blockedReason"),
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Required to break circular type inference for self-referential FK
-  blockedBy: text("blockedBy").references((): any => user.id),
-  passwordResetRequired: integer("passwordResetRequired", { mode: "boolean" }).default(false),
-  passwordResetRequestedAt: text("passwordResetRequestedAt"),
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Required to break circular type inference for self-referential FK
-  passwordResetRequestedBy: text("passwordResetRequestedBy").references((): any => user.id),
-  // Legal consent fields - stored for GDPR compliance proof
-  acceptedTermsAt: text("acceptedTermsAt"), // ISO timestamp when Terms of Service accepted
-  acceptedNotRussianResidentAt: text("acceptedNotRussianResidentAt"), // ISO timestamp when non-RU resident confirmed
-  // Per-user artifact quota overrides (null = use global setting)
-  artifactQuotaMb: integer("artifactQuotaMb"), // Max total storage in MB (overrides artifacts.default_quota_mb)
-  artifactMaxFiles: integer("artifactMaxFiles"), // Max artifact count (overrides artifacts.default_max_files)
-  createdAt: text("createdAt").notNull(),
-  updatedAt: text("updatedAt").notNull(),
-});
+export const user = sqliteTable(
+  "user",
+  {
+    id: text("id").primaryKey(),
+    email: text("email").notNull().unique(),
+    name: text("name"),
+    // Handle: unique user identifier for URLs and workflow references (e.g., @john-doe)
+    // Format: alphanumeric + hyphen, 4-40 chars, globally unique
+    // Derived from email prefix on registration, with collision resolution via random suffix
+    handle: text("handle").notNull().unique(),
+    emailVerified: integer("emailVerified", { mode: "boolean" }).default(false),
+    image: text("image"),
+    isAdmin: integer("isAdmin", { mode: "boolean" }).default(false),
+    // Independent account-admission decision. null means pending approval.
+    approvedAt: text("approvedAt"),
+    blocked: integer("blocked", { mode: "boolean" }).default(false),
+    blockedAt: text("blockedAt"),
+    blockedReason: text("blockedReason"),
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Required to break circular type inference for self-referential FK
+    blockedBy: text("blockedBy").references((): any => user.id),
+    passwordResetRequired: integer("passwordResetRequired", { mode: "boolean" }).default(false),
+    passwordResetRequestedAt: text("passwordResetRequestedAt"),
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Required to break circular type inference for self-referential FK
+    passwordResetRequestedBy: text("passwordResetRequestedBy").references((): any => user.id),
+    // Legal consent fields - stored for GDPR compliance proof
+    acceptedTermsAt: text("acceptedTermsAt"), // ISO timestamp when Terms of Service accepted
+    acceptedNotRussianResidentAt: text("acceptedNotRussianResidentAt"), // ISO timestamp when non-RU resident confirmed
+    // Per-user artifact quota overrides (null = use global setting)
+    artifactQuotaMb: integer("artifactQuotaMb"), // Max total storage in MB (overrides artifacts.default_quota_mb)
+    artifactMaxFiles: integer("artifactMaxFiles"), // Max artifact count (overrides artifacts.default_max_files)
+    createdAt: text("createdAt").notNull(),
+    updatedAt: text("updatedAt").notNull(),
+  },
+  (table) => ({
+    registrationEpochIdx: index("user_registration_epoch_idx").on(
+      storedTimestampMs(table.createdAt),
+    ),
+  }),
+);
 
-export const session = sqliteTable("session", {
-  id: text("id").primaryKey(),
-  expiresAt: text("expiresAt").notNull(),
-  token: text("token").notNull().unique(),
-  createdAt: text("createdAt").notNull(),
-  updatedAt: text("updatedAt").notNull(),
-  ipAddress: text("ipAddress"),
-  userAgent: text("userAgent"),
-  country: text("country"),
-  userId: text("userId")
-    .notNull()
-    .references(() => user.id, { onDelete: "cascade" }),
-});
+export const session = sqliteTable(
+  "session",
+  {
+    id: text("id").primaryKey(),
+    expiresAt: text("expiresAt").notNull(),
+    token: text("token").notNull().unique(),
+    createdAt: text("createdAt").notNull(),
+    updatedAt: text("updatedAt").notNull(),
+    // Observed provider renewal; initial and unobserved historical sessions remain null.
+    refreshedAt: text("refreshedAt"),
+    ipAddress: text("ipAddress"),
+    userAgent: text("userAgent"),
+    country: text("country"),
+    userId: text("userId")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+  },
+  (table) => ({
+    userExpiryActivityIdx: index("session_user_expiry_activity_idx").on(
+      table.userId,
+      storedTimestampMs(table.expiresAt),
+      storedTimestampMs(table.refreshedAt),
+    ),
+    activityExpiryIdx: index("session_activity_expiry_idx").on(
+      storedTimestampMs(table.refreshedAt),
+      storedTimestampMs(table.expiresAt),
+    ),
+  }),
+);
 
 export const account = sqliteTable("account", {
   id: text("id").primaryKey(),
@@ -625,6 +650,13 @@ export const workflowExecution = sqliteTable(
       table.lastActivityAt,
     ),
     parentIdx: index("workflow_execution_parent_idx").on(table.parentExecutionId),
+    userCreatedIdx: index("execution_user_created_idx").on(table.userId, table.createdAt),
+    workflowCreatedIdx: index("execution_workflow_created_idx").on(
+      table.workflowId,
+      table.createdAt,
+    ),
+    stateCreatedIdx: index("execution_state_created_idx").on(table.state, table.createdAt),
+    createdIdx: index("execution_created_idx").on(table.createdAt),
   }),
 );
 
@@ -817,6 +849,13 @@ export const auditLog = sqliteTable(
   },
   (table) => ({
     dedupeKeyIdx: uniqueIndex("audit_log_dedupe_key_idx").on(table.dedupeKey),
+    userCreatedIdx: index("audit_user_created_idx").on(table.userId, table.createdAt),
+    resourceActionCreatedIdx: index("audit_resource_action_created_idx").on(
+      table.resourceId,
+      table.action,
+      table.createdAt,
+    ),
+    createdIdx: index("audit_created_idx").on(table.createdAt),
   }),
 );
 

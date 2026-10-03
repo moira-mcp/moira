@@ -6,7 +6,7 @@
  * Version switcher in edit mode — select historical versions (read-only) with Restore.
  */
 
-import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import React, { lazy, Suspense, useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import {
   X,
@@ -18,7 +18,7 @@ import {
   ChevronDown,
   GitCompareArrows,
 } from "lucide-react";
-import ReactMarkdown from "react-markdown";
+import { Skeleton } from "../ui/skeleton";
 import { apiClient, ApiClientError } from "../../services/api-client";
 import { Card } from "../ui/card";
 import { Button } from "../ui/button";
@@ -58,6 +58,8 @@ interface NoteInlineEditorProps {
 
 const MAX_NOTE_SIZE = 100 * 1024; // 100 KB
 const KEY_PATTERN = /^[a-zA-Z0-9_-]+$/;
+
+const ReactMarkdown = lazy(() => import("react-markdown"));
 
 export const NoteInlineEditor: React.FC<NoteInlineEditorProps> = ({
   noteKey,
@@ -424,7 +426,17 @@ export const NoteInlineEditor: React.FC<NoteInlineEditorProps> = ({
                   isViewingOlderVersion ? (
                     <pre className="font-mono text-sm whitespace-pre-wrap break-words">{value}</pre>
                   ) : (
-                    <ReactMarkdown>{value}</ReactMarkdown>
+                    <Suspense
+                      fallback={
+                        <Skeleton
+                          className="h-28 w-full"
+                          role="status"
+                          aria-label={t("common.loading")}
+                        />
+                      }
+                    >
+                      <ReactMarkdown>{value}</ReactMarkdown>
+                    </Suspense>
                   )
                 ) : (
                   <p className="text-muted-foreground italic">

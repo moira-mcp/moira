@@ -6,7 +6,7 @@
 import i18n from "@/i18n";
 
 export function formatDate(timestamp: number | string | undefined): string {
-  if (!timestamp) return "—";
+  if (timestamp === undefined || timestamp === "") return "—";
   const date = typeof timestamp === "string" ? new Date(timestamp) : new Date(timestamp);
   if (isNaN(date.getTime())) return "—";
   return date.toLocaleDateString(i18n.language || undefined, {
@@ -25,7 +25,7 @@ export function formatSize(bytes: number): string {
 }
 
 export function formatRelativeTime(timestamp: number | string | undefined): string {
-  if (!timestamp) return "—";
+  if (timestamp === undefined || timestamp === "") return "—";
   const date = typeof timestamp === "string" ? new Date(timestamp) : new Date(timestamp);
   if (isNaN(date.getTime())) return "—";
   const now = Date.now();

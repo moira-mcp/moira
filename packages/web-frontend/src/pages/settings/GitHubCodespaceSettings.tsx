@@ -12,6 +12,7 @@ import { ConfirmDialog } from "@/components/confirm-dialog";
 import { useGitHubCodespaces } from "./GitHubCodespacesData";
 import { GitHubSetupSteps } from "./GitHubSetupSteps";
 import { guideAnchor } from "../../guides/anchors";
+import { DataRegion } from "@/components/DataRegion";
 
 function statusVariant(
   state: CodespaceConnectionView["state"],
@@ -148,7 +149,7 @@ export const GitHubCodespaceSettings: React.FC = () => {
     }
   };
 
-  if (loading) {
+  if (loading && !status) {
     return (
       <Card data-testid="github-codespace-settings" {...guideAnchor("settings.github-connect")}>
         <CardContent className="flex min-h-32 items-center justify-center p-6">
@@ -158,7 +159,7 @@ export const GitHubCodespaceSettings: React.FC = () => {
     );
   }
 
-  if (loadError || !status) {
+  if (!status) {
     return (
       <Card data-testid="github-codespace-settings" {...guideAnchor("settings.github-connect")}>
         <CardContent className="space-y-4 p-6">
@@ -200,172 +201,187 @@ export const GitHubCodespaceSettings: React.FC = () => {
         </div>
       </CardHeader>
       <CardContent className="space-y-4">
-        <GitHubSetupSteps connection={status} />
+        <DataRegion
+          hasResult
+          pending={loading}
+          error={loadError ? t("pages.settings.github.loadFailed") : null}
+          onRetry={loadStatus}
+          testId="github-connection-region"
+        >
+          <GitHubSetupSteps connection={status} />
 
-        {status.state === "disabled" && (
-          <Alert>
-            <ShieldCheck aria-hidden="true" />
-            <AlertTitle>{t("pages.settings.github.disabledTitle")}</AlertTitle>
-            <AlertDescription>{t("pages.settings.github.disabledDescription")}</AlertDescription>
-          </Alert>
-        )}
+          {status.state === "disabled" && (
+            <Alert>
+              <ShieldCheck aria-hidden="true" />
+              <AlertTitle>{t("pages.settings.github.disabledTitle")}</AlertTitle>
+              <AlertDescription>{t("pages.settings.github.disabledDescription")}</AlertDescription>
+            </Alert>
+          )}
 
-        {actionableError && (
-          <Alert variant="destructive">
-            <AlertCircle aria-hidden="true" />
-            <AlertTitle>
-              {t(`pages.settings.github.errors.${status.reason ?? "UNKNOWN"}.title`)}
-            </AlertTitle>
-            <AlertDescription>
-              {t(`pages.settings.github.errors.${status.reason ?? "UNKNOWN"}.description`)}
-            </AlertDescription>
-          </Alert>
-        )}
+          {actionableError && (
+            <Alert variant="destructive">
+              <AlertCircle aria-hidden="true" />
+              <AlertTitle>
+                {t(`pages.settings.github.errors.${status.reason ?? "UNKNOWN"}.title`)}
+              </AlertTitle>
+              <AlertDescription>
+                {t(`pages.settings.github.errors.${status.reason ?? "UNKNOWN"}.description`)}
+              </AlertDescription>
+            </Alert>
+          )}
 
-        {status.account && (
-          <div className="flex flex-wrap items-center gap-2" data-testid="github-codespace-account">
-            <CheckCircle2 className="h-4 w-4 text-primary" aria-hidden="true" />
-            <span className="font-medium">@{status.account.login}</span>
-            <span className="text-sm text-muted-foreground">
-              {t("pages.settings.github.accountId", { id: status.account.id })}
-            </span>
-          </div>
-        )}
-
-        {status.state === "installation_required" && (
-          <div className="flex flex-wrap gap-2">
-            {status.installationUrl && (
-              <Button asChild>
-                <a href={status.installationUrl} rel="noreferrer">
-                  {t("pages.settings.github.install")}
-                </a>
-              </Button>
-            )}
-            <Button
-              variant="outline"
-              disabled={checkingInstallation}
-              onClick={() => void checkInstallation()}
-              data-testid="github-codespace-check-installation"
+          {status.account && (
+            <div
+              className="flex flex-wrap items-center gap-2"
+              data-testid="github-codespace-account"
             >
-              {checkingInstallation ? (
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              ) : (
-                <RefreshCw className="mr-2 h-4 w-4" aria-hidden="true" />
-              )}
-              {t("pages.settings.github.checkInstallation")}
-            </Button>
-          </div>
-        )}
+              <CheckCircle2 className="h-4 w-4 text-primary" aria-hidden="true" />
+              <span className="font-medium">@{status.account.login}</span>
+              <span className="text-sm text-muted-foreground">
+                {t("pages.settings.github.accountId", { id: status.account.id })}
+              </span>
+            </div>
+          )}
 
-        {status.state === "connected" && (
-          <div className="space-y-2">
-            <div className="flex items-center justify-between gap-3">
-              <h3 className="text-sm font-medium">{t("pages.settings.github.repositories")}</h3>
-              <div className="flex items-center gap-2">
-                <span className="text-xs text-muted-foreground">{status.repositories.length}</span>
-                {status.installationUrl && (
-                  <Button size="sm" variant="outline" asChild>
-                    <a
-                      href={status.installationUrl}
-                      rel="noreferrer"
-                      data-testid="github-codespace-add-installation"
-                    >
-                      {t("pages.settings.github.addInstallation")}
-                    </a>
-                  </Button>
-                )}
-                <Button
-                  size="sm"
-                  variant="outline"
-                  disabled={refreshingRepositories}
-                  onClick={() => void refreshRepositories()}
-                  data-testid="github-codespace-refresh-repositories"
-                >
-                  {refreshingRepositories ? (
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  ) : (
-                    <RefreshCw className="mr-2 h-4 w-4" aria-hidden="true" />
-                  )}
-                  {t("pages.settings.github.refreshRepositories")}
+          {status.state === "installation_required" && (
+            <div className="flex flex-wrap gap-2">
+              {status.installationUrl && (
+                <Button asChild>
+                  <a href={status.installationUrl} rel="noreferrer">
+                    {t("pages.settings.github.install")}
+                  </a>
                 </Button>
+              )}
+              <Button
+                variant="outline"
+                disabled={checkingInstallation}
+                onClick={() => void checkInstallation()}
+                data-testid="github-codespace-check-installation"
+              >
+                {checkingInstallation ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <RefreshCw className="mr-2 h-4 w-4" aria-hidden="true" />
+                )}
+                {t("pages.settings.github.checkInstallation")}
+              </Button>
+            </div>
+          )}
+
+          {status.state === "connected" && (
+            <div className="space-y-2">
+              <div className="flex items-center justify-between gap-3">
+                <h3 className="text-sm font-medium">{t("pages.settings.github.repositories")}</h3>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-muted-foreground">
+                    {status.repositories.length}
+                  </span>
+                  {status.installationUrl && (
+                    <Button size="sm" variant="outline" asChild>
+                      <a
+                        href={status.installationUrl}
+                        rel="noreferrer"
+                        data-testid="github-codespace-add-installation"
+                      >
+                        {t("pages.settings.github.addInstallation")}
+                      </a>
+                    </Button>
+                  )}
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={refreshingRepositories}
+                    onClick={() => void refreshRepositories()}
+                    data-testid="github-codespace-refresh-repositories"
+                  >
+                    {refreshingRepositories ? (
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    ) : (
+                      <RefreshCw className="mr-2 h-4 w-4" aria-hidden="true" />
+                    )}
+                    {t("pages.settings.github.refreshRepositories")}
+                  </Button>
+                </div>
+              </div>
+              {status.repositoriesStale && (
+                <Alert data-testid="github-codespace-repositories-stale">
+                  <AlertCircle aria-hidden="true" />
+                  <AlertTitle>{t("pages.settings.github.repositoriesStaleTitle")}</AlertTitle>
+                  <AlertDescription>
+                    {t("pages.settings.github.repositoriesStale")}
+                  </AlertDescription>
+                </Alert>
+              )}
+              <div
+                className="max-h-48 space-y-1 overflow-y-auto rounded-md border p-2"
+                data-testid="github-codespace-repositories"
+              >
+                {status.repositories.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">
+                    {t("pages.settings.github.noRepositories")}
+                  </p>
+                ) : (
+                  status.repositories.map((repository) => (
+                    <div
+                      key={repository.externalRepositoryId}
+                      className="flex items-center justify-between gap-3 rounded px-2 py-1 text-sm"
+                    >
+                      <span className="min-w-0 truncate">{repository.fullName}</span>
+                      <Badge variant="outline">
+                        {repository.private
+                          ? t("pages.settings.github.private")
+                          : t("pages.settings.github.public")}
+                      </Badge>
+                    </div>
+                  ))
+                )}
               </div>
             </div>
-            {status.repositoriesStale && (
-              <Alert data-testid="github-codespace-repositories-stale">
-                <AlertCircle aria-hidden="true" />
-                <AlertTitle>{t("pages.settings.github.repositoriesStaleTitle")}</AlertTitle>
-                <AlertDescription>{t("pages.settings.github.repositoriesStale")}</AlertDescription>
-              </Alert>
-            )}
-            <div
-              className="max-h-48 space-y-1 overflow-y-auto rounded-md border p-2"
-              data-testid="github-codespace-repositories"
-            >
-              {status.repositories.length === 0 ? (
-                <p className="text-sm text-muted-foreground">
-                  {t("pages.settings.github.noRepositories")}
-                </p>
-              ) : (
-                status.repositories.map((repository) => (
-                  <div
-                    key={repository.externalRepositoryId}
-                    className="flex items-center justify-between gap-3 rounded px-2 py-1 text-sm"
-                  >
-                    <span className="min-w-0 truncate">{repository.fullName}</span>
-                    <Badge variant="outline">
-                      {repository.private
-                        ? t("pages.settings.github.private")
-                        : t("pages.settings.github.public")}
-                    </Badge>
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
-        )}
+          )}
 
-        <div className="flex flex-wrap gap-2">
-          {status.state === "connected" && (
-            <Button
-              variant="outline"
-              onClick={updateAuthorization}
-              data-testid="github-codespace-reauthorize"
-            >
-              {t("pages.settings.github.reauthorize")}
-            </Button>
-          )}
-          {status.canConnect && status.state !== "installation_required" && (
-            <Button onClick={startAuthorization} data-testid="github-codespace-connect">
-              {status.state === "connection_required" || status.state === "disconnected"
-                ? t("pages.settings.github.connect")
-                : t("pages.settings.github.reconnect")}
-            </Button>
-          )}
-          {status.canDisconnect && !requiresExternalRevocation && (
-            <Button
-              ref={disconnectButtonRef}
-              variant="destructive"
-              disabled={disconnecting}
-              onClick={() => setConfirmDisconnect(true)}
-              data-testid="github-codespace-disconnect"
-            >
-              {disconnecting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              {t("pages.settings.github.disconnect")}
-            </Button>
-          )}
-          {requiresExternalRevocation && (
-            <Button
-              ref={externalRevocationButtonRef}
-              variant="destructive"
-              disabled={recoveringExternalRevocation}
-              onClick={() => setConfirmExternalRevocation(true)}
-              data-testid="github-codespace-confirm-external-revocation"
-            >
-              {recoveringExternalRevocation && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              {t("pages.settings.github.confirmExternalRevocationAction")}
-            </Button>
-          )}
-        </div>
+          <div className="flex flex-wrap gap-2">
+            {status.state === "connected" && (
+              <Button
+                variant="outline"
+                onClick={updateAuthorization}
+                data-testid="github-codespace-reauthorize"
+              >
+                {t("pages.settings.github.reauthorize")}
+              </Button>
+            )}
+            {status.canConnect && status.state !== "installation_required" && (
+              <Button onClick={startAuthorization} data-testid="github-codespace-connect">
+                {status.state === "connection_required" || status.state === "disconnected"
+                  ? t("pages.settings.github.connect")
+                  : t("pages.settings.github.reconnect")}
+              </Button>
+            )}
+            {status.canDisconnect && !requiresExternalRevocation && (
+              <Button
+                ref={disconnectButtonRef}
+                variant="destructive"
+                disabled={disconnecting}
+                onClick={() => setConfirmDisconnect(true)}
+                data-testid="github-codespace-disconnect"
+              >
+                {disconnecting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                {t("pages.settings.github.disconnect")}
+              </Button>
+            )}
+            {requiresExternalRevocation && (
+              <Button
+                ref={externalRevocationButtonRef}
+                variant="destructive"
+                disabled={recoveringExternalRevocation}
+                onClick={() => setConfirmExternalRevocation(true)}
+                data-testid="github-codespace-confirm-external-revocation"
+              >
+                {recoveringExternalRevocation && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                {t("pages.settings.github.confirmExternalRevocationAction")}
+              </Button>
+            )}
+          </div>
+        </DataRegion>
       </CardContent>
 
       <ConfirmDialog

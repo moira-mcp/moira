@@ -1,6 +1,17 @@
-import { beforeEach, describe, expect, it, jest } from "@jest/globals";
+import { afterEach, beforeEach, describe, expect, it, jest } from "@jest/globals";
 import express, { type NextFunction, type Request, type Response } from "express";
 import request from "supertest";
+import Database from "better-sqlite3";
+import { drizzle, type BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
+import { migrate } from "drizzle-orm/better-sqlite3/migrator";
+import path from "node:path";
+import * as schema from "../../../packages/shared/src/database/schema.js";
+import { AdminAnalyticsRepository } from "../../../packages/shared/src/database/repositories/admin-analytics-repository.js";
+import { ExecutionRepository } from "../../../packages/shared/src/database/repositories/execution-repository.js";
+import { parseUserIdSelection } from "../../../packages/shared/src/database/admin-analytics-query.js";
+
+let sqlite: Database.Database;
+let db: BetterSQLite3Database<typeof schema>;
 
 const deployment = { accountApprovalEnabled: false, adminAnalyticsEnabled: false };
 const approvalState: { approvedAt: string | null } = { approvedAt: null };
@@ -61,6 +72,12 @@ jest.unstable_mockModule("@mcp-moira/workflow-engine", () => ({
 }));
 
 jest.unstable_mockModule("@mcp-moira/shared", () => ({
+  AdminAnalyticsRepository,
+  ExecutionRepository,
+  parseUserIdSelection,
+  getDatabase: () => db,
+  workflow: schema.workflow,
+  workflowExecution: schema.workflowExecution,
   AuthorizationError: class extends Error {},
   AuditAction: {},
   createLogger: () => ({
@@ -82,7 +99,7 @@ jest.unstable_mockModule("@mcp-moira/shared", () => ({
   getLoadTestSecret: jest.fn(),
   getMcpTextService: jest.fn(),
   getRateLimitWhitelist: () => [],
-  getSqliteInstance: jest.fn(),
+  getSqliteInstance: () => sqlite,
   getUserService: () => ({ approveAccount }),
   getWorkflowReconciliationStatusSummary: jest.fn(() => reconciliationState),
   isEmailConfigured: jest.fn(),
@@ -172,6 +189,9 @@ async function mountProductionAdminRoutes(app: express.Application): Promise<voi
 
 describe("account approval route capability", () => {
   beforeEach(() => {
+    sqlite = new Database(":memory:");
+    db = drizzle(sqlite, { schema });
+    migrate(db, { migrationsFolder: path.join(process.cwd(), "packages/web-backend/drizzle") });
     deployment.accountApprovalEnabled = false;
     deployment.adminAnalyticsEnabled = false;
     broadReadsAllowed = false;
@@ -189,6 +209,9 @@ describe("account approval route capability", () => {
     listExecutions.mockClear();
     getSettingDefinitions.mockClear();
     approveAccount.mockClear();
+  });
+  afterEach(() => {
+    sqlite.close();
   });
 
   it("returns 403 in SaaS before the mutation service can change storage or audit state", async () => {
@@ -282,7 +305,6 @@ describe("account approval route capability", () => {
 
   it("serves computed statistics through the enabled production route selector", async () => {
     deployment.adminAnalyticsEnabled = true;
-    broadReadsAllowed = true;
     workflowsFixture = [{ id: "workflow-1" }, { id: "workflow-2" }];
     executionsFixture = [
       {
@@ -304,6 +326,42 @@ describe("account approval route capability", () => {
         createdAt: 200,
       },
     ];
+    db.insert(schema.user)
+      .values({
+        id: "owner",
+        email: "owner@example.test",
+        handle: "owner",
+        createdAt: "2026-01-01T00:00:00Z",
+        updatedAt: "2026-01-01T00:00:00Z",
+      })
+      .run();
+    for (const item of workflowsFixture) {
+      db.insert(schema.workflow)
+        .values({
+          id: item.id,
+          userId: "owner",
+          slug: item.id,
+          name: item.id,
+          version: "1.0.0",
+          graph: "{}",
+          createdAt: new Date(1),
+          updatedAt: new Date(1),
+        })
+        .run();
+    }
+    for (const item of executionsFixture) {
+      db.insert(schema.workflowExecution)
+        .values({
+          executionId: item.executionId,
+          workflowId: item.workflowId,
+          userId: "owner",
+          state: item.status,
+          context: "{}",
+          createdAt: new Date(item.createdAt),
+          updatedAt: new Date(item.createdAt),
+        })
+        .run();
+    }
     const app = express();
     await mountProductionAdminRoutes(app);
 

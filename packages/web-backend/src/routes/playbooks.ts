@@ -11,6 +11,7 @@ import { asyncHandler, createApiError } from "../middleware/error-middleware.js"
 import { AuthenticatedRequest } from "../types/express-types.js";
 import { getPlaybookService, collectDefinitionReferences } from "@mcp-moira/shared";
 import { DatabaseRepository } from "@mcp-moira/workflow-engine";
+import { sendConditionalRead } from "../utils/conditional-read.js";
 
 const router = Router();
 const playbooks = getPlaybookService();
@@ -57,7 +58,7 @@ router.get(
       offset: offset ? Number(offset) : undefined,
     });
 
-    res.json({ success: true, data: result });
+    sendConditionalRead(req, res, result, { scope: userId });
   }),
 );
 
@@ -197,27 +198,14 @@ router.get(
     const userId = (req as AuthenticatedRequest).userId;
     const name = req.params.name;
 
-    const running = await repository.listExecutionsWithFilters({
-      userId,
-      status: ["running"],
-      limit: 1000,
-      offset: 0,
-    });
-
-    const byWorkflow = new Map<string, number>();
-    for (const execution of running.executions) {
-      byWorkflow.set(execution.workflowId, (byWorkflow.get(execution.workflowId) ?? 0) + 1);
-    }
-
-    const inspected = [...byWorkflow.keys()].slice(0, MAX_INSPECTED_WORKFLOWS);
-    const complete = inspected.length === byWorkflow.size;
+    const running = await repository.runningCountsByWorkflow(userId, MAX_INSPECTED_WORKFLOWS);
+    const complete = running.workflows.length === running.totalWorkflows;
 
     let executions = 0;
     const workflows: { workflowId: string; name: string; executions: number }[] = [];
-    for (const workflowId of inspected) {
+    for (const { workflowId, executionCount: count } of running.workflows) {
       const graph = await repository.getWorkflowGraph(workflowId, userId);
       if (!graph || !(await definitionNames(graph, userId, userId, name))) continue;
-      const count = byWorkflow.get(workflowId) ?? 0;
       executions += count;
       workflows.push({ workflowId, name: graph.metadata?.name ?? workflowId, executions: count });
     }

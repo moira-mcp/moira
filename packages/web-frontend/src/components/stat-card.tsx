@@ -3,6 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { SparkAreaChart } from "@tremor/react";
 import { NumberTicker } from "@/components/ui/number-ticker";
 import { cn } from "@/lib/utils";
+import { CHART_COLORS } from "@/lib/chart-colors";
 
 interface StatCardProps {
   label: string;
@@ -51,7 +52,7 @@ export function StatCard({ label, value, icon: Icon, trend, className, onClick }
               categories={["value"]}
               index="index"
               className="h-8 w-20"
-              colors={["indigo"]}
+              colors={[CHART_COLORS[0]]}
             />
           )}
         </div>

@@ -3,7 +3,11 @@
  */
 
 // Auth
-export { createAuth } from "./auth/better-auth-config.js";
+export {
+  createAuth,
+  type SuccessfulRegistration,
+  type AuthRegistrationOptions,
+} from "./auth/better-auth-config.js";
 export {
   ACCOUNT_APPROVAL_REQUIRED_CODE,
   getAccountAccessDenial,

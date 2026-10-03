@@ -3,6 +3,7 @@
  * Admin view for managing all user artifacts with filters and quota management
  */
 
+import { productFetch } from "@/services/product-fetch";
 import React, { useState, useEffect, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { FileCode, BarChart3 } from "lucide-react";
@@ -18,6 +19,8 @@ import { FilterBar } from "@/components/FilterBar";
 import { DataListView } from "@/components/DataListView";
 import { ArtifactCard, type ArtifactCardData } from "@/components/cards";
 import { ConfirmDialog } from "@/components/confirm-dialog";
+import { DataRegion } from "@/components/DataRegion";
+import { useResource } from "@/hooks/useResource";
 
 interface AdminArtifactItem {
   id: string;
@@ -65,9 +68,23 @@ export const AdminArtifacts: React.FC = () => {
   const { t } = useTranslation();
   const { pageSize, containerRef, onViewModeChange } = useListPageSize(() => setCurrentPage(1));
 
-  const [artifacts, setArtifacts] = useState<AdminArtifactItem[]>([]);
-  const [stats, setStats] = useState<AdminArtifactStats | null>(null);
-  const [total, setTotal] = useState(0);
+  const [accepted, setAccepted] = useState<{
+    artifacts: AdminArtifactItem[];
+    total: number;
+    page: number;
+    pageSize: number;
+    search: string;
+    includeExpired: boolean;
+    includeDeleted: boolean;
+  } | null>(null);
+  const artifacts = accepted?.artifacts ?? [];
+  const total = accepted?.total ?? 0;
+  const statsResource = useResource<AdminArtifactStats>("admin-artifact-stats", async () => {
+    const response = await productFetch("/api/admin/artifacts/stats", { credentials: "include" });
+    if (!response.ok) throw new Error(t("admin.artifacts.errors.loadFailed"));
+    return (await response.json()).data;
+  });
+  const stats = statsResource.data;
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -80,20 +97,6 @@ export const AdminArtifacts: React.FC = () => {
 
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [selectedArtifact, setSelectedArtifact] = useState<AdminArtifactItem | null>(null);
-
-  const loadStats = useCallback(async () => {
-    try {
-      const response = await fetch("/api/admin/artifacts/stats", {
-        credentials: "include",
-      });
-      if (response.ok) {
-        const result = await response.json();
-        setStats(result.data);
-      }
-    } catch {
-      // Stats are non-critical
-    }
-  }, []);
 
   const beginRequest = useLatestRequest();
   const loadArtifacts = useCallback(async () => {
@@ -109,7 +112,7 @@ export const AdminArtifacts: React.FC = () => {
       if (includeExpired) params.append("includeExpired", "true");
       if (includeDeleted) params.append("includeDeleted", "true");
 
-      const response = await fetch(`/api/admin/artifacts?${params.toString()}`, {
+      const response = await productFetch(`/api/admin/artifacts?${params.toString()}`, {
         credentials: "include",
       });
 
@@ -119,8 +122,15 @@ export const AdminArtifacts: React.FC = () => {
 
       const result = await response.json();
       if (!isCurrent()) return;
-      setArtifacts(result.data.artifacts);
-      setTotal(result.data.total);
+      setAccepted({
+        artifacts: result.data.artifacts,
+        total: result.data.total,
+        page: currentPage,
+        pageSize,
+        search: trimmedSearch,
+        includeExpired,
+        includeDeleted,
+      });
       setError(null);
     } catch (err: unknown) {
       if (!isCurrent()) return;
@@ -133,8 +143,7 @@ export const AdminArtifacts: React.FC = () => {
 
   useEffect(() => {
     loadArtifacts();
-    loadStats();
-  }, [loadArtifacts, loadStats]);
+  }, [loadArtifacts]);
 
   useEffect(() => {
     setCurrentPage(1);
@@ -152,7 +161,7 @@ export const AdminArtifacts: React.FC = () => {
     if (!selectedArtifact) return;
 
     try {
-      const response = await fetch(`/api/admin/artifacts/${selectedArtifact.uuid}`, {
+      const response = await productFetch(`/api/admin/artifacts/${selectedArtifact.uuid}`, {
         method: "DELETE",
         credentials: "include",
       });
@@ -164,10 +173,11 @@ export const AdminArtifacts: React.FC = () => {
       setDeleteDialogOpen(false);
       setSelectedArtifact(null);
       loadArtifacts();
-      loadStats();
+      void statsResource.refresh();
     } catch (err) {
       const message = err instanceof Error ? err.message : t("admin.artifacts.errors.deleteFailed");
       toast.error(message);
+      throw err;
     }
   };
 
@@ -178,81 +188,68 @@ export const AdminArtifacts: React.FC = () => {
     setCurrentPage(1);
   };
 
-  const totalPages = Math.ceil(total / pageSize);
-
-  if (loading && artifacts.length === 0) {
-    return (
-      <PageShell
-        title={t("admin.artifacts.title")}
-        description={t("admin.artifacts.subtitle")}
-        loading
-      />
-    );
-  }
-
-  if (error && artifacts.length === 0) {
-    return (
-      <PageShell
-        title={t("admin.artifacts.title")}
-        error={error}
-        onRetry={loadArtifacts}
-        retryLabel={t("admin.artifacts.retry")}
-      />
-    );
-  }
+  const totalPages = Math.ceil(total / (accepted?.pageSize ?? pageSize));
 
   return (
     <PageShell title={t("admin.artifacts.title")} description={t("admin.artifacts.subtitle")}>
       {/* Stats Cards */}
-      {stats && (
-        <div className="grid grid-cols-1 md:grid-cols-5 gap-4 mb-6">
-          <Card>
-            <CardContent className="pt-4 pb-4">
-              <div className="flex items-center gap-2">
-                <BarChart3 className="h-4 w-4 text-muted-foreground" />
-                <span className="text-sm text-muted-foreground">
-                  {t("admin.artifacts.stats.totalArtifacts")}
-                </span>
-              </div>
-              <div className="text-2xl font-bold mt-1">{stats.totalArtifacts}</div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="pt-4 pb-4">
-              <div className="text-sm text-muted-foreground">
-                {t("admin.artifacts.stats.totalSize")}
-              </div>
-              <div className="text-2xl font-bold mt-1">{formatSize(stats.totalSize)}</div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="pt-4 pb-4">
-              <div className="text-sm text-muted-foreground">
-                {t("admin.artifacts.stats.totalUsers")}
-              </div>
-              <div className="text-2xl font-bold mt-1">{stats.totalUsers}</div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="pt-4 pb-4">
-              <div className="text-sm text-muted-foreground">
-                {t("admin.artifacts.stats.expiredArtifacts")}
-              </div>
-              <div className="text-2xl font-bold mt-1 text-warning">{stats.expiredArtifacts}</div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="pt-4 pb-4">
-              <div className="text-sm text-muted-foreground">
-                {t("admin.artifacts.stats.deletedArtifacts")}
-              </div>
-              <div className="text-2xl font-bold mt-1 text-destructive">
-                {stats.deletedArtifacts}
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-      )}
+      <DataRegion
+        hasResult={stats !== undefined}
+        pending={statsResource.pending}
+        error={statsResource.error}
+        onRetry={statsResource.refresh}
+        testId="admin-artifact-stats-region"
+      >
+        {stats && (
+          <div className="grid grid-cols-1 md:grid-cols-5 gap-4 mb-6">
+            <Card>
+              <CardContent className="pt-4 pb-4">
+                <div className="flex items-center gap-2">
+                  <BarChart3 className="h-4 w-4 text-muted-foreground" />
+                  <span className="text-sm text-muted-foreground">
+                    {t("admin.artifacts.stats.totalArtifacts")}
+                  </span>
+                </div>
+                <div className="text-2xl font-bold mt-1">{stats.totalArtifacts}</div>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="pt-4 pb-4">
+                <div className="text-sm text-muted-foreground">
+                  {t("admin.artifacts.stats.totalSize")}
+                </div>
+                <div className="text-2xl font-bold mt-1">{formatSize(stats.totalSize)}</div>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="pt-4 pb-4">
+                <div className="text-sm text-muted-foreground">
+                  {t("admin.artifacts.stats.totalUsers")}
+                </div>
+                <div className="text-2xl font-bold mt-1">{stats.totalUsers}</div>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="pt-4 pb-4">
+                <div className="text-sm text-muted-foreground">
+                  {t("admin.artifacts.stats.expiredArtifacts")}
+                </div>
+                <div className="text-2xl font-bold mt-1 text-warning">{stats.expiredArtifacts}</div>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="pt-4 pb-4">
+                <div className="text-sm text-muted-foreground">
+                  {t("admin.artifacts.stats.deletedArtifacts")}
+                </div>
+                <div className="text-2xl font-bold mt-1 text-destructive">
+                  {stats.deletedArtifacts}
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        )}
+      </DataRegion>
 
       <FilterBar
         search={userSearchInput}
@@ -303,15 +300,32 @@ export const AdminArtifacts: React.FC = () => {
         keyExtractor={(a) => a.uuid}
         storageKey="admin-artifacts-view-mode"
         loading={loading}
+        hasResult={accepted !== null}
+        error={error}
+        onRetry={loadArtifacts}
+        onRefresh={loadArtifacts}
+        resultScope={
+          accepted && (
+            <span>
+              {t("common.pagination.page", {
+                current: accepted.page,
+                total: Math.max(1, totalPages),
+              })}
+              {accepted.search && ` · ${t("common.filters.user")}: ${accepted.search}`}
+              {accepted.includeExpired && ` · ${t("admin.artifacts.filters.includeExpired")}`}
+              {accepted.includeDeleted && ` · ${t("admin.artifacts.filters.includeDeleted")}`}
+            </span>
+          )
+        }
         containerRef={containerRef}
         emptyIcon={FileCode}
         emptyTitle={t("admin.artifacts.noArtifacts")}
         pagination={{
           mode: "total",
-          currentPage,
+          currentPage: accepted?.page ?? currentPage,
           totalPages,
           totalItems: total,
-          pageSize,
+          pageSize: accepted?.pageSize ?? pageSize,
           onPageChange: setCurrentPage,
         }}
         className="flex-1 min-h-0 flex flex-col"

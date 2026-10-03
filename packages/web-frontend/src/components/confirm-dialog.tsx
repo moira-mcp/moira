@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
+import React, { useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
+import { useTranslation } from "react-i18next";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -18,6 +19,7 @@ interface ConfirmDialogProps {
   onOpenChange: (open: boolean) => void;
   title: string;
   description: ReactNode;
+  children?: ReactNode;
   confirmLabel?: string;
   cancelLabel?: string;
   variant?: "default" | "destructive";
@@ -31,13 +33,15 @@ export function ConfirmDialog({
   onOpenChange,
   title,
   description,
-  confirmLabel = "Confirm",
-  cancelLabel = "Cancel",
+  children,
+  confirmLabel,
+  cancelLabel,
   variant = "default",
   onConfirm,
   returnFocusRef,
   onReturnFocus,
 }: ConfirmDialogProps) {
+  const { t } = useTranslation();
   const [loading, setLoading] = useState(false);
   const wasOpen = useRef(open);
 
@@ -67,10 +71,15 @@ export function ConfirmDialog({
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>{title}</AlertDialogTitle>
-          <AlertDialogDescription>{description}</AlertDialogDescription>
+          <AlertDialogDescription asChild>
+            <div>{description}</div>
+          </AlertDialogDescription>
         </AlertDialogHeader>
+        {children}
         <AlertDialogFooter>
-          <AlertDialogCancel disabled={loading}>{cancelLabel}</AlertDialogCancel>
+          <AlertDialogCancel disabled={loading}>
+            {cancelLabel ?? t("common.cancel")}
+          </AlertDialogCancel>
           <AlertDialogAction
             onClick={(e) => {
               e.preventDefault();
@@ -80,7 +89,7 @@ export function ConfirmDialog({
             className={cn(variant === "destructive" && buttonVariants({ variant: "destructive" }))}
           >
             {loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-            {confirmLabel}
+            {confirmLabel ?? t("common.confirm")}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>

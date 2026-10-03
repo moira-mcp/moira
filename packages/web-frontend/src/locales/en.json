@@ -1313,6 +1313,13 @@
         }
       },
       "definitions": {
+        "system": {
+          "notify_admins_on_registration": {
+            "label": "Notify administrators of new registrations",
+            "description": "Send a Telegram message after a new account registers successfully.",
+            "help": "This installation-wide preference uses each eligible administrator’s personal Telegram settings. Set up the bot and chat and enable Telegram in Settings → Notifications. Turning this off stops registration messages without changing personal notification settings."
+          }
+        },
         "telegram": {
           "bot_token": {
             "label": "Bot token",
@@ -1908,6 +1915,40 @@
     }
   },
   "admin": {
+    "settingsRegions": {
+      "systemCategory": "System configuration",
+      "messagesCategory": "Messages and validation",
+      "schemaFieldChanged": "Changed {{field}}",
+      "navLabel": "Admin settings sections",
+      "definitionsDescription": "Manage setting definitions and import or export their schema.",
+      "valuesDescription": "Edit global values, agent prompts and their history.",
+      "maintenanceDescription": "Back up the database or reclaim unused space.",
+      "codespacesDescription": "Inspect readiness and control codespace availability.",
+      "loadFailed": "Failed to load this setting.",
+      "saveFailed": "Failed to save. Your changes are preserved.",
+      "resetFailed": "Failed to reset this setting.",
+      "importFailed": "Failed to import setting values.",
+      "exportFailed": "Failed to export setting values.",
+      "invalidImport": "Invalid import file.",
+      "definitionLoadFailed": "Failed to load setting definitions.",
+      "createFailed": "Failed to create the definition.",
+      "deleteFailed": "Failed to delete the definition.",
+      "schemaImportFailed": "Failed to import the schema.",
+      "schemaExportFailed": "Failed to export the schema.",
+      "systemPrompt": "System prompt",
+      "systemReminder": "System reminder",
+      "promptDefaultDescription": "Default prompt used by all agents",
+      "promptAgentDescription": "Override for all {{vendor}} models",
+      "promptModelDescription": "Override for {{vendor}} / {{model}}",
+      "overrideActive": "Override active",
+      "usingFallback": "Using fallback",
+      "scope": "Scope",
+      "model": "Model",
+      "allModels": "All models",
+      "notApplicable": "Not applicable",
+      "defaultPlaceholder": "Enter the default prompt…",
+      "fallbackPlaceholder": "Leave empty to use the parent value…"
+    },
     "panel": {
       "title": "Admin Panel",
       "tabs": {
@@ -2378,6 +2419,7 @@
         "confirmRevokeAll": "Revoke all OAuth tokens for this user? All their OAuth applications will lose access."
       },
       "artifactQuota": {
+        "invalidValue": "Enter a non-negative number.",
         "title": "Artifact Quota",
         "storage": "Storage",
         "files": "Files",
@@ -2415,6 +2457,7 @@
         "selectActions": "Select actions...",
         "selected": "{{count}} selected",
         "searchActions": "Search actions...",
+        "noActions": "No actions found.",
         "resource": "Resource",
         "resourcePlaceholder": "e.g. workflow, user",
         "source": "Source",
@@ -2626,6 +2669,28 @@
       }
     },
     "monitoringTest": {
+      "events": {
+        "reactPending": "Triggering React error…",
+        "windowTriggered": "Window error triggered; check the console.",
+        "promiseTriggered": "Promise rejection triggered; check the console.",
+        "apiPending": "Triggering API error…",
+        "apiUnexpectedSuccess": "Expected a test error (500), but the request succeeded.",
+        "apiExpectedError": "Expected test error received (500).",
+        "apiFailed": "The expected API test error was not confirmed.",
+        "slowPending": "Starting a slow request ({{ms}} ms)…",
+        "slowCompleted": "Slow request completed in {{ms}} ms.",
+        "slowFailed": "Slow request failed.",
+        "logsPending": "Generating logs at all levels…",
+        "logsCompleted": "Generated {{count}} log entries.",
+        "logsFailed": "Failed to generate logs.",
+        "workflowPending": "Requesting workflow simulation…",
+        "workflowCompleted": "Workflow start simulation logged; no workflow was started.",
+        "workflowFailed": "Workflow simulation failed.",
+        "mcpPending": "Simulating an MCP tool call…",
+        "mcpCompletedSuccess": "MCP success simulation completed in {{ms}} ms.",
+        "mcpCompletedError": "MCP error simulation completed in {{ms}} ms.",
+        "mcpFailed": "Failed to simulate an MCP call."
+      },
       "title": "Monitoring Test",
       "description": "Generate test events for validating the monitoring pipeline. Each button triggers events that should appear in logs, metrics, and Grafana dashboards.",
       "loading": "Loading...",
@@ -2656,8 +2721,8 @@
       },
       "workflowTest": {
         "title": "Workflow Execution",
-        "description": "Test workflow execution metrics (for validation after Etap 4)",
-        "startWorkflow": "Start Test Workflow"
+        "description": "Log a workflow start simulation to check the monitoring pipeline. No workflow is started.",
+        "startWorkflow": "Log workflow simulation"
       },
       "mcpTest": {
         "title": "MCP Tool Calls",
@@ -3092,6 +3157,14 @@
     }
   },
   "common": {
+    "confirm": "Confirm",
+    "dataRegion": {
+      "loading": "Loading…",
+      "updating": "Updating; showing the last loaded results.",
+      "retry": "Retry",
+      "previousResult": "Showing the last loaded results.",
+      "refresh": "Refresh"
+    },
     "save": "Save",
     "saving": "Saving...",
     "cancel": "Cancel",

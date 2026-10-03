@@ -266,19 +266,31 @@ export class UserCommunicationService {
     userId: string,
     repository: IDataRepository,
   ): Promise<UserCommunicationResult | null> {
+    return this.deliverChannel(
+      channelId,
+      {
+        userId,
+        text: "Test notification from MCP Moira.",
+        format: "plain",
+        purpose: "notification",
+      },
+      repository,
+    );
+  }
+
+  /** Deliver through one registered channel with the same admission as ordinary notifications. */
+  async deliverChannel(
+    channelId: string,
+    request: UserCommunicationRequest,
+    repository: IDataRepository,
+  ): Promise<UserCommunicationResult | null> {
     const adapter = this.registry.get(channelId);
     if (!adapter) return null;
-    const request: UserCommunicationRequest = {
-      userId,
-      text: "Test notification from MCP Moira.",
-      format: "plain",
-      purpose: "notification",
-    };
     this.validateRequest(request);
     const configuration: CommunicationConfigurationResolver = {
-      get: <T>(key: string) => repository.getSetting<T>(userId, key),
+      get: <T>(key: string) => repository.getSetting<T>(request.userId, key),
     };
-    const availability = await this.resolveAvailability(adapter, configuration, userId);
+    const availability = await this.resolveAvailability(adapter, configuration, request.userId);
     if ("result" in availability) return this.aggregate([availability.result], 0, 0);
     if (!availability.configured) {
       return this.aggregate([{ channelId, status: "not_configured" }], 0, 0);
@@ -288,10 +300,12 @@ export class UserCommunicationService {
       {
         text: request.text,
         format: request.format,
+        silent: request.silent,
+        attachment: request.attachment,
         purpose: request.purpose,
       },
       configuration,
-      userId,
+      request.userId,
     );
     return this.aggregate([result], 1, this.supports(adapter, request) ? 1 : 0);
   }

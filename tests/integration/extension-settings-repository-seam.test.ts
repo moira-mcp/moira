@@ -7,7 +7,7 @@
  * only, which is exactly what "the definitions seam is closed and the value seam is not" looks like.
  */
 
-import { describe, test, expect, beforeAll, beforeEach, afterAll } from "@jest/globals";
+import { describe, test, expect, beforeAll, beforeEach, afterAll, jest } from "@jest/globals";
 import { DatabaseRepository } from "@mcp-moira/workflow-engine";
 import {
   ExtensionRegistry,
@@ -471,11 +471,19 @@ describe("DatabaseRepository serves extension settings on both seams", () => {
     const sqlite = getSqliteInstance();
     sqlite.prepare("DELETE FROM auditLog WHERE resourceId = ?").run("seam-messenger.token");
 
-    await repository.setSetting(userId, "seam-messenger.token", "audited-value");
-    await repository.deleteUserSettingValue(userId, "seam-messenger.token");
+    // Both operations can legitimately be recorded in the same millisecond.
+    jest.useFakeTimers({ now: Date.parse("2026-09-30T12:00:00.000Z") });
+    try {
+      await repository.setSetting(userId, "seam-messenger.token", "audited-value");
+      await repository.deleteUserSettingValue(userId, "seam-messenger.token");
+    } finally {
+      jest.useRealTimers();
+    }
 
     const entries = sqlite
-      .prepare("SELECT action, changes FROM auditLog WHERE resourceId = ? ORDER BY createdAt")
+      .prepare(
+        "SELECT action, changes FROM auditLog WHERE resourceId = ? ORDER BY createdAt, rowid",
+      )
       .all("seam-messenger.token") as Array<{ action: string; changes: string | null }>;
 
     expect(entries.map((entry) => entry.action)).toEqual(["settings:set", "settings:delete"]);
@@ -512,5 +520,33 @@ describe("DatabaseRepository serves extension settings on both seams", () => {
     const builtIn = await repository.getSettingDefinition("telegram.enabled");
     expect(builtIn).not.toBeNull();
     expect(builtIn!.source).toBeUndefined();
+  });
+
+  test("one bulk snapshot respects declaration precedence, present null and browser secret exposure", async () => {
+    const sqlite = getSqliteInstance();
+    const key = "seam-messenger.payload";
+    // A legacy built-in row must not resurrect a value when the active declaration is unset.
+    sqlite
+      .prepare(
+        "INSERT INTO settingDefinition (key,type,category,label,defaultValue,createdAt,updatedAt) VALUES (?, 'string', 'general', 'Legacy shadow', 'wrong fallback', 1, 1)",
+      )
+      .run(key);
+    try {
+      expect(await repository.getSettings(userId)).not.toHaveProperty([key]);
+      expect(await repository.getSettings(userId, "general")).not.toHaveProperty([key]);
+      await repository.setSetting(userId, key, null);
+      expect(await repository.getSettings(userId)).toHaveProperty([key], null);
+      expect(await repository.getSettingsForApi(userId)).toHaveProperty([key], null);
+      expect(await repository.getSettingsForBrowser(userId)).toHaveProperty([key], null);
+      await repository.setSetting(userId, "seam-messenger.token", "browser-private-token");
+      const browser = await repository.getSettingsForBrowser(userId);
+      expect(browser["seam-messenger.token"]).toEqual(expect.stringMatching(/oken$/));
+      expect(JSON.stringify(browser)).not.toContain("browser-private-token");
+      expect((await repository.getSettings(userId))["seam-messenger.token"]).toBe(
+        "browser-private-token",
+      );
+    } finally {
+      sqlite.prepare("DELETE FROM settingDefinition WHERE key = ?").run(key);
+    }
   });
 });

@@ -95,20 +95,8 @@ const config = {
   optimization: {
     splitChunks: {
       chunks: "all",
-      cacheGroups: {
-        vendor: {
-          test: /[\\/]node_modules[\\/]/,
-          name: "vendors",
-          priority: 10,
-          chunks: "all",
-        },
-        reactflow: {
-          test: /[\\/]node_modules[\\/]@xyflow[\\/]/,
-          name: "reactflow",
-          priority: 20,
-          chunks: "all",
-        },
-      },
+      // Default groups partition by actual consumers; one fixed vendor name merges
+      // route-only dependencies back into the initial application download.
     },
   },
 };

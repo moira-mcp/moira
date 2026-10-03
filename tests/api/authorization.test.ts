@@ -91,8 +91,8 @@ describe("API Authorization", () => {
     });
 
     // User API
-    test("GET /api/user/info returns 401 without auth", async () => {
-      const response = await fetch(`${BASE_URL}/api/user/info`);
+    test("GET /api/user/me returns 401 without auth", async () => {
+      const response = await fetch(`${BASE_URL}/api/user/me`);
       expect(response.status).toBe(401);
     });
 
@@ -101,17 +101,17 @@ describe("API Authorization", () => {
       expect(response.status).toBe(401);
     });
 
-    test("PUT /api/user/profile returns 401 without auth", async () => {
+    test("PATCH /api/user/profile returns 401 without auth", async () => {
       const response = await fetch(`${BASE_URL}/api/user/profile`, {
-        method: "PUT",
+        method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({}),
       });
       expect(response.status).toBe(401);
     });
 
-    test("GET /api/user/account-status returns 401 without auth", async () => {
-      const response = await fetch(`${BASE_URL}/api/user/account-status`);
+    test("GET /api/user/handle returns 401 without auth", async () => {
+      const response = await fetch(`${BASE_URL}/api/user/handle`);
       expect(response.status).toBe(401);
     });
 

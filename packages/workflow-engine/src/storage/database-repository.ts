@@ -26,6 +26,7 @@ import {
   type ExecutionListResult,
   type WorkflowFilter,
   type WorkflowListResult,
+  type WorkflowSummaryListResult,
   type AdminWorkflowFilter,
   type AdminWorkflowListResult,
   type ExecutionError,
@@ -57,7 +58,7 @@ import {
   mergeSettingDefinitions,
   prepareExtensionSettingValue,
 } from "../extensions/extension-settings.js";
-import { maskEncryptedValue } from "../utils/encryption.js";
+import { maskEncryptedValue, decryptValue } from "../utils/encryption.js";
 
 function convertSettingValue(raw: string, type: SettingDefinition["type"]): unknown {
   switch (type) {
@@ -122,6 +123,10 @@ export class DatabaseRepository implements IDataRepository {
 
   async listWorkflowsWithFilters(filter: WorkflowFilter): Promise<WorkflowListResult> {
     return await this.workflowRepo.listWithFilters(filter);
+  }
+
+  async listWorkflowSummaries(filter: WorkflowFilter): Promise<WorkflowSummaryListResult> {
+    return this.workflowRepo.listSummaries(filter);
   }
 
   async getWorkflowGraph(workflowId: string, userId: string): Promise<WorkflowGraph | null> {
@@ -221,6 +226,8 @@ export class DatabaseRepository implements IDataRepository {
 
   async listAllDeletedWorkflowsPaginated(filter: {
     search?: string;
+    fromDate?: number;
+    toDate?: number;
     sort?: "name" | "deletedAt";
     sortOrder?: "asc" | "desc";
     limit?: number;
@@ -287,6 +294,10 @@ export class DatabaseRepository implements IDataRepository {
     limit: number,
   ): Promise<Array<{ workflowId: string; runs: number; lastRunAt: number }>> {
     return await this.executionRepo.countRunsByWorkflow(userId, limit);
+  }
+
+  async runningCountsByWorkflow(userId: string, limit = 200) {
+    return this.executionRepo.runningCountsByWorkflow(userId, limit);
   }
 
   async deleteExecution(executionId: string): Promise<void> {
@@ -593,74 +604,54 @@ export class DatabaseRepository implements IDataRepository {
     await this.settingsService.set(userId, key, value);
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  async getSettings(userId: string, category?: string): Promise<Record<string, any>> {
-    const stored = await this.settingsRepo.getSettings(userId, category);
-    return { ...stored, ...(await this.extensionSettingsForInternalUse(userId, category)) };
+  async getSettings(userId: string, category?: string): Promise<Record<string, unknown>> {
+    return this.readSettingsProjection(userId, category, "internal");
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  async getSettingsForApi(userId: string, category?: string): Promise<Record<string, any>> {
-    const stored = await this.settingsRepo.getSettingsForApi(userId, category);
-    return { ...stored, ...(await this.extensionSettingsForApi(userId, category)) };
+  async getSettingsForApi(userId: string, category?: string): Promise<Record<string, unknown>> {
+    return this.readSettingsProjection(userId, category, "api");
   }
 
-  /** Decrypted typed values for trusted in-process consumers. */
-  private async extensionSettingsForInternalUse(
+  /** Browser projection reuses the same winning source snapshot, with its existing secret mask. */
+  async getSettingsForBrowser(userId: string, category?: string): Promise<Record<string, unknown>> {
+    return this.readSettingsProjection(userId, category, "browser");
+  }
+
+  private async readSettingsProjection(
     userId: string,
-    category?: string,
+    category: string | undefined,
+    exposure: "internal" | "api" | "browser",
   ): Promise<Record<string, unknown>> {
-    const declarations = extensionSettingDefinitions().filter(
-      (definition) => category === undefined || definition.category === category,
+    const declared = extensionSettingDefinitions();
+    const declaredKeys = new Set(declared.map((definition) => definition.key));
+    const [builtIn, builtInRows, extensionRows] = await Promise.all([
+      this.settingsRepo.getSettingDefinitions(category),
+      this.settingsRepo.listValues(userId),
+      this.extensionSettingsRepo.listValues(userId),
+    ]);
+    const visible = (definition: SettingDefinition) =>
+      exposure !== "browser" || !definition.adminOnly;
+    const result = this.settingsRepo.projectValues(
+      builtIn.filter((definition) => !declaredKeys.has(definition.key) && visible(definition)),
+      builtInRows,
+      exposure,
     );
-    const values: Record<string, unknown> = {};
-    for (const definition of declarations) {
-      const raw = await this.extensionSettingsRepo.getRawValue(userId, definition.key);
-      const hasEffectiveValue =
-        raw !== null || (definition.defaultValue !== null && definition.defaultValue !== undefined);
-      if (!hasEffectiveValue) continue;
-      const value = await this.getSetting(userId, definition.key);
-      // A stored/default JSON `null` is a value, while no row and no default is absence. Checking
-      // the source separately preserves that distinction even though getSetting uses null as its
-      // general not-found sentinel.
-      values[definition.key] = value;
-    }
-    return values;
-  }
-
-  /**
-   * Extension settings as a consumer-facing map: a set encrypted value appears as a mask of itself,
-   * never as plaintext. The mask is of the stored value, so "set" and "not set" stay distinguishable
-   * — an empty answer for a filled secret would read as an unfilled setting.
-   */
-  private async extensionSettingsForApi(
-    userId: string,
-    category?: string,
-  ): Promise<Record<string, unknown>> {
-    const declarations = extensionSettingDefinitions().filter(
-      (definition) => category === undefined || definition.category === category,
-    );
-    if (declarations.length === 0) return {};
-
-    const values: Record<string, unknown> = {};
-    for (const definition of declarations) {
-      const raw = await this.extensionSettingsRepo.getRawValue(userId, definition.key);
-      if (definition.type === "encrypted") {
-        // Match the built-in settings contract: only a persisted encrypted value is exposed, and
-        // it is exposed as a mask. A manifest default must never become plaintext in an API/MCP
-        // response merely because no user row exists yet.
-        if (raw !== null) values[definition.key] = maskEncryptedValue(raw);
+    const stored = new Map(extensionRows.map((row) => [row.settingKey, row]));
+    for (const definition of declared) {
+      if ((category !== undefined && definition.category !== category) || !visible(definition))
+        continue;
+      const row = stored.get(definition.key);
+      if (definition.type === "encrypted" && exposure !== "internal") {
+        if (row) result[definition.key] = maskEncryptedValue(row.value);
         continue;
       }
-      if (raw === null) {
-        if (definition.defaultValue !== null && definition.defaultValue !== undefined) {
-          values[definition.key] = convertSettingValue(definition.defaultValue, definition.type);
-        }
-        continue;
-      }
-      values[definition.key] = convertSettingValue(raw, definition.type);
+      // A declaration wins even when absent; JSON null and empty defaults are actual values.
+      const raw = row?.value ?? definition.defaultValue;
+      if (raw === null || raw === undefined) continue;
+      const effective = exposure === "internal" && row?.encrypted ? decryptValue(raw) : raw;
+      result[definition.key] = convertSettingValue(effective, definition.type);
     }
-    return values;
+    return result;
   }
 
   async getSettingDefinition(key: string): Promise<SettingDefinition | null> {

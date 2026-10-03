@@ -17,16 +17,14 @@ const router = Router();
 // Get UserService for operations with automatic audit
 const userService = getUserService();
 
-// Apply middleware
-router.use(apiLimiter);
-router.use(requireAuth);
-
 /**
  * GET /api/user/oauth-consents
  * Get paginated list of active OAuth consents with client info
  */
 router.get(
   "/oauth-consents",
+  apiLimiter,
+  requireAuth,
   asyncHandler(async (req, res) => {
     const userId = (req as AuthenticatedRequest).userId;
     const { search, sort, sortOrder, limit, offset } = req.query;
@@ -65,6 +63,8 @@ router.get(
  */
 router.delete(
   "/oauth-consents/:id",
+  apiLimiter,
+  requireAuth,
   asyncHandler(async (req, res) => {
     const userId = (req as unknown as AuthenticatedRequest).userId;
     const consentId = req.params.id;
@@ -90,6 +90,8 @@ router.delete(
  */
 router.get(
   "/sessions",
+  apiLimiter,
+  requireAuth,
   asyncHandler(async (req, res) => {
     const userId = (req as AuthenticatedRequest).userId;
     const currentToken = (req as AuthenticatedRequest).session?.token;
@@ -132,6 +134,8 @@ router.get(
  */
 router.delete(
   "/sessions/:sessionId",
+  apiLimiter,
+  requireAuth,
   asyncHandler(async (req, res) => {
     const userId = (req as unknown as AuthenticatedRequest).userId;
     const sessionId = req.params.sessionId;

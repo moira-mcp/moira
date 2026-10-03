@@ -5,15 +5,20 @@
  * down all artifacts of a user.
  */
 
-import React, { useState, useEffect, useCallback } from "react";
+import { productFetch } from "@/services/product-fetch";
+import React, { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Flag, ExternalLink, ShieldX, Ban } from "lucide-react";
-import { Card, CardContent } from "../components/ui/card";
-import { Button } from "../components/ui/button";
+import { Flag, ExternalLink, ShieldX, Ban, RotateCcw } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { Badge } from "../components/ui/badge";
 import { toast } from "sonner";
 import { PageShell } from "@/components/PageShell";
 import { ConfirmDialog } from "@/components/confirm-dialog";
+import { DataListView } from "@/components/DataListView";
+import { CardShell } from "@/components/cards/CardShell";
+import { useResource } from "@/hooks/useResource";
+import { useListPageSize } from "@/hooks/useListPageSize";
+import { useReadOwnerGuard } from "@/auth/ReadScopeBoundary";
 
 interface ReportedArtifact {
   uuid: string;
@@ -35,45 +40,48 @@ type PendingAction =
 export const AdminReportedArtifacts: React.FC = () => {
   const { t } = useTranslation();
 
-  const [artifacts, setArtifacts] = useState<ReportedArtifact[]>([]);
-  const [total, setTotal] = useState(0);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [page, setPage] = useState(1);
+  const { pageSize, containerRef, onViewModeChange } = useListPageSize(() => setPage(1));
   const [pending, setPending] = useState<PendingAction | null>(null);
+  const guardOwner = useReadOwnerGuard();
 
-  const load = useCallback(async () => {
-    try {
-      setLoading(true);
-      const response = await fetch("/api/admin/artifacts/reported?limit=100", {
-        credentials: "include",
-      });
+  const resource = useResource(JSON.stringify({ page, pageSize }), async (key) => {
+    const requested = JSON.parse(key) as { page: number; pageSize: number };
+    async function read(targetPage: number) {
+      const response = await productFetch(
+        `/api/admin/artifacts/reported?limit=${requested.pageSize}&offset=${(targetPage - 1) * requested.pageSize}`,
+        {
+          credentials: "include",
+        },
+      );
       if (!response.ok) {
         throw new Error(t("admin.reportedArtifacts.errors.loadFailed"));
       }
       const result = await response.json();
-      setArtifacts(result.data.artifacts);
-      setTotal(result.data.total);
-      setError(null);
-    } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : t("admin.reportedArtifacts.errors.loadFailed"));
-    } finally {
-      setLoading(false);
+      return result.data as { artifacts: ReportedArtifact[]; total: number };
     }
-  }, [t]);
-
-  useEffect(() => {
-    load();
-  }, [load]);
+    let data = await read(requested.page);
+    const acceptedPage = Math.min(
+      requested.page,
+      Math.max(1, Math.ceil(data.total / requested.pageSize)),
+    );
+    if (acceptedPage !== requested.page) data = await read(acceptedPage);
+    return { ...data, page: acceptedPage, pageSize: requested.pageSize };
+  });
+  const accepted = resource.data;
+  const artifacts = accepted?.artifacts ?? [];
+  const total = accepted?.total ?? 0;
 
   const handleConfirm = async () => {
     if (!pending) return;
+    const isCurrentOwner = guardOwner();
     const reason = t("admin.reportedArtifacts.defaultReason");
     try {
       const url =
         pending.kind === "takedown"
           ? `/api/admin/artifacts/${pending.artifact.uuid}/takedown`
           : `/api/admin/users/${pending.artifact.userId}/artifacts/takedown`;
-      const response = await fetch(url, {
+      const response = await productFetch(url, {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
@@ -82,109 +90,104 @@ export const AdminReportedArtifacts: React.FC = () => {
       if (!response.ok) {
         throw new Error(t("admin.reportedArtifacts.errors.takedownFailed"));
       }
+      if (!isCurrentOwner()) return;
       toast.success(t("admin.reportedArtifacts.takedownSuccess"));
       setPending(null);
-      load();
+      await resource.refresh();
     } catch (err) {
-      toast.error(
-        err instanceof Error ? err.message : t("admin.reportedArtifacts.errors.takedownFailed"),
-      );
+      if (isCurrentOwner())
+        toast.error(
+          err instanceof Error ? err.message : t("admin.reportedArtifacts.errors.takedownFailed"),
+        );
+      throw err;
     }
   };
-
-  if (loading && artifacts.length === 0) {
-    return (
-      <PageShell
-        title={t("admin.reportedArtifacts.title")}
-        description={t("admin.reportedArtifacts.subtitle")}
-        loading
-      />
-    );
-  }
-
-  if (error && artifacts.length === 0) {
-    return (
-      <PageShell
-        title={t("admin.reportedArtifacts.title")}
-        error={error}
-        onRetry={load}
-        retryLabel={t("admin.reportedArtifacts.retry")}
-      />
-    );
-  }
 
   return (
     <PageShell
       title={t("admin.reportedArtifacts.title")}
       description={t("admin.reportedArtifacts.subtitle")}
     >
-      <div className="mb-4 text-sm text-muted-foreground" data-testid="reported-count">
-        {t("admin.reportedArtifacts.resultsCount", { count: total })}
-      </div>
-
-      {artifacts.length === 0 ? (
-        <Card>
-          <CardContent className="py-12 text-center text-muted-foreground">
-            <Flag className="h-8 w-8 mx-auto mb-3 opacity-50" />
-            {t("admin.reportedArtifacts.noReports")}
-          </CardContent>
-        </Card>
-      ) : (
-        <div className="flex flex-col gap-3">
-          {artifacts.map((a) => (
-            <Card key={a.uuid} data-testid={`reported-artifact-${a.uuid}`}>
-              <CardContent className="pt-4 pb-4 flex items-center justify-between gap-4 flex-wrap">
-                <div className="min-w-0">
-                  <div className="flex items-center gap-2">
-                    <span className="font-medium truncate">{a.name}</span>
-                    <Badge variant="destructive" className="gap-1">
-                      <Flag className="h-3 w-3" />
-                      {a.reportCount}
-                    </Badge>
-                    {a.takenDown && (
-                      <Badge variant="outline" className="text-destructive border-destructive">
-                        {t("admin.reportedArtifacts.takenDownBadge")}
-                      </Badge>
-                    )}
-                  </div>
-                  <div className="text-xs text-muted-foreground mt-1 truncate">
-                    {t("admin.reportedArtifacts.owner")}: {a.userId} · {a.uuid}
-                  </div>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => window.open(`/static/${a.uuid}.html`, "_blank")}
-                  >
-                    <ExternalLink className="h-4 w-4 mr-1" />
-                    {t("admin.reportedArtifacts.actions.preview")}
-                  </Button>
-                  <Button
-                    variant="destructive"
-                    size="sm"
-                    disabled={a.takenDown}
-                    onClick={() => setPending({ kind: "takedown", artifact: a })}
-                    data-testid={`takedown-${a.uuid}`}
-                  >
-                    <ShieldX className="h-4 w-4 mr-1" />
-                    {t("admin.reportedArtifacts.actions.takedown")}
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => setPending({ kind: "takedownUser", artifact: a })}
-                    data-testid={`takedown-user-${a.uuid}`}
-                  >
-                    <Ban className="h-4 w-4 mr-1" />
-                    {t("admin.reportedArtifacts.actions.takedownUser")}
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
-      )}
+      <DataListView
+        hasResult={accepted !== undefined}
+        items={artifacts}
+        loading={resource.pending}
+        error={resource.error}
+        onRetry={resource.refresh}
+        toolbar={
+          <>
+            <Button variant="outline" size="sm" onClick={() => void resource.refresh()}>
+              <RotateCcw className="size-4" />
+              {t("common.dataRegion.refresh")}
+            </Button>
+            {accepted && (
+              <span className="text-sm text-muted-foreground" data-testid="reported-count">
+                {t("admin.reportedArtifacts.resultsCount", { count: total })}
+              </span>
+            )}
+          </>
+        }
+        keyExtractor={(item) => item.uuid}
+        storageKey="reported-artifacts-view-mode"
+        containerRef={containerRef}
+        onViewModeChange={onViewModeChange}
+        className="flex-1 min-h-0 flex flex-col"
+        emptyIcon={Flag}
+        emptyTitle={t("admin.reportedArtifacts.noReports")}
+        pagination={{
+          mode: "total",
+          currentPage: accepted?.page ?? 1,
+          totalPages: Math.ceil(total / (accepted?.pageSize ?? pageSize)),
+          totalItems: total,
+          pageSize: accepted?.pageSize ?? pageSize,
+          onPageChange: setPage,
+        }}
+        renderCard={(a, viewMode) => (
+          <CardShell
+            compact={viewMode === "grid"}
+            testId={`reported-artifact-${a.uuid}`}
+            icon={<Flag />}
+            title={a.name}
+            description={<span className="font-mono text-xs">{a.uuid}</span>}
+            meta={
+              <span>
+                {t("admin.reportedArtifacts.owner")}: {a.userId}
+              </span>
+            }
+            badges={
+              <>
+                <Badge variant="destructive">{a.reportCount}</Badge>
+                {a.takenDown && (
+                  <Badge variant="outline" className="text-destructive border-destructive">
+                    {t("admin.reportedArtifacts.takenDownBadge")}
+                  </Badge>
+                )}
+              </>
+            }
+            actions={[
+              {
+                icon: <ExternalLink />,
+                label: t("admin.reportedArtifacts.actions.preview"),
+                onClick: () => window.open(`/static/${a.uuid}.html`, "_blank"),
+              },
+              {
+                icon: <ShieldX />,
+                label: t("admin.reportedArtifacts.actions.takedown"),
+                variant: "destructive" as const,
+                disabled: a.takenDown,
+                onClick: () => setPending({ kind: "takedown", artifact: a }),
+                testId: `takedown-${a.uuid}`,
+              },
+              {
+                icon: <Ban />,
+                label: t("admin.reportedArtifacts.actions.takedownUser"),
+                onClick: () => setPending({ kind: "takedownUser", artifact: a }),
+                testId: `takedown-user-${a.uuid}`,
+              },
+            ]}
+          />
+        )}
+      />
 
       <ConfirmDialog
         open={pending !== null}

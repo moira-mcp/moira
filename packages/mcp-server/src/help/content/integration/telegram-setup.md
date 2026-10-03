@@ -1,6 +1,6 @@
 ---
 title: Telegram Setup
-description: Configure Telegram notifications and trusted lock PIN delivery for Moira workflows
+description: Configure Telegram workflow notifications, administrator registration messages and trusted lock PIN delivery
 sidebar:
   order: 5
 ---
@@ -51,6 +51,27 @@ message from your bot in Telegram.
 :::caution[Important]
 You must send at least one message to your bot in Telegram before testing. The Telegram API requires this before the bot can message you.
 :::
+
+## Administrator registration notifications
+
+Each receiving administrator first configures their own Telegram card as described above. The
+account must be admitted by the installation's access policy; a blocked or pending administrator,
+or a disabled/incomplete Telegram channel, receives no registration message.
+
+In **Admin → Settings Manager → Values → System configuration**, use **Notify administrators of
+new registrations** and save. The global boolean `system.notify_admins_on_registration` is enabled
+by default. Turning it off stops registration messages for the installation without changing
+anyone's personal Telegram settings. The checkbox does not store another bot token or chat ID.
+
+A successful new email or OAuth account triggers a plain Telegram message with its name, email,
+registration time and a link to its administrator detail page. Existing-user sign-in, linking
+another provider and failed registration do not trigger it. The ordinary **Send test** button
+checks your saved Telegram delivery configuration; it does not simulate a registration.
+
+Delivery does not hold up the registration response. A recipient's failure does not prevent
+delivery to other administrators or invalidate the new account. Delivery is best-effort: a
+timeout, lost response or process interruption can leave the outcome unknown, and Moira does not
+automatically resend the event.
 
 ## Guided Setup via Agent
 

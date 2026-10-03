@@ -3,7 +3,7 @@
  */
 
 import React from "react";
-import { AuthView } from "@daveyplate/better-auth-ui";
+import { AuthView } from "../auth/LazyAuthView";
 import { AuthErrorDisplay } from "../components/auth/AuthErrorDisplay";
 import { AuthLayout } from "../components/AuthLayout";
 

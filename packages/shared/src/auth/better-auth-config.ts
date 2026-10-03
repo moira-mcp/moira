@@ -3,10 +3,11 @@
  */
 
 import { betterAuth } from "better-auth";
-import type { BetterAuthOptions } from "better-auth";
-import { createAuthMiddleware, APIError, getSessionFromCtx } from "better-auth/api";
+import type { BetterAuthOptions, BetterAuthPlugin } from "better-auth";
+import { createAuthMiddleware, APIError, getSessionFromCtx, isAPIError } from "better-auth/api";
 import { mcp } from "better-auth/plugins";
 import { timingSafeEqual } from "crypto";
+import { AsyncLocalStorage } from "node:async_hooks";
 import geoip from "geoip-lite";
 import type { ServiceLogger } from "../logging/logger.js";
 import { createLogger } from "../logging/logger.js";
@@ -32,8 +33,121 @@ import {
 import { getFeatureResolver } from "../services/index.js";
 import { ACCOUNT_APPROVAL_REQUIRED_CODE, getAccountAccessDenial } from "./account-admission.js";
 import { generateHandleFromEmail, generateRandomHandleSuffix } from "../validation/slug-handle.js";
+import { storedTimestampMs } from "../database/timestamp-sql.js";
 
 const logger = createLogger({ component: "BetterAuth" });
+
+export interface SuccessfulRegistration {
+  id: string;
+  name: string | null;
+  email: string;
+  createdAt: number;
+}
+
+export interface AuthRegistrationOptions {
+  onSuccessfulRegistration?: (registration: SuccessfulRegistration) => void | Promise<void>;
+}
+
+interface RegistrationCapture {
+  candidateId?: string;
+  mailFailed: boolean;
+  consumed: boolean;
+  result?: {
+    path: string;
+    userId?: string;
+    sessionId?: string;
+    returnedUserId?: string;
+    refused: boolean;
+    redirect?: string;
+  };
+}
+
+// Auth hooks receive cloned contexts; the envelope belongs to one HTTP handler invocation.
+const registrationCapture = new AsyncLocalStorage<RegistrationCapture>();
+
+function registrationPath(path: string): boolean {
+  return (
+    path === "/sign-up/email" || path === "/sign-in/social" || /^\/callback\/[^/]+$/.test(path)
+  );
+}
+
+function registrationResultObserver(): BetterAuthPlugin {
+  return {
+    id: "moira-registration-result",
+    hooks: {
+      after: [
+        {
+          matcher: (ctx) => !!registrationCapture.getStore() && registrationPath(ctx.path ?? ""),
+          handler: createAuthMiddleware(async (ctx) => {
+            const capture = registrationCapture.getStore();
+            if (!capture || capture.consumed) return;
+            const returned = ctx.context.returned;
+            const session = ctx.context.newSession;
+            const resultUser =
+              returned && typeof returned === "object" && "user" in returned
+                ? (returned as { user?: { id?: unknown } }).user
+                : undefined;
+            capture.result = {
+              path: ctx.path,
+              userId: session?.user.id,
+              sessionId: session?.session.id,
+              returnedUserId: typeof resultUser?.id === "string" ? resultUser.id : undefined,
+              refused: isAPIError(returned) && returned.statusCode >= 400,
+              redirect:
+                isAPIError(returned) && returned.statusCode === 302
+                  ? (new Headers(returned.headers).get("location") ?? undefined)
+                  : undefined,
+            };
+          }),
+        },
+      ],
+    },
+  };
+}
+
+async function confirmedRegistration(
+  capture: RegistrationCapture,
+  response: Response,
+  request: Request,
+): Promise<SuccessfulRegistration | null> {
+  const result = capture.result;
+  if (
+    capture.mailFailed ||
+    !capture.candidateId ||
+    !result ||
+    result.refused ||
+    result.userId !== capture.candidateId ||
+    !result.sessionId ||
+    (!response.ok && response.status !== 302)
+  )
+    return null;
+
+  if (result.redirect) {
+    const location = response.headers.get("location");
+    if (!location || location !== result.redirect) return null;
+    const redirect = new URL(location, request.url);
+    if (redirect.searchParams.has("error") || redirect.searchParams.has("error_description"))
+      return null;
+  } else {
+    if (!response.ok || result.path.startsWith("/callback/")) return null;
+    const body = (await response.clone().json()) as { user?: { id?: unknown } };
+    if (result.returnedUserId !== capture.candidateId || body?.user?.id !== capture.candidateId)
+      return null;
+  }
+
+  const [account] = await getDatabase()
+    .select({
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      createdAt: storedTimestampMs(user.createdAt),
+    })
+    .from(user)
+    .where(eq(user.id, capture.candidateId))
+    .limit(1);
+  if (!account || account.createdAt === null) return null;
+  return { ...account, createdAt: account.createdAt };
+}
 
 function assertRealEmailDelivery(): void {
   const status = getEmailDeliveryStatus();
@@ -68,6 +182,8 @@ const PUBLIC_ACCOUNT_LIFECYCLE_PATHS = new Set([
   "/send-verification-email",
   "/get-session",
   "/sign-out",
+  // Target ownership remains enforced by Better Auth's authoritative session middleware.
+  "/revoke-session",
   "/.well-known/oauth-authorization-server",
   "/.well-known/oauth-protected-resource",
   "/mcp/register",
@@ -346,33 +462,39 @@ const baseConfig = {
       user: { id: string; email?: string };
       url: string;
     }) => {
-      assertRealEmailDelivery();
-      if (!user.email) {
-        throw new APIError("BAD_REQUEST", {
-          message: "Email address is required for verification delivery",
-          code: "EMAIL_REQUIRED",
-        });
-      }
-      // Fix callbackURL to go to /app instead of / (landing page)
-      // Better Auth uses callbackURL=/ by default when not specified by client
-      let fixedUrl = url;
-      if (url.includes("callbackURL=%2F") || url.includes("callbackURL=/")) {
-        fixedUrl = url
-          .replace(/callbackURL=%2F(&|$)/, "callbackURL=%2Fapp$1")
-          .replace(/callbackURL=\/(&|$)/, "callbackURL=/app$1");
-      }
-      await sendEmail(user.id, "verification", {
-        to: user.email,
-        subject: "Verify your email - MCP Moira",
-        text: `Click the link to verify your email: ${fixedUrl}\n\nIf you didn't create an account, please ignore this email.`,
-        html: `
+      try {
+        assertRealEmailDelivery();
+        if (!user.email) {
+          throw new APIError("BAD_REQUEST", {
+            message: "Email address is required for verification delivery",
+            code: "EMAIL_REQUIRED",
+          });
+        }
+        // Fix callbackURL to go to /app instead of / (landing page)
+        // Better Auth uses callbackURL=/ by default when not specified by client
+        let fixedUrl = url;
+        if (url.includes("callbackURL=%2F") || url.includes("callbackURL=/")) {
+          fixedUrl = url
+            .replace(/callbackURL=%2F(&|$)/, "callbackURL=%2Fapp$1")
+            .replace(/callbackURL=\/(&|$)/, "callbackURL=/app$1");
+        }
+        await sendEmail(user.id, "verification", {
+          to: user.email,
+          subject: "Verify your email - MCP Moira",
+          text: `Click the link to verify your email: ${fixedUrl}\n\nIf you didn't create an account, please ignore this email.`,
+          html: `
           <h2>Verify Your Email</h2>
           <p>Click the button below to verify your email address:</p>
           <p><a href="${fixedUrl}" style="display:inline-block;padding:12px 24px;background:#10b981;color:white;text-decoration:none;border-radius:6px;">Verify Email</a></p>
           <p>Or copy this link: ${fixedUrl}</p>
           <p><small>If you didn't create an account, please ignore this email.</small></p>
         `,
-      });
+        });
+      } catch (error) {
+        const capture = registrationCapture.getStore();
+        if (capture && !capture.consumed) capture.mailFailed = true;
+        throw error;
+      }
     },
   },
 
@@ -394,6 +516,14 @@ const baseConfig = {
   session: {
     expiresIn: 60 * 60 * 24 * 7, // 7 days
     updateAge: 60 * 60, // 1 hour
+    additionalFields: {
+      refreshedAt: {
+        type: "string" as const,
+        required: false,
+        input: false,
+        returned: false,
+      },
+    },
   },
 
   trustedOrigins: [getBaseUrl(), ...getExtraTrustedOrigins()],
@@ -451,9 +581,23 @@ const baseConfig = {
           logger.info("Generated handle for new user", { email, handle });
           return { data: { ...userData, handle } };
         },
+        after: async (createdUser: { id: string }) => {
+          const capture = registrationCapture.getStore();
+          if (capture && !capture.consumed) capture.candidateId = createdUser.id;
+        },
       },
     },
     session: {
+      update: {
+        before: async (data: { updatedAt?: Date; expiresAt?: Date }) => {
+          // Better Auth renewal updates expiry and time together. Creating a session
+          // and updating additional fields do not establish a renewal observation.
+          if (data.updatedAt instanceof Date && data.expiresAt instanceof Date) {
+            return { data: { ...data, refreshedAt: data.updatedAt.toISOString() } };
+          }
+          return { data };
+        },
+      },
       create: {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         before: async (session: any, ctx: any) => {
@@ -768,6 +912,12 @@ const baseConfig = {
       }
     }),
     after: createAuthMiddleware(async (ctx) => {
+      if (ctx.path === "/revoke-session") {
+        // Session middleware can expire or renew the request cookie before its target
+        // handler. A delayed targeted cleanup must not replace another tab's cookie.
+        ctx.responseHeaders?.delete("set-cookie");
+        ctx.context.responseHeaders?.delete("set-cookie");
+      }
       await inheritMcpCatalogRevisionOnRefresh(ctx);
       try {
         const newSession = ctx.context.newSession;
@@ -855,7 +1005,12 @@ const baseConfig = {
         }
 
         // Sign-out events
-        if (ctx.path === "/sign-out") {
+        const revokedCurrentSession =
+          ctx.path === "/revoke-session" &&
+          (ctx.context.returned as { status?: boolean } | undefined)?.status === true &&
+          (ctx.body as { token?: string } | undefined)?.token ===
+            ctx.context.session?.session.token;
+        if (ctx.path === "/sign-out" || revokedCurrentSession) {
           const session = ctx.context.session;
           if (session) {
             await auditRepo.log({
@@ -884,9 +1039,10 @@ const baseConfig = {
 /**
  * Create Better Auth instance with service-specific error logging
  */
-export function createAuth(logger: ServiceLogger) {
+export function createAuth(logger: ServiceLogger, registration: AuthRegistrationOptions = {}) {
   const config: BetterAuthOptions = {
     ...baseConfig,
+    plugins: [...baseConfig.plugins, registrationResultObserver()],
     database: getSqliteInstance(),
     logger: {
       disabled: false,
@@ -924,5 +1080,34 @@ export function createAuth(logger: ServiceLogger) {
     },
   };
 
-  return betterAuth(config);
+  const auth = betterAuth(config);
+  const originalHandler = auth.handler;
+  auth.handler = (request: Request) =>
+    registrationCapture.run({ mailFailed: false, consumed: false }, async () => {
+      const capture = registrationCapture.getStore()!;
+      try {
+        const response = await originalHandler(request);
+        if (registration.onSuccessfulRegistration) {
+          try {
+            const account = await confirmedRegistration(capture, response, request);
+            capture.consumed = true;
+            if (account) {
+              try {
+                void Promise.resolve(registration.onSuccessfulRegistration(account)).catch(() => {
+                  logger.warn("Registration notification callback failed", { userId: account.id });
+                });
+              } catch {
+                logger.warn("Registration notification callback failed", { userId: account.id });
+              }
+            }
+          } catch {
+            logger.warn("Registration notification eligibility could not be confirmed");
+          }
+        }
+        return response;
+      } finally {
+        capture.consumed = true;
+      }
+    });
+  return auth;
 }

@@ -9,10 +9,8 @@
 import React, { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { apiClient } from "../../services/api-client";
-import {
-  RevisionHistoryDialog,
-  type RevisionHistorySource,
-} from "../history/RevisionHistoryDialog";
+import { RevisionHistoryDialog } from "../history/LazyRevisionHistoryDialog";
+import type { RevisionHistorySource } from "../history/RevisionHistoryDialog";
 
 interface NoteHistoryDialogProps {
   open: boolean;
