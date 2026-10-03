@@ -135,6 +135,7 @@ async function start(graph: WorkflowGraph) {
       createPresentation: true,
     });
   const presentation = await present(executionId);
+  mkdirSync(join(process.cwd(), "agent_temp_files_local"), { recursive: true });
   const callerRoot = mkdtempSync(
     join(process.cwd(), "agent_temp_files_local/task-identity-caller-"),
   );
