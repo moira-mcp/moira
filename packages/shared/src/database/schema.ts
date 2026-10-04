@@ -411,6 +411,113 @@ export const codespaceProviderControl = sqliteTable("codespaceProviderControl", 
   updatedBy: text("updatedBy").references(() => user.id),
 });
 
+/** One-time owner approval used to enroll a local companion. */
+export const codespaceLocalPairing = sqliteTable(
+  "codespaceLocalPairing",
+  {
+    id: text("id").primaryKey(),
+    userId: text("userId").notNull().references(() => user.id, { onDelete: "cascade" }),
+    codeDigest: text("codeDigest").notNull().unique(),
+    expiresAt: integer("expiresAt", { mode: "timestamp_ms" }).notNull(),
+    consumedAt: integer("consumedAt", { mode: "timestamp_ms" }),
+    createdAt: integer("createdAt", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => ({
+    ownerExpiryIdx: index("codespace_local_pairing_owner_expiry_idx").on(table.userId, table.expiresAt),
+  }),
+);
+
+/** Server-side public metadata and token digest for a user-owned local companion. */
+export const codespaceLocalDevice = sqliteTable(
+  "codespaceLocalDevice",
+  {
+    id: text("id").primaryKey(),
+    userId: text("userId").notNull().references(() => user.id, { onDelete: "cascade" }),
+    label: text("label").notNull(),
+    tokenDigest: text("tokenDigest").notNull().unique(),
+    generation: integer("generation").notNull().default(1),
+    enabled: integer("enabled", { mode: "boolean" }).notNull().default(false),
+    leaseUntil: integer("leaseUntil", { mode: "timestamp_ms" }).notNull().default(0),
+    snapshotVersion: integer("snapshotVersion").notNull().default(1),
+    machineName: text("machineName").notNull(),
+    machineDisplayName: text("machineDisplayName").notNull(),
+    machineOperatingSystem: text("machineOperatingSystem").notNull(),
+    machineCpuCores: integer("machineCpuCores").notNull(),
+    machineMemoryBytes: integer("machineMemoryBytes").notNull(),
+    machineStorageBytes: integer("machineStorageBytes").notNull(),
+    maxSandboxes: integer("maxSandboxes").notNull(),
+    lastSeenAt: integer("lastSeenAt", { mode: "timestamp_ms" }),
+    revokedAt: integer("revokedAt", { mode: "timestamp_ms" }),
+    createdAt: integer("createdAt", { mode: "timestamp_ms" }).notNull(),
+    updatedAt: integer("updatedAt", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => ({
+    ownerIdx: index("codespace_local_device_owner_idx").on(table.userId, table.revokedAt),
+  }),
+);
+
+/** Mapping from an opaque Moira repository target to the local companion grant. */
+export const codespaceLocalRepository = sqliteTable(
+  "codespaceLocalRepository",
+  {
+    deviceId: text("deviceId").notNull().references(() => codespaceLocalDevice.id, { onDelete: "cascade" }),
+    externalRepositoryId: text("externalRepositoryId").notNull(),
+    publicRepositoryId: text("publicRepositoryId").notNull().unique(),
+    fullName: text("fullName").notNull(),
+    private: integer("private", { mode: "boolean" }).notNull(),
+    createdAt: integer("createdAt", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => ({ pk: primaryKey({ columns: [table.deviceId, table.externalRepositoryId] }) }),
+);
+
+/** Last authoritative local snapshot for one sandbox. Missing means absent only after an online poll. */
+export const codespaceLocalResource = sqliteTable(
+  "codespaceLocalResource",
+  {
+    providerResourceName: text("providerResourceName").primaryKey(),
+    deviceId: text("deviceId").notNull().references(() => codespaceLocalDevice.id, { onDelete: "cascade" }),
+    spaceId: text("spaceId").notNull(),
+    operationMarker: text("operationMarker").notNull(),
+    publicRepositoryId: text("publicRepositoryId").notNull(),
+    repositoryFullName: text("repositoryFullName").notNull(),
+    ref: text("ref").notNull(),
+    generation: integer("generation").notNull(),
+    state: text("state").notNull(),
+    phase: text("phase").notNull(),
+    lastStartedAt: integer("lastStartedAt", { mode: "timestamp_ms" }),
+    createdAt: integer("createdAt", { mode: "timestamp_ms" }).notNull(),
+    updatedAt: integer("updatedAt", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => ({
+    spaceIdx: uniqueIndex("codespace_local_resource_space_idx").on(table.deviceId, table.spaceId),
+    markerIdx: uniqueIndex("codespace_local_resource_marker_idx").on(table.deviceId, table.operationMarker),
+  }),
+);
+
+/** Durable outbound request/reply queue. Only the local companion polls it. */
+export const codespaceLocalRelay = sqliteTable(
+  "codespaceLocalRelay",
+  {
+    id: text("id").primaryKey(),
+    userId: text("userId").notNull().references(() => user.id, { onDelete: "cascade" }),
+    deviceId: text("deviceId").notNull().references(() => codespaceLocalDevice.id, { onDelete: "cascade" }),
+    deviceGeneration: integer("deviceGeneration").notNull(),
+    dedupeKey: text("dedupeKey").notNull(),
+    requestJson: text("requestJson").notNull(),
+    state: text("state").notNull(),
+    leaseId: text("leaseId"),
+    leaseExpiresAt: integer("leaseExpiresAt", { mode: "timestamp_ms" }),
+    replyJson: text("replyJson"),
+    expiresAt: integer("expiresAt", { mode: "timestamp_ms" }).notNull(),
+    createdAt: integer("createdAt", { mode: "timestamp_ms" }).notNull(),
+    updatedAt: integer("updatedAt", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => ({
+    dedupeIdx: uniqueIndex("codespace_local_relay_dedupe_idx").on(table.deviceId, table.dedupeKey),
+    claimIdx: index("codespace_local_relay_claim_idx").on(table.deviceId, table.state, table.leaseExpiresAt, table.expiresAt),
+  }),
+);
+
 /** Durable metadata for an exact operation in a user-owned codespace. */
 export const codespaceOperation = sqliteTable(
   "codespaceOperation",
