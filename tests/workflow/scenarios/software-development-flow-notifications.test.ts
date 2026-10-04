@@ -14,11 +14,19 @@ import {
   internalValues,
   runNotificationScenario,
   type NotificationMockInput,
+  type NotificationScenario,
   type NotificationScenarioResult,
 } from "../../helpers/notification-scenario.js";
 
 const workflow = catalogGraph("software-development-flow");
-const note = "Add the export button";
+const taskTitle = "Add the export button";
+const note = "The spreadsheet format still needs a separate review";
+const runScenario = (scenario: NotificationScenario) =>
+  runNotificationScenario(workflow, {
+    ...scenario,
+    note,
+    taskTitle: { atNode: "capture-task-and-context", title: taskTitle },
+  });
 const UNITS = [{ title: "Add the export endpoint" }, { title: "Add the export button" }];
 const REPORT = "https://moira.example/artifacts/unit-report.html";
 const FINAL = "https://5bd31ded.static.moira.example/";
@@ -101,7 +109,7 @@ function answers(
 }
 
 const heading = (run: NotificationScenarioResult) =>
-  `[Software Development Flow · ${note}](${runPageUrl({ executionId: run.executionId })})`;
+  `[Software Development Flow · ${taskTitle}](${runPageUrl({ executionId: run.executionId })})`;
 const ids = (run: NotificationScenarioResult) => run.notifications.map((m) => m.nodeId);
 const text = (run: NotificationScenarioResult, nodeId: string) =>
   run.notifications.find((m) => m.nodeId === nodeId)!.text;
@@ -121,6 +129,8 @@ const ASKING = new Set([
 ]);
 
 function expectClean(run: NotificationScenarioResult) {
+  expect(run.taskIdentity?.title).toBe(taskTitle);
+  expect(run.note).toBe(note);
   for (const { text: body } of run.notifications) {
     expect(body.startsWith(heading(run))).toBe(true);
     expect(internalValues(body, workflow)).toEqual([]);
@@ -146,7 +156,7 @@ const unitTwoPlan = (overrides: Answer) => [
 
 describe("Software Development Flow notifications", () => {
   test("interactive: plan to approve, a unit to approve, a unit with report and approval in one message, the result to approve, the finish", async () => {
-    const run = await runNotificationScenario(workflow, {
+    const run = await runScenario({
       mockInputs: answers("interactive", {
         "prepare-plan-unit-implementation": [
           { preparation_outcome: "ready", visual_mode: "disabled", approval_required: true },
@@ -193,7 +203,7 @@ describe("Software Development Flow notifications", () => {
   });
 
   test("autonomous: the work goes ahead with the goal, a report without stopping for approval, the finish with the commits — nothing asks", async () => {
-    const run = await runNotificationScenario(workflow, {
+    const run = await runScenario({
       mockInputs: answers("autonomous", {
         "activate-reviewed-plan": { current_step_index: 1, vcs_commits_authorized: true },
         "prepare-plan-unit-implementation": unitTwoPlan({
@@ -277,7 +287,7 @@ describe("Software Development Flow notifications", () => {
     async (_where, blocked, nodeId, words, source) => {
       for (const mode of ["interactive", "autonomous"] as const) {
         const [first, ...rest] = blocked[source as keyof typeof blocked] as unknown as Answer[];
-        const run = await runNotificationScenario(workflow, {
+        const run = await runScenario({
           mockInputs: answers(mode, {
             [source]: [
               { ...first, blocker_summary: "The package registry is unreachable" },
@@ -305,7 +315,7 @@ describe("Software Development Flow notifications", () => {
   );
 
   test("finalization blocked: the choices include finishing without the final commit, and that finish says what is left", async () => {
-    const run = await runNotificationScenario(workflow, {
+    const run = await runScenario({
       mockInputs: answers("interactive", {
         "activate-reviewed-plan": { current_step_index: 1, vcs_commits_authorized: true },
         "prepare-plan-unit-implementation": unitTwoPlan({
@@ -337,7 +347,7 @@ describe("Software Development Flow notifications", () => {
   });
 
   test("autonomous: a blocked finish still waits for the person, and the agent retries once it changed", async () => {
-    const run = await runNotificationScenario(workflow, {
+    const run = await runScenario({
       mockInputs: answers("autonomous", {
         "activate-reviewed-plan": { current_step_index: 1, vcs_commits_authorized: true },
         "prepare-plan-unit-implementation": unitTwoPlan({
@@ -363,7 +373,7 @@ describe("Software Development Flow notifications", () => {
   });
 
   test("a person who ends the run at a blocker is told it stopped, why, and what is left", async () => {
-    const run = await runNotificationScenario(workflow, {
+    const run = await runScenario({
       mockInputs: answers("interactive", {
         "validate-runtime": {
           validation_outcome: "external_blocker",
@@ -420,7 +430,7 @@ describe("Software Development Flow notifications", () => {
       ALL_DONE,
     ],
   ] as const)("a stop at %s says only what is true", async (_where, stop, reason, list) => {
-    const run = await runNotificationScenario(workflow, {
+    const run = await runScenario({
       mockInputs: answers("interactive", stop as unknown as Record<string, NotificationMockInput>),
     });
     const stopped = text(run, "notify-workflow-stopped");
@@ -450,7 +460,7 @@ describe("Software Development Flow notifications", () => {
         { current_step_index: 1, vcs_commits_authorized: false },
       ],
     };
-    const interactive = await runNotificationScenario(workflow, {
+    const interactive = await runScenario({
       mockInputs: answers("interactive", replan),
     });
     expect(text(interactive, "notify-unit-closure")).toContain(
@@ -462,7 +472,7 @@ describe("Software Development Flow notifications", () => {
     expect(text(interactive, "notify-unit-closure")).toMatch(WAITING_FOR_YOU);
     expectClean(interactive);
 
-    const autonomous = await runNotificationScenario(workflow, {
+    const autonomous = await runScenario({
       mockInputs: answers("autonomous", replan),
     });
     // Autonomous: the person is told before the gate, in words true whichever way it decides.
@@ -486,7 +496,7 @@ describe("Software Development Flow notifications", () => {
       { title: "Add the export job" },
       { title: "Add the export button" },
     ];
-    const run = await runNotificationScenario(workflow, {
+    const run = await runScenario({
       mockInputs: answers("interactive", {
         "prepare-plan-unit-implementation": {
           preparation_outcome: "ready",
@@ -529,7 +539,7 @@ describe("Software Development Flow notifications", () => {
     // A self-hosted or dev instance without TLS serves artifacts over http.
     const unitReport = "http://3f1c.static.moira-localhost.localtest.me:8100/";
     const finalReport = "http://9af2.static.moira-localhost.localtest.me:8100/";
-    const run = await runNotificationScenario(workflow, {
+    const run = await runScenario({
       mockInputs: answers("autonomous", {
         "prepare-plan-unit-implementation": {
           preparation_outcome: "ready",
@@ -549,7 +559,7 @@ describe("Software Development Flow notifications", () => {
   });
 
   test("a goal revised with the requirements is the goal the plan message shows", async () => {
-    const run = await runNotificationScenario(workflow, {
+    const run = await runScenario({
       mockInputs: answers("interactive", {
         "confirm-requirements": [
           { requirements_approval: "no", user_feedback: "Only a user's own projects" },
@@ -563,9 +573,17 @@ describe("Software Development Flow notifications", () => {
     );
   });
 
+  test("accepts intake without the optional note and keeps the persisted task title independent", async () => {
+    const mocks = answers("autonomous");
+    const { execution_note: _note, ...intake } = mocks["capture-task-and-context"] as Answer;
+    const run = await runScenario({
+      mockInputs: { ...mocks, "capture-task-and-context": intake },
+    });
+    expectClean(run);
+  });
+
   // The reader lines exist only because the flow refuses an answer without them.
   test.each([
-    ["capture-task-and-context", "execution_note", {}],
     ["capture-task-and-context", "goal_summary", {}],
     ["create-plan", "plan_units", {}],
     ["review-unit-completeness", "unit_result_summary", {}],
@@ -580,9 +598,9 @@ describe("Software Development Flow notifications", () => {
     const all = answers("interactive", Object.keys(base).length ? { [nodeId]: base } : {});
     const answer: Answer = { ...(all[nodeId] as Answer) };
     delete answer[field];
-    await expect(
-      runNotificationScenario(workflow, { mockInputs: { ...all, [nodeId]: answer } }),
-    ).rejects.toThrow(new RegExp(`The answer for ${nodeId} \\(visit 1\\) was rejected`, "u"));
+    await expect(runScenario({ mockInputs: { ...all, [nodeId]: answer } })).rejects.toThrow(
+      new RegExp(`The answer for ${nodeId} \\(visit 1\\) was rejected`, "u"),
+    );
   });
 
   test("the flow validates without a notification content warning", async () => {

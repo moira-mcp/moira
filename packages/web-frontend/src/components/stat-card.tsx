@@ -8,13 +8,22 @@ import { CHART_COLORS } from "@/lib/chart-colors";
 interface StatCardProps {
   label: string;
   value: string | number;
+  description?: string;
   icon?: LucideIcon;
   trend?: number[];
   className?: string;
   onClick?: () => void;
 }
 
-export function StatCard({ label, value, icon: Icon, trend, className, onClick }: StatCardProps) {
+export function StatCard({
+  label,
+  value,
+  description,
+  icon: Icon,
+  trend,
+  className,
+  onClick,
+}: StatCardProps) {
   return (
     <Card
       className={cn(
@@ -56,6 +65,7 @@ export function StatCard({ label, value, icon: Icon, trend, className, onClick }
             />
           )}
         </div>
+        {description ? <p className="mt-2 text-xs text-muted-foreground">{description}</p> : null}
       </CardContent>
     </Card>
   );

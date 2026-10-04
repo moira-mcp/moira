@@ -48,7 +48,8 @@ that exact node is current, letting a workflow show truthful unit, iteration, va
 detail without changing the block's stable label. It requires the node to belong to a block and
 never affects routing or stored state.
 
-The execution note is projected as the task title. The same node may declare
+The independent execution task identity supplies the task title; arbitrary notes stay separate
+(see [Execution task name](#execution-task-name)). The same node may declare
 `progressActiveContent` with the same structured fields. Its fields replace the matching content
 of its block only while that exact node is current; omitted fields keep their stable base values. Nested
 strings use the normal variable registry and template protection. Progress stores no presentation
@@ -139,6 +140,48 @@ guide) the same projection is shown as the map — the process as a diagram with
 with a block panel that drills into each block's steps, timings and list and focuses the
 technical node graph, which is the page's other view. The page and the PNG contain the same essential information. A workflow
 without progress shows the technical node graph and the variables panel instead.
+
+## Execution task name
+
+A run's task name is independent of its workflow name, current step and arbitrary execution note.
+Establish it at the first evidence-bearing intake, before submitting that step. Read
+`session({ action: "execution_context", executionId })`, then use the returned revisions:
+
+```javascript
+session({
+  action: "update-task-title",
+  executionId,
+  taskTitle: "Import October orders",
+  expectedRevision: current.revision,
+  expectedTaskIdentityRevision: current.metadataRevisions.taskIdentity,
+});
+```
+
+Here `current` is the execution-context result. The owner can name an active run (`running`,
+including stored `waiting` executions); completed and stopped runs refuse changes. The title is
+trimmed, nonempty, and limited to 500 JavaScript string code units. Unicode control and formatting
+characters are rejected before trimming. Both the step revision and independent identity revision
+must match; on a stale response reread authoritative context and reconcile the actual task.
+
+The server stores `taskIdentity: { title, changedAt, changeId }`; its time and change token are
+server-owned. Naming preserves the presented step attempt, question, variables and other metadata
+revisions. An identical normalized name changes no revision, activity or events. A real rename
+contributes activity. An authorized responsibility that changes actual task scope updates the name;
+ordinary progress, reordering and implementation tactics retain it. Naming grants no scope authority.
+
+Headings use explicit identity, then the resolved authored `progress.title`, then the run's own
+workflow name. Notes never supply headings and remain separately inspectable. Sent messages retain
+their historical name; subsequent notifications resolve current identity at delivery.
+
+`session progress` and `GET /api/executions/:id/progress` return `source: "trace"` for authored
+progress. Without it they return `source: "metadata"` with task identity, workflow/version and
+execution revision/status, without invented blocks, route, variables or statistics. Runs without
+identity have `taskIdentity: null` and use the same fallback. PNG grants require authored progress
+and bind the independent task identity as well as step/context revisions; a rename invalidates a
+grant, including a same-clock rename back to the original text. Request a fresh grant after stale
+redemption or when a grant lacks the identity binding.
+
+## Workflow definition
 
 Every workflow consists of:
 

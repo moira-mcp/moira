@@ -5,8 +5,10 @@
  * IMPORTANT: Tests run against Docker by default (localhost:DOCKER_PORT from .env)
  */
 
-import { describe, test, expect, beforeAll } from "@jest/globals";
-import { getTestBaseUrl } from "../utils/test-config.js";
+import { describe, test, expect, beforeAll, afterAll, afterEach } from "@jest/globals";
+import { randomUUID } from "node:crypto";
+import { getTestBaseUrl, isExternalTarget } from "../utils/test-config.js";
+import { execSqliteInDocker } from "../utils/docker-command.js";
 import {
   createTestUserViaApi,
   formatSessionCookie,
@@ -15,6 +17,13 @@ import {
 } from "../utils/mcp-auth.js";
 
 const BASE_URL = getTestBaseUrl();
+// Only this fixture group writes historical rows directly to an isolated local Docker database.
+// Remote scripts still run the HTTP analytics contract tests below, without synthetic SQL writes.
+const localFixtureTarget =
+  !isExternalTarget() &&
+  ["localhost", "127.0.0.1", "[::1]"].includes(new URL(BASE_URL).hostname) &&
+  !process.env.REMOTE_DOCKER_CONTEXT;
+const describeLocalFixtures = localFixtureTarget ? describe : describe.skip;
 
 let adminCookie: string;
 let normalUserCookie: string;
@@ -37,6 +46,342 @@ describe("Admin Analytics API", () => {
       await signInUser(BASE_URL, normalUserEmail, normalUserPassword),
     );
   });
+
+  describeLocalFixtures(
+    "intentional stops remain separate from genuine completion outcomes (local Docker fixtures)",
+    () => {
+      let workflowId: string;
+      let ownerId: string;
+      const executionIds: string[] = [];
+      const createdAt = Date.parse("2001-01-02T23:59:59.000Z");
+
+      async function analytics(path: string) {
+        const url = new URL(`${BASE_URL}/api/admin/analytics/${path}`);
+        // These fixtures and their native baselines include their administrator owner.
+        // Omission selects default-admin exclusions; explicit empty selects everyone.
+        url.searchParams.set("excludeUserIds", "");
+        expect(url.searchParams.get("excludeUserIds")).toBe("");
+        const response = await fetch(url, {
+          headers: { Cookie: adminCookie },
+        });
+        expect(response.status).toBe(200);
+        const body = (await response.json()) as any;
+        expect(body.success).toBe(true);
+        const consumer = path.split("?")[0];
+        if (["overview", "executions", "top-workflows"].includes(consumer)) {
+          expect(body.data.scope).toEqual(
+            expect.objectContaining({
+              timeRange: url.searchParams.get("range"),
+              exclusions: { mode: "custom", userIds: [], effectiveCount: 0 },
+            }),
+          );
+        }
+        // Quality and operational retain their existing timeRange-only response contracts.
+        expect(body.data.timeRange).toBe(url.searchParams.get("range"));
+        return body.data;
+      }
+
+      async function fixtureTopWorkflow() {
+        const limit = 20;
+        let total: number | undefined;
+        const seen = new Set<string>();
+        for (let offset = 0; total === undefined || offset < total; offset += limit) {
+          const page = await analytics(`top-workflows?range=all&limit=${limit}&offset=${offset}`);
+          expect(Number.isSafeInteger(page.total)).toBe(true);
+          expect(page.total).toBeGreaterThanOrEqual(0);
+          if (total === undefined) total = Number(page.total);
+          expect(page.total).toBe(total);
+          expect(page.workflows).toHaveLength(Math.min(limit, total - offset));
+          for (const workflow of page.workflows) {
+            expect(seen.has(workflow.workflowId)).toBe(false);
+            seen.add(workflow.workflowId);
+          }
+          const fixture = page.workflows.find(
+            (workflow: any) => workflow.workflowId === workflowId,
+          );
+          if (fixture) return fixture;
+        }
+        throw new Error(
+          "Owned outcome fixture is absent from the complete scoped top-workflow list",
+        );
+      }
+
+      function seed(
+        state: string,
+        duration: number | null,
+        stopReason: string | null,
+        errorType?: string,
+        startedAt = createdAt,
+      ) {
+        const id = randomUUID();
+        executionIds.push(id);
+        const errors = errorType
+          ? [{ timestamp: startedAt, nodeId: "start", errorType, message: "Recorded step fact" }]
+          : [];
+        // These are owned synthetic rows in the existing Docker fixture database. Production
+        // mutations cannot reproduce legacy states or independently chosen historical cohorts.
+        const quote = (value: string) => `'${value.replace(/'/g, "''")}'`;
+        execSqliteInDocker(
+          `INSERT INTO workflowExecution
+          (executionId, workflowId, userId, state, context, errors, createdAt, updatedAt, completedAt, stopReason)
+         VALUES (${quote(id)}, ${quote(workflowId)}, ${quote(ownerId)}, ${quote(state)},
+          ${quote(JSON.stringify({ variables: {}, nodeStates: {}, executionId: id, workflowId, userId: ownerId }))},
+          ${quote(JSON.stringify(errors))}, ${startedAt}, ${startedAt},
+          ${duration === null ? "NULL" : startedAt + duration},
+          ${stopReason === null ? "NULL" : quote(stopReason)});`,
+        );
+        return id;
+      }
+
+      beforeAll(async () => {
+        if (
+          !process.env.DOCKER_CONTAINER_NAME ||
+          new URL(BASE_URL).port !== process.env.DOCKER_PORT
+        ) {
+          throw new Error("Local HTTP target and explicit Docker fixture environment must agree");
+        }
+        const response = await fetch(`${BASE_URL}/api/workflows`, {
+          method: "POST",
+          headers: { Cookie: adminCookie, "Content-Type": "application/json" },
+          body: JSON.stringify({
+            visibility: "private",
+            workflow: {
+              metadata: {
+                name: `Outcome analytics ${randomUUID()}`,
+                version: "1.0.0",
+                description: "Controlled completion and stop analytics",
+              },
+              nodes: [
+                { id: "start", type: "start", connections: { default: "end" } },
+                { id: "end", type: "end" },
+              ],
+            },
+          }),
+        });
+        expect(response.status).toBe(200);
+        workflowId = ((await response.json()) as any).data.workflowId;
+        ownerId = execSqliteInDocker(`SELECT userId FROM workflow WHERE id = '${workflowId}';`);
+        expect(ownerId.length).toBeGreaterThan(0);
+      });
+
+      afterEach(() => {
+        for (const id of executionIds.splice(0)) {
+          execSqliteInDocker(`DELETE FROM workflowExecution WHERE executionId = '${id}';`);
+        }
+      });
+
+      afterAll(async () => {
+        if (workflowId) {
+          const response = await fetch(`${BASE_URL}/api/workflows/${workflowId}`, {
+            method: "DELETE",
+            headers: { Cookie: adminCookie },
+          });
+          expect(response.status).toBe(200);
+        }
+      });
+
+      test("all five consumers exclude stops with and without refusals while retaining starts and genuine durations", async () => {
+        const beforeOverview = await analytics("overview?range=all");
+        const beforeExecutions = await analytics("executions?range=all");
+        // Weight the new durations against the native contributing count and unrounded sum;
+        // completed totals can include runs without a duration, and the API average is rounded.
+        const [durationCountBefore, durationSumBefore] = execSqliteInDocker(
+          "SELECT COUNT(*), COALESCE(SUM(e.completedAt - e.createdAt), 0) FROM workflowExecution e JOIN user u ON u.id=e.userId WHERE e.state = 'completed' AND e.stopReason IS NULL AND e.completedAt >= e.createdAt;",
+        )
+          .split("|")
+          .map(Number);
+        const beforeOperational = await analytics("operational?range=all&granularity=daily");
+        const completedMetricBefore = beforeOperational.metrics.find(
+          (metric: any) => metric.name === "workflows_completed_per_day",
+        );
+        const startedMetricBefore = beforeOperational.metrics.find(
+          (metric: any) => metric.name === "workflows_started_per_day",
+        );
+        const beforeDay = beforeExecutions.overTime.find(
+          (point: any) => point.date === "2001-01-02",
+        ) ?? { count: 0, completed: 0, failed: 0, stopped: 0 };
+
+        seed("completed", 1000, null, "degradation");
+        seed("completed", 3000, null, "handler");
+        seed("completed", 100_000, "Scope withdrawn");
+        seed("completed", 200_000, "", "validation");
+        seed("running", null, "Historical intentional stop");
+        seed("running", null, null);
+        seed("failed", 500_000, null, "system");
+
+        const overview = await analytics("overview?range=all");
+        expect(overview.totalExecutions).toBe(beforeOverview.totalExecutions + 7);
+        expect(overview.activeExecutions).toBe(beforeOverview.activeExecutions + 1);
+        expect(overview.completedExecutions).toBe(beforeOverview.completedExecutions + 2);
+        expect(overview.failedExecutions).toBe(beforeOverview.failedExecutions + 1);
+        expect(overview.stoppedExecutions).toBe(beforeOverview.stoppedExecutions + 3);
+
+        const executions = await analytics("executions?range=all");
+        expect(executions.total).toBe(beforeExecutions.total + 7);
+        expect(executions.active).toBe(beforeExecutions.active + 1);
+        expect(executions.completed).toBe(beforeExecutions.completed + 2);
+        expect(executions.failed).toBe(beforeExecutions.failed + 1);
+        expect(executions.stopped).toBe(beforeExecutions.stopped + 3);
+        expect(executions.avgDurationMs).toBe(
+          Math.round((durationSumBefore + 4000) / (durationCountBefore + 2)),
+        );
+        expect(executions.successRate).toBe(
+          Math.round(
+            ((beforeExecutions.completed - beforeExecutions.failed + 1) /
+              (beforeExecutions.completed + 2)) *
+              10000,
+          ) / 100,
+        );
+        expect(executions.byWorkflow.find((row: any) => row.workflowId === workflowId)).toEqual({
+          workflowId,
+          count: 7,
+          completed: 2,
+          failed: 1,
+          stopped: 3,
+        });
+        expect(executions.overTime.find((row: any) => row.date === "2001-01-02")).toEqual({
+          date: "2001-01-02",
+          count: beforeDay.count + 7,
+          completed: beforeDay.completed + 2,
+          failed: beforeDay.failed + 1,
+          stopped: beforeDay.stopped + 3,
+        });
+
+        const topWorkflow = await fixtureTopWorkflow();
+        expect(topWorkflow).toEqual(
+          expect.objectContaining({
+            executionCount: 7,
+            completedCount: 2,
+            failedCount: 1,
+            stoppedCount: 3,
+            successRate: 50,
+            avgDurationMs: 2000,
+          }),
+        );
+        const quality = await analytics(`workflow-quality/${workflowId}?range=all`);
+        expect(quality).toEqual(
+          expect.objectContaining({
+            totalExecutions: 7,
+            completedExecutions: 2,
+            stoppedExecutions: 3,
+            completionRate: 28.57,
+          }),
+        );
+
+        const operational = await analytics("operational?range=all&granularity=daily");
+        expect(operational.metrics.map((metric: any) => metric.name)).toEqual([
+          "unique_users_per_day",
+          "total_calls_per_day",
+          "calls_per_second",
+          "workflows_started_per_day",
+          "workflows_completed_per_day",
+          "mcp_calls_per_second",
+        ]);
+        const completedMetric = operational.metrics.find(
+          (metric: any) => metric.name === "workflows_completed_per_day",
+        );
+        const startedMetric = operational.metrics.find(
+          (metric: any) => metric.name === "workflows_started_per_day",
+        );
+        expect(completedMetric.available).toBe(true);
+        expect(completedMetric.value).toBe(completedMetricBefore.value + 2);
+        expect(startedMetric.available).toBe(true);
+        expect(startedMetric.value).toBe(startedMetricBefore.value + 7);
+        const previousCompletedDay =
+          completedMetricBefore.timeSeries.find((point: any) => point.date === "2001-01-03")
+            ?.value ?? 0;
+        expect(
+          completedMetric.timeSeries.find((point: any) => point.date === "2001-01-03")?.value,
+        ).toBe(previousCompletedDay + 2);
+        const previousStartedDay =
+          startedMetricBefore.timeSeries.find((point: any) => point.date === "2001-01-02")?.value ??
+          0;
+        expect(
+          startedMetric.timeSeries.find((point: any) => point.date === "2001-01-02")?.value,
+        ).toBe(previousStartedDay + 7);
+        expect(
+          execSqliteInDocker(
+            `SELECT COUNT(*) FROM workflowExecution WHERE workflowId = '${workflowId}' AND completedAt IS NOT NULL;`,
+          ),
+        ).toBe("5");
+      });
+
+      test("stopped-only work has zero genuine completions, refusals, success and completed duration", async () => {
+        seed("completed", 100_000, "Stopped after refusal", "handler");
+        const topWorkflow = await fixtureTopWorkflow();
+        expect(topWorkflow).toEqual(
+          expect.objectContaining({
+            executionCount: 1,
+            completedCount: 0,
+            failedCount: 0,
+            stoppedCount: 1,
+            successRate: 0,
+            avgDurationMs: 0,
+          }),
+        );
+        const quality = await analytics(`workflow-quality/${workflowId}?range=all`);
+        expect(quality).toEqual(
+          expect.objectContaining({
+            totalExecutions: 1,
+            completedExecutions: 0,
+            stoppedExecutions: 1,
+            completionRate: 0,
+          }),
+        );
+      });
+
+      test("completion-time operational cohorts include an old start completed recently without changing creation-time analytics", async () => {
+        const beforeExecutions = await analytics("executions?range=week");
+        const beforeOperational = await analytics("operational?range=week&granularity=daily");
+        const completedBefore = beforeOperational.metrics.find(
+          (metric: any) => metric.name === "workflows_completed_per_day",
+        );
+        const startedBefore = beforeOperational.metrics.find(
+          (metric: any) => metric.name === "workflows_started_per_day",
+        );
+        const completedAt = Date.now() - 60_000;
+        const id = seed("completed", completedAt - createdAt, null);
+        seed("completed", completedAt - createdAt, "No longer needed", "handler");
+
+        const executions = await analytics("executions?range=week");
+        expect(executions.total).toBe(beforeExecutions.total);
+        expect(executions.completed).toBe(beforeExecutions.completed);
+        expect(
+          executions.byWorkflow.find((row: any) => row.workflowId === workflowId),
+        ).toBeUndefined();
+        const quality = await analytics(`workflow-quality/${workflowId}?range=week`);
+        expect(quality).toEqual(
+          expect.objectContaining({
+            totalExecutions: 0,
+            completedExecutions: 0,
+            stoppedExecutions: 0,
+            completionRate: 0,
+          }),
+        );
+        const operational = await analytics("operational?range=week&granularity=daily");
+        const completed = operational.metrics.find(
+          (metric: any) => metric.name === "workflows_completed_per_day",
+        );
+        const started = operational.metrics.find(
+          (metric: any) => metric.name === "workflows_started_per_day",
+        );
+        expect(completed.available).toBe(true);
+        expect(completed.value).toBe(completedBefore.value + 1);
+        expect(started.value).toBe(startedBefore.value);
+        const day = new Date(completedAt).toISOString().slice(0, 10);
+        const previous =
+          completedBefore.timeSeries.find((point: any) => point.date === day)?.value ?? 0;
+        expect(completed.timeSeries.find((point: any) => point.date === day)?.value).toBe(
+          previous + 1,
+        );
+        expect(
+          execSqliteInDocker(
+            `SELECT createdAt || '|' || completedAt FROM workflowExecution WHERE executionId = '${id}';`,
+          ),
+        ).toBe(`${createdAt}|${completedAt}`);
+      });
+    },
+  );
 
   describe("GET /api/admin/analytics/overview", () => {
     test("returns overview statistics for admin", async () => {

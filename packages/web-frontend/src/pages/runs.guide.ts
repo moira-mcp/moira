@@ -12,8 +12,8 @@ export const runsGuide: GuideDefinition = {
   routes: ["/executions"],
   steps: [
     { id: "intro", anchor: "runs.header", kind: "look", revision: 1 },
-    { id: "status", anchor: "runs.status", kind: "look", revision: 1 },
-    { id: "list", anchor: "runs.list", kind: "look", revision: 1 },
+    { id: "status", anchor: "runs.status", kind: "look", revision: 2 },
+    { id: "list", anchor: "runs.list", kind: "look", revision: 2 },
   ],
 };
 

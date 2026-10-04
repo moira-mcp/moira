@@ -10,6 +10,12 @@ declares. Everything on the page comes from the run's recorded route; nothing is
 block order. A workflow without a process view (`progress`) shows the technical node graph and the
 variables panel instead.
 
+The header shows the canonical task name, the run's own flow name and its arbitrary note separately.
+An own-run live rename refreshes the name without reloading the definition or resetting reading
+position. Responses from a run you have left cannot replace the current run or redirect its answer
+and variable-edit controls. Without authored progress, the page retains the technical graph and
+variables, with metadata identity but no invented process stages.
+
 ## Opening a run from the list
 
 Open **Runs** and choose its card. The card keeps the known start time separately from the last
@@ -149,6 +155,19 @@ An agent that was holding the step you answered receives `ATTEMPT_STALE` on its 
 reads `session current_step` for the step the run is now on. An answer is refused while an agent is
 executing the current step, on a locked or finished execution, and when the page's copy of the run
 is behind the server's (reload and answer again).
+
+## Stopping your run
+
+When the owner's run can be stopped, **Stop task** opens a confirmation with a required reason.
+An executing operation temporarily disables the action; an administrator viewing another owner's
+run does not gain it. Review the task before confirming. A failed request keeps the reason, and a
+conflict requires **Use the current state for a new decision** before another submission.
+
+**Stopped** and the recorded reason identify intentional termination, not successful task
+completion. The route, completed stages and partial checklist remain readable. Unfinished stages
+stay unfinished; the stopped frontier has no active pulse or waiting prompt, and its duration no
+longer ticks. Stopping one run leaves child runs independent. Own-run updates arrive live;
+administrator reads of another owner's run retain their manual refresh control.
 
 ## Explaining the page
 

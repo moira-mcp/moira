@@ -183,9 +183,27 @@ session({ action: "execution_context", executionId: "abc-123" })
 ```
 
 Returns execution state including context variables, history, the workflow-step `revision`, and
-independent parent, context, and reminder revisions. Supply the matching target revision together
+independent task-identity, parent, context, and reminder revisions. Supply the matching target revision together
 with `expectedRevision` when changing that metadata; successful writes return the next target
 revision without changing the step revision.
+
+## Naming the task
+
+At intake, read execution context and persist the actual name before submitting the step:
+
+```javascript
+session({
+  action: "update-task-title",
+  executionId,
+  taskTitle: "Implement authentication",
+  expectedRevision: current.revision,
+  expectedTaskIdentityRevision: current.metadataRevisions.taskIdentity,
+});
+```
+
+`current` is the execution-context result. Apply the [task-name contract](/docs/concepts/workflows/#execution-task-name)
+for limits, stale guards and no-op behavior. Rename at an authorized actual scope change;
+ordinary progress retains the name and the current step attempt. Notes below remain separate.
 
 ## Execution Notes
 
@@ -261,8 +279,11 @@ finish a cancelled workflow. If an execution operation, including recovery or a 
 is still in progress, stopping is refused:
 wait for it to finish and read the context again. A stale revision or an already finished run is
 also refused. After a lost response, repeat the original revision and reason to receive the same
-stopped result without another change. Stopped runs are hidden in the default overview, including
-children; use **Stopped** or **All** to find them. Their active child runs continue independently.
+stopped result without another change. Stopped runs do not match the default active overview;
+use **Stopped** or **All** to find them and choose **All time** for older runs. A stopped ancestor
+can remain as labelled context for an eligible child. Their active child runs continue independently.
+The web UI's owner stop controls use the same guarded operation. Read `stopCapability` as an advisory
+snapshot; the stored mutation repeats ownership, revision and executing-operation checks.
 
 ## Finding Workflows
 

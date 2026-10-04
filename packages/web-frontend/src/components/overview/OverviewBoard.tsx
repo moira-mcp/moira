@@ -104,6 +104,7 @@ function GroupView({
             : "overflow-x-auto bg-muted/60"
           : cn(
               "border-dashed",
+              depth >= 2 && "rounded-none border-x-0 px-0",
               depth === 1 ? "bg-primary/5" : "bg-primary/10",
               layout === "grid" && "basis-full",
             ),

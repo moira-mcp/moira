@@ -898,7 +898,7 @@ describe("workflow-management-flow", () => {
   });
 
   test("keeps shared gates and routes each local answer on its owning directive", () => {
-    expect(workflow.metadata.version).toBe("6.18.0");
+    expect(workflow.metadata.version).toBe("6.19.0");
     expect(
       workflow.nodes.filter((node) => node.type === "condition").map((node) => node.id),
     ).toEqual([

@@ -1,9 +1,9 @@
 /**
  * One run on the overview, on a card of constant height: whatever the number of plan items or the
- * length of the text, the rows are the same — status and age, a two-line title, the flow (or the
- * parent a child run belongs to), the stage strip or what the person is waited for, the plan window
+ * length of the text, the rows are the same — status and age, a two-line title, its own flow and
+ * parent or context relationship, the stage strip or what the person is waited for, the plan window
  * around the current item, and the footer with its flags. Everything a card shortens is in the
- * hints and, in full, in the side panel its title opens.
+ * hints and, in full, in the modal dialog its title opens.
  */
 
 import React from "react";
@@ -37,6 +37,7 @@ import {
   type PlanRow,
 } from "./model";
 import { agoText, ageText, dateText, daysIn } from "./format";
+import { useExecutionStopAction } from "../execution/ExecutionStop";
 
 /** The dot and label colour of each status; the label always says the status in words. */
 export const STATUS_DOT: Record<OverviewStatus, string> = {
@@ -61,7 +62,7 @@ export function StatusLabel({
   const label = (
     <span
       className={cn(
-        "inline-flex items-center gap-1.5 whitespace-nowrap font-semibold",
+        "inline-flex min-w-0 items-center gap-1.5 font-semibold",
         status === "waiting-user" ? "text-your-move" : "text-foreground",
       )}
       data-testid="overview-status"
@@ -76,7 +77,7 @@ export function StatusLabel({
         )}
         aria-hidden="true"
       />
-      {t(`pages.overview.runStatus.${status}`)}
+      <span className="min-w-0 truncate">{t(`pages.overview.runStatus.${status}`)}</span>
     </span>
   );
   return withHint ? (
@@ -160,7 +161,7 @@ function PlanRowView({ row, t }: { row: PlanRow; t: TFunction }): React.JSX.Elem
       </span>
       <span
         className={cn(
-          "min-w-0",
+          "min-w-0 flex-1 [overflow-wrap:anywhere]",
           row.twoLines ? "line-clamp-2 leading-[18px]" : "truncate",
           item.done && "text-muted-foreground",
         )}
@@ -231,38 +232,46 @@ function StripRow({ run }: { run: OverviewRun }): React.JSX.Element | null {
       </Hint>
     );
   }
-  if (!run.stages || run.stages.labels.length === 0) return null;
-  const total = run.stages.labels.length;
-  const finished = run.status === "completed";
-  const active = run.stages.activeIndex;
-  const position = finished ? total : (active ?? run.stages.doneCount);
-  const hint = run.stages.labels
-    .map(
-      (label, index) =>
-        `${index < position ? "✓" : index === position && !finished ? "▸" : "·"} ${label}`,
-    )
+  if (!run.stages || run.stages.entries.length === 0) return null;
+  const entries = run.stages.entries;
+  const total = entries.length;
+  const done = entries.filter(
+    (stage) => stage.status === "done" || stage.status === "repeated",
+  ).length;
+  const position =
+    run.status === "completed"
+      ? -1
+      : entries.findIndex((stage) => stage.status === "active" || stage.status === "waiting");
+  const hint = entries
+    .map((stage) => `${stage.label} — ${t(`pages.runPage.status.${stage.status}`)}`)
     .join("\n");
   return (
     <Hint content={hint} className="whitespace-pre-line" width="md">
       <div className="grid content-start gap-[5px]" data-testid="overview-stages" tabIndex={0}>
-        <div className="flex justify-between gap-2 whitespace-nowrap text-xs text-muted-foreground">
-          <span>
-            {t("pages.overview.card.stage", { number: Math.min(position + 1, total), total })}
+        <div className="flex min-w-0 justify-between gap-2 text-xs text-muted-foreground">
+          <span className="min-w-0 truncate">
+            {position >= 0
+              ? t("pages.overview.card.stage", { number: position + 1, total })
+              : t("pages.overview.card.stagesProgress", { done, total })}
           </span>
           <b className="truncate font-semibold text-foreground">
-            {finished || position >= total
+            {done === total
               ? t("pages.overview.card.stagesDone")
-              : run.stages.labels[position]}
+              : position >= 0
+                ? entries[position].label
+                : ""}
           </b>
         </div>
         <div className="flex gap-[3px]" aria-hidden="true">
-          {run.stages.labels.map((label, index) => (
+          {entries.map((stage, index) => (
             <i
-              key={`${index}-${label}`}
+              key={stage.id}
+              data-stage-status={stage.status}
               className={cn(
-                "h-[5px] flex-1 rounded-[2px] bg-secondary",
-                index < position && (finished ? "bg-success" : "bg-primary"),
-                index === position && !finished && "bg-primary/40",
+                "h-[5px] min-w-0 flex-1 rounded-[2px] bg-secondary",
+                (stage.status === "done" || stage.status === "repeated") && "bg-primary",
+                stage.status === "skipped" && "bg-muted-foreground/25",
+                index === position && "bg-primary/40",
               )}
             />
           ))}
@@ -277,16 +286,16 @@ function PlanArea({ run }: { run: OverviewRun }): React.JSX.Element {
   const plan = cardPlan(run);
   if (plan.kind === "none") {
     return (
-      <div className="grid min-h-0 grid-rows-[18px_1fr] border-t border-border pt-2">
+      <div className="grid min-h-0 grid-cols-[minmax(0,1fr)] grid-rows-[18px_1fr] border-t border-border pt-2">
         <div className="text-[11.5px] font-semibold uppercase tracking-wide text-muted-foreground">
           {t("pages.overview.card.plan")}
         </div>
         <div
-          className="grid content-center gap-1.5 text-[13px] text-muted-foreground"
+          className="grid min-w-0 content-center gap-1.5 text-[13px] text-muted-foreground"
           data-testid="overview-no-plan"
         >
           {run.status !== "completed" && run.status !== "stopped" && run.current?.stepName ? (
-            <span>
+            <span className="line-clamp-4 [overflow-wrap:anywhere]">
               {t("pages.overview.card.now")}{" "}
               <b className="font-medium text-foreground">{run.current.stepName}</b>
             </span>
@@ -307,7 +316,7 @@ function PlanArea({ run }: { run: OverviewRun }): React.JSX.Element {
       : t("pages.overview.card.doneOf", { done: plan.done, total: plan.total });
   return (
     <div
-      className="grid min-h-0 grid-rows-[18px_1fr] border-t border-border pt-2"
+      className="grid min-h-0 grid-cols-[minmax(0,1fr)] grid-rows-[18px_1fr] border-t border-border pt-2"
       data-testid="overview-plan"
       data-plan={plan.kind}
     >
@@ -340,9 +349,11 @@ function Footer({ run, now }: { run: OverviewRun; now: number }): React.JSX.Elem
     notified = note.ok;
     hint = "";
   } else if (run.status === "completed" || run.status === "stopped") {
-    text = t(`pages.overview.card.${run.status}`, {
-      ago: agoText(now - (run.completedAt ?? activityOf(run)), t),
-    });
+    const at = run.completedAt ?? activityOf(run);
+    text =
+      at === null
+        ? t(`pages.overview.card.${run.status}Unknown`)
+        : t(`pages.overview.card.${run.status}`, { ago: agoText(now - at, t) });
     hint = "";
   } else {
     text =
@@ -368,11 +379,12 @@ function Footer({ run, now }: { run: OverviewRun; now: number }): React.JSX.Elem
     >
       {hint ? <Hint content={hint}>{textView}</Hint> : textView}
       <span className="ml-auto inline-flex flex-none gap-1">
-        {run.children.total > 0 ? (
+        {run.childrenTotal.total > 0 ? (
           <Hint
             content={t("pages.overview.card.childrenFlag", {
-              total: run.children.total,
-              unfinished: run.children.unfinished,
+              total: run.childrenTotal.total,
+              shown: run.children.total,
+              unfinished: run.childrenTotal.unfinished,
             })}
           >
             <span
@@ -381,7 +393,7 @@ function Footer({ run, now }: { run: OverviewRun; now: number }): React.JSX.Elem
               tabIndex={0}
             >
               <GitBranch className="h-3 w-3" aria-hidden="true" />
-              {run.children.unfinished}/{run.children.total}
+              {run.children.total}/{run.childrenTotal.total}
             </span>
           </Hint>
         ) : null}
@@ -401,8 +413,8 @@ function Footer({ run, now }: { run: OverviewRun; now: number }): React.JSX.Elem
             </span>
           </Hint>
         ) : null}
-        {/* The note is usually the task's title already; only a note that differs is flagged. */}
-        {run.note && run.note !== run.title ? (
+        {/* Notes remain independently inspectable even when their text matches the task title. */}
+        {run.note ? (
           <Hint
             content={t("pages.overview.card.noteFlag", { note: run.note })}
             side="top"
@@ -440,6 +452,7 @@ export function OverviewCard({
   className,
 }: OverviewCardProps): React.JSX.Element {
   const { t, i18n } = useTranslation();
+  const stop = useExecutionStopAction(run);
   const strip = hasStripRow(run);
   const since = activityOf(run);
   const stale = isStale(run, now);
@@ -453,17 +466,19 @@ export function OverviewCard({
     run.subtreeActivityAt > run.lastActivityAt
       ? t("pages.overview.ageHint.subtree", { at: dateText(run.subtreeActivityAt, i18n.language) })
       : null,
-    stale ? t("pages.overview.ageHint.stale", { days: daysIn(now - since) }) : null,
+    stale && since !== null
+      ? t("pages.overview.ageHint.stale", { days: daysIn(now - since) })
+      : null,
   ]
     .filter(Boolean)
     .join("\n");
   return (
     <article
       className={cn(
-        "relative grid h-[340px] w-full min-w-0 cursor-pointer gap-y-2 rounded-xl border border-border bg-card px-4 pb-3 pt-3.5 text-card-foreground shadow-sm transition-colors hover:border-ring/50",
+        "relative grid h-[360px] w-full min-w-0 grid-cols-[minmax(0,1fr)] cursor-pointer gap-y-2 rounded-xl border border-border bg-card px-4 pb-3 pt-3.5 text-card-foreground shadow-sm transition-colors hover:border-ring/50",
         strip
-          ? "grid-rows-[20px_40px_18px_26px_minmax(0,1fr)_22px]"
-          : "grid-rows-[20px_40px_18px_minmax(0,1fr)_22px]",
+          ? "grid-rows-[20px_40px_34px_26px_minmax(0,1fr)_22px]"
+          : "grid-rows-[20px_40px_34px_minmax(0,1fr)_22px]",
         run.status === "waiting-user" && "border-your-move/50 ring-1 ring-your-move/30",
         !run.matches && "[&>*]:opacity-50",
         className,
@@ -491,32 +506,65 @@ export function OverviewCard({
             data-stale={stale || undefined}
             tabIndex={0}
           >
-            {ageText(now - since, t)}
+            {since === null ? "—" : ageText(now - since, t)}
           </span>
         </Hint>
+        {stop ? (
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="size-6 shrink-0 text-destructive"
+            aria-label={stop.label}
+            data-hint={stop.label}
+            disabled={stop.disabled}
+            data-testid={stop.testId}
+            onClick={(event) => {
+              event.stopPropagation();
+              stop.onClick();
+            }}
+          >
+            {stop.icon}
+          </Button>
+        ) : null}
       </div>
       <Button
         type="button"
         variant="ghost"
-        className="h-auto justify-start whitespace-normal rounded-sm p-0 text-left text-[15px] font-semibold leading-5 hover:bg-transparent"
+        className="h-auto min-w-0 justify-start whitespace-normal rounded-sm p-0 text-left text-[15px] font-semibold leading-5 hover:bg-transparent"
         aria-haspopup="dialog"
         data-testid="overview-card-open"
         onClick={() => onOpen(run.executionId)}
       >
-        <span className="line-clamp-2">{run.title}</span>
+        <span className="min-w-0 flex-1 line-clamp-2 [overflow-wrap:anywhere]">{run.title}</span>
       </Button>
-      <div className="truncate text-xs text-muted-foreground" data-testid="overview-subtitle">
-        {continuing ? (
-          <Hint content={t("pages.overview.card.flowHint", { name: run.workflowName ?? "—" })}>
-            <span tabIndex={0}>
-              <span className="font-semibold text-primary">
+      <div
+        className="grid min-w-0 content-start gap-0.5 text-xs text-muted-foreground"
+        data-testid="overview-subtitle"
+      >
+        <span className="min-w-0 truncate" data-testid="overview-own-flow">
+          {run.workflowName ?? "—"}
+        </span>
+        <span className="flex min-w-0 items-center gap-1.5">
+          {!run.matches ? (
+            <span className="shrink-0 font-medium" data-testid="overview-parent-context">
+              {t("pages.overview.card.context")}
+            </span>
+          ) : null}
+          {continuing ? (
+            <Hint
+              content={`${t("pages.overview.card.childOf", { title: continuing })}\n${t("pages.overview.card.flowHint", { name: run.workflowName ?? "—" })}`}
+              className="whitespace-pre-line"
+            >
+              <span
+                tabIndex={0}
+                className="block min-w-0 flex-1 truncate font-semibold text-primary"
+              >
                 {t("pages.overview.card.childOf", { title: continuing })}
               </span>
-            </span>
-          </Hint>
-        ) : (
-          (run.workflowName ?? "—")
-        )}
+            </Hint>
+          ) : null}
+        </span>
       </div>
       {strip ? <StripRow run={run} /> : null}
       <PlanArea run={run} />

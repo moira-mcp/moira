@@ -63,6 +63,7 @@ import {
 import { formatDuration } from "./duration";
 import {
   currentBlockId,
+  blockIsCurrent,
   listProgressLabel,
   orderNodeIds,
   stepsOf,
@@ -178,7 +179,11 @@ function blockFacts(
     label: t("pages.runPage.stepCount", { count: block.nodeIds.length }),
     tip:
       steps.length > 0 ? (
-        <StepTipList steps={steps} currentNodeId={block.currentNodeId} onFocusNode={onFocusNode} />
+        <StepTipList
+          steps={steps}
+          currentNodeId={block.stopped ? null : block.currentNodeId}
+          onFocusNode={onFocusNode}
+        />
       ) : (
         block.nodeIds.join("\n")
       ),
@@ -192,7 +197,7 @@ function blockFacts(
       tip: block.timing.passes
         .map(
           (pass, index) =>
-            `${index + 1}: ${pass.durationMs === null ? "—" : formatDuration(pass.durationMs, t)}${pass.open ? " · " + t("pages.runPage.map.current") : ""}`,
+            `${index + 1}: ${pass.durationMs === null ? "—" : formatDuration(pass.durationMs, t)}${pass.open && !block.stopped ? " · " + t("pages.runPage.map.current") : ""}`,
         )
         .join("\n"),
     });
@@ -208,7 +213,7 @@ function blockFacts(
           : formatDuration(timing.totalMs ?? 0, t),
       tip: `${t("pages.runPage.map.total")}: ${timing.totalMs === null ? "—" : formatDuration(timing.totalMs, t)}${
         timing.currentMs !== null
-          ? `\n${t("pages.runPage.map.current")}: ${formatDuration(timing.currentMs, t)}`
+          ? `\n${t(block.stopped ? "pages.runPage.stoppedHere" : "pages.runPage.map.current")}: ${formatDuration(timing.currentMs, t)}`
           : ""
       }`,
     });
@@ -222,10 +227,10 @@ function blockFacts(
         ? list.items
             .map(
               (item) =>
-                `${item.done ? "✓" : item.current ? "▶" : "·"} ${item.title}${item.durationMs !== null ? ` — ${formatDuration(item.durationMs, t)}` : ""}`,
+                `${item.done ? "✓" : item.current && !block.stopped ? "▶" : "·"} ${item.title}${item.durationMs !== null ? ` — ${formatDuration(item.durationMs, t)}` : ""}`,
             )
             .join("\n")
-        : (list.currentTitle ?? t("pages.runPage.map.listProgress")),
+        : ((!block.stopped ? list.currentTitle : null) ?? t("pages.runPage.map.listProgress")),
     });
   }
   return facts;
@@ -254,11 +259,15 @@ function BlockNodeView({ data }: NodeProps<BlockNode>): React.JSX.Element {
   const litIds = focus.hovered ?? (focus.pinnedBlock === block.id ? new Set(keys) : null);
   return (
     <PortedCard
-      badge={<StatusChip status={block.status} waitingFor={waitingFor} />}
+      badge={<StatusChip status={block.status} stopped={block.stopped} waitingFor={waitingFor} />}
       titleExtra={block.iterations > 1 ? <PassCount iterations={block.iterations} /> : undefined}
       title={block.name}
       index={block.index + 1}
-      tone={BLOCK_TONE[block.status]}
+      tone={
+        block.stopped && (block.status === "active" || block.status === "waiting")
+          ? "neutral"
+          : BLOCK_TONE[block.status]
+      }
       description={block.description}
       descriptionTip={block.description}
       facts={blockFacts(block, t, steps, onFocusNode)}
@@ -268,7 +277,7 @@ function BlockNodeView({ data }: NodeProps<BlockNode>): React.JSX.Element {
       outputs={outputs}
       selfLoops={selfLoops}
       width={BLOCK_WIDTH}
-      current={block.status === "active" || block.status === "waiting"}
+      current={blockIsCurrent(block)}
       selected={selected}
       near={near}
       litIds={litIds}
@@ -291,10 +300,14 @@ function BlockNodeView({ data }: NodeProps<BlockNode>): React.JSX.Element {
               className={cn(
                 "flex items-center gap-1.5 truncate",
                 item.done && "text-muted-foreground line-through decoration-muted-foreground/50",
-                item.current && "font-medium text-primary",
+                item.current && !block.stopped && "font-medium text-primary",
               )}
             >
-              <ListMarker done={item.done} current={item.current} variant="glyph" />
+              <ListMarker
+                done={item.done}
+                current={item.current && !block.stopped}
+                variant="glyph"
+              />
               {onSelectListItem ? (
                 <button
                   type="button"
@@ -775,8 +788,9 @@ function CanvasInner({
               pannable
               zoomable
               nodeColor={(node) => {
-                const status = (node.data as { block?: RunBlock }).block?.status;
-                return status === "active" || status === "waiting"
+                const block = (node.data as { block?: RunBlock }).block;
+                const status = block?.status;
+                return block && blockIsCurrent(block)
                   ? "var(--primary)"
                   : status === "done" || status === "repeated"
                     ? "var(--success)"

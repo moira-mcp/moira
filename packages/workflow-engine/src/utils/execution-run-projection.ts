@@ -10,6 +10,7 @@
  */
 
 import type { WorkflowGraph } from "../interfaces/core-interfaces.js";
+import { metadataRevision } from "@mcp-moira/shared";
 import { GraphTemplateProcessor } from "../templates/graph-template-processor.js";
 import type {
   ExecutionVisit,
@@ -19,6 +20,8 @@ import type {
 import type {
   ExecutionBlockStatus,
   ExecutionProgress,
+  ExecutionProgressMetadata,
+  ExecutionProgressResult,
   ExecutionProgressContent,
   ExecutionProgressNode,
   ExecutionProgressState,
@@ -29,6 +32,7 @@ import { EXECUTION_PROGRESS_TEXT_LIMITS } from "./execution-progress-contract.js
 import { deriveProcess, type ProcessProjection } from "./process-derivation.js";
 import { currentGatedNode, humanGateWaiting } from "./human-gate.js";
 import { awaitingUserAfterMove } from "./awaiting-user.js";
+import { PROGRESS_SUMMARY_LIST_WINDOW } from "./execution-progress-read.js";
 import {
   blockTimings,
   itemIndexResolver,
@@ -39,9 +43,13 @@ import {
 export type {
   ExecutionBlockStatus,
   ExecutionProgress,
+  ExecutionProgressMetadata,
+  ExecutionProgressResult,
   ExecutionProgressNode,
   ExecutionProgressState,
   ExecutionRouteEntry,
+  ExecutionStageEntry,
+  ExecutionStages,
   ExecutionVariableState,
 } from "./execution-progress-contract.js";
 
@@ -80,13 +88,98 @@ export function passSelector(
   };
 }
 
+function withinResolvedLimit(value: string, maxLength: number): boolean {
+  return [...value].length <= maxLength;
+}
+
 function enforceResolvedLimit(value: string, maxLength: number, field: string): string {
-  if ([...value].length > maxLength) {
+  if (!withinResolvedLimit(value, maxLength)) {
     throw new Error(
       `Execution progress ${field} exceeds ${maxLength} characters after template resolution`,
     );
   }
   return value;
+}
+
+export interface ExecutionTaskTitleDefinition {
+  metadata: Pick<WorkflowGraph["metadata"], "name">;
+  variableRegistry?: Record<string, { default?: unknown }>;
+  progress?: { title?: string };
+}
+
+function progressTemplateContext(
+  workflow: ExecutionTaskTitleDefinition,
+  execution: WorkflowExecution,
+) {
+  const defaults = Object.fromEntries(
+    Object.entries(workflow.variableRegistry ?? {})
+      .filter(([, variable]) => variable.default !== undefined)
+      .map(([name, variable]) => [name, variable.default]),
+  );
+  return {
+    ...execution.globalContext,
+    variables: { ...defaults, ...execution.globalContext.variables },
+    _templateFragmentVars: GraphTemplateProcessor.computeFragmentVars(workflow.variableRegistry),
+  };
+}
+
+function taskTitleFrom(
+  workflow: ExecutionTaskTitleDefinition | undefined,
+  execution: WorkflowExecution,
+  authoredTitle: string | null,
+): string {
+  return enforceResolvedLimit(
+    execution.taskIdentity?.title ??
+      (authoredTitle?.includes(GraphTemplateProcessor.UNDEFINED_PLACEHOLDER)
+        ? null
+        : authoredTitle) ??
+      workflow?.metadata.name.trim() ??
+      execution.workflowId,
+    EXECUTION_PROGRESS_TEXT_LIMITS.taskTitle,
+    "taskTitle",
+  );
+}
+
+/** A task's own identity; arbitrary notes and parent names never supply its heading. */
+export function resolveExecutionTaskTitle(
+  workflow: ExecutionTaskTitleDefinition | undefined,
+  execution: WorkflowExecution,
+): string {
+  if (execution.taskIdentity) return taskTitleFrom(workflow, execution, null);
+  if (!workflow) return taskTitleFrom(workflow, execution, null);
+  const authoredTitle = workflow.progress?.title
+    ? new GraphTemplateProcessor()
+        .processDirective(workflow.progress.title, progressTemplateContext(workflow, execution))
+        .trim()
+    : null;
+  // A legacy authored title can expand beyond its render limit. Heading-only consumers retain
+  // the own-flow fallback; the full progress projection still rejects the oversized text.
+  return taskTitleFrom(
+    workflow,
+    execution,
+    authoredTitle && withinResolvedLimit(authoredTitle, EXECUTION_PROGRESS_TEXT_LIMITS.title)
+      ? authoredTitle
+      : null,
+  );
+}
+
+function executionTaskMetadata(
+  workflow: WorkflowGraph,
+  execution: WorkflowExecution,
+): Omit<ExecutionProgressMetadata, "source" | "taskTitle"> {
+  const taskIdentity = execution.taskIdentity ? { ...execution.taskIdentity } : null;
+  return {
+    taskIdentity,
+    taskIdentityRevision: metadataRevision(taskIdentity),
+    executionId: execution.executionId,
+    workflowId: execution.workflowId,
+    workflowName: workflow.metadata.name,
+    workflowVersion: workflow.metadata.version,
+    executionWorkflowVersion: execution.workflowVersion ?? null,
+    executionRevision: execution.revision,
+    executionStatus: execution.status,
+    stopReason: execution.stopReason ?? null,
+  };
 }
 
 function resolveOptional(
@@ -389,6 +482,41 @@ export interface ProjectExecutionRunOptions {
   now?: number;
 }
 
+export type ExecutionProgressSummary = Pick<
+  ExecutionProgress,
+  "taskTitle" | "activeNodeId" | "waitingForUser"
+> & {
+  nodes: Array<Pick<ExecutionProgressNode, "id" | "label" | "status" | "list">>;
+};
+
+/** A current-state summary shares the full projection's route, list and wait rules. */
+export function projectExecutionRunSummary(
+  workflow: WorkflowGraph,
+  execution: WorkflowExecution,
+  options: Pick<ProjectExecutionRunOptions, "now"> = {},
+): ExecutionProgressSummary | null {
+  const progress = projectRun(workflow, execution, options, true);
+  if (!progress) return null;
+  return {
+    taskTitle: progress.taskTitle,
+    activeNodeId: progress.activeNodeId,
+    waitingForUser: progress.waitingForUser,
+    nodes: progress.nodes.map(({ id, label, status, list }) => {
+      if (!list?.items) return { id, label, status, list };
+      const start = Math.min(
+        Math.max(0, (list.current ?? 0) - Math.floor(PROGRESS_SUMMARY_LIST_WINDOW / 2)),
+        Math.max(0, list.items.length - PROGRESS_SUMMARY_LIST_WINDOW),
+      );
+      return {
+        id,
+        label,
+        status,
+        list: { ...list, items: list.items.slice(start, start + PROGRESS_SUMMARY_LIST_WINDOW) },
+      };
+    }),
+  };
+}
+
 /**
  * The execution as it stood when the visit at the cursor was the last one: the route cut there,
  * the run still running on that visit's node, waiting there if the visit paused.
@@ -412,6 +540,30 @@ export function projectExecutionRun(
   source: WorkflowExecution,
   options: ProjectExecutionRunOptions = {},
 ): ExecutionProgress | null {
+  return projectRun(workflow, source, options, false);
+}
+
+/** Progress transports also expose task metadata for definitions without an authored process. */
+export function projectExecutionProgress(
+  workflow: WorkflowGraph,
+  execution: WorkflowExecution,
+  options: ProjectExecutionRunOptions = {},
+): ExecutionProgressResult {
+  return (
+    projectExecutionRun(workflow, execution, options) ?? {
+      source: "metadata",
+      ...executionTaskMetadata(workflow, execution),
+      taskTitle: resolveExecutionTaskTitle(workflow, execution),
+    }
+  );
+}
+
+function projectRun(
+  workflow: WorkflowGraph,
+  source: WorkflowExecution,
+  options: ProjectExecutionRunOptions,
+  summary: boolean,
+): ExecutionProgress | null {
   const definition = workflow.progress;
   const process = deriveProcess(workflow);
   if (!definition || !process) return null;
@@ -430,11 +582,7 @@ export function projectExecutionRun(
       .filter(([, variable]) => variable.default !== undefined)
       .map(([name, variable]) => [name, variable.default]),
   );
-  const context = {
-    ...execution.globalContext,
-    variables: { ...registryDefaults, ...execution.globalContext.variables },
-    _templateFragmentVars: GraphTemplateProcessor.computeFragmentVars(workflow.variableRegistry),
-  };
+  const context = progressTemplateContext(workflow, execution);
   const nodeTypes = new Map(workflow.nodes.map((node) => [node.id, node.type]));
   const owner = new Map<string, string>();
   for (const block of process.blocks) for (const id of block.nodeIds) owner.set(id, block.id);
@@ -532,11 +680,13 @@ export function projectExecutionRun(
   // Timings and bound lists: the variables at the cursor, the passes of every block, and — for
   // a bound block — the item each pass worked on.
   const now =
-    execution.stopReason && cursor === null
+    execution.stopReason != null && cursor === null
       ? (execution.completedAt ?? execution.updatedAt)
       : (options.now ?? Date.now());
   const bindings = new Map(
-    definition.nodes.filter((node) => node.list).map((node) => [node.id, node.list!]),
+    definition.nodes
+      .filter((node) => node.list && (!summary || node.id === activeNodeId))
+      .map((node) => [node.id, node.list!]),
   );
   const itemResolvers = new Map(
     [...bindings].map(([blockId, binding]) => [
@@ -577,12 +727,14 @@ export function projectExecutionRun(
       isActive && activeLabelNode?.progressActiveLabel
         ? activeLabelNode.progressActiveLabel
         : node.label;
-    const content = resolveContent(
-      node.content,
-      isActive ? activeLabelNode?.progressActiveContent : undefined,
-      templateProcessor,
-      context,
-    );
+    const content = summary
+      ? { summary: null, details: [], outcome: null, next: null }
+      : resolveContent(
+          node.content,
+          isActive ? activeLabelNode?.progressActiveContent : undefined,
+          templateProcessor,
+          context,
+        );
     if (run.status === "pending" || run.status === "skipped") content.outcome = null;
     const next = definition.nodes[index + 1];
     return {
@@ -612,29 +764,21 @@ export function projectExecutionRun(
   });
 
   return {
-    taskTitle: execution.note?.trim()
-      ? enforceResolvedLimit(
-          execution.note.trim(),
-          EXECUTION_PROGRESS_TEXT_LIMITS.taskTitle,
-          "taskTitle",
-        )
-      : (renderedTitle ??
-        enforceResolvedLimit(
-          workflow.metadata.name.trim(),
-          EXECUTION_PROGRESS_TEXT_LIMITS.taskTitle,
-          "taskTitle",
-        )),
+    ...executionTaskMetadata(workflow, execution),
+    taskTitle: taskTitleFrom(workflow, execution, renderedTitle),
     title: renderedTitle,
-    goal: resolveOptional(
-      definition.goal,
-      templateProcessor,
-      context,
-      EXECUTION_PROGRESS_TEXT_LIMITS.goal,
-      "goal",
-    ),
+    goal: summary
+      ? null
+      : resolveOptional(
+          definition.goal,
+          templateProcessor,
+          context,
+          EXECUTION_PROGRESS_TEXT_LIMITS.goal,
+          "goal",
+        ),
     // A fact over a variable the run has not set yet (the template processor's undefined
     // marker) or that resolves to nothing is left out rather than shown as a marker.
-    facts: (definition.facts ?? [])
+    facts: (summary ? [] : (definition.facts ?? []))
       .map((fact) => ({
         label: enforceResolvedLimit(
           templateProcessor.processDirective(fact.label, context).trim(),
@@ -663,8 +807,8 @@ export function projectExecutionRun(
     executionStatus: execution.status,
     diagnostics,
     process,
-    route: projectRoute(process, visits),
-    variables: variableStates,
+    route: summary ? [] : projectRoute(process, visits),
+    variables: summary ? [] : variableStates,
     routeRecorded,
     cursor,
     source: "trace",

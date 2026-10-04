@@ -21,6 +21,8 @@ import {
 import {
   ConflictError,
   ValidationError,
+  NotFoundError,
+  AuthorizationError,
   applyExecutionReminderMutation,
   canonicalJson,
   createLogger,
@@ -28,7 +30,10 @@ import {
   metadataRevision,
   stepAttemptBindingMatches,
   stepAttemptContinuationMatches,
+  normalizeExecutionTaskTitle,
+  type ExecutionTaskTitleMutationResult,
 } from "@mcp-moira/shared";
+import { executionStopCapability } from "@mcp-moira/shared/execution-management";
 import { encryptValue, decryptValue } from "../utils/encryption.js";
 import { humanGateChanged, humanGateWaiting } from "../utils/human-gate.js";
 import { awaitingUserAfterMove } from "../utils/awaiting-user.js";
@@ -366,6 +371,7 @@ export class InMemoryRepository implements IDataRepository {
       execution.revision += 1;
       // The agent's question is not the saver's to write (as in the database's save).
       execution.awaitingUser = awaitingUserAfterMove(current.awaitingUser, execution);
+      execution.taskIdentity = structuredClone(current.taskIdentity ?? null);
     }
     this.executions.set(execution.executionId, structuredClone(execution));
 
@@ -380,6 +386,53 @@ export class InMemoryRepository implements IDataRepository {
     // The database stores these two on every write; derived on read here, from the same function.
     const copy = structuredClone(execution);
     return { ...copy, ...executionActivity(copy) };
+  }
+
+  async getExecutionManagementHeaders(
+    executionIds: string[],
+  ): Promise<import("@mcp-moira/shared/execution-management").ExecutionManagementHeader[]> {
+    return [...new Set(executionIds)].flatMap((id) => {
+      const row = this.executions.get(id);
+      if (!row) return [];
+      return [
+        {
+          executionId: id,
+          workflowId: row.workflowId,
+          userId: row.userId,
+          status: row.status,
+          revision: row.revision,
+          stopReason: row.stopReason ?? null,
+          hasExecutingAttempt: [...this.executionAttempts.values()].some(
+            (attempt) =>
+              attempt.executionId === id &&
+              attempt.userId === row.userId &&
+              attempt.state === "executing",
+          ),
+          hasActiveLock: row.status === "locked",
+          gateWaiting: Boolean(row.gateWaiting),
+          awaitingUser: row.awaitingUser != null,
+          createdAt: row.createdAt ?? null,
+          lastActivityAt: executionActivity(row).lastActivityAt,
+        },
+      ];
+    });
+  }
+
+  async getExecutingExecutionIds(executionIds: string[]): Promise<string[]> {
+    const requested = new Set(executionIds);
+    return [
+      ...new Set(
+        [...this.executionAttempts.values()]
+          .filter(
+            (attempt) =>
+              attempt.executionId !== null &&
+              requested.has(attempt.executionId) &&
+              attempt.state === "executing" &&
+              this.executions.get(attempt.executionId)?.userId === attempt.userId,
+          )
+          .map((attempt) => attempt.executionId!),
+      ),
+    ];
   }
 
   async listExecutions(): Promise<WorkflowExecution[]> {
@@ -477,11 +530,17 @@ export class InMemoryRepository implements IDataRepository {
     if (status && status.length > 0) {
       const { dbStatuses: mappedFilterStatuses } = mapLegacyStatusArray(status);
       executions = executions.filter((e) => {
+        if (filter.includeStopped !== undefined && e.stopReason != null)
+          return filter.includeStopped;
         // Map execution's status too (it might be 'waiting' or 'failed' in legacy data)
         const { dbStatuses: mappedExecStatuses } = mapLegacyStatusArray([e.status]);
         return mappedExecStatuses.some((s) => mappedFilterStatuses.includes(s));
       });
     }
+    if (!status?.length && filter.includeStopped !== undefined)
+      executions = executions.filter(
+        (execution) => (execution.stopReason != null) === filter.includeStopped,
+      );
 
     if (workflowId) {
       executions = executions.filter((e) => e.workflowId === workflowId);
@@ -527,6 +586,39 @@ export class InMemoryRepository implements IDataRepository {
       execution.note = note;
       execution.updatedAt = Date.now();
     }
+  }
+
+  async updateExecutionTaskTitle(
+    executionId: string,
+    userId: string,
+    expectedRevision: number,
+    expectedTaskIdentityRevision: string,
+    taskTitle: string,
+  ): Promise<ExecutionTaskTitleMutationResult> {
+    const title = normalizeExecutionTaskTitle(taskTitle);
+    const execution = this.executions.get(executionId);
+    if (!execution || execution.userId !== userId)
+      throw new ValidationError("Execution must belong to the authenticated user");
+    if (execution.stopReason != null || !["running", "waiting"].includes(execution.status))
+      throw new ValidationError("Only active executions accept task title changes");
+    if (execution.revision !== expectedRevision)
+      throw new ConflictError("Execution state changed; reload before changing task title");
+    if (metadataRevision(execution.taskIdentity ?? null) !== expectedTaskIdentityRevision)
+      throw new ConflictError("Execution task identity changed; reload before changing task title");
+    const changed = execution.taskIdentity?.title !== title;
+    if (changed) {
+      execution.taskIdentity = { title, changedAt: Date.now(), changeId: randomUUID() };
+      execution.updatedAt = execution.taskIdentity.changedAt;
+      Object.assign(execution, executionActivity(execution));
+    }
+    const taskIdentity = structuredClone(execution.taskIdentity!);
+    return {
+      executionId,
+      taskIdentity,
+      revision: execution.revision,
+      taskIdentityRevision: metadataRevision(taskIdentity),
+      changed,
+    };
   }
 
   async setExecutionAwaitingUser(
@@ -614,28 +706,43 @@ export class InMemoryRepository implements IDataRepository {
     expectedRevision: number,
     reason: string,
   ): Promise<{ changed: boolean; revision: number }> {
+    if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0)
+      throw new ValidationError("expectedRevision must be a non-negative safe integer");
     reason = reason.trim();
     if (!reason || reason.length > 500)
       throw new ValidationError("Stop reason must contain 1–500 characters");
     const execution = this.executions.get(executionId);
-    if (!execution || execution.userId !== userId)
-      throw new ValidationError("Execution must belong to the authenticated user");
+    if (!execution) throw new NotFoundError("Execution not found");
+    if (execution.userId !== userId)
+      throw new AuthorizationError("Execution must belong to the authenticated user");
     if (
       execution.status === "completed" &&
       execution.stopReason === reason &&
       execution.revision === expectedRevision + 1
     )
       return { changed: false, revision: execution.revision };
-    if (execution.revision !== expectedRevision)
-      throw new ConflictError("Execution state changed; reload execution_context before stopping");
-    if (!["running", "waiting"].includes(execution.status))
-      throw new ValidationError("Execution is already finished");
     const attempts = [...this.executionAttempts.values()].filter(
       (attempt) => attempt.executionId === executionId && attempt.userId === userId,
     );
-    if (attempts.some((attempt) => attempt.state === "executing"))
+    const hasExecutingAttempt = attempts.some((attempt) => attempt.state === "executing");
+    const context = {
+      currentRevision: execution.revision,
+      stopCapability: executionStopCapability({ ...execution, hasExecutingAttempt }, userId),
+    };
+    if (execution.revision !== expectedRevision)
+      throw new ConflictError("Execution state changed; reload execution_context before stopping", {
+        ...context,
+        stopRefusal: "stale",
+      });
+    if (execution.stopReason != null || !["running", "waiting"].includes(execution.status))
+      throw new ConflictError("Execution is already finished", {
+        ...context,
+        stopRefusal: "terminal",
+      });
+    if (hasExecutingAttempt)
       throw new ConflictError(
         "An agent operation is executing; wait for it to finish before stopping",
+        { ...context, stopRefusal: "in-flight" },
       );
     const now = Date.now();
     Object.assign(execution, {
@@ -1199,6 +1306,7 @@ export class InMemoryRepository implements IDataRepository {
 
     this.executions.set(input.execution.executionId, {
       ...structuredClone(input.execution),
+      taskIdentity: structuredClone(stored.taskIdentity ?? null),
       revision: stored.revision + 1,
       awaitingUser: null,
       updatedAt: Date.now(),
@@ -1245,6 +1353,7 @@ export class InMemoryRepository implements IDataRepository {
     updatedExecution.errors = structuredClone(current.errors);
     updatedExecution.reminders = structuredClone(current.reminders);
     updatedExecution.parentExecutionId = current.parentExecutionId;
+    updatedExecution.taskIdentity = structuredClone(current.taskIdentity ?? null);
     updatedExecution.awaitingUser = input.answeredByUser
       ? awaitingUserAfterMove(current.awaitingUser, updatedExecution)
       : null;

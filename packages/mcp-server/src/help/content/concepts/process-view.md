@@ -103,6 +103,12 @@ this map rasterised: the same cards, ports, edges, statuses, facts and typical d
 same projection (see the _Workflows_ concept). A notification attaches a different picture made
 for a phone — the run's steps, one row per block, from the same projection.
 
+The run's [task name](/docs/concepts/workflows/#execution-task-name) is independent execution
+metadata, separate from its own flow name and arbitrary note. A progress read returns
+`source: "trace"` when the flow declares progress; without it, `source: "metadata"` exposes
+identity and execution state without inventing a process or route. Explicit naming does not
+create blocks for a graph-only flow.
+
 ## Making a workflow readable
 
 Name blocks for what a person would call the stage, keep descriptions to one sentence, label

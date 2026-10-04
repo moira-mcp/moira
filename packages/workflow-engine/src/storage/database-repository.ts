@@ -30,6 +30,7 @@ import {
   type AdminWorkflowFilter,
   type AdminWorkflowListResult,
   type ExecutionError,
+  type ExecutionTaskTitleMutationResult,
 } from "@mcp-moira/shared";
 import { IDataRepository, WorkflowInfo, SettingDefinition } from "../interfaces/data-repository.js";
 import { WorkflowGraph } from "../interfaces/core-interfaces.js";
@@ -261,6 +262,14 @@ export class DatabaseRepository implements IDataRepository {
     return await this.executionRepo.get(executionId);
   }
 
+  async getExecutionManagementHeaders(executionIds: string[]) {
+    return this.executionRepo.getManyManagementHeaders(executionIds);
+  }
+
+  async getExecutingExecutionIds(executionIds: string[]): Promise<string[]> {
+    return this.executionRepo.getExecutingIds(executionIds);
+  }
+
   async listExecutions(): Promise<WorkflowExecution[]> {
     return await this.executionRepo.list();
   }
@@ -306,6 +315,22 @@ export class DatabaseRepository implements IDataRepository {
 
   async updateExecutionNote(executionId: string, note: string): Promise<void> {
     await this.executionRepo.updateNote(executionId, note);
+  }
+
+  async updateExecutionTaskTitle(
+    executionId: string,
+    userId: string,
+    expectedRevision: number,
+    expectedTaskIdentityRevision: string,
+    taskTitle: string,
+  ): Promise<ExecutionTaskTitleMutationResult> {
+    return this.executionService.updateExecutionTaskTitle(
+      executionId,
+      userId,
+      expectedRevision,
+      expectedTaskIdentityRevision,
+      taskTitle,
+    );
   }
 
   async setExecutionAwaitingUser(

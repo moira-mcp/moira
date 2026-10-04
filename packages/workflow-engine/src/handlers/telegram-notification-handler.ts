@@ -28,7 +28,11 @@ import { createLogger, WorkflowLogger, InternalError } from "@mcp-moira/shared";
 import { renderExecutionProgressStepsImage } from "../utils/execution-progress-steps.js";
 import { withInFlightPause } from "../utils/execution-visits.js";
 import { textEscaper, type NotificationFormat } from "../utils/notification-text.js";
-import { frameNotification, resolveNotificationFrame } from "../services/notification-frame.js";
+import {
+  frameNotification,
+  resolveNotificationFrame,
+  prepareNotificationFrame,
+} from "../services/notification-frame.js";
 
 function formatOf(parseMode: TelegramNotificationNode["parseMode"]): NotificationFormat {
   return parseMode === "Markdown" ? "markdown" : parseMode === "HTML" ? "html" : "plain";
@@ -197,7 +201,7 @@ export class TelegramNotificationHandler implements INodeHandler {
         : new GraphTemplateProcessor(undefined, undefined, textEscaper(format))
     ).processDirective(node.message, context);
     const frame = await resolveNotificationFrame(repository, context, node.id, liveRun);
-    const processedMessage = frameNotification(frame, body, {
+    let processedMessage = frameNotification(frame, body, {
       format,
       limit: node.attachProgressImage ? TELEGRAM_CAPTION_MAX_LENGTH : TELEGRAM_TEXT_MAX_LENGTH,
     });
@@ -236,10 +240,19 @@ export class TelegramNotificationHandler implements INodeHandler {
           "Workflow has no progress graph",
         );
       // The phone steps picture of the run as of this node.
-      const rendered = await this.progressImageRenderer(
-        graph,
-        withInFlightPause(graph, run, node.id),
+      const prepared = await prepareNotificationFrame(
+        repository,
+        context,
+        node.id,
+        frame,
+        async (current) =>
+          this.progressImageRenderer(graph, withInFlightPause(graph, current.run ?? run, node.id)),
       );
+      const rendered = prepared.value;
+      processedMessage = frameNotification(prepared.frame, body, {
+        format,
+        limit: TELEGRAM_CAPTION_MAX_LENGTH,
+      });
       if (!rendered)
         throw this.createTelegramError(
           TelegramErrorType.TEMPLATE_ERROR,

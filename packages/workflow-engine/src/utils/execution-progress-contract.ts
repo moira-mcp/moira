@@ -1,10 +1,14 @@
 import type { ProgressFactTone } from "../types/base-types.js";
 import type { ExecutionVisitActorRole } from "../types/base-types.js";
 import type { ProcessProjection } from "./process-derivation.js";
+import {
+  EXECUTION_TASK_TITLE_LIMIT,
+  type ExecutionTaskIdentity,
+} from "@mcp-moira/shared/execution-task-identity";
 export type { ProgressFactTone } from "../types/base-types.js";
 
 export const EXECUTION_PROGRESS_TEXT_LIMITS = {
-  taskTitle: 500,
+  taskTitle: EXECUTION_TASK_TITLE_LIMIT,
   title: 200,
   goal: 1000,
   factLabel: 100,
@@ -141,8 +145,22 @@ export interface ExecutionProgressNode {
   list: ExecutionBlockList | null;
 }
 
+/** Exact recorded block states for compact management readers, never a completed prefix. */
+export type ExecutionStageEntry = Pick<ExecutionProgressNode, "id" | "label" | "status">;
+export interface ExecutionStages {
+  entries: ExecutionStageEntry[];
+  labels: string[];
+  activeIndex: number | null;
+  doneCount: number;
+}
+
 export interface ExecutionProgress {
   taskTitle: string | null;
+  taskIdentity?: ExecutionTaskIdentity | null;
+  taskIdentityRevision?: string;
+  executionId?: string;
+  workflowId?: string;
+  workflowName?: string;
   title: string | null;
   goal: string | null;
   facts: ExecutionProgressFact[];
@@ -154,6 +172,8 @@ export interface ExecutionProgress {
   executionWorkflowVersion: string | null;
   executionRevision: number;
   executionStatus: string;
+  /** Stored intentional-stop marker; absent on older producers, null on an ordinary run. */
+  stopReason?: string | null;
   diagnostics: string[];
   /** The derived process the run is projected onto. */
   process: ProcessProjection;
@@ -185,6 +205,25 @@ export interface ExecutionProgress {
    */
   waitingForUser: ExecutionWaitingForUser | null;
 }
+
+/** Identity remains inspectable when the definition authors no process view. */
+export interface ExecutionProgressMetadata {
+  source: "metadata";
+  taskTitle: string;
+  taskIdentity: ExecutionTaskIdentity | null;
+  taskIdentityRevision: string;
+  executionId: string;
+  workflowId: string;
+  workflowName: string;
+  workflowVersion: string;
+  executionWorkflowVersion: string | null;
+  executionRevision: number;
+  executionStatus: string;
+  /** Stored intentional-stop marker; absent on older producers, null on an ordinary run. */
+  stopReason?: string | null;
+}
+
+export type ExecutionProgressResult = ExecutionProgress | ExecutionProgressMetadata;
 
 /** Why a run waits for a person, worded for them. */
 export type ExecutionWaitingForUser =

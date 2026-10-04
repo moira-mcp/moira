@@ -24,6 +24,8 @@ import {
 export const PAGE_REFETCH_MS = 700;
 
 export interface LiveOverviewHandlers {
+  /** A detail consumer refreshes only for its own execution; a page observes all changes. */
+  executionId?: string;
   /** Fetch the page again. */
   refetchPage(): Promise<void>;
   /** Take this run off the page now. */
@@ -98,6 +100,12 @@ export function useLiveOverview(
     };
     const onMessage = (message: LiveMessage) => {
       if (!current()) return;
+      if (
+        message.type !== "reset" &&
+        handlersRef.current.executionId &&
+        message.change.executionId !== handlersRef.current.executionId
+      )
+        return;
       routeLiveMessage(message, handlersRef.current);
       dirty = true;
       schedule();

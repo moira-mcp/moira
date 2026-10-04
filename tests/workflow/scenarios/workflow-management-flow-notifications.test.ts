@@ -16,11 +16,19 @@ import {
   runNotificationScenario,
   type NotificationMockContext,
   type NotificationMockInput,
+  type NotificationScenario,
   type NotificationScenarioResult,
 } from "../../helpers/notification-scenario.js";
 
 const workflow = catalogGraph("workflow-management-flow");
-const note = "Build the release checklist";
+const taskTitle = "Build the release checklist";
+const note = "Keep publication authorization separate from the task";
+const runScenario = (scenario: NotificationScenario) =>
+  runNotificationScenario(workflow, {
+    ...scenario,
+    note,
+    taskTitle: { atNode: "get-action-type", title: taskTitle },
+  });
 const stages = [{ title: "Collect the release items" }, { title: "Check each item" }];
 const QUESTION = /\b(?:choose|approve|reject)\b|\?/iu;
 
@@ -102,7 +110,7 @@ function answers(
 }
 
 const heading = (run: NotificationScenarioResult) =>
-  `[Workflow Management Flow · ${note}](${runPageUrl({ executionId: run.executionId })})`;
+  `[Workflow Management Flow · ${taskTitle}](${runPageUrl({ executionId: run.executionId })})`;
 
 /** The messages that put a question to the person; an autonomous run sends none of them. */
 const ASKING = new Set([
@@ -129,6 +137,8 @@ const gateMarks = (run: NotificationScenarioResult, nodeId: string) =>
   run.pauses.filter((pause) => pause.nodeId === nodeId).map((pause) => pause.gateWaiting);
 
 function expectClean(run: NotificationScenarioResult, mode: Mode) {
+  expect(run.taskIdentity?.title).toBe(taskTitle);
+  expect(run.note).toBe(note);
   for (const { text } of run.notifications) {
     expect(text.startsWith(heading(run))).toBe(true);
     expect(internalValues(text, workflow)).toEqual([]);
@@ -250,7 +260,7 @@ describe("Workflow Management Flow notifications", () => {
   ] as const)(
     "%s at the %s level, %s: the plan, the questions, the finish",
     async (action, tier, mode, sequence) => {
-      const run = await runNotificationScenario(workflow, {
+      const run = await runScenario({
         mockInputs: answers(action, mode, tier),
       });
       expect(ids(run)).toEqual(sequence);
@@ -278,7 +288,7 @@ describe("Workflow Management Flow notifications", () => {
   );
 
   test("interactive plan approval names the choices and lists the stages", async () => {
-    const run = await runNotificationScenario(workflow, {
+    const run = await runScenario({
       mockInputs: answers("create", "interactive", "standard"),
     });
     const approval = text(run, "notify-structure-approval");
@@ -296,7 +306,7 @@ describe("Workflow Management Flow notifications", () => {
 
   test("a plan revised after the person rejects the result is announced again with nothing done", async () => {
     const revised = [...stages, { title: "Publish the checklist" }];
-    const run = await runNotificationScenario(workflow, {
+    const run = await runScenario({
       mockInputs: answers("create", "interactive", "simple", {
         "user-final-review": [
           { work_approved: "no", final_feedback: "Add a publishing step" },
@@ -323,7 +333,7 @@ describe("Workflow Management Flow notifications", () => {
 
   test("a plan revised at the standard level after the person rejects the result is announced again with nothing done", async () => {
     const redesigned = [{ title: "Collect the release items" }, { title: "Sign off the release" }];
-    const run = await runNotificationScenario(workflow, {
+    const run = await runScenario({
       mockInputs: answers("create", "interactive", "standard", {
         "user-final-review": [
           { work_approved: "no", final_feedback: "Replace the check with a sign-off" },
@@ -346,7 +356,7 @@ describe("Workflow Management Flow notifications", () => {
 
   test("a process revision on the simple level announces the corrected plan before the new build", async () => {
     const corrected = [{ title: "Collect the release items" }, { title: "Tag the release" }];
-    const run = await runNotificationScenario(workflow, {
+    const run = await runScenario({
       mockInputs: answers("create", "interactive", "simple", {
         "teleport-revise-process": { planned_changes: corrected },
       }),
@@ -368,7 +378,7 @@ describe("Workflow Management Flow notifications", () => {
 
   test("a person who lowers the level at the approval is told the lowered plan before it is built", async () => {
     const lowered = [{ title: "List the release items" }];
-    const run = await runNotificationScenario(workflow, {
+    const run = await runScenario({
       mockInputs: answers("create", "interactive", "standard", {
         "approve-structure": {
           structure_approved: "no",
@@ -388,7 +398,7 @@ describe("Workflow Management Flow notifications", () => {
 
   test("a lowering without the lowered plan is refused", async () => {
     await expect(
-      runNotificationScenario(workflow, {
+      runScenario({
         mockInputs: answers("create", "interactive", "standard", {
           "approve-structure": {
             structure_approved: "no",
@@ -404,7 +414,7 @@ describe("Workflow Management Flow notifications", () => {
 
   test("a run that saved, was revised and then not saved ends saying it is not in the catalogue", async () => {
     const workspace = "./moira-ws/workflow-management-flow-edit-saved-then-revised";
-    const run = await runNotificationScenario(workflow, {
+    const run = await runScenario({
       mockInputs: answers("edit", "interactive", "simple", {
         "prepare-edit-workflow": {
           local_workflow_path: "workflows/release-checklist.json",
@@ -442,7 +452,7 @@ describe("Workflow Management Flow notifications", () => {
   ] as const)(
     "autonomous audit decision %s is announced after it, with the reason",
     async (value, nodeId, words) => {
-      const run = await runNotificationScenario(workflow, {
+      const run = await runScenario({
         mockInputs: answers("edit", "autonomous", "standard", {
           "ask-full-antipattern-audit": {
             full_antipattern_audit: value,
@@ -463,7 +473,7 @@ describe("Workflow Management Flow notifications", () => {
   );
 
   test("an autonomous upload the task authorized is announced, and the finish says it is in the catalogue", async () => {
-    const run = await runNotificationScenario(workflow, {
+    const run = await runScenario({
       mockInputs: answers("create", "autonomous", "standard", {
         "ask-upload": {
           upload_confirmed: true,
@@ -492,7 +502,7 @@ describe("Workflow Management Flow notifications", () => {
   };
 
   test("interactive: a failed upload asks with the reason and the choices; cancelling ends the run cancelled", async () => {
-    const run = await runNotificationScenario(workflow, {
+    const run = await runScenario({
       mockInputs: answers("create", "interactive", "simple", {
         "ask-upload": {
           upload_confirmed: true,
@@ -528,7 +538,7 @@ describe("Workflow Management Flow notifications", () => {
   ] as const)(
     "autonomous upload error: %s is announced after the decision, then a skip",
     async (action, words) => {
-      const run = await runNotificationScenario(workflow, {
+      const run = await runScenario({
         mockInputs: answers("create", "autonomous", "simple", {
           "ask-upload": {
             upload_confirmed: true,
@@ -563,9 +573,15 @@ describe("Workflow Management Flow notifications", () => {
     },
   );
 
+  test("accepts intake without the optional note and keeps the persisted task title independent", async () => {
+    const mocks = answers("create", "autonomous", "simple");
+    const { execution_note: _note, ...intake } = mocks["get-action-type"] as Answer;
+    const run = await runScenario({ mockInputs: { ...mocks, "get-action-type": intake } });
+    expectClean(run, "autonomous");
+  });
+
   // The reader lines exist only because the flow refuses an answer without them.
   test.each([
-    ["get-action-type", "execution_note", "create", "standard"],
     ["gather-workflow-requirements", "planned_changes", "create", "simple"],
     ["design-workflow-structure", "planned_changes", "create", "standard"],
     ["create-edit-plan", "planned_changes", "edit", "standard"],
@@ -576,9 +592,9 @@ describe("Workflow Management Flow notifications", () => {
     const base = answers(action, "interactive", tier);
     const answer: Answer = { ...(base[nodeId] as Answer) };
     delete answer[field];
-    await expect(
-      runNotificationScenario(workflow, { mockInputs: { ...base, [nodeId]: answer } }),
-    ).rejects.toThrow(new RegExp(`The answer for ${nodeId} \\(visit 1\\) was rejected`, "u"));
+    await expect(runScenario({ mockInputs: { ...base, [nodeId]: answer } })).rejects.toThrow(
+      new RegExp(`The answer for ${nodeId} \\(visit 1\\) was rejected`, "u"),
+    );
   });
 
   test("a failed upload is refused without its reason, and an autonomous error decision without its summary", async () => {
@@ -593,7 +609,7 @@ describe("Workflow Management Flow notifications", () => {
     };
     const { failure_summary: _reason, ...failedWithoutReason } = failedUpload;
     await expect(
-      runNotificationScenario(workflow, {
+      runScenario({
         mockInputs: answers("create", "interactive", "simple", {
           ...upload,
           "save-workflow-to-target": failedWithoutReason,
@@ -601,7 +617,7 @@ describe("Workflow Management Flow notifications", () => {
       }),
     ).rejects.toThrow(/The answer for save-workflow-to-target \(visit 1\) was rejected/u);
     await expect(
-      runNotificationScenario(workflow, {
+      runScenario({
         mockInputs: answers("create", "autonomous", "simple", {
           ...upload,
           "save-workflow-to-target": failedUpload,

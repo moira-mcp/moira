@@ -16,6 +16,9 @@ import { RESOURCE_TYPES } from "../../authorization/authorization-policy.js";
 import { AuthorizationService } from "../../authorization/authorization-service.js";
 import type { WorkflowGraph } from "@mcp-moira/workflow-engine";
 import { migrateWorkflowGraph } from "@mcp-moira/workflow-engine/migration";
+import { CURRENT_WORKFLOW_SCHEMA_VERSION } from "@mcp-moira/workflow-engine/migration";
+import type { ExecutionTaskTitleDefinition } from "@mcp-moira/workflow-engine";
+import { storedJsonValue } from "../sql-json.js";
 
 /**
  * A stored definition, read in its current schema shape. Persisted rows are upgraded once at
@@ -34,8 +37,7 @@ import {
   validateSlug,
   normalizeSlug,
 } from "../../validation/slug-handle.js";
-import { executeListQuery, type ListQueryConfig } from "../list-query-builder.js";
-import { clampPagination } from "../list-query-builder.js";
+import { executeListQuery, clampPagination, type ListQueryConfig } from "../list-query-builder.js";
 import { WorkflowRevisionConflictError } from "../../errors/domain-errors.js";
 import { recomputeGateWaiting, storedGraphNodes } from "../gate-waiting.js";
 
@@ -756,9 +758,116 @@ export class WorkflowRepository {
 
   // ===== Get Operations =====
 
+  private async readableRows<T extends { id: string; userId: string; visibility: string | null }>(
+    rows: T[],
+    userId: string,
+  ): Promise<T[]> {
+    const allowed = await this.authorization.canMany(
+      userId,
+      "view",
+      rows.map((row) => ({
+        type: RESOURCE_TYPES.workflow,
+        id: row.id,
+        ownerId: row.userId,
+        visibility: row.visibility === "public" ? "public" : "private",
+      })),
+    );
+    return rows.filter((_row, index) => allowed[index]);
+  }
+
+  /** Heading metadata only for current definitions; older shapes reuse full authorized migration once. */
+  async getManyForTaskTitles(
+    workflowIds: string[],
+    userId: string,
+  ): Promise<
+    Map<string, { name: string; definition: ExecutionTaskTitleDefinition; current: boolean }>
+  > {
+    const result = new Map<
+      string,
+      { name: string; definition: ExecutionTaskTitleDefinition; current: boolean }
+    >();
+    if (!workflowIds.length) return result;
+    const graph = sql`CASE WHEN json_valid(${workflow.graph}) THEN ${workflow.graph} ELSE '{}' END`;
+    const rows = await this.db
+      .select({
+        id: workflow.id,
+        userId: workflow.userId,
+        visibility: workflow.visibility,
+        name: workflow.name,
+        schemaVersion: sql<number | null>`json_extract(${graph}, '$.metadata.schemaVersion')`,
+        headingName: sql<unknown>`json_extract(${graph}, '$.metadata.name')`,
+        title: sql<unknown>`json_extract(${graph}, '$.progress.title')`,
+      })
+      .from(workflow)
+      .where(
+        and(
+          inArray(workflow.id, [...new Set(workflowIds)]),
+          or(eq(workflow.deleted, false), isNull(workflow.deleted)),
+        ),
+      );
+    const allowed = await this.readableRows(rows, userId);
+    const older: string[] = [];
+    for (const row of allowed) {
+      if (
+        row.schemaVersion !== CURRENT_WORKFLOW_SCHEMA_VERSION ||
+        typeof row.headingName !== "string" ||
+        (row.title !== null && typeof row.title !== "string")
+      ) {
+        older.push(row.id);
+        continue;
+      }
+      result.set(row.id, {
+        name: row.name,
+        current: true,
+        definition: {
+          metadata: { name: row.headingName },
+          progress: { title: typeof row.title === "string" ? row.title : undefined },
+          variableRegistry: {},
+        },
+      });
+    }
+    if (older.length) {
+      const migrated = await this.getManyForUser(older, userId);
+      for (const [id, value] of migrated)
+        result.set(id, { name: value.name, definition: value.graph, current: false });
+    }
+    return result;
+  }
+
+  /** Needed authored defaults cross SQLite; descriptions/schemas and unrelated defaults do not. */
+  async getTaskTitleDefaultsForUser(
+    reads: Array<{ workflowId: string; variables: string[] | null }>,
+    userId: string,
+  ): Promise<Map<string, Record<string, { default?: unknown }>>> {
+    if (!reads.length) return new Map();
+    const specifications = JSON.stringify(
+      Object.fromEntries(reads.map((read) => [read.workflowId, read])),
+    );
+    const graph = sql`CASE WHEN json_valid(${workflow.graph}) THEN ${workflow.graph} ELSE '{}' END`;
+    const rows = await this.db
+      .select({
+        id: workflow.id,
+        userId: workflow.userId,
+        visibility: workflow.visibility,
+        defaults: sql<string>`COALESCE((SELECT json_group_object(v.key, json_object('default',
+        ${storedJsonValue(sql`json_type(v.value, '$.default')`, sql`json_extract(v.value, '$.default')`)}))
+        FROM json_each(${graph}, '$.variableRegistry') v
+        WHERE json_type(v.value, '$.default') IS NOT NULL AND
+          (json_type(requested.value, '$.variables') = 'null' OR v.key IN (SELECT value FROM json_each(requested.value, '$.variables')))), '{}')`,
+      })
+      .from(workflow)
+      .innerJoin(
+        sql`json_each(${specifications}) AS requested`,
+        sql`requested.key = ${workflow.id}`,
+      )
+      .where(or(eq(workflow.deleted, false), isNull(workflow.deleted)));
+    const allowed = await this.readableRows(rows, userId);
+    return new Map(allowed.map((row) => [row.id, JSON.parse(row.defaults)]));
+  }
+
   /**
-   * The definitions with these ids the user may view, with their names, in one query (the access
-   * decision is `mayView`, as for `get`); deleted and inaccessible workflows are left out.
+   * The definitions with these ids the user may view, with their names, through bounded batch
+   * authorization using the same policy as `get`; deleted and inaccessible workflows are left out.
    */
   async getManyForUser(
     workflowIds: string[],
@@ -781,11 +890,8 @@ export class WorkflowRepository {
           or(eq(workflow.deleted, false), isNull(workflow.deleted)),
         ),
       );
-    for (const row of rows) {
-      if (await this.mayView(userId, row)) {
-        result.set(row.id, { name: row.name, graph: parseStoredGraph(row.graph) });
-      }
-    }
+    for (const row of await this.readableRows(rows, userId))
+      result.set(row.id, { name: row.name, graph: parseStoredGraph(row.graph) });
     return result;
   }
 

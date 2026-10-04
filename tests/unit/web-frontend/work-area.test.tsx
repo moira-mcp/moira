@@ -29,6 +29,10 @@ function run(id: string, extra: Partial<ActiveWorkRun> = {}): ActiveWorkRun {
     workflowName: "Release checklist",
     note: null,
     status: "running",
+    revision: 1,
+    displayStatus: "waiting-agent",
+    stopReason: null,
+    stopCapability: { available: true, revision: 1 },
     hasActiveLock: false,
     errorCount: 0,
     stepId: "notes",
@@ -54,7 +58,7 @@ describe("WorkArea", () => {
     draw({
       activeRuns: [
         run("plain-0000"),
-        run("locked-000", { status: "locked", hasActiveLock: true }),
+        run("locked-000", { status: "locked", displayStatus: "locked", hasActiveLock: true }),
         run("errors-000", { errorCount: 2 }),
       ],
       recentRuns: [],
@@ -67,6 +71,35 @@ describe("WorkArea", () => {
     expect(
       within(screen.getByTestId("work-active-errors-000")).getByText(/^2 errors$/),
     ).toBeVisible();
+  });
+
+  test("task names, own flow names and notes remain separately readable for active and recent runs", () => {
+    draw({
+      activeRuns: [
+        run("named-task", {
+          taskTitle: "Publish the October release",
+          note: "Waiting for artifact checks",
+        }),
+      ],
+      recentRuns: [
+        run("recent-task", {
+          status: "completed",
+          displayStatus: "completed",
+          stopCapability: { available: false, revision: 1, reason: "terminal" },
+          taskTitle: "Publish the September release",
+          note: "Historical deployment note",
+        }),
+      ],
+      topFlows: [],
+    });
+    const active = screen.getByTestId("work-active-named-task");
+    expect(within(active).getByText("Publish the October release")).toBeVisible();
+    expect(within(active).getByText("Release checklist")).toBeVisible();
+    expect(within(active).getByText("Waiting for artifact checks")).toBeVisible();
+    const recent = screen.getByTestId("work-recent");
+    expect(within(recent).getByText("Publish the September release")).toBeVisible();
+    expect(within(recent).getByText("Release checklist")).toBeVisible();
+    expect(within(recent).getByText("Historical deployment note")).toBeVisible();
   });
 
   test("a step with a name shows it; one without reads as words from its id, not the raw id", () => {

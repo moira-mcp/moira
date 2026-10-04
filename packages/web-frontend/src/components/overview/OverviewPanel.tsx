@@ -1,12 +1,12 @@
 /**
- * Everything about one run of the overview, in a modal side panel: the chain of parent runs, what
+ * Everything about one run of the overview, in a spacious modal: the chain of parent runs, what
  * the person is waited for (the question and its choices, "answer the agent in the chat", whether
  * they were notified), the current step, refusals, the whole plan and every stage (from the run's
  * progress), the child runs, the dates and the note, and a link to the run page. Whatever a card
  * shows only in a hint is here in full. Esc closes the panel and focus returns to where it was.
  */
 
-import React, { useCallback, useLayoutEffect, useRef, useSyncExternalStore } from "react";
+import React, { useCallback, useLayoutEffect, useMemo, useRef, useSyncExternalStore } from "react";
 import { getReadIdentity, subscribeReadScope } from "../../services/read-scope";
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
@@ -14,13 +14,13 @@ import { Check, Circle, CircleDot } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetFooter,
-  SheetHeader,
-  SheetTitle,
-} from "@/components/ui/sheet";
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 import { ROUTES } from "../../constants/routes";
 import { useResource } from "../../hooks/useResource";
@@ -31,6 +31,7 @@ import { waitingNotificationText } from "../execution/waitingNotification";
 import { STATUS_DOT, StatusLabel } from "./OverviewCard";
 import { activityOf, isStale } from "./model";
 import { agoText, dateText, daysIn } from "./format";
+import { ExecutionStopButton } from "../execution/ExecutionStop";
 
 export interface OverviewPanelProps {
   /** The run shown, or null when the panel is closed. */
@@ -94,7 +95,21 @@ function StageList({
                 aria-hidden="true"
               />
             )}
-            <span className={cn(done && "text-muted-foreground")}>{block.name}</span>
+            <span
+              className={cn(
+                "min-w-0 flex-1 [overflow-wrap:anywhere]",
+                done && "text-muted-foreground",
+              )}
+            >
+              {block.name}{" "}
+              <span className="text-xs text-muted-foreground">
+                {t(
+                  stopped && (block.status === "active" || block.status === "waiting")
+                    ? "pages.runPage.stoppedHere"
+                    : `pages.runPage.status.${block.status}`,
+                )}
+              </span>
+            </span>
             {active ? <span className="sr-only">{t("pages.overview.card.current")}</span> : null}
           </li>
         );
@@ -115,19 +130,38 @@ function PanelBody({
   onOpen: (id: string) => void;
 }): React.JSX.Element {
   const { t, i18n } = useTranslation();
+  const lifetime = useMemo(() => ({ executionId: run.executionId }), [run.executionId]);
   const progress = useResource(
     `${run.executionId}@${run.lastActivityAt ?? 0}`,
-    useCallback(() => apiClient.getExecutionProgress(run.executionId), [run.executionId]),
+    useCallback(
+      async () => ({
+        lifetime,
+        executionId: run.executionId,
+        value: await apiClient.getExecutionProgress(run.executionId),
+      }),
+      [lifetime, run.executionId],
+    ),
   );
-  const blocks = progress.data ? runBlocks(progress.data) : [];
+  const held =
+    progress.data?.lifetime === lifetime && progress.data.executionId === run.executionId
+      ? progress.data.value
+      : undefined;
+  const stopped = run.status === "stopped" || held?.stopReason != null;
+  const blocks = held?.source === "trace" ? runBlocks(held, undefined, stopped) : [];
   const currentId = currentBlockId(blocks);
-  const current = blocks.find((block) => block.id === currentId) ?? null;
+  // An intentionally stopped frontier can still own the partial list, without being current work.
+  const current =
+    blocks.find((block) => block.id === currentId) ??
+    (stopped
+      ? blocks.find((block) => block.status === "active" || block.status === "waiting")
+      : null) ??
+    null;
   const listBlock = current?.list ? current : (blocks.find((block) => block.list) ?? null);
   const waiting = run.status === "waiting-user" ? run.waitingForUser : null;
   const unfinished = run.status !== "completed" && run.status !== "stopped";
   const since = activityOf(run);
   return (
-    <div className="grid gap-5 px-4 pb-4">
+    <div className="grid min-w-0 gap-5 px-5 pb-5 [overflow-wrap:anywhere]">
       {run.status === "stopped" ? (
         <Section title={t("pages.overview.panel.stopReason")} testId="overview-panel-stop-reason">
           <p className="whitespace-pre-wrap break-words rounded-lg bg-secondary p-3 text-sm">
@@ -135,16 +169,16 @@ function PanelBody({
           </p>
         </Section>
       ) : null}
-      {run.note && run.note !== run.title ? (
+      {run.note ? (
         <div
-          className="rounded-md bg-secondary px-2.5 py-2 text-sm"
+          className="whitespace-pre-wrap rounded-md bg-secondary px-2.5 py-2 text-sm"
           data-testid="overview-panel-note"
         >
           <span className="sr-only">{t("pages.overview.panel.note")}: </span>
           {run.note}
         </div>
       ) : null}
-      {isStale(run, now) ? (
+      {since !== null && isStale(run, now) ? (
         <div className="rounded-md bg-warning/15 px-2.5 py-2 text-sm text-foreground" role="note">
           {t("pages.overview.panel.stale", { days: daysIn(now - since) })}
         </div>
@@ -221,11 +255,11 @@ function PanelBody({
           </p>
         </Section>
       ) : null}
-      {progress.pending && !progress.data ? (
+      {progress.pending && held === undefined ? (
         <p className="text-xs text-muted-foreground" role="status">
           {t("pages.overview.panel.progressLoading")}
         </p>
-      ) : progress.error && !progress.data ? (
+      ) : progress.error && held === undefined ? (
         <p className="text-xs text-destructive" role="status">
           {t("pages.overview.panel.progressError")}
         </p>
@@ -235,37 +269,50 @@ function PanelBody({
           title={`${t("pages.overview.panel.list")} · ${listBlock.name}`}
           testId="overview-panel-list"
         >
-          <BlockListCard block={listBlock} />
+          <BlockListCard block={listBlock} stopped={stopped} />
         </Section>
       ) : null}
       {blocks.length > 0 ? (
         <Section title={t("pages.overview.panel.stages")}>
-          <StageList blocks={blocks} stopped={run.status === "stopped"} />
+          <StageList blocks={blocks} stopped={stopped} />
         </Section>
       ) : null}
-      {run.childRuns.length > 0 ? (
+      {run.childrenTotal.total > 0 || run.childRuns.length > 0 ? (
         <Section
           title={t("pages.overview.panel.children", { count: run.childRuns.length })}
           testId="overview-panel-children"
         >
+          <p className="text-xs text-muted-foreground">
+            {t("pages.overview.card.childrenFlag", {
+              shown: run.childRuns.length,
+              total: run.childrenTotal.total,
+              unfinished: run.childrenTotal.unfinished,
+            })}
+          </p>
           <ul className="grid gap-1">
             {run.childRuns.map((child) => (
-              <li key={child.executionId}>
+              <li key={child.executionId} className="flex min-w-0 items-start gap-2">
                 <Button
                   type="button"
                   variant="ghost"
-                  className="h-auto w-full justify-start gap-2 px-1 py-1 text-left text-sm font-normal"
+                  className="grid h-auto min-w-0 flex-1 grid-cols-[auto_minmax(0,1fr)] justify-start gap-1 whitespace-normal px-1 py-1 text-left text-sm font-normal"
                   onClick={() => onOpen(child.executionId)}
                 >
                   <span
-                    className={cn("h-2 w-2 flex-none rounded-full", STATUS_DOT[child.status])}
+                    className={cn("mt-1 h-2 w-2 self-start rounded-full", STATUS_DOT[child.status])}
                     aria-hidden="true"
                   />
-                  <span className="min-w-0 flex-1 truncate">{child.title}</span>
-                  <span className="flex-none text-xs text-muted-foreground">
+                  <span className="min-w-0 flex-1 [overflow-wrap:anywhere]">
+                    {child.title}
+                    <span className="block text-xs text-muted-foreground">
+                      {child.workflowName}
+                    </span>
+                  </span>
+                  <span className="col-start-2 text-xs text-muted-foreground">
                     {t(`pages.overview.runStatus.${child.status}`)}
                   </span>
                 </Button>
+                <ExecutionStopButton target={child} />
               </li>
             ))}
           </ul>
@@ -313,7 +360,7 @@ function PanelBody({
         <Button
           type="button"
           variant="link"
-          className="h-auto justify-start p-0 text-sm"
+          className="h-auto min-w-0 max-w-full justify-start whitespace-normal p-0 text-left text-sm [overflow-wrap:anywhere]"
           onClick={() => onOpen(run.parent!.executionId)}
         >
           {t("pages.overview.card.childOf", { title: run.parent.title })}
@@ -334,6 +381,7 @@ export function OverviewPanel({
 }: OverviewPanelProps): React.JSX.Element {
   const { t } = useTranslation();
   const identity = useSyncExternalStore(subscribeReadScope, getReadIdentity, getReadIdentity);
+  const lifetime = useMemo(() => ({ runId, identity }), [runId, identity]);
   // The panel opens from a card's title without a dialog trigger, so it remembers what had focus
   // when it opened and gives focus back there when it closes.
   const returnFocus = useRef<HTMLElement | null>(null);
@@ -346,33 +394,52 @@ export function OverviewPanel({
   // A run opened by a link, or one a live refetch took off the page, is fetched by id — again
   // whenever the live connection reports a change — and until then the panel keeps the row it had.
   const lastRow = useRef<OverviewRun | null>(null);
-  if (run) lastRow.current = run;
+  const lastLifetime = useRef(lifetime);
+  if (lastLifetime.current !== lifetime) {
+    lastLifetime.current = lifetime;
+    lastRow.current = null;
+  }
+  const currentRun = isOpen && run?.executionId === runId ? run : null;
+  if (currentRun) lastRow.current = currentRun;
   else if (lastRow.current?.executionId !== runId) lastRow.current = null;
   const fetched = useResource(
-    runId !== null && run === null ? `${runId}#${refreshKey ?? 0}` : null,
+    isOpen && currentRun === null ? `${runId}#${refreshKey ?? 0}` : null,
     useCallback(
-      async (key: string) =>
-        (await apiClient.getOverviewRows([key.slice(0, key.lastIndexOf("#"))]))[0] ?? null,
-      [],
+      async (key: string) => ({
+        lifetime,
+        row: (await apiClient.getOverviewRows([key.slice(0, key.lastIndexOf("#"))]))[0] ?? null,
+      }),
+      [lifetime],
     ),
   );
-  const fetchedRow = fetched.data?.executionId === runId ? fetched.data : null;
-  const shown = run ?? fetchedRow ?? lastRow.current;
+  const fetchedRow =
+    fetched.data?.lifetime === lifetime && fetched.data.row?.executionId === runId
+      ? fetched.data.row
+      : null;
+  const shown = isOpen ? (currentRun ?? fetchedRow ?? lastRow.current) : null;
   return (
-    <Sheet open={isOpen} onOpenChange={(open) => (open ? undefined : onClose())}>
-      <SheetContent
-        side="right"
-        className="w-full gap-0 p-0 sm:max-w-[460px]"
+    <Dialog open={isOpen} onOpenChange={(open) => (open ? undefined : onClose())}>
+      <DialogContent
+        className="flex max-h-[calc(100dvh-2rem)] w-[calc(100vw-2rem)] min-w-0 flex-col gap-0 overflow-hidden p-0 sm:max-w-4xl"
         data-testid="overview-panel"
         aria-describedby={undefined}
         closeLabel={t("pages.overview.panel.close")}
         onCloseAutoFocus={(event) => {
           event.preventDefault();
           if (returnFocus.current?.isConnected) returnFocus.current.focus();
+          else {
+            const fallback = document.querySelector<HTMLElement>(
+              '[data-testid="overview-card"] button, [data-testid="overview-status-active"], main h1',
+            );
+            if (fallback) {
+              if (!fallback.hasAttribute("tabindex")) fallback.tabIndex = -1;
+              fallback.focus();
+            }
+          }
           returnFocus.current = null;
         }}
       >
-        <SheetHeader className="gap-2 border-b border-border pr-12">
+        <DialogHeader className="max-h-[35dvh] min-w-0 shrink-0 gap-2 overflow-y-auto border-b border-border px-5 py-4 pr-12 text-left [overflow-wrap:anywhere]">
           {ancestors.length > 0 ? (
             <nav
               className="flex flex-wrap items-center gap-1.5 text-[12.5px] text-muted-foreground"
@@ -384,7 +451,7 @@ export function OverviewPanel({
                   <Button
                     type="button"
                     variant="link"
-                    className="h-auto max-w-[220px] truncate p-0 text-[12.5px]"
+                    className="h-auto min-w-0 max-w-full whitespace-normal p-0 text-left text-[12.5px] [overflow-wrap:anywhere]"
                     onClick={() => onOpen(ancestor.executionId)}
                   >
                     {ancestor.title}
@@ -395,16 +462,26 @@ export function OverviewPanel({
               <span>{t("pages.overview.panel.thisRun")}</span>
             </nav>
           ) : null}
-          <SheetTitle className="text-lg leading-snug" data-testid="overview-panel-title">
+          <DialogTitle
+            className="min-w-0 text-xl leading-snug [overflow-wrap:anywhere]"
+            data-testid="overview-panel-title"
+          >
             {shown?.title ?? (fetched.pending ? "…" : t("pages.overview.panel.notFound"))}
-          </SheetTitle>
+          </DialogTitle>
           {shown ? (
-            <SheetDescription asChild>
-              <div className="flex items-center gap-2 text-[12.5px]">
+            <DialogDescription asChild>
+              <div className="flex min-w-0 flex-wrap items-center gap-2 text-[12.5px]">
                 <StatusLabel status={shown.status} withHint={false} />
-                <span className="truncate text-muted-foreground">{shown.workflowName ?? ""}</span>
+                {!shown.matches ? (
+                  <span className="text-xs font-medium" data-testid="overview-panel-context">
+                    {t("pages.overview.card.context")}
+                  </span>
+                ) : null}
+                <span className="min-w-0 text-muted-foreground [overflow-wrap:anywhere]">
+                  {shown.workflowName ?? ""}
+                </span>
               </div>
-            </SheetDescription>
+            </DialogDescription>
           ) : null}
           {shown ? (
             <p
@@ -415,16 +492,24 @@ export function OverviewPanel({
               {shown.matches ? null : ` ${t("pages.overview.card.muted")}.`}
             </p>
           ) : null}
-        </SheetHeader>
-        <ScrollArea className="min-h-0 flex-1">
+        </DialogHeader>
+        <ScrollArea className="min-h-0 min-w-0 flex-1" data-testid="overview-panel-scroll">
           <div className="pt-4">
             {shown ? (
               <PanelBody run={shown} ancestors={ancestors} now={now} onOpen={onOpen} />
+            ) : fetched.error && !fetched.pending ? (
+              <p role="alert" className="px-5 pb-5 text-sm text-destructive">
+                {t("pages.overview.error")}{" "}
+                <Button variant="link" onClick={() => void fetched.refresh()}>
+                  {t("pages.overview.retry")}
+                </Button>
+              </p>
             ) : null}
           </div>
         </ScrollArea>
         {shown ? (
-          <SheetFooter className="flex-row justify-end border-t border-border">
+          <DialogFooter className="shrink-0 flex-row flex-wrap justify-end gap-2 border-t border-border px-5 py-3">
+            <ExecutionStopButton target={shown} />
             <Button asChild>
               <Link
                 to={`${ROUTES.EXECUTIONS}/${encodeURIComponent(shown.executionId)}`}
@@ -433,9 +518,9 @@ export function OverviewPanel({
                 {t("pages.overview.panel.open")}
               </Link>
             </Button>
-          </SheetFooter>
+          </DialogFooter>
         ) : null}
-      </SheetContent>
-    </Sheet>
+      </DialogContent>
+    </Dialog>
   );
 }

@@ -30,6 +30,7 @@ import type { NodeTypeDescriptor } from "../../types/node-type-catalog";
 import type { WorkflowGraph, WorkflowNode } from "../../types/workflow-types";
 import type { RunBlock } from "../run/model";
 import type { ExportEntry } from "./operations";
+import type { ExecutionStopCapability } from "@mcp-moira/shared/execution-management";
 
 type EngineGraph = Parameters<typeof findNodeReferences>[0];
 const engine = (graph: WorkflowGraph): EngineGraph => graph as unknown as EngineGraph;
@@ -316,7 +317,13 @@ export interface RunOnNode {
   executionId: string;
   status: string;
   currentNodeId: string | null;
-  note?: string;
+  waitingForInputNodeId?: string | null;
+  taskTitle?: string;
+  workflowName?: string | null;
+  note?: string | null;
+  revision?: number | null;
+  stopReason?: string | null;
+  stopCapability?: ExecutionStopCapability;
 }
 
 export interface PausedRunWarning {
@@ -325,11 +332,15 @@ export interface PausedRunWarning {
   change: "renamed" | "removed";
   /** The node's new id, for a rename. */
   to?: string;
-  note?: string;
+  taskTitle?: string;
+  workflowName?: string | null;
+  note?: string | null;
+  revision?: number | null;
+  stopCapability?: ExecutionStopCapability;
 }
 
 /**
- * The owner's runs that wait on a node the draft renames or removes. A run reads the stored
+ * The visible runs that actually wait on a node the draft renames or removes. A run reads the stored
  * definition at its next step, so such a run would look for a node that no longer exists; the
  * warning names it before the save, together with `session recover`.
  */
@@ -344,7 +355,13 @@ export function pausedRunWarnings(
   }
   if (touched.size === 0) return [];
   return runs.flatMap((run) => {
-    if (run.status !== "running" || !run.currentNodeId) return [];
+    if (
+      !["running", "waiting", "locked"].includes(run.status) ||
+      run.stopReason != null ||
+      !run.currentNodeId ||
+      run.waitingForInputNodeId !== run.currentNodeId
+    )
+      return [];
     const hit = touched.get(run.currentNodeId);
     return hit
       ? [
@@ -352,6 +369,10 @@ export function pausedRunWarnings(
             executionId: run.executionId,
             nodeId: run.currentNodeId,
             ...hit,
+            revision: run.revision,
+            stopCapability: run.stopCapability,
+            ...(run.taskTitle ? { taskTitle: run.taskTitle } : {}),
+            ...(run.workflowName ? { workflowName: run.workflowName } : {}),
             ...(run.note ? { note: run.note } : {}),
           },
         ]

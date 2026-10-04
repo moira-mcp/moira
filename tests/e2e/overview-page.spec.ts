@@ -2,7 +2,7 @@
  * E2E: the overview page against the real container, as a fresh person whose runs are all started
  * here through MCP.
  *
- * A run waiting for the person comes first, with what the agent asks and the hint to answer in the
+ * Stable server ordering retains what the agent asks and the hint to answer in the
  * chat; a step the agent hands in shows on the open page without a reload; the filter by time
  * without movement keeps only the runs untouched since the cut (the cut is read from the server's
  * own timestamps, since a run's last step cannot be backdated), and nothing that just moved counts
@@ -90,7 +90,307 @@ const card = (page: Page, executionId: string) =>
   page.locator(`[data-testid="overview-card"][data-run-id="${executionId}"]`);
 
 test.describe("The overview", () => {
-  test("a run waiting for you comes first, with the question and where to answer it", async ({
+  for (const viewport of [
+    { label: "desktop", width: 1440, height: 900 },
+    { label: "mobile", width: 390, height: 844 },
+  ]) {
+    test(`long task, step, list, stage and child relationship remain contained on ${viewport.label}`, async ({
+      page,
+    }, testInfo) => {
+      const me = await person(page, `long-slots-${viewport.label}`);
+      try {
+        const parent = await me.start("Parent diagnostic note");
+        const parentTitle = `Parent task ${"P".repeat(450)}`;
+        const childTitle = `Child task ${"T".repeat(450)}`;
+        const ownFlow = `Separate child flow ${"F".repeat(180)}`;
+        const stage = `Import stage ${"S".repeat(180)}`;
+        const step = `Import one batch ${"C".repeat(180)}`;
+        const items = Array.from({ length: 8 }, (_, index) => ({
+          title: `Batch ${index + 1}: ${"Long batch description ".repeat(4)}${"I".repeat(100)}`,
+        }));
+        const childFlow = {
+          ...orderImportFlow(ownFlow),
+          variableRegistry: {
+            plan_steps: { type: "array", description: "Batches to import", default: items },
+            current_step: { type: "number", description: "One-based batch cursor", default: 1 },
+          },
+          progress: {
+            nodes: [
+              {
+                id: "import",
+                label: stage,
+                content: { summary: "Import the orders batch by batch" },
+                list: { items: "plan_steps", title: "title", current: "current_step" },
+              },
+              { id: "check", label: "Check", content: { summary: "Check the imported orders" } },
+            ],
+          },
+          nodes: orderImportFlow(ownFlow).nodes.map((node) =>
+            node.id === "load" ? { ...node, metadata: { displayName: step } } : node,
+          ),
+        };
+        const created = await callMCPTool<{ workflowId: string }>(me.client, "manage", {
+          action: "create",
+          workflow: childFlow,
+        });
+        const child = await startWorkflowExecutionState(me.client, created.workflowId, {
+          parentExecutionId: parent.processId,
+          skipNotificationCheck: true,
+          note: "Separate child diagnostic note",
+        });
+        for (const [executionId, taskTitle] of [
+          [parent.processId, parentTitle],
+          [child.processId, childTitle],
+        ]) {
+          const response = await page.request.get(`${BASE_URL}/api/executions/${executionId}`);
+          expect(response.status()).toBe(200);
+          const detail = (await response.json()).data.execution;
+          const updated = await page.request.put(
+            `${BASE_URL}/api/executions/${executionId}/task-title`,
+            {
+              data: {
+                taskTitle,
+                expectedRevision: detail.revision,
+                expectedTaskIdentityRevision: detail.metadataRevisions.taskIdentity,
+              },
+            },
+          );
+          expect(updated.status()).toBe(200);
+        }
+        await page.setViewportSize({ width: viewport.width, height: viewport.height });
+        await page.goto(`${BASE_URL}/overview`);
+        const shown = card(page, child.processId);
+        await expect(shown).toBeVisible();
+        await expect(shown).toContainText(childTitle);
+        await expect(shown).toContainText(ownFlow);
+        await expect(shown).toContainText(parentTitle);
+        await expect(shown).toContainText(items[0].title);
+        const bounds = await shown.evaluate((element) => {
+          const cardBounds = element.getBoundingClientRect();
+          return {
+            card: element.scrollWidth <= element.clientWidth,
+            page: document.documentElement.scrollWidth <= window.innerWidth,
+            offendingSlots: Array.from(element.querySelectorAll("[data-testid]")).flatMap(
+              (slot) => {
+                const bounds = slot.getBoundingClientRect();
+                return bounds.left >= cardBounds.left && bounds.right <= cardBounds.right
+                  ? []
+                  : [
+                      {
+                        testId: slot.getAttribute("data-testid"),
+                        left: bounds.left,
+                        right: bounds.right,
+                        cardLeft: cardBounds.left,
+                        cardRight: cardBounds.right,
+                        clientWidth: slot.clientWidth,
+                        scrollWidth: slot.scrollWidth,
+                      },
+                    ];
+              },
+            ),
+          };
+        });
+        expect(bounds).toEqual({ card: true, page: true, offendingSlots: [] });
+        await shown.scrollIntoViewIfNeeded();
+        await page.screenshot({
+          path: testInfo.outputPath(`overview-long-child-card-${viewport.label}.png`),
+          fullPage: true,
+          animations: "disabled",
+        });
+        await shown.getByTestId("overview-card-open").click();
+        const dialog = page.getByTestId("overview-panel");
+        await expect(dialog).toHaveAccessibleName(childTitle);
+        await expect(dialog).toContainText(ownFlow);
+        await expect(dialog.getByTestId("overview-panel-parents")).toContainText(parentTitle);
+        await expect(dialog.getByTestId("overview-panel-step")).toHaveText(step);
+        await expect(dialog.getByTestId("overview-panel-stages")).toContainText(stage);
+        await expect(dialog.getByTestId("overview-panel-list")).toContainText(items[0].title);
+        await expect(dialog).toBeInViewport({ ratio: 1 });
+        expect(await dialog.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(
+          true,
+        );
+        await dialog.getByTestId("overview-panel-list").scrollIntoViewIfNeeded();
+        await page.screenshot({
+          path: testInfo.outputPath(`overview-long-child-modal-${viewport.label}.png`),
+          fullPage: true,
+          animations: "disabled",
+        });
+      } finally {
+        await me.cleanup();
+      }
+    });
+  }
+
+  for (const surface of ["home", "list", "inspector", "lock-banner"] as const) {
+    test(`the owner can stop from ${surface} without card navigation or stale surrounding resources`, async ({
+      page,
+    }) => {
+      const me = await person(page, `stop-${surface}`);
+      try {
+        const run = await me.start(`Arbitrary note for the ${surface} surface`);
+        if (surface === "lock-banner") {
+          const locked = await page.request.post(
+            `${BASE_URL}/api/executions/${run.processId}/lock`,
+            { data: { reason: "Pause before importing" } },
+          );
+          expect(locked.status()).toBe(200);
+        }
+        const route =
+          surface === "home"
+            ? "/"
+            : surface === "inspector"
+              ? `/executions/${run.processId}`
+              : "/executions";
+        await page.goto(`${BASE_URL}${route}`);
+        const owner =
+          surface === "home"
+            ? page.getByTestId(`work-active-${run.processId}`)
+            : surface === "inspector"
+              ? page.getByTestId("run-header")
+              : surface === "lock-banner"
+                ? page.getByTestId("locked-executions-widget")
+                : page.getByTestId("execution-card").filter({ hasText: run.processId.slice(0, 8) });
+        await expect(owner).toBeVisible();
+        await owner.getByTestId(`execution-stop-${run.processId}`).click();
+        await expect(page).toHaveURL(`${BASE_URL}${route}`);
+        const dialog = page.getByRole("alertdialog");
+        await expect(dialog).toBeVisible();
+        await dialog
+          .getByRole("textbox", { name: "Reason for stopping" })
+          .fill(`The owner stopped from ${surface}`);
+        const response = page.waitForResponse(
+          (result) =>
+            result.url().endsWith(`/api/executions/${run.processId}/stop`) &&
+            result.request().method() === "POST",
+        );
+        await dialog.getByRole("button", { name: "Stop task", exact: true }).click();
+        expect((await response).status()).toBe(200);
+        await expect(dialog).toHaveCount(0);
+        if (surface === "home") {
+          await expect(page.getByTestId(`work-active-${run.processId}`)).toHaveCount(0);
+          await expect(page.getByTestId("work-recent")).toContainText("Stopped");
+        } else if (surface === "inspector") {
+          await expect(page.getByTestId("run-status")).toHaveText("Stopped");
+          await expect(page.getByTestId("run-stop-reason")).toContainText(
+            `The owner stopped from ${surface}`,
+          );
+          await expect(
+            page.locator(
+              '[data-testid="canvas-view"] [data-current="true"], [data-testid="map-contents"] [aria-current="step"]',
+            ),
+          ).toHaveCount(0);
+        } else {
+          const stoppedCard = page
+            .getByTestId("execution-card")
+            .filter({ hasText: run.processId.slice(0, 8) });
+          await expect(stoppedCard).toContainText("Stopped");
+          await expect(stoppedCard.getByTestId(`execution-stop-${run.processId}`)).toHaveCount(0);
+          if (surface === "lock-banner")
+            await expect(page.getByTestId("locked-executions-widget")).toHaveCount(0);
+        }
+      } finally {
+        await me.cleanup();
+      }
+    });
+  }
+
+  for (const viewport of [
+    { label: "desktop", width: 1440, height: 900 },
+    { label: "mobile", width: 390, height: 844 },
+  ]) {
+    test(`the ${viewport.label} detail retains its identity and scroll through rename and owner stop`, async ({
+      page,
+    }, testInfo) => {
+      const me = await person(page, `modal-${viewport.label}`);
+      try {
+        const run = await me.start(
+          Array.from({ length: 30 }, (_, index) => `Diagnostic ${index}`).join("\n"),
+        );
+        await page.setViewportSize({ width: viewport.width, height: viewport.height });
+        const rename = async (taskTitle: string) => {
+          const response = await page.request.get(`${BASE_URL}/api/executions/${run.processId}`);
+          expect(response.status()).toBe(200);
+          const detail = (await response.json()).data.execution;
+          const updated = await page.request.put(
+            `${BASE_URL}/api/executions/${run.processId}/task-title`,
+            {
+              data: {
+                taskTitle,
+                expectedRevision: detail.revision,
+                expectedTaskIdentityRevision: detail.metadataRevisions.taskIdentity,
+              },
+            },
+          );
+          expect(updated.status()).toBe(200);
+        };
+        const longTitle = `Inspect${"X".repeat(480)}`;
+        await rename(longTitle);
+        await page.goto(`${BASE_URL}/overview`);
+        const shown = card(page, run.processId);
+        await expect(shown).toContainText(longTitle);
+        expect(await shown.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(
+          true,
+        );
+        await shown.getByTestId("overview-card-open").click();
+        const dialog = page.getByTestId("overview-panel");
+        await expect(dialog).toHaveAccessibleName(longTitle);
+        await expect(dialog).toBeInViewport({ ratio: 1 });
+        await expect(dialog.getByTestId("overview-panel-open-run")).toBeInViewport({ ratio: 1 });
+        await page.screenshot({
+          path: testInfo.outputPath(`overview-long-dialog-${viewport.label}.png`),
+          fullPage: true,
+          animations: "disabled",
+        });
+        await page.keyboard.press("Escape");
+        await expect(dialog).toHaveCount(0);
+        const initialTitle = "The task is inspected while its detail stays open";
+        await rename(initialTitle);
+        await expect(shown).toContainText(initialTitle);
+        await shown.getByTestId("overview-card-open").click();
+        await expect(dialog).toHaveAccessibleName(initialTitle);
+        const scroll = dialog.getByTestId("overview-panel-scroll");
+        await expect(dialog.getByTestId("overview-panel-stages")).toBeVisible();
+        await scroll.evaluate((element) => {
+          element.scrollTop = element.scrollHeight;
+          element.setAttribute("data-retained-viewport", "same");
+        });
+        const scrollTop = await scroll.evaluate((element) => element.scrollTop);
+        expect(scrollTop).toBeGreaterThan(0);
+        const renamed = "The task has changed while its detail stays open";
+        await rename(renamed);
+        await expect(dialog).toHaveAccessibleName(renamed);
+        await expect(scroll).toHaveAttribute("data-retained-viewport", "same");
+        expect(await scroll.evaluate((element) => element.scrollTop)).toBe(scrollTop);
+        await dialog.getByTestId(`execution-stop-${run.processId}`).click();
+        const confirmation = page.getByRole("alertdialog");
+        await expect(confirmation).toContainText(renamed);
+        await confirmation
+          .getByRole("textbox", { name: "Reason for stopping" })
+          .fill("The owner chose another task");
+        await confirmation.getByRole("button", { name: "Stop task", exact: true }).click();
+        await expect(confirmation).toHaveCount(0);
+        await expect(shown).toHaveCount(0);
+        await expect(dialog).toHaveAccessibleName(renamed);
+        await expect(dialog.getByTestId("overview-panel-stop-reason")).toContainText(
+          "The owner chose another task",
+        );
+        await expect(scroll).toHaveAttribute("data-retained-viewport", "same");
+        await expect(dialog.getByTestId("overview-panel-step")).toHaveCount(0);
+        await page.screenshot({
+          path: testInfo.outputPath(`overview-retained-stopped-dialog-${viewport.label}.png`),
+          fullPage: true,
+          animations: "disabled",
+        });
+        await page.keyboard.press("Escape");
+        await expect(dialog).toHaveCount(0);
+        await expect(page.locator("main h1")).toBeFocused();
+      } finally {
+        await me.cleanup();
+      }
+    });
+  }
+
+  test("cards preserve server hour order across waiting states, with the question and where to answer it", async ({
     page,
   }) => {
     const me = await person(page, "first");
@@ -107,22 +407,30 @@ test.describe("The overview", () => {
       });
 
       await page.goto(`${BASE_URL}/overview`);
+      const orderedResponse = await page.request.get(`${BASE_URL}/api/executions/overview`);
+      expect(orderedResponse.ok()).toBe(true);
+      const ordered = (await orderedResponse.json()).data.runs as Array<{ executionId: string }>;
       const cards = page.getByTestId("overview-card");
       await expect(cards).toHaveCount(2);
-      await expect(cards.first()).toHaveAttribute("data-run-id", asking.processId);
-      await expect(cards.first()).toHaveAttribute("data-status", "waiting-user");
-      await expect(cards.first().getByTestId("overview-waiting")).toContainText(
+      expect(
+        await cards.evaluateAll((elements) =>
+          elements.map((element) => element.getAttribute("data-run-id")),
+        ),
+      ).toEqual(ordered.map((row) => row.executionId));
+      const askingCard = card(page, asking.processId);
+      await expect(askingCard).toHaveAttribute("data-status", "waiting-user");
+      await expect(askingCard.getByTestId("overview-waiting")).toContainText(
         "Which currency should the prices use?",
       );
 
-      await cards.first().getByTestId("overview-card-open").click();
+      await askingCard.getByTestId("overview-card-open").click();
       const panel = page.getByRole("dialog");
       await expect(panel).toContainText("Answer the agent in the chat");
       await expect(panel.getByTestId("overview-panel-options")).toContainText("USD");
       await expect(page).toHaveURL(new RegExp(`run=${asking.processId}`));
       await page.keyboard.press("Escape");
       await expect(panel).toHaveCount(0);
-      await expect(cards.first().getByTestId("overview-card-open")).toBeFocused();
+      await expect(askingCard.getByTestId("overview-card-open")).toBeFocused();
     } finally {
       await me.cleanup();
     }
@@ -215,7 +523,7 @@ test.describe("The overview", () => {
       await expect(panel.getByTestId("overview-panel-facts")).toContainText("Stopped");
       await expect(panel.getByTestId("overview-panel-facts")).not.toContainText("Completed");
       await expect(panel.getByTestId("overview-panel-step")).toHaveCount(0);
-      // Text is present before the sheet finishes sliding in; capture only its settled position.
+      // Wait for the dialog's entrance animation before capturing its bounded position.
       await panel.evaluate((element) =>
         Promise.all(element.getAnimations().map((animation) => animation.finished)),
       );

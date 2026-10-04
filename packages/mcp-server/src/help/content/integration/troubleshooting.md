@@ -135,7 +135,10 @@ Gets full execution state including context variables.
 - `status`: Execution status (running, waiting, completed, failed)
 - `currentNodeId`: Current node ID
 - `waitingForInputNodeId`: Node waiting for input (if any)
-- `note`: Execution note
+- `taskTitle`: Canonical task name, independent of the arbitrary note
+- `taskIdentity`: Persisted `{ title, changedAt, changeId }` or `null`
+- `revision`, `metadataRevisions.taskIdentity`: Step and independent task-name revision
+- `note`: Arbitrary execution note
 - `context.variables`: Context variables
 - `context.nodeStates`: Node execution states
 - `createdAt`, `updatedAt`, `completedAt`: Timestamps
@@ -237,6 +240,15 @@ past it, but a `lock` node creates its lock and sends its approval code when the
 and a `subgraph` node enters its child — choose one of those as the target only when you want that.
 Recovery is also refused unless the run really cannot continue, and refused for a run that is already
 finished or cancelled, which stays that way; a refusal changes nothing.
+For a materialize target, recovery keeps the execution paused there. Perform its generated
+delivery to obtain the current guide files; a context patch alone does not refresh local files.
+
+### A task-name write is stale
+
+Read `execution_context` again and reconcile the actual task before retrying `update-task-title`
+with its current step and identity revisions. A same-clock rename back to the original text still
+invalidates the older identity revision. Do not bypass the guards or use a note as a title; see
+[execution task naming](/docs/concepts/workflows/#execution-task-name).
 
 ### `STEP_BLOCKED` or `RECOVERY REQUIRED` for a missing expression variable
 

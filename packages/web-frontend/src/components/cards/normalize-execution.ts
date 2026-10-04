@@ -3,13 +3,16 @@
  * Maps the user and admin execution list items to a single normalized shape
  */
 
-export interface NormalizedExecution {
+import type { ExecutionTaskIdentity } from "@mcp-moira/shared";
+import type { ExecutionManagementFields } from "@mcp-moira/shared/execution-management";
+
+export interface NormalizedExecution extends Partial<ExecutionManagementFields> {
   id: string;
   workflowId: string;
   workflowName?: string | null;
+  taskTitle?: string;
   status: string;
-  stopReason?: string | null;
-  note?: string;
+  note?: string | null;
   errorCount?: number;
   error?: string;
   /**
@@ -24,13 +27,15 @@ export interface NormalizedExecution {
   hasActiveLock?: boolean;
 }
 
-interface ExecutionListItem {
+interface ExecutionListItem extends Partial<ExecutionManagementFields> {
   executionId: string;
   workflowId: string;
   workflowName?: string | null;
+  taskTitle?: string;
+  taskIdentity?: ExecutionTaskIdentity | null;
   status: string;
   stopReason?: string | null;
-  note?: string;
+  note?: string | null;
   createdAt?: number | null;
   lastStepAt?: number | null;
   completedAt?: number;
@@ -39,10 +44,12 @@ interface ExecutionListItem {
   hasActiveLock?: boolean;
 }
 
-interface AdminExecution {
+interface AdminExecution extends Partial<ExecutionManagementFields> {
   executionId: string;
   workflowId: string;
   workflowName?: string | null;
+  taskTitle?: string;
+  taskIdentity?: ExecutionTaskIdentity | null;
   userEmail: string | null;
   userName: string | null;
   status: string;
@@ -63,17 +70,35 @@ function isAdminExecution(e: AnyExecution): e is AdminExecution {
 }
 
 export function normalizeExecution(execution: AnyExecution): NormalizedExecution {
+  const management = {
+    revision: execution.revision,
+    stopCapability: execution.stopCapability,
+    stopReason: execution.stopReason,
+    displayStatus: execution.displayStatus,
+  };
+  const status =
+    execution.stopReason != null
+      ? "stopped"
+      : execution.status === "failed"
+        ? "failed"
+        : (execution.displayStatus ?? execution.status);
+  const taskTitle =
+    execution.taskTitle ??
+    execution.taskIdentity?.title ??
+    execution.workflowName ??
+    execution.workflowId;
   if (isAdminExecution(execution)) {
     return {
+      ...management,
       id: execution.executionId,
       workflowId: execution.workflowId,
       workflowName: execution.workflowName,
-      status: execution.status,
-      stopReason: execution.stopReason,
+      taskTitle,
+      status,
       userDisplay: execution.userName || execution.userEmail || null,
       createdAt: execution.createdAt,
       lastStepAt: execution.lastStepAt,
-      note: execution.note ?? undefined,
+      note: execution.note,
       errorCount: execution.errorCount,
       completedAt: execution.completedAt,
       error: execution.error,
@@ -82,11 +107,12 @@ export function normalizeExecution(execution: AnyExecution): NormalizedExecution
   }
 
   return {
+    ...management,
     id: execution.executionId,
     workflowId: execution.workflowId,
     workflowName: execution.workflowName,
-    status: execution.status,
-    stopReason: execution.stopReason,
+    taskTitle,
+    status,
     note: execution.note,
     errorCount: execution.errorCount,
     createdAt: execution.createdAt,

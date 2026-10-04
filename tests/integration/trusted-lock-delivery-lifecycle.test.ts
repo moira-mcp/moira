@@ -7,6 +7,7 @@ import {
   getLockService,
   getWorkflowService,
   isHashedPin,
+  metadataRevision,
   user,
 } from "@mcp-moira/shared";
 import {
@@ -340,7 +341,7 @@ describe("production LockHandler trusted-delivery lifecycle", () => {
     expect(JSON.stringify({ result, visibleHistory, audits })).not.toContain(failedPin);
   });
 
-  test("the PIN message is headed by the task note set earlier in the same cycle", async () => {
+  test("the PIN message names independent task identity while retaining the same-cycle arbitrary note", async () => {
     // The note arrives with the answer that leads straight to the lock, so it is not saved yet
     // when the PIN is sent; the heading must still carry it.
     const noted = await getWorkflowService().save({
@@ -383,11 +384,20 @@ describe("production LockHandler trusted-delivery lifecycle", () => {
         }) as never,
     );
     await executor.executeStep(executionId);
-    await executor.executeStep(executionId, { execution_note: "Release the parser" });
+    const running = (await repository.getExecution(executionId))!;
+    await repository.updateExecutionTaskTitle(
+      executionId,
+      TEST_USER_ID,
+      running.revision,
+      metadataRevision(null),
+      "Release the parser",
+    );
+    await executor.executeStep(executionId, { execution_note: "Arbitrary lock note" });
     expect(
       delivered.startsWith(
         `🔒 Noted Lock ${suffix} · Release the parser\n${runPageUrl({ executionId })}\n\n`,
       ),
     ).toBe(true);
+    expect((await repository.getExecution(executionId))!.note).toBe("Arbitrary lock note");
   });
 });

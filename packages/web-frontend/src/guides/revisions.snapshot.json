@@ -24,28 +24,28 @@
     "fingerprint": "79b614b7"
   },
   "home.work": {
-    "revision": 1,
-    "fingerprint": "89eeb00d"
+    "revision": 2,
+    "fingerprint": "0e5fe748"
   },
   "home.show-me-around": {
     "revision": 1,
     "fingerprint": "1cf41460"
   },
   "overview.intro": {
-    "revision": 1,
-    "fingerprint": "a911cbc8"
+    "revision": 2,
+    "fingerprint": "1901df37"
   },
   "overview.status": {
-    "revision": 2,
-    "fingerprint": "9284df0d"
+    "revision": 3,
+    "fingerprint": "3502829b"
   },
   "overview.idle": {
-    "revision": 1,
-    "fingerprint": "e0d4ba59"
+    "revision": 2,
+    "fingerprint": "c2894878"
   },
   "overview.board": {
-    "revision": 1,
-    "fingerprint": "ebe757a8"
+    "revision": 2,
+    "fingerprint": "4ee931c1"
   },
   "overview.live": {
     "revision": 1,
@@ -152,12 +152,12 @@
     "fingerprint": "d831c188"
   },
   "runs.status": {
-    "revision": 1,
-    "fingerprint": "4789b6a2"
+    "revision": 2,
+    "fingerprint": "74412356"
   },
   "runs.list": {
-    "revision": 1,
-    "fingerprint": "920ffcf2"
+    "revision": 2,
+    "fingerprint": "56ba310c"
   },
   "run.process": {
     "revision": 1,
@@ -168,12 +168,12 @@
     "fingerprint": "355e28f8"
   },
   "run.agent": {
-    "revision": 1,
-    "fingerprint": "cd92200f"
+    "revision": 2,
+    "fingerprint": "b5efe7ea"
   },
   "run.evidence": {
-    "revision": 1,
-    "fingerprint": "7a6f52ef"
+    "revision": 2,
+    "fingerprint": "e4d2362e"
   },
   "run.loop": {
     "revision": 1,
@@ -192,8 +192,8 @@
     "fingerprint": "aad6755d"
   },
   "run.notifications": {
-    "revision": 1,
-    "fingerprint": "4cc68b73"
+    "revision": 2,
+    "fingerprint": "85decc44"
   },
   "run.explore": {
     "revision": 1,
@@ -320,8 +320,8 @@
     "fingerprint": "f680fa12"
   },
   "flow-editor.bar": {
-    "revision": 1,
-    "fingerprint": "a51d79ba"
+    "revision": 2,
+    "fingerprint": "1a9538df"
   },
   "flow-editor.add-step": {
     "revision": 1,

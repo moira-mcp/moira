@@ -1,7 +1,7 @@
 /**
  * What a person receives from a Quick Task run, in both operating modes: the plan when it is ready
  * (to approve, or already started), the result when it waits for them, and the finish with the
- * plan's final state — headed by the flow and the task the first step named, linked to the run,
+ * plan's final state — headed by the flow and the task explicitly persisted at intake, linked to the run,
  * with nothing internal in the text and no question in an autonomous run.
  */
 
@@ -12,11 +12,19 @@ import {
   internalValues,
   runNotificationScenario,
   type NotificationMockContext,
+  type NotificationScenario,
   type NotificationScenarioResult,
 } from "../../helpers/notification-scenario.js";
 
 const workflow = catalogGraph("quick-task");
-const note = "Add a dark_mode toggle";
+const taskTitle = "Add a dark_mode toggle";
+const note = "The settings review is scheduled for Thursday";
+const runScenario = (scenario: NotificationScenario) =>
+  runNotificationScenario(workflow, {
+    ...scenario,
+    note,
+    taskTitle: { atNode: "get-task", title: taskTitle },
+  });
 const firstPlan = [{ title: "Add the setting" }, { title: "Wire the toggle" }];
 const revisedPlan = [
   { title: "Add the setting" },
@@ -65,7 +73,7 @@ const heading = (executionId: string) =>
 
 describe("Quick Task notifications", () => {
   test("interactive: plan to approve (again after a rejection), result to review (again after rework), finish", async () => {
-    const run = await runNotificationScenario(workflow, {
+    const run = await runScenario({
       mockInputs: answers("interactive", {
         "present-plan": (ctx: NotificationMockContext) => ({
           approval: ctx.visit === 1 ? "no" : "yes",
@@ -93,6 +101,8 @@ describe("Quick Task notifications", () => {
       "notify-finished",
     ]);
     const [plan, revised, result, , finished] = run.notifications.map((message) => message.text);
+    expect(run.taskIdentity?.title).toBe(taskTitle);
+    expect(run.note).toBe(note);
     for (const { text } of run.notifications) {
       expect(text.startsWith(heading(run.executionId))).toBe(true);
       expect(internalValues(text, workflow)).toEqual([]);
@@ -123,7 +133,7 @@ describe("Quick Task notifications", () => {
   });
 
   test("autonomous: work started with the plan, then the finish — nothing asks for a decision", async () => {
-    const run = await runNotificationScenario(workflow, { mockInputs: answers("autonomous") });
+    const run = await runScenario({ mockInputs: answers("autonomous") });
     expect(run.notifications.map((message) => message.nodeId)).toEqual([
       "notify-work-started",
       "notify-finished",
@@ -145,7 +155,7 @@ describe("Quick Task notifications", () => {
   });
 
   test("autonomous replan mid-run: the revised plan is announced with the finished unit kept", async () => {
-    const run = await runNotificationScenario(workflow, {
+    const run = await runScenario({
       mockInputs: answers("autonomous", {
         "teleport-replan": { progress_plan_outcome: "The plan no longer fits" },
         "revise-plan": (ctx: NotificationMockContext) => ({

@@ -15,7 +15,12 @@ function repositoryWithSettings(values: Record<string, string | null>): IDataRep
   return {
     getSetting: async (_userId: string, key: string) => values[key] ?? null,
     getWorkflow: async () => ({ metadata: { name: "Trusted workflow" } }),
-    getExecution: async () => ({ note: "Ship the release notes" }),
+    getWorkflowGraph: async () => ({ metadata: { name: "Trusted workflow" }, nodes: [] }),
+    getExecution: async () => ({
+      ...options(),
+      note: "Arbitrary note",
+      taskIdentity: { title: "Ship the release notes", changedAt: 1, changeId: "one" },
+    }),
   } as unknown as IDataRepository;
 }
 
@@ -30,6 +35,38 @@ function options() {
 }
 
 describe("trusted agent-path lock delivery", () => {
+  it("resolves the current title after pending lock creation while keeping trusted PIN delivery", async () => {
+    let title = "Before";
+    const repository = repositoryWithSettings({
+      "telegram.bot_token": "123:token",
+      "telegram.chat_id": "42",
+    });
+    repository.getExecution = async () =>
+      ({
+        ...options(),
+        taskIdentity: { title, changedAt: 1, changeId: title },
+        note: "Arbitrary note",
+      }) as never;
+    let delivered = "";
+    await createTrustedExecutionLock(repository, options(), {
+      clientFactory: () => ({
+        sendMessage: async ({ text }) => {
+          delivered = text;
+          return { ok: true } as never;
+        },
+      }),
+      lockService: {
+        createLockWithDelivery: async (_options, send) => {
+          title = "After";
+          await send({ lockId: "lock", pin: PIN });
+          return { lockId: "lock" };
+        },
+      },
+    });
+    expect(delivered).toContain("Trusted workflow · After");
+    expect(delivered).not.toContain("Arbitrary note");
+    expect(delivered).toContain(PIN);
+  });
   it("does not consult or invoke an ordinary registered communication adapter", async () => {
     const registry = getActiveCommunicationChannelRegistry();
     const isConfigured = jest.fn(async () => true);

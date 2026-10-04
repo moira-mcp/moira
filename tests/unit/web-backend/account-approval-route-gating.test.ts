@@ -10,6 +10,7 @@ import { AdminAnalyticsRepository } from "../../../packages/shared/src/database/
 import { ExecutionRepository } from "../../../packages/shared/src/database/repositories/execution-repository.js";
 import { parseUserIdSelection } from "../../../packages/shared/src/database/admin-analytics-query.js";
 import { clampPagination } from "../../../packages/shared/src/database/list-query-builder.js";
+import { readExecutionManagement } from "../../../packages/workflow-engine/src/utils/execution-management.js";
 
 let sqlite: Database.Database;
 let db: BetterSQLite3Database<typeof schema>;
@@ -51,7 +52,22 @@ const approveAccount = jest.fn(async (adminId: string, userId: string) => {
   return { status: "approved", approvedAt };
 });
 
+// Execution headings belong to the execution routes, not these account/status/statistics
+// handlers. Keep their database dependencies outside this fixture and fail if a tested
+// handler unexpectedly starts resolving headings.
+const executionTaskTitles = jest.fn(async (): Promise<Map<string, string>> => {
+  throw new Error("execution heading resolution entered the account approval fixture");
+});
+const withExecutionTaskTitles = jest.fn(async () => {
+  throw new Error("execution inventory resolution entered the account approval fixture");
+});
+jest.unstable_mockModule(
+  "../../../packages/web-backend/src/utils/execution-task-titles.js",
+  () => ({ executionTaskTitles, withExecutionTaskTitles }),
+);
+
 jest.unstable_mockModule("@mcp-moira/workflow-engine", () => ({
+  readExecutionManagement,
   DatabaseRepository: class {
     async listWorkflows() {
       return listWorkflows();
@@ -61,6 +77,9 @@ jest.unstable_mockModule("@mcp-moira/workflow-engine", () => ({
     }
     async getSettingDefinitions() {
       return getSettingDefinitions();
+    }
+    async getExecutingExecutionIds() {
+      return [];
     }
   },
   getActiveExtensionRegistry: () => null,
@@ -97,7 +116,7 @@ jest.unstable_mockModule("@mcp-moira/shared", () => ({
   getDbPath: () => "/definitely-not-present/moira.db",
   getFeatureResolver: () => ({ isEnabled }),
   getGlobalSettingsService: jest.fn(),
-  getLockService: jest.fn(),
+  getLockService: () => ({ getActiveExecutionIds: async () => new Set<string>() }),
   getLoadTestSecret: jest.fn(),
   getMcpTextService: jest.fn(),
   getRateLimitWhitelist: () => [],
@@ -211,6 +230,13 @@ describe("account approval route capability", () => {
     listExecutions.mockClear();
     getSettingDefinitions.mockClear();
     approveAccount.mockClear();
+    executionTaskTitles.mockClear();
+    withExecutionTaskTitles.mockClear();
+  });
+
+  afterEach(() => {
+    expect(executionTaskTitles).not.toHaveBeenCalled();
+    expect(withExecutionTaskTitles).not.toHaveBeenCalled();
   });
   afterEach(() => {
     sqlite.close();
@@ -386,6 +412,8 @@ describe("account approval route capability", () => {
           id: "execution-new",
           workflowId: "workflow-2",
           status: "running",
+          displayStatus: "waiting-agent",
+          stopReason: null,
           timestamp: 300,
           action: "Workflow execution running",
         },
@@ -393,6 +421,8 @@ describe("account approval route capability", () => {
           id: "execution-middle",
           workflowId: "workflow-1",
           status: "failed",
+          displayStatus: "completed",
+          stopReason: null,
           timestamp: 200,
           action: "Workflow execution failed",
         },
@@ -400,6 +430,8 @@ describe("account approval route capability", () => {
           id: "execution-old",
           workflowId: "workflow-1",
           status: "completed",
+          displayStatus: "completed",
+          stopReason: null,
           timestamp: 100,
           action: "Workflow execution completed",
         },

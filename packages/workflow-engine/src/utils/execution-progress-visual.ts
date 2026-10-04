@@ -51,6 +51,8 @@ export type {
   ExecutionProgressNode,
   ExecutionProgressState,
   ExecutionRouteEntry,
+  ExecutionStageEntry,
+  ExecutionStages,
   ExecutionVariableChange,
   ExecutionVariableState,
 } from "./execution-progress-contract.js";

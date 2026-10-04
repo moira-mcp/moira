@@ -9,9 +9,11 @@
 import { describe, expect, test } from "@jest/globals";
 import {
   boundListLine,
+  itemIndexResolver,
   nearestBoundList,
   planListLines,
   projectExecutionRun,
+  projectExecutionRunSummary,
   textEscaper,
   variablesObject,
   waitingActorLine,
@@ -20,6 +22,7 @@ import {
   type WorkflowExecution,
   type WorkflowGraph,
 } from "@mcp-moira/workflow-engine";
+import { cpuTimeMs } from "../../utils/cpu-time.js";
 
 function graph(): WorkflowGraph {
   return {
@@ -114,6 +117,34 @@ function execution(
 }
 
 describe("bound lists", () => {
+  test("the compact projection preserves active list, stage and waiting truth without inactive lists", () => {
+    const run = execution(
+      [
+        { seq: 0, nodeId: "start", exitKey: "default", changes: { current_task: 1 } },
+        {
+          seq: 1,
+          nodeId: "task",
+          exitKey: "success",
+          changes: { current_task: 2 },
+          enteredAt: 10,
+          leftAt: 50,
+        },
+        { seq: 2, nodeId: "task", exitKey: null, changes: {}, waited: true, enteredAt: 60 },
+      ],
+      { tasks, current_task: 2, total_tasks: 3 },
+    );
+    const full = projectExecutionRun(graph(), run, { now: 100 })!;
+    const summary = projectExecutionRunSummary(graph(), run, { now: 100 })!;
+    expect(summary.taskTitle).toBe(full.taskTitle);
+    expect(summary.activeNodeId).toBe("work");
+    expect(summary.nodes.map((node) => [node.label, node.status])).toEqual(
+      full.nodes.map((node) => [node.label, node.status]),
+    );
+    expect(summary.nodes[0].list).toEqual(full.nodes[0].list);
+    expect(summary.nodes[1].list).toBeNull();
+    expect(full.nodes[1].list).not.toBeNull();
+    expect(summary.waitingForUser).toBe(full.waitingForUser);
+  });
   test("a block bound to an items array shows titles, done/total and the current item", () => {
     const run = execution(
       [
@@ -228,6 +259,62 @@ describe("bound lists", () => {
       current: 2,
       currentTitle: "Document it",
     });
+  });
+});
+
+describe("historical list cursor lookup", () => {
+  test("moving the cursor backward resolves prior writes, including explicit undefined and local outputs", () => {
+    const states: ExecutionVariableState[] = [
+      {
+        name: "cursor",
+        kind: "variable",
+        current: 99,
+        adjusted: false,
+        history: [
+          { seq: 2, nodeId: "task", value: 3 },
+          { seq: 7, nodeId: "task", value: undefined },
+        ],
+      },
+      {
+        name: "node.cursor",
+        kind: "output",
+        current: 99,
+        adjusted: false,
+        history: [
+          { seq: 1, nodeId: "node", value: 2 },
+          { seq: 5, nodeId: "node", value: 4 },
+        ],
+      },
+    ];
+    const visit = (seq: number): ExecutionVisit => ({
+      seq,
+      nodeId: "task",
+      exitKey: null,
+      changes: {},
+    });
+    const global = itemIndexResolver({ current: "cursor" }, states, { cursor: 1 });
+    expect([8, 3, 2, 7, 0].map((seq) => global(visit(seq)))).toEqual([null, 2, 0, 2, 0]);
+    const local = itemIndexResolver({ current: "node.cursor" }, states, {});
+    expect([6, 2, 1, 5].map((seq) => local(visit(seq)))).toEqual([3, 1, null, 1]);
+  });
+
+  test("eight thousand recorded passes resolve within the shared history CPU budget", () => {
+    const length = 8000;
+    const state: ExecutionVariableState = {
+      name: "cursor",
+      kind: "variable",
+      current: length,
+      adjusted: false,
+      history: Array.from({ length }, (_, seq) => ({ seq, nodeId: "task", value: seq + 1 })),
+    };
+    const resolve = itemIndexResolver({ current: "cursor" }, [state], {});
+    let checksum = 0;
+    const measured = cpuTimeMs(() => {
+      for (let seq = 1; seq <= length; seq++)
+        checksum += resolve({ seq, nodeId: "task", exitKey: null, changes: {} })!;
+    });
+    expect(checksum).toBe(31_996_000);
+    expect(measured.cpuMs).toBeLessThan(50);
   });
 });
 

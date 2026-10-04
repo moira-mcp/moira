@@ -120,14 +120,25 @@ with a monotonically increasing token. The worker opens one lease handle with an
 compare-and-set renewal; a five-second heartbeat then renews the 30-second lease.
 
 Materialize and progress-image grants bind context-derived content to an independent context
-revision as well as their execution/node or workflow-step constraints. Metadata changes therefore
+revision as well as their execution/node or workflow-step constraints. Progress images additionally
+bind independent task identity, including its change token and absent identity. Metadata changes therefore
 do not masquerade as step transitions, while a URL cannot render different context after issuance.
 
 The execution revision is the workflow-step generation. It advances when an original `step`
 persists workflow state or an explicit stop ends the run; receipt replay and session mutations such as note, parent, reminder, or
 runtime-variable changes do not advance it or invalidate the presented attempt. Those mutations
 guard the field or stored snapshot they actually change with independent opaque parent, context,
-and reminder revisions returned by the corresponding read and mutation surfaces.
+reminder and task-identity revisions returned by the corresponding read and mutation surfaces.
+
+Execution task naming uses the common `ExecutionService.updateExecutionTaskTitle` mutation and optional
+persisted `taskIdentity: { title, changedAt, changeId }`. Both the step revision and opaque identity
+revision guard the owner-only active (`running`, including stored `waiting`) write before no-op
+comparison. A trimmed identical title changes no activity/event; a real rename receives server time
+and a fresh change token, including same-clock A→B→A. Completed/stopped runs reject it. Text must
+have 1–500 JavaScript string code units after trimming, with Unicode controls/formatting characters
+rejected before trimming. Existing execution writers preserve current identity and its activity
+when committing an older context snapshot. Naming preserves the presented step, question and other
+metadata revisions; it is not a variable or note mutation.
 
 A person may answer the waiting step from the run page (`POST /api/executions/:id/answer`). That
 runs the step through an internal durable attempt: the agent's presentation is superseded before
@@ -261,8 +272,9 @@ the corresponding `operation` label, so an expired Start lease is never reported
 
 ### Waiting-for-you notifications
 
-`session({ action: "stop-execution", executionId, expectedRevision, reason })` ends an owned active
-execution. The trimmed reason is required and contains 1–500 characters. In one immediate transaction,
+`session({ action: "stop-execution", executionId, expectedRevision, reason })` and HTTP
+`POST /api/executions/:id/stop` share `ExecutionStopService` and end an owned active execution.
+The trimmed reason is required and contains 1–500 UTF-16 code units. In one immediate transaction,
 `ExecutionAttemptRepository.stopExecution` stores lifecycle state `completed` with `stopReason`,
 advances the step revision, clears input, gate and question waits, retires presented and
 outcome-unknown attempts with a new fence, and records a status change in the feed. An executing
@@ -270,6 +282,12 @@ Start or Step attempt refuses the stop until it finishes. Repeating the original
 returns the same result without another write. Stopping does not roll back external effects or stop
 separately running child executions. `cancel-execution` remains the recovery action for an unknown
 Start outcome. Terminal guards prevent either stopped or ordinarily completed runs from resuming.
+The shared service emits normal audit and metric effects only for a changed stop; exact replay
+returns `changed: false`. This does not promise crash-proof exactly-once delivery of post-commit
+effects. Management reads publish nullable revision, effective display status, recorded reason and
+owner-specific stop capability. Capability is advisory: the mutation repeats its guards, and an
+administrator's read access grants no stop authority over another owner's run. Any non-null marker,
+including an empty marker on historical raw running state, is terminal without rewriting that state.
 The stop transaction supersedes pending waiting notifications. The sender rechecks the stored wait
 after loading and before beginning delivery; a stopped run cannot queue another reminder. A delivery
 already begun may still reach its external channel after the stop.
@@ -345,7 +363,8 @@ why in the pull request. Workflow version pinning and blanket migration do not r
 
 Two columns of `workflowExecution` feed the overview's filters and order. `lastActivityAt` is the
 run's last event of work — the latest `enteredAt` or `leftAt` of its visits (a step handed in, a
-directive shown, a variable adjustment by the agent or a person) or `completedAt`; a note, reminders,
+directive shown, a variable adjustment by the agent or a person), `completedAt` or a meaningful
+`taskIdentity.changedAt`; a normalized no-op title, a note, reminders,
 a new parent, a journal entry, a lock or the agent's `await-user` do not move it. `refusalCount` is
 `countRefusals` over the journal. One function, `executionActivity`
 (`packages/shared/src/database/execution-activity.ts`), derives both, and every writer that stores the
@@ -356,18 +375,58 @@ with the same function. Migration `0047_execution_activity` fills existing rows 
 in SQL and adds the indexes `(userId, state, lastActivityAt)` and `(parentExecutionId)`.
 
 `ExecutionOverviewRepository` (`packages/shared/src/database/repositories/execution-overview-repository.ts`)
-decides the overview's membership, nesting and order in SQL: the status predicate, the candidate set,
-roots (candidates with no candidate ancestor, found by a recursive CTE), each root's tree, the subtree
-facts (a match anywhere, the latest activity, a run waiting for its person) and paging over roots.
-`packages/web-backend/src/services/execution-overview.ts` projects the page's runs into rows in batch —
-the runs in one query, each flow's definition once (`WorkflowRepository.getManyForUser`), the
-notification marks in two (`ExecutionNotificationRepository.latestForCurrentWaits`) — so the number of
-queries does not grow with the page; the projection is `projectExecutionRun`.
+decides membership, nesting and order in SQL. The default selects active work with meaningful own
+activity in the last seven days. Relative periods, full-subtree idle filters and explicit own-activity
+bounds resolve against one clock; contradictory combinations are refused. Eligibility is decided
+before root count and pagination. Only eligible runs and their necessary owned ancestors remain;
+context ancestors have `matches: false`, and unrelated siblings are omitted. Missing or foreign
+parents end the owner path. Deep valid ancestry remains visible; cycles are cut for presentation
+without rewriting parent relations. Activity order is UTC hour descending, creation descending,
+then execution id ascending for roots and nested siblings, without waiting-status priority.
+The owner's scalar rows are materialized before recursive traversal, and exact root count and
+root pagination share one SQL statement, including an empty page beyond the last root.
+`packages/web-backend/src/services/execution-overview.ts` reads execution identities and current
+progress inputs in batches, loads each flow's definition once (`WorkflowRepository.getManyForUser`),
+and reads notification marks through `ExecutionNotificationRepository.latestForCurrentWaits`.
+Search resolves current canonical headings before selection, including generic template dependencies
+through authorized selective reads. An explicit task identity suppresses an overridden authored
+heading; note, own flow and execution id remain separate literal, Unicode-case-insensitive matches.
+A database-generation fence refuses an incoherent context/definition discovery snapshot. Required
+template inputs can be larger than their displayed heading; no stored title mirror supplies membership.
+Batch definition access uses `AuthorizationService.canMany` with the same central policy as a
+single-resource read, including the strongest direct or group grant; it does not give an operator
+the owner's authority.
+
+`progressReadDependencies` determines the variables, counter histories and list windows needed
+for the compact projection. `ExecutionRepository.getManyForProgress` selects those values before
+they cross SQLite: unrelated variables, node states, journals and reminders are not returned.
+List windows preserve array length, item indices, counter semantics and JSON value types. Runtime
+fragment dependencies are discovered in additional batches; their depth, rather than the number of
+page rows, determines these reads. Changing snapshots receive bounded retries and a `ConflictError`
+if they do not settle. A moving cursor can require the needed list in full to keep its counters and
+items coherent. These narrowed execution objects are read-only inputs and must never be saved.
+
+`projectExecutionRunSummary` shares the full projection's route, stage, wait and list rules while
+omitting narrative content, facts, route output and inactive lists. The active list carries its
+window around the current item. Shared historical item lookup finds the predecessor write by visit
+sequence, including when a reader moves the cursor backward. Full execution reads and
+`projectExecutionRun` retain the engine, MCP and detailed-progress contracts.
+
+`GET /api/workflows` uses `DatabaseRepository.listWorkflowSummaries`, delegated to
+`WorkflowRepository.listSummaries`. The query returns authored metadata and listing facts without
+executable nodes crossing SQLite. Full and summary lists share access, filters, exact counts,
+pagination bounds and deterministic ID tie-breaking. Metadata receives the same schema stamping;
+the reported size is the UTF-8 byte length of the stored workflow JSON. Full workflow retrieval
+continues to return the executable definition.
 
 The overview derives `stopped` from a non-null `stopReason` (migration `0049_execution_stop`),
-separately from `completed`. Its default `active` filter removes stopped roots and descendants;
-their active children remain discoverable as roots carrying the parent link. Other filters can show
-stopped runs and their reason. The run projection preserves unfinished route history and freezes a
+separately from `completed`. Stopped rows do not match the active filter but can remain as necessary
+ancestor context for an eligible child. `children` counts shown direct children; `childrenTotal`
+counts all owned direct children. Both are `{ total, unfinished }` objects. Retained matching
+activity supplies `subtreeActivityAt`; all owned descendants supply `idleActivityAt`. Compact ids
+refresh is unfiltered and owner-scoped, with no nested children or membership decision. Other
+filters can show stopped runs and their reason. Per-stage entries preserve recorded states rather
+than inferring a completed prefix. The run projection preserves unfinished route history and freezes a
 stopped run's open duration at its completion timestamp; stopped runs do not enter typical-duration
 statistics.
 
@@ -635,7 +694,7 @@ step({
     execution_note: "Step 3: API integration done",
   },
 });
-// Note: execution_note is stripped from input passed to workflow
+// execution_note remains subject to the node inputSchema; it never supplies a task heading
 ```
 
 ### Teleport (Jump to Different Workflow Branch)
@@ -965,7 +1024,8 @@ interface WorkflowExecution {
   globalContext: ExecutionContext;
   status: "running" | "completed";
   errors?: ExecutionError[]; // Persistent error log
-  note?: string | null; // User-provided note for identification (max 500 chars)
+  note?: string | null; // Arbitrary operational note (max 500 chars), never a task heading
+  taskIdentity?: { title: string; changedAt: number; changeId: string } | null;
   stopReason?: string | null; // Explicit stop explanation; null for ordinary completion
   createdAt: number;
   updatedAt: number;
@@ -1397,9 +1457,10 @@ interface ValidationError {
 - **Auto-execution** - renders the portable message and invokes the shared user communication service
 - **Notification frame** (`services/notification-frame.ts` over `utils/notification-text.ts`,
   shared with the deprecated handler and the lock PIN message) - the delivered text is the heading
-  `<workflow name> · <run note>` linked to `runPageUrl` (Markdown `[…](url)` with brackets turned
-  into parentheses, HTML `<a href>`, plain text with the URL on the next line; the name alone when
-  the run has no note), then the rendered `message`, then the plan by `planList`
+  `<workflow name> · <canonical task name>` linked to `runPageUrl` (Markdown `[…](url)` with brackets
+  turned into parentheses, HTML `<a href>`, plain text with the URL on the next line). Canonical
+  precedence is explicit identity, resolved authored progress title, then own flow name; a duplicate
+  flow/task label is not repeated. Notes remain separate. Then come the rendered `message` and plan by `planList`
   (`progress`: `📝 done/total: current item`; `full`: `📝 done/total` and numbered `✓`/`▶`/`○` items,
   folded around the current item into `… N earlier` / `… N more` to fit; `none` — and when the
   node's `default` connection leads straight to an `end` node, the run's last message, no item is
@@ -1417,7 +1478,10 @@ interface ValidationError {
 - **Run as of the node** - the frame and an attached image read the handler's `liveRun()` — the
   persisted run with the current cycle's visits, variables and note folded in as the executor will
   save them — projected with the node in flight (`withInFlightPause`); without a live run (an inline
-  subgraph child) the persisted run
+  subgraph child) the persisted run. Reconcile only current authoritative task identity into that
+  live copy, preserving unsaved variables and visits. Compose headings after awaited channel and
+  rendering dependencies; trusted PIN composition occurs inside its existing delivery callback.
+  Sent historical notices retain their original name
 - **Plan selection** - the bound list nearest the run (the active block's, else the most recently
   passed bound block's, else — before any bound block is reached — the first bound block whose
   items resolve); an empty plan or an unbound run adds no plan lines
@@ -1798,19 +1862,26 @@ as delivery.
 
 Action-based tool for session-related information.
 
+Execution reads publish the browser-safe management fields from
+`@mcp-moira/shared/execution-management`; their status and capability shapes are defined in
+[Execution management fields](API.md#execution-management-fields). Raw stored status remains
+separate from effective reader status and stop permission.
+
 ```typescript
 // Parameters
 {
   action: 'user' | 'executions' | 'execution_context' | 'current_step' | 'diagnose' | 'recover'
-        | 'update-note' | 'await-user' | 'stop-execution';
-  executionId?: string;  // Required for execution_context, current_step, diagnose, recover, update-note, await-user
+        | 'update-note' | 'update-task-title' | 'await-user' | 'stop-execution';
+  executionId?: string;  // Required for execution reads, update-note, update-task-title, await-user, stop-execution
   nodeId?: string;       // Required for recover: the node the run must resume from
   variableValues?: Record<string, unknown>; // recover: values written into the execution context
   note?: string;         // Required for update-note (max 500 chars)
+  taskTitle?: string;    // update-task-title: normalized nonempty text, max 500 JS code units
+  expectedTaskIdentityRevision?: string; // update-task-title: opaque revision from execution_context
   question?: string;     // await-user: what the agent needs from the person (1-500 chars)
   options?: string[];    // await-user: up to 4 choices (1-200 chars each)
   resolve?: true;        // await-user: clear the open question instead of raising one
-  expectedRevision?: number; // stop-execution: required step revision from execution_context
+  expectedRevision?: number; // stop-execution and update-task-title: required step revision
   reason?: string;       // stop-execution: required trimmed explanation, 1-500 chars
 }
 
@@ -1828,11 +1899,16 @@ Action-based tool for session-related information.
     workflowId: string;
     workflowSlug: string;         // Human-readable workflow identifier
     workflowOwnerHandle: string;  // Workflow owner's handle
+    taskTitle: string; // Canonical task name, independent of note
+    taskIdentity: { title: string; changedAt: number; changeId: string } | null;
     status: 'running' | 'completed' | 'locked';  // "locked" = running + active lock
     currentNodeId: string;
     note?: string | null;
     stopReason: string | null;
     parentExecutionId?: string | null;
+    revision: number | null;
+    displayStatus: OverviewStatus;
+    stopCapability: ExecutionStopCapability;
     createdAt: string;   // ISO 8601
     updatedAt: string;   // ISO 8601
     completedAt?: string; // ISO 8601
@@ -1847,6 +1923,12 @@ Action-based tool for session-related information.
   workflowId: string;
   workflowSlug: string;         // Human-readable workflow identifier
   workflowOwnerHandle: string;  // Workflow owner's handle
+  taskTitle: string;
+  taskIdentity: { title: string; changedAt: number; changeId: string } | null;
+  revision: number | null;
+  metadataRevisions: { taskIdentity: string; parent: string; context: string; reminders: string };
+  displayStatus: OverviewStatus;
+  stopCapability: ExecutionStopCapability;
   status: 'running' | 'completed' | 'locked';  // "locked" = running + active lock
   currentNodeId: string | null;
   waitingForInputNodeId: string | null;
@@ -1866,12 +1948,24 @@ Action-based tool for session-related information.
 // action: 'current_step' - Returns the authoritative current presentation
 string  // Formatted directive including Process ID and Step attempt ID
 
+// action: 'update-task-title' - Guarded active-owner naming; no step transition
+{
+  executionId: string;
+  taskIdentity: { title: string; changedAt: number; changeId: string };
+  revision: number;
+  taskIdentityRevision: string;
+  changed: boolean;
+}
+
 // action: 'stop-execution' - Ends an owned active run; exact repeats return the same data
 {
   executionId: string;
   stopped: true;
   stopReason: string;
   revision: number;
+  changed: boolean;
+  displayStatus: 'stopped';
+  stopCapability: { available: false; revision: number; reason: 'terminal' };
 }
 
 // action: 'diagnose' - Reports whether a paused run can still continue, and why not

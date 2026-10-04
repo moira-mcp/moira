@@ -27,6 +27,7 @@ import { promptKey } from "../onboarding/recommended";
 import { usePanelVisible } from "../onboarding/beginnerPanels";
 import { humanizeVariable } from "../diagram/VariableText";
 import { guideAnchor } from "@/guides/anchors";
+import { useExecutionStopAction } from "../execution/ExecutionStop";
 
 async function copy(text: string, done: string): Promise<void> {
   try {
@@ -65,6 +66,11 @@ function Section({
 function ActiveRunItem({ run }: { run: ActiveWorkRun }): React.JSX.Element {
   const { t } = useTranslation();
   const navigate = useNavigate();
+  const stop = useExecutionStopAction({
+    executionId: run.executionId,
+    title: run.taskTitle ?? run.workflowName ?? run.workflowId,
+    stopCapability: run.stopCapability,
+  });
   // A step with no name to show reads as words made from its id, not as the raw id
   const step =
     run.stepName ??
@@ -73,13 +79,14 @@ function ActiveRunItem({ run }: { run: ActiveWorkRun }): React.JSX.Element {
       : null);
   const resume = t("pages.dashboard.work.inProgress.resumePrompt", { id: run.executionId });
   const open = () => navigate(`${ROUTES.EXECUTIONS}/${run.executionId}`);
-  const needsAttention = run.status === "locked" || run.errorCount > 0;
+  const normalized = normalizeExecution({ ...run, note: run.note ?? undefined });
+  const needsAttention = normalized.status === "locked" || run.errorCount > 0;
   return (
     <CardShell
       testId={`work-active-${run.executionId}`}
       onClick={open}
       icon={<Play aria-hidden="true" />}
-      title={run.workflowName ?? run.workflowId}
+      title={normalized.taskTitle ?? run.workflowName ?? run.workflowId}
       description={
         step ? (
           <span data-testid="work-active-step">
@@ -90,6 +97,9 @@ function ActiveRunItem({ run }: { run: ActiveWorkRun }): React.JSX.Element {
       note={run.note ?? undefined}
       meta={
         <>
+          {normalized.taskTitle !== (run.workflowName ?? run.workflowId) ? (
+            <span>{run.workflowName ?? run.workflowId}</span>
+          ) : null}
           <span className="inline-flex items-center gap-1">
             <Clock className="size-3" aria-hidden="true" />
             {formatRelativeTime(run.updatedAt)}
@@ -108,9 +118,9 @@ function ActiveRunItem({ run }: { run: ActiveWorkRun }): React.JSX.Element {
                 {run.errorCount} {t("common.errorsLabel", { defaultValue: "errors" })}
               </Badge>
             )}
-            {run.status === "locked" && (
+            {normalized.status === "locked" && (
               <StatusBadge
-                status={run.status as ExecutionStatus}
+                status={normalized.status as ExecutionStatus}
                 className="h-5 px-1.5 text-[11px]"
               />
             )}
@@ -118,6 +128,7 @@ function ActiveRunItem({ run }: { run: ActiveWorkRun }): React.JSX.Element {
         ) : undefined
       }
       actions={[
+        ...(stop ? [stop] : []),
         {
           icon: <Copy className="h-3.5 w-3.5" />,
           label: t("pages.dashboard.work.inProgress.copyResume"),

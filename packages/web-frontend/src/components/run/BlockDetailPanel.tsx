@@ -242,12 +242,19 @@ export function BlockDetailPanel({
       <header className="space-y-1">
         <div className="flex flex-wrap items-center gap-2">
           <h3 className="flex min-w-0 flex-1 items-center gap-2 text-base font-semibold leading-6">
-            <IndexBadge index={block.index + 1} tone={BLOCK_TONE[block.status]} />
+            <IndexBadge
+              index={block.index + 1}
+              tone={
+                block.stopped && (block.status === "active" || block.status === "waiting")
+                  ? "neutral"
+                  : BLOCK_TONE[block.status]
+              }
+            />
             <span className="min-w-0">
               {editing ? <BlockNameEditor block={block} /> : block.name}
             </span>
           </h3>
-          <StatusChip status={block.status} waitingFor={waitingFor} />
+          <StatusChip status={block.status} stopped={block.stopped} waitingFor={waitingFor} />
         </div>
         <DiagnosticBadge blockId={block.id} />
         {editing ? (
@@ -293,7 +300,7 @@ export function BlockDetailPanel({
         <PanelSection
           id="list"
           title={t("pages.runPage.blockDetail.list")}
-          summary={`${listProgressLabel(block.list)}${block.list.currentTitle ? ` · ${block.list.currentTitle}` : ""}`}
+          summary={`${listProgressLabel(block.list)}${!block.stopped && block.list.currentTitle ? ` · ${block.list.currentTitle}` : ""}`}
           openToken={listHighlight?.token}
         >
           <BlockListCard block={block} highlight={listHighlight} />
@@ -409,7 +416,11 @@ export function BlockDetailPanel({
           />
         ) : (
           <>
-            <StepList steps={steps} currentNodeId={block.currentNodeId} onFocusNode={onFocusNode} />
+            <StepList
+              steps={steps}
+              currentNodeId={block.stopped ? null : block.currentNodeId}
+              onFocusNode={onFocusNode}
+            />
             <p className="mt-1 text-[11px] text-muted-foreground">
               {t("pages.runPage.blockDetail.stepsHint")}
             </p>

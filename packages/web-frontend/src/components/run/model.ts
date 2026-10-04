@@ -46,6 +46,8 @@ export interface RunTransition {
 
 /** One process block with the run's projection of it. */
 export interface RunBlock {
+  /** Recorded frontier remains intact; a stopped run does not advertise current work. */
+  stopped?: boolean;
   id: string;
   /** Zero-based position in process order. */
   index: number;
@@ -86,6 +88,7 @@ const PENDING: Pick<
 export function runBlocks(
   progress: ExecutionProgress,
   statistics?: WorkflowVersionStatistics | null,
+  stopped = progress.stopReason != null,
 ): RunBlock[] {
   const byId = new Map(progress.nodes.map((node) => [node.id, node]));
   const statsById = new Map((statistics?.blocks ?? []).map((entry) => [entry.blockId, entry]));
@@ -93,6 +96,7 @@ export function runBlocks(
     const run = byId.get(block.id) ?? PENDING;
     const stats = statsById.get(block.id);
     return {
+      stopped,
       id: block.id,
       index,
       name: byId.get(block.id)?.label ?? block.label,
@@ -135,7 +139,11 @@ export function blockById(blocks: readonly RunBlock[]): Map<string, RunBlock> {
 
 /** The block the run is on: active or waiting. */
 export function currentBlockId(blocks: readonly RunBlock[]): string | null {
-  return blocks.find((b) => b.status === "active" || b.status === "waiting")?.id ?? null;
+  return blocks.find(blockIsCurrent)?.id ?? null;
+}
+
+export function blockIsCurrent(block: Pick<RunBlock, "stopped" | "status">): boolean {
+  return !block.stopped && (block.status === "active" || block.status === "waiting");
 }
 
 /** Which block owns each node. */

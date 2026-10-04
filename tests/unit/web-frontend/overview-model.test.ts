@@ -62,6 +62,8 @@ function run(id: string, overrides: Partial<OverviewRun> = {}): OverviewRun {
     workflowVersion: "1.0.0",
     title: `Import ${id}`,
     status: "waiting-agent",
+    revision: 1,
+    stopCapability: { available: true, revision: 1 },
     stopReason: null,
     matches: true,
     waitingForUser: null,
@@ -72,11 +74,13 @@ function run(id: string, overrides: Partial<OverviewRun> = {}): OverviewRun {
     list: null,
     lastActivityAt: 1,
     subtreeActivityAt: 1,
+    idleActivityAt: 1,
     createdAt: 1,
     completedAt: null,
     parentExecutionId: null,
     parent: null,
     children: { total: 0, unfinished: 0 },
+    childrenTotal: { total: 0, unfinished: 0 },
     childRuns: [],
     ...overrides,
   };
@@ -134,7 +138,16 @@ describe("the plan window of a card", () => {
     });
     const withListAndStages = run("b", {
       list: withList.list,
-      stages: { labels: ["Plan", "Work", "Check"], activeIndex: 1, doneCount: 1 },
+      stages: {
+        entries: [
+          { id: "plan", label: "Plan", status: "done" },
+          { id: "work", label: "Work", status: "active" },
+          { id: "check", label: "Check", status: "pending" },
+        ],
+        labels: ["Plan", "Work", "Check"],
+        activeIndex: 1,
+        doneCount: 1,
+      },
     });
     const waiting = run("c", {
       status: "waiting-user",
@@ -144,7 +157,7 @@ describe("the plan window of a card", () => {
     expect(planSlots(withList)).toBe(6);
     expect(planSlots(withListAndStages)).toBe(5);
     expect(planSlots(waiting)).toBe(5);
-    // Without a list the stages themselves are the plan, marked done up to the active one.
+    // Without a list the stages themselves are the plan, using actual projected outcomes.
     const plan = cardPlan(waiting);
     expect(plan.kind).toBe("stages");
     expect(plan.kind === "stages" && plan.items.map((item) => [item.done, item.current])).toEqual([
@@ -172,11 +185,11 @@ describe("a run tree on the board", () => {
     ],
   });
 
-  test("children without children come before nested groups, and each run appears once", () => {
+  test("server sibling order is preserved across leaves and nested groups, with each run once", () => {
     expect(placement(boardNode(tree))).toEqual([
       "root",
+      ["branch", ["deep", "…1", "deeper"], "leaf-2"],
       "leaf-1",
-      ["branch", "leaf-2", ["deep", "…1", "deeper"]],
     ]);
     expect(
       flattenRuns([tree])
@@ -232,6 +245,26 @@ describe("a run tree on the board", () => {
 });
 
 describe("the filters in the URL", () => {
+  test("recent defaults, all-time idle and custom dates remain distinct and reset clears every filter", () => {
+    expect(filtersFromParams(new URLSearchParams()).period).toBe("7d");
+    expect(filtersFromParams(new URLSearchParams("period=30d")).period).toBe("30d");
+    expect(
+      filtersFromParams(new URLSearchParams("idle=7d&period=7d&activeFrom=100")),
+    ).toMatchObject({ period: "all", idle: "7d", activeFrom: null, activeTo: null });
+    expect(filtersFromParams(new URLSearchParams("activeFrom=100&activeTo=200"))).toMatchObject({
+      period: "all",
+      idle: null,
+      activeFrom: 100,
+      activeTo: 200,
+    });
+    const reset = paramsWithFilters(
+      new URLSearchParams(
+        "status=stopped&period=all&q=task&page=9&idle=7d&activeFrom=10&workflowId=wf&sort=idle&refusals=true&layout=lanes&run=kept&guide=overview",
+      ),
+      { ...DEFAULT_FILTERS, layout: "lanes" },
+    );
+    expect(reset.toString()).toBe("layout=lanes&run=kept&guide=overview");
+  });
   test("stopped is an explicit filter and the default remains in progress", () => {
     expect(filtersFromParams(new URLSearchParams()).status).toBe("active");
     expect(filtersFromParams(new URLSearchParams("status=stopped")).status).toBe("stopped");
@@ -246,8 +279,7 @@ describe("the filters in the URL", () => {
       ...DEFAULT_FILTERS,
       status: "waiting-user" as const,
       idle: "7d" as const,
-      activeFrom: 1_700_000_000_000,
-      activeTo: 1_700_100_000_000,
+      period: "all" as const,
       workflowId: "wf-1",
       sort: "idle" as const,
       refusals: true,
@@ -275,11 +307,57 @@ describe("the filters in the URL", () => {
 });
 
 describe("stopped runs", () => {
+  test("completed runs count only actual done and repeated stages, leaving skipped and pending stages intact", () => {
+    const completed = run("finished", {
+      status: "completed",
+      stages: {
+        labels: ["Visited", "Repeated", "Skipped", "Not reached"],
+        entries: [
+          { id: "visited", label: "Visited", status: "done" },
+          { id: "repeated", label: "Repeated", status: "repeated" },
+          { id: "skipped", label: "Skipped", status: "skipped" },
+          { id: "pending", label: "Not reached", status: "pending" },
+        ],
+        activeIndex: 3,
+        doneCount: 4,
+      },
+    });
+    expect(stageItems(completed).map(({ done, current }) => [done, current])).toEqual([
+      [true, false],
+      [true, false],
+      [false, false],
+      [false, false],
+    ]);
+    expect(cardPlan(completed)).toMatchObject({ kind: "stages", done: 2, total: 4 });
+  });
+
+  test("unknown activity remains unknown and never acquires an invented stale age", () => {
+    expect(
+      isStale(
+        run("unknown", {
+          createdAt: null,
+          lastActivityAt: null,
+          subtreeActivityAt: null,
+          idleActivityAt: null,
+        }),
+        1_800_000_000_000,
+      ),
+    ).toBe(false);
+  });
   test("preserve completed stages without marking the remaining stages current or done", () => {
     const stopped = run("stopped", {
       status: "stopped",
       stopReason: "The user changed the task",
-      stages: { labels: ["Plan", "Work", "Check"], activeIndex: 1, doneCount: 1 },
+      stages: {
+        entries: [
+          { id: "plan", label: "Plan", status: "done" },
+          { id: "work", label: "Work", status: "active" },
+          { id: "check", label: "Check", status: "pending" },
+        ],
+        labels: ["Plan", "Work", "Check"],
+        activeIndex: 1,
+        doneCount: 1,
+      },
     });
     expect(stageItems(stopped).map(({ done, current }) => [done, current])).toEqual([
       [true, false],
@@ -287,7 +365,11 @@ describe("stopped runs", () => {
       [false, false],
     ]);
     expect(isStale(stopped, 30 * 24 * 60 * 60_000)).toBe(false);
-    expect(stageItems({ ...stopped, status: "completed" }).every((item) => item.done)).toBe(true);
+    expect(stageItems({ ...stopped, status: "completed" }).map((item) => item.done)).toEqual([
+      true,
+      false,
+      false,
+    ]);
   });
 
   test("a stopped checklist retains its results but no longer has a current item", () => {

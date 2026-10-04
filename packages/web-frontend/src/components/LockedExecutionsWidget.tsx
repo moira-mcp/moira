@@ -13,13 +13,18 @@ import { apiClient } from "../services/api-client";
 import { ROUTES } from "../constants/routes";
 import { useResource } from "../hooks/useResource";
 import { DataRegion } from "./DataRegion";
+import { ExecutionStopButton } from "./execution/ExecutionStop";
+import type { ExecutionManagementFields } from "@mcp-moira/shared/execution-management";
+import type { ExecutionTaskIdentity } from "@mcp-moira/shared";
 
-interface LockedExecution {
+interface LockedExecution extends Partial<ExecutionManagementFields> {
   executionId: string;
   workflowId: string;
   workflowName?: string | null;
+  taskTitle?: string;
+  taskIdentity?: ExecutionTaskIdentity | null;
   status: string;
-  note?: string;
+  note?: string | null;
   createdAt?: number | null;
   updatedAt?: number | null;
   hasActiveLock?: boolean;
@@ -92,34 +97,55 @@ export const LockedExecutionsWidget: React.FC<LockedExecutionsWidgetProps> = ({
           <AlertDescription>
             <div className="space-y-2 mt-1">
               {displayItems.map((exec) => (
-                <button
-                  type="button"
-                  key={exec.executionId}
-                  className="w-full text-left flex items-center justify-between gap-2 py-1 px-2 rounded hover:bg-yellow-100/50 dark:hover:bg-yellow-900/30 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                  onClick={() => handleClick(exec.executionId)}
-                  data-testid="locked-execution-item"
-                >
-                  <div className="flex items-center gap-2 min-w-0">
-                    <Badge
-                      variant="outline"
-                      className="text-[10px] px-1 py-0 h-4 border-yellow-500/50 text-yellow-600 dark:text-yellow-400 shrink-0"
-                    >
-                      <Lock className="w-3 h-3" />
-                    </Badge>
-                    <span className="text-sm truncate">
-                      {exec.workflowName || exec.note || exec.executionId.slice(0, 8)}
-                    </span>
-                    {admin && exec.userEmail && (
-                      <span className="text-xs text-muted-foreground truncate">
-                        ({exec.userEmail})
+                <div key={exec.executionId} className="flex min-w-0 items-center gap-2">
+                  <button
+                    type="button"
+                    className="min-w-0 flex-1 text-left flex items-center justify-between gap-2 py-1 px-2 rounded hover:bg-yellow-100/50 dark:hover:bg-yellow-900/30 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    onClick={() => handleClick(exec.executionId)}
+                    data-testid="locked-execution-item"
+                  >
+                    <div className="flex items-center gap-2 min-w-0">
+                      <Badge
+                        variant="outline"
+                        className="text-[10px] px-1 py-0 h-4 border-yellow-500/50 text-yellow-600 dark:text-yellow-400 shrink-0"
+                      >
+                        <Lock className="w-3 h-3" />
+                      </Badge>
+                      <span className="text-sm truncate">
+                        {exec.taskTitle ??
+                          exec.taskIdentity?.title ??
+                          exec.workflowName ??
+                          exec.workflowId}
                       </span>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-1 text-xs text-muted-foreground shrink-0">
-                    <Clock className="w-3 h-3" />
-                    {exec.updatedAt != null ? formatDuration(Date.now() - exec.updatedAt) : "—"}
-                  </div>
-                </button>
+                      {exec.taskTitle &&
+                      exec.taskTitle !== (exec.workflowName ?? exec.workflowId) ? (
+                        <span className="text-xs text-muted-foreground truncate">
+                          {exec.workflowName ?? exec.workflowId}
+                        </span>
+                      ) : null}
+                      {admin && exec.userEmail && (
+                        <span className="text-xs text-muted-foreground truncate">
+                          ({exec.userEmail})
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-1 text-xs text-muted-foreground shrink-0">
+                      <Clock className="w-3 h-3" />
+                      {exec.updatedAt != null ? formatDuration(Date.now() - exec.updatedAt) : "—"}
+                    </div>
+                  </button>
+                  <ExecutionStopButton
+                    target={{
+                      executionId: exec.executionId,
+                      title:
+                        exec.taskTitle ??
+                        exec.taskIdentity?.title ??
+                        exec.workflowName ??
+                        exec.workflowId,
+                      stopCapability: exec.stopCapability,
+                    }}
+                  />
+                </div>
               ))}
               {hasMore && (
                 <Button

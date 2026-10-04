@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { zodToJsonSchema } from "zod-to-json-schema";
 import { AWAITING_USER_LIMITS } from "@mcp-moira/workflow-engine/awaiting-user";
+import { EXECUTION_TASK_TITLE_LIMIT } from "@mcp-moira/shared/execution-task-identity";
 import { progressAuthoringSchema } from "../schemas/progress-authoring.js";
 
 export const listWorkflowsSchema = z.object({
@@ -231,6 +232,7 @@ export const getSessionInfoHandlerSchema = z.object({
       "cancel-execution",
       "stop-execution",
       "update-note",
+      "update-task-title",
       "set-parent",
       "add-reminder",
       "reminders",
@@ -274,6 +276,16 @@ export const getSessionInfoHandlerSchema = z.object({
     .max(500)
     .optional()
     .describe("New note text for update-note action (max 500 chars)"),
+  taskTitle: z
+    .string()
+    .max(EXECUTION_TASK_TITLE_LIMIT)
+    .optional()
+    .describe("Concise actual task name for update-task-title; independent of note and flow name"),
+  expectedTaskIdentityRevision: z
+    .string()
+    .length(64)
+    .optional()
+    .describe("Task identity revision from execution_context or the Progress API"),
   parentExecutionId: z
     .string()
     .optional()

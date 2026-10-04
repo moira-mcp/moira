@@ -7,7 +7,8 @@ import React, { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Play } from "lucide-react";
-import { apiClient } from "../services/api-client";
+import { apiClient, type ExecutionSummary } from "../services/api-client";
+import { ExecutionStopProvider } from "../components/execution/ExecutionStop";
 import { ROUTES } from "../constants/routes";
 import { PageShell } from "../components/PageShell";
 import { FilterBar } from "../components/FilterBar";
@@ -31,21 +32,7 @@ import { guideAnchor } from "@/guides/anchors";
 import { useResource } from "@/hooks/useResource";
 import { DataRegion } from "@/components/DataRegion";
 
-interface ExecutionListItem {
-  executionId: string;
-  workflowId: string;
-  workflowName?: string | null; // Issue #421: Workflow name from API
-  userId: string;
-  status: string;
-  stopReason?: string | null;
-  currentNodeId: string | null;
-  note?: string;
-  createdAt?: number | null;
-  updatedAt?: number | null;
-  completedAt?: number;
-  error?: string;
-  errorCount?: number; // Issue #386: Error count for badge display
-}
+type ExecutionListItem = ExecutionSummary;
 
 export const Executions: React.FC = () => {
   const navigate = useNavigate();
@@ -73,6 +60,8 @@ export const Executions: React.FC = () => {
   }));
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  const [stopRefresh, setStopRefresh] = useState(0);
 
   // Filter state
   const [searchQuery, setSearchQuery] = useState("");
@@ -171,157 +160,167 @@ export const Executions: React.FC = () => {
   const totalPages = Math.ceil(total / (accepted?.pageSize ?? pageSize));
 
   return (
-    <PageShell
-      title={t("pages.executions.title")}
-      guide={guideAnchor("runs.header")}
-      description={t("pages.executions.subtitle")}
+    <ExecutionStopProvider
+      onStopped={async () => {
+        await loadExecutions();
+        setStopRefresh((value) => value + 1);
+      }}
     >
-      <FilterBar
-        search={searchQuery}
-        onSearchChange={setSearchQuery}
-        searchPlaceholder={t("pages.executions.filters.searchPlaceholder")}
-        searchTestId="executions-search"
-        onReset={handleReset}
-        filters={
-          <>
-            <LabeledFilter label={t("common.filters.status")}>
-              <Select
-                value={statusFilter}
-                onValueChange={(value) => {
-                  setStatusFilter(value);
-                  setCurrentPage(1);
-                }}
-              >
-                <SelectTrigger
-                  className="w-[150px]"
-                  data-testid="status-filter"
-                  {...guideAnchor("runs.status")}
+      <PageShell
+        title={t("pages.executions.title")}
+        guide={guideAnchor("runs.header")}
+        description={t("pages.executions.subtitle")}
+      >
+        <FilterBar
+          search={searchQuery}
+          onSearchChange={setSearchQuery}
+          searchPlaceholder={t("pages.executions.filters.searchPlaceholder")}
+          searchTestId="executions-search"
+          onReset={handleReset}
+          filters={
+            <>
+              <LabeledFilter label={t("common.filters.status")}>
+                <Select
+                  value={statusFilter}
+                  onValueChange={(value) => {
+                    setStatusFilter(value);
+                    setCurrentPage(1);
+                  }}
                 >
-                  <SelectValue placeholder={t("pages.executions.filters.status")} />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">{t("pages.executions.filters.allStatuses")}</SelectItem>
-                  <SelectItem value="running">
-                    {t("pages.executions.filters.active", "Active")}
-                  </SelectItem>
-                  <SelectItem value="locked">{t("common.status.locked", "Locked")}</SelectItem>
-                  <SelectItem value="completed">{t("common.status.completed")}</SelectItem>
-                  <SelectItem value="failed">{t("common.status.failed")}</SelectItem>
-                  <SelectItem value="waiting">{t("common.status.waiting")}</SelectItem>
-                </SelectContent>
-              </Select>
-            </LabeledFilter>
+                  <SelectTrigger
+                    className="w-[150px]"
+                    data-testid="status-filter"
+                    {...guideAnchor("runs.status")}
+                  >
+                    <SelectValue placeholder={t("pages.executions.filters.status")} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">{t("pages.executions.filters.allStatuses")}</SelectItem>
+                    <SelectItem value="running">
+                      {t("pages.executions.filters.active", "Active")}
+                    </SelectItem>
+                    <SelectItem value="locked">{t("common.status.locked", "Locked")}</SelectItem>
+                    <SelectItem value="completed">{t("common.status.completed")}</SelectItem>
+                    <SelectItem value="stopped">{t("pages.overview.runStatus.stopped")}</SelectItem>
+                    <SelectItem value="failed">{t("common.status.failed")}</SelectItem>
+                    <SelectItem value="waiting">{t("common.status.waiting")}</SelectItem>
+                  </SelectContent>
+                </Select>
+              </LabeledFilter>
 
-            <LabeledFilter label={t("common.filters.workflow")}>
-              <SearchableSelect
-                value={workflowFilter}
-                onValueChange={(value) => {
-                  setWorkflowFilter(value);
-                  setCurrentPage(1);
-                }}
+              <LabeledFilter label={t("common.filters.workflow")}>
+                <SearchableSelect
+                  value={workflowFilter}
+                  onValueChange={(value) => {
+                    setWorkflowFilter(value);
+                    setCurrentPage(1);
+                  }}
+                  options={[
+                    { value: "all", label: t("pages.executions.filters.allWorkflows") },
+                    ...workflows.map((wf) => ({ value: wf.id, label: wf.name })),
+                  ]}
+                  placeholder={
+                    workflowFilter !== "all"
+                      ? workflowFilter
+                      : t("pages.executions.filters.workflow")
+                  }
+                  searchPlaceholder={t("common.filters.search")}
+                  emptyMessage={t("pages.workflows.explorer.noMatch")}
+                  testId="workflow-filter"
+                />
+              </LabeledFilter>
+
+              <SortSelect
+                value={sortValue}
+                onChange={handleSortChange}
+                label={t("common.filters.sort")}
                 options={[
-                  { value: "all", label: t("pages.executions.filters.allWorkflows") },
-                  ...workflows.map((wf) => ({ value: wf.id, label: wf.name })),
+                  {
+                    value: "createdAt-desc",
+                    label: `${t("pages.executions.filters.sortByCreated")} ↓`,
+                  },
+                  {
+                    value: "createdAt-asc",
+                    label: `${t("pages.executions.filters.sortByCreated")} ↑`,
+                  },
+                  {
+                    value: "updatedAt-desc",
+                    label: `${t("pages.executions.filters.sortByUpdated")} ↓`,
+                  },
+                  {
+                    value: "updatedAt-asc",
+                    label: `${t("pages.executions.filters.sortByUpdated")} ↑`,
+                  },
                 ]}
-                placeholder={
-                  workflowFilter !== "all" ? workflowFilter : t("pages.executions.filters.workflow")
-                }
-                searchPlaceholder={t("common.filters.search")}
-                emptyMessage={t("pages.workflows.explorer.noMatch")}
-                testId="workflow-filter"
+                testId="sort-select"
               />
-            </LabeledFilter>
+            </>
+          }
+        />
+        <DataRegion
+          hasResult={choices.data !== undefined}
+          pending={choices.pending}
+          error={choices.error}
+          onRetry={choices.refresh}
+          testId="execution-workflow-choices-region"
+        />
 
-            <SortSelect
-              value={sortValue}
-              onChange={handleSortChange}
-              label={t("common.filters.sort")}
-              options={[
-                {
-                  value: "createdAt-desc",
-                  label: `${t("pages.executions.filters.sortByCreated")} ↓`,
-                },
-                {
-                  value: "createdAt-asc",
-                  label: `${t("pages.executions.filters.sortByCreated")} ↑`,
-                },
-                {
-                  value: "updatedAt-desc",
-                  label: `${t("pages.executions.filters.sortByUpdated")} ↓`,
-                },
-                {
-                  value: "updatedAt-asc",
-                  label: `${t("pages.executions.filters.sortByUpdated")} ↑`,
-                },
-              ]}
-              testId="sort-select"
+        <LockedExecutionsWidget refreshKey={stopRefresh} />
+
+        <DataListView
+          onViewModeChange={onViewModeChange}
+          items={executions}
+          renderCard={(execution, viewMode) => (
+            <ExecutionCard
+              execution={normalizeExecution(execution)}
+              compact={viewMode === "grid"}
+              onClick={() => handleExecutionClick(execution.executionId)}
             />
-          </>
-        }
-      />
-      <DataRegion
-        hasResult={choices.data !== undefined}
-        pending={choices.pending}
-        error={choices.error}
-        onRetry={choices.refresh}
-        testId="execution-workflow-choices-region"
-      />
-
-      <LockedExecutionsWidget />
-
-      <DataListView
-        onViewModeChange={onViewModeChange}
-        items={executions}
-        renderCard={(execution, viewMode) => (
-          <ExecutionCard
-            execution={normalizeExecution(execution)}
-            compact={viewMode === "grid"}
-            onClick={() => handleExecutionClick(execution.executionId)}
-          />
-        )}
-        keyExtractor={(e) => e.executionId}
-        storageKey="executions-view-mode"
-        guide={guideAnchor("runs.list")}
-        loading={loading}
-        hasResult={accepted !== null}
-        error={error}
-        onRetry={loadExecutions}
-        onRefresh={loadExecutions}
-        resultScope={
-          accepted && (
-            <span>
-              {t("common.pagination.page", {
-                current: accepted.page,
-                total: Math.max(1, totalPages),
-              })}
-              {accepted.search && ` · ${t("common.filters.search")}: ${accepted.search}`}
-              {accepted.status !== "all" &&
-                ` · ${t("common.filters.status")}: ${t(accepted.status === "running" ? "pages.executions.filters.active" : `common.status.${accepted.status}`)}`}
-              {accepted.workflowId !== "all" &&
-                ` · ${t("common.filters.workflow")}: ${workflows.find((w) => w.id === accepted.workflowId)?.name ?? accepted.workflowId}`}
-              {` · ${t(accepted.sortBy === "createdAt" ? "pages.executions.filters.sortByCreated" : "pages.executions.filters.sortByUpdated")} ${accepted.sortOrder === "desc" ? "↓" : "↑"}`}
-            </span>
-          )
-        }
-        emptyIcon={Play}
-        emptyTitle={
-          accepted?.search ||
-          (accepted && accepted.status !== "all") ||
-          (accepted && accepted.workflowId !== "all")
-            ? t("pages.executions.noResults")
-            : t("pages.executions.noExecutions")
-        }
-        containerRef={containerRef}
-        pagination={{
-          mode: "total",
-          currentPage: accepted?.page ?? currentPage,
-          totalPages,
-          totalItems: total,
-          pageSize: accepted?.pageSize ?? pageSize,
-          onPageChange: setCurrentPage,
-        }}
-        className="flex-1 min-h-0 flex flex-col"
-      />
-    </PageShell>
+          )}
+          keyExtractor={(e) => e.executionId}
+          storageKey="executions-view-mode"
+          guide={guideAnchor("runs.list")}
+          loading={loading}
+          hasResult={accepted !== null}
+          error={error}
+          onRetry={loadExecutions}
+          onRefresh={loadExecutions}
+          resultScope={
+            accepted && (
+              <span>
+                {t("common.pagination.page", {
+                  current: accepted.page,
+                  total: Math.max(1, totalPages),
+                })}
+                {accepted.search && ` · ${t("common.filters.search")}: ${accepted.search}`}
+                {accepted.status !== "all" &&
+                  ` · ${t("common.filters.status")}: ${t(accepted.status === "stopped" ? "pages.overview.runStatus.stopped" : accepted.status === "running" ? "pages.executions.filters.active" : `common.status.${accepted.status}`)}`}
+                {accepted.workflowId !== "all" &&
+                  ` · ${t("common.filters.workflow")}: ${workflows.find((w) => w.id === accepted.workflowId)?.name ?? accepted.workflowId}`}
+                {` · ${t(accepted.sortBy === "createdAt" ? "pages.executions.filters.sortByCreated" : "pages.executions.filters.sortByUpdated")} ${accepted.sortOrder === "desc" ? "↓" : "↑"}`}
+              </span>
+            )
+          }
+          emptyIcon={Play}
+          emptyTitle={
+            accepted?.search ||
+            (accepted && accepted.status !== "all") ||
+            (accepted && accepted.workflowId !== "all")
+              ? t("pages.executions.noResults")
+              : t("pages.executions.noExecutions")
+          }
+          containerRef={containerRef}
+          pagination={{
+            mode: "total",
+            currentPage: accepted?.page ?? currentPage,
+            totalPages,
+            totalItems: total,
+            pageSize: accepted?.pageSize ?? pageSize,
+            onPageChange: setCurrentPage,
+          }}
+          className="flex-1 min-h-0 flex flex-col"
+        />
+      </PageShell>
+    </ExecutionStopProvider>
   );
 };

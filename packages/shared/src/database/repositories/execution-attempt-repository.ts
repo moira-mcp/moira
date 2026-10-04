@@ -1,7 +1,13 @@
 import type Database from "better-sqlite3";
 import { createHash } from "node:crypto";
 import { canonicalJson } from "../../utils/canonical-json.js";
-import { ConflictError, ValidationError } from "../../errors/index.js";
+import {
+  ConflictError,
+  ValidationError,
+  NotFoundError,
+  AuthorizationError,
+} from "../../errors/index.js";
+import { executionStopCapability } from "../../types/execution-management.js";
 import type {
   ClaimStartExecutionAttemptInput,
   CompleteExecutionAttemptInput,
@@ -20,7 +26,7 @@ import {
   stepAttemptContinuationMatches,
 } from "../../types/step-attempt-binding.js";
 import { drizzle } from "drizzle-orm/better-sqlite3";
-import { executionRowFields } from "../execution-row.js";
+import { executionRowFields, STORED_TASK_ACTIVITY_SQL } from "../execution-row.js";
 import { enqueueWaitingNotification } from "../execution-notification.js";
 import { recordExecutionChange, trackExecutionChange } from "../execution-change.js";
 import { executionActivity, parseStoredVisits } from "../execution-activity.js";
@@ -203,10 +209,10 @@ export class ExecutionAttemptRepository {
           .prepare(
             `INSERT INTO workflowExecution (
               executionId, workflowId, userId, state, currentNodeId, waitingForInputNodeId,
-              context, error, errors, note, parentExecutionId, revision, reminders, visits,
+              context, error, errors, note, taskIdentity, parentExecutionId, revision, reminders, visits,
               gateWaiting, lastActivityAt, refusalCount, workflowVersion, createdAt, updatedAt,
               completedAt
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           )
           .run(
             input.execution.executionId,
@@ -219,6 +225,7 @@ export class ExecutionAttemptRepository {
             execution.error,
             execution.errors,
             execution.note,
+            execution.taskIdentity,
             execution.parentExecutionId,
             input.execution.revision,
             execution.reminders,
@@ -354,13 +361,14 @@ export class ExecutionAttemptRepository {
           this.sqlite
             .prepare(
               `UPDATE workflowExecution SET state = 'completed', gateWaiting = 0, awaitingUser = NULL,
-             error = ?, errors = ?, lastActivityAt = ?, refusalCount = ?,
+             error = ?, errors = ?, lastActivityAt = ${STORED_TASK_ACTIVITY_SQL}, refusalCount = ?,
              completedAt = ?, updatedAt = ?
              WHERE executionId = ? AND userId = ? AND state = 'running' AND revision = ?`,
             )
             .run(
               error.message,
               JSON.stringify(errors),
+              activity.lastActivityAt,
               activity.lastActivityAt,
               activity.refusalCount,
               error.timestamp,
@@ -390,6 +398,8 @@ export class ExecutionAttemptRepository {
     expectedRevision: number,
     reason: string,
   ): { changed: boolean; revision: number } {
+    if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0)
+      throw new ValidationError("expectedRevision must be a non-negative safe integer");
     reason = reason.trim();
     if (!reason || reason.length > 500)
       throw new ValidationError("Stop reason must contain 1–500 characters");
@@ -397,32 +407,54 @@ export class ExecutionAttemptRepository {
       .transaction(() => {
         const row = this.sqlite
           .prepare(
-            "SELECT state, revision, stopReason FROM workflowExecution WHERE executionId = ? AND userId = ?",
+            "SELECT userId, state, revision, stopReason FROM workflowExecution WHERE executionId = ?",
           )
-          .get(executionId, userId) as
-          { state: string; revision: number; stopReason: string | null } | undefined;
-        if (!row) throw new ValidationError("Execution must belong to the authenticated user");
+          .get(executionId) as
+          | { userId: string; state: string; revision: number; stopReason: string | null }
+          | undefined;
+        if (!row) throw new NotFoundError("Execution not found");
+        if (row.userId !== userId)
+          throw new AuthorizationError("Execution must belong to the authenticated user");
         if (
           row.state === "completed" &&
           row.stopReason === reason &&
           row.revision === expectedRevision + 1
         )
           return { changed: false, revision: row.revision };
-        if (row.revision !== expectedRevision)
-          throw new ConflictError(
-            "Execution state changed; reload execution_context before stopping",
-          );
-        if (!["running", "waiting"].includes(row.state))
-          throw new ValidationError("Execution is already finished");
-        if (
+        const hasExecutingAttempt = Boolean(
           this.sqlite
             .prepare(
               "SELECT 1 FROM executionMutationAttempt WHERE executionId = ? AND userId = ? AND state = 'executing'",
             )
-            .get(executionId, userId)
-        )
+            .get(executionId, userId),
+        );
+        const context = {
+          currentRevision: row.revision,
+          stopCapability: executionStopCapability(
+            {
+              status: row.state,
+              revision: row.revision,
+              stopReason: row.stopReason,
+              userId: row.userId,
+              hasExecutingAttempt,
+            },
+            userId,
+          ),
+        };
+        if (row.revision !== expectedRevision)
+          throw new ConflictError(
+            "Execution state changed; reload execution_context before stopping",
+            { ...context, stopRefusal: "stale" },
+          );
+        if (row.stopReason !== null || !["running", "waiting"].includes(row.state))
+          throw new ConflictError("Execution is already finished", {
+            ...context,
+            stopRefusal: "terminal",
+          });
+        if (hasExecutingAttempt)
           throw new ConflictError(
             "An agent operation is executing; wait for it to finish before stopping",
+            { ...context, stopRefusal: "in-flight" },
           );
         const now = Date.now();
         this.tracked(executionId, () =>
@@ -430,10 +462,10 @@ export class ExecutionAttemptRepository {
             .prepare(
               `UPDATE workflowExecution SET state = 'completed', stopReason = ?, revision = revision + 1,
          waitingForInputNodeId = NULL, gateWaiting = 0, awaitingUser = NULL,
-         completedAt = ?, updatedAt = ?, lastActivityAt = ?
+         completedAt = ?, updatedAt = ?, lastActivityAt = ${STORED_TASK_ACTIVITY_SQL}
          WHERE executionId = ? AND userId = ? AND revision = ? AND state IN ('running', 'waiting')`,
             )
-            .run(reason, now, now, now, executionId, userId, expectedRevision),
+            .run(reason, now, now, now, now, executionId, userId, expectedRevision),
         );
         this.sqlite
           .prepare(
@@ -703,7 +735,7 @@ export class ExecutionAttemptRepository {
             .prepare(
               `UPDATE workflowExecution SET state = ?, currentNodeId = ?, waitingForInputNodeId = ?,
                context = ?, visits = ?, gateWaiting = ?, awaitingUser = NULL, updatedAt = ?,
-               lastActivityAt = ?, revision = revision + 1
+               lastActivityAt = ${STORED_TASK_ACTIVITY_SQL}, revision = revision + 1
              WHERE executionId = ? AND revision = ? AND state = ?
                AND currentNodeId IS ? AND waitingForInputNodeId IS ? AND context = ?`,
             )
@@ -715,6 +747,7 @@ export class ExecutionAttemptRepository {
               execution.visits,
               execution.gateWaiting,
               now,
+              execution.lastActivityAt,
               execution.lastActivityAt,
               input.execution.executionId,
               input.expectedExecution.revision,
@@ -767,7 +800,7 @@ export class ExecutionAttemptRepository {
                WHEN json_valid(awaitingUser) = 0 THEN NULL
                WHEN json_extract(awaitingUser, '$.nodeId') IS ? THEN awaitingUser
                ELSE NULL END, updatedAt = ?, completedAt = ?,
-             lastActivityAt = ?, revision = revision + 1
+             lastActivityAt = ${STORED_TASK_ACTIVITY_SQL}, revision = revision + 1
            WHERE executionId = ? AND revision = ? AND state = ?
              AND currentNodeId IS ? AND waitingForInputNodeId IS ? AND context = ?
              AND (? = 0 OR note IS ?)`,
@@ -786,6 +819,7 @@ export class ExecutionAttemptRepository {
               execution.currentNodeId,
               execution.updatedAt,
               execution.completedAt,
+              execution.lastActivityAt,
               execution.lastActivityAt,
               input.execution.executionId,
               input.execution.revision,

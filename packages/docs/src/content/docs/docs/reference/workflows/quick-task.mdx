@@ -80,14 +80,17 @@ The plan length becomes authoritative for execution only after the current plan 
 
 The first step resolves `operating_mode` as `autonomous` or `interactive`. The agent reuses a mode you already stated, infers an unambiguous one — including a run started by an already autonomous parent process — and asks once only when the mode is neither stated nor derivable.
 
-The same step returns `execution_note`, the task in a few words (at most 120 characters, the
-caller's note when one was given); it heads every notification of the run.
+Before completing intake, the agent persists the actual [task name](/docs/concepts/workflows/#execution-task-name)
+through guarded Progress/session metadata. The reusable naming contract is included in agent
+presentations. Optional `execution_note` is arbitrary nonempty text of at most 120 characters,
+independent of headings. Authorized scope changes at revision, rework or replan update the same
+name; tactics, reordering and ordinary repair retain it without granting new authority.
 
 In `interactive` mode nothing changes. In `autonomous` mode the plan-approval gate is bypassed and the final step presents the result without asking for acceptance. Both independent reviews and their repair loops are identical in either mode, and the delivery stays honest: unfinished or unverified work is reported as such rather than silently accepted.
 
 ## Execution progress
 
-The execution card and exported progress image use the same seven-block process: Understand the task → Draft the plan → Independent plan review → Plan approval → Execute plan steps → Final review → Present the result. The execution note remains the task title. Every node, including routing nodes and the jump-only replan entry, belongs to one of these blocks; every edge that leaves a block is labelled, and every return carries the cause of the loop and the condition that ends it, so the process view is derived from the executable graph and never adds routes or changes it.
+The execution card and exported progress image use the same seven-block process: Understand the task → Draft the plan → Independent plan review → Plan approval → Execute plan steps → Final review → Present the result. The task name is separate from the note and workflow name. Every node, including routing nodes and the jump-only replan entry, belongs to one of these blocks; every edge that leaves a block is labelled, and every return carries the cause of the loop and the condition that ends it, so the process view is derived from the executable graph and never adds routes or changes it.
 
 Each stage shows its stable purpose, the exact current role, the latest confirmed outcome, and the next meaningful action. The node that owns a semantic result writes one bounded outcome: intake summarizes the resolved contract, planning roles replace the current plan synopsis, execution replaces the latest completed-unit outcome, review roles replace the current review disposition, and presentation or rework replaces the result disposition. Writers replace the value instead of appending history.
 

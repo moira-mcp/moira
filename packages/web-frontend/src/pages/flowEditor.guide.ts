@@ -18,7 +18,7 @@ export const flowEditorGuide: GuideDefinition = {
   panels: ["block", "variables"],
   sections: ["steps"],
   steps: [
-    { id: "bar", anchor: "flow.edit-bar", kind: "look", revision: 1, roles: "owner" },
+    { id: "bar", anchor: "flow.edit-bar", kind: "look", revision: 2, roles: "owner" },
     {
       id: "add-step",
       anchor: "flow.edit-add-step",

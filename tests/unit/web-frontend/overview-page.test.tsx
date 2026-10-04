@@ -1,6 +1,6 @@
 /** @jest-environment jsdom */
 /**
- * The overview's interactive parts in the DOM: the side panel is a modal dialog that closes on Esc
+ * The overview's interactive parts in the DOM: the detail is a modal dialog that closes on Esc
  * and gives focus back, says what the person is waited for and that the answer goes to the agent,
  * and offers no answer form; a card's hint opens from the keyboard; and the live hook turns a burst
  * of changes into one refresh request, while a change of status refetches the page instead.
@@ -24,6 +24,7 @@ import { MemoryRouter } from "react-router-dom";
 import { Overview } from "../../../packages/web-frontend/src/pages/Overview";
 import { GuideProvider } from "../../../packages/web-frontend/src/guides/GuideContext";
 import { FeaturesProvider } from "../../../packages/web-frontend/src/hooks/useFeatures";
+import { authClient } from "../../../packages/web-frontend/src/auth/better-auth-client";
 import {
   observeReadSession,
   suspendReadSession,
@@ -31,6 +32,7 @@ import {
 import i18n from "../../../packages/web-frontend/src/i18n";
 import {
   apiClient,
+  type OverviewPage,
   type OverviewRun,
 } from "../../../packages/web-frontend/src/services/api-client";
 import { OverviewPanel } from "../../../packages/web-frontend/src/components/overview/OverviewPanel";
@@ -47,10 +49,32 @@ import type {
 
 const NOW = 1_800_000_000_000;
 const originalReact = globalThis.React;
+let admitted = true;
 
-beforeEach(() => {
+beforeEach(async () => {
   globalThis.React = React;
-  observeReadSession("reader", "reader-session");
+  admitted = true;
+  // Settle the installed client's authority before opening a private portal. A manual
+  // read identity alone can be retired by its still-pending initial session observation.
+  jest.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+    if (new URL(String(input), "http://localhost").pathname !== "/api/auth/get-session")
+      throw new Error("Unexpected network request in overview fixture");
+    return Response.json(
+      admitted
+        ? {
+            user: { id: "reader", email: "reader@example.test", name: "Reader" },
+            session: {
+              id: "reader-session",
+              userId: "reader",
+              expiresAt: "2099-01-01T00:00:00Z",
+              updatedAt: "2026-01-01T00:00:00Z",
+              createdAt: "2026-01-01T00:00:00Z",
+            },
+          }
+        : null,
+    );
+  });
+  await authClient.$store.atoms.session.get().refetch();
 });
 
 function run(overrides: Partial<OverviewRun> = {}): OverviewRun {
@@ -61,6 +85,8 @@ function run(overrides: Partial<OverviewRun> = {}): OverviewRun {
     workflowVersion: "1.0.0",
     title: "Import March orders",
     status: "waiting-user",
+    revision: 1,
+    stopCapability: { available: true, revision: 1 },
     stopReason: null,
     matches: true,
     waitingForUser: {
@@ -77,11 +103,13 @@ function run(overrides: Partial<OverviewRun> = {}): OverviewRun {
     list: null,
     lastActivityAt: NOW - 60 * 60_000,
     subtreeActivityAt: NOW - 60 * 60_000,
+    idleActivityAt: NOW - 60 * 60_000,
     createdAt: NOW - 2 * 60 * 60_000,
     completedAt: null,
     parentExecutionId: null,
     parent: null,
     children: { total: 0, unfinished: 0 },
+    childrenTotal: { total: 0, unfinished: 0 },
     childRuns: [],
     ...overrides,
   };
@@ -99,15 +127,17 @@ beforeAll(async () => {
   await i18n.changeLanguage("en");
 });
 
-afterEach(() => {
+afterEach(async () => {
   cleanup();
+  admitted = false;
+  await authClient.$store.atoms.session.get().refetch();
   jest.restoreAllMocks();
   jest.useRealTimers();
   observeReadSession(null, null);
   globalThis.React = originalReact;
 });
 
-describe("the overview's side panel", () => {
+describe("the overview's detail dialog", () => {
   function Harness({ shown }: { shown: OverviewRun }) {
     const [open, setOpen] = useState<string | null>(null);
     return (
@@ -151,6 +181,52 @@ describe("the overview's side panel", () => {
     fireEvent.keyDown(dialog, { key: "Escape" });
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     await waitFor(() => expect(opener).toHaveFocus());
+  });
+
+  test("a metadata-only result keeps task, flow and note visible without inventing stages", async () => {
+    jest.spyOn(apiClient, "getExecutionProgress").mockResolvedValue({
+      source: "metadata",
+      executionId: "run-1",
+      workflowId: "wf",
+      workflowName: "Order import",
+      workflowVersion: "1.0.0",
+      executionWorkflowVersion: "1.0.0",
+      executionRevision: 2,
+      executionStatus: "running",
+      taskTitle: "Import March orders",
+      taskIdentity: { title: "Import March orders", changedAt: NOW, changeId: "named" },
+      taskIdentityRevision: "named-revision",
+    });
+    wrap(<Harness shown={run({ note: "Waiting for delimiter verification" })} />);
+    fireEvent.click(screen.getByRole("button", { name: "Open the card" }));
+    const dialog = await screen.findByRole("dialog");
+    await waitFor(() => expect(screen.queryByText("Loading the full plan…")).toBeNull());
+    expect(dialog).toHaveAccessibleName("Import March orders");
+    expect(dialog).toHaveTextContent("Order import");
+    expect(dialog).toHaveTextContent("Waiting for delimiter verification");
+    expect(screen.queryByTestId("overview-panel-stages")).toBeNull();
+    expect(screen.queryByTestId("overview-panel-list")).toBeNull();
+  });
+
+  test("a note matching the task title remains separately available on the card and in full detail", async () => {
+    jest.spyOn(apiClient, "getExecutionProgress").mockResolvedValue(null);
+    const shown = run({ note: "Import March orders" });
+    wrap(
+      <>
+        <OverviewCard run={shown} parentTitle={null} now={NOW} onOpen={() => undefined} />
+        <Harness shown={shown} />
+      </>,
+    );
+    const noteFlag = screen.getByTestId("overview-flag-note");
+    expect(noteFlag).toBeVisible();
+    act(() => noteFlag.focus());
+    expect(await screen.findByRole("tooltip")).toHaveTextContent("Import March orders");
+    fireEvent.click(screen.getByRole("button", { name: "Open the card" }));
+    await screen.findByRole("dialog");
+    expect(screen.getByTestId("overview-panel-title")).toHaveTextContent("Import March orders");
+    expect(screen.getByTestId("overview-panel-note")).toHaveTextContent(
+      "Note: Import March orders",
+    );
   });
 });
 
@@ -245,12 +321,7 @@ test("the mounted overview keeps controls, accepted page and focus through a ref
   jest
     .spyOn(apiClient, "getWorkflows")
     .mockResolvedValue({ workflows: [], totalWorkflows: 0 } as never);
-  let initial!: (value: {
-    runs: OverviewRun[];
-    total: number;
-    offset: number;
-    limit: number;
-  }) => void;
+  let initial!: (value: OverviewPage) => void;
   let refuse!: (error: unknown) => void;
   const query = jest
     .spyOn(apiClient, "getOverview")
@@ -266,7 +337,14 @@ test("the mounted overview keeps controls, accepted page and focus through a ref
           refuse = reject;
         }),
     )
-    .mockResolvedValue({ runs: [], total: 0, limit: 50, offset: 0 });
+    .mockResolvedValue({
+      evaluatedAt: NOW,
+      effectiveTime: { kind: "period", period: "7d" },
+      runs: [],
+      total: 0,
+      limit: 50,
+      offset: 0,
+    });
   try {
     render(
       <MemoryRouter initialEntries={["/overview?page=2"]}>
@@ -283,7 +361,14 @@ test("the mounted overview keeps controls, accepted page and focus through a ref
     expect(input).toBeInTheDocument();
     await waitFor(() => expect(query).toHaveBeenCalledTimes(1));
     await act(async () => {
-      initial({ runs: [run()], total: 75, limit: 50, offset: 50 });
+      initial({
+        evaluatedAt: NOW,
+        effectiveTime: { kind: "period", period: "7d" },
+        runs: [run()],
+        total: 75,
+        limit: 50,
+        offset: 50,
+      });
     });
     expect(await screen.findByTestId("overview-card")).toHaveTextContent("Import March orders");
     input.focus();
@@ -347,6 +432,58 @@ describe("a dimmed card", () => {
   });
 });
 
+describe("wire child-count objects", () => {
+  test.each([0, 1])(
+    "a card shows %i selected children against the actual global count object",
+    async (visible) => {
+      const shown = run({
+        children: { total: visible, unfinished: visible },
+        childrenTotal: { total: 2, unfinished: 1 },
+      });
+      wrap(<OverviewCard run={shown} parentTitle={null} now={NOW} onOpen={() => undefined} />);
+      const flag = screen.getByTestId("overview-flag-children");
+      expect(flag).toHaveTextContent(`${visible}/2`);
+      act(() => flag.focus());
+      const hint = await screen.findByRole("tooltip");
+      expect(hint).toHaveTextContent(`Showing ${visible} of 2 child runs`);
+      expect(hint).toHaveTextContent("All child runs in progress: 1");
+    },
+  );
+
+  test.each([0, 1])(
+    "the detail explains %i shown children and preserves the complete count object",
+    async (visible) => {
+      jest.spyOn(apiClient, "getExecutionProgress").mockResolvedValue(null);
+      const child = run({
+        executionId: "child",
+        title: "Child task",
+        workflowName: "Child own flow",
+        childrenTotal: { total: 0, unfinished: 0 },
+      });
+      const shown = run({
+        children: { total: visible, unfinished: visible },
+        childrenTotal: { total: 2, unfinished: 1 },
+        childRuns: visible ? [child] : [],
+      });
+      wrap(
+        <OverviewPanel
+          runId={shown.executionId}
+          run={shown}
+          ancestors={[]}
+          now={NOW}
+          onOpen={() => undefined}
+          onClose={() => undefined}
+        />,
+      );
+      const section = await screen.findByTestId("overview-panel-children");
+      expect(section).toHaveTextContent(`Showing ${visible} of 2 child runs`);
+      expect(section).toHaveTextContent("All child runs in progress: 1");
+      expect(section).not.toHaveTextContent("[object Object]");
+      if (visible) expect(section).toHaveTextContent("Child own flow");
+    },
+  );
+});
+
 describe("a card's hints", () => {
   test("the status hint opens from the keyboard", async () => {
     wrap(<OverviewCard run={run()} parentTitle={null} now={NOW} onOpen={() => undefined} />);
@@ -366,7 +503,16 @@ describe("stopped runs in the overview", () => {
       completedAt: NOW - 60_000,
       lastActivityAt: NOW - 30 * 24 * 60 * 60_000,
       subtreeActivityAt: NOW - 30 * 24 * 60 * 60_000,
-      stages: { labels: ["Plan", "Work", "Check"], activeIndex: 1, doneCount: 1 },
+      stages: {
+        entries: [
+          { id: "plan", label: "Plan", status: "done" },
+          { id: "work", label: "Work", status: "active" },
+          { id: "check", label: "Check", status: "pending" },
+        ],
+        labels: ["Plan", "Work", "Check"],
+        activeIndex: 1,
+        doneCount: 1,
+      },
     });
 
   test("the card identifies a stopped run, shows its reason and preserves unfinished stages", () => {
@@ -555,6 +701,28 @@ describe("the live hook", () => {
     });
     act(() => jest.advanceTimersByTime(PAGE_REFETCH_MS));
     expect(calls.refetches).toBe(1);
+  });
+
+  test("a detail consumer ignores other runs and refreshes its own renamed heading", () => {
+    jest.useFakeTimers();
+    const { deps, stream } = dependencies();
+    const refresh = jest.fn<() => Promise<void>>().mockResolvedValue();
+    renderHook(() =>
+      useLiveOverview(
+        { executionId: "own-run", refetchPage: refresh, removeRun: () => undefined },
+        () => deps,
+      ),
+    );
+    act(() => {
+      stream().change(1, "other-run", "activity");
+      jest.advanceTimersByTime(PAGE_REFETCH_MS);
+    });
+    expect(refresh).not.toHaveBeenCalled();
+    act(() => {
+      stream().change(2, "own-run", "activity");
+      jest.advanceTimersByTime(PAGE_REFETCH_MS);
+    });
+    expect(refresh).toHaveBeenCalledTimes(1);
   });
 });
 

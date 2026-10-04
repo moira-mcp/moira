@@ -14,7 +14,7 @@ import { runScenario, type MockInput, type TestScenario } from "../../helpers/sc
 import { catalogGraph } from "../../helpers/catalog-graphs.js";
 
 function loadWorkflow(): WorkflowGraph {
-  return catalogGraph("robust-task");
+  return catalogGraph("robust-task", { baseDir: process.env.TASK_IDENTITY_CATALOG_DIR });
 }
 
 function node(workflow: WorkflowGraph, id: string): any {
@@ -604,7 +604,7 @@ describe("Robust Task cause-aware contract", () => {
         .filter((candidate) => candidate.type === "agent-directive")
         .filter((candidate: any) => !candidate.directive.includes("workflow-guide.md"))
         .map((candidate) => candidate.id),
-    ).toEqual(["initialize-workspace", "approve-plan"]);
+    ).toEqual(["initialize-workspace"]);
     expect(guideReaders).toEqual(
       expect.arrayContaining([
         "ask-plan-review-limit",

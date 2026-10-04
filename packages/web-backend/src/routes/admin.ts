@@ -8,6 +8,7 @@ import {
   DatabaseRepository,
   getActiveExtensionRegistry,
   TrustedExtensionChannelApprovalService,
+  readExecutionManagement,
 } from "@mcp-moira/workflow-engine";
 import { asyncHandler, createApiError } from "../middleware/error-middleware.js";
 import { apiLimiter } from "../middleware/rate-limit-middleware.js";
@@ -40,6 +41,8 @@ import * as sharedEmail from "@mcp-moira/shared";
 import { isCodespaceReadinessDegraded } from "@mcp-moira/shared";
 import { getCodespaceObservabilityService } from "../services/codespace-services.js";
 import { sendConditionalRead } from "../utils/conditional-read.js";
+import { executionTaskTitles, withExecutionTaskTitles } from "../utils/execution-task-titles.js";
+import { executionDisplayStatus } from "@mcp-moira/shared/execution-management";
 
 const router = Router();
 const repository = new DatabaseRepository();
@@ -841,7 +844,7 @@ router.get(
   "/stats",
   asyncHandler(async (_req: Request, res: Response) => {
     const { getDatabase, workflow, workflowExecution } = await import("@mcp-moira/shared");
-    const { count, eq, desc, sql } = await import("drizzle-orm");
+    const { count, eq, desc, sql, and, isNull } = await import("drizzle-orm");
     const db = getDatabase();
     const [workflows] = await db
       .select({ count: count() })
@@ -851,17 +854,23 @@ router.get(
     const [active] = await db
       .select({ count: count() })
       .from(workflowExecution)
-      .where(eq(workflowExecution.state, "running"));
+      .where(and(eq(workflowExecution.state, "running"), isNull(workflowExecution.stopReason)));
     const recent = await db
       .select({
         id: workflowExecution.executionId,
         workflowId: workflowExecution.workflowId,
         status: workflowExecution.state,
+        stopReason: workflowExecution.stopReason,
         timestamp: workflowExecution.createdAt,
       })
       .from(workflowExecution)
       .orderBy(desc(workflowExecution.createdAt))
       .limit(10);
+    const management = new Map(
+      (
+        await new ExecutionRepository(db).getManyManagementHeaders(recent.map((item) => item.id))
+      ).map((header) => [header.executionId, header]),
+    );
     res.json({
       success: true,
       data: {
@@ -871,6 +880,16 @@ router.get(
         activeExecutions: active.count,
         recentActivity: recent.map((item) => ({
           ...item,
+          displayStatus: executionDisplayStatus(
+            management.get(item.id) ?? {
+              status: item.status,
+              stopReason: item.stopReason,
+              hasActiveLock: false,
+              gateWaiting: false,
+              awaitingUser: false,
+            },
+          ),
+          stopReason: management.get(item.id)?.stopReason ?? item.stopReason,
           timestamp: item.timestamp?.getTime() ?? null,
           action: `Workflow execution ${item.status}`,
         })),
@@ -1161,13 +1180,25 @@ router.get(
       throw createApiError.notFound(`Execution not found: ${id}`, { executionId: id });
     }
 
+    const taskTitles = await executionTaskTitles([execution]);
+    const management = await readExecutionManagement(
+      repository,
+      [execution],
+      (req as AuthenticatedRequest).userId,
+      await getLockService().getActiveExecutionIds(),
+    );
+
     res.json({
       success: true,
       data: {
         executionId: execution.executionId,
         workflowId: execution.workflowId,
+        taskTitle: taskTitles.get(execution.executionId),
+        taskIdentity: execution.taskIdentity ?? null,
+        note: execution.note ?? null,
         userId: execution.userId,
         status: execution.status,
+        ...management.get(execution.executionId),
         currentNodeId: execution.currentNodeId,
         waitingForInputNodeId: execution.waitingForInputNodeId,
         context: {
@@ -1918,6 +1949,11 @@ router.get(
             ["running", "waiting", "completed", "failed", "locked"].includes(s),
           ) as LegacyStatus[])
       : undefined;
+    const includeStopped = statusParam?.split(",").includes("stopped")
+      ? true
+      : rawStatus?.length
+        ? false
+        : undefined;
 
     let adminDbStatuses: ReturnType<typeof mapLegacyStatusArray>["dbStatuses"] | undefined;
     let adminHasLockedFilter = false;
@@ -1932,23 +1968,26 @@ router.get(
       }
     }
 
-    const result = await new ExecutionRepository(getDatabase()).listSummaries({
-      userId: userId || undefined,
-      status: adminDbStatuses,
-      search,
-      sort: "createdAt",
-      sortOrder: "desc",
-      limit,
-      offset,
-      locked: adminHasLockedFilter && !adminOriginalIncludedRunning ? true : undefined,
-    });
-    const enrichedExecutions = result.executions;
+    const result = await withExecutionTaskTitles(() =>
+      new ExecutionRepository(getDatabase()).listSummaries({
+        userId: userId || undefined,
+        status: adminDbStatuses,
+        includeStopped,
+        search,
+        sort: "createdAt",
+        sortOrder: "desc",
+        limit,
+        offset,
+        locked: adminHasLockedFilter && !adminOriginalIncludedRunning ? true : undefined,
+        actorId: (req as AuthenticatedRequest).userId,
+      }),
+    );
     const totalCount = result.total;
 
     res.json({
       success: true,
       data: {
-        executions: enrichedExecutions,
+        executions: result.executions,
         total: totalCount,
         limit,
         offset,
@@ -1991,10 +2030,17 @@ router.get(
       .select({ id: workflowTable.id, name: workflowTable.name })
       .from(workflowTable);
     const workflowNameMap = new Map(allWorkflows.map((w) => [w.id, w.name]));
+    const taskTitles = await executionTaskTitles([execution]);
 
     // Get active lock info
     const lockService = getLockService();
     const activeLock = await lockService.getActiveLock(executionId);
+    const management = await readExecutionManagement(
+      repository,
+      [execution],
+      (req as AuthenticatedRequest).userId,
+      new Set(activeLock ? [executionId] : []),
+    );
 
     res.json({
       success: true,
@@ -2002,11 +2048,15 @@ router.get(
         executionId: execution.executionId,
         workflowId: execution.workflowId,
         workflowName: workflowNameMap.get(execution.workflowId) || null,
+        taskTitle: taskTitles.get(execution.executionId),
+        taskIdentity: execution.taskIdentity ?? null,
+        note: execution.note ?? null,
         userId: execution.userId,
         userEmail: userInfo?.email || null,
         userName: userInfo?.name || null,
         status:
           execution.status === "running" && activeLock ? ("locked" as const) : execution.status,
+        ...management.get(executionId),
         currentNodeId: execution.currentNodeId,
         waitingForInputNodeId: execution.waitingForInputNodeId,
         context: execution.globalContext,

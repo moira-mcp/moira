@@ -217,6 +217,7 @@ test.describe("Feature-mode UI gating", () => {
             activeExecutions: 0,
             completedExecutions: 0,
             failedExecutions: 0,
+            stoppedExecutions: 0,
             activeUsers: 0,
             successfulExecutions: 0,
             successRate: 0,
