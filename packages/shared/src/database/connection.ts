@@ -86,6 +86,34 @@ export function getSqliteInstance(): Database.Database {
 }
 
 /**
+ * Keep awaited reads on one WAL snapshot without sharing a transaction with writers.
+ * Private in-memory databases cannot be reopened; their existing generation guards remain active.
+ */
+export async function withReadSnapshot<T>(
+  read: (db: BetterSQLite3Database<typeof schema>, sqlite: Database.Database) => Promise<T>,
+  source: Database.Database = getSqliteInstance(),
+): Promise<T> {
+  if (!source.name || source.name === ":memory:") return read(drizzle(source, { schema }), source);
+  const sqlite = new Database(source.name, { readonly: true, fileMustExist: true });
+  try {
+    if (sqlite.pragma("journal_mode", { simple: true }) !== "wal")
+      throw new Error("Awaited database snapshots require WAL journal mode");
+    registerExecutionManagementFunctions(sqlite);
+    sqlite.pragma("busy_timeout = 5000");
+    sqlite.exec("BEGIN DEFERRED");
+    // BEGIN alone is lazy: acquire the read snapshot before the callback's first await.
+    sqlite.prepare("SELECT rootpage FROM sqlite_schema LIMIT 1").get();
+    return await read(drizzle(sqlite, { schema }), sqlite);
+  } finally {
+    try {
+      if (sqlite.inTransaction) sqlite.exec("ROLLBACK");
+    } finally {
+      sqlite.close();
+    }
+  }
+}
+
+/**
  * Close database connection (for graceful shutdown)
  */
 export function closeDatabase(): void {

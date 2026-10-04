@@ -41,6 +41,7 @@ import {
   ExecutionRepository,
   WorkflowRepository,
   getSqliteInstance,
+  withReadSnapshot,
   type OverviewSort,
   type OverviewStatusFilter,
 } from "@mcp-moira/shared";
@@ -409,13 +410,15 @@ router.get(
   "/overview",
   asyncHandler(async (req: Request, res: Response) => {
     const userId = (req as AuthenticatedRequest).userId;
-    const db = getDatabase();
-    const deps = {
-      overview: new ExecutionOverviewRepository(getSqliteInstance()),
-      executions: new ExecutionRepository(db),
-      workflows: new WorkflowRepository(db),
-      notifications: new ExecutionNotificationRepository(db),
-    };
+    const snapshot = <T>(read: (deps: Parameters<typeof overviewPage>[1]) => Promise<T>) =>
+      withReadSnapshot((db, sqlite) =>
+        read({
+          overview: new ExecutionOverviewRepository(sqlite),
+          executions: new ExecutionRepository(db),
+          workflows: new WorkflowRepository(db),
+          notifications: new ExecutionNotificationRepository(db),
+        }),
+      );
 
     if (typeof req.query.ids === "string") {
       const ids = req.query.ids
@@ -425,7 +428,7 @@ router.get(
       if (ids.length > OVERVIEW_MAX_LIMIT) {
         throw createApiError.badRequest(`At most ${OVERVIEW_MAX_LIMIT} ids`);
       }
-      const runs = await overviewRows(userId, ids, deps);
+      const runs = await snapshot((deps) => overviewRows(userId, ids, deps));
       res.json({ success: true, data: { runs }, timestamp: new Date().toISOString() });
       return;
     }
@@ -478,7 +481,7 @@ router.get(
       if (error instanceof RangeError) throw createApiError.badRequest(error.message);
       throw error;
     }
-    const data = await overviewPage(query, deps);
+    const data = await snapshot((deps) => overviewPage(query, deps));
     res.json({ success: true, data, timestamp: new Date().toISOString() });
   }),
 );
