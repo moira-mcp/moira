@@ -4859,11 +4859,13 @@ Authentication: Required (admin role)
 
 ### GET /api/admin/analytics/executions
 
-Get the overview fields and compatible execution statistics aliases. A failed execution is a
-completed run with at least one refusal; degradation alone is not a failure. Explicitly stopped
-runs count as completed, but only completions without a stop reason or refusals are successful.
-Success rate is `successful / completed * 100`, or zero without completions. Average duration considers
-completed runs with a valid non-negative recorded duration, and is zero without a sample.
+Get the overview fields and compatible execution statistics aliases. `completed` counts only raw
+`completed` runs with a null stop marker. `failed` counts the subset of those completions with at
+least one refusal; degradation alone does not count, and raw `failed` runs are outside that subset.
+`stopped` counts every non-null stop marker, including an empty marker or a marker on a raw-running
+run, separately from completed and failed. Success rate is `successful / completed * 100`, or zero
+without genuine completions. Average duration considers genuine completions with a valid
+non-negative recorded duration and is zero without a sample; stopped runs do not enter that average.
 
 Response:
 
@@ -4910,7 +4912,7 @@ Authentication: Required (admin role)
 Get most used workflows.
 
 Participants and top users respect the same exclusions and interval as the run counts. Each flow
-has at most three top users. Success rate uses successful completions among all completions.
+has at most three top users. Success rate uses successful completions among genuine completions.
 `total` counts all matching distinct flows, not just this page. The executions endpoint's
 `byWorkflow` projection holds at most twenty flows and exposes `byWorkflowTotal`/`byWorkflowLimited`.
 

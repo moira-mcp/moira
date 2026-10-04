@@ -17,6 +17,7 @@ type HeadingReference = Pick<WorkflowExecution, "executionId" | "workflowId" | "
 async function titleValues(
   executions: readonly HeadingReference[],
   check: () => void,
+  snapshots?: readonly WorkflowExecution[],
 ): Promise<Map<string, string>> {
   const owners = new Map<string, string[]>();
   for (const execution of executions) {
@@ -27,7 +28,9 @@ async function titleValues(
   const db = getDatabase();
   const deps = { executions: new ExecutionRepository(db), workflows: new WorkflowRepository(db) };
   const titles = await Promise.all(
-    [...owners].map(([ownerId, ids]) => readExecutionTaskTitles(ids, ownerId, deps, check)),
+    [...owners].map(([ownerId, ids]) =>
+      readExecutionTaskTitles(ids, ownerId, deps, check, snapshots),
+    ),
   );
   check();
   return new Map(titles.flatMap((values) => [...values]));
@@ -52,11 +55,11 @@ async function coherentRead<T>(read: (check: () => void) => Promise<T>): Promise
   }
 }
 
-/** Resolve already-authorized rows through the same selective heading reader as overview search. */
+/** Resolve full authorized snapshots without replacing their identity or context from storage. */
 export function executionTaskTitles(
-  executions: readonly HeadingReference[],
+  executions: readonly WorkflowExecution[],
 ): Promise<Map<string, string>> {
-  return coherentRead((check) => titleValues(executions, check));
+  return coherentRead((check) => titleValues(executions, check, executions));
 }
 
 /** Preserve every native wrapper field while returning its identity and heading from one generation. */

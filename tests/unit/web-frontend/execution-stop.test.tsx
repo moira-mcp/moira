@@ -5,6 +5,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import "@testing-library/jest-dom/jest-globals";
 import { I18nextProvider } from "react-i18next";
 import i18n from "../../../packages/web-frontend/src/i18n";
+import { authClient } from "../../../packages/web-frontend/src/auth/better-auth-client";
 import {
   ApiClientError,
   apiClient,
@@ -17,12 +18,42 @@ import {
 } from "../../../packages/web-frontend/src/components/execution/ExecutionStop";
 
 const originalReact = (globalThis as typeof globalThis & { React?: typeof React }).React;
+let admittedOwner: string | null = null;
+async function acceptOwner(owner: string | null) {
+  admittedOwner = owner;
+  await authClient.$store.atoms.session.get().refetch();
+}
 beforeEach(async () => {
   (globalThis as typeof globalThis & { React?: typeof React }).React = React;
   await i18n.changeLanguage("en");
+  // Settle Better Auth's real session observation, which admits the existing private read scope.
+  jest.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+    if (new URL(String(input), "http://localhost").pathname !== "/api/auth/get-session")
+      throw new Error("Unexpected network request in execution stop fixture");
+    return Response.json(
+      admittedOwner === null
+        ? null
+        : {
+            user: {
+              id: admittedOwner,
+              email: `${admittedOwner}@example.test`,
+              name: admittedOwner,
+            },
+            session: {
+              id: `${admittedOwner}-session`,
+              userId: admittedOwner,
+              expiresAt: "2099-01-01T00:00:00Z",
+              updatedAt: "2026-01-01T00:00:00Z",
+              createdAt: "2026-01-01T00:00:00Z",
+            },
+          },
+    );
+  });
+  await acceptOwner("owner");
 });
-afterEach(() => {
+afterEach(async () => {
   cleanup();
+  await acceptOwner(null);
   jest.restoreAllMocks();
   const target = globalThis as typeof globalThis & { React?: typeof React };
   if (originalReact) target.React = originalReact;
@@ -110,6 +141,26 @@ function openReason(value: string) {
 }
 
 describe("shared execution stop decisions", () => {
+  test("null admission refuses an open decision and replacing the authenticated owner retires its reason", async () => {
+    const stop = jest.spyOn(apiClient, "stopExecution").mockResolvedValue(stopped);
+    render(<Harness />);
+    await act(async () => acceptOwner(null));
+    fireEvent.click(screen.getByTestId("execution-stop-owned-run"));
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    expect(screen.queryByRole("textbox", { name: "Reason for stopping" })).toBeNull();
+    expect(stop).not.toHaveBeenCalled();
+    await act(async () => acceptOwner("owner"));
+    openReason("Former owner's unsent reason");
+    await act(async () => acceptOwner("replacement"));
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    expect(stop).not.toHaveBeenCalled();
+    await act(async () => acceptOwner("owner"));
+    fireEvent.click(screen.getByTestId("execution-stop-owned-run"));
+    expect(screen.getByRole("textbox", { name: "Reason for stopping" })).toHaveValue("");
+    expect(screen.getByRole("button", { name: "Stop task" })).toBeDisabled();
+    expect(stop).not.toHaveBeenCalled();
+  });
+
   test("uses authoritative capability, including disabled in-flight and hidden foreign/terminal/unavailable controls", () => {
     render(
       <Harness

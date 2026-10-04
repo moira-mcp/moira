@@ -7,6 +7,7 @@ import "@testing-library/jest-dom/jest-globals";
 import { I18nextProvider } from "react-i18next";
 import { BrowserRouter } from "react-router-dom";
 import i18n from "../../../packages/web-frontend/src/i18n";
+import { authClient } from "../../../packages/web-frontend/src/auth/better-auth-client";
 import { apiClient } from "../../../packages/web-frontend/src/services/api-client";
 import type { ExecutionData } from "../../../packages/web-frontend/src/components/execution/ExecutionInspector";
 import type { LiveOverviewHandlers } from "../../../packages/web-frontend/src/components/overview/useLiveOverview";
@@ -67,14 +68,36 @@ jest.unstable_mockModule(
 let Inspector: typeof import("../../../packages/web-frontend/src/components/execution/ExecutionInspector").ExecutionInspector;
 let GuideProvider: typeof import("../../../packages/web-frontend/src/guides/GuideContext").GuideProvider;
 const originalReact = (globalThis as typeof globalThis & { React?: typeof React }).React;
+let admitted = true;
 beforeAll(async () => {
   ({ ExecutionInspector: Inspector } =
     await import("../../../packages/web-frontend/src/components/execution/ExecutionInspector"));
   ({ GuideProvider } = await import("../../../packages/web-frontend/src/guides/GuideContext"));
   await i18n.changeLanguage("en");
 });
-beforeEach(() => {
+beforeEach(async () => {
   (globalThis as typeof globalThis & { React?: typeof React }).React = React;
+  admitted = true;
+  // The real stop action requires the same admitted owner as these execution fixtures.
+  jest.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+    if (new URL(String(input), "http://localhost").pathname !== "/api/auth/get-session")
+      throw new Error("Unexpected network request in inspector lifetime fixture");
+    return Response.json(
+      admitted
+        ? {
+            user: { id: "owner", email: "owner@example.test", name: "Owner" },
+            session: {
+              id: "owner-session",
+              userId: "owner",
+              expiresAt: "2099-01-01T00:00:00Z",
+              updatedAt: "2026-01-01T00:00:00Z",
+              createdAt: "2026-01-01T00:00:00Z",
+            },
+          }
+        : null,
+    );
+  });
+  await authClient.$store.atoms.session.get().refetch();
   window.history.replaceState(null, "", "/executions/A");
   jest.spyOn(apiClient, "getWorkflow").mockImplementation(async (id) => definition(id));
   jest.spyOn(apiClient, "getExecutionVariables").mockResolvedValue({ variables: [], revision: 0 });
@@ -92,8 +115,10 @@ beforeEach(() => {
   });
   jest.spyOn(apiClient, "updateExecutionContextPath").mockResolvedValue(true);
 });
-afterEach(() => {
+afterEach(async () => {
   cleanup();
+  admitted = false;
+  await authClient.$store.atoms.session.get().refetch();
   jest.restoreAllMocks();
   const target = globalThis as typeof globalThis & { React?: typeof React };
   if (originalReact) target.React = originalReact;

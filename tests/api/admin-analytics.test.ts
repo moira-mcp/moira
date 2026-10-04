@@ -56,13 +56,54 @@ describe("Admin Analytics API", () => {
       const createdAt = Date.parse("2001-01-02T23:59:59.000Z");
 
       async function analytics(path: string) {
-        const response = await fetch(`${BASE_URL}/api/admin/analytics/${path}`, {
+        const url = new URL(`${BASE_URL}/api/admin/analytics/${path}`);
+        // These fixtures and their native baselines include their administrator owner.
+        // Omission selects default-admin exclusions; explicit empty selects everyone.
+        url.searchParams.set("excludeUserIds", "");
+        expect(url.searchParams.get("excludeUserIds")).toBe("");
+        const response = await fetch(url, {
           headers: { Cookie: adminCookie },
         });
         expect(response.status).toBe(200);
         const body = (await response.json()) as any;
         expect(body.success).toBe(true);
+        const consumer = path.split("?")[0];
+        if (["overview", "executions", "top-workflows"].includes(consumer)) {
+          expect(body.data.scope).toEqual(
+            expect.objectContaining({
+              timeRange: url.searchParams.get("range"),
+              exclusions: { mode: "custom", userIds: [], effectiveCount: 0 },
+            }),
+          );
+        }
+        // Quality and operational retain their existing timeRange-only response contracts.
+        expect(body.data.timeRange).toBe(url.searchParams.get("range"));
         return body.data;
+      }
+
+      async function fixtureTopWorkflow() {
+        const limit = 20;
+        let total: number | undefined;
+        const seen = new Set<string>();
+        for (let offset = 0; total === undefined || offset < total; offset += limit) {
+          const page = await analytics(`top-workflows?range=all&limit=${limit}&offset=${offset}`);
+          expect(Number.isSafeInteger(page.total)).toBe(true);
+          expect(page.total).toBeGreaterThanOrEqual(0);
+          if (total === undefined) total = Number(page.total);
+          expect(page.total).toBe(total);
+          expect(page.workflows).toHaveLength(Math.min(limit, total - offset));
+          for (const workflow of page.workflows) {
+            expect(seen.has(workflow.workflowId)).toBe(false);
+            seen.add(workflow.workflowId);
+          }
+          const fixture = page.workflows.find(
+            (workflow: any) => workflow.workflowId === workflowId,
+          );
+          if (fixture) return fixture;
+        }
+        throw new Error(
+          "Owned outcome fixture is absent from the complete scoped top-workflow list",
+        );
       }
 
       function seed(
@@ -145,7 +186,7 @@ describe("Admin Analytics API", () => {
         // Weight the new durations against the native contributing count and unrounded sum;
         // completed totals can include runs without a duration, and the API average is rounded.
         const [durationCountBefore, durationSumBefore] = execSqliteInDocker(
-          "SELECT COUNT(*), COALESCE(SUM(completedAt - createdAt), 0) FROM workflowExecution WHERE state = 'completed' AND stopReason IS NULL AND completedAt IS NOT NULL AND createdAt IS NOT NULL AND completedAt != 0 AND createdAt != 0;",
+          "SELECT COUNT(*), COALESCE(SUM(e.completedAt - e.createdAt), 0) FROM workflowExecution e JOIN user u ON u.id=e.userId WHERE e.state = 'completed' AND e.stopReason IS NULL AND e.completedAt >= e.createdAt;",
         )
           .split("|")
           .map(Number);
@@ -206,8 +247,8 @@ describe("Admin Analytics API", () => {
           stopped: beforeDay.stopped + 3,
         });
 
-        const top = await analytics("top-workflows?range=all&limit=100000");
-        expect(top.workflows.find((row: any) => row.workflowId === workflowId)).toEqual(
+        const topWorkflow = await fixtureTopWorkflow();
+        expect(topWorkflow).toEqual(
           expect.objectContaining({
             executionCount: 7,
             completedCount: 2,
@@ -267,8 +308,8 @@ describe("Admin Analytics API", () => {
 
       test("stopped-only work has zero genuine completions, refusals, success and completed duration", async () => {
         seed("completed", 100_000, "Stopped after refusal", "handler");
-        const top = await analytics("top-workflows?range=all&limit=100000");
-        expect(top.workflows.find((row: any) => row.workflowId === workflowId)).toEqual(
+        const topWorkflow = await fixtureTopWorkflow();
+        expect(topWorkflow).toEqual(
           expect.objectContaining({
             executionCount: 1,
             completedCount: 0,

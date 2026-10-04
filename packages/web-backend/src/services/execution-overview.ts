@@ -484,6 +484,7 @@ export async function readExecutionTaskTitles(
   userId: string,
   deps: Pick<OverviewDependencies, "executions" | "workflows">,
   checkGeneration: () => void = () => {},
+  snapshots?: readonly WorkflowExecution[],
 ): Promise<Map<string, string>> {
   const executions = new Map<string, WorkflowExecution>();
   const read = async (
@@ -500,7 +501,12 @@ export async function readExecutionTaskTitles(
       checkGeneration();
     }
   };
-  await read(executionIds);
+  if (snapshots) {
+    const requested = new Set(executionIds);
+    for (const execution of snapshots)
+      if (execution.userId === userId && requested.has(execution.executionId))
+        executions.set(execution.executionId, execution);
+  } else await read(executionIds);
   const legacy = [...executions.values()].filter((execution) => !execution.taskIdentity);
   const definitions = await deps.workflows.getManyForTaskTitles(
     legacy.map((execution) => execution.workflowId),
@@ -549,9 +555,13 @@ export async function readExecutionTaskTitles(
         if (definition) definition.definition.variableRegistry = values.get(spec.workflowId) ?? {};
       }
     }
-    const missing = reads.filter(
-      (spec) => variableRequests.get(spec.executionId) !== JSON.stringify(spec.variables),
-    );
+    // A full caller snapshot already contains its complete context. Missing values must remain
+    // missing there: reading them from storage would mix this snapshot with a later generation.
+    const missing = snapshots
+      ? []
+      : reads.filter(
+          (spec) => variableRequests.get(spec.executionId) !== JSON.stringify(spec.variables),
+        );
     if (missing.length) {
       await read(
         missing.map((spec) => spec.executionId),

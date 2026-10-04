@@ -4,10 +4,12 @@ import { afterEach, beforeEach, describe, expect, jest, test } from "@jest/globa
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import "@testing-library/jest-dom/jest-globals";
 import { ConfirmDialog } from "../../../packages/web-frontend/src/components/confirm-dialog";
+import i18n from "../../../packages/web-frontend/src/i18n";
 
 const originalReact = (globalThis as typeof globalThis & { React?: typeof React }).React;
-beforeEach(() => {
+beforeEach(async () => {
   (globalThis as typeof globalThis & { React?: typeof React }).React = React;
+  await i18n.changeLanguage("en");
 });
 afterEach(() => {
   cleanup();

@@ -24,6 +24,7 @@ import { MemoryRouter } from "react-router-dom";
 import { Overview } from "../../../packages/web-frontend/src/pages/Overview";
 import { GuideProvider } from "../../../packages/web-frontend/src/guides/GuideContext";
 import { FeaturesProvider } from "../../../packages/web-frontend/src/hooks/useFeatures";
+import { authClient } from "../../../packages/web-frontend/src/auth/better-auth-client";
 import {
   observeReadSession,
   suspendReadSession,
@@ -31,6 +32,7 @@ import {
 import i18n from "../../../packages/web-frontend/src/i18n";
 import {
   apiClient,
+  type OverviewPage,
   type OverviewRun,
 } from "../../../packages/web-frontend/src/services/api-client";
 import { OverviewPanel } from "../../../packages/web-frontend/src/components/overview/OverviewPanel";
@@ -47,10 +49,32 @@ import type {
 
 const NOW = 1_800_000_000_000;
 const originalReact = globalThis.React;
+let admitted = true;
 
-beforeEach(() => {
+beforeEach(async () => {
   globalThis.React = React;
-  observeReadSession("reader", "reader-session");
+  admitted = true;
+  // Settle the installed client's authority before opening a private portal. A manual
+  // read identity alone can be retired by its still-pending initial session observation.
+  jest.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+    if (new URL(String(input), "http://localhost").pathname !== "/api/auth/get-session")
+      throw new Error("Unexpected network request in overview fixture");
+    return Response.json(
+      admitted
+        ? {
+            user: { id: "reader", email: "reader@example.test", name: "Reader" },
+            session: {
+              id: "reader-session",
+              userId: "reader",
+              expiresAt: "2099-01-01T00:00:00Z",
+              updatedAt: "2026-01-01T00:00:00Z",
+              createdAt: "2026-01-01T00:00:00Z",
+            },
+          }
+        : null,
+    );
+  });
+  await authClient.$store.atoms.session.get().refetch();
 });
 
 function run(overrides: Partial<OverviewRun> = {}): OverviewRun {
@@ -103,8 +127,10 @@ beforeAll(async () => {
   await i18n.changeLanguage("en");
 });
 
-afterEach(() => {
+afterEach(async () => {
   cleanup();
+  admitted = false;
+  await authClient.$store.atoms.session.get().refetch();
   jest.restoreAllMocks();
   jest.useRealTimers();
   observeReadSession(null, null);
@@ -295,12 +321,7 @@ test("the mounted overview keeps controls, accepted page and focus through a ref
   jest
     .spyOn(apiClient, "getWorkflows")
     .mockResolvedValue({ workflows: [], totalWorkflows: 0 } as never);
-  let initial!: (value: {
-    runs: OverviewRun[];
-    total: number;
-    offset: number;
-    limit: number;
-  }) => void;
+  let initial!: (value: OverviewPage) => void;
   let refuse!: (error: unknown) => void;
   const query = jest
     .spyOn(apiClient, "getOverview")
@@ -316,7 +337,14 @@ test("the mounted overview keeps controls, accepted page and focus through a ref
           refuse = reject;
         }),
     )
-    .mockResolvedValue({ runs: [], total: 0, limit: 50, offset: 0 });
+    .mockResolvedValue({
+      evaluatedAt: NOW,
+      effectiveTime: { kind: "period", period: "7d" },
+      runs: [],
+      total: 0,
+      limit: 50,
+      offset: 0,
+    });
   try {
     render(
       <MemoryRouter initialEntries={["/overview?page=2"]}>
@@ -333,7 +361,14 @@ test("the mounted overview keeps controls, accepted page and focus through a ref
     expect(input).toBeInTheDocument();
     await waitFor(() => expect(query).toHaveBeenCalledTimes(1));
     await act(async () => {
-      initial({ runs: [run()], total: 75, limit: 50, offset: 50 });
+      initial({
+        evaluatedAt: NOW,
+        effectiveTime: { kind: "period", period: "7d" },
+        runs: [run()],
+        total: 75,
+        limit: 50,
+        offset: 50,
+      });
     });
     expect(await screen.findByTestId("overview-card")).toHaveTextContent("Import March orders");
     input.focus();
