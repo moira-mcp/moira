@@ -1,0 +1,11 @@
+{
+  "name": "@mcp-moira/local",
+  "version": "0.1.0",
+  "description": "User-owned Docker Sandboxes codespaces for Moira",
+  "type": "module",
+  "private": true,
+  "bin": { "moira-local": "./dist/cli.js" },
+  "files": ["dist"],
+  "engines": { "node": ">=24.0.0" },
+  "dependencies": { "zod": "^3.25.76" }
+}
