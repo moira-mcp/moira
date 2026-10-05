@@ -587,9 +587,14 @@ supportedGuard("independent guard with a real subprocess SDK substitute", () => 
           "--input-type=module",
           "-e",
           `
-        import {startGuard} from ${JSON.stringify(`file://${join(root, "guard.js")}`)};
-        await startGuard(${JSON.stringify(local.state.root)}).then(device=>device.stop().then(()=>{throw new Error('Retired inventory accepted');}),error=>{if(error.code!==${JSON.stringify(reason === "daemon-retired" ? "LOCAL_CONTROL_RETIRED" : "LOCAL_NOT_RUNNING")})throw error;});
+        import {pathToFileURL} from 'node:url';
+        const {startGuard} = await import(pathToFileURL(process.argv[2]).href);
+        await startGuard(process.argv[3]).then(device=>device.stop().then(()=>{throw new Error('Retired inventory accepted');}),error=>{if(error.code!==process.argv[4])throw error;});
       `,
+          "inventory-driver",
+          join(root, "guard.js"),
+          local.state.root,
+          reason === "daemon-retired" ? "LOCAL_CONTROL_RETIRED" : "LOCAL_NOT_RUNNING",
         ],
         { env: {}, stdio: ["ignore", "pipe", "pipe"] },
       );
