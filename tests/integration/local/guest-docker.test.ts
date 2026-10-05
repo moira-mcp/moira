@@ -87,6 +87,8 @@ import('file://'+root+'/docker.mjs').then(async module=>{
             "docker",
             [
               "run",
+              // Keep image-pull progress separate from the guest's asserted stderr.
+              "--quiet",
               "--rm",
               "--interactive",
               "--network",

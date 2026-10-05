@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "@jest/globals";
-import { mkdtemp, rm, realpath, mkdir, symlink } from "node:fs/promises";
+import { mkdtemp, rm, realpath, mkdir, symlink, copyFile, chmod } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { PrivateState } from "../../../packages/local/src/private-state.js";
@@ -304,8 +304,14 @@ describe("Docker Sandboxes lifecycle boundary", () => {
 
   test("virtual default cannot admit setup through an unvalidated SDK version", async () => {
     const fixture = await localFixture(state);
-    fixture.policy.runtime.binary = await realpath(process.execPath);
-    const runtime = simulatedRuntime(fixture.policy, async () => result("sbx version: v0.47.0\n"));
+    fixture.policy.runtime.binary = join(root, "owned-sdk");
+    await copyFile(process.execPath, fixture.policy.runtime.binary);
+    await chmod(fixture.policy.runtime.binary, 0o700);
+    const runtime = simulatedRuntime(fixture.policy, async (request) => {
+      expect(request.binary).toBe(fixture.policy.runtime.binary);
+      expect(request.argv).toEqual(["version"]);
+      return result("sbx version: v0.47.0\n");
+    });
     await expect(runtime.initialize()).rejects.toMatchObject({ code: "LOCAL_RUNTIME_VERSION" });
   });
 
