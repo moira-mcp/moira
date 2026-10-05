@@ -271,6 +271,10 @@
     "revision": 1,
     "fingerprint": "f2a10a39"
   },
+  "settings.local-devices": {
+    "revision": 1,
+    "fingerprint": "0113cfb4"
+  },
   "settings.apps": {
     "revision": 1,
     "fingerprint": "96012979"
@@ -292,8 +296,8 @@
     "fingerprint": "52012de3"
   },
   "settings-github.codespaces": {
-    "revision": 2,
-    "fingerprint": "22fc3e42"
+    "revision": 3,
+    "fingerprint": "9314a92d"
   },
   "settings-github.limits": {
     "revision": 2,

@@ -26,7 +26,39 @@ npm run fix               # ESLint + Prettier fix all files
 
 ```
 
-**All development happens through Docker containers.**
+The web application is developed through its Docker image. The Moira Local
+companion is a separate host executable and must be built for its supported host.
+
+### Moira Local companion
+
+Run its commands from the repository root:
+
+```bash
+npm run local:build
+npm run local -- --help
+npm run typecheck:local
+npm run local:verify:guest
+```
+
+`local:build` emits the CLI, independent guard, fixed runtime API and guest assets
+under `packages/local/dist`, including native ownership and credential helpers.
+Do not copy a single JavaScript entry without its companion assets.
+`local:verify:guest` rebuilds and exercises the packaged guest helper in a Docker
+container; it is a guest diagnostic, not proof of microVM isolation or SDK lifecycle.
+Host runtime validation requires the supported macOS SDK and locally approved
+state. Linux VM execution fails closed before creation.
+
+The companion shares the provider-neutral job codec and guest supervisor with the
+GitHub connector. Changes to lifecycle, relay or guest behavior must preserve
+durable replay receipts, independent kernel ownership and unknown-outcome fences;
+an injected test runtime does not establish physical SDK isolation. Use root
+Testfold scripts for focused tests in `tests/integration/local/` and device/provider
+integration tests. Integration global setup runs `local:build` before database
+migration, so source consumers use current packaged native and guest assets on a
+clean checkout. This build prerequisite does not run the SDK or validate a microVM.
+See [System architecture](SYSTEM.md#local-codespace-composition-and-ownership),
+[API contracts](API.md#local-device-enrollment-and-relay-api) and
+[Codespaces](CODESPACES.md) for runtime setup and recovery.
 
 ### Code Quality
 

@@ -110,6 +110,9 @@ export * from "./types/index.js";
 
 // Codespace provider connection primitives
 export * from "./codespaces/types.js";
+export * from "./codespaces/local-device-types.js";
+export * from "./codespaces/local-device-repository.js";
+export * from "./codespaces/local-device-service.js";
 export * from "./codespaces/github-app-config.js";
 export * from "./codespaces/credential-vault.js";
 export * from "./codespaces/connection-service.js";

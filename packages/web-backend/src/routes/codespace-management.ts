@@ -5,6 +5,7 @@ import {
   projectCodespaceOperationSummary,
   projectCodespaceSummary,
   recordCodespaceRejection,
+  parseLocalRepositoryTargetId,
   type CodespaceConnectionService,
   type CodespaceObservabilityService,
   type CodespaceOperationService,
@@ -17,9 +18,22 @@ import {
   getCodespaceObservabilityService,
   getCodespaceOperationService,
   getCodespaceResourceService,
+  getCodespaceProviderBundles,
+  selectCodespaceProviderServices,
+  getLocalDeviceService,
 } from "../services/codespace-services.js";
 
 export interface CodespaceManagementServices {
+  provider?: string;
+  providers?: CodespaceManagementServices[];
+  select?: (
+    userId: string,
+    input: { repositoryId?: string; codespaceId?: string },
+  ) => CodespaceManagementServices;
+  repositoryMetadata?: (
+    userId: string,
+    repositoryId: string,
+  ) => { device_id: string; device_label: string };
   connection: Pick<CodespaceConnectionService, "getStatus" | "refreshGrants">;
   observability: Pick<CodespaceObservabilityService, "readiness" | "limitsWithBilling">;
   resource: Pick<
@@ -62,6 +76,15 @@ function defaultServices(): CodespaceManagementServices {
     observability: getCodespaceObservabilityService(),
     resource: getCodespaceResourceService(),
     operation: getCodespaceOperationService(),
+    providers: getCodespaceProviderBundles(),
+    select: selectCodespaceProviderServices,
+    repositoryMetadata: (userId, repositoryId) => {
+      const target = parseLocalRepositoryTargetId(repositoryId);
+      return {
+        device_id: target.deviceId,
+        device_label: getLocalDeviceService().getActiveDevice(userId, target.deviceId).label,
+      };
+    },
   };
 }
 
@@ -82,9 +105,10 @@ export function createCodespaceManagementRoutes(
     next();
   });
 
-  const settingsUrl = (userId: string): string => services.connection.getStatus(userId).settingsUrl;
+  const settingsUrl = (userId: string, selected = services): string =>
+    selected.connection.getStatus(userId).settingsUrl;
 
-  const notConfigured = (userId: string) => ({
+  const notConfigured = (userId: string, selected = services) => ({
     status: 503,
     body: {
       success: false,
@@ -92,7 +116,7 @@ export function createCodespaceManagementRoutes(
         code: "CODESPACE_NOT_CONFIGURED",
         message: "Cloud codespaces are not configured on this Moira instance",
       },
-      settings_url: settingsUrl(userId),
+      settings_url: settingsUrl(userId, selected),
     },
   });
 
@@ -124,27 +148,62 @@ export function createCodespaceManagementRoutes(
   const codespaceId = (value: unknown): string | null =>
     typeof value === "string" && UUID.test(value) ? value : null;
 
-  const managementData = async (userId: string, refresh: boolean) => {
+  const managementData = async (
+    userId: string,
+    refresh: boolean,
+    selected = services,
+  ): Promise<Record<string, unknown>> => {
+    if (selected.providers) {
+      const providers: Array<Record<string, unknown> & { provider: string | undefined }> =
+        await Promise.all(
+          selected.providers.map(async (bundle) => ({
+            ...(await managementData(userId, refresh, bundle)),
+            provider: bundle.provider,
+          })),
+        );
+      const preferred =
+        providers.find(
+          (bundle) => (bundle.connection as { state?: string } | undefined)?.state === "connected",
+        ) ?? providers[0];
+      return {
+        ...preferred,
+        providers,
+        repositories: providers.flatMap((bundle) =>
+          ((bundle.repositories ?? []) as Record<string, unknown>[]).map((repository) => {
+            if (bundle.provider !== "local-sandboxes")
+              return { ...repository, provider: bundle.provider };
+            return {
+              ...repository,
+              provider: bundle.provider,
+              ...selected.repositoryMetadata?.(userId, String(repository.repository_id)),
+            };
+          }),
+        ),
+        codespaces: providers.flatMap((bundle) => (bundle.codespaces ?? []) as unknown[]),
+        repositories_stale: providers.some((bundle) => bundle.repositories_stale === true),
+        resources_stale: providers.some((bundle) => bundle.resources_stale === true),
+      };
+    }
     const grants = refresh
-      ? await services.connection.refreshGrants(userId, { force: true })
-      : await services.connection.refreshGrants(userId);
+      ? await selected.connection.refreshGrants(userId, { force: true })
+      : await selected.connection.refreshGrants(userId);
     const resources =
-      refresh && !grants.stale && services.resource
-        ? await services.resource.refreshProviderState(userId, { authorizationFresh: true })
+      refresh && !grants.stale && selected.resource
+        ? await selected.resource.refreshProviderState(userId, { authorizationFresh: true })
         : { stale: refresh && grants.stale };
     return {
-      readiness: await services.observability.readiness(),
-      connection: services.connection.getStatus(userId),
+      readiness: await selected.observability.readiness(),
+      connection: selected.connection.getStatus(userId),
       repositories:
-        services.resource?.listRepositories(userId).map((repository) => ({
+        selected.resource?.listRepositories(userId).map((repository) => ({
           repository_id: repository.id,
           name: repository.fullName,
           private: repository.private,
         })) ?? [],
       repositories_stale: grants.stale,
       resources_stale: resources.stale,
-      codespaces: services.resource?.listResources(userId).map(projectCodespaceSummary) ?? [],
-      limits: await services.observability.limitsWithBilling(userId, { force: refresh }),
+      codespaces: selected.resource?.listResources(userId).map(projectCodespaceSummary) ?? [],
+      limits: await selected.observability.limitsWithBilling(userId, { force: refresh }),
     };
   };
 
@@ -168,7 +227,7 @@ export function createCodespaceManagementRoutes(
     "/",
     asyncHandler(async (req, res) => {
       const userId = (req as AuthenticatedRequest).userId;
-      if (!services.resource) {
+      if (!services.resource && !services.providers) {
         const failure = notConfigured(userId);
         res.status(failure.status).json(failure.body);
         return;
@@ -193,8 +252,14 @@ export function createCodespaceManagementRoutes(
         return;
       }
       try {
-        await services.connection.refreshGrants(userId);
-        const created = await services.resource.create(userId, repositoryId, ref);
+        const selected = services.select?.(userId, { repositoryId }) ?? services;
+        if (!selected.resource) {
+          const failure = notConfigured(userId, selected);
+          res.status(failure.status).json(failure.body);
+          return;
+        }
+        await selected.connection.refreshGrants(userId);
+        const created = await selected.resource.create(userId, repositoryId, ref);
         res.status(201).json({
           success: true,
           data: { codespace: projectCodespaceSummary(created.resource) },
@@ -210,7 +275,7 @@ export function createCodespaceManagementRoutes(
     asyncHandler(async (req, res) => {
       const userId = (req as AuthenticatedRequest).userId;
       const id = codespaceId(req.params.codespaceId);
-      if (!services.resource || !id) {
+      if ((!services.resource && !services.providers) || !id) {
         res.status(404).json({
           success: false,
           error: { code: "CODESPACE_NOT_FOUND", message: "Codespace was not found" },
@@ -218,9 +283,15 @@ export function createCodespaceManagementRoutes(
         return;
       }
       try {
-        const codespace = services.resource.getCodespace(userId, id);
+        const selected = services.select?.(userId, { codespaceId: id }) ?? services;
+        if (!selected.resource)
+          throw new CodespaceResourceError(
+            "CODESPACE_NOT_FOUND",
+            "Codespace provider is unavailable",
+          );
+        const codespace = selected.resource.getCodespace(userId, id);
         const operations =
-          services.operation
+          selected.operation
             ?.list(userId, id)
             .slice(-20)
             .reverse()
@@ -241,7 +312,7 @@ export function createCodespaceManagementRoutes(
       asyncHandler(async (req, res) => {
         const userId = (req as AuthenticatedRequest).userId;
         const id = codespaceId(req.params.codespaceId);
-        if (!services.resource) {
+        if (!services.resource && !services.providers) {
           const failure = notConfigured(userId);
           res.status(failure.status).json(failure.body);
           return;
@@ -254,10 +325,16 @@ export function createCodespaceManagementRoutes(
           return;
         }
         try {
+          const selected = services.select?.(userId, { codespaceId: id }) ?? services;
+          if (!selected.resource) {
+            const failure = notConfigured(userId, selected);
+            res.status(failure.status).json(failure.body);
+            return;
+          }
           const codespace =
             action === "start"
-              ? await services.resource.startCodespace(userId, id)
-              : await services.resource.stopCodespace(userId, id);
+              ? await selected.resource.startCodespace(userId, id)
+              : await selected.resource.stopCodespace(userId, id);
           res.json({
             success: true,
             data: {
@@ -277,7 +354,7 @@ export function createCodespaceManagementRoutes(
     asyncHandler(async (req, res) => {
       const userId = (req as AuthenticatedRequest).userId;
       const id = codespaceId(req.params.codespaceId);
-      if (!services.resource) {
+      if (!services.resource && !services.providers) {
         const failure = notConfigured(userId);
         res.status(failure.status).json(failure.body);
         return;
@@ -305,7 +382,13 @@ export function createCodespaceManagementRoutes(
         return;
       }
       try {
-        const codespace = await services.resource.deleteCodespace(userId, id, expectedGeneration);
+        const selected = services.select?.(userId, { codespaceId: id }) ?? services;
+        if (!selected.resource) {
+          const failure = notConfigured(userId, selected);
+          res.status(failure.status).json(failure.body);
+          return;
+        }
+        const codespace = await selected.resource.deleteCodespace(userId, id, expectedGeneration);
         res.json({
           success: true,
           data: { codespace: projectCodespaceSummary(codespace), data_preserved: false },
@@ -334,9 +417,9 @@ function publicMessage(code: string): string {
     case "CODESPACE_OPERATION_BUSY":
       return "Codespace operations are busy; retry later";
     case "CODESPACE_PROVIDER_DISABLED":
-      return "Cloud codespace operations are disabled";
+      return "Codespace operations are disabled";
     case "CODESPACE_PROVIDER_UNAVAILABLE":
-      return "The cloud codespace provider is unavailable";
+      return "The codespace provider is unavailable";
     case "CODESPACE_NOT_RUNNING":
       return "The codespace is not ready and running";
     case "CODESPACE_CREATE_PENDING":

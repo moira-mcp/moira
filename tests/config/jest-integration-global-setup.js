@@ -1,6 +1,6 @@
 /**
  * Integration tests global setup — runs ONCE before all workers.
- * Creates fresh test database with migrations.
+ * Builds the shipped local companion assets and creates a fresh migrated test database.
  */
 import { execSync } from "child_process";
 import { existsSync, mkdirSync, readFileSync } from "fs";
@@ -31,6 +31,9 @@ const testDbPath = "./data/test-integration.db";
 const dbDir = path.dirname(testDbPath);
 
 export default async function globalSetup() {
+  // Direct source consumers use the same fixed native helper as the packaged companion.
+  execSync("npm run local:build", { cwd: projectRoot, stdio: "inherit" });
+
   // Ensure data directory exists
   if (!existsSync(dbDir)) {
     mkdirSync(dbDir, { recursive: true });

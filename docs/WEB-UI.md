@@ -113,7 +113,8 @@ frontend/src/
 │   │   ├── GitHubCodespacesData.tsx # One data source for the GitHub & Codespaces section
 │   │   ├── GitHubCodespaceSettings.tsx # Website-only GitHub codespace connection
 │   │   ├── GitHubSetupSteps.tsx # Connect → install → grant repositories stepper
-│   │   ├── GitHubCodespaceManagement.tsx # Cloud codespaces card
+│   │   ├── GitHubCodespaceManagement.tsx # Shared GitHub/local codespace card
+│   │   ├── LocalDeviceSettings.tsx      # Pair, review and revoke local devices
 │   │   ├── CodespaceAutoPause.tsx # Automatic pause card (idle settings)
 │   │   ├── CodespaceLimitsPanel.tsx # Your limits card
 │   │   ├── OAuthSettings.tsx    # Connected apps (OAuth consents): search, paging, revoke
@@ -817,7 +818,7 @@ and typed handle open, with the normalized string or API error message inside th
 | `account`             | Account             | `settings-section-profile`      | `ProfileSettings`: name, email with verification badge, handle with a help popover on why changing it breaks links and a confirmation                                                                                                                                                                                                                       |
 | `security`            | Security & sign-in  | `settings-section-security`     | `SecuritySettings`: the change-password form, or for an account that signs in only through a social provider, how it signs in and a set-password form; an Active Sessions subsection (`settings-section-sessions`, help popover) with `SessionsSettings`                                                                                                    |
 | `notifications`       | Notifications       | `settings-section-dynamic`      | One `CommunicationChannelCard` per channel, a help popover, the **Telegram setup** tour button when Telegram is present, an empty state without channels                                                                                                                                                                                                    |
-| `integrations-github` | GitHub & Codespaces | `settings-section-integrations` | Help popover, **Setup guide** tour, and the connection, Cloud codespaces, Automatic pause and Your limits cards under one `GitHubCodespacesProvider`                                                                                                                                                                                                        |
+| `integrations-github` | GitHub & Codespaces | `settings-section-integrations` | Help popover, **Setup guide** tour, local devices, GitHub connection, shared codespace management, Automatic pause and Your limits under one `GitHubCodespacesProvider`; `integrations-local` is the nested local-device anchor                                                                                                                             |
 | `connected-apps`      | Connected apps      | `settings-section-oauth`        | `OAuthSettings` with a help popover                                                                                                                                                                                                                                                                                                                         |
 | `api-tokens`          | API tokens          | `settings-section-api-tokens`   | `ApiTokensSettings` with a help popover on when a token is needed, the Bearer header and the one-time display                                                                                                                                                                                                                                               |
 | `preferences`         | Preferences         | `settings-section-preferences`  | `PreferencesSettings` theme (Light/Dark/System, via `useTheme`) and interface language, both kept in this browser; the beginner-panel switches (the account's `ui.hidden_panels`); the Guides block (`preferences-guides`: "Start the tour again", "Forget what I have seen"); then the generic editor for remaining definitions (`settings-section-other`) |
@@ -838,7 +839,7 @@ the Quick Start card and the notification channel cards use it. `lib/codespace-e
 (`codespaceErrorMessage`) turns a failed codespace or GitHub-connection request into a message in
 the reader's language: each stable error `code` has its own message under `common.codespaceErrors`,
 and anything else, including a network failure, shows the caller's localized generic message; the
-server's English detail is never shown. The Cloud codespaces card and the admin Codespaces
+server's English detail is never shown. The shared codespaces card and the admin Codespaces
 controls use it for their failure toasts.
 
 Admin lists and cards that show a user's email (executions, artifacts, the audit log and the
@@ -846,6 +847,37 @@ execution inspector) receive `null` for a user that no longer exists and show th
 `common.unknownUser`.
 
 **Section details:**
+
+- Local devices: `LocalDeviceSettings` lives inside the GitHub & Codespaces section,
+  at `/settings#integrations-local`, with guide anchor `settings.local-devices`.
+  Its independent `useResource`/`DataRegion` distinguishes a loaded empty device
+  list from initial loading or failure, retains accepted devices during refresh,
+  and retries only that region. Pairing instructions remain mounted separately.
+  **Connect a device** creates a ten-minute pairing and displays a copyable
+  `moira-local enroll --server … --pairing-id …` command and a separately copied
+  pairing token, which the companion reads from stdin rather than command arguments.
+  The token remains page-local and is absent from later device-list responses.
+  After local enrollment, the confirmation dialog displays the device's repository
+  grants, push/delete permissions, domains, CPU/memory/storage limits and finite
+  lease. Confirmation uses the pairing revision; revoke uses the device generation.
+  A refused decision keeps the selected device and accessible local error inside
+  `ConfirmDialog`. Owner guards retire delayed actions after identity changes.
+  Device cards show localized pending/active/revoked status and nullable last-seen
+  time. Revocation fences server access; local lease expiry and disable enforce
+  physical stop when a device cannot reach Moira.
+- Codespace provider choice: the existing `GitHubCodespaceManagement` card offers
+  GitHub and Local providers. Readiness, connection and create limits use the selected
+  provider's facts. Repository choices are filtered by provider, local targets also
+  show their device label, and a repository selected under another provider cannot
+  be submitted. Local operation requires a confirmed locally enabled companion;
+  it does not require a GitHub App connection. The combined codespace list retains
+  provider context and the existing Start/Stop/Delete controls. Creation and actions
+  use the shared management endpoints under `/api/integrations/github/codespaces`;
+  the prefix does not restrict routing to GitHub. Provider-specific disclosures
+  explain that local work stays inside locally approved bounds and lease. The
+  Settings screen tour includes the local-device anchor; the GitHub task tour
+  retains its separate GitHub setup steps. English and Russian local-device text
+  is merged under `localDevices` from the matching locale modules.
 
 - Active sessions: search and paging (the shared `ServerPagination` in its `embedded` in-card
   variant, as for connected apps); each session shows a parsed device
@@ -866,7 +898,7 @@ execution inspector) receive `null` for a user that no longer exists and show th
   each done, current, not started or unavailable on this instance). The App can be installed on the
   connected user's account or an organization, but Codespace creation requires GitHub to bill the
   connected personal account; an organization-billed repository is rejected before creation. The
-  Cloud codespaces card shows
+  shared codespaces card shows
   instance readiness, the agent-authority disclosure, the create form whose hint says how many
   codespaces the user holds of the per-user ceiling and that stopped ones count, and per-codespace
   cards with repository and current branch (`current_ref`, falling back to `requested_ref`),
@@ -929,7 +961,7 @@ save disables its Save action while the input remains editable. Successful compl
 the submitted draft: a newer edit to that same field stays dirty for the next save.
 
 **Implementation:** Settings.tsx → ProfileSettings.tsx, SecuritySettings.tsx, SessionsSettings.tsx,
-GitHubCodespacesData.tsx, GitHubCodespaceSettings.tsx, GitHubCodespaceManagement.tsx,
+GitHubCodespacesData.tsx, GitHubCodespaceSettings.tsx, GitHubCodespaceManagement.tsx, LocalDeviceSettings.tsx,
 CodespaceAutoPause.tsx, CodespaceLimitsPanel.tsx, OAuthSettings.tsx, ApiTokensSettings.tsx,
 PreferencesSettings.tsx
 

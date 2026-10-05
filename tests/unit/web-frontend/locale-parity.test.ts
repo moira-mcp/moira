@@ -24,17 +24,19 @@ import { describe, expect, test } from "@jest/globals";
 import { LAYOUT_PRESETS } from "../../../packages/web-frontend/src/components/diagram/layoutPreset.js";
 import { MODES } from "../../../packages/web-frontend/src/components/run/modes.js";
 import { GUIDES } from "../../../packages/web-frontend/src/guides/registry.js";
+import i18n from "../../../packages/web-frontend/src/i18n.js";
 import en from "../../../packages/web-frontend/src/locales/en.json";
 import ru from "../../../packages/web-frontend/src/locales/ru.json";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const frontend = path.resolve(here, "../../../packages/web-frontend/src");
-const locales = path.join(frontend, "locales");
 
 type Tree = { [key: string]: Tree | string };
 
 function read(language: "en" | "ru"): Tree {
-  return JSON.parse(fs.readFileSync(path.join(locales, `${language}.json`), "utf8")) as Tree;
+  // Check the actual registered translation tree, including separately composed feature files.
+  // Reading each language's bundle directly never lets fallback English satisfy Russian parity.
+  return i18n.getResourceBundle(language, "translation") as Tree;
 }
 
 function flatten(tree: Tree, prefix = ""): string[] {

@@ -509,6 +509,130 @@ export const codespaceTransfer = sqliteTable(
   }),
 );
 
+/** Locally approved devices; only credential digests and public policy metadata are persisted. */
+export const codespaceLocalDevice = sqliteTable(
+  "codespaceLocalDevice",
+  {
+    id: text("id").primaryKey(),
+    userId: text("userId")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    connectionId: text("connectionId")
+      .notNull()
+      .references(() => codespaceConnection.id),
+    label: text("label").notNull(),
+    generation: integer("generation").notNull().default(1),
+    status: text("status").notNull(),
+    credentialDigest: text("credentialDigest").notNull().unique(),
+    policy: text("policy").notNull(),
+    policyDigest: text("policyDigest").notNull(),
+    lastSeenAt: integer("lastSeenAt"),
+    createdAt: integer("createdAt").notNull(),
+    updatedAt: integer("updatedAt").notNull(),
+  },
+  (table) => ({
+    ownerIdx: index("codespace_local_device_owner_idx").on(table.userId, table.status),
+  }),
+);
+export const codespaceLocalPairing = sqliteTable(
+  "codespaceLocalPairing",
+  {
+    id: text("id").primaryKey(),
+    userId: text("userId")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    tokenDigest: text("tokenDigest").notNull().unique(),
+    deviceId: text("deviceId").references(() => codespaceLocalDevice.id),
+    revision: integer("revision").notNull().default(1),
+    confirmedAt: integer("confirmedAt"),
+    expiresAt: integer("expiresAt").notNull(),
+    createdAt: integer("createdAt").notNull(),
+  },
+  (table) => ({
+    ownerExpiryIdx: index("codespace_local_pairing_owner_expiry_idx").on(
+      table.userId,
+      table.expiresAt,
+    ),
+  }),
+);
+export const codespaceLocalResourceBinding = sqliteTable(
+  "codespaceLocalResourceBinding",
+  {
+    resourceId: text("resourceId")
+      .primaryKey()
+      .references(() => codespaceResource.id, { onDelete: "cascade" }),
+    userId: text("userId")
+      .notNull()
+      .references(() => user.id),
+    deviceId: text("deviceId")
+      .notNull()
+      .references(() => codespaceLocalDevice.id),
+    deviceGeneration: integer("deviceGeneration").notNull(),
+    repositoryId: text("repositoryId").notNull(),
+    profileId: text("profileId").notNull(),
+  },
+  (table) => ({
+    deviceIdx: index("codespace_local_binding_device_idx").on(
+      table.deviceId,
+      table.deviceGeneration,
+    ),
+  }),
+);
+/** Relay rows contain private transfer references, never command arguments or byte payloads. */
+export const codespaceLocalRelay = sqliteTable(
+  "codespaceLocalRelay",
+  {
+    requestId: text("requestId").primaryKey(),
+    userId: text("userId")
+      .notNull()
+      .references(() => user.id),
+    deviceId: text("deviceId")
+      .notNull()
+      .references(() => codespaceLocalDevice.id),
+    deviceGeneration: integer("deviceGeneration").notNull(),
+    connectionId: text("connectionId")
+      .notNull()
+      .references(() => codespaceConnection.id),
+    resourceId: text("resourceId")
+      .notNull()
+      .references(() => codespaceResource.id),
+    resourceGeneration: integer("resourceGeneration").notNull(),
+    digest: text("digest").notNull(),
+    inputReference: text("inputReference").notNull(),
+    status: text("status").notNull(),
+    claimId: text("claimId"),
+    claimExpiresAt: integer("claimExpiresAt"),
+    outputReference: text("outputReference"),
+    deadlineAt: integer("deadlineAt").notNull(),
+    createdAt: integer("createdAt").notNull(),
+    updatedAt: integer("updatedAt").notNull(),
+  },
+  (table) => ({
+    claimIdx: index("codespace_local_relay_claim_idx").on(
+      table.deviceId,
+      table.deviceGeneration,
+      table.status,
+      table.deadlineAt,
+      table.createdAt,
+    ),
+    ownerDeadlineIdx: index("codespace_local_relay_owner_deadline_idx").on(
+      table.userId,
+      table.deadlineAt,
+      table.status,
+    ),
+  }),
+);
+
+export const codespaceLocalRelayPart = sqliteTable("codespaceLocalRelayPart", {
+  transferId: text("transferId")
+    .primaryKey()
+    .references(() => codespaceTransfer.id, { onDelete: "cascade" }),
+  requestId: text("requestId")
+    .notNull()
+    .references(() => codespaceLocalRelay.requestId, { onDelete: "cascade" }),
+  claimId: text("claimId").notNull(),
+});
+
 // ===== MCP Moira Workflow Tables =====
 
 export const workflow = sqliteTable(

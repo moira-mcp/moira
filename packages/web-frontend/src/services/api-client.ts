@@ -62,6 +62,8 @@ import type {
   ExecutionSummary as SharedExecutionSummary,
   ExecutionTaskIdentity,
   ExecutionTaskTitleMutationResult,
+  LocalDeviceView,
+  LocalPairingView,
 } from "@mcp-moira/shared";
 
 /** The latest notification about the wait a run stands in: what the run page shows under its banner. */
@@ -925,6 +927,45 @@ export class MoiraApiClient {
   async getGitHubCodespaceConnection(): Promise<CodespaceConnectionView> {
     const response =
       await this.client.get<ApiResponse<CodespaceConnectionView>>("/integrations/github");
+    return response.data.data!;
+  }
+
+  /** Device authority is volatile and never enters the conditional read store. */
+  async getLocalDevices(): Promise<{ devices: LocalDeviceView[]; pairings: LocalPairingView[] }> {
+    const response = await this.client.get<
+      ApiResponse<{ devices: LocalDeviceView[]; pairings: LocalPairingView[] }>
+    >("/integrations/local/devices");
+    return response.data.data!;
+  }
+
+  async beginLocalEnrollment(): Promise<{
+    pairingId: string;
+    pairingToken: string;
+    revision: number;
+    expiresAt: number;
+  }> {
+    const response = await this.client.post<
+      ApiResponse<{ pairingId: string; pairingToken: string; revision: number; expiresAt: number }>
+    >("/integrations/local/pairings", {});
+    return response.data.data!;
+  }
+
+  async confirmLocalEnrollment(
+    pairingId: string,
+    expectedRevision: number,
+  ): Promise<LocalDeviceView> {
+    const response = await this.client.post<ApiResponse<LocalDeviceView>>(
+      `/integrations/local/pairings/${encodeURIComponent(pairingId)}/confirm`,
+      { expectedRevision },
+    );
+    return response.data.data!;
+  }
+
+  async revokeLocalDevice(deviceId: string, expectedGeneration: number): Promise<LocalDeviceView> {
+    const response = await this.client.delete<ApiResponse<LocalDeviceView>>(
+      `/integrations/local/devices/${encodeURIComponent(deviceId)}`,
+      { data: { expectedGeneration } },
+    );
     return response.data.data!;
   }
 

@@ -367,6 +367,13 @@ export interface CodespaceTransportAvailability {
 }
 
 export interface CodespaceOperationTransport extends CodespaceTransportAvailability {
+  /** Persist native input in transport-owned durable storage before its original transfer is consumed. */
+  retainExecuteInput?(
+    credential: string,
+    codespace: CodespaceResourceRecord,
+    operation: CodespaceOperationRecord,
+    request: CodespaceExecRequest,
+  ): Promise<void>;
   execute(
     credential: string,
     codespace: CodespaceResourceRecord,
@@ -517,6 +524,13 @@ export interface CodespaceFileOperationResponse {
 }
 
 export interface CodespaceFileTransport extends CodespaceTransportAvailability {
+  /** Persist materialized native bytes before their original private transfer is consumed. */
+  retainFileInput?(
+    credential: string,
+    codespace: CodespaceResourceRecord,
+    operation: CodespaceOperationRecord,
+    request: CodespaceFileRequest,
+  ): Promise<void>;
   executeFile(
     credential: string,
     codespace: CodespaceResourceRecord,
@@ -541,7 +555,7 @@ export interface CodespaceNativeFileReference {
 export interface CodespaceTransferRecord {
   id: string;
   userId: string;
-  purpose: "codespace_input" | "codespace_download";
+  purpose: "codespace_input" | "codespace_download" | "local_relay_input" | "local_relay_output";
   state: "reserved" | "ready" | "claimed" | "consumed";
   fileName: string;
   mimeType: string;

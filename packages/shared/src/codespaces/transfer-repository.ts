@@ -199,6 +199,21 @@ export class CodespaceTransferRepository {
       .all() as CodespaceTransferRecord[];
   }
 
+  getReadyOwned(
+    id: string,
+    userId: string,
+    purpose: CodespaceTransferRecord["purpose"],
+    now: number,
+  ): CodespaceTransferRecord | null {
+    return (
+      (this.sqlite
+        .prepare(
+          "SELECT * FROM codespaceTransfer WHERE id = ? AND userId = ? AND purpose = ? AND state = 'ready' AND expiresAt > ?",
+        )
+        .get(id, userId, purpose, now) as CodespaceTransferRecord | undefined) ?? null
+    );
+  }
+
   private require(id: string): CodespaceTransferRecord {
     const row = this.sqlite.prepare("SELECT * FROM codespaceTransfer WHERE id = ?").get(id) as
       CodespaceTransferRecord | undefined;

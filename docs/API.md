@@ -1569,9 +1569,103 @@ Errors:
 
 Authentication: Via token (no session required)
 
+## Local Device Enrollment and Relay API
+
+Browser device management uses `/api/integrations/local` with ordinary admitted-user
+authentication. Companion requests use `/api/local-devices` with device credentials,
+not browser cookies or MCP API tokens. Both namespaces return `Cache-Control: no-store`
+and `Referrer-Policy: no-referrer`; an explicitly supplied `Origin` must equal the
+configured application origin. Successful JSON responses use `{success:true,data:…}`.
+
+### Browser device management
+
+| Method and path                                     | Input                                    | Returned `data`                                              |
+| --------------------------------------------------- | ---------------------------------------- | ------------------------------------------------------------ |
+| `GET /api/integrations/local/devices`               | None                                     | `{devices: LocalDeviceView[], pairings: LocalPairingView[]}` |
+| `POST /api/integrations/local/pairings`             | Empty object                             | `201`: `{pairingId, revision, expiresAt, pairingToken}`      |
+| `POST /api/integrations/local/pairings/:id/confirm` | `{expectedRevision: positive integer}`   | Confirmed `LocalDeviceView`                                  |
+| `DELETE /api/integrations/local/devices/:id`        | `{expectedGeneration: positive integer}` | Revoked `LocalDeviceView`                                    |
+
+Pairing lasts ten minutes. Its secret is returned when created; subsequent list
+responses do not disclose it. The local companion must enroll with that secret
+before the browser can confirm the received policy. Confirmation requires the
+current pairing revision. Revocation requires the current device generation and
+invalidates that device's authority without revoking sibling devices.
+
+`LocalDeviceView` contains `userId`, `deviceId`, `deviceGeneration`, `connectionId`,
+`label`, `status` (`pending|active|revoked`), public `policy`, nullable `lastSeenAt`
+and `createdAt`. `LocalPairingView` contains `id`, `revision`, nullable `deviceId`,
+`state` (`waiting_local|waiting_confirmation|confirmed|expired`) and `expiresAt`.
+Timestamps are epoch milliseconds.
+
+The version-1 public policy includes device identity and label, `enabled`,
+`leaseUntil`, approved repositories (`id`, `fullName`, `private`, `allowPush`,
+`allowDelete`, `domains`), machine ceilings and `maxSandboxes`. It has no host paths,
+repository tokens, SDK credentials or executable selection. Browser confirmation
+does not enlarge this locally approved policy. Server revocation fences requests;
+an offline machine's physical stop still depends on its independent local lease
+and disable mechanism, rather than an instantaneous server-to-host command.
+
+### Companion enrollment and work
+
+`POST /api/local-devices/enroll` accepts
+`{pairingId, pairingToken, credential, policy}` and returns `201` with the pending
+device. The companion generates the 32-byte base64url credential locally. The
+server stores digests of credentials and pairing tokens, not their plaintext.
+`POST /api/local-devices/pairings/status` accepts `{pairingId,pairingToken}` and
+returns `{pairing,device}`, with a nullable device while enrollment is incomplete.
+These two endpoints use the pairing secret rather than Bearer authentication.
+
+All remaining companion endpoints require `Authorization: Bearer <device credential>`.
+Authentication resolves current account admission, device identity and generation.
+The companion pins the locally chosen HTTPS application URL and refuses redirects;
+server responses cannot choose another origin. There is no HTTP-origin bypass flag.
+
+| Method and path relative to `/api/local-devices` | Input                                                            | Returned `data`                               |
+| ------------------------------------------------ | ---------------------------------------------------------------- | --------------------------------------------- |
+| `POST /heartbeat`                                | `{policy}`                                                       | Current `LocalDeviceView`                     |
+| `POST /relay/claim`                              | Optional `limit` (1–8, default 1), `waitMs` (0–25000, default 0) | `{requests: LocalRelayClaim[], maxPartBytes}` |
+| `POST /relay/:requestId/renew`                   | Empty object and `X-Moira-Claim-Id`                              | Renewed `LocalRelayClaim`                     |
+| `GET /relay/:requestId/payload/:partIndex`       | `offset` ≥ 0; `length` 0–262144, plus `X-Moira-Claim-Id`         | Raw `application/octet-stream` bytes          |
+| `POST /relay/:requestId/result-part`             | Raw `application/octet-stream` and `X-Moira-Claim-Id`            | `201`: `{transferId,sha256,size}`             |
+| `POST /relay/ack`                                | `{requestId,digest,claimId,status,outcomeReference}`             | `LocalRelayResult`                            |
+
+Request, claim and transfer IDs are UUIDs. A claim carries `userId`, `deviceId`,
+`deviceGeneration`, `connectionId`, `resourceId`, `resourceGeneration`, `requestId`,
+payload `digest`, `payloadReference`, `deadlineAt`, `claimId` and `claimExpiresAt`.
+Its lease lasts at most thirty seconds and cannot exceed the request deadline or
+local work lease. Renewal extends the same current claim within those bounds.
+Reclaiming an expired claim changes the claim ID, not the request identity.
+
+Payload references contain `parts:[{transferId,sha256,size}]` and the complete
+`sha256` and `size`. They allow at most 32 unique parts and 24 MiB in total; part
+sizes must sum to the total. Result uploads must respect the advertised positive
+`maxPartBytes`, which is at most 4 MiB and can be smaller under installation policy.
+Private transfer byte, object, in-flight and TTL limits also apply. These references
+are claim-bound private objects, not public download tokens or arbitrary blob access.
+Authority is checked before and after payload reads and output retention.
+
+Acknowledgement status is `completed` or `refused`; `outcomeReference` identifies
+the retained complete response. Repeating the same acknowledged claim and result
+metadata is accepted after a lost response. Changed request digest, result or
+authority is refused. Companion durable request receipts prevent redispatch of
+effects after reconnect; an unknown outcome is retained as unknown, not retried as
+a new command. Server resource generations and local VM generations are separate:
+a newer server observation cannot erase an unverified local lifetime change or an
+unknown-outcome fence. A confirmed stop of the same owned VM supplies a durable
+stopped-generation proof for reconnect. A resource-bound snapshot may reconcile
+that proof at the retained server generation; a new mutation requires a newer
+server generation. Retained pre-stop requests cannot authorize another effect.
+
+Errors use `{success:false,error:{code,message}}`: `LOCAL_INVALID` → 400,
+`LOCAL_UNAUTHORIZED` → 401, `LOCAL_CONFLICT` → 409, `LOCAL_EXPIRED` → 410 and
+`LOCAL_CAPACITY` → 429. An unacceptable Origin returns 403. Oversized parser
+input returns 413 without echoing the body. Companion routes precede global body
+logging, so device secrets and binary content do not enter request-context logs.
+
 ## Codespace Management API
 
-Website management of the user's persistent cloud codespaces. These routes are
+Website management of the user's persistent GitHub and local codespaces. These routes are
 mounted under `/api/integrations/github/codespaces` behind `requireAuth`, use the same
 domain services as the MCP `codespace` tool, and return `Cache-Control: no-store`
 and `Referrer-Policy: no-referrer`. Responses contain the sanitized codespace summary
@@ -1580,6 +1674,13 @@ created on — and `current_ref` — the ref the provider last reported checked 
 observed or on a detached HEAD — machine, state, retention policy, desired/observed state,
 generation, timestamps) and never provider resource names,
 markers, claims, capabilities or credentials.
+
+The existing GitHub-named prefix is shared by both providers. Creation selects
+`github-codespaces` for a GitHub repository ID and `local-sandboxes` for a qualified
+`local:<device UUID>:<repository UUID>` target. Later actions select the provider
+from the owned codespace record, not from a caller-supplied provider or device.
+Local targets identify an approved repository on one specific device; identical
+repository names on different devices remain distinct targets.
 
 ### GET /api/integrations/github/codespaces
 
@@ -1592,23 +1693,49 @@ user's codespaces and the user's limits.
   data: {
     readiness: CodespaceReadinessView;
     connection: CodespaceConnectionView;
-    repositories: Array<{ repository_id: string; name: string; private: boolean }>;
+    repositories: Array<{
+      repository_id: string;
+      name: string;
+      private: boolean;
+      provider: string;
+      device_id?: string; // Local repository target only
+      device_label?: string;
+    }>;
     repositories_stale: boolean;
     resources_stale: boolean;
     codespaces: CodespaceSummaryView[];
     limits: CodespaceLimitsView;
+    providers: Array<{
+      provider: "github-codespaces" | "local-sandboxes";
+      readiness: CodespaceReadinessView;
+      connection: CodespaceConnectionView;
+      repositories: Array<{ repository_id: string; name: string; private: boolean }>;
+      repositories_stale: boolean;
+      resources_stale: boolean;
+      codespaces: CodespaceSummaryView[];
+      limits: CodespaceLimitsView;
+    }>;
   }
 }
 ```
 
-The route refreshes grants behind the normal TTL and lists locally stored codespaces.
+The top-level repository and codespace lists combine the providers. Top-level
+readiness, connection and limits come from the first connected provider, or the
+first provider when neither is connected; use `providers` for provider-specific
+facts. Stale flags aggregate the providers. Local connection facts use active
+enrolled devices and their public repository policies; no GitHub App is required
+for a local-only account. Local stream response limits are capped at 1 MiB each
+for stdout and stderr, even when the installation's ceiling is higher.
+
+For GitHub, the route refreshes grants behind the normal TTL and lists stored codespaces.
 It does not observe provider resources; `resources_stale` is `false` on this read.
 If grant enumeration fails, it keeps the saved repositories and returns
 `repositories_stale: true`.
 
 ### POST /api/integrations/github/codespaces/refresh
 
-Returns the same response shape as `GET`. It forces installation and repository
+Returns the same response shape as `GET` and refreshes each provider's resources.
+For GitHub, it forces installation and repository
 enumeration, then observes the user's persistent codespaces at GitHub and updates
 the local list. If grant enumeration is stale, provider observation is skipped and
 both `repositories_stale` and `resources_stale` are `true`. If observation fails or
@@ -1691,7 +1818,10 @@ before it checks repository authorization. For a provider that requires personal
 creation first reads GitHub's `billable_owner` for that repository and ref. An
 organization repository is allowed when GitHub would bill the connected personal
 account; an organization payer returns `422 CODESPACE_BILLING_UNSUPPORTED` before
-any codespace is created. `400` for malformed input; `503`
+any codespace is created. Local creation requires the selected device's active
+generation, enabled unexpired local policy, approved repository and a heartbeat
+within the last minute. Cloud input cannot select a host path, runtime binary,
+machine enlargement or another device. `400` for malformed input; `503`
 `CODESPACE_NOT_CONFIGURED` with `settings_url` when the feature is not configured.
 
 ### GET /api/integrations/github/codespaces/:codespaceId

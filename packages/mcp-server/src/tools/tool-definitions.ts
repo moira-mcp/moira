@@ -426,13 +426,14 @@ export const TOOL_DEFINITIONS = [
     ],
     documentation: {
       en: {
-        summary: "Work in a persistent cloud codespace: lifecycle, commands and files, by action.",
+        summary:
+          "Work in a persistent GitHub or local Docker Sandboxes codespace: lifecycle, commands and files, by action.",
         result:
           "The result the requested action produces, sanitized: codespace state, durable operation state with bounded output, file versions, or a one-use native download link.",
       },
       ru: {
         summary:
-          "Работа в постоянном облачном codespace: жизненный цикл, команды и файлы, по action.",
+          "Работа в постоянном codespace GitHub или локальной Docker Sandboxes VM: жизненный цикл, команды и файлы, по action.",
         result:
           "Безопасный результат запрошенного действия: состояние codespace, состояние операции с ограниченным выводом, версии файлов или одноразовая нативная ссылка на скачивание.",
       },

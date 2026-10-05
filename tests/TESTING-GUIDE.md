@@ -145,6 +145,77 @@ them against a second container started with `DEPLOYMENT_MODE=self-host` on port
 **Location:** `tests/e2e/`
 **Purpose:** Full system tests with browser
 
+### Local companion and codespace providers
+
+Use the root runners for focused local tests:
+
+```bash
+npm run test:unit -- --file tests/unit/local/policy.test.ts
+npm run test:unit -- --file tests/unit/web-frontend/local-device-settings.test.tsx
+npm run test:integration -- --file tests/integration/local/runtime-api.test.ts
+npm run test:integration -- --file tests/integration/local-devices-relay.test.ts
+npm run test:integration -- --file tests/integration/local-codespace-provider.test.ts
+```
+
+`tests/integration/local/` covers private journals, bounded subprocesses, local policy,
+broker and relay authority, SDK protocol validation, credential-store preparation and
+independent shutdown. SDK and keychain fixtures substitute external responses; the guard
+uses controlled executables and real process/socket effects. The native runtime-control
+tests compile the shipped C helper and distinguish Darwin kernel ownership from unsupported
+Linux VM transport. None of these fixtures starts a real sbx microVM or uses personal
+credentials. Darwin-only guard cases are skipped on other platforms.
+
+Integration global setup runs `npm run local:build` before creating and migrating the
+fresh test database, so source consumers receive the shipped companion bundles and
+native helpers. The guard's packaged CLI recovery regression kills a real fixture lock
+owner, then checks owned fake SDK/worker shutdown, retained unknown jobs and disabled
+admission. A live owner remains protected even when its runner marker is stale. Idle
+relay regressions exercise the actual manager/relay with substituted runtime peers:
+parent closure, lease expiry and emergency disable fence old requests while confirmed
+recovery permits a fresh start. These host regressions do not establish real-VM recovery.
+
+The provider and device/relay integration suites use real SQLite migrations, private
+transfer files and authenticated HTTP. The provider suite also uses the production
+companion relay and LocalRpc, with the external runtime substituted. They check device
+and repository binding, independent generations, revocation, replay after response loss,
+native bytes retained before input consumption and bounded payload/metadata storage.
+Settings tests cover pairing, confirmation, revocation and provider selection without a
+GitHub connection. See [COVERAGE-MAP.md](COVERAGE-MAP.md#codespace-connections) for each
+suite's responsibility.
+
+`tests/integration/local/guest-docker.test.ts` requires Docker and the configured pinned
+template image. It runs real Linux descriptor-limit behavior with substituted Docker
+service plumbing. To check the built guest bundles in that image separately:
+
+```bash
+npm run local:verify:guest
+```
+
+This command builds the local package and requires the pinned image already present
+locally. Its network-disabled container checks repository binding, stdin, binary files,
+persistent sessions and cancellation. Container compatibility and `npm run verify:docker`
+API/MCP/self-host checks do not establish physical sbx isolation.
+
+### Real sbx acceptance
+
+Use the supported macOS runtime described in [CODESPACES.md](../docs/CODESPACES.md) with
+an explicitly approved disposable profile and repository. Validate usable mountless
+creation, guest Docker, command exits and separate output streams, native byte integrity,
+session directory/variables and file persistence across stop/start. Lease expiry and local
+emergency disable must stop physical work independently of the parent process, retain
+data and produce settled ownership before restart. Check that host files, credentials
+and SSH sockets are not forwarded; credential-shaped guest variables require classification
+against documented public placeholders rather than assuming that their presence means
+host forwarding.
+
+For physical network checks, establish controlled receivers and prove host-side reachability
+before guest probes. Verify approved broker egress as the positive guest control, then
+observe denied host, LAN, VPN, metadata and other-VM access without exposing a personal
+service. SDK policy lookup and failure to reach an unavailable target are insufficient
+evidence of isolation. Mark an unavailable controlled receiver as not executed and state
+the missing target; never convert it into a pass. Keep this native evidence separate from
+versioned fixture coverage and from root verification results.
+
 ### Production/Staging Tests
 
 ```bash

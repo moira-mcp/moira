@@ -21,6 +21,7 @@ export const settingsGuide: GuideDefinition = {
     // finished) and that their heading opens the run page.
     { id: "notifications", anchor: "settings.notifications", kind: "look", revision: 2 },
     { id: "github", anchor: "settings.integrations", kind: "look", revision: 1 },
+    { id: "local-devices", anchor: "settings.local-devices", kind: "look", revision: 1 },
     { id: "apps", anchor: "settings.apps", kind: "look", revision: 1 },
     { id: "tokens", anchor: "settings.api-tokens", kind: "look", revision: 1 },
     { id: "preferences", anchor: "settings.preferences", kind: "look", revision: 1 },
@@ -35,7 +36,7 @@ export const githubSetupGuide: GuideDefinition = {
   steps: [
     { id: "steps", anchor: "settings.github-steps", kind: "look", revision: 1 },
     { id: "connect", anchor: "settings.github-connect", kind: "look", revision: 2 },
-    { id: "codespaces", anchor: "settings.codespaces", kind: "look", revision: 2 },
+    { id: "codespaces", anchor: "settings.codespaces", kind: "look", revision: 3 },
     { id: "limits", anchor: "settings.codespace-limits", kind: "look", revision: 2 },
     { id: "autopause", anchor: "settings.codespace-autopause", kind: "look", revision: 1 },
   ],

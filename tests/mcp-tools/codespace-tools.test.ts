@@ -199,7 +199,10 @@ describe("Codespace MCP HTTP contract on a default-disabled installation", () =>
 
   test("should return provider-owned setup guidance without provisioning", async () => {
     const result = CallToolResultSchema.parse(
-      await client.callTool({ name: "codespace", arguments: { action: "setup_help" } }),
+      await client.callTool({
+        name: "codespace",
+        arguments: { action: "setup_help", repository_id: "162" },
+      }),
     );
     expect(result.isError).not.toBe(true);
     expect(result.structuredContent).toMatchObject({
@@ -217,6 +220,26 @@ describe("Codespace MCP HTTP contract on a default-disabled installation", () =>
     expect(JSON.stringify(result)).not.toMatch(
       /accessToken|refreshToken|clientSecret|vaultKey|BEGIN .*PRIVATE KEY/,
     );
+  });
+
+  test("should explain local enrollment and the disabled instance policy when no provider is selected", async () => {
+    const result = CallToolResultSchema.parse(
+      await client.callTool({ name: "codespace", arguments: { action: "setup_help" } }),
+    );
+    expect(result.isError).not.toBe(true);
+    expect(result.structuredContent).toMatchObject({
+      provider: "local-sandboxes",
+      situation: "instance_disabled",
+      reason: "LOCAL_DEVICE_REQUIRED",
+      instruction: expect.stringMatching(/administrator.*enable.*Connect Moira Local/),
+    });
+    const links = result.structuredContent?.links as Array<{ id: string; url: string }>;
+    const settings = new URL(links.find((link) => link.id === "settings")!.url);
+    expect(settings.origin).toBe(new URL(getTestBaseUrl()).origin);
+    expect(settings.pathname).toBe("/settings");
+    expect(settings.hash).toBe("#integrations-local");
+    expect(settings.search).toBe("");
+    expect(JSON.stringify(result)).not.toMatch(/accessToken|refreshToken|clientSecret|vaultKey/);
   });
 
   test("should report the same readiness decision through MCP health as through the list action", async () => {
@@ -337,23 +360,32 @@ describe("Codespace MCP HTTP contract on a default-disabled installation", () =>
         ],
       },
     ],
-  ])("should return a website-only setup error from action %s over HTTP", async (action, args) => {
-    const result = CallToolResultSchema.parse(
-      await client.callTool({ name: "codespace", arguments: { action, ...args } }),
-    );
-    expect(result.isError).toBe(true);
-    expect(result.structuredContent).toMatchObject({
-      error: {
-        code: "CODESPACE_NOT_CONFIGURED",
-        message: expect.any(String),
-        retryable: expect.any(Boolean),
-      },
-    });
-    expectSettingsLink((result.structuredContent?.error as Record<string, unknown>).settings_url);
-    expect(JSON.stringify(result)).not.toMatch(
-      /accessToken|refreshToken|clientSecret|vaultKey|github\.com\/login|device_code/,
-    );
-  });
+  ])(
+    "should refuse action %s with its exact selected-provider or missing-identity error over HTTP",
+    async (action, args) => {
+      const result = CallToolResultSchema.parse(
+        await client.callTool({ name: "codespace", arguments: { action, ...args } }),
+      );
+      expect(result.isError).toBe(true);
+      expect(result.structuredContent).toMatchObject({
+        error: {
+          code: action === "create" ? "CODESPACE_NOT_CONFIGURED" : "CODESPACE_NOT_FOUND",
+          message: expect.any(String),
+          retryable: expect.any(Boolean),
+        },
+      });
+      const error = result.structuredContent?.error as Record<string, unknown>;
+      if (action === "create") expectSettingsLink(error.settings_url);
+      else {
+        // An absent opaque identity supplies no provider authority or setup destinations.
+        expect(error).not.toHaveProperty("settings_url");
+        expect(error).not.toHaveProperty("links");
+      }
+      expect(JSON.stringify(result)).not.toMatch(
+        /accessToken|refreshToken|clientSecret|vaultKey|github\.com\/login|device_code/,
+      );
+    },
+  );
 
   test("should reject mixed text and native-file stdin before codespace dispatch", async () => {
     const result = CallToolResultSchema.parse(

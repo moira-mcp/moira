@@ -176,10 +176,19 @@ Automatic node types (execute without agent interaction):
 - JSON Schema validation for all inputs
 - Template processing with safe serialization
 
+### Codespace Providers
+
+- GitHub and local Docker Sandboxes share the resource, operation, file and native-transfer contracts.
+- Creation selects a discovered repository target; subsequent calls use the persisted resource's provider and identity.
+- Moira Local is a companion on the user's machine, distinct from the `moira-local` Docker MCP-server alias in the testing examples. It connects to the selected Moira instance through authenticated outbound HTTPS.
+- Local repository grants, finite leases and physical stop belong to the companion's independent owner. Cloud messages cannot expand them or select host commands.
+- Build and operational instructions, supported-host constraints and isolation evidence are in [Codespaces](CODESPACES.md).
+
 ### File Organization Logic
 
 - `packages/workflow-engine/` - Core engine (handlers, storage, types)
 - `packages/web-backend/` + `packages/web-frontend/` - Web UI components
+- `packages/local/` - User-owned companion and isolated runtime
 - `workflows/production/` - Working examples
 - `tests/` - Unit and integration test suites
 

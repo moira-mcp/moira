@@ -13,7 +13,9 @@ export default {
   // one worker so write transactions are isolated by test order instead of
   // racing until busy_timeout expires; WAL still benefits reads within a file.
   maxWorkers: 1,
-  workerIdleMemoryLimit: "4GB",
+  // Recycle retained heap between completed files, leaving room for native
+  // modules and child processes without interrupting an active test.
+  workerIdleMemoryLimit: "512MB",
   globalSetup: "<rootDir>/tests/config/jest-integration-global-setup.js",
   setupFiles: [
     "<rootDir>/tests/config/jest-memory-setup.js",

@@ -573,6 +573,7 @@ export class CodespaceOperationRepository {
     now: number,
     leaseExpiresAt: number,
     userId?: string,
+    providerId?: string,
   ): CodespaceOperationRecord | null {
     const transaction = this.sqlite.transaction(() => {
       const row = this.sqlite
@@ -596,6 +597,7 @@ export class CodespaceOperationRepository {
                    AND connection.externalAccountId = resource.externalOwnerId
                    AND connection.credentialGeneration = operation.authorizationGeneration)))
              AND (? IS NULL OR operation.userId = ?)
+             AND (? IS NULL OR operation.provider = ?)
              AND (claimExpiresAt IS NULL OR claimExpiresAt <= ?)
            ORDER BY CASE WHEN state = 'reserved' THEN 0
              WHEN remoteCleanupPending = 1
@@ -604,8 +606,15 @@ export class CodespaceOperationRepository {
              ELSE 3 END,
                     updatedAt, id LIMIT 1`,
         )
-        .get(now, now, userId ?? null, userId ?? null, now) as
-        { id: string; userId: string } | undefined;
+        .get(
+          now,
+          now,
+          userId ?? null,
+          userId ?? null,
+          providerId ?? null,
+          providerId ?? null,
+          now,
+        ) as { id: string; userId: string } | undefined;
       if (!row) return null;
       const changed = this.sqlite
         .prepare(

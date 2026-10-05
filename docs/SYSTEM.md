@@ -594,6 +594,80 @@ the unauthenticated `/api/health` and MCP `/health` surfaces carry only its publ
 (`state`, `provider`, `degraded`) from a cached snapshot with a two-second bound on the connector
 probe, and both processes refresh their codespace gauges on the reconciliation interval. See `docs/CODESPACES.md` for the contract.
 
+### Local codespace composition and ownership
+
+`codespace-services.ts` composes both `github-codespaces` and `local-sandboxes`
+through the existing provider registry, resource, operation, file and transfer
+services. Local services remain available without GitHub App configuration.
+Repository discovery qualifies local targets by device and repository UUID;
+resource lookup selects the persisted provider after checking the caller's ownership.
+The existing GitHub-named management HTTP prefix serves both providers. MCP keeps
+the same lifecycle, command, session, file and native-file actions; local transport
+uses the shared `CodespaceJobTransport` codec rather than a second executor.
+
+`LocalDeviceService` separates browser confirmation from companion authentication.
+Each device has its own credential digest, connection identity, generation and
+locally approved public policy. Resource bindings retain that exact device tuple.
+The companion makes outbound HTTPS requests to its pinned application origin;
+there is no public host listener, inbound SSH or forwarded Docker API. Browser
+management and companion wire contracts are documented in
+[API](API.md#local-device-enrollment-and-relay-api).
+
+`LocalCodespaceRelay` durably reserves request metadata and private transfer parts
+before dispatch. Claim leases, account/device/resource generations and complete
+payload hashes gate every read, upload and acknowledgement. Private objects use
+the common byte, object, in-flight and expiry quotas. Reconnect reuses the request
+identity and its durable companion receipt; losing an acknowledgement does not
+authorize another guest effect. The companion retains a separate binding between
+server resource generation and local space generation. A server observation may
+advance its own counter while the exact local tuple stays unchanged; it cannot
+adopt another VM or clear a local recovery fence.
+An ordinary stop of the same owned VM publishes a durable stopped-generation proof
+only after physical settlement and an unchanged identity check. Relay reconnect
+can reconcile that proof without operator acknowledgement: a resource-bound
+snapshot permits the retained server counter, while a new mutation requires a
+newer one. Uncertain outcomes and external lifetime changes remain fenced.
+
+`packages/local` owns the host policy, repository tokens and SDK profile. A local
+finite lease, repository grants, machine/storage ceilings and explicit permissions
+bound remote work. Each codespace has a persistent mountless VM. The shared guest
+supervisor verifies the provider-owned repository root and binding; both providers
+reuse its command/session/file behavior. SDK creation, start and guest attachment
+use fixed local API operations that avoid automatic MCP gateway creation and
+verify the fresh VM boundary before guest work. Host environment and credential
+stores are not merged into guest environment. SDK-provided credential-named
+placeholders are not evidence of a usable host credential.
+
+An independent device guard owns SDK launch and calls before VM creation. It
+cancels and reaps tracked calls, holds exact kernel identities for the SDK daemon
+and VM workers, and maps SDK UUIDs to private container identities before admitting
+work. Shutdown does not depend on a readable SDK credential store. It signals only
+captured incarnations, preserves disks, and records settlement only after confirmed
+exit. Missing ownership, unsupported capture, expired policy or uncertain guest
+transport fails closed. Confirmed physical stop does not erase unknown job markers.
+Explicit local recovery acknowledges them without replay, checks identity and
+opens a new local generation; cloud actions cannot acknowledge recovery.
+
+Runner ownership also uses a persistent `runner-gate.lock` inode with a kernel
+file lock. The fixed native helper holds it until release or parent pipe closure;
+the gate file is never removed or replaced. Ordinary commands refuse an existing
+`runner.lock` marker. Explicit device recovery while disabled may reclaim a safe,
+unchanged marker only when its PID is confirmed absent and no recorded independent
+owner is live. Recovery retains the exact profile and receipt checks, confirms
+fresh physical shutdown, and preserves jobs and data without enabling work.
+Malformed or ambiguous ownership remains a refusal; do not remove lock files manually.
+
+The supported runtime is macOS with the pinned SDK contract described in
+[Codespaces](CODESPACES.md). Linux VM execution is refused before creation while
+its required worker-ownership capability is unsupported. CLI one-shot manager
+commands close their manager and stop its VMs on exit; long-lived `run` owns the
+relay and VM lifetime. Device revocation fences server work, but cannot promise
+instant physical stop while the machine is offline; local lease expiry and disable
+remain authoritative. These boundaries do not assert tested reachability controls
+for every remote VPN, cloud metadata endpoint or separate physical VM.
+
+### Communication adapters
+
 Each communication adapter also supplies provider-safe presentation metadata through the same
 registry: title, origin, exact setting keys, optional enable key/help link, extension identity and
 trusted-delivery declaration. `GET /api/notifications/channels` evaluates those adapters with only

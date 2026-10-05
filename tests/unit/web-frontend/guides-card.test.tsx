@@ -37,6 +37,7 @@ function SettingsFixture(): React.JSX.Element {
         "settings.security",
         "settings.notifications",
         "settings.integrations",
+        "settings.local-devices",
         "settings.apps",
         "settings.api-tokens",
         "settings.preferences",
@@ -158,7 +159,7 @@ describe("a guide's card", () => {
     // One announcement at a time: the region holds the current step's sentence only.
     expect(announcer.textContent).not.toContain(settings.nav.title);
     expect(announcer.textContent).toBe(
-      `${en.guides.settings.title}, step 2 of 8: ${settings.account.title}`,
+      `${en.guides.settings.title}, step 2 of 9: ${settings.account.title}`,
     );
   });
 

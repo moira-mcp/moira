@@ -125,6 +125,12 @@ type CodespaceNewToolParams<Action extends CodespaceAction> = Exclude<
 >;
 
 export interface CodespaceToolServices {
+  provider?: string;
+  providers?: CodespaceToolServices[];
+  select?: (
+    userId: string,
+    input: { repositoryId?: string; codespaceId?: string },
+  ) => CodespaceToolServices;
   connection: Pick<CodespaceConnectionService, "getStatus" | "refreshGrants">;
   observability: Pick<CodespaceObservabilityService, "readiness" | "limitsWithBilling">;
   guidance: (situation: CodespaceGuidanceSituation) => {
@@ -162,6 +168,8 @@ const PROVIDER_REFUSAL_CODES: ReadonlySet<string> = new Set([
 ]);
 
 const SAFE_ERROR_MESSAGES: Record<string, string> = {
+  LOCAL_DEVICE_REQUIRED:
+    "Connect Moira Local in Settings and approve the pairing on your computer.",
   CONNECTION_REQUIRED: "Connect GitHub in Moira Settings before using cloud codespaces.",
   INSTALLATION_REQUIRED: "Complete the GitHub App installation in Moira Settings.",
   REPOSITORY_NOT_ALLOWED: "The repository is not approved for this connection.",
@@ -170,8 +178,8 @@ const SAFE_ERROR_MESSAGES: Record<string, string> = {
   AUTH_GRANT_REVOCATION_REQUIRED: "Revoke and reconnect the GitHub grant in Moira Settings.",
   CREDENTIAL_UNREADABLE: "Restore or reconnect the GitHub credential in Moira Settings.",
   AUTHORIZATION_FAILED: "GitHub authorization could not be used.",
-  CODESPACE_PROVIDER_DISABLED: "Cloud codespace operations are disabled.",
-  CODESPACE_PROVIDER_UNAVAILABLE: "The cloud codespace provider is unavailable.",
+  CODESPACE_PROVIDER_DISABLED: "Codespace operations are disabled.",
+  CODESPACE_PROVIDER_UNAVAILABLE: "The codespace provider is unavailable.",
   CODESPACE_POLICY_LIMIT: "A codespace quota, concurrency, size or time limit was reached.",
   CODESPACE_SESSION_UNAVAILABLE:
     "The named command session is not available in this codespace's current life.",
@@ -208,6 +216,7 @@ const SAFE_ERROR_MESSAGES: Record<string, string> = {
 };
 
 const SETUP_ERROR_CODES = new Set([
+  "LOCAL_DEVICE_REQUIRED",
   "CONNECTION_REQUIRED",
   "INSTALLATION_REQUIRED",
   "CODESPACE_NOT_CONFIGURED",
@@ -446,13 +455,14 @@ function publicExpected(expected: z.infer<typeof codespaceExpectedSchema>) {
 
 async function loadServices(): Promise<CodespaceToolServices> {
   const services = await import("@mcp-moira/web-backend/services");
+  const providers = services.getCodespaceProviderBundles();
+  const preferred =
+    providers.find((provider) => provider.provider === "github-codespaces" && provider.resource) ??
+    providers.find((provider) => provider.resource)!;
   return {
-    connection: services.getCodespaceConnectionService(),
-    observability: services.getCodespaceObservabilityService(),
-    guidance: services.getCodespaceSetupGuidance,
-    resource: services.getCodespaceResourceService(),
-    operation: services.getCodespaceOperationService(),
-    file: services.getCodespaceFileService(),
+    ...preferred,
+    providers,
+    select: services.selectCodespaceProviderServices,
   };
 }
 
@@ -502,13 +512,15 @@ function requireReady(
       ? status.reason!
       : "AUTH_REFRESH_FAILED";
     const code =
-      status.state === "installation_required"
-        ? "INSTALLATION_REQUIRED"
-        : status.state === "refresh_failed" || status.state === "revocation_pending"
-          ? authorizationCode
-          : status.state === "disabled" || status.state === "configuration_error"
-            ? "CODESPACE_NOT_CONFIGURED"
-            : "CONNECTION_REQUIRED";
+      status.reason === "LOCAL_DEVICE_REQUIRED"
+        ? "LOCAL_DEVICE_REQUIRED"
+        : status.state === "installation_required"
+          ? "INSTALLATION_REQUIRED"
+          : status.state === "refresh_failed" || status.state === "revocation_pending"
+            ? authorizationCode
+            : status.state === "disabled" || status.state === "configuration_error"
+              ? "CODESPACE_NOT_CONFIGURED"
+              : "CONNECTION_REQUIRED";
     return errorResult(code, status.settingsUrl, true, undefined, guidanceLinks);
   }
   return { settingsUrl: status.settingsUrl };
@@ -566,6 +578,67 @@ export async function executeCodespaceTool(
 ): Promise<CallToolResult> {
   const { action } = call;
   const params = call.request as CodespaceToolParams[CodespaceAction];
+  if (
+    action === "setup_help" &&
+    services.providers &&
+    !("repository_id" in params && params.repository_id)
+  ) {
+    try {
+      services =
+        services.providers.find(
+          (provider) => provider.connection.getStatus(userId).state === "connected",
+        ) ?? services;
+    } catch (error) {
+      reportUnexpectedFailure(action, error);
+      return errorResult("INTERNAL_ERROR");
+    }
+  }
+  if (action === "list" && services.providers) {
+    const results = await Promise.all(
+      services.providers.map(async (provider) => ({
+        provider: provider.provider,
+        result: await executeCodespaceTool(call, userId, provider),
+      })),
+    );
+    const successful = results.filter(
+      (entry) => !entry.result.isError && entry.result.structuredContent,
+    );
+    if (successful.length === 0) return results[0].result;
+    const projections: Array<Record<string, unknown> & { provider: string | undefined }> =
+      successful.map((entry) => ({
+        ...(entry.result.structuredContent as Record<string, unknown>),
+        provider: entry.provider,
+      }));
+    const preferred =
+      projections.find(
+        (entry) => (entry.readiness as { state?: string } | undefined)?.state === "connected",
+      ) ?? projections[0];
+    return jsonResult({
+      ...preferred,
+      providers: projections,
+      repositories: projections.flatMap((entry) =>
+        ((entry.repositories ?? []) as Record<string, unknown>[]).map((repository) => ({
+          ...repository,
+          provider: entry.provider,
+        })),
+      ),
+      codespaces: projections.flatMap((entry) => (entry.codespaces ?? []) as unknown[]),
+      repositories_stale: projections.some((entry) => entry.repositories_stale === true),
+      resources_stale: projections.some((entry) => entry.resources_stale === true),
+    });
+  }
+  if (services.select && ("repository_id" in params || "codespace_id" in params)) {
+    try {
+      services = services.select(userId, {
+        ...("repository_id" in params ? { repositoryId: params.repository_id } : {}),
+        ...("codespace_id" in params ? { codespaceId: params.codespace_id } : {}),
+      });
+    } catch (error) {
+      if (error instanceof CodespaceResourceError) return errorResult(error.code);
+      reportUnexpectedFailure(action, error);
+      return errorResult("INTERNAL_ERROR");
+    }
+  }
   let status: ReturnType<CodespaceConnectionService["getStatus"]>;
   try {
     status = services.connection.getStatus(userId);

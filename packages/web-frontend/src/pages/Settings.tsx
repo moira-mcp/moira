@@ -58,6 +58,7 @@ import { ApiTokensSettings } from "./settings/ApiTokensSettings";
 import { GitHubCodespaceSettings } from "./settings/GitHubCodespaceSettings";
 import { GitHubCodespaceManagement } from "./settings/GitHubCodespaceManagement";
 import { GitHubCodespacesProvider } from "./settings/GitHubCodespacesData";
+import { LocalDeviceSettings } from "./settings/LocalDeviceSettings";
 import { CodespaceAutoPause } from "./settings/CodespaceAutoPause";
 import { CodespaceLimitsFromData } from "./settings/CodespaceLimitsPanel";
 import { PreferencesSettings } from "./settings/PreferencesSettings";
@@ -408,6 +409,14 @@ export const Settings: React.FC = () => {
             {...guideAnchor("settings.integrations")}
           >
             <GitHubCodespacesProvider>
+              <div
+                id="integrations-local"
+                data-settings-section="integrations-local"
+                className="scroll-mt-20 lg:scroll-mt-8"
+                {...guideAnchor("settings.local-devices")}
+              >
+                <LocalDeviceSettings />
+              </div>
               <GitHubCodespaceSettings />
               <GitHubCodespaceManagement />
               <DataRegion

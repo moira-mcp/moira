@@ -2,6 +2,7 @@ import {
   AuditAction,
   AuditRepository,
   CODESPACE_PROVIDER_GITHUB,
+  CODESPACE_PROVIDER_LOCAL,
   CodespaceConnectionRepository,
   CodespaceConnectionService,
   CodespaceProviderRegistry,
@@ -12,6 +13,7 @@ import {
   CodespaceTransferService,
   CodespaceResourceRepository,
   CodespaceResourceService,
+  CodespaceResourceError,
   CodespaceObservabilityService,
   recordCodespaceConnectionEvent,
   recordCodespaceOperationEvent,
@@ -36,6 +38,7 @@ import { existsSync, mkdirSync, readdirSync, renameSync, rmdirSync } from "node:
 
 import { GitHubCodespacesConnector } from "./github-codespaces-connector.js";
 import { OpenAINativeReferenceFetcher } from "./codespace-native-reference-fetcher.js";
+import { createLocalCodespaceServices } from "./local-codespace-services.js";
 import {
   GitHubCodespaceClientError,
   HttpGitHubCodespaceClient,
@@ -49,7 +52,17 @@ interface CodespaceServices {
   file: CodespaceFileService | null;
   transfer: CodespaceTransferService;
   observability: CodespaceObservabilityService;
+  local: ReturnType<typeof createLocalCodespaceServices>;
 }
+
+export type CodespaceProviderServices = Pick<
+  CodespaceServices,
+  "resource" | "operation" | "file" | "transfer" | "observability"
+> & {
+  provider: string;
+  connection: Pick<CodespaceConnectionService, "getStatus" | "refreshGrants">;
+  guidance: CodespaceResourceService["setupGuidance"];
+};
 
 /** A billing cache entry is valid only for one connected account and credential generation. */
 export function createCodespaceBillingReader(dependencies: {
@@ -145,6 +158,38 @@ export function createCodespaceBillingReader(dependencies: {
       ]);
     } finally {
       if (timer) clearTimeout(timer);
+    }
+  };
+}
+
+function resourceAudit(
+  auditRepository: AuditRepository,
+): (event: CodespaceResourceAuditEvent) => Promise<void> {
+  return async (event) => {
+    const context = {
+      userId: event.userId,
+      action: resourceAuditAction(event),
+      resource: "codespace_resource",
+      resourceId: event.resourceId,
+      metadata: {
+        provider: event.provider,
+        outcome: event.outcome,
+        ...(event.reason !== undefined ? { reason: event.reason } : {}),
+        state: event.state,
+        machine: event.machine,
+      },
+    };
+    let inserted = true;
+    if (event.dedupeKey === undefined) {
+      await logAuditEventDirect(auditRepository, context);
+    } else {
+      inserted = await logAuditEventDirectOnce(auditRepository, {
+        ...context,
+        dedupeKey: event.dedupeKey,
+      });
+    }
+    if (inserted) {
+      recordCodespaceResourceEvent(event);
     }
   };
 }
@@ -326,33 +371,7 @@ function initializeCodespaceServices(): CodespaceServices {
         const result = await connection.refreshGrants(userId, { force: true });
         return !result.stale;
       },
-      audit: async (event) => {
-        const context = {
-          userId: event.userId,
-          action: resourceAuditAction(event),
-          resource: "codespace_resource",
-          resourceId: event.resourceId,
-          metadata: {
-            provider: event.provider,
-            outcome: event.outcome,
-            ...(event.reason !== undefined ? { reason: event.reason } : {}),
-            state: event.state,
-            machine: event.machine,
-          },
-        };
-        let inserted = true;
-        if (event.dedupeKey === undefined) {
-          await logAuditEventDirect(auditRepository, context);
-        } else {
-          inserted = await logAuditEventDirectOnce(auditRepository, {
-            ...context,
-            dedupeKey: event.dedupeKey,
-          });
-        }
-        if (inserted) {
-          recordCodespaceResourceEvent(event);
-        }
-      },
+      audit: resourceAudit(auditRepository),
       controlAudit: async (event) => {
         await logAuditEventDirect(auditRepository, {
           userId: event.userId,
@@ -371,6 +390,7 @@ function initializeCodespaceServices(): CodespaceServices {
     });
     const nativeFetcher = new OpenAINativeReferenceFetcher();
     operation = new CodespaceOperationService({
+      providerId: CODESPACE_PROVIDER_GITHUB,
       repository: operationRepository,
       credentials: {
         getCredential: async (userId, providerId) => {
@@ -438,7 +458,11 @@ function initializeCodespaceServices(): CodespaceServices {
     snapshotMaxAgeMs: getCodespaceResourcePolicy().reconcileIntervalMs * 2,
   });
 
-  services = { connection, resource, operation, file, transfer, observability };
+  const local = createLocalCodespaceServices(transfer, {
+    resourceAudit: resourceAudit(auditRepository),
+    operationAudit: operationAudit(auditRepository),
+  });
+  services = { connection, resource, operation, file, transfer, observability, local };
   return services;
 }
 
@@ -464,6 +488,65 @@ export function getCodespaceFileService(): CodespaceFileService | null {
 
 export function getCodespaceTransferService(): CodespaceTransferService {
   return initializeCodespaceServices().transfer;
+}
+
+export function getLocalDeviceService() {
+  return initializeCodespaceServices().local.devices;
+}
+
+export function getCodespaceProviderServices(provider: string): CodespaceProviderServices {
+  const current = initializeCodespaceServices();
+  if (provider === CODESPACE_PROVIDER_LOCAL) {
+    return {
+      ...current.local,
+      provider,
+      guidance: (situation) => current.local.resource.setupGuidance(situation),
+    };
+  }
+  if (provider !== CODESPACE_PROVIDER_GITHUB) throw new Error("Unknown codespace provider");
+  return { ...current, provider, guidance: getCodespaceSetupGuidance };
+}
+
+export function getCodespaceProviderBundles(): CodespaceProviderServices[] {
+  return [
+    getCodespaceProviderServices(CODESPACE_PROVIDER_GITHUB),
+    getCodespaceProviderServices(CODESPACE_PROVIDER_LOCAL),
+  ];
+}
+
+export function selectCodespaceProviderServices(
+  userId: string,
+  input: { repositoryId?: string; codespaceId?: string },
+): CodespaceProviderServices {
+  if (input.codespaceId !== undefined) {
+    const resource = new CodespaceResourceRepository(getSqliteInstance()).getOwned(
+      userId,
+      input.codespaceId,
+    );
+    if (!resource)
+      throw new CodespaceResourceError(
+        "CODESPACE_NOT_FOUND",
+        "Codespace is not owned by this caller",
+      );
+    return getCodespaceProviderServices(resource.provider);
+  }
+  return getCodespaceProviderServices(
+    input.repositoryId?.startsWith("local:") ? CODESPACE_PROVIDER_LOCAL : CODESPACE_PROVIDER_GITHUB,
+  );
+}
+
+export function startCodespaceProviderServices(): void {
+  for (const bundle of getCodespaceProviderBundles()) {
+    bundle.resource?.start();
+    bundle.operation?.start();
+  }
+}
+
+export function stopCodespaceProviderServices(): void {
+  for (const bundle of getCodespaceProviderBundles()) {
+    bundle.resource?.stop();
+    bundle.operation?.stop();
+  }
 }
 
 /** Guidance is available even when invalid configuration prevents runtime services from starting. */

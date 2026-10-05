@@ -12,7 +12,6 @@ import {
   codespaceTransferLiveBytesGauge,
 } from "../metrics/index.js";
 import type { CodespaceConnectionAuditEvent } from "./connection-service.js";
-import type { CodespaceGitHubConfigStatus } from "./github-app-config.js";
 import type { CodespaceOperationRepository } from "./operation-repository.js";
 import type { CodespaceOperationAuditEvent } from "./operation-service.js";
 import type { CodespaceResourceRepository } from "./resource-repository.js";
@@ -95,7 +94,8 @@ export function recordCodespaceRejection(code: string): void {
 
 export interface CodespaceObservabilityDependencies {
   providerId: string;
-  config: () => CodespaceGitHubConfigStatus;
+  config: () =>
+    { state: "available" } | { state: "disabled" } | { state: "invalid"; reason: string };
   policy: () => CodespaceResourcePolicy;
   resources: Pick<
     CodespaceResourceRepository,

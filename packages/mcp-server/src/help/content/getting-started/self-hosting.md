@@ -212,6 +212,95 @@ docker compose logs | grep -A3 "ADMIN LOGIN"
 
 Sign in with `ADMIN_EMAIL` (default `admin@moira.local`) and the printed password.
 
+### Connect local codespaces
+
+**Settings → Codespaces → Local devices** connects a computer running Moira Local to this
+account. Local and GitHub development environments share the `codespace` tool; a local device
+does not require the GitHub App, vault configuration or GitHub connector Compose profile below.
+Server work still requires `CODESPACE_CODESPACES_ENABLED=true` and enabled instance controls.
+The companion makes outbound HTTPS requests and exposes no public listening port.
+
+Use Node.js 24 and macOS on Apple silicon with the pinned Docker Sandboxes `sbx` 0.46.0
+signed bundle from [Docker's release artifacts](https://github.com/docker/sandboxes/releases/tag/v0.46.0).
+See [Docker's installation requirements](https://docs.docker.com/ai/sandboxes/install/).
+Linux execution is refused. Build the private companion package from a Moira source checkout
+with the macOS command-line C compiler available;
+there is no published global npm installer:
+
+```bash
+npm ci
+npm run local:build
+npm run local -- init --sbx /absolute/path/to/Sbx.app/Contents/MacOS/sbx --label My-computer
+npm run local -- login
+npm run local -- setup
+npm run local -- approve OWNER/REPO
+npm run local -- enable --hours 8
+npm run local -- doctor
+```
+
+`init` creates private state and a bounded disk image, with work disabled. The image uses a short
+device-owned mount path for the SDK sockets. `--state PATH` chooses another state directory;
+repeat it on every command. `--storage-gib`, `--cpus`, `--memory-gib` and `--max-sandboxes`
+choose local ceilings at initialization. `setup` requires an empty dedicated SDK profile.
+`doctor` checks prerequisites under an enabled, unexpired lease; its
+`liveVmIsolationVerified: false` is not a live microVM isolation result.
+
+The companion keeps Docker sign-in in a separate encrypted SDK store and does not alter personal
+Docker or Keychain selection. For credential-store recovery, first disable local work and stop
+the companion, then use `npm run local -- login --new-store`. This explicit action checks owned
+shutdown, creates a separate store and preserves existing credentials. It never automatically
+rotates a failed store or imports personal credentials.
+This machine-only store trusts the host account: its generated password is kept in an owner-only
+local file, and sleep/interval auto-lock is disabled only for that SDK store, not personal Keychain.
+
+Repository permissions are granted on the computer. `approve OWNER/REPO` allows read access
+and the built-in public Git/package domains; repeated `--domain HOST` supplies a replacement
+allowed-domain list. Add `--private`, `--push` or `--delete` only for those rights.
+For a private repository, supply its GitHub token on stdin to
+`npm run local -- git-token OWNER/REPO`; do not put it in arguments or shell history.
+Repository tokens stay local and are separate from the device credential.
+The browser or server cannot expand these grants or the finite lease (8 hours by default,
+at most 24). Renew it locally with `enable --hours N`.
+
+In **Local devices**, choose **Connect a device**. Copy the displayed command and pairing token
+separately. From the source checkout, run the command as
+`npm run local -- enroll --server <displayed HTTPS application URL> --pairing-id <displayed ID>`.
+Enter the token on stdin and end input; never append it to the command. The server URL includes
+the app prefix when configured and contains no credentials, query or fragment.
+Refresh the browser, review the pending device's repositories, egress, push/delete rights,
+limits and lease, then confirm. Start the foreground relay only after confirmation:
+
+```bash
+npm run local -- run
+```
+
+Choose **Local Docker Sandboxes** and the device's repository in **Development environments**, or discover
+its qualified `repository_id` through `codespace({ action: "list" })`. Different computers
+offering the same repository are distinct choices. Further operations use the existing
+`codespace_id`, execution/session/file and native-transfer contracts. The GitHub provider remains
+independently available. Settings can revoke one device; **Refresh** rereads current state. Browser revocation
+denies new server work but cannot prove physical shutdown of an offline computer; local disable
+and lease expiry enforce shutdown independently.
+
+Manager-backed CLI create/start/exec commands are one-shot and stop owned VM processes on exit;
+persistent server work uses `run`. Stop it before another command needs the same runner lock.
+Ctrl+C closes the foreground companion; `npm run local -- disable` stops owned work independently
+and keeps VM data. Stop keeps files, while `remove SPACE_ID --confirm` deletes the exact owned VM.
+An uncertain guest outcome is fenced, not retried automatically. Once that VM is confirmed stopped,
+`recover SPACE_ID --confirm` acknowledges the outcome without replaying jobs. For an orphan device
+shutdown, `recover --confirm` requires disabled work, proves physical stop and retains jobs/data.
+See [Troubleshooting](/docs/integration/troubleshooting/#local-codespaces) for refusal recovery.
+
+Local VMs have no host mounts, shared skills, host MCP gateway or forwarded host credentials,
+environment or agent sockets. External SDK policy denies host/LAN/VPN/metadata/other-VM access and
+direct egress; only locally approved brokered public egress is admitted. Public SDK API/GitHub
+credential placeholders in guest variables are not user tokens. Root-guest controlled checks
+observe host canaries and reachable loopback/LAN/VPN-interface challenge delivery; a proxy connection
+alone is not delivery. They do not establish remote VPN, metadata-service or other-VM physical
+isolation without reachable controlled targets. Those external probes remain unexecuted on the
+validation host. Codespace content is intentionally visible to Moira; review returned code before
+running it on the computer.
+
 ### Enable the GitHub codespace connection
 
 The GitHub codespace connection is separate from GitHub social login. It stays disabled unless
@@ -245,8 +334,8 @@ other low-diversity values are rejected. The vault key is not auto-generated and
 across container restarts; changing it makes existing connection credentials unreadable.
 
 If a key or ciphertext is lost, ordinary Reconnect and Disconnect cannot prove remote revocation.
-First remove the Moira GitHub App grant in GitHub settings. Then return to **Settings → GitHub &
-Codespaces** and choose **Forget after external revoke**. The confirmation deletes
+First remove the Moira GitHub App grant in GitHub settings. Then return to **Settings → Codespaces**
+and choose **Forget after external revoke** in the GitHub card. The confirmation deletes
 unreadable local ciphertext; do not confirm while GitHub still lists the grant.
 If the original key and version are restored, Moira no longer offers this unreadable-credential
 recovery. Ordinary **Reconnect GitHub** and **Disconnect** are available again; both revoke the
@@ -256,7 +345,7 @@ The same external-revoke confirmation appears if a refresh may have returned a n
 Moira could neither retain nor revoke. Revoke the entire GitHub App grant before confirming; this
 state deliberately disables Reconnect and ordinary Disconnect.
 
-After the container is healthy, each user opens **Settings → GitHub & Codespaces**, selects
+After the container is healthy, each user opens **Settings → Codespaces**, selects
 **Connect GitHub** and authorizes once on GitHub. If the app is not installed on the account yet,
 the browser continues straight to GitHub's installation page; after the user installs it for the
 intended personal repositories, Settings shows the connection as connected without a second
@@ -265,7 +354,7 @@ To switch GitHub accounts, disconnect and connect again. Authorization never hap
 tool or agent. When setup is
 missing or a credential must be renewed, the user returns to this website.
 
-Codespace creation and agent operations additionally require `CODESPACE_CODESPACES_ENABLED=true`
+GitHub codespace creation and agent operations additionally require `CODESPACE_CODESPACES_ENABLED=true`
 and the connector pair from the disabled-by-default Compose profile:
 
 ```bash
@@ -289,8 +378,8 @@ provider-console links as `setup_help`, plus App installation when its URL is co
 starting any authorization flow. A codespace is
 personal rather than shared; collaboration happens through version-control branches.
 
-Users manage the same codespaces from the **Cloud codespaces** card in **Settings → GitHub &
-Codespaces**: create one for an approved repository, start or stop it (stop keeps the repository
+Users manage the same codespaces from the **Development environments** card in **Settings →
+Codespaces**, with GitHub selected: create one for an approved repository, start or stop it (stop keeps the repository
 data) and delete it after an explicit confirmation. Each user's idle codespaces pause on their own:
 the **Automatic pause** card in the same section sets `codespaces.auto_stop_enabled` (on by default)
 and `codespaces.idle_timeout_minutes` (30 by default, 5 to 240), which decide when Moira stops a
