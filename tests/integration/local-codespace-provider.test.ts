@@ -30,7 +30,7 @@ import {
   type SandboxIdentity,
   type SandboxObservation,
 } from "../../packages/local/src/sbx-runtime.js";
-import { requireLocalGrant } from "../../packages/local/src/policy.js";
+import { LocalRefusal, requireLocalGrant } from "../../packages/local/src/policy.js";
 import { localFixture } from "./local/fixtures.js";
 
 let root: string, sqlite: Database.Database;
@@ -125,8 +125,7 @@ async function fixture(partLimit = 4 * 1024 * 1024, maxObjects = 512, nativeSize
     createLocalDeviceManagementRoutes(services.devices, "https://moira.example"),
   );
   const faults = { dropNextAck: false, lostAcknowledgements: 0 };
-  let setupRefusal: { status: number; code: string } | undefined;
-  let connecting = true;
+  let transportRefusal: { status: number; code: string; route: string } | undefined;
   const fetch: typeof globalThis.fetch = async (input, options) => {
     const url = new URL(String(input));
     expect(url.origin).toBe("https://moira.example");
@@ -144,11 +143,12 @@ async function fixture(partLimit = 4 * 1024 * 1024, maxObjects = 512, nativeSize
       else throw new Error("Unexpected controlled request body");
     }
     const response = await call;
-    if (connecting && response.status >= 400) {
+    if (response.status >= 400) {
       const code: unknown = response.body?.error?.code;
-      setupRefusal = {
+      transportRefusal = {
         status: response.status,
         code: typeof code === "string" && /^[A-Z_]{1,80}$/.test(code) ? code : "NO_SAFE_CODE",
+        route: url.pathname.includes("/payload/") ? "relay-payload" : "device-management",
       };
     }
     if (url.pathname === "/api/local-devices/relay/ack" && faults.dropNextAck) {
@@ -331,11 +331,10 @@ async function fixture(partLimit = 4 * 1024 * 1024, maxObjects = 512, nativeSize
     await relay.confirmed();
   } catch (cause) {
     throw new Error(
-      `Fixture connection setup refused: HTTP ${setupRefusal?.status ?? "UNKNOWN"}, code ${setupRefusal?.code ?? "UNKNOWN"}`,
+      `Fixture connection setup refused: HTTP ${transportRefusal?.status ?? "UNKNOWN"}, code ${transportRefusal?.code ?? "UNKNOWN"}`,
       { cause },
     );
   }
-  connecting = false;
   const drive = async <T>(work: Promise<T>): Promise<T> => {
     let settled = false;
     const outcome = work.then(
@@ -353,6 +352,7 @@ async function fixture(partLimit = 4 * 1024 * 1024, maxObjects = 512, nativeSize
         .prepare("SELECT COUNT(*) count FROM codespaceLocalRelay WHERE status='queued'")
         .get() as { count: number };
       if (pending.count) {
+        const refusalBeforePoll = transportRefusal;
         try {
           await relay.poll(rpc);
         } catch (error) {
@@ -360,7 +360,17 @@ async function fixture(partLimit = 4 * 1024 * 1024, maxObjects = 512, nativeSize
             !(error instanceof Error) ||
             error.message !== "Controlled lost acknowledgement response"
           )
-            throw error;
+            if (
+              error instanceof LocalRefusal &&
+              (error.code === "LOCAL_UNAUTHORIZED" || error.code === "LOCAL_RELAY_REFUSED") &&
+              transportRefusal &&
+              transportRefusal !== refusalBeforePoll
+            )
+              throw new Error(
+                `Fixture relay refused: ${transportRefusal.route}, HTTP ${transportRefusal.status}, code ${transportRefusal.code}`,
+                { cause: error },
+              );
+            else throw error;
         }
       } else await delay(5);
     }
