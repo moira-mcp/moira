@@ -69,8 +69,43 @@ async function socketProcess(name: string, ignoresTerm = false) {
     { env: {}, stdio: ["ignore", "pipe", "pipe"] },
   );
   children.push(child);
-  expect((await once(child.stdout!, "data"))[0].toString()).toBe("ready\n");
+  expect(await nextOutput(child)).toBe("ready\n");
   return { socket, child };
+}
+
+function nextOutput(child: ChildProcess): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const output = child.stdout!;
+    const cleanup = () => {
+      output.removeListener("data", received);
+      output.removeListener("error", failed);
+      child.removeListener("error", failed);
+      child.removeListener("close", closed);
+    };
+    const received = (bytes: Buffer) => {
+      cleanup();
+      resolve(bytes.toString());
+    };
+    const failed = (error: Error) => {
+      cleanup();
+      reject(error);
+    };
+    const closed = (code: number | null, signal: NodeJS.Signals | null) => {
+      cleanup();
+      reject(
+        Object.assign(new Error(`Controlled process closed before output: ${code}/${signal}`), {
+          code,
+          signal,
+        }),
+      );
+    };
+    output.once("data", received);
+    output.once("error", failed);
+    child.once("error", failed);
+    child.once("close", closed);
+    if (output.destroyed && (child.exitCode !== null || child.signalCode !== null))
+      closed(child.exitCode, child.signalCode);
+  });
 }
 
 async function vmProcess(foreign = false) {
@@ -104,7 +139,7 @@ async function vmProcess(foreign = false) {
     stdio: ["ignore", "pipe", "pipe"],
   });
   children.push(child);
-  expect((await once(child.stdout!, "data"))[0].toString()).toBe("ready\n");
+  expect(await nextOutput(child)).toBe("ready\n");
   return { sdk, worker, socket, child };
 }
 
@@ -128,13 +163,13 @@ describe("credential-independent captured process shutdown", () => {
     });
     children.push(watch);
     const closed = once(watch, "close");
-    expect(JSON.parse((await once(watch.stdout!, "data"))[0].toString())).toEqual({
+    expect(JSON.parse(await nextOutput(watch))).toEqual({
       ready: true,
       containerId: "a".repeat(64),
     });
-    const checked = once(watch.stdout!, "data");
+    const checked = nextOutput(watch);
     watch.stdin!.write("check\n");
-    expect(JSON.parse((await checked)[0].toString())).toEqual({ held: true });
+    expect(JSON.parse(await checked)).toEqual({ held: true });
     const exited = once(vm.child, "close");
     watch.stdin!.end("stop\n");
     expect((await exited)[1]).toBe("SIGTERM");
@@ -167,18 +202,18 @@ describe("credential-independent captured process shutdown", () => {
     });
     children.push(watch);
     const closed = once(watch, "close");
-    expect(JSON.parse((await once(watch.stdout!, "data"))[0].toString())).toEqual({ ready: true });
+    expect(JSON.parse(await nextOutput(watch))).toEqual({ ready: true });
     for (let index = 0; index < 100; index++) {
-      const response = once(watch.stdout!, "data");
+      const response = nextOutput(watch);
       watch.stdin!.write("check\n");
-      expect(JSON.parse((await response)[0].toString())).toEqual({ held: true });
+      expect(JSON.parse(await response)).toEqual({ held: true });
     }
-    const retired = once(watch.stdout!, "data");
+    const retired = nextOutput(watch);
     const ownedExit = once(owned.child, "close");
     owned.child.kill("SIGKILL");
     await ownedExit;
     watch.stdin!.write("check\n");
-    const response = (await retired)[0].toString();
+    const response = await retired;
     expect(response).toContain('{"retired":true}');
     expect(response).not.toContain('{"held":true}');
     expect((await closed)[0]).toBe(0);
@@ -195,12 +230,7 @@ describe("credential-independent captured process shutdown", () => {
     });
     children.push(watch);
     const closed = once(watch, "close");
-    const ready = await Promise.race([
-      once(watch.stdout!, "data").then(([bytes]) => JSON.parse(bytes.toString())),
-      closed.then(([code]) => {
-        throw new Error(`Owned short socket capture exited ${code}`);
-      }),
-    ]);
+    const ready = JSON.parse(await nextOutput(watch));
     expect(ready).toEqual({ ready: true });
     const ownedExit = once(owned.child, "close");
     watch.stdin!.end("stop\n");
@@ -218,7 +248,7 @@ describe("credential-independent captured process shutdown", () => {
       });
       children.push(watch);
       const watchExit = once(watch, "close");
-      expect(JSON.parse((await once(watch.stdout!, "data"))[0].toString())).toEqual({
+      expect(JSON.parse(await nextOutput(watch))).toEqual({
         ready: true,
       });
       const ownedExit = once(owned.child, "close");
@@ -238,7 +268,7 @@ describe("credential-independent captured process shutdown", () => {
     });
     children.push(watch);
     const watchExit = once(watch, "close");
-    expect(JSON.parse((await once(watch.stdout!, "data"))[0].toString())).toEqual({ ready: true });
+    expect(JSON.parse(await nextOutput(watch))).toEqual({ ready: true });
     const ownedExit = once(owned.child, "close");
     watch.stdin!.end();
     expect((await ownedExit)[1]).toBe("SIGTERM");
@@ -247,7 +277,12 @@ describe("credential-independent captured process shutdown", () => {
 
   test("an executable mismatch refuses capture and leaves the socket owner alive", async () => {
     const owned = await socketProcess("owned.sock");
-    await expect(execute(helper, [root, helper, owned.socket])).rejects.toMatchObject({ code: 2 });
+    const watch = spawn(helper, [root, helper, owned.socket], {
+      env: {},
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    children.push(watch);
+    await expect(nextOutput(watch)).rejects.toMatchObject({ code: 2 });
     expect(owned.child.exitCode).toBeNull();
     expect(owned.child.signalCode).toBeNull();
   });
@@ -299,7 +334,7 @@ describe("credential-independent captured process shutdown", () => {
       children.push(watch);
       const closed = once(watch, "close");
       try {
-        expect(JSON.parse((await once(watch.stdout!, "data"))[0].toString())).toEqual({
+        expect(JSON.parse(await nextOutput(watch))).toEqual({
           ready: true,
         });
         const child = await Promise.race([
