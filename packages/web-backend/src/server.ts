@@ -95,12 +95,21 @@ import { tokenRoutes } from "./routes/tokens.js";
 import { adminTokenRoutes } from "./routes/admin-tokens.js";
 import { createCodespaceConnectionRoutes } from "./routes/codespace-connections.js";
 import { createCodespaceManagementRoutes } from "./routes/codespace-management.js";
+import {
+  createLocalDeviceManagementRoutes,
+  createLocalDeviceRoutes,
+  createLocalDeviceBinaryRoutes,
+} from "./routes/local-devices.js";
 import { createAdminCodespaceRoutes } from "./routes/admin-codespaces.js";
 import { mcpClientAutoRegister } from "./middleware/mcp-client-auto-register.js";
 import { auth } from "./auth.js";
-import { getCodespaceResourceService } from "./services/codespace-resource-service.js";
-import { getCodespaceOperationService } from "./services/codespace-operation-service.js";
-import { getCodespaceObservabilityService } from "./services/codespace-services.js";
+import {
+  getCodespaceTransferService,
+  getLocalDeviceService,
+  getCodespaceProviderBundles,
+  startCodespaceProviderServices,
+  stopCodespaceProviderServices,
+} from "./services/codespace-services.js";
 import {
   getCodespaceResourcePolicy,
   ExecutionChangeRepository,
@@ -205,6 +214,22 @@ class MoiraApiServer {
    * Setup middleware that must run AFTER Better Auth routes
    */
   private setupMiddlewareAfterAuth(): void {
+    // Device secrets and native byte payloads never pass through global body logging/context.
+    this.app.use(
+      "/api/local-devices",
+      apiLimiter,
+      createLocalDeviceBinaryRoutes(
+        getLocalDeviceService(),
+        getCodespaceTransferService(),
+        getBaseUrl(),
+      ),
+      createLocalDeviceRoutes(getLocalDeviceService(), getCodespaceTransferService(), getBaseUrl()),
+      (_req, res) =>
+        res.status(404).json({
+          success: false,
+          error: { code: "ENDPOINT_NOT_FOUND", message: "Unknown local-device endpoint" },
+        }),
+    );
     // JSON parsing with default limits (AFTER Better Auth)
     this.app.use(
       express.json({
@@ -417,6 +442,12 @@ class MoiraApiServer {
     this.app.use("/api/executions", apiLimiter, requireAuth, executionRoutes);
     this.app.use("/api/settings", apiLimiter, requireAuth, settingsRoutes);
     this.app.use(
+      "/api/integrations/local",
+      apiLimiter,
+      requireAuth,
+      createLocalDeviceManagementRoutes(getLocalDeviceService(), getBaseUrl()),
+    );
+    this.app.use(
       "/api/integrations/github/codespaces",
       apiLimiter,
       requireAuth,
@@ -502,9 +533,9 @@ class MoiraApiServer {
       getExecutionRetentionService().start();
       // The overview's live updates: this process's watcher of the change feed and its trimming.
       getExecutionChangeHub().start();
-      getCodespaceResourceService()?.start();
-      getCodespaceOperationService()?.start();
-      getCodespaceObservabilityService().start(getCodespaceResourcePolicy().reconcileIntervalMs);
+      startCodespaceProviderServices();
+      for (const bundle of getCodespaceProviderBundles())
+        bundle.observability.start(getCodespaceResourcePolicy().reconcileIntervalMs);
 
       // Establish this process's extension state. The API server and the MCP server run as
       // separate processes, so each needs its own registry and its own runner client: without them
@@ -580,9 +611,8 @@ class MoiraApiServer {
         uptime: process.uptime(),
       });
 
-      getCodespaceResourceService()?.stop();
-      getCodespaceOperationService()?.stop();
-      getCodespaceObservabilityService().stop();
+      stopCodespaceProviderServices();
+      for (const bundle of getCodespaceProviderBundles()) bundle.observability.stop();
 
       // Close metrics server
       if (this.metricsServer) {

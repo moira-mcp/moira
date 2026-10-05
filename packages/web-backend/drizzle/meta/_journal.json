@@ -386,6 +386,13 @@
       "when": 1790000960000,
       "tag": "0053_execution_task_identity",
       "breakpoints": true
+    },
+    {
+      "idx": 55,
+      "version": "7",
+      "when": 1790001020000,
+      "tag": "0054_local_devices_relay",
+      "breakpoints": true
     }
   ]
 }

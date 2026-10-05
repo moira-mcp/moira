@@ -226,6 +226,8 @@ export class CodespaceOperationService {
   constructor(
     private readonly dependencies: {
       repository: CodespaceOperationRepository;
+      /** Bound provider for scheduled reconciliation; omitted by legacy single-provider callers. */
+      providerId?: string;
       credentials: CodespaceCredentialResolver;
       transport: CodespaceOperationTransport & Partial<CodespaceFileTransport>;
       policy: () => CodespaceResourcePolicy;
@@ -541,14 +543,29 @@ export class CodespaceOperationService {
         };
       }
       remoteContacted = true;
-      if (claimedInput) await this.dependencies.transfers!.consume(claimedInput);
-      const result = await this.dependencies.transport.execute(credential, codespace, operation, {
+      const dispatchRequest: CodespaceExecRequest = {
         ...materializedRequest,
         timeoutMs: resolvedTimeoutMs,
         maxStdoutBytes: stdoutLimitBytes,
         maxStderrBytes: stderrLimitBytes,
         maxRetainedBytes: retainedOutputBytes(policy),
-      });
+      };
+      if (claimedInput) {
+        await this.dependencies.transport.retainExecuteInput?.(
+          credential,
+          codespace,
+          operation,
+          dispatchRequest,
+        );
+        await this.dependencies.transfers!.consume(claimedInput);
+        claimedInput = null;
+      }
+      const result = await this.dependencies.transport.execute(
+        credential,
+        codespace,
+        operation,
+        dispatchRequest,
+      );
       this.dependencies.repository.recordConnectorRunning(
         userId,
         codespace.id,
@@ -594,6 +611,7 @@ export class CodespaceOperationService {
         terminalResult = this.complete(userId, operation, result);
       }
     } catch {
+      if (claimedInput) this.dependencies.transfers?.release(claimedInput);
       if (remoteContacted) {
         this.dependencies.repository.markReconcilePending(
           userId,
@@ -603,7 +621,6 @@ export class CodespaceOperationService {
         );
         await this.emit("reconcile", this.dependencies.repository.getOwned(userId, operation.id)!);
       } else {
-        if (claimedInput) this.dependencies.transfers?.release(claimedInput);
         this.dependencies.repository.cancelBeforeDispatch(
           userId,
           operation.id,
@@ -755,6 +772,7 @@ export class CodespaceOperationService {
       this.now(),
       this.now() + policy.claimLeaseMs,
       userId,
+      this.dependencies.providerId,
     );
     if (!operation) return false;
     const context = this.dependencies.repository.getContext(operation.userId, operation.id);

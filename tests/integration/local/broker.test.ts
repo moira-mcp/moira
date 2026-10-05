@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "@jest/globals";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, realpath } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { connect, createServer, type Socket } from "node:net";
@@ -8,12 +8,15 @@ import { startBroker } from "../../../packages/local/src/broker.js";
 import { startBrokerTunnel, BROKER_PREFACE } from "../../../packages/local/src/broker-tunnel.js";
 import { NetworkBudget } from "../../../packages/local/src/network-budget.js";
 import { localFixture } from "./fixtures.js";
+import { LocalManager } from "../../../packages/local/src/manager.js";
+import { SbxRuntime } from "../../../packages/local/src/sbx-runtime.js";
+import { LocalRefusal } from "../../../packages/local/src/policy.js";
 
 let root: string;
 let state: PrivateState;
 const closers: Array<() => Promise<void>> = [];
 beforeEach(async () => {
-  root = await mkdtemp(join(tmpdir(), "moira-local-broker-"));
+  root = await realpath(await mkdtemp(join(tmpdir(), "moira-local-broker-")));
   state = await PrivateState.open(root);
 });
 afterEach(async () => {
@@ -44,6 +47,74 @@ function exchange(port: number, bytes: string): Promise<string> {
 }
 
 describe("local broker authority and address boundary", () => {
+  test("broker and fixed tunnel repeat and concurrent close settle the actual listeners", async () => {
+    const fixture = await localFixture(state);
+    const broker = await startBroker({
+      authorize: (header) => fixture.records.authorize(header),
+      budget: new NetworkBudget(state),
+      git: async (_request, response) => {
+        response.end();
+      },
+      onFault: () => {},
+    });
+    const tunnel = await startBrokerTunnel(broker.port);
+    closers.push(broker.close, tunnel.close);
+    await Promise.all([tunnel.close(), tunnel.close(), broker.close(), broker.close()]);
+    await tunnel.close();
+    await broker.close();
+    for (const port of [broker.port, tunnel.port]) {
+      const probe = createServer();
+      await new Promise<void>((resolve, reject) => {
+        probe.once("error", reject);
+        probe.listen(port, "127.0.0.1", resolve);
+      });
+      await new Promise<void>((resolve, reject) =>
+        probe.close((error) => (error ? reject(error) : resolve())),
+      );
+    }
+  });
+
+  test("manager close then refused reopen preserves the initial reason and releases its runner lock", async () => {
+    const fixture = await localFixture(state);
+    let refuse = false;
+    const original = new LocalRefusal(
+      "LOCAL_NETWORK_UNSAFE",
+      "Controlled invalid network baseline",
+    );
+    class ExternalRuntime extends SbxRuntime {
+      override async verifySettings() {
+        if (refuse) throw original;
+      }
+    }
+    const manager = new LocalManager(fixture.records, {
+      storage: async () => {},
+      runtime: (policy) => new ExternalRuntime(policy),
+      guard: async () => ({
+        active: true,
+        stop: async () => {},
+        observe: async () => [],
+        retire: async () => {},
+        remove: async () => {},
+        space: async () => {
+          throw Error("No VM work expected");
+        },
+      }),
+    });
+    closers.push(() => manager.close());
+    await manager.open();
+    await manager.close();
+    refuse = true;
+    await expect(manager.open()).rejects.toBe(original);
+    const release = await state.lock();
+    await release();
+    refuse = false;
+    await manager.open();
+    await manager.close();
+    await manager.close();
+    const unlocked = await state.lock();
+    await unlocked();
+  });
+
   test("fixed-service framing and a valid local grant are both required", async () => {
     const fixture = await localFixture(state);
     let authorized = 0;

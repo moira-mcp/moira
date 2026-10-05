@@ -11,6 +11,10 @@ import type {
 import { effectiveCodespaceLimits } from "./resource-policy.js";
 import { CodespaceResourceError } from "./resource-types.js";
 import { CodespaceTransferRepository } from "./transfer-repository.js";
+import {
+  localRelayPayloadReferenceSchema,
+  type LocalRelayPayloadReference,
+} from "./local-device-types.js";
 
 const TOKEN = /^[A-Za-z0-9_-]{43}$/;
 const OBJECT = /^[a-f0-9]{48}$/;
@@ -290,15 +294,24 @@ export class CodespaceTransferService {
     reserved: CodespaceTransferReservation,
     input: Uint8Array,
   ): Promise<CodespaceTransferHandle> {
+    if (reserved.record.purpose !== "codespace_download") {
+      throw new CodespaceResourceError(
+        "CODESPACE_RESOURCE_INVALID",
+        "Invalid download reservation",
+      );
+    }
+    return this.publishObject(reserved, input);
+  }
+
+  private async publishObject(
+    reserved: CodespaceTransferReservation,
+    input: Uint8Array,
+  ): Promise<CodespaceTransferHandle> {
     const bytes = Buffer.from(input);
     const partial = this.path(reserved.record.objectKey, ".partial");
     const target = this.path(reserved.record.objectKey);
     try {
-      if (
-        reserved.record.purpose !== "codespace_download" ||
-        reserved.record.state !== "reserved" ||
-        bytes.byteLength > reserved.record.declaredSize
-      ) {
+      if (reserved.record.state !== "reserved" || bytes.byteLength > reserved.record.declaredSize) {
         throw new CodespaceResourceError(
           "CODESPACE_RESOURCE_INVALID",
           "Invalid download reservation",
@@ -335,6 +348,157 @@ export class CodespaceTransferService {
       await this.discard(reserved.record);
       throw error;
     }
+  }
+
+  /** Internal relay objects are never published as downloadable bearer references. */
+  relayPartLimit(): number {
+    return effectiveCodespaceLimits(this.dependencies.policy()).transfers.maxFileBytes;
+  }
+
+  async retainRelayPart(
+    userId: string,
+    purpose: "local_relay_input" | "local_relay_output",
+    bytes: Uint8Array,
+  ): Promise<LocalRelayPayloadReference["parts"][number]> {
+    if (purpose !== "local_relay_input" && purpose !== "local_relay_output") {
+      throw new CodespaceResourceError("CODESPACE_RESOURCE_INVALID", "Invalid relay purpose");
+    }
+    const reserved = this.reserve(
+      userId,
+      purpose,
+      "relay.bin",
+      "application/octet-stream",
+      bytes.byteLength,
+    );
+    const handle = await this.publishObject(reserved, bytes);
+    return { transferId: reserved.record.id, sha256: handle.sha256, size: handle.size };
+  }
+
+  async retainRelayPayload(
+    userId: string,
+    purpose: "local_relay_input" | "local_relay_output",
+    input: Uint8Array,
+  ): Promise<LocalRelayPayloadReference> {
+    if (input.byteLength > 24 * 1024 * 1024) {
+      throw new CodespaceResourceError("CODESPACE_POLICY_LIMIT", "Relay payload exceeds its limit");
+    }
+    const bytes = Buffer.from(input);
+    const partSize = this.relayPartLimit();
+    const reference: LocalRelayPayloadReference = {
+      parts: [],
+      size: bytes.length,
+      sha256: createHash("sha256").update(bytes).digest("hex"),
+    };
+    try {
+      for (
+        let offset = 0;
+        offset < bytes.length || reference.parts.length === 0;
+        offset += partSize
+      ) {
+        if (reference.parts.length >= 32) {
+          throw new CodespaceResourceError(
+            "CODESPACE_POLICY_LIMIT",
+            "Relay payload has too many parts",
+          );
+        }
+        reference.parts.push(
+          await this.retainRelayPart(userId, purpose, bytes.subarray(offset, offset + partSize)),
+        );
+      }
+      return localRelayPayloadReferenceSchema.parse(reference);
+    } catch (error) {
+      await this.discardRelayPayload(userId, purpose, reference);
+      throw error;
+    }
+  }
+
+  async readRelayChunk(
+    userId: string,
+    purpose: "local_relay_input" | "local_relay_output",
+    reference: LocalRelayPayloadReference,
+    partIndex: number,
+    offset: number,
+    length: number,
+  ): Promise<Buffer> {
+    const valid = localRelayPayloadReferenceSchema.parse(reference);
+    if (
+      !Number.isSafeInteger(partIndex) ||
+      partIndex < 0 ||
+      partIndex >= valid.parts.length ||
+      !Number.isSafeInteger(offset) ||
+      offset < 0 ||
+      !Number.isSafeInteger(length) ||
+      length < 0 ||
+      length > 256 * 1024
+    ) {
+      throw new CodespaceResourceError("CODESPACE_RESOURCE_INVALID", "Invalid relay byte range");
+    }
+    const part = valid.parts[partIndex];
+    const record = this.relayPart(userId, purpose, part);
+    if (offset > part.size) {
+      throw new CodespaceResourceError("CODESPACE_RESOURCE_INVALID", "Invalid relay byte range");
+    }
+    const bytes = await this.readVerified(record);
+    return bytes.subarray(offset, Math.min(part.size, offset + length));
+  }
+
+  async readRelayPayload(
+    userId: string,
+    purpose: "local_relay_input" | "local_relay_output",
+    reference: LocalRelayPayloadReference,
+  ): Promise<Buffer> {
+    const valid = localRelayPayloadReferenceSchema.parse(reference);
+    const chunks: Buffer[] = [];
+    const hash = createHash("sha256");
+    for (const part of valid.parts) {
+      const bytes = await this.readVerified(this.relayPart(userId, purpose, part));
+      hash.update(bytes);
+      chunks.push(bytes);
+    }
+    if (hash.digest("hex") !== valid.sha256) {
+      throw new CodespaceResourceError(
+        "CODESPACE_RESOURCE_INVALID",
+        "Relay payload digest mismatch",
+      );
+    }
+    return Buffer.concat(chunks, valid.size);
+  }
+
+  async discardRelayPayload(
+    userId: string,
+    purpose: "local_relay_input" | "local_relay_output",
+    reference: LocalRelayPayloadReference,
+  ): Promise<void> {
+    for (const part of reference.parts) {
+      const record = this.dependencies.repository.getReadyOwned(
+        part.transferId,
+        userId,
+        purpose,
+        this.now(),
+      );
+      if (record && record.sha256 === part.sha256 && record.observedSize === part.size)
+        await this.discard(record);
+    }
+  }
+
+  private relayPart(
+    userId: string,
+    purpose: "local_relay_input" | "local_relay_output",
+    part: LocalRelayPayloadReference["parts"][number],
+  ): CodespaceTransferRecord {
+    const record = this.dependencies.repository.getReadyOwned(
+      part.transferId,
+      userId,
+      purpose,
+      this.now(),
+    );
+    if (!record || record.sha256 !== part.sha256 || record.observedSize !== part.size) {
+      throw new CodespaceResourceError(
+        "CODESPACE_RESOURCE_INVALID",
+        "Relay payload is unavailable",
+      );
+    }
+    return record;
   }
 
   async claimInput(

@@ -228,6 +228,33 @@ describe("GitHub Codespaces connector boundary", () => {
     });
   });
 
+  test("returns all binary bytes at the supported four MiB file boundary", async () => {
+    const bytes = Buffer.alloc(4 * 1024 * 1024);
+    for (let index = 0; index < bytes.length; index++) bytes[index] = index % 256;
+    const harness = requestHarness(() => ({
+      value: JSON.stringify({
+        state: "succeeded",
+        value: {
+          action: "download",
+          path: "binary.dat",
+          offset: 0,
+          totalSize: bytes.length,
+          bytesBase64: bytes.toString("base64"),
+          sha256: "a".repeat(64),
+        },
+      }),
+    }));
+    const connector = new GitHubCodespacesConnector(harness.requestImpl);
+    const result = await connector.executeFile(
+      "ghu_topsecret",
+      codespace,
+      { ...fileOperation("download"), stdoutLimitBytes: bytes.length },
+      { action: "download", path: "binary.dat", maxBytes: bytes.length },
+    );
+    expect(result).toMatchObject({ action: "download", totalSize: bytes.length });
+    expect("bytes" in result && Buffer.from(result.bytes).equals(bytes)).toBe(true);
+  });
+
   test("owns and transmits the remote patch-summary byte budget", async () => {
     const harness = requestHarness(() => ({ value: JSON.stringify({ state: "running" }) }));
     const connector = new GitHubCodespacesConnector(harness.requestImpl);

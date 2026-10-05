@@ -21,6 +21,26 @@ const request = () => ({
 });
 
 describe("bounded local subprocess boundary", () => {
+  test("persistent companion streams keep only bounded tails while observing every response", async () => {
+    let observed = 0;
+    const result = await runProcess({
+      ...request(),
+      retainOutput: true,
+      argv: [
+        "-e",
+        "process.stdout.write('x'.repeat(65536)+'end');process.stderr.write('y'.repeat(65536)+'err')",
+      ],
+      onStdout: (chunk) => {
+        observed += chunk.length;
+      },
+    });
+    expect(result.exitCode).toBe(0);
+    expect(observed).toBe(65539);
+    expect(result.stdout.length).toBe(1024);
+    expect(result.stderr.length).toBe(1024);
+    expect(result.stdout.toString().endsWith("end")).toBe(true);
+    expect(result.stderr.toString().endsWith("err")).toBe(true);
+  });
   test("arguments are literal, stdin is separate and the host environment is not inherited", async () => {
     const result = await runProcess({
       ...request(),
@@ -35,7 +55,15 @@ describe("bounded local subprocess boundary", () => {
     const value = JSON.parse(result.stdout.toString());
     expect(value.arg).toBe("$(echo unexpected); & literal");
     expect(value.input).toBe("payload");
-    expect(value.env).toEqual({ PATH: "/usr/bin:/bin", ONLY_ALLOWED: "yes" });
+    // macOS adds this text-encoding metadata even to an explicitly empty child environment.
+    // It is not inherited application configuration; keep the exact assertion for other keys.
+    const { __CF_USER_TEXT_ENCODING, ...environment } = value.env;
+    expect(__CF_USER_TEXT_ENCODING).toEqual(
+      process.platform === "darwin"
+        ? expect.stringMatching(/^0x[0-9A-Fa-f]+:0x[0-9A-Fa-f]+:0x[0-9A-Fa-f]+$/)
+        : undefined,
+    );
+    expect(environment).toEqual({ PATH: "/usr/bin:/bin", ONLY_ALLOWED: "yes" });
   });
   test("output and lifetime are bounded independently of child cooperation", async () => {
     await expect(

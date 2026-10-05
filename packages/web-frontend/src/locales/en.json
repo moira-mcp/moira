@@ -1264,8 +1264,8 @@
           "emptyDescription": "This Moira instance has no notification channels installed."
         },
         "github": {
-          "title": "GitHub & Codespaces",
-          "description": "Connect GitHub so agents can work in cloud codespaces for the repositories you choose.",
+          "title": "Codespaces",
+          "description": "Connect GitHub for cloud codespaces or your computer for locally approved repositories and sandboxes.",
           "helpTitle": "What agents can do in a codespace",
           "helpBody": "A codespace is a cloud development machine for one of your repositories. Agents run commands and edit files in it through Moira's codespace tool; they never receive your GitHub credentials.",
           "helpAuthority": "Inside a codespace an agent has the same access as the codespace user: the repository, the network and any secrets configured for that codespace. Grant only repositories you are comfortable with."
@@ -3714,6 +3714,10 @@
           "title": "GitHub & Codespaces",
           "body": "Connect GitHub and choose repositories so agents can work in cloud codespaces. Limits and automatic pausing are set here too."
         },
+        "local-devices": {
+          "title": "Connect your computer",
+          "body": "Create a one-time pairing here, run the local command and paste the token into its standard input. Approve the repositories and limits on your computer, refresh this list and confirm those grants here. Start the companion after confirmation. Revoke a device here to refuse its further requests without deleting its local files. The codespace form's Provider selector chooses GitHub or a locally approved repository and device."
+        },
         "apps": {
           "title": "Connected apps",
           "body": "AI assistants you have allowed to use Moira. Revoke any you no longer use."
@@ -3742,7 +3746,7 @@
         },
         "codespaces": {
           "title": "Create a codespace",
-          "body": "Pick a repository and branch, then create a personally billed codespace. Agents find it by ID. Stop keeps its files; Delete removes them. Refresh checks GitHub for changes made outside Moira."
+          "body": "Choose GitHub Codespaces in Provider, then pick a repository and branch to create a personally billed codespace. Agents find it by ID. Stop keeps its files; Delete removes them. Refresh checks GitHub for changes made outside Moira."
         },
         "limits": {
           "title": "Know your limits",

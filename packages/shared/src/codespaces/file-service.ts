@@ -501,11 +501,17 @@ export class CodespaceFileService {
         await this.emit("terminal", current);
         return { operation: current, result: null };
       }
+      remoteContacted = true;
       if (claimedInput) {
+        await this.dependencies.transport.retainFileInput?.(
+          credential,
+          codespace,
+          operation,
+          request,
+        );
         await this.dependencies.transfers!.consume(claimedInput);
         claimedInput = null;
       }
-      remoteContacted = true;
       const result = await this.dependencies.transport.executeFile(
         credential,
         codespace,

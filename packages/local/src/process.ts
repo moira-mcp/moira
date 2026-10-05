@@ -7,7 +7,12 @@ export interface ProcessRequest {
   cwd: string;
   env: Readonly<Record<string, string>>;
   stdin?: Uint8Array;
-  timeoutMs: number;
+  /** Owner-bound companions use EOF instead of a command deadline. SDK calls remain finite. */
+  input?: AsyncIterable<Uint8Array>;
+  onStdout?: (chunk: Buffer) => void;
+  /** Persistent fixed companions retain a bounded tail per stream instead of a lifetime budget. */
+  retainOutput?: boolean;
+  timeoutMs: number | null;
   maxBytes: number;
   signal?: AbortSignal;
 }
@@ -47,17 +52,39 @@ export const runProcess: RunProcess = (request) =>
         if ((error as NodeJS.ErrnoException).code !== "ESRCH") child.kill("SIGKILL");
       }
     };
-    const timer = setTimeout(
-      () => stop("LOCAL_COMMAND_TIMEOUT", "Local runtime did not answer in time."),
-      request.timeoutMs,
-    );
+    const timer =
+      request.timeoutMs === null
+        ? undefined
+        : setTimeout(
+            () => stop("LOCAL_COMMAND_TIMEOUT", "Local runtime did not answer in time."),
+            request.timeoutMs,
+          );
     const cancel = () => stop("LOCAL_CANCELLED", "Local operation was cancelled.");
     request.signal?.addEventListener("abort", cancel, { once: true });
     const collect = (chunks: Buffer[]) => (chunk: Buffer) => {
       bytes += chunk.length;
-      if (bytes > request.maxBytes) {
+      if (!request.retainOutput && bytes > request.maxBytes) {
         stop("LOCAL_OUTPUT_LIMIT", "Local runtime output exceeded its bound.");
-      } else chunks.push(Buffer.from(chunk));
+      } else {
+        chunks.push(Buffer.from(chunk));
+        if (request.retainOutput) {
+          let retained = chunks.reduce((total, bytes) => total + bytes.length, 0);
+          while (retained > request.maxBytes) {
+            const first = chunks[0];
+            const drop = Math.min(first.length, retained - request.maxBytes);
+            if (drop === first.length) chunks.shift();
+            else chunks[0] = first.subarray(drop);
+            retained -= drop;
+          }
+        }
+        if (chunks === stdout && request.onStdout) {
+          try {
+            request.onStdout(Buffer.from(chunk));
+          } catch {
+            stop("LOCAL_OUTPUT_INVALID", "The local companion returned invalid output.");
+          }
+        }
+      }
     };
     child.stdout.on("data", collect(stdout));
     child.stderr.on("data", collect(stderr));
@@ -85,5 +112,23 @@ export const runProcess: RunProcess = (request) =>
           exitCode: code ?? 1,
         });
     });
-    child.stdin.end(request.stdin);
+    if (request.input) {
+      const input = request.input;
+      void (async () => {
+        try {
+          if (request.stdin) throw new Error("Conflicting input modes");
+          for await (const chunk of input) {
+            if (child.stdin.destroyed) break;
+            if (!child.stdin.write(chunk))
+              await new Promise<void>((done) => {
+                child.stdin.once("drain", done);
+                child.stdin.once("close", done);
+              });
+          }
+          child.stdin.end();
+        } catch {
+          stop("LOCAL_INPUT_FAILED", "Could not deliver companion input.");
+        }
+      })();
+    } else child.stdin.end(request.stdin);
   });

@@ -30,6 +30,7 @@ packages/
 ├── web-backend/       # Express API for workflow management
 ├── web-frontend/      # React UI for workflow visualization
 ├── shared/            # Database (Drizzle), Better Auth, logging, config
+├── local/             # User-owned companion and isolated Docker Sandboxes runtime
 └── docs/              # Astro 5 + Starlight documentation site (EN + RU)
 workflows/             # Bundled workflow catalog (workflows/production/public/)
 config/                # Dockerfile, nginx, supervisord, prompts
@@ -304,13 +305,28 @@ interface IGraphStorage {
 ### MCP Tools (short names)
 
 `list`, `start`, `step`, `manage`, `session`, `settings`, `token`, `notes`,
-`artifacts`, `communication`, `lock`, `help`, plus `codespace`, the one cloud-codespace
-tool parameterized by `action` (lifecycle, exec, files, native upload/download; see
+`artifacts`, `communication`, `lock`, `help`, plus `codespace`, the provider-neutral
+codespace tool parameterized by `action` (lifecycle, exec, files, native upload/download; see
 `docs/CODESPACES.md`).
 The HTTP transport is
 `StreamableHTTPServerTransport` (stateless). See `docs/SYSTEM.md` for the full
 tool signatures and request/response shapes, and `packages/mcp-server/src/server.ts`
 for the registrations.
+
+### Local codespaces
+
+The local provider uses the existing resource, operation, file and private-transfer
+services and shared guest supervisor. The companion runs on the user's machine;
+the server communicates through its authenticated outbound relay and cannot choose
+host commands or expand local repository grants and work leases. GitHub and local
+resources retain their provider identity for subsequent lifecycle calls.
+
+Build the companion with `npm run local:build`; invoke it through `npm run local --`
+from this checkout. The package is private and has no published global installer.
+Installation, supported-host constraints, pairing, recovery and security boundaries
+are documented in [Codespaces](docs/CODESPACES.md). Runtime fixtures and ordinary
+containers do not prove microVM isolation; retain the distinction between actual
+SDK observations and unsupported external probes when changing this provider.
 
 ## Node Types
 

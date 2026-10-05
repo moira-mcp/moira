@@ -1,6 +1,7 @@
 /** @jest-environment jsdom */
 
 import React from "react";
+import axios from "axios";
 import { afterEach, beforeEach, describe, expect, jest, test } from "@jest/globals";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import "@testing-library/jest-dom/jest-globals";
@@ -14,7 +15,7 @@ import i18n from "../../../packages/web-frontend/src/i18n";
 import { GitHubCodespacesProvider } from "../../../packages/web-frontend/src/pages/settings/GitHubCodespacesData";
 import { GitHubCodespaceManagement } from "../../../packages/web-frontend/src/pages/settings/GitHubCodespaceManagement";
 import { GitHubCodespaceSettings } from "../../../packages/web-frontend/src/pages/settings/GitHubCodespaceSettings";
-import { apiClient } from "../../../packages/web-frontend/src/services/api-client";
+import { apiClient, MoiraApiClient } from "../../../packages/web-frontend/src/services/api-client";
 import type { CodespaceManagementView } from "../../../packages/web-frontend/src/types/api-types";
 
 const CODESPACE_ID = "00000000-0000-4000-8000-000000000001";
@@ -120,6 +121,95 @@ function renderSettings(content: React.ReactNode) {
 }
 
 describe("GitHub Codespaces Settings", () => {
+  test("local provider creation remains available without GitHub and identifies two devices granting the same repository", async () => {
+    const first = "local:11111111-1111-4111-8111-111111111111:33333333-3333-4333-8333-333333333333";
+    const second =
+      "local:22222222-2222-4222-8222-222222222222:33333333-3333-4333-8333-333333333333";
+    const repositories = [
+      {
+        repository_id: first,
+        name: "owner/repository",
+        private: true,
+        provider: "local-sandboxes",
+        device_label: "First laptop",
+      },
+      {
+        repository_id: second,
+        name: "owner/repository",
+        private: true,
+        provider: "local-sandboxes",
+        device_label: "Second laptop",
+      },
+    ];
+    const disconnected = { ...connection, state: "disconnected" as const };
+    jest.mocked(apiClient.getGitHubCodespaces).mockResolvedValue({
+      ...management,
+      connection: disconnected,
+      repositories,
+      providers: [
+        {
+          provider: "github-codespaces",
+          readiness: management.readiness,
+          connection: disconnected,
+          repositories: [],
+          limits: management.limits,
+        },
+        {
+          provider: "local-sandboxes",
+          readiness: { ...management.readiness, provider: "local-sandboxes" },
+          connection,
+          repositories,
+          limits: management.limits,
+        },
+      ],
+    });
+    const originalAdapter = axios.defaults.adapter;
+    const originalScroll = HTMLElement.prototype.scrollIntoView;
+    HTMLElement.prototype.scrollIntoView = () => undefined;
+    const bodies: unknown[] = [];
+    axios.defaults.adapter = async (config) => {
+      bodies.push(JSON.parse(config.data));
+      return {
+        config,
+        status: 200,
+        statusText: "OK",
+        headers: {},
+        data: {
+          success: true,
+          data: { codespace: { ...management.codespaces[0], provider: "local-sandboxes" } },
+        },
+      };
+    };
+    const client = new MoiraApiClient();
+    jest
+      .spyOn(apiClient, "createGitHubCodespace")
+      .mockImplementation(client.createGitHubCodespace.bind(client));
+    try {
+      renderSettings(<GitHubCodespaceManagement />);
+      const provider = await screen.findByTestId("codespace-provider");
+      fireEvent.keyDown(provider, { key: "ArrowDown" });
+      fireEvent.click(await screen.findByRole("option", { name: "Local Docker Sandboxes" }));
+      const repository = await screen.findByTestId("github-codespace-repository");
+      expect(repository).toHaveTextContent("First laptop");
+      fireEvent.keyDown(repository, { key: "ArrowDown" });
+      fireEvent.click(
+        await screen.findByRole("option", { name: "owner/repository · Second laptop" }),
+      );
+      fireEvent.change(screen.getByTestId("github-codespace-ref"), {
+        target: { value: "feature/local" },
+      });
+      fireEvent.click(screen.getByTestId("github-codespace-create-submit"));
+      await waitFor(() =>
+        expect(bodies).toEqual([{ repository_id: second, ref: "feature/local" }]),
+      );
+      expect(
+        screen.queryByText(/Codespaces are billed to your personal GitHub account/),
+      ).toBeNull();
+    } finally {
+      axios.defaults.adapter = originalAdapter;
+      HTMLElement.prototype.scrollIntoView = originalScroll;
+    }
+  });
   test("Refresh uses the provider sync response and removes an externally deleted row", async () => {
     renderSettings(<GitHubCodespaceManagement />);
     const card = await screen.findByTestId("github-codespace-management");

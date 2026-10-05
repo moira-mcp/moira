@@ -1,15 +1,33 @@
 import { afterEach, beforeEach, describe, expect, test } from "@jest/globals";
-import { mkdtemp, rm, writeFile, chmod, symlink, readFile } from "node:fs/promises";
+import { spawn, execFile } from "node:child_process";
+import { promisify } from "node:util";
+import { once } from "node:events";
+import { build } from "esbuild";
+import {
+  mkdtemp,
+  rm,
+  writeFile,
+  chmod,
+  symlink,
+  readFile,
+  realpath,
+  copyFile,
+  link,
+  lstat,
+} from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
 import { PrivateState } from "../../../packages/local/src/private-state.js";
 import { RequestJournal } from "../../../packages/local/src/journal.js";
+import { localFixture } from "./fixtures.js";
+
+const execute = promisify(execFile);
 
 let root: string;
 let state: PrivateState;
 beforeEach(async () => {
-  root = await mkdtemp(join(tmpdir(), "moira-local-state-"));
+  root = await realpath(await mkdtemp(join(tmpdir(), "moira-local-state-")));
   state = await PrivateState.open(root);
 });
 afterEach(async () => {
@@ -17,6 +35,190 @@ afterEach(async () => {
 });
 
 describe("private local state", () => {
+  test("shipping device recovery after a dead real lock owner retains journals and permits a later owner", async () => {
+    const local = await localFixture(state);
+    local.policy.enabled = false;
+    await state.write("policy.json", local.policy);
+    const module = join(root, "private-state.mjs");
+    await build({
+      entryPoints: ["packages/local/src/private-state.ts"],
+      outfile: module,
+      bundle: true,
+      platform: "node",
+      format: "esm",
+      target: "node24",
+    });
+    await copyFile(
+      "packages/local/dist/runtime-control-helper",
+      join(root, "runtime-control-helper"),
+    );
+    const owner = spawn(
+      process.execPath,
+      [
+        "--input-type=module",
+        "-e",
+        `
+      import {PrivateState} from ${JSON.stringify(`file://${module}`)};
+      const state=await PrivateState.open(${JSON.stringify(root)});
+      await state.lock();process.stdout.write('ready');process.stdin.resume();
+    `,
+      ],
+      { stdio: ["pipe", "pipe", "pipe"] },
+    );
+    try {
+      await Promise.race([
+        once(owner.stdout, "data"),
+        once(owner, "close").then(() => {
+          throw Error("Owner failed before ready");
+        }),
+      ]);
+      const closed = once(owner, "close");
+      owner.kill("SIGKILL");
+      await closed;
+      const job = { unknown: true, marker: "own-unknown-job" };
+      await state.write("job-unknown.json", job);
+      const spaces = await readFile(join(root, `space-${local.space.id}.json`));
+      const result = await execute(process.execPath, [
+        "packages/local/dist/cli.js",
+        "recover",
+        "--confirm",
+        "--state",
+        root,
+      ]);
+      expect(JSON.parse(result.stdout)).toMatchObject({
+        recovered: true,
+        enabled: false,
+        priorJobsRetained: true,
+        dataPreserved: true,
+      });
+      expect(await state.read("job-unknown.json", (value) => value)).toEqual(job);
+      expect((await readFile(join(root, `space-${local.space.id}.json`))).equals(spaces)).toBe(
+        true,
+      );
+      expect(await state.read("runtime-owner.json", (value) => value)).toMatchObject({
+        settled: true,
+      });
+      const release = await state.lock();
+      await release();
+    } finally {
+      if (owner.exitCode === null && owner.signalCode === null) {
+        const closed = once(owner, "close");
+        owner.kill("SIGKILL");
+        await closed;
+      }
+    }
+  });
+  test("explicit marker recovery refuses a live or unknown owner without changing bytes", async () => {
+    await writeFile(join(root, "runner.lock"), String(process.pid), { mode: 0o600 });
+    await expect(state.lock({ recoverStale: true })).rejects.toThrow("Another companion owns");
+    expect(await readFile(join(root, "runner.lock"), "utf8")).toBe(String(process.pid));
+    for (const marker of ["", "0", "no-pid", "2147483648", Buffer.from([0xb1, 0xb2])]) {
+      await writeFile(join(root, "runner.lock"), marker, { mode: 0o600 });
+      await expect(state.lock({ recoverStale: true })).rejects.toThrow(/Unsafe|Unknown/);
+      expect(await readFile(join(root, "runner.lock"))).toEqual(Buffer.from(marker));
+    }
+  });
+  test.each(["symlink", "hardlink", "permissions"] as const)(
+    "explicit recovery refuses unsafe %s marker",
+    async (kind) => {
+      const target = join(root, "outside");
+      await writeFile(target, "1", { mode: 0o600 });
+      if (kind === "symlink") await symlink(target, join(root, "runner.lock"));
+      else if (kind === "hardlink") await link(target, join(root, "runner.lock"));
+      else await writeFile(join(root, "runner.lock"), "1", { mode: 0o644 });
+      await expect(state.lock({ recoverStale: true })).rejects.toThrow(/Unsafe/);
+      expect(await readFile(target, "utf8")).toBe("1");
+    },
+  );
+  test.each(["runner.lock", "runner-gate.lock"])(
+    "recovery refuses unsafe FIFO %s without opening a stream",
+    async (name) => {
+      await execute("/usr/bin/mkfifo", [join(root, name)]);
+      await chmod(join(root, name), 0o600);
+      await expect(state.lock({ recoverStale: true })).rejects.toThrow(
+        /Unsafe|private kernel lock/,
+      );
+      expect((await lstat(join(root, name))).isFIFO()).toBe(true);
+    },
+  );
+  test("concurrent explicit recovery never displaces the winning owner or changes the gate inode", async () => {
+    const dead = spawn(process.execPath, ["-e", ""]);
+    await once(dead, "close");
+    await writeFile(join(root, "runner.lock"), String(dead.pid), { mode: 0o600 });
+    const results = await Promise.allSettled([
+      state.lock({ recoverStale: true }),
+      state.lock({ recoverStale: true }),
+    ]);
+    expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+    expect(results.filter((result) => result.status === "rejected")).toHaveLength(1);
+    const gate = await lstat(join(root, "runner-gate.lock"));
+    expect(await readFile(join(root, "runner.lock"), "utf8")).toBe(String(process.pid));
+    for (const result of results) if (result.status === "fulfilled") await result.value();
+    const release = await state.lock();
+    const nextGate = await lstat(join(root, "runner-gate.lock"));
+    expect([nextGate.dev, nextGate.ino]).toEqual([gate.dev, gate.ino]);
+    await release();
+  });
+  test("explicit recovery reclaims a SIGKILL owner's marker without replaying its unknown job", async () => {
+    const module = join(root, "private-state.mjs");
+    await build({
+      entryPoints: ["packages/local/src/private-state.ts"],
+      outfile: module,
+      bundle: true,
+      platform: "node",
+      format: "esm",
+      target: "node24",
+    });
+    await copyFile(
+      "packages/local/dist/runtime-control-helper",
+      join(root, "runtime-control-helper"),
+    );
+    const child = spawn(
+      process.execPath,
+      [
+        "--input-type=module",
+        "-e",
+        `
+      import {PrivateState} from ${JSON.stringify(`file://${module}`)};
+      const state=await PrivateState.open(${JSON.stringify(root)});
+      await state.lock(); process.stdout.write('ready'); process.stdin.resume();
+    `,
+      ],
+      { stdio: ["pipe", "pipe", "pipe"] },
+    );
+    try {
+      await Promise.race([
+        once(child.stdout, "data"),
+        once(child, "close").then(() => {
+          throw new Error("Lock owner exited before readiness");
+        }),
+      ]);
+      const closed = once(child, "close");
+      child.kill("SIGKILL");
+      await closed;
+      const job = { unknown: true, digest: "a".repeat(64) };
+      await state.write("job-unknown.json", job);
+      await expect(state.lock()).rejects.toThrow("Another companion owns");
+      const release = await state.lock({ recoverStale: true });
+      try {
+        expect(await readFile(join(root, "runner.lock"), "utf8")).toBe(String(process.pid));
+        expect(await state.read("job-unknown.json", (value) => value)).toEqual(job);
+        await expect(state.lock()).rejects.toThrow("Another companion owns");
+      } finally {
+        await release();
+      }
+      const next = await state.lock();
+      await release();
+      await expect(state.lock()).rejects.toThrow("Another companion owns");
+      await next();
+    } finally {
+      if (child.exitCode === null && child.signalCode === null) {
+        const closed = once(child, "close");
+        child.kill("SIGKILL");
+        await closed;
+      }
+    }
+  });
   test("persists complete large documents atomically without following links", async () => {
     const value = { data: "x".repeat(1024 * 1024) };
     await state.write("large.json", value);

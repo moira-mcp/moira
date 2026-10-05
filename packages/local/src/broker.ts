@@ -186,13 +186,14 @@ export async function startBroker(options: BrokerOptions, port = 0) {
   });
   const address = server.address();
   if (!address || typeof address === "string") throw new Error("Broker did not bind loopback");
+  let closing: Promise<void> | undefined;
   return {
     port: address.port,
     close: () =>
-      new Promise<void>((resolve, reject) => {
+      (closing ??= new Promise<void>((resolve, reject) => {
         clearInterval(sweep);
         for (const socket of sockets) socket.destroy();
         server.close((error) => (error ? reject(error) : resolve()));
-      }),
+      })),
   };
 }

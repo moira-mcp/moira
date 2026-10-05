@@ -298,6 +298,29 @@ The engine logs a warning naming the residual placeholder and the `executionId`.
 2. Ensure an upstream node writes the variable (via `globalInputs`) before its first use.
 3. Never echo `{{...}}` into data you return from `step()` — keep templates only in static node fields.
 
+## Local codespaces
+
+Use **Settings → Codespaces → Local devices** and the companion's `status` to distinguish pending
+browser approval, revocation, an offline computer and an expired local lease. An offline row is
+not proof that the computer or its VM has physically stopped. Renew a lease on the computer with
+`npm run local -- enable --hours 8`, then run the confirmed companion in the foreground with
+`npm run local -- run`. A revoked device requires a new pairing and browser confirmation.
+
+`doctor` requires an enabled, unexpired lease and checks prerequisites, not live VM isolation.
+Stop the foreground companion before commands that require its runner lock. Unsupported SDK
+versions, Linux runtime ownership, unsafe mounts/settings or unknown identity refuse work;
+do not reset the personal Docker profile, substitute an ordinary directory for bounded storage,
+or relax network policy. For Docker sign-in use `npm run local -- login`. An unreadable SDK store
+can be recovered explicitly with `login --new-store` only after local disable and owned shutdown;
+existing stores are preserved.
+
+`LOCAL_GUEST_SETTLEMENT_UNKNOWN` means the previous guest effect cannot be safely retried.
+After confirmed physical stop, `npm run local -- recover SPACE_ID --confirm` acknowledges that
+outcome without replaying prior jobs. `npm run local -- recover --confirm` is the separate
+disabled-device orphan-shutdown acknowledgement. Neither deletes codespace data or authorizes
+adoption by SDK name. If shutdown remains pending or identity is unknown, retain the records
+and resolve that refusal before enabling more work. See [local setup](/docs/getting-started/self-hosting/#connect-local-codespaces).
+
 ## Recovery Scenarios
 
 ### Scenario: Resume After Interruption

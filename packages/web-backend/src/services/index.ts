@@ -12,4 +12,8 @@ export { getCodespaceTransferService } from "./codespace-transfer-service.js";
 export {
   getCodespaceObservabilityService,
   getCodespaceSetupGuidance,
+  getCodespaceProviderServices,
+  getCodespaceProviderBundles,
+  selectCodespaceProviderServices,
+  getLocalDeviceService,
 } from "./codespace-services.js";

@@ -22,9 +22,20 @@ export const spaceSchema = z
       .nullable(),
     brokerToken: z.string().regex(/^[a-f0-9]{64}$/),
     generation: z.number().int().positive(),
+    recoveryGeneration: z.number().int().positive().optional(),
     failure: z.string().max(128).nullable(),
   })
-  .strict();
+  .strict()
+  .superRefine((space, context) => {
+    if (
+      space.recoveryGeneration !== undefined &&
+      (!space.runtimeId ||
+        space.recoveryGeneration > space.generation ||
+        (space.recoveryGeneration === space.generation &&
+          (space.failure !== null || space.desiredState !== "stopped")))
+    )
+      context.addIssue({ code: "custom", message: "Invalid local recovery acknowledgement." });
+  });
 export type LocalSpace = z.infer<typeof spaceSchema>;
 
 export class LocalRecords {

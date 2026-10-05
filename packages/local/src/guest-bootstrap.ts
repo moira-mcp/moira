@@ -1,10 +1,12 @@
 import { configureGuestDocker } from "./guest-docker.js";
-import { mkdir, readFile, writeFile, access } from "node:fs/promises";
+import { mkdir, readFile, writeFile, access, lstat, realpath, rename } from "node:fs/promises";
+import { randomBytes } from "node:crypto";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
 import { connect } from "node:net";
+import type { SupervisorRepositoryBinding } from "../../web-backend/src/services/github-codespaces-remote-supervisor.mjs";
 
 const execute = promisify(execFile);
 export interface GuestBootstrap {
@@ -15,6 +17,47 @@ export interface GuestBootstrap {
   repository: string;
   ref: string;
   clone: boolean;
+}
+
+/** Records the repository the local bootstrap owns; job messages cannot select this binding. */
+export async function bindGuestRepository(
+  input: Pick<GuestBootstrap, "repository" | "spaceId" | "brokerToken">,
+): Promise<SupervisorRepositoryBinding> {
+  if (
+    !/^[A-Za-z0-9][A-Za-z0-9_.-]{0,99}\/[A-Za-z0-9][A-Za-z0-9_.-]{0,99}$/.test(input.repository) ||
+    !/^[a-f0-9-]{36}$/.test(input.spaceId) ||
+    !/^[a-f0-9]{64}$/.test(input.brokerToken)
+  ) {
+    throw new Error("Invalid local repository binding");
+  }
+  const root = `/workspaces/${input.repository.split("/")[1]}`;
+  const metadata = await lstat(root);
+  if (
+    !metadata.isDirectory() ||
+    metadata.isSymbolicLink() ||
+    metadata.uid === 0 ||
+    (await realpath(root)) !== root
+  )
+    throw new Error("Invalid local repository root");
+  const origin = `http://${input.spaceId}:${input.brokerToken}@127.0.0.1:3437/git/${input.repository}.git`;
+  const observed = await execute("git", ["-C", root, "remote", "get-url", "origin"], {
+    timeout: 10_000,
+    maxBuffer: 64 * 1024,
+  });
+  if (observed.stdout.trim() !== origin) throw new Error("Local repository origin changed");
+  const binding = {
+    repositoryFullName: input.repository,
+    root,
+    origin,
+    dev: metadata.dev,
+    ino: metadata.ino,
+  };
+  const directory = join(homedir(), ".local", "share", "moira-local");
+  await mkdir(directory, { recursive: true, mode: 0o700 });
+  const temporary = join(directory, `.repository-${randomBytes(16).toString("hex")}.json`);
+  await writeFile(temporary, JSON.stringify(binding), { mode: 0o600, flag: "wx" });
+  await rename(temporary, join(directory, "repository.json"));
+  return binding;
 }
 
 /** This module is shipped as data and evaluated only by node inside the owned VM. */
@@ -141,5 +184,6 @@ export async function bootstrap(input: GuestBootstrap) {
     });
   }
   await access(root);
+  await bindGuestRepository(input);
   return { repositoryRoot: root, proxyReady: true };
 }

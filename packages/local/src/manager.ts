@@ -11,26 +11,25 @@ import {
 } from "./policy.js";
 import { SbxRuntime, type SandboxIdentity } from "./sbx-runtime.js";
 import { admitStorage } from "./storage.js";
-import { startGuard, type SpaceGuard, type StartGuard } from "./guard.js";
+import { startGuard, type SpaceGuard, type StartGuard, type DeviceGuard } from "./guard.js";
 import { startBroker } from "./broker.js";
 import { startBrokerTunnel } from "./broker-tunnel.js";
 import { gitBroker } from "./git-broker.js";
 import { NetworkBudget } from "./network-budget.js";
-import { guestAssets, installGuest, type GuestAssets } from "./assets.js";
 
 export interface ManagerDependencies {
+  brokerPorts?: { http: number; tunnel: number };
   runtime?: (policy: LocalPolicy) => SbxRuntime;
   storage?: typeof admitStorage;
   guard?: StartGuard;
-  assets?: () => Promise<GuestAssets>;
   now?: () => number;
   onFault?: (error: unknown) => void;
 }
 const brokerState = z.object({ port: z.number().int().min(1024).max(65535) }).strict();
-const envelope = z.object({ ok: z.literal(true), result: z.unknown() }).strict();
 
 export class LocalManager {
   private readonly guards = new Map<string, SpaceGuard>();
+  private device?: DeviceGuard;
   private broker?: Awaited<ReturnType<typeof startBroker>>;
   private tunnel?: Awaited<ReturnType<typeof startBrokerTunnel>>;
   private releaseLock?: () => Promise<void>;
@@ -59,43 +58,84 @@ export class LocalManager {
     return result;
   }
 
+  private async owner(): Promise<DeviceGuard> {
+    if (!this.device?.active) {
+      await this.device?.stop();
+      this.device = await (this.dependencies.guard ?? startGuard)(this.records.state.root);
+    }
+    return this.device;
+  }
+
   async open(): Promise<void> {
     this.releaseLock = await this.records.state.lock();
     try {
       const policy = await this.records.policy();
       await (this.dependencies.storage ?? admitStorage)(policy);
-      await this.runtime(policy).verifySettings();
+      await this.owner();
+      if (this.dependencies.runtime) await this.runtime(policy).verifySettings();
       const onFault = this.dependencies.onFault ?? (() => undefined);
       const budget = new NetworkBudget(this.records.state);
-      this.broker = await startBroker({
-        authorize: (credential) => this.records.authorize(credential, this.now()),
-        budget,
-        git: gitBroker(budget, onFault),
-        onFault,
-      });
+      this.broker = await startBroker(
+        {
+          authorize: (credential) => this.records.authorize(credential, this.now()),
+          budget,
+          git: gitBroker(budget, onFault),
+          onFault,
+        },
+        this.dependencies.brokerPorts?.http,
+      );
       const saved = await this.records.state.read("broker.json", brokerState.parse);
-      this.tunnel = await startBrokerTunnel(this.broker.port, saved?.port);
+      this.tunnel = await startBrokerTunnel(
+        this.broker.port,
+        saved?.port ?? this.dependencies.brokerPorts?.tunnel,
+      );
       await this.records.state.write("broker.json", { port: this.tunnel.port });
     } catch (error) {
-      await this.close();
+      try {
+        await this.close();
+      } catch (cleanup) {
+        throw new AggregateError([error, cleanup], "Local startup and cleanup failed", {
+          cause: error,
+        });
+      }
       throw error;
     }
   }
 
   async close(): Promise<void> {
     const errors: unknown[] = [];
-    for (const guard of this.guards.values()) {
+    for (const [id, guard] of this.guards) {
       try {
         await guard.stop();
+        this.guards.delete(id);
       } catch (error) {
         errors.push(error);
       }
     }
-    this.guards.clear();
-    await this.tunnel?.close();
-    await this.broker?.close();
-    await this.releaseLock?.();
-    this.releaseLock = undefined;
+    try {
+      await this.device?.stop();
+      this.device = undefined;
+    } catch (error) {
+      errors.push(error);
+    }
+    try {
+      await this.tunnel?.close();
+      this.tunnel = undefined;
+    } catch (error) {
+      errors.push(error);
+    }
+    try {
+      await this.broker?.close();
+      this.broker = undefined;
+    } catch (error) {
+      errors.push(error);
+    }
+    try {
+      await this.releaseLock?.();
+      this.releaseLock = undefined;
+    } catch (error) {
+      errors.push(error);
+    }
     if (errors.length)
       throw new AggregateError(errors, "Some local sandboxes could not be confirmed stopped");
   }
@@ -121,10 +161,10 @@ export class LocalManager {
       const spaces = await this.records.list();
       const duplicate = spaces.find((space) => space.operationMarker === operationMarker);
       if (duplicate) {
-        if (duplicate.repositoryId !== repositoryId)
+        if (duplicate.repositoryId !== repositoryId || duplicate.ref !== ref)
           throw new LocalRefusal(
             "LOCAL_REPLAY_CONFLICT",
-            "Creation marker belongs to another repository.",
+            "Creation marker belongs to another repository or revision.",
           );
         return duplicate;
       }
@@ -158,75 +198,36 @@ export class LocalManager {
         failure: null,
       };
       await this.records.put(space);
-      const runtime = this.runtime(policy);
-      try {
-        const identity = await runtime.create(space.name);
-        space.runtimeId = identity.runtimeId;
-        await this.records.put(space);
-        return await this.prepare(space, true);
-      } catch (error) {
-        space.phase = "failed";
-        space.failure = error instanceof LocalRefusal ? error.code : "LOCAL_CREATE_FAILED";
-        space.desiredState = "stopped";
-        await this.records.put(space);
-        if (space.runtimeId) await runtime.stop(this.identity(space));
-        throw error;
-      }
+      // Keep the pending intent if independent ownership cannot be established; no SDK
+      // creation occurs before that owner, and the parent never overwrites its outcome.
+      return this.prepare(space, true);
     });
   }
 
-  private async prepare(space: LocalSpace, clone: boolean): Promise<LocalSpace> {
+  private async prepare(space: LocalSpace, clone: boolean, activate = false): Promise<LocalSpace> {
     if (!this.tunnel)
       throw new LocalRefusal("LOCAL_NOT_RUNNING", "Start the local companion first.");
-    const policy = await this.records.policy();
-    const repository = requireLocalGrant(policy, space.repositoryId, this.now());
-    const runtime = this.runtime(policy);
-    const identity = this.identity(space);
-    await runtime.start(identity);
-    await runtime.verifySettings();
-    await runtime.verifyBoundary(identity);
-    if (space.networkPolicy) await this.boundary(space, runtime);
-    else {
-      space.networkPolicy = createHash("sha256")
-        .update(await runtime.configureBroker(identity, this.tunnel.port))
-        .digest("hex");
-      await this.records.put(space);
-    }
-    const assets = await (this.dependencies.assets ?? guestAssets)();
-    const guard = await (this.dependencies.guard ?? startGuard)(this.records.state.root, space.id);
+    if (clone !== (space.phase === "creating"))
+      throw new LocalRefusal("LOCAL_SETUP_INCOMPLETE", "The local setup phase changed.");
+    const guard = await (await this.owner()).space(space.id, activate);
     this.guards.set(space.id, guard);
     try {
-      await installGuest(runtime, identity, assets);
-      const input = {
-        kind: "bootstrap",
-        request: {
-          proxySource: assets.proxy,
-          hostPort: this.tunnel.port,
-          spaceId: space.id,
-          brokerToken: space.brokerToken,
-          repository: repository.fullName,
-          ref: space.ref,
-          clone,
-        },
-      };
-      const output = await runtime.guest(
-        identity,
-        ["node", "/tmp/moira-local-runtime/worker.mjs"],
-        Buffer.from(JSON.stringify(input)),
-        Math.min(300_000, policy.leaseUntil - this.now()),
-      );
-      envelope.parse(JSON.parse(output.toString("utf8")));
-      requireLocalGrant(await this.records.policy(), space.repositoryId, this.now());
-      space.phase = "usable";
-      space.lastStartedAt = this.now();
-      space.failure = null;
-      await this.records.put(space);
-      return space;
+      await guard.prepare();
+      return await this.require(space.id);
     } catch (error) {
       await guard.stop();
       this.guards.delete(space.id);
       throw error;
     }
+  }
+
+  async operation(id: string, request: unknown): Promise<Buffer> {
+    let guard = this.guards.get(id);
+    if (!guard?.active) {
+      guard = await (await this.owner()).space(id);
+      this.guards.set(id, guard);
+    }
+    return guard.operation(request);
   }
 
   async boundary(space: LocalSpace, runtime: SbxRuntime): Promise<void> {
@@ -243,6 +244,51 @@ export class LocalManager {
     }
   }
 
+  /** Hold the existing lifecycle boundary until this guest contact has settled. */
+  async dispatchGuest<T>(
+    id: string,
+    dispatch: (space: LocalSpace, policy: LocalPolicy) => Promise<T>,
+  ): Promise<T> {
+    return this.serial(async () => {
+      const space = await this.require(id);
+      const policy = await this.records.policy();
+      requireLocalGrant(policy, space.repositoryId, this.now());
+      if (space.desiredState !== "running" || space.phase !== "usable") {
+        throw new LocalRefusal(
+          "LOCAL_NOT_RUNNING",
+          "Start this local sandbox before requesting work.",
+        );
+      }
+      if (this.dependencies.runtime) {
+        const runtime = this.runtime(policy);
+        if ((await runtime.exact(this.identity(space)))?.status !== "running")
+          throw new LocalRefusal("LOCAL_NOT_RUNNING", "The owned sandbox is stopped.");
+        await this.boundary(space, runtime);
+      } else {
+        let guard = this.guards.get(id);
+        if (!guard?.active) {
+          guard = await (await this.owner()).space(id);
+          this.guards.set(id, guard);
+        }
+        await guard.validate();
+      }
+      // Local configuration and the independent guard can change while runtime checks await.
+      const current = await this.require(id);
+      if (
+        current.desiredState !== "running" ||
+        current.phase !== "usable" ||
+        current.generation !== space.generation ||
+        current.runtimeId !== space.runtimeId
+      )
+        throw new LocalRefusal("LOCAL_NOT_RUNNING", "The local sandbox changed before dispatch.");
+      const currentPolicy = await this.records.policy();
+      requireLocalGrant(currentPolicy, current.repositoryId, this.now());
+      if (JSON.stringify(currentPolicy.runtime) !== JSON.stringify(policy.runtime))
+        throw new LocalRefusal("LOCAL_RUNTIME_CHANGED", "The locally approved runtime changed.");
+      return dispatch(current, currentPolicy);
+    });
+  }
+
   async start(id: string): Promise<LocalSpace> {
     return this.serial(async () => {
       const space = await this.require(id);
@@ -255,27 +301,36 @@ export class LocalManager {
           "This sandbox was not fully initialized; inspect it locally.",
         );
       }
-      if (this.guards.has(id)) return space;
-      space.desiredState = "running";
-      space.generation++;
-      await this.records.put(space);
-      try {
-        return await this.prepare(space, false);
-      } catch (error) {
-        space.desiredState = "stopped";
-        await this.records.put(space);
-        await this.runtime(policy).stop(this.identity(space));
-        throw error;
+      if (this.guards.get(id)?.active) {
+        if (space.desiredState !== "running")
+          throw new LocalRefusal(
+            "LOCAL_STOP_PENDING",
+            "The independent owner is completing local shutdown.",
+          );
+        return space;
       }
+      this.guards.delete(id);
+      return this.prepare(space, false, true);
     });
   }
 
   async stop(id: string): Promise<LocalSpace> {
     return this.serial(async () => {
       const space = await this.require(id);
+      const guard =
+        this.guards.get(id) ??
+        (space.desiredState === "running" ? await (await this.owner()).space(id) : undefined);
+      if (guard) {
+        await guard.stop();
+        this.guards.delete(id);
+        return await this.require(id);
+      }
+      if (!this.dependencies.runtime) {
+        await (await this.owner()).retire(space.id, space.generation);
+        return this.require(id);
+      }
       space.desiredState = "stopped";
       await this.records.put(space);
-      await this.guards.get(id)?.stop();
       this.guards.delete(id);
       if (space.runtimeId)
         await this.runtime(await this.records.policy()).stop(this.identity(space));
@@ -283,6 +338,26 @@ export class LocalManager {
       space.generation++;
       await this.records.put(space);
       return space;
+    });
+  }
+
+  async recover(id: string, localApproval: boolean): Promise<LocalSpace> {
+    return this.serial(async () => {
+      if (!localApproval)
+        throw new LocalRefusal(
+          "LOCAL_RECOVERY_CONFIRM",
+          "Acknowledge the unknown outcome explicitly on this computer.",
+        );
+      const space = await this.require(id);
+      const owner = await this.owner();
+      if (!owner.recover)
+        throw new LocalRefusal(
+          "LOCAL_RECOVERY_REFUSED",
+          "The local owner does not support verified recovery.",
+        );
+      await owner.recover(id, space.generation);
+      this.guards.delete(id);
+      return this.require(id);
     });
   }
 
@@ -302,11 +377,21 @@ export class LocalManager {
           "LOCAL_GENERATION_CONFLICT",
           "Refresh the local sandbox before deleting it.",
         );
+      if (!this.dependencies.runtime) {
+        await (await this.owner()).remove(space.id, generation, localApproval);
+        this.guards.delete(space.id);
+        return;
+      }
+      const guard =
+        this.guards.get(id) ??
+        (space.desiredState === "running" ? await (await this.owner()).space(id) : undefined);
+      await guard?.stop();
+      this.guards.delete(id);
+      const stopped = await this.require(id);
+      Object.assign(space, stopped);
       space.desiredState = "deleted";
       space.phase = "deleting";
       await this.records.put(space);
-      await this.guards.get(id)?.stop();
-      this.guards.delete(id);
       if (!space.runtimeId)
         throw new LocalRefusal(
           "LOCAL_CREATE_UNKNOWN",
@@ -321,11 +406,20 @@ export class LocalManager {
 
   async snapshot() {
     const policy = await this.records.policy();
-    const observed = await this.runtime(policy).list();
+    const admitted = policy.enabled && policy.leaseUntil > this.now();
+    const observed = this.dependencies.runtime
+      ? await this.runtime(policy).list()
+      : admitted
+        ? await (await this.owner()).observe()
+        : [];
     const spaces = [];
     for (const space of await this.records.list()) {
       if (space.phase === "deleted") continue;
-      const actual = observed.find((item) => item.name === space.name);
+      // A creation manifest without an observed UUID is still unknown, even if the
+      // SDK now happens to contain the same name. Read-only status cannot adopt it.
+      const actual = space.runtimeId
+        ? observed.find((item) => item.name === space.name)
+        : undefined;
       if (actual && space.runtimeId !== actual.id)
         throw new LocalRefusal("LOCAL_IDENTITY_CHANGED", "A local sandbox identity changed.");
       spaces.push({
@@ -336,7 +430,15 @@ export class LocalManager {
         createdAt: space.createdAt,
         lastStartedAt: space.lastStartedAt,
         generation: space.generation,
-        state: actual?.status ?? (space.runtimeId ? "absent" : "unknown"),
+        state:
+          actual?.status ??
+          (!admitted
+            ? space.phase === "stopped"
+              ? "stopped"
+              : "unknown"
+            : space.runtimeId
+              ? "absent"
+              : "unknown"),
         phase: space.phase,
         failure: space.failure,
       });

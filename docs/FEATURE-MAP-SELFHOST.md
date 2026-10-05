@@ -50,6 +50,11 @@ remain in the Apache-2.0 product. Security behavior such as blocked-account admi
 revocation, PIN hashing, request limits, and input validation is always active and is not a feature
 flag.
 
+Codespace orchestration also belongs to the OSS runtime. GitHub resources use the configured
+GitHub integration; local resources use an explicitly approved Moira Local device and do not require
+GitHub OAuth on the server. Local work still requires the instance runtime policy and the device's
+own repository grants and finite lease. See [Codespaces](CODESPACES.md) for setup and provider limits.
+
 Email delivery has a separate runtime status returned by `GET /api/features`:
 
 - `real`: SMTP or Brevo can deliver messages;

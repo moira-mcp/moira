@@ -1,7 +1,7 @@
-# Codespaces and GitHub Connection
+# Codespaces and Local Devices
 
 This reference describes Moira's provider-neutral codespace control plane and
-the built-in GitHub Codespaces provider. A codespace is a persistent,
+the GitHub Codespaces and Moira Local providers. A codespace is a persistent,
 user-owned development environment addressed by an opaque codespace ID. It is
 not a chat session: Moira does not receive or store a ChatGPT conversation ID,
 and different authorized clients may reuse the same codespace.
@@ -32,7 +32,14 @@ delete) over the same services. Administrators own the instance-wide kill switch
   `transfer-repository.ts` own provider-neutral file operations, native byte
   authority, quotas and private object lifecycle.
 - `packages/shared/src/codespaces/provider-registry.ts` enforces the versioned
-  provider contract. GitHub Codespaces is the only registered provider.
+  provider contract. `github-codespaces` and `local-sandboxes` implement it.
+- `packages/local/` owns the user-run companion, local policy, bounded storage,
+  private SDK credentials, independently supervised runtime and outbound relay.
+- `packages/shared/src/codespaces/local-device-service.ts` and
+  `local-device-repository.ts` own pairing, device generations, public local grants
+  and durable relay claims. The web backend's local provider adapts the common lifecycle and operations.
+- `packages/web-backend/src/routes/local-devices.ts` and the Settings
+  `LocalDeviceSettings` card own browser pairing confirmation and revocation.
 - `packages/shared/src/codespaces/credential-vault.ts` owns versioned
   AES-256-GCM credential envelopes bound to the Moira user, provider and opaque
   connection or revocation record.
@@ -67,8 +74,125 @@ delete) over the same services. Administrators own the instance-wide kill switch
 
 Every internal resource or operation lookup supplies the authenticated Moira
 user ID and a codespace or operation ID. Ownership is resolved from SQLite;
-possession of an opaque ID does not grant access. Provider resource names and
-credentials remain server-side.
+possession of an opaque ID does not grant access. Public projections omit provider
+resource names and credentials. GitHub credentials remain in the server vault;
+local repository credentials remain on the user's computer, separate from its device credential.
+
+## Moira Local companion
+
+Moira Local uses outbound authenticated HTTPS to a locally selected Moira application URL.
+Server codespace work requires `CODESPACE_CODESPACES_ENABLED=true` and enabled instance controls;
+GitHub App credentials and the GitHub connector are not required for the local provider.
+The server cannot choose host commands, VM templates, updates or broader local grants.
+Each codespace has its own persistent mountless microVM. The companion requires Node.js 24,
+macOS on Apple silicon and Docker Sandboxes `sbx` 0.46.0. Linux execution is refused because
+the required runtime ownership contract is not supported there; a container or host-shell fallback
+is not used. Install the pinned SDK from the [official Docker release artifacts](https://github.com/docker/sandboxes/releases/tag/v0.46.0)
+and retain its signed application bundle; see [Docker installation requirements](https://docs.docker.com/ai/sandboxes/install/).
+
+Build from the repository root with the macOS command-line C compiler available;
+`@mcp-moira/local` is private, not a published global npm package:
+
+```bash
+npm ci
+npm run local:build
+npm run local -- --help
+npm run local -- init --sbx /absolute/path/to/Sbx.app/Contents/MacOS/sbx --label My-computer
+npm run local -- login
+npm run local -- setup
+npm run local -- approve OWNER/REPO
+npm run local -- enable --hours 8
+npm run local -- doctor
+```
+
+`init` creates private state under `~/.moira-local` unless `--state PATH` is supplied, and starts
+disabled. Use the same `--state` on every command when overriding it. The default bounded disk
+image is stored in that state and mounted at a short device-owned `/private/tmp/ml-…` path, so
+SDK Unix sockets fit the native path bound. `--storage-gib`, `--cpus`, `--memory-gib` and
+`--max-sandboxes` set local ceilings at initialization. `--storage-root` accepts an existing empty,
+private, separately mounted bounded filesystem, not an ordinary directory. Preserve the image and
+ownership records; a missing mount is a refusal, not permission to create unbounded storage.
+
+`setup` initializes only an empty dedicated SDK profile. `doctor` checks storage, supported SDK,
+settings, global network policy and owned inventory under an enabled, unexpired lease. Its
+`liveVmIsolationVerified: false` result is explicit: it does not execute a microVM isolation test.
+The SDK profile has its own HOME, namespace and encrypted credential store; it does not select
+the user's personal Docker profile or change personal Keychain default/search metadata.
+The bundled native helper prepares and unlocks only the owned store without interactive password
+prompts. `login --new-store` is an explicit recovery operation: it requires disabled work,
+the runner lock and confirmed shutdown, creates a separate store, and preserves existing stores.
+An unreadable store never causes automatic rotation or personal credential adoption.
+The machine-only store uses an owner-readable generated password file and disables sleep/interval
+auto-lock only for that owned SDK store. It trusts the host user account; it is not protection
+against another process already acting as that same user. Personal Keychain lock policy is unchanged.
+
+`approve OWNER/REPO` grants read access and the built-in public package/Git domains.
+Use repeated `--domain HOST` to supply the complete allowed-domain list instead;
+`--private`, `--push` and `--delete` grant those capabilities explicitly. A private repository
+token is supplied through stdin to `npm run local -- git-token OWNER/REPO`; it is never an argv
+argument, browser field or device credential. The Git broker injects it only for the approved
+repository. Local ceilings, repositories and lease cannot be expanded by a relay request.
+`enable --hours N` grants at most 24 hours (8 by default), not an indefinite daemon permission.
+
+Open **Settings → Codespaces → Local devices** (`/settings#integrations-local`, under the app's
+configured prefix), choose **Connect a device**, and copy the enrollment command and token
+separately. From this checkout, use `npm run local -- enroll` with the displayed `--server` and
+`--pairing-id` arguments. Enter the token on stdin and end input; do not append it to the command
+or put it in shell history. The trusted server URL must be HTTPS, without credentials, query or
+fragment. Refresh the browser, review the pending device's repositories, egress, push/delete
+rights, machine ceilings and lease, then confirm. Only then run:
+
+```bash
+npm run local -- run
+```
+
+Keep that foreground process running to serve the account; Ctrl+C settles owned work. Reconnection
+uses durable request IDs, digests and claims, so a lost response does not authorize redispatch.
+The browser can revoke a specific device; revocation invalidates its generation and denies new
+work. Local `disable` independently stops owned SDK/VM processes and preserves data, including when
+credentials cannot be read. Neither closing an MCP client nor losing the relay deletes a codespace.
+
+Local diagnostics use `status`, `create OWNER/REPO --ref REF`, `start SPACE_ID`, `stop SPACE_ID`
+and `exec SPACE_ID -- COMMAND ARG…`. Stop retains files; `remove SPACE_ID --confirm` deletes the
+owned VM through that explicit local confirmation. Manager-backed CLI commands are one-shot:
+their final cleanup stops owned VM processes on exit. Persistent server/MCP work uses the long-lived
+paired `run`; stop it before another command needs the same runner lock. Browser revocation denies
+new server work, but physical shutdown of an offline computer cannot be asserted by the browser;
+local disable and the independent lease guard remain authoritative. An unknown guest outcome remains
+fenced until physical stop is confirmed. `recover SPACE_ID --confirm` acknowledges that stopped
+outcome without retrying prior jobs. Device-level `recover --confirm` requires disabled work and
+acknowledges an orphan shutdown after proving owned processes stopped; it preserves jobs and data.
+After abrupt companion termination, do not manually unlink `runner.lock`. Disable local work,
+then use `recover --confirm`; it reclaims the marker only when its owner is proven absent and
+refuses a live or unknown owner. After a confirmed ordinary stop, including idle disconnection,
+restart `run` under an enabled, unexpired local lease; no unknown-outcome acknowledgement is
+needed unless that outcome remains fenced. Do not clear journals or adopt a VM by name to bypass
+recovery.
+
+### Local isolation boundary
+
+The guest root and cloud requests are untrusted. Host mounts, shared skills, MCP gateway, host environment,
+credentials and agent sockets are not forwarded. Fixed SDK API operations avoid CLI lifecycle hooks
+that can attach host integrations. Fresh SDK identity and container mapping are checked against
+kernel-held process ownership before effects; malformed or missing mandatory observations refuse work.
+Unknown dispatch settlement requires stopping the exact owned VM, not treating a closed socket as
+successful guest cancellation.
+
+Outside the VM, the dedicated profile denies direct egress, including host, LAN, VPN, metadata and
+other-sandbox destinations. Only the approved broker TCP path is allowed; UDP remains globally denied.
+The broker admits approved public DNS destinations and verifies connected addresses, with local
+connection/byte budgets. SDK network-user prompts are disabled rather than allowed to expand access.
+The guest may contain public SDK credential placeholders: API sentinel values and the pinned SDK's
+public GitHub sentinel are not forwarded user tokens. Their presence alone neither proves forwarding
+nor authorizes access. The companion supplies no AI-provider keys or host credential values.
+
+Controlled guest-root checks observe fake host file/environment/socket access and challenge delivery
+to reachable loopback and the host's assigned LAN/VPN interfaces, with positive receivers. A proxy
+handshake alone is not target delivery. These observations do not prove access denial along a remote
+VPN route, to a metadata service or to a second VM when no controlled reachable target exists.
+Those physical checks remain unexecuted on the validation host; configuration admission, vendor
+contract and negative policy tests do not turn them into physical passes. Codespace content is
+intentionally visible to Moira. Review returned code before running it on the host.
 
 ## Persistent lifecycle
 
@@ -269,7 +393,7 @@ connector input without model-context base64. `CodespaceOperationService.execute
 composes native reference validation/fetch/storage with that dispatch path; callers do
 not handle the internal `codespace-file://` capability.
 
-The remote supervisor runs the command directly as the ordinary Codespace user
+The shared guest supervisor runs the command directly as the ordinary codespace user
 inside the selected repository. It keeps its opaque marker, process-group facts
 and bounded result outside the repository. The result preserves separate stdout
 and stderr, terminal state and exit code.
@@ -293,7 +417,7 @@ independent stdout/stderr bounds and deadline. SQLite stores only
 operation metadata. It does not store argv, cwd, stdin, stdout, stderr, provider
 tokens or SSH configuration.
 
-Cancellation targets the recorded foreground process group and validates the
+For GitHub, cancellation targets the recorded foreground process group and validates the
 process start time before signalling. A lost worker, SSH connection or control
 response is not treated as successful cancellation: the operation remains
 `reconcile_pending` and occupies capacity until remote inspection proves a
@@ -492,7 +616,7 @@ If permission is absent, the API format is unsupported, or GitHub fails, billing
 is `"unavailable"` while local limits and management remain usable. Successful
 billing reads are cached briefly; an explicit refresh asks GitHub again.
 
-Every grant-dependent discovery or creation action — `list`, `setup_help` and
+For GitHub, every grant-dependent discovery or creation action — `list`, `setup_help` and
 `create` — refreshes the stored installation and repository snapshot after a
 bounded TTL before using it. `list` also accepts `refresh: true` to force that
 attempt and reconcile managed Codespaces with GitHub. A provider failure returns
@@ -620,9 +744,13 @@ patches, argv, text and native references do not enter request context.
 
 ## Website management
 
-The Settings page's **GitHub & Codespaces** section (anchor `#integrations-github`)
-holds the GitHub connection card, the Cloud codespaces card, the Automatic pause card
-and the Your limits card. One data source feeds all of them: it loads the connection
+The Settings page's **Codespaces** section (anchor `#integrations-github`)
+holds Local devices (`#integrations-local`), the GitHub connection card, the Development environments
+card, Automatic pause and Your limits. The development-environment provider selector separates
+GitHub and local repository choices. Local choices include the device label and a qualified
+repository target, so the same repository on two devices remains distinct. Local creation uses
+the selected device's current grants and lease, independently of GitHub OAuth.
+One shared data source loads the connection
 view and the codespace view (with repositories and `limits`) together, and any change
 one card makes reloads what it can affect, so disconnecting never leaves codespaces of
 a connection that no longer exists on screen. The section heading offers a help
@@ -630,10 +758,11 @@ popover and a **Setup guide** tour, and the connection card shows a stepper (con
 GitHub, install the Moira App, grant repositories) marking each step
 done, current, not started or unavailable on this instance.
 
-The Cloud codespaces card shows the instance readiness, discloses that an authorized
-agent has the Codespace user's repository, network and configured-secret access, and
-lets the user create a codespace for an approved personal or organization repository
-and ref when GitHub bills the connected personal account; the create hint
+The Development environments card shows the selected provider's readiness. With GitHub selected,
+it discloses that an authorized agent has the Codespace user's repository, network and configured-secret
+access, and lets the user create a codespace for an approved personal or organization repository
+and ref when GitHub bills the connected personal account. With Moira Local selected, it describes
+the device-owned VM and locally approved rights; the create hint
 states how many codespaces the user holds against the per-user ceiling and that
 stopped codespaces count. It lists the user's codespaces with repository, current
 branch (the requested ref until a current one is observed), provider and machine
@@ -660,19 +789,23 @@ provide a trustworthy summary. The Your limits card shows Moira's own `limits`:
 meters for codespaces held, commands running and file-transfer bytes, plus a
 collapsed list of the other local ceilings.
 
-The routes are mounted under `/api/integrations/github/codespaces` behind
+The routes retain `/api/integrations/github/codespaces` behind
 `requireAuth` and are a second presentation of the same services the MCP tools use,
-with identical tenant, generation and confirmation authority:
+with identical tenant, generation and confirmation authority. The list combines repositories
+and codespaces from both providers and includes `providers` with their separate connection,
+readiness and limits. A local `repository_id` is the qualified target returned by discovery;
+callers do not manufacture it. Creation routes by that target, and later actions route by the
+resource's persisted provider/device identity:
 
-| Method   | Path                  | Behavior                                                                                                                                                                        |
-| -------- | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `GET`    | `/`                   | Refreshes grants behind the TTL, then returns readiness, connection, approved repositories, `repositories_stale`, `resources_stale: false`, summaries still in use and `limits` |
-| `POST`   | `/refresh`            | Forces grant refresh, managed-resource observation and billing read; returns the list with separate repository and resource stale flags                                         |
-| `POST`   | `/`                   | Refreshes grants, verifies the personal billable owner before POST, then creates for `repository_id` and `ref`; returns the sanitized (possibly pending) codespace              |
-| `GET`    | `/:codespaceId`       | One owned codespace plus its recent metadata-only operations                                                                                                                    |
-| `POST`   | `/:codespaceId/start` | Records desired running state; `data_preserved: true`                                                                                                                           |
-| `POST`   | `/:codespaceId/stop`  | Records desired stopped state; `data_preserved: true`                                                                                                                           |
-| `DELETE` | `/:codespaceId`       | Requires `confirm_delete: true` and the current `expected_generation`; `data_preserved: false`                                                                                  |
+| Method   | Path                  | Behavior                                                                                                                                                                                                |
+| -------- | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET`    | `/`                   | Refreshes grants behind the TTL, then returns readiness, connection, approved repositories, `repositories_stale`, `resources_stale: false`, summaries still in use and `limits`                         |
+| `POST`   | `/refresh`            | Forces grant refresh, managed-resource observation and billing read; returns the list with separate repository and resource stale flags                                                                 |
+| `POST`   | `/`                   | Selects the provider from `repository_id`, verifies its grants and policy, then creates for `ref`; GitHub also verifies the personal billable owner; returns the sanitized (possibly pending) codespace |
+| `GET`    | `/:codespaceId`       | One owned codespace plus its recent metadata-only operations                                                                                                                                            |
+| `POST`   | `/:codespaceId/start` | Records desired running state; `data_preserved: true`                                                                                                                                                   |
+| `POST`   | `/:codespaceId/stop`  | Records desired stopped state; `data_preserved: true`                                                                                                                                                   |
+| `DELETE` | `/:codespaceId`       | Requires `confirm_delete: true` and the current `expected_generation`; `data_preserved: false`                                                                                                          |
 
 Domain failures map to bounded codes: not found and malformed IDs return the generic
 404, generation conflicts and not-running states 409, unsupported organization
@@ -683,8 +816,10 @@ claims, capabilities or credentials.
 
 ## Readiness, metrics and controls
 
-`CodespaceObservabilityService.readiness()` is the one instance-level readiness
-decision. Its states are `disabled` (configuration absent or
+Each provider's `CodespaceObservabilityService.readiness()` is its instance-level readiness
+decision. Local services have no GitHub configuration requirement; device connection, current
+locally approved repositories, online contact and finite lease are checked independently before work.
+For GitHub, its states are `disabled` (configuration absent or
 `CODESPACE_CODESPACES_ENABLED` false), `misconfigured` (invalid GitHub App or vault
 configuration), `control_disabled` (a kill switch is on), `connector_unavailable`
 (the credential connector does not answer its health probe) and `ready`. The view
@@ -745,7 +880,7 @@ ordinary reconciliation; it never deletes data. Re-enabling clears the control. 
 change is audited as `CODESPACE_CONTROL_UPDATE` with the scope, flag, reason and the
 number of codespaces asked to stop.
 
-## Trust and isolation
+## GitHub trust and isolation
 
 Direct execution is not an agent sandbox. An authorized agent has the same
 repository, installed tools, network and configured Codespaces secrets available
@@ -777,7 +912,7 @@ codespace policy:
 docker compose --profile codespaces up -d
 ```
 
-## Runtime configuration
+## GitHub runtime configuration
 
 Codespace GitHub configuration is distinct from `GITHUB_CLIENT_ID` and
 `GITHUB_CLIENT_SECRET`, which belong to Better Auth social login.
@@ -808,7 +943,7 @@ approve the updated permission on GitHub and obtain a new App user token through
 Enable "Request user authorization (OAuth) during installation" and expiring user
 authorization tokens; the callback URL is the exact same-origin Moira path below.
 Adding `Account: Plan` does not by itself require reinstalling the App. The
-connection card's **Refresh** re-reads repository grants, while the Cloud codespaces
+connection card's **Refresh** re-reads repository grants, while the Development environments
 card's **Refresh** also re-reads billing; both use the existing token and cannot add
 a permission to it. For organization repositories, an organization owner
 must install or approve the App on that organization and grant the selected

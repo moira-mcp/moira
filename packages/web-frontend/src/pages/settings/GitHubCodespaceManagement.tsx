@@ -78,6 +78,7 @@ export const GitHubCodespaceManagement: React.FC = () => {
     setManagement: setView,
   } = useGitHubCodespaces();
   const [repositoryId, setRepositoryId] = useState("");
+  const [provider, setProvider] = useState("github-codespaces");
   const [ref, setRef] = useState("main");
   const [creating, setCreating] = useState(false);
   const [busyCodespace, setBusyCodespace] = useState<string | null>(null);
@@ -89,14 +90,24 @@ export const GitHubCodespaceManagement: React.FC = () => {
 
   // Keep the selected repository while it is still offered; otherwise take the first one.
   const repositories = view?.repositories;
+  const availableRepositories = repositories?.filter(
+    (repository) => (repository.provider ?? "github-codespaces") === provider,
+  );
   useEffect(() => {
     if (!repositories) return;
     setRepositoryId((current) =>
-      current && repositories.some((repository) => repository.repository_id === current)
+      current &&
+      repositories.some(
+        (repository) =>
+          repository.repository_id === current &&
+          (repository.provider ?? "github-codespaces") === provider,
+      )
         ? current
-        : (repositories[0]?.repository_id ?? ""),
+        : (repositories.find(
+            (repository) => (repository.provider ?? "github-codespaces") === provider,
+          )?.repository_id ?? ""),
     );
-  }, [repositories]);
+  }, [repositories, provider]);
 
   useEffect(() => {
     if (loadError) toast.error(t("pages.settings.codespaces.loadFailed"));
@@ -129,7 +140,12 @@ export const GitHubCodespaceManagement: React.FC = () => {
     codespaceErrorMessage(error, t, "pages.settings.codespaces.requestFailed");
 
   const create = async () => {
-    if (!repositoryId || !ref.trim()) return;
+    if (
+      !repositoryId ||
+      !ref.trim() ||
+      !availableRepositories?.some((repository) => repository.repository_id === repositoryId)
+    )
+      return;
     try {
       setCreating(true);
       const codespace = await apiClient.createGitHubCodespace({
@@ -214,10 +230,12 @@ export const GitHubCodespaceManagement: React.FC = () => {
     );
   }
 
-  const { readiness, connection, codespaces, limits } = view;
+  const selectedProvider = view.providers?.find((entry) => entry.provider === provider);
+  const { readiness, connection, limits } = selectedProvider ?? view;
+  const { codespaces } = view;
   const ready = readiness.state === "ready";
   const connected = connection.state === "connected";
-  const canCreate = ready && connected && view.repositories.length > 0;
+  const canCreate = ready && connected && (availableRepositories?.length ?? 0) > 0;
   const formatDate = (value: number) => new Date(value).toLocaleString(i18n.language);
 
   return (
@@ -227,8 +245,20 @@ export const GitHubCodespaceManagement: React.FC = () => {
           <div className="flex min-w-0 items-start gap-3">
             <Cloud className="mt-0.5 h-6 w-6 shrink-0" aria-hidden="true" />
             <div className="min-w-0">
-              <CardTitle className="text-base">{t("pages.settings.codespaces.title")}</CardTitle>
-              <CardDescription>{t("pages.settings.codespaces.description")}</CardDescription>
+              <CardTitle className="text-base">
+                {t(
+                  view.providers
+                    ? "localDevices.resourcesTitle"
+                    : "pages.settings.codespaces.title",
+                )}
+              </CardTitle>
+              <CardDescription>
+                {t(
+                  view.providers
+                    ? "localDevices.resourcesDescription"
+                    : "pages.settings.codespaces.description",
+                )}
+              </CardDescription>
             </div>
           </div>
           <Badge
@@ -240,6 +270,27 @@ export const GitHubCodespaceManagement: React.FC = () => {
         </div>
       </CardHeader>
       <CardContent className="space-y-4">
+        {view.providers && (
+          <div className="space-y-1">
+            <Label htmlFor="codespace-provider">{t("localDevices.provider")}</Label>
+            <Select value={provider} onValueChange={setProvider}>
+              <SelectTrigger id="codespace-provider" data-testid="codespace-provider">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {view.providers.map((entry) => (
+                  <SelectItem key={entry.provider} value={entry.provider}>
+                    {t(
+                      entry.provider === "local-sandboxes"
+                        ? "localDevices.localProvider"
+                        : "localDevices.githubProvider",
+                    )}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        )}
         <DataRegion
           hasResult
           pending={loading}
@@ -249,9 +300,19 @@ export const GitHubCodespaceManagement: React.FC = () => {
         >
           <Alert data-testid="github-codespace-disclosure">
             <ShieldAlert aria-hidden="true" />
-            <AlertTitle>{t("pages.settings.codespaces.disclosureTitle")}</AlertTitle>
+            <AlertTitle>
+              {t(
+                provider === "local-sandboxes"
+                  ? "localDevices.disclosureTitle"
+                  : "pages.settings.codespaces.disclosureTitle",
+              )}
+            </AlertTitle>
             <AlertDescription>
-              {t("pages.settings.codespaces.disclosureDescription")}
+              {t(
+                provider === "local-sandboxes"
+                  ? "localDevices.localDisclosure"
+                  : "pages.settings.codespaces.disclosureDescription",
+              )}
             </AlertDescription>
           </Alert>
 
@@ -262,7 +323,11 @@ export const GitHubCodespaceManagement: React.FC = () => {
                 {t(`pages.settings.codespaces.instanceStates.${readiness.state}`)}
               </AlertTitle>
               <AlertDescription>
-                {t(`pages.settings.codespaces.instanceDescriptions.${readiness.state}`)}
+                {t(
+                  provider === "local-sandboxes"
+                    ? "localDevices.unavailable"
+                    : `pages.settings.codespaces.instanceDescriptions.${readiness.state}`,
+                )}
               </AlertDescription>
             </Alert>
           )}
@@ -270,9 +335,19 @@ export const GitHubCodespaceManagement: React.FC = () => {
           {ready && !connected && (
             <Alert>
               <AlertCircle aria-hidden="true" />
-              <AlertTitle>{t("pages.settings.codespaces.connectFirstTitle")}</AlertTitle>
+              <AlertTitle>
+                {t(
+                  provider === "local-sandboxes"
+                    ? "localDevices.title"
+                    : "pages.settings.codespaces.connectFirstTitle",
+                )}
+              </AlertTitle>
               <AlertDescription>
-                {t("pages.settings.codespaces.connectFirstDescription")}
+                {t(
+                  provider === "local-sandboxes"
+                    ? "localDevices.connectionRequired"
+                    : "pages.settings.codespaces.connectFirstDescription",
+                )}
               </AlertDescription>
             </Alert>
           )}
@@ -314,9 +389,10 @@ export const GitHubCodespaceManagement: React.FC = () => {
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {view.repositories.map((repository) => (
+                    {availableRepositories?.map((repository) => (
                       <SelectItem key={repository.repository_id} value={repository.repository_id}>
                         {repository.name}
+                        {repository.device_label ? ` · ${repository.device_label}` : ""}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -343,10 +419,15 @@ export const GitHubCodespaceManagement: React.FC = () => {
                 </Button>
               </div>
               <p className="text-xs text-muted-foreground sm:col-span-3">
-                {t("pages.settings.codespaces.createHint", {
-                  held: limits.codespaces.held,
-                  max: limits.codespaces.max_per_user,
-                })}
+                {t(
+                  provider === "local-sandboxes"
+                    ? "localDevices.createHint"
+                    : "pages.settings.codespaces.createHint",
+                  {
+                    held: limits.codespaces.held,
+                    max: limits.codespaces.max_per_user,
+                  },
+                )}
               </p>
             </form>
           )}
@@ -396,9 +477,14 @@ export const GitHubCodespaceManagement: React.FC = () => {
                             </span>
                           </p>
                           <p className="text-xs text-muted-foreground">
-                            {t("pages.settings.codespaces.providerLine", {
-                              machine: codespace.machine.display_name,
-                            })}
+                            {t(
+                              codespace.provider === "local-sandboxes"
+                                ? "localDevices.localProviderLine"
+                                : "pages.settings.codespaces.providerLine",
+                              {
+                                machine: codespace.machine.display_name,
+                              },
+                            )}
                           </p>
                         </div>
                       </div>

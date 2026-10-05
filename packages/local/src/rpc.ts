@@ -57,7 +57,7 @@ export class LocalRpc {
     }
   }
 
-  private failure(error: unknown): LocalReply {
+  failure(error: unknown): LocalReply {
     return {
       ok: false,
       error:

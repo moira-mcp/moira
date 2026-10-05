@@ -3,9 +3,61 @@ import { lstat, mkdir, open, readdir, realpath, rename, unlink } from "node:fs/p
 import { randomBytes } from "node:crypto";
 import { dirname, join, resolve } from "node:path";
 import { LocalRefusal } from "./policy.js";
+import { PassThrough } from "node:stream";
+import { runProcess } from "./process.js";
+import { runtimeControlAsset } from "./assets.js";
 
 const KEY = /^[a-z][a-z0-9-]{0,127}\.json$/;
 const MAX_STATE_BYTES = 16 * 1024 * 1024;
+const busy = () =>
+  new LocalRefusal(
+    "LOCAL_ALREADY_RUNNING",
+    "Another companion owns this state; stop it before starting again.",
+  );
+
+/** Fixed native gate only: no runtime executable, credentials or work commands. */
+async function acquireGate(root: string): Promise<() => Promise<void>> {
+  const input = new PassThrough();
+  let ready!: () => void;
+  const readiness = new Promise<void>((resolve) => {
+    ready = resolve;
+  });
+  let frame = "";
+  const completion = runProcess({
+    binary: runtimeControlAsset(),
+    argv: ["--state-lock", root],
+    cwd: root,
+    env: {},
+    input,
+    timeoutMs: null,
+    maxBytes: 1024,
+    onStdout: (chunk) => {
+      frame += chunk.toString("utf8");
+      if (frame.startsWith('{"ready":true}\n')) ready();
+    },
+  });
+  try {
+    await Promise.race([
+      readiness,
+      completion.then((result) => {
+        if (result.exitCode === 5) throw busy();
+        throw new LocalRefusal("LOCAL_STATE_UNSAFE", "The private kernel lock was refused.");
+      }),
+    ]);
+  } catch (error) {
+    input.end();
+    await completion.catch(() => undefined);
+    throw error;
+  }
+  let release: Promise<void> | undefined;
+  return () =>
+    (release ??= (async () => {
+      input.end("stop\n");
+      const result = await completion;
+      if (result.exitCode !== 0 || !result.stdout.toString("utf8").endsWith('{"settled":true}\n'))
+        throw new LocalRefusal("LOCAL_STATE_UNSAFE", "The private kernel lock did not settle.");
+    })());
+}
 
 /** Only locally selected state lives here; callers never supply cloud-controlled paths. */
 export class PrivateState {
@@ -120,26 +172,120 @@ export class PrivateState {
     return (await readdir(this.root)).filter((name) => KEY.test(name) && name.startsWith(prefix));
   }
 
-  /** No automatic lock stealing: after a crash, a local command verifies the old PID is gone. */
-  async lock(): Promise<() => Promise<void>> {
+  /** Ordinary callers never steal markers; explicit recovery requires a proven absent PID. */
+  async lock(options?: { recoverStale: boolean }): Promise<() => Promise<void>> {
+    const releaseGate = await acquireGate(this.root);
     const path = join(this.root, "runner.lock");
-    let handle;
+    let handle: Awaited<ReturnType<typeof open>> | undefined;
     try {
-      handle = await open(path, constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY, 0o600);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "EEXIST") {
-        throw new LocalRefusal(
-          "LOCAL_ALREADY_RUNNING",
-          "Another companion owns this state; stop it before starting again.",
-        );
+      if (options?.recoverStale) {
+        const old = await open(
+          path,
+          constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
+        ).catch((error: NodeJS.ErrnoException) => {
+          if (error.code === "ENOENT") return undefined;
+          throw new LocalRefusal("LOCAL_STATE_UNSAFE", "Unsafe runner lock marker.");
+        });
+        if (old) {
+          try {
+            const metadata = await old.stat();
+            if (
+              !metadata.isFile() ||
+              metadata.nlink !== 1 ||
+              (metadata.mode & 0o077) !== 0 ||
+              metadata.size < 1 ||
+              metadata.size > 10 ||
+              (process.getuid && metadata.uid !== process.getuid())
+            )
+              throw new LocalRefusal("LOCAL_STATE_UNSAFE", "Unsafe runner lock marker.");
+            const buffer = Buffer.alloc(11);
+            const read = await old.read(buffer, 0, buffer.length, 0);
+            const bytes = buffer.subarray(0, read.bytesRead);
+            const value = bytes.toString("utf8");
+            if (
+              !/^[1-9][0-9]{0,9}$/.test(value) ||
+              Number(value) > 2147483647 ||
+              bytes.length !== metadata.size
+            )
+              throw new LocalRefusal("LOCAL_STATE_UNSAFE", "Unknown runner lock owner.");
+            try {
+              process.kill(Number(value), 0);
+              throw busy();
+            } catch (error) {
+              if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw busy();
+            }
+            const current = await lstat(path);
+            const again = Buffer.alloc(bytes.length + 1);
+            const reread = await old.read(again, 0, again.length, 0);
+            if (
+              current.dev !== metadata.dev ||
+              current.ino !== metadata.ino ||
+              current.size !== metadata.size ||
+              reread.bytesRead !== bytes.length ||
+              !again.subarray(0, bytes.length).equals(bytes)
+            )
+              throw new LocalRefusal("LOCAL_STATE_CHANGED", "Runner lock changed during recovery.");
+            await unlink(path);
+          } finally {
+            await old.close();
+          }
+        }
       }
+      handle = await open(
+        path,
+        constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY | constants.O_NOFOLLOW,
+        0o600,
+      );
+      await handle.writeFile(String(process.pid));
+      await handle.sync();
+      const own = await handle.stat();
+      await handle.close();
+      handle = undefined;
+      let released: Promise<void> | undefined;
+      return () =>
+        (released ??= (async () => {
+          try {
+            const marker = await open(
+              path,
+              constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
+            );
+            try {
+              const current = await marker.stat();
+              const bytes = Buffer.alloc(11);
+              const read = await marker.read(bytes, 0, bytes.length, 0);
+              if (
+                current.dev !== own.dev ||
+                current.ino !== own.ino ||
+                current.nlink !== 1 ||
+                !current.isFile() ||
+                (current.mode & 0o077) !== 0 ||
+                bytes.subarray(0, read.bytesRead).toString("utf8") !== String(process.pid)
+              )
+                throw new LocalRefusal("LOCAL_STATE_CHANGED", "The runner lock owner changed.");
+              const named = await lstat(path);
+              if (named.dev !== own.dev || named.ino !== own.ino)
+                throw new LocalRefusal("LOCAL_STATE_CHANGED", "The runner lock owner changed.");
+            } finally {
+              await marker.close();
+            }
+            await unlink(path);
+          } finally {
+            await releaseGate();
+          }
+        })());
+    } catch (error) {
+      const cleanup = await Promise.allSettled([handle?.close(), releaseGate()]);
+      const failures = cleanup.flatMap((result) =>
+        result.status === "rejected" ? [result.reason] : [],
+      );
+      if (failures.length)
+        throw new AggregateError(
+          [error, ...failures],
+          "Runner lock acquisition and cleanup failed",
+          { cause: error },
+        );
+      if ((error as NodeJS.ErrnoException).code === "EEXIST") throw busy();
       throw error;
     }
-    await handle.writeFile(String(process.pid));
-    await handle.sync();
-    await handle.close();
-    return async () => {
-      await unlink(path);
-    };
   }
 }

@@ -39,6 +39,7 @@ consent, email verification, and the broader multi-user administration surface.
 - **packages/workflow-engine/** - Core node-graph execution engine
 - **packages/extension-sdk/** - Typed authoring contract for custom nodes and communication channels
 - **packages/extension-runner/** - Isolated companion service for installed extension bundles
+- **packages/local/** - User-owned Docker Sandboxes companion for local codespaces
 - **packages/mcp-server/** - MCP protocol HTTP server with tools
 - **packages/web-backend/** - Express API for workflow management
 - **packages/web-frontend/** - React UI for workflow visualization
@@ -131,6 +132,29 @@ and [Writing an
 Extension](packages/docs/src/content/docs/docs/guides/writing-extensions.mdx) for the complete
 installation, SDK, permission and failure contracts. `npm run test:docker-extensions` verifies the
 default-off profile and read-only bundle mount.
+
+### Local codespaces on your computer
+
+Moira Local connects your computer to your Moira account through outbound HTTPS. It runs approved
+repositories in persistent, mountless Docker Sandboxes microVMs. GitHub Codespaces remains a separate
+provider; local devices do not require a Moira GitHub App connection.
+
+The companion requires Node.js 24, macOS on Apple silicon and the pinned Docker Sandboxes
+`sbx` 0.46.0 runtime. Linux execution is refused. From this source checkout:
+
+```bash
+npm ci
+npm run local:build
+npm run local -- --help
+```
+
+The package is private and is not a published global npm installer. Configure local repository
+rights and a finite work lease before connecting **Settings → Codespaces → Local devices**.
+The pairing token goes to the companion through stdin; review the device's grants in the browser
+before confirming. See [Codespaces: Moira Local](docs/CODESPACES.md#moira-local-companion)
+for setup, run, stop, recovery and the limits of isolation evidence. Codespace contents are visible
+to Moira; review returned code before executing it on your computer. The `moira-local` MCP connection
+name in the examples below is independent of the companion executable.
 
 ### Testing
 
@@ -665,24 +689,24 @@ listed alongside those file-backed topics and renders directly from the typed MC
 
 For contributors working on the codebase (implementation detail, not end-user docs).
 
-| File                   | Covers                                                                                                                | Path                                                              |
-| ---------------------- | --------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------- |
-| Development setup      | Build, Docker, local dev, project structure                                                                           | `docs/DEVELOPMENT.md`                                             |
-| Testing                | Test types, runner, fixtures, antipatterns                                                                            | `docs/TESTING.md` + `docs/testing/`                               |
-| API                    | Backend & admin HTTP API reference                                                                                    | `docs/API.md`                                                     |
-| System architecture    | Engine, storage, MCP transport, handlers, validation                                                                  | `docs/SYSTEM.md`                                                  |
-| Authentication         | Better Auth, OAuth 2.1, API tokens                                                                                    | `docs/AUTHENTICATION.md`                                          |
-| Web UI                 | Frontend architecture, components                                                                                     | `docs/WEB-UI.md`                                                  |
-| Audit system           | Audit logging design                                                                                                  | `docs/AUDIT-SYSTEM.md`                                            |
-| Workflows              | Workflow authoring, tools, catalog                                                                                    | `docs/WORKFLOW.md`, `docs/WORKFLOWS.md`, `docs/WORKFLOW-TOOLS.md` |
-| Design system          | UI design tokens and components                                                                                       | `docs/DESIGN-SYSTEM.md`                                           |
-| Documentation style    | How to write internal **and** public docs                                                                             | `docs/DOCUMENTATION-STYLE-GUIDE.md`                               |
-| Logging                | Structured logging conventions                                                                                        | `docs/LOGGING.md`                                                 |
-| Codespaces             | GitHub authorization, persistent lifecycle, MCP tools, website management, readiness/metrics/kill switches, isolation | `docs/CODESPACES.md`                                              |
-| Issue management       | GitHub issue conventions                                                                                              | `docs/ISSUE-MANAGEMENT.md`                                        |
-| Architecture decisions | ADRs (licensing, OSS model, …)                                                                                        | `docs/adr/`                                                       |
-| Deployment             | Environment variables, restart procedures                                                                             | `docs/deployment/`                                                |
-| Legal                  | License/legal notes                                                                                                   | `docs/legal/`                                                     |
+| File                   | Covers                                                                                                                  | Path                                                              |
+| ---------------------- | ----------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------- |
+| Development setup      | Build, Docker, local dev, project structure                                                                             | `docs/DEVELOPMENT.md`                                             |
+| Testing                | Test types, runner, fixtures, antipatterns                                                                              | `docs/TESTING.md` + `docs/testing/`                               |
+| API                    | Backend & admin HTTP API reference                                                                                      | `docs/API.md`                                                     |
+| System architecture    | Engine, storage, MCP transport, handlers, validation                                                                    | `docs/SYSTEM.md`                                                  |
+| Authentication         | Better Auth, OAuth 2.1, API tokens                                                                                      | `docs/AUTHENTICATION.md`                                          |
+| Web UI                 | Frontend architecture, components                                                                                       | `docs/WEB-UI.md`                                                  |
+| Audit system           | Audit logging design                                                                                                    | `docs/AUDIT-SYSTEM.md`                                            |
+| Workflows              | Workflow authoring, tools, catalog                                                                                      | `docs/WORKFLOW.md`, `docs/WORKFLOWS.md`, `docs/WORKFLOW-TOOLS.md` |
+| Design system          | UI design tokens and components                                                                                         | `docs/DESIGN-SYSTEM.md`                                           |
+| Documentation style    | How to write internal **and** public docs                                                                               | `docs/DOCUMENTATION-STYLE-GUIDE.md`                               |
+| Logging                | Structured logging conventions                                                                                          | `docs/LOGGING.md`                                                 |
+| Codespaces             | GitHub and local providers, companion setup/recovery, persistent lifecycle, MCP tools, website management and isolation | `docs/CODESPACES.md`                                              |
+| Issue management       | GitHub issue conventions                                                                                                | `docs/ISSUE-MANAGEMENT.md`                                        |
+| Architecture decisions | ADRs (licensing, OSS model, …)                                                                                          | `docs/adr/`                                                       |
+| Deployment             | Environment variables, restart procedures                                                                               | `docs/deployment/`                                                |
+| Legal                  | License/legal notes                                                                                                     | `docs/legal/`                                                     |
 
 ## Contributing
 

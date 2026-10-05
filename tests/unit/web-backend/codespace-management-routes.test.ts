@@ -150,6 +150,157 @@ const LIMITS = projectCodespaceLimits({
 });
 
 describe("website codespace management routes", () => {
+  test.each(["create", "start", "stop", "delete"] as const)(
+    "%s preserves the selected unconfigured provider response while another provider is available",
+    async (action) => {
+      const base = services();
+      const selectedSettings = "https://moira.example.com/settings#selected-provider";
+      const selected = services({
+        provider: "github-codespaces",
+        resource: null,
+        operation: null,
+        connection: {
+          ...base.connection,
+          getStatus: () => ({
+            ...base.connection.getStatus("user-a"),
+            state: "disabled",
+            settingsUrl: selectedSettings,
+          }),
+        },
+      });
+      const local = services({ provider: "local-sandboxes" });
+      const app = appWith(
+        services({
+          resource: null,
+          operation: null,
+          providers: [selected, local],
+          select: () => selected,
+        }),
+      );
+      const prefix = "/api/integrations/github/codespaces";
+      const response =
+        action === "create"
+          ? await request(app).post(prefix).send({ repository_id: "162", ref: "main" })
+          : action === "delete"
+            ? await request(app)
+                .delete(`${prefix}/${CODESPACE_ID}`)
+                .send({ confirm_delete: true, expected_generation: 3 })
+            : await request(app).post(`${prefix}/${CODESPACE_ID}/${action}`);
+      expect({ status: response.status, body: response.body }).toMatchObject({
+        status: 503,
+        body: {
+          success: false,
+          error: { code: "CODESPACE_NOT_CONFIGURED" },
+          settings_url: selectedSettings,
+        },
+      });
+      expect(selected.connection.refreshGrants).not.toHaveBeenCalled();
+      expect(local.resource!.create).not.toHaveBeenCalled();
+    },
+  );
+
+  test("the existing website endpoint creates and stops local codespaces with GitHub disabled", async () => {
+    const target =
+      "local:00000000-0000-4000-8000-000000000011:00000000-0000-4000-8000-000000000012";
+    const base = services();
+    const local = services({
+      provider: "local-sandboxes",
+      resource: {
+        ...base.resource!,
+        create: async () => ({
+          resource: codespace({ provider: "local-sandboxes", repositoryId: target }),
+          lifecycleCapability: "secret-capability",
+        }),
+        stopCodespace: async () =>
+          codespace({ provider: "local-sandboxes", state: "stopped", desiredState: "stopped" }),
+      },
+    });
+    const app = appWith(
+      services({
+        resource: null,
+        operation: null,
+        providers: [local],
+        connection: {
+          ...base.connection,
+          refreshGrants: async () => {
+            throw new Error("GitHub must not gate local work");
+          },
+        },
+        select: (_userId, input) => {
+          if (input.repositoryId === target || input.codespaceId === CODESPACE_ID) return local;
+          throw new CodespaceResourceError("CODESPACE_NOT_FOUND", "Not owned");
+        },
+      }),
+    );
+    const created = await request(app)
+      .post("/api/integrations/github/codespaces")
+      .send({ repository_id: target, ref: "main" });
+    expect(created.status).toBe(201);
+    expect(created.body.data.codespace).toMatchObject({
+      provider: "local-sandboxes",
+      repository_id: target,
+    });
+    const stopped = await request(app).post(
+      `/api/integrations/github/codespaces/${CODESPACE_ID}/stop`,
+    );
+    expect(stopped.status).toBe(200);
+    expect(stopped.body.data).toMatchObject({
+      data_preserved: true,
+      codespace: { provider: "local-sandboxes", state: "stopped" },
+    });
+  });
+
+  test("one management list presents both providers without turning local readiness into GitHub readiness", async () => {
+    const base = services();
+    const local = services({
+      provider: "local-sandboxes",
+      resource: {
+        ...base.resource!,
+        listRepositories: () => [{ id: "local-target", fullName: "owner/local", private: false }],
+        listResources: () => [
+          codespace({ provider: "local-sandboxes", id: "00000000-0000-4000-8000-000000000002" }),
+        ],
+      },
+      observability: {
+        ...base.observability,
+        readiness: async () => ({ ...readiness, provider: "local-sandboxes" }),
+      },
+    });
+    const response = await request(
+      appWith(
+        services({
+          providers: [{ ...base, provider: "github-codespaces" }, local],
+          repositoryMetadata: () => ({ device_id: "device", device_label: "Computer" }),
+        }),
+      ),
+    ).get("/api/integrations/github/codespaces");
+    expect(response.status).toBe(200);
+    expect(response.body.data.repositories).toEqual([
+      {
+        repository_id: "42",
+        name: "owner/repository",
+        private: true,
+        provider: "github-codespaces",
+      },
+      {
+        repository_id: "local-target",
+        name: "owner/local",
+        private: false,
+        provider: "local-sandboxes",
+        device_id: "device",
+        device_label: "Computer",
+      },
+    ]);
+    expect(
+      response.body.data.codespaces.map((entry: { provider: string }) => entry.provider),
+    ).toEqual(["github-codespaces", "local-sandboxes"]);
+    expect(
+      response.body.data.providers.map(
+        (entry: { readiness: { provider: string } }) => entry.readiness.provider,
+      ),
+    ).toEqual(["github-codespaces", "local-sandboxes"]);
+  });
+
   test("lists readiness, repositories and sanitized codespaces without internal authority", async () => {
     const dependencies = services();
     const response = await request(appWith(dependencies)).get(
@@ -351,7 +502,10 @@ describe("website codespace management routes", () => {
     const conflict = await request(app).post(
       `/api/integrations/github/codespaces/${CODESPACE_ID}/start`,
     );
-    expect(conflict.status).toBe(409);
+    expect({ status: conflict.status, body: conflict.body }).toMatchObject({
+      status: 409,
+      body: { error: { code: "CODESPACE_GENERATION_CONFLICT" } },
+    });
     expect(conflict.body.error.code).toBe("CODESPACE_GENERATION_CONFLICT");
     expect(conflict.text).not.toContain("generation 9");
 

@@ -114,6 +114,19 @@ export class LocalRefusal extends Error {
   }
 }
 
+/** Base64 prefixes plus the fixed worker/result metadata must fit one guest JSON reply. */
+export function requireOperationOutputBudget(stdout: unknown, stderr: unknown): void {
+  const prefix = integer(1, MAX_MESSAGE_BYTES / 2);
+  const encoded = (value: unknown) => 4 * Math.ceil(prefix.parse(value) / 3);
+  // The installed supervisor publishes two prefixes and fixed terminal/counter fields,
+  // not argv or session environment. Reserve room for that envelope independently of data.
+  if (encoded(stdout) + encoded(stderr) > MAX_MESSAGE_BYTES - 1024)
+    throw new LocalRefusal(
+      "LOCAL_OUTPUT_LIMIT",
+      "Combined encoded output prefixes exceed the local response budget.",
+    );
+}
+
 export function requireLocalGrant(
   policy: LocalPolicy,
   repositoryId: string,

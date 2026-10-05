@@ -56,7 +56,8 @@ describe("codespace identifier completeness", () => {
       /\/api\/integrations\/github\/workspaces\b/g,
     ];
     const allowedCompatibility = new Set([
-      "packages/web-backend/src/services/github-codespaces-connector.ts:WORKSPACE_FILE_REJECTED",
+      // The private version-1 decoder normalizes this persisted code before publishing it.
+      "packages/web-backend/src/services/codespace-job-transport.ts:WORKSPACE_FILE_REJECTED",
     ]);
     const violations: string[] = [];
 

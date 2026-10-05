@@ -9,9 +9,16 @@ import { LocalRecords } from "./space-record.js";
 import { LocalManager } from "./manager.js";
 import { LocalJobs } from "./jobs.js";
 import { LocalRpc } from "./rpc.js";
+import { LocalRelay } from "./relay.js";
 import { SbxRuntime } from "./sbx-runtime.js";
 import { admitStorage } from "./storage.js";
 import { LocalRefusal, MAX_MESSAGE_BYTES, publicPolicy } from "./policy.js";
+import {
+  prepareLocalCredentialRecovery,
+  recoverLocalDevice,
+  stopLocalDevice,
+  withLocalRuntimeOwner,
+} from "./guard.js";
 
 const HELP = `Moira Local — user-owned, mountless Docker Sandboxes codespaces
 
@@ -19,6 +26,7 @@ Usage: moira-local <command> [options]
 
   init         Create private local state and bounded storage; work starts disabled
   login        Sign in to Docker within the companion's separate runtime
+               --new-store creates a separate encrypted store; existing credentials are preserved
   setup        Initialize an empty dedicated runtime with host integrations disabled
   approve OWNER/REPO [--private] [--push] [--delete] [--domain HOST ...]
                Grant repository, egress and optional destructive rights locally
@@ -30,16 +38,24 @@ Usage: moira-local <command> [options]
                Inspect local grants, health and isolation prerequisites
   create OWNER/REPO [--ref main]
   start SPACE_ID | stop SPACE_ID | remove SPACE_ID --confirm
+  recover SPACE_ID --confirm
+               Acknowledge a stopped VM's unknown guest outcome; prior jobs are never retried
+  recover --confirm
+               Acknowledge orphan device shutdown while work is disabled; preserve jobs and data
   exec SPACE_ID -- COMMAND [ARG ...]
                Run a command inside the VM, never in the host's shell
   request      Read one bounded JSON protocol request from stdin
+  enroll --server HTTPS_URL --pairing-id UUID
+               Read the browser's pairing token from stdin; confirm the local grants in Moira
+  run          Serve the paired Moira account through outbound HTTPS until stopped
 
 Options: --state PATH --sbx PATH --template IMAGE@sha256:DIGEST
          --storage-root PATH --storage-gib 32 --cpus 2 --memory-gib 4
          --max-sandboxes 2 --label NAME --json --help
 
-macOS init creates a private bounded disk image. On Linux provide an empty,
-private, already mounted bounded filesystem. Docker Sandboxes sign-in is required.
+The verified runtime supports macOS; init creates a private bounded disk image.
+Linux execution is refused until its kernel ownership contract is supported.
+Docker Sandboxes sign-in is required.
 No host folders, host secrets or production credentials are supplied to a sandbox.
 Codespace content is visible to Moira. Review returned code before running it locally.
 `;
@@ -82,11 +98,19 @@ export async function main(args: string[], environment: NodeJS.ProcessEnv): Prom
       delete: { type: "boolean" },
       confirm: { type: "boolean" },
       json: { type: "boolean" },
+      "new-store": { type: "boolean" },
       help: { type: "boolean" },
+      server: { type: "string" },
+      "pairing-id": { type: "string" },
     },
   });
   const [command, target] = parsed.positionals;
   const options = parsed.values;
+  if (options["new-store"] && command !== "login")
+    throw new LocalRefusal(
+      "LOCAL_OPTION_INVALID",
+      "--new-store is available only for local login.",
+    );
   const output = (value: unknown) => process.stdout.write(`${JSON.stringify(value, null, 2)}\n`);
   if (!command || options.help) {
     process.stdout.write(HELP);
@@ -149,7 +173,48 @@ export async function main(args: string[], environment: NodeJS.ProcessEnv): Prom
     return;
   }
   const policy = await records.policy();
-  const runtime = new SbxRuntime(policy);
+  if (command === "recover" && target === undefined) {
+    await recoverLocalDevice(records, options.confirm === true);
+    output({ recovered: true, enabled: false, priorJobsRetained: true, dataPreserved: true });
+    return;
+  }
+  if (command === "enroll") {
+    if (!options.server || !options["pairing-id"])
+      throw new LocalRefusal(
+        "LOCAL_PAIRING_INCOMPLETE",
+        "Supply --server and --pairing-id from the Moira browser.",
+      );
+    output(
+      await new LocalRelay(records).enroll(
+        options.server,
+        options["pairing-id"],
+        (await input(4096)).toString("utf8").trim(),
+      ),
+    );
+    return;
+  }
+  if (command === "run") {
+    const controller = new AbortController();
+    const stop = () => controller.abort();
+    process.once("SIGINT", stop);
+    process.once("SIGTERM", stop);
+    const manager = new LocalManager(records);
+    const relay = new LocalRelay(records);
+    try {
+      await relay.confirmed(controller.signal);
+      await manager.open();
+      const rpc = new LocalRpc(manager);
+      while (!controller.signal.aborted) await relay.poll(rpc, controller.signal);
+    } catch (error) {
+      if (!controller.signal.aborted) throw error;
+    } finally {
+      controller.abort();
+      await manager.close();
+      process.removeListener("SIGINT", stop);
+      process.removeListener("SIGTERM", stop);
+    }
+    return;
+  }
   if (command === "status") {
     output({
       ...publicPolicy(policy),
@@ -165,42 +230,49 @@ export async function main(args: string[], environment: NodeJS.ProcessEnv): Prom
   }
   if (command === "setup") {
     await admitStorage(policy);
-    await runtime.initialize();
+    await withLocalRuntimeOwner(records, "setup");
     output({ configured: true });
     return;
   }
   if (command === "doctor") {
     await admitStorage(policy);
-    await runtime.verifySettings();
-    await runtime.list();
+    await withLocalRuntimeOwner(records, "doctor");
     output({ ready: true, liveVmIsolationVerified: false });
     return;
   }
   if (command === "login") {
-    await mkdir(join(runtime.home, "tmp"), { recursive: true, mode: 0o700 });
-    await runtime.validateExecutable();
-    await new Promise<void>((resolve, reject) => {
-      const child = spawn(policy.runtime.binary, ["login"], {
-        cwd: runtime.home,
-        env: { ...runtime.environment },
-        stdio: "inherit",
-        shell: false,
+    const release = await state.lock();
+    try {
+      const loginPolicy = await records.policy();
+      const runtime = new SbxRuntime(loginPolicy);
+      await admitStorage(loginPolicy);
+      if (options["new-store"]) await prepareLocalCredentialRecovery(records);
+      await mkdir(join(runtime.home, "tmp"), { recursive: true, mode: 0o700 });
+      await runtime.prepareCredentials({ newStore: options["new-store"] });
+      await runtime.validateExecutable();
+      await runtime.prepareCredentials();
+      await new Promise<void>((resolve, reject) => {
+        const child = spawn(loginPolicy.runtime.binary, ["login"], {
+          cwd: runtime.home,
+          env: { ...runtime.environment },
+          stdio: "inherit",
+          shell: false,
+        });
+        child.once("error", reject);
+        child.once("exit", (code) =>
+          code === 0
+            ? resolve()
+            : reject(new LocalRefusal("LOCAL_LOGIN_FAILED", "Docker sign-in did not complete.")),
+        );
       });
-      child.once("error", reject);
-      child.once("exit", (code) =>
-        code === 0
-          ? resolve()
-          : reject(new LocalRefusal("LOCAL_LOGIN_FAILED", "Docker sign-in did not complete.")),
-      );
-    });
+    } finally {
+      await release();
+    }
     return;
   }
   if (command === "disable") {
     await setEnabled(records, false);
-    for (const space of await records.list()) {
-      if (space.runtimeId && space.phase !== "deleted")
-        await runtime.stop({ name: space.name, runtimeId: space.runtimeId });
-    }
+    await stopLocalDevice(records);
     output({ enabled: false });
     return;
   }
@@ -241,6 +313,16 @@ async function runManagerCommand(
       return;
     }
     z.string().uuid().parse(target);
+    if (command === "recover") {
+      const recovered = await manager.recover(target, options.confirm === true);
+      output({
+        recovered: true,
+        spaceId: recovered.id,
+        generation: recovered.generation,
+        priorJobsRetained: true,
+      });
+      return;
+    }
     if (command === "start") {
       await manager.start(target);
       output({ started: true, spaceId: target });

@@ -120,6 +120,140 @@ function fetcher(bytes = Buffer.from([0, 255, 1, 2, 3])): CodespaceNativeReferen
 }
 
 describe("private codespace transfer service", () => {
+  test("retains a multi-part relay payload across restart without public download authority", async () => {
+    const value = fixture({
+      maxTransferFileBytes: 4,
+      maxTransferBytesPerUser: 32,
+      maxTransferBytesGlobal: 64,
+      maxTransferObjectsPerUser: 10,
+      maxTransferObjectsGlobal: 20,
+      maxTransferInflightBytesPerUser: 32,
+    });
+    const bytes = Buffer.from([0, 255, 1, 2, 3, 4, 5, 6, 7]);
+    try {
+      const ref = await value.service.retainRelayPayload("user-1", "local_relay_input", bytes);
+      expect(ref.parts.map((part) => part.size)).toEqual([4, 4, 1]);
+      const restarted = new CodespaceTransferService({
+        repository: value.repository,
+        root: value.root,
+        policy: () => basePolicy,
+        now: () => 1_800_000_000_000,
+      });
+      expect(await restarted.readRelayPayload("user-1", "local_relay_input", ref)).toEqual(bytes);
+      expect(await restarted.readRelayChunk("user-1", "local_relay_input", ref, 1, 1, 2)).toEqual(
+        bytes.subarray(5, 7),
+      );
+      await expect(restarted.readRelayPayload("user-2", "local_relay_input", ref)).rejects.toThrow(
+        /unavailable/,
+      );
+      await expect(restarted.readRelayPayload("user-1", "local_relay_output", ref)).rejects.toThrow(
+        /unavailable/,
+      );
+      expect(value.repository.listLive().map((row) => row.purpose)).toEqual([
+        "local_relay_input",
+        "local_relay_input",
+        "local_relay_input",
+      ]);
+      expect(JSON.stringify(value.repository.listLive())).not.toContain(bytes.toString("base64"));
+      await restarted.discardRelayPayload("user-1", "local_relay_input", ref);
+      expect(value.repository.listLive()).toEqual([]);
+      expect(readdirSync(value.root)).toEqual([]);
+    } finally {
+      value.sqlite.close();
+    }
+  });
+
+  test("a valid relay token cannot claim a public download or publish through its API", async () => {
+    const value = fixture();
+    try {
+      const reserved = value.repository.reserve({
+        userId: "user-1",
+        purpose: "local_relay_output",
+        fileName: "relay.bin",
+        mimeType: "application/octet-stream",
+        declaredSize: 3,
+        ownerPid: process.pid,
+        ownerStartTime: processStartTime(process.pid),
+        policy: basePolicy,
+        now: 1_800_000_000_000,
+      })!;
+      await expect(value.service.publishDownload(reserved, Buffer.from("abc"))).rejects.toThrow(
+        /reservation/,
+      );
+      writeFileSync(join(value.root, reserved.record.objectKey), "abc");
+      expect(
+        value.repository.markReady(
+          reserved.record.id,
+          3,
+          createHash("sha256").update("abc").digest("hex"),
+          1_800_000_000_000,
+        ),
+      ).toBe(true);
+      await expect(
+        value.service.claimDownload(`codespace-file://${reserved.token}`),
+      ).rejects.toThrow(/unavailable/);
+      expect(value.repository.listLive()[0].state).toBe("ready");
+    } finally {
+      value.sqlite.close();
+    }
+  });
+
+  test("relay quota failure releases earlier parts and preserves existing native objects", async () => {
+    const value = fixture({
+      maxTransferFileBytes: 4,
+      maxTransferBytesPerUser: 8,
+      maxTransferObjectsPerUser: 2,
+    });
+    try {
+      const native = await value.service.createDownload("user-1", {
+        fileName: "keep.bin",
+        mimeType: "application/octet-stream",
+        bytes: Buffer.from([9]),
+      });
+      await expect(
+        value.service.retainRelayPayload("user-1", "local_relay_input", Buffer.alloc(8)),
+      ).rejects.toThrow(/quota/);
+      expect(value.repository.listLive()).toHaveLength(1);
+      const claimed = await value.service.claimDownload(native.referenceId);
+      const chunks: Buffer[] = [];
+      for await (const chunk of claimed.stream) chunks.push(Buffer.from(chunk));
+      expect(Buffer.concat(chunks)).toEqual(Buffer.from([9]));
+    } finally {
+      value.sqlite.close();
+    }
+  });
+
+  test("relay refuses reordered or mutated payloads and expires stored bytes under shared quotas", async () => {
+    const value = fixture({ maxTransferFileBytes: 4, maxTransferBytesPerUser: 16 });
+    try {
+      const ref = await value.service.retainRelayPayload(
+        "user-1",
+        "local_relay_output",
+        Buffer.from("abcdefgh"),
+      );
+      await expect(
+        value.service.readRelayPayload("user-1", "local_relay_output", {
+          ...ref,
+          parts: [...ref.parts].reverse(),
+        }),
+      ).rejects.toThrow(/digest/);
+      const record = value.repository.listLive()[0];
+      writeFileSync(join(value.root, record.objectKey), "evil");
+      await expect(
+        value.service.readRelayChunk("user-1", "local_relay_output", ref, 0, 0, 4),
+      ).rejects.toThrow(/digest/);
+      value.advance(60_001);
+      await expect(
+        value.service.readRelayPayload("user-1", "local_relay_output", ref),
+      ).rejects.toThrow(/unavailable/);
+      await value.service.cleanup();
+      expect(value.repository.listLive()).toEqual([]);
+      expect(readdirSync(value.root)).toEqual([]);
+    } finally {
+      value.sqlite.close();
+    }
+  });
+
   test("accepts the documented raw file ID without treating it as download authority", async () => {
     const value = fixture();
     const source = fetcher();

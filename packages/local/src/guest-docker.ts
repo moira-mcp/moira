@@ -34,6 +34,11 @@ export async function configureGuestDocker(
     ))
       throw error;
   }
+  const previousProxies = configuration.proxies as Record<string, unknown> | undefined;
+  const previouslyExact =
+    previousProxies?.["http-proxy"] === proxyUrl &&
+    previousProxies?.["https-proxy"] === proxyUrl &&
+    previousProxies?.["no-proxy"] === "localhost,127.0.0.1,::1";
   configuration.proxies = {
     "http-proxy": proxyUrl,
     "https-proxy": proxyUrl,
@@ -44,6 +49,26 @@ export async function configureGuestDocker(
   await execute("sudo", ["-n", "install", "-D", "-m", "600", prepared, "/etc/docker/daemon.json"], {
     timeout: 10_000,
   });
+  const installed = JSON.parse(
+    (
+      await execute("sudo", ["-n", "cat", "/etc/docker/daemon.json"], {
+        timeout: 10_000,
+        maxBuffer: 64 * 1024,
+      })
+    ).stdout,
+  );
+  if (
+    installed?.proxies?.["http-proxy"] !== proxyUrl ||
+    installed?.proxies?.["https-proxy"] !== proxyUrl ||
+    installed?.proxies?.["no-proxy"] !== "localhost,127.0.0.1,::1"
+  )
+    throw new Error("Guest Docker proxy configuration was not installed exactly");
+  // Engine SystemInfo masks both userinfo fields with this fixed literal.
+  // Compare the complete URL pair, preserving every other field and both protocols.
+  const maskedProxy = proxyUrl.replace(/^([^:]+:\/\/)[^/?#]*@/, "$1xxxxx:xxxxx@");
+  const matchesProxy = (output: string) =>
+    output.trim() === `${proxyUrl}|${proxyUrl}` ||
+    output.trim() === `${maskedProxy}|${maskedProxy}`;
   let configured = false;
   try {
     const { stdout } = await execute(
@@ -51,15 +76,21 @@ export async function configureGuestDocker(
       ["info", "--format", "{{.HTTPProxy}}|{{.HTTPSProxy}}"],
       { timeout: 10_000 },
     );
-    configured = stdout.trim() === `${proxyUrl}|${proxyUrl}`;
+    configured = previouslyExact && matchesProxy(stdout);
   } catch {
     /* A new VM may not have started its own Docker daemon yet. */
   }
   if (!configured)
-    await execute("sudo", ["-n", "service", "docker", "restart"], {
-      timeout: 30_000,
-      maxBuffer: 128 * 1024,
-    });
+    // The template init script lowers hard NOFILE to 524288. Its inherited soft
+    // limit must not exceed that value; leave the hard ceiling unchanged here.
+    await execute(
+      "sudo",
+      ["-n", "prlimit", "--nofile=524288:", "--", "service", "docker", "restart"],
+      {
+        timeout: 30_000,
+        maxBuffer: 128 * 1024,
+      },
+    );
   for (let attempt = 0; attempt < 20 && !configured; attempt++) {
     try {
       const { stdout } = await execute(
@@ -67,7 +98,7 @@ export async function configureGuestDocker(
         ["info", "--format", "{{.HTTPProxy}}|{{.HTTPSProxy}}"],
         { timeout: 5000 },
       );
-      configured = stdout.trim() === `${proxyUrl}|${proxyUrl}`;
+      configured = matchesProxy(stdout);
     } catch {
       /* Wait for this guest's daemon, not a host socket. */
     }

@@ -31,7 +31,6 @@ export async function serveGuestProxy(hostPort: number, guestPort = 3437) {
           path: request.url,
           host: "moira-local",
           headers: { ...request.headers, connection: "close" },
-          agent: false,
           createConnection: (_options, ready) => {
             tunnel((error, socket) => ready(error, socket!));
             return undefined;

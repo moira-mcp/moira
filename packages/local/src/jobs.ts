@@ -1,7 +1,12 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import { LocalManager } from "./manager.js";
-import { LocalRefusal, MAX_MESSAGE_BYTES, requireLocalGrant } from "./policy.js";
+import {
+  LocalRefusal,
+  MAX_MESSAGE_BYTES,
+  requireLocalGrant,
+  requireOperationOutputBudget,
+} from "./policy.js";
 
 const requestSchema = z
   .object({
@@ -27,6 +32,7 @@ const ledgerSchema = z
     deadlineAt: z.number().int(),
     terminal: z.boolean(),
     kind: z.enum(["exec", "file"]),
+    unknown: z.boolean().default(false),
   })
   .strict();
 
@@ -61,22 +67,21 @@ export class LocalJobs {
       );
     }
     request.repositoryFullName = repository.fullName;
-    const runtime = this.manager.runtime(policy);
-    if (
-      space.desiredState !== "running" ||
-      space.phase !== "usable" ||
-      (await runtime.exact(this.manager.identity(space)))?.status !== "running"
-    ) {
+    if (space.desiredState !== "running" || space.phase !== "usable") {
       throw new LocalRefusal(
         "LOCAL_NOT_RUNNING",
         "Start this local sandbox before requesting work.",
       );
     }
-    await this.manager.boundary(space, runtime);
     const key = `job-${space.id}-${request.remoteMarker.slice(9)}.json`;
     const creates = request.action === "execute" || request.action === "file-execute";
     let ownsDispatch = false;
     let job = await this.manager.records.state.read(key, ledgerSchema.parse);
+    if (job?.unknown)
+      throw new LocalRefusal(
+        "LOCAL_GUEST_SETTLEMENT_UNKNOWN",
+        "The retained guest outcome is unknown; inspect its local fence.",
+      );
     if (creates) {
       if (request.action === "execute") {
         const timeout = z
@@ -87,20 +92,16 @@ export class LocalJobs {
           .parse(request.timeoutMs);
         request.timeoutMs = Math.min(timeout, policy.leaseUntil - this.manager.now());
         z.number().int().min(1).max(policy.limits.maxOutputBytes).parse(request.maxRetainedBytes);
-        z.number()
-          .int()
-          .min(1)
-          .max(MAX_MESSAGE_BYTES / 2)
-          .parse(request.maxStdoutBytes);
-        z.number()
-          .int()
-          .min(1)
-          .max(MAX_MESSAGE_BYTES / 2)
-          .parse(request.maxStderrBytes);
+        requireOperationOutputBudget(request.maxStdoutBytes, request.maxStderrBytes);
       }
       const digest = createHash("sha256").update(serialized).digest("hex");
       await this.serial(async () => {
         job = await this.manager.records.state.read(key, ledgerSchema.parse);
+        if (job?.unknown)
+          throw new LocalRefusal(
+            "LOCAL_GUEST_SETTLEMENT_UNKNOWN",
+            "The retained guest outcome is unknown; inspect its local fence.",
+          );
         if (job) {
           if (job.digest !== digest)
             throw new LocalRefusal(
@@ -130,10 +131,16 @@ export class LocalJobs {
           marker: request.remoteMarker,
           digest,
           generation: space.generation,
-          deadlineAt:
+          deadlineAt: Math.min(
+            policy.leaseUntil,
             this.manager.now() +
-            (typeof request.timeoutMs === "number" ? request.timeoutMs : 60_000),
+              Math.min(
+                policy.limits.maxOperationMs,
+                typeof request.timeoutMs === "number" ? request.timeoutMs : 60_000,
+              ),
+          ),
           terminal: false,
+          unknown: false,
           kind: request.action === "execute" ? "exec" : "file",
         };
         await this.manager.records.state.write(key, job);
@@ -144,14 +151,38 @@ export class LocalJobs {
     if (!ownsDispatch && this.preparing.has(key)) return { state: "running" };
     if (!job) return { state: "absent" };
     try {
-      if (job.generation !== space.generation && job.kind === "exec" && !job.terminal)
-        return { state: "interrupted" };
-      const output = await runtime.guest(
-        this.manager.identity(space),
-        ["node", "/tmp/moira-local-runtime/worker.mjs"],
-        Buffer.from(JSON.stringify({ kind: "operation", request })),
-        30_000,
-      );
+      const accepted = job;
+      const output = await this.manager.dispatchGuest(spaceId, async (current, latest) => {
+        const repository = requireLocalGrant(latest, current.repositoryId, this.manager.now());
+        if (request.repositoryFullName !== repository.fullName)
+          throw new LocalRefusal("LOCAL_REPOSITORY_DENIED", "The approved repository changed.");
+        if (
+          accepted.generation !== current.generation &&
+          accepted.kind === "exec" &&
+          !accepted.terminal
+        )
+          return null;
+        if (ownsDispatch) {
+          const remaining = Math.min(
+            accepted.deadlineAt - this.manager.now(),
+            latest.leaseUntil - this.manager.now(),
+            latest.limits.maxOperationMs,
+          );
+          if (remaining <= 0)
+            throw new LocalRefusal("LOCAL_LEASE_EXPIRED", "The accepted work deadline expired.");
+          if (request.action === "execute") {
+            request.timeoutMs = Math.min(Number(request.timeoutMs), remaining);
+            z.number()
+              .int()
+              .min(1)
+              .max(latest.limits.maxOutputBytes)
+              .parse(request.maxRetainedBytes);
+          }
+          accepted.deadlineAt = this.manager.now() + remaining;
+        }
+        return this.manager.operation(spaceId, request);
+      });
+      if (output === null) return { state: "interrupted" };
       const response = z
         .object({ ok: z.literal(true), result: z.unknown() })
         .strict()
@@ -167,9 +198,19 @@ export class LocalJobs {
         (resultState !== "running" && resultState !== "session_limit")
       ) {
         job.terminal = true;
+      }
+      await this.manager.records.state.write(key, job);
+      return response.result;
+    } catch (error) {
+      if (
+        error instanceof LocalRefusal &&
+        (error.code === "LOCAL_GUEST_SETTLEMENT_UNKNOWN" || error.code === "LOCAL_STOP_PENDING")
+      ) {
+        job.unknown = true;
+        // Unknown is deliberately not terminal: a transport EOF cannot certify guest exit.
         await this.manager.records.state.write(key, job);
       }
-      return response.result;
+      throw error;
     } finally {
       if (ownsDispatch) this.preparing.delete(key);
     }

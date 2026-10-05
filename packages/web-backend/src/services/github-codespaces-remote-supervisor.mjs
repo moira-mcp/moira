@@ -10,6 +10,7 @@ import {
   open,
   readFile,
   readdir,
+  realpath,
   rename,
   rm,
   stat,
@@ -318,10 +319,26 @@ async function resolveSession(request) {
   };
 }
 
-async function verifyRepository(request, repositoryName) {
-  const root = join(CODESPACES_ROOT, repositoryName);
+async function verifyRepository(request, repositoryName, binding) {
+  const root = binding?.root ?? join(CODESPACES_ROOT, repositoryName);
+  if (binding && binding.repositoryFullName !== request.repositoryFullName) {
+    fail("repository identity mismatch");
+  }
   const value = await stat(root);
   if (!value.isDirectory() || value.uid === 0) fail("invalid codespace repository");
+  if (binding) {
+    const inspected = await lstat(root);
+    if (
+      inspected.isSymbolicLink() ||
+      (await realpath(root)) !== root ||
+      inspected.dev !== binding.dev ||
+      inspected.ino !== binding.ino ||
+      value.dev !== inspected.dev ||
+      value.ino !== inspected.ino
+    ) {
+      fail("repository root identity mismatch");
+    }
+  }
   const result = await capture("/usr/bin/git", [
     "-c",
     `safe.directory=${root}`,
@@ -331,15 +348,26 @@ async function verifyRepository(request, repositoryName) {
     "get-url",
     "origin",
   ]);
-  const normalized = result.stdout
+  const origin = result.stdout.trim();
+  const normalized = origin
     .trim()
     .replace(/^git@github\.com:/, "")
     .replace(/^https:\/\/github\.com\//, "")
     .replace(/\.git$/, "")
     .toLowerCase();
-  if (normalized !== request.repositoryFullName.toLowerCase()) fail("repository identity mismatch");
+  if (
+    binding ? origin !== binding.origin : normalized !== request.repositoryFullName.toLowerCase()
+  ) {
+    fail("repository identity mismatch");
+  }
   const cwd = resolve(root, request.cwd);
   if (cwd !== root && !cwd.startsWith(`${root}${sep}`)) fail("working directory escaped codespace");
+  if (binding) {
+    const canonical = await realpath(cwd);
+    if (canonical !== root && !canonical.startsWith(`${root}${sep}`)) {
+      fail("working directory escaped codespace");
+    }
+  }
   await access(cwd, constants.R_OK | constants.X_OK);
   return cwd;
 }
@@ -361,13 +389,13 @@ function safeRelativePath(value, allowRoot = false) {
   return value.replaceAll("\\", "/");
 }
 
-async function repositoryRootForFile(request) {
+async function repositoryRootForFile(request, binding) {
   const match = request.repositoryFullName?.match(REPOSITORY);
   if (!match) fail("invalid repository identity");
-  const path = await verifyRepository({ ...request, cwd: "." }, match[1]);
+  const path = await verifyRepository({ ...request, cwd: "." }, match[1], binding);
   const value = await lstat(path);
   if (!value.isDirectory() || value.isSymbolicLink()) fail("codespace root is invalid");
-  return { path, dev: value.dev, ino: value.ino };
+  return { path, dev: binding?.dev ?? value.dev, ino: binding?.ino ?? value.ino };
 }
 
 function descriptorPath(handle, name = "") {
@@ -1375,14 +1403,14 @@ async function readFileOperationResult(directory) {
   }
 }
 
-async function fileExecute(request) {
+async function fileExecute(request, binding) {
   const directory = validateBase(request);
   for (;;) {
     const existing = await readFileOperationResult(directory);
     if (existing) {
       const savedIntent = await readFileIntent(directory);
       if (savedIntent) {
-        await cleanupFileTransaction(directory, await repositoryRootForFile(savedIntent));
+        await cleanupFileTransaction(directory, await repositoryRootForFile(savedIntent, binding));
       }
       await rm(join(directory, "file-intent.json"), { force: true });
       return existing;
@@ -1421,7 +1449,7 @@ async function fileExecute(request) {
     };
     await writeDurableJson(directory, "file-intent.json", intent);
   }
-  const root = await repositoryRootForFile(intent);
+  const root = await repositoryRootForFile(intent, binding);
   await recoverFileTransaction(directory, root);
   let state = "succeeded";
   let value;
@@ -1442,14 +1470,15 @@ async function fileExecute(request) {
   return { state, value };
 }
 
-async function fileInspect(request) {
+async function fileInspect(request, binding) {
   const directory = validateBase(request);
   try {
     await access(directory, constants.R_OK);
     const result = await readFileOperationResult(directory);
     if (result) {
       const intent = await readFileIntent(directory);
-      if (intent) await cleanupFileTransaction(directory, await repositoryRootForFile(intent));
+      if (intent)
+        await cleanupFileTransaction(directory, await repositoryRootForFile(intent, binding));
       await rm(join(directory, "file-intent.json"), { force: true });
       return result;
     }
@@ -1458,7 +1487,7 @@ async function fileInspect(request) {
     try {
       const intent = await readFileIntent(directory);
       if (!intent) return { state: "absent" };
-      return fileExecute(intent);
+      return fileExecute(intent, binding);
     } catch (error) {
       if (error?.code === "ENOENT") return { state: "absent" };
       throw error;
@@ -1582,7 +1611,7 @@ if(input.session&&input.sessionEnd)await rm(input.session.path,{force:true}).cat
 await writeFile(input.resultTempPath,JSON.stringify({state,stdout:Buffer.concat(prefix.stdout).toString("base64"),stderr:Buffer.concat(prefix.stderr).toString("base64"),exitCode:Number.isInteger(code)?code:null,stdoutBytes:total.stdout,stderrBytes:total.stderr,outputLimitExceeded:retainedExceeded,sessionCaptureDropped:captureDropped}),{mode:0o600});await rename(input.resultTempPath,input.resultPath);
 })().catch(async()=>{process.exitCode=1});`;
 
-async function execute(request) {
+async function execute(request, binding) {
   const directory = validateBase(request);
   const { repositoryName } = validateExecution(request);
   const session = await resolveSession(request);
@@ -1594,7 +1623,7 @@ async function execute(request) {
     await session.end?.();
     return { state: "session_ended" };
   }
-  const cwd = await verifyRepository({ ...request, cwd: session.cwd }, repositoryName);
+  const cwd = await verifyRepository({ ...request, cwd: session.cwd }, repositoryName, binding);
   await mkdir(dirname(directory), { recursive: true, mode: 0o700 });
   await mkdir(directory, { mode: 0o700 });
   // The life of the environment the command runs in, so a later inspection can tell a command whose
@@ -1634,7 +1663,7 @@ async function execute(request) {
       capturePath,
       shellOwned: [...SHELL_OWNED_VARIABLES],
       sessionEnd: Boolean(request.sessionEnd),
-      repositoryRoot: join(CODESPACES_ROOT, repositoryName),
+      repositoryRoot: binding?.root ?? join(CODESPACES_ROOT, repositoryName),
       session: session.store
         ? {
             path: sessionPath(request.session),
@@ -1897,14 +1926,34 @@ async function finalize(request) {
   return { state: "absent" };
 }
 
-export async function runRequest(request) {
-  if (request.action === "execute") return execute(request);
+/** Binding is supplied by the installed provider worker, never decoded from a job request. */
+export async function runRequest(request, binding) {
+  if (
+    binding !== undefined &&
+    (!binding ||
+      typeof binding !== "object" ||
+      Array.isArray(binding) ||
+      Object.keys(binding).sort().join(",") !== "dev,ino,origin,repositoryFullName,root" ||
+      typeof binding.repositoryFullName !== "string" ||
+      !REPOSITORY.test(binding.repositoryFullName) ||
+      typeof binding.root !== "string" ||
+      resolve(binding.root) !== binding.root ||
+      typeof binding.origin !== "string" ||
+      binding.origin.length < 1 ||
+      binding.origin.length > 4096 ||
+      !Number.isSafeInteger(binding.dev) ||
+      binding.dev < 0 ||
+      !Number.isSafeInteger(binding.ino) ||
+      binding.ino < 1)
+  )
+    fail("invalid provider repository binding");
+  if (request.action === "execute") return execute(request, binding);
   if (request.action === "inspect") return inspect(request);
   if (request.action === "cancel") return cancel(request);
   if (request.action === "finalize") return finalize(request);
   if (request.action === "output") return readOutput(request);
-  if (request.action === "file-execute") return fileExecute(request);
-  if (request.action === "file-inspect") return fileInspect(request);
+  if (request.action === "file-execute") return fileExecute(request, binding);
+  if (request.action === "file-inspect") return fileInspect(request, binding);
   fail("unsupported supervisor action");
 }
 

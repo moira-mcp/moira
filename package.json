@@ -14,6 +14,7 @@
   "scripts": {
     "local": "node packages/local/dist/cli.js",
     "local:build": "node scripts/build-local.js",
+    "local:verify:guest": "npm run local:build && node scripts/verify-local-guest.js",
     "typecheck:local": "tsc --noEmit -p packages/local/tsconfig.json",
     "test": "testfold unit workflow integration api e2e mcp-tools -e local",
     "test:unit": "testfold unit",

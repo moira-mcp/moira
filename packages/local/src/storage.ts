@@ -9,6 +9,17 @@ const ownerSchema = z
   .object({ deviceId: z.string().uuid(), capacityBytes: z.number().int().positive() })
   .strict();
 
+/** Native socket paths must stay short even when the private image is stored under a long path. */
+export function defaultStorageMount(
+  stateRoot: string,
+  deviceId: string,
+  platform: NodeJS.Platform,
+): string {
+  return platform === "darwin"
+    ? join("/private/tmp", `ml-${deviceId.replaceAll("-", "").slice(0, 12)}`)
+    : join(stateRoot, "storage");
+}
+
 /** A runtime filesystem must have its own finite capacity, not merely an application counter. */
 export async function admitStorage(policy: LocalPolicy): Promise<void> {
   const root = policy.runtime.storageRoot;
@@ -77,7 +88,7 @@ export async function initializeStorage(
       "Choose an integral storage size between 8 and 1024 GiB.",
     );
   }
-  const root = suppliedMount ?? join(state.root, "storage");
+  const root = suppliedMount ?? defaultStorageMount(state.root, deviceId, process.platform);
   if (!suppliedMount) {
     if (process.platform !== "darwin") {
       throw new LocalRefusal(

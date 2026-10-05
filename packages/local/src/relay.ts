@@ -1,0 +1,786 @@
+import { createHash, randomBytes } from "node:crypto";
+import { z } from "zod";
+import {
+  localPublicPolicySchema,
+  localRelayPayloadReferenceSchema,
+  type LocalRelayClaim,
+  type LocalRelayPayloadReference,
+} from "../../shared/src/codespaces/local-device-types.js";
+import { LocalRecords } from "./space-record.js";
+import { LocalRefusal, MAX_MESSAGE_BYTES, publicPolicy } from "./policy.js";
+import { LocalRpc, localEnvelopeSchema } from "./rpc.js";
+
+const uuid = z.string().uuid();
+const deviceSecret = z.string().regex(/^[A-Za-z0-9_-]{43}$/);
+const connectionSchema = z
+  .object({
+    origin: z.string().url(),
+    credential: deviceSecret,
+    deviceId: uuid,
+    userId: z.string().min(1).max(255).optional(),
+    deviceGeneration: z.number().int().positive().optional(),
+    connectionId: uuid.optional(),
+    pairingId: uuid,
+    pairingToken: deviceSecret.optional(),
+  })
+  .strict();
+type Connection = z.infer<typeof connectionSchema>;
+const deviceSchema = z
+  .object({
+    deviceId: uuid,
+    userId: z.string().min(1).max(255),
+    deviceGeneration: z.number().int().positive(),
+    connectionId: uuid,
+    status: z.enum(["pending", "active", "revoked"]),
+    policy: localPublicPolicySchema,
+  })
+  .passthrough();
+const claimSchema = z
+  .object({
+    requestId: uuid,
+    deviceId: uuid,
+    userId: z.string().min(1),
+    deviceGeneration: z.number().int().positive(),
+    connectionId: uuid,
+    resourceId: uuid,
+    resourceGeneration: z.number().int().positive(),
+    digest: z.string().regex(/^[a-f0-9]{64}$/),
+    payloadReference: localRelayPayloadReferenceSchema,
+    deadlineAt: z.number().int().positive(),
+    claimId: uuid,
+    claimExpiresAt: z.number().int().positive(),
+  })
+  .strict();
+const hash = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex");
+const bindingSchema = z
+  .object({
+    resourceId: uuid,
+    deviceId: uuid,
+    userId: z.string().min(1),
+    connectionId: uuid,
+    deviceGeneration: z.number().int().positive(),
+    serverGeneration: z.number().int().positive(),
+    localSpaceId: uuid.nullable(),
+    localGeneration: z.number().int().positive().nullable(),
+    createMarker: z.string().regex(/^moira-[a-f0-9]{24}$/),
+    repositoryId: uuid,
+    createRequestId: uuid,
+    createDigest: z.string().regex(/^[a-f0-9]{64}$/),
+  })
+  .strict();
+const intentSchema = z
+  .object({
+    digest: z.string().regex(/^[a-f0-9]{64}$/),
+    resourceId: uuid,
+    deviceGeneration: z.number().int().positive(),
+    connectionId: uuid,
+    serverGeneration: z.number().int().positive(),
+    message: localEnvelopeSchema,
+  })
+  .strict();
+
+/** The origin is chosen on this machine. Server responses cannot select another host or redirect. */
+export function relayOrigin(value: string): string {
+  const url = new URL(value);
+  if (url.protocol !== "https:" || url.username || url.password || url.search || url.hash)
+    throw new LocalRefusal(
+      "LOCAL_ORIGIN_UNSAFE",
+      "Choose an HTTPS Moira application URL without credentials.",
+    );
+  return url.href.replace(/\/$/, "");
+}
+
+export class LocalRelay {
+  private established?: Connection;
+  constructor(
+    readonly records: LocalRecords,
+    private readonly fetch: typeof globalThis.fetch = globalThis.fetch,
+  ) {}
+
+  private async request(
+    connection: Connection,
+    path: string,
+    options: {
+      body?: unknown;
+      binary?: Uint8Array;
+      claim?: string;
+      signal?: AbortSignal;
+      limit?: number;
+    } = {},
+  ): Promise<Buffer> {
+    const response = await this.fetch(
+      `${relayOrigin(connection.origin)}/api/local-devices${path}`,
+      {
+        method: options.body === undefined && options.binary === undefined ? "GET" : "POST",
+        redirect: "error",
+        signal: options.signal
+          ? AbortSignal.any([options.signal, AbortSignal.timeout(30_000)])
+          : AbortSignal.timeout(30_000),
+        headers: {
+          authorization: `Bearer ${connection.credential}`,
+          ...(options.claim ? { "X-Moira-Claim-Id": options.claim } : {}),
+          ...(options.body === undefined ? {} : { "content-type": "application/json" }),
+          ...(options.binary === undefined ? {} : { "content-type": "application/octet-stream" }),
+        },
+        body:
+          options.binary === undefined
+            ? options.body === undefined
+              ? undefined
+              : JSON.stringify(options.body)
+            : Buffer.from(options.binary),
+      },
+    );
+    if (!response.ok) {
+      await response.body?.cancel();
+      throw new LocalRefusal(
+        response.status === 401 ? "LOCAL_UNAUTHORIZED" : "LOCAL_RELAY_REFUSED",
+        "Moira refused the current local connection or relay claim.",
+      );
+    }
+    const chunks: Buffer[] = [];
+    let size = 0;
+    const reader = response.body?.getReader();
+    if (reader)
+      try {
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          size += value.length;
+          if (size > (options.limit ?? MAX_MESSAGE_BYTES)) {
+            await reader.cancel();
+            throw new LocalRefusal("LOCAL_OUTPUT_LIMIT", "The relay response exceeded its bound.");
+          }
+          chunks.push(Buffer.from(value));
+        }
+      } finally {
+        reader.releaseLock();
+      }
+    return Buffer.concat(chunks);
+  }
+
+  private async json(
+    connection: Connection,
+    path: string,
+    body: unknown,
+    signal?: AbortSignal,
+    claim?: string,
+  ): Promise<unknown> {
+    const management = path === "/enroll" || path === "/pairings/status" || path === "/heartbeat";
+    const bytes = await this.request(connection, path, {
+      body,
+      signal,
+      claim,
+      limit: management ? 2 * 1024 * 1024 : 128 * 1024,
+    });
+    return z
+      .object({ success: z.literal(true), data: z.unknown() })
+      .passthrough()
+      .parse(JSON.parse(bytes.toString("utf8"))).data;
+  }
+
+  async enroll(
+    origin: string,
+    pairingId: string,
+    pairingToken: string,
+  ): Promise<{ deviceId: string; status: string }> {
+    const release = await this.records.state.lock();
+    try {
+      const policy = await this.records.policy();
+      const saved = await this.records.state.read("connection.json", connectionSchema.parse);
+      if (
+        saved &&
+        (saved.origin !== relayOrigin(origin) ||
+          saved.pairingId !== pairingId ||
+          saved.deviceId !== policy.deviceId ||
+          saved.pairingToken !== pairingToken ||
+          saved.connectionId)
+      )
+        throw new LocalRefusal(
+          "LOCAL_ALREADY_ENROLLED",
+          "This device already has another pairing; inspect it before replacing its authority.",
+        );
+      const connection =
+        saved ??
+        connectionSchema.parse({
+          origin: relayOrigin(origin),
+          pairingId,
+          pairingToken,
+          deviceId: policy.deviceId,
+          credential: randomBytes(32).toString("base64url"),
+        });
+      // Persist before transport: a lost enrollment response must not rotate the credential.
+      await this.records.state.write("connection.json", connection);
+      const device = deviceSchema.parse(
+        await this.json(connection, "/enroll", {
+          pairingId,
+          pairingToken,
+          credential: connection.credential,
+          policy: publicPolicy(policy),
+        }),
+      );
+      if (device.deviceId !== policy.deviceId || device.status === "revoked")
+        throw new LocalRefusal(
+          "LOCAL_IDENTITY_CHANGED",
+          "The pairing did not bind this locally selected device.",
+        );
+      return { deviceId: device.deviceId, status: device.status };
+    } finally {
+      await release();
+    }
+  }
+
+  async confirmed(signal?: AbortSignal): Promise<Connection> {
+    const connection = await this.records.state.read("connection.json", connectionSchema.parse);
+    if (!connection)
+      throw new LocalRefusal("LOCAL_NOT_ENROLLED", "Pair this device from Moira first.");
+    const policy = await this.records.policy();
+    if (connection.deviceId !== policy.deviceId)
+      throw new LocalRefusal(
+        "LOCAL_IDENTITY_CHANGED",
+        "The paired device differs from local policy.",
+      );
+    if (!connection.connectionId) {
+      if (!connection.pairingToken)
+        throw new LocalRefusal("LOCAL_PAIRING_INCOMPLETE", "The pending pairing has no token.");
+      const status = z
+        .object({ device: deviceSchema.nullable() })
+        .passthrough()
+        .parse(
+          await this.json(
+            connection,
+            "/pairings/status",
+            { pairingId: connection.pairingId, pairingToken: connection.pairingToken },
+            signal,
+          ),
+        );
+      if (!status.device || status.device.status !== "active")
+        throw new LocalRefusal(
+          "LOCAL_PAIRING_INCOMPLETE",
+          "Confirm this device's local policy in the Moira browser.",
+        );
+      if (status.device.deviceId !== policy.deviceId)
+        throw new LocalRefusal(
+          "LOCAL_IDENTITY_CHANGED",
+          "The confirmed pairing differs from local policy.",
+        );
+      connection.userId = status.device.userId;
+      connection.deviceGeneration = status.device.deviceGeneration;
+      connection.connectionId = status.device.connectionId;
+      delete connection.pairingToken;
+      await this.records.state.write("connection.json", connection);
+    }
+    const device = deviceSchema.parse(
+      await this.json(connection, "/heartbeat", { policy: publicPolicy(policy) }, signal),
+    );
+    if (
+      device.status !== "active" ||
+      device.deviceId !== connection.deviceId ||
+      device.userId !== connection.userId ||
+      device.connectionId !== connection.connectionId ||
+      device.deviceGeneration !== connection.deviceGeneration
+    )
+      throw new LocalRefusal(
+        "LOCAL_IDENTITY_CHANGED",
+        "The confirmed connection authority changed.",
+      );
+    if (
+      this.established &&
+      (
+        [
+          "origin",
+          "credential",
+          "deviceId",
+          "userId",
+          "deviceGeneration",
+          "connectionId",
+          "pairingId",
+          "pairingToken",
+        ] as const
+      ).some((key) => connection[key] !== this.established![key])
+    )
+      throw new LocalRefusal(
+        "LOCAL_IDENTITY_CHANGED",
+        "The locally pinned relay connection changed during this run.",
+      );
+    this.established = { ...connection };
+    return connection;
+  }
+
+  private async payload(
+    connection: Connection,
+    claim: LocalRelayClaim,
+    signal?: AbortSignal,
+  ): Promise<Buffer> {
+    if (claim.payloadReference.size > MAX_MESSAGE_BYTES)
+      throw new LocalRefusal(
+        "LOCAL_REQUEST_TOO_LARGE",
+        "The requested local operation exceeds its message bound.",
+      );
+    const parts: Buffer[] = [];
+    for (const [index, part] of claim.payloadReference.parts.entries()) {
+      const chunks: Buffer[] = [];
+      for (let offset = 0; offset < part.size; offset += 256 * 1024) {
+        const length = Math.min(256 * 1024, part.size - offset);
+        const bytes = await this.request(
+          connection,
+          `/relay/${claim.requestId}/payload/${index}?offset=${offset}&length=${length}`,
+          { claim: claim.claimId, signal, limit: length },
+        );
+        if (bytes.length !== length)
+          throw new LocalRefusal("LOCAL_PAYLOAD_CHANGED", "A relay payload part is incomplete.");
+        chunks.push(bytes);
+      }
+      const bytes = Buffer.concat(chunks);
+      if (hash(bytes) !== part.sha256)
+        throw new LocalRefusal(
+          "LOCAL_PAYLOAD_CHANGED",
+          "A relay payload part differs from its digest.",
+        );
+      parts.push(bytes);
+    }
+    const bytes = Buffer.concat(parts);
+    if (
+      bytes.length !== claim.payloadReference.size ||
+      hash(bytes) !== claim.payloadReference.sha256 ||
+      hash(bytes) !== claim.digest
+    )
+      throw new LocalRefusal(
+        "LOCAL_PAYLOAD_CHANGED",
+        "The complete relay payload differs from its digest.",
+      );
+    return bytes;
+  }
+
+  private async dispatch(
+    rpc: LocalRpc,
+    claim: LocalRelayClaim,
+    message: z.infer<typeof localEnvelopeSchema>,
+  ) {
+    const key = `relay-space-${claim.resourceId}.json`;
+    let binding = await this.records.state.read(key, bindingSchema.parse);
+    const intentKey = `relay-request-${claim.requestId}.json`;
+    let intent = await this.records.state.read(intentKey, intentSchema.parse);
+    if (
+      binding &&
+      (binding.userId !== claim.userId ||
+        binding.deviceId !== claim.deviceId ||
+        binding.connectionId !== claim.connectionId ||
+        binding.deviceGeneration !== claim.deviceGeneration)
+    )
+      throw new LocalRefusal(
+        "LOCAL_IDENTITY_CHANGED",
+        "This server resource belongs to another device authority.",
+      );
+    if (binding?.localSpaceId && binding.localGeneration !== null) {
+      const space = await this.records.get(binding.localSpaceId);
+      if (
+        !space ||
+        space.repositoryId !== binding.repositoryId ||
+        space.operationMarker !== binding.createMarker
+      )
+        throw new LocalRefusal(
+          "LOCAL_IDENTITY_CHANGED",
+          "The retained local resource identity changed.",
+        );
+      if (space.generation !== binding.localGeneration) {
+        if (
+          intent ||
+          claim.resourceGeneration < binding.serverGeneration ||
+          (claim.resourceGeneration === binding.serverGeneration &&
+            message.request.action !== "snapshot") ||
+          space.recoveryGeneration !== space.generation ||
+          space.failure !== null ||
+          space.phase !== "stopped" ||
+          space.desiredState !== "stopped" ||
+          !space.runtimeId
+        )
+          throw new LocalRefusal(
+            "LOCAL_GENERATION_CONFLICT",
+            "A changed local generation requires a fresh server request after confirmed local stop or recovery.",
+          );
+        binding.localGeneration = space.generation;
+        binding.serverGeneration = claim.resourceGeneration;
+        await this.records.state.write(key, binding);
+      }
+      if (claim.resourceGeneration < binding.serverGeneration)
+        throw new LocalRefusal(
+          "LOCAL_GENERATION_CONFLICT",
+          "The retained request predates the current resource generation.",
+        );
+    }
+    if (intent) {
+      if (
+        intent.digest !== claim.digest ||
+        intent.resourceId !== claim.resourceId ||
+        intent.deviceGeneration !== claim.deviceGeneration ||
+        intent.connectionId !== claim.connectionId ||
+        intent.serverGeneration !== claim.resourceGeneration
+      )
+        throw new LocalRefusal(
+          "LOCAL_REPLAY_CONFLICT",
+          "A retained relay request cannot change its authority or payload.",
+        );
+      message = intent.message;
+    } else {
+      const request = message.request;
+      if (request.action === "create") {
+        const keys = await this.records.state.keys("relay-space-");
+        if (!binding && keys.length >= 128)
+          throw new LocalRefusal(
+            "LOCAL_RESOURCE_LIMIT",
+            "Retained local resource binding capacity is exhausted.",
+          );
+        for (const previousKey of keys) {
+          const previous = await this.records.state.read(previousKey, bindingSchema.parse);
+          if (
+            previous &&
+            previous.resourceId !== claim.resourceId &&
+            previous.createMarker === request.operationMarker
+          )
+            throw new LocalRefusal(
+              "LOCAL_REPLAY_CONFLICT",
+              "A local creation marker already belongs to another server resource.",
+            );
+        }
+        if (
+          binding &&
+          (binding.createRequestId !== claim.requestId || binding.createDigest !== claim.digest)
+        )
+          throw new LocalRefusal(
+            "LOCAL_REPLAY_CONFLICT",
+            "This resource already has another local creation intent.",
+          );
+        binding ??= bindingSchema.parse({
+          resourceId: claim.resourceId,
+          deviceId: claim.deviceId,
+          userId: claim.userId,
+          connectionId: claim.connectionId,
+          deviceGeneration: claim.deviceGeneration,
+          serverGeneration: claim.resourceGeneration,
+          localSpaceId: null,
+          localGeneration: null,
+          createMarker: request.operationMarker,
+          repositoryId: request.repositoryId,
+          createRequestId: claim.requestId,
+          createDigest: claim.digest,
+        });
+        await this.records.state.write(key, binding);
+      } else {
+        if (!binding?.localSpaceId || !binding.localGeneration)
+          throw new LocalRefusal(
+            "LOCAL_CREATE_UNKNOWN",
+            "This server resource has no confirmed local creation receipt.",
+          );
+        if (claim.resourceGeneration < binding.serverGeneration)
+          throw new LocalRefusal(
+            "LOCAL_GENERATION_CONFLICT",
+            "The server resource generation is stale.",
+          );
+        const space = await this.records.get(binding.localSpaceId);
+        if (
+          !space ||
+          space.generation !== binding.localGeneration ||
+          space.repositoryId !== binding.repositoryId ||
+          space.operationMarker !== binding.createMarker
+        )
+          throw new LocalRefusal(
+            "LOCAL_GENERATION_CONFLICT",
+            "The locally owned resource changed outside its retained relay receipt.",
+          );
+        if (request.action !== "snapshot" && request.spaceId !== binding.localSpaceId)
+          throw new LocalRefusal(
+            "LOCAL_IDENTITY_CHANGED",
+            "The request targets another local sandbox.",
+          );
+        if (request.action === "delete") {
+          if (request.generation !== claim.resourceGeneration)
+            throw new LocalRefusal(
+              "LOCAL_GENERATION_CONFLICT",
+              "Deletion does not name the current server generation.",
+            );
+          message = { ...message, request: { ...request, generation: binding.localGeneration } };
+        }
+      }
+      if ((await this.records.state.keys("relay-request-")).length >= 1024)
+        throw new LocalRefusal(
+          "LOCAL_REQUEST_CAPACITY",
+          "Retained relay authority capacity is exhausted.",
+        );
+      intent = intentSchema.parse({
+        digest: claim.digest,
+        resourceId: claim.resourceId,
+        deviceGeneration: claim.deviceGeneration,
+        connectionId: claim.connectionId,
+        serverGeneration: claim.resourceGeneration,
+        message,
+      });
+      await this.records.state.write(intentKey, intent);
+    }
+    if (!binding)
+      throw new LocalRefusal(
+        "LOCAL_CREATE_UNKNOWN",
+        "The retained relay resource binding disappeared.",
+      );
+    const result = await rpc.handle(message);
+    if (!binding.localSpaceId) {
+      if (result.ok && message.request.action === "create")
+        binding.localSpaceId = z.object({ spaceId: uuid }).strict().parse(result.result).spaceId;
+      else {
+        // This is our durable pre-SDK manifest, never a same-name SDK adoption.
+        const candidates = (await this.records.list()).filter(
+          (space) =>
+            space.operationMarker === binding!.createMarker &&
+            space.repositoryId === binding!.repositoryId,
+        );
+        if (candidates.length === 1) binding.localSpaceId = candidates[0].id;
+      }
+    }
+    if (binding.localSpaceId && intent.serverGeneration >= binding.serverGeneration) {
+      const space = await this.records.get(binding.localSpaceId);
+      if (
+        !space ||
+        space.repositoryId !== binding.repositoryId ||
+        space.operationMarker !== binding.createMarker
+      )
+        throw new LocalRefusal(
+          "LOCAL_IDENTITY_CHANGED",
+          "The local creation receipt changed identity.",
+        );
+      const lifecycleReceipt =
+        result.ok && ["create", "start", "stop", "delete"].includes(message.request.action);
+      const unknownStopReceipt =
+        !result.ok &&
+        result.error.code === "LOCAL_GUEST_SETTLEMENT_UNKNOWN" &&
+        space.phase === "stopped" &&
+        space.failure === "LOCAL_GUEST_SETTLEMENT_UNKNOWN";
+      if (
+        binding.localGeneration !== null &&
+        binding.localGeneration !== space.generation &&
+        !lifecycleReceipt &&
+        !unknownStopReceipt
+      )
+        throw new LocalRefusal(
+          "LOCAL_GENERATION_CONFLICT",
+          "The local generation changed without this request's confirmed lifecycle receipt.",
+        );
+      binding.localGeneration = space.generation;
+      binding.serverGeneration = intent.serverGeneration;
+      await this.records.state.write(key, binding);
+    }
+    if (result.ok && message.request.action === "snapshot") {
+      const snapshot = z
+        .object({ spaces: z.array(z.object({ id: uuid }).passthrough()) })
+        .passthrough()
+        .parse(result.result);
+      result.result = {
+        ...snapshot,
+        spaces: snapshot.spaces.filter((space) => space.id === binding!.localSpaceId),
+      };
+    }
+    return result;
+  }
+
+  private async holdClaim(
+    connection: Connection,
+    claim: LocalRelayClaim,
+    rpc: LocalRpc,
+    work: (signal: AbortSignal) => Promise<void>,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    const controller = new AbortController();
+    const scope = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let rejectLoss!: (error: unknown) => void;
+    const lost = new Promise<never>((_done, reject) => {
+      rejectLoss = reject;
+    });
+    const renew = async () => {
+      try {
+        await this.confirmed(scope);
+        const next = claimSchema.parse(
+          await this.json(connection, `/relay/${claim.requestId}/renew`, {}, scope, claim.claimId),
+        );
+        if (
+          next.claimId !== claim.claimId ||
+          next.requestId !== claim.requestId ||
+          next.digest !== claim.digest ||
+          next.deviceGeneration !== claim.deviceGeneration ||
+          next.connectionId !== claim.connectionId ||
+          next.resourceGeneration !== claim.resourceGeneration ||
+          next.resourceId !== claim.resourceId ||
+          next.deviceId !== claim.deviceId ||
+          next.userId !== claim.userId ||
+          next.deadlineAt !== claim.deadlineAt ||
+          JSON.stringify(next.payloadReference) !== JSON.stringify(claim.payloadReference) ||
+          next.claimExpiresAt <= Date.now()
+        )
+          throw new LocalRefusal(
+            "LOCAL_IDENTITY_CHANGED",
+            "A renewed relay claim changed authority.",
+          );
+        if (!scope.aborted)
+          timer = setTimeout(() => {
+            void renew();
+          }, 10_000);
+      } catch (error) {
+        rejectLoss(error);
+      }
+    };
+    timer = setTimeout(() => {
+      void renew();
+    }, 10_000);
+    const executing = work(scope);
+    try {
+      await Promise.race([executing, lost]);
+    } catch (error) {
+      controller.abort();
+      // A server revocation or lost lease cannot leave admitted guest work running.
+      const before = await this.records.list();
+      await rpc.manager.close();
+      await executing.catch(() => undefined);
+      // Only this confirmed closure may advance the local clock without a cloud lifecycle.
+      // Preserve pending request identity and server clock so a lost ACK replays its receipt.
+      for (const key of await this.records.state.keys("relay-space-")) {
+        const binding = await this.records.state.read(key, bindingSchema.parse);
+        const previous = before.find((space) => space.id === binding?.localSpaceId);
+        if (
+          !binding ||
+          !previous ||
+          binding.localGeneration !== previous.generation ||
+          binding.deviceId !== connection.deviceId ||
+          binding.deviceGeneration !== connection.deviceGeneration ||
+          binding.connectionId !== connection.connectionId ||
+          binding.userId !== connection.userId
+        )
+          continue;
+        const stopped = await this.records.get(previous.id);
+        if (
+          stopped &&
+          stopped.generation > previous.generation &&
+          stopped.runtimeId === previous.runtimeId &&
+          stopped.name === previous.name &&
+          stopped.repositoryId === binding.repositoryId &&
+          stopped.operationMarker === binding.createMarker &&
+          stopped.ref === previous.ref &&
+          stopped.createdAt === previous.createdAt &&
+          stopped.networkPolicy === previous.networkPolicy &&
+          stopped.brokerToken === previous.brokerToken &&
+          stopped.failure === null &&
+          stopped.phase === "stopped" &&
+          stopped.desiredState === "stopped"
+        ) {
+          binding.localGeneration = stopped.generation;
+          await this.records.state.write(key, binding);
+        }
+      }
+      throw error;
+    } finally {
+      controller.abort();
+      if (timer) clearTimeout(timer);
+    }
+  }
+
+  async poll(rpc: LocalRpc, signal?: AbortSignal): Promise<number> {
+    const connection = await this.confirmed(signal);
+    for (const key of await this.records.state.keys("relay-request-")) {
+      const entry = await this.records.state.read(key, intentSchema.parse);
+      if (entry && entry.message.expiresAt <= Date.now()) await this.records.state.remove(key);
+    }
+    const data = z
+      .object({
+        requests: z.array(claimSchema).max(8),
+        maxPartBytes: z
+          .number()
+          .int()
+          .min(1)
+          .max(4 * 1024 * 1024),
+      })
+      .strict()
+      .parse(await this.json(connection, "/relay/claim", { limit: 1, waitMs: 25_000 }, signal));
+    for (const claim of data.requests) {
+      if (
+        claim.deviceId !== connection.deviceId ||
+        claim.userId !== connection.userId ||
+        claim.connectionId !== connection.connectionId ||
+        claim.deviceGeneration !== connection.deviceGeneration ||
+        claim.deadlineAt <= Date.now() ||
+        claim.claimExpiresAt <= Date.now()
+      )
+        throw new LocalRefusal(
+          "LOCAL_IDENTITY_CHANGED",
+          "A relay claim differs from this device's authority.",
+        );
+      await this.holdClaim(
+        connection,
+        claim,
+        rpc,
+        async (scope) => {
+          const payload = await this.payload(connection, claim, scope);
+          let result;
+          try {
+            const message = localEnvelopeSchema.parse(JSON.parse(payload.toString("utf8")));
+            if (message.id !== claim.requestId || message.expiresAt !== claim.deadlineAt)
+              throw new LocalRefusal(
+                "LOCAL_PAYLOAD_CHANGED",
+                "The relay request identity or deadline changed.",
+              );
+            result = await this.dispatch(rpc, claim, message);
+          } catch (error) {
+            if (
+              !(error instanceof LocalRefusal) &&
+              !(error instanceof z.ZodError) &&
+              !(error instanceof SyntaxError)
+            )
+              throw error;
+            // A refused resource request gets the existing RPC error envelope; it is
+            // not a revocation of independent work on sibling resources.
+            result = rpc.failure(error);
+          }
+          const bytes = Buffer.from(JSON.stringify(result));
+          if (Math.ceil(bytes.length / data.maxPartBytes) > 32)
+            throw new LocalRefusal(
+              "LOCAL_OUTPUT_LIMIT",
+              "The result exceeds the configured relay's bounded part capacity.",
+            );
+          const parts: LocalRelayPayloadReference["parts"] = [];
+          for (let offset = 0; offset < bytes.length; offset += data.maxPartBytes) {
+            const part = bytes.subarray(offset, offset + data.maxPartBytes);
+            const response = await this.request(
+              connection,
+              `/relay/${claim.requestId}/result-part`,
+              { binary: part, claim: claim.claimId, signal: scope, limit: 8192 },
+            );
+            const uploaded = z
+              .object({
+                success: z.literal(true),
+                data: localRelayPayloadReferenceSchema.innerType().shape.parts.element,
+              })
+              .passthrough()
+              .parse(JSON.parse(response.toString("utf8"))).data;
+            if (uploaded.size !== part.length || uploaded.sha256 !== hash(part))
+              throw new LocalRefusal(
+                "LOCAL_PAYLOAD_CHANGED",
+                "The uploaded result part differs from its digest.",
+              );
+            parts.push(uploaded);
+          }
+          await this.json(
+            connection,
+            "/relay/ack",
+            {
+              requestId: claim.requestId,
+              claimId: claim.claimId,
+              digest: claim.digest,
+              status: result.ok ? "completed" : "refused",
+              outcomeReference: { parts, size: bytes.length, sha256: hash(bytes) },
+            },
+            scope,
+          );
+          // Keep the journal's cached result until expiry: another claim may replay a lost acknowledgement.
+        },
+        signal,
+      );
+    }
+    return data.requests.length;
+  }
+}

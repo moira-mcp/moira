@@ -1,7 +1,10 @@
 import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { runRequest } from "../../web-backend/src/services/github-codespaces-remote-supervisor.mjs";
+import {
+  runRequest,
+  type SupervisorRepositoryBinding,
+} from "../../web-backend/src/services/github-codespaces-remote-supervisor.mjs";
 import { bootstrap, type GuestBootstrap } from "./guest-bootstrap.js";
 
 /** This entry runs only inside a sandbox. Its stdin is data, never JavaScript source. */
@@ -18,6 +21,13 @@ try {
   if (typeof input !== "object" || input === null || !("kind" in input) || !("request" in input)) {
     throw new Error("Invalid guest request");
   }
+  // This binding was written by the installed bootstrap; it is not part of the cloud job.
+  const binding =
+    input.kind === "operation"
+      ? (JSON.parse(
+          await readFile(join(homedir(), ".local/share/moira-local/repository.json"), "utf8"),
+        ) as SupervisorRepositoryBinding)
+      : undefined;
   if (input.kind === "operation") {
     const environment = JSON.parse(
       await readFile(join(homedir(), ".local/share/moira-local/environment.json"), "utf8"),
@@ -41,7 +51,7 @@ try {
     input.kind === "bootstrap"
       ? await bootstrap(input.request as GuestBootstrap)
       : input.kind === "operation"
-        ? await runRequest(input.request)
+        ? await runRequest(input.request, binding)
         : (() => {
             throw new Error("Unknown guest request kind");
           })();

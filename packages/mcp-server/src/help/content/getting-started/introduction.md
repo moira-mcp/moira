@@ -66,6 +66,12 @@ management/health unchanged. Default self-host: health and **Users**, no analyti
 **Admin Settings** groups definitions/values/maintenance/Codespaces; `?tab=values` selects a section.
 Updates/errors/retry stay local; other controls, loaded data and drafts remain.
 
+## Development environments for your agent
+
+The `codespace` tool provides persistent GitHub or local Docker Sandboxes environments.
+**Settings → Codespaces** connects Moira Local devices after approval on your computer.
+See [setup, permissions and security](/docs/getting-started/self-hosting/#connect-local-codespaces).
+
 ## A gradual path
 
 Start at the top and stop wherever you have what you need:
@@ -230,10 +236,3 @@ Self-host opens registration behind administrator approval. SaaS-only email veri
 legal-consent, and social-login behavior remains off by default. See
 [Self-hosting](/docs/getting-started/self-hosting/) for the deployment-mode details.
 :::
-
-## Next Steps
-
-- [Quick Start](/docs/getting-started/quickstart/) - Connect Moira to your AI client
-- [Tutorial: your first flows](/docs/getting-started/tutorial/) - Three tiny learning flows
-- [Which ready flow to use](/docs/getting-started/ready-flows/) - Everyday tasks without building a flow
-- [Workflows](/docs/concepts/workflows/) - Deep dive into workflow structure

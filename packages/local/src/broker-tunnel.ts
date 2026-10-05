@@ -53,12 +53,13 @@ export async function startBrokerTunnel(targetPort: number, port = 0) {
   });
   const address = server.address();
   if (!address || typeof address === "string") throw new Error("Broker tunnel did not bind");
+  let closing: Promise<void> | undefined;
   return {
     port: address.port,
     close: () =>
-      new Promise<void>((resolve, reject) => {
+      (closing ??= new Promise<void>((resolve, reject) => {
         for (const socket of sockets) socket.destroy();
         server.close((error) => (error ? reject(error) : resolve()));
-      }),
+      })),
   };
 }

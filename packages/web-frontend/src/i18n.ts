@@ -5,6 +5,8 @@ import en from "./locales/en.json";
 import ru from "./locales/ru.json";
 import adminOverviewEn from "./locales/admin-overview.en.json";
 import adminOverviewRu from "./locales/admin-overview.ru.json";
+import localDevicesEn from "./locales/local-devices.en.json";
+import localDevicesRu from "./locales/local-devices.ru.json";
 
 /**
  * Language configuration
@@ -33,10 +35,10 @@ i18n
   .init({
     resources: {
       en: {
-        translation: { ...en, adminOverview: adminOverviewEn },
+        translation: { ...en, adminOverview: adminOverviewEn, localDevices: localDevicesEn },
       },
       ru: {
-        translation: { ...ru, adminOverview: adminOverviewRu },
+        translation: { ...ru, adminOverview: adminOverviewRu, localDevices: localDevicesRu },
       },
     },
     supportedLngs: SUPPORTED_LANGUAGE_CODES,

@@ -388,6 +388,25 @@ cannot perform this conversion and would otherwise admit pending users. If the
 approval-aware version is restored later, review each converted account before
 approving it and explicitly unblocking it.
 
+## Local Companion Authentication
+
+Local devices have separate credentials from browser sessions, MCP OAuth and
+persistent API tokens. An admitted user creates a short-lived pairing in Settings;
+the companion supplies its locally generated credential and public policy using
+the pairing secret, then the same user confirms that policy in the browser.
+Only credential and pairing-token digests are stored on the server. Later
+companion calls authenticate the active device generation and its owning account
+through `/api/local-devices`; they cannot act as another device or user.
+
+Repository, resource, claim and generation checks remain additional authority
+boundaries. Device revocation invalidates its requests without revoking other
+devices. It does not promise instantaneous physical stop on an offline host:
+the independent companion guard enforces the locally granted finite work lease
+and disable state. Local SDK sign-in and repository tokens remain on the user's
+machine and are not sent as enrollment policy or forwarded into guest environment.
+See [Local Device Enrollment and Relay API](API.md#local-device-enrollment-and-relay-api)
+for endpoints and [Codespaces](CODESPACES.md) for local setup and recovery.
+
 ## MCP Authentication
 
 MCP clients use OAuth 2.1 authorization flow:

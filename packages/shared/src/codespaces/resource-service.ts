@@ -1153,6 +1153,7 @@ export class CodespaceResourceService {
       this.now(),
       this.now() + policy.claimLeaseMs,
       userId,
+      this.dependencies.providerId,
     );
     if (!record) return false;
     if (record.state === "create_pending") {

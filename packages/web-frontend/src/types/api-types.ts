@@ -14,7 +14,21 @@ import type {
 export interface CodespaceManagementView {
   readiness: CodespaceReadinessView;
   connection: CodespaceConnectionView;
-  repositories: Array<{ repository_id: string; name: string; private: boolean }>;
+  repositories: Array<{
+    repository_id: string;
+    name: string;
+    private: boolean;
+    provider?: string;
+    device_id?: string;
+    device_label?: string;
+  }>;
+  providers?: Array<{
+    provider: string;
+    readiness: CodespaceReadinessView;
+    connection: CodespaceConnectionView;
+    repositories: CodespaceManagementView["repositories"];
+    limits: CodespaceLimitsView;
+  }>;
   repositories_stale: boolean;
   resources_stale: boolean;
   codespaces: CodespaceSummaryView[];
