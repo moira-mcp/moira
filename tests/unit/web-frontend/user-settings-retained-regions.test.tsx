@@ -22,7 +22,7 @@ import { FeaturesProvider } from "../../../packages/web-frontend/src/hooks/useFe
 import { ThemeProvider } from "../../../packages/web-frontend/src/hooks/useTheme";
 import { GuideProvider } from "../../../packages/web-frontend/src/guides/GuideContext";
 import { Settings } from "../../../packages/web-frontend/src/pages/Settings";
-import { MemoryRouter } from "react-router-dom";
+import { BrowserRouter, MemoryRouter } from "react-router-dom";
 
 const originalReact = globalThis.React;
 const originalScroll = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "scrollIntoView");
@@ -253,7 +253,11 @@ test("the actual settings composition keeps navigation and independent controls 
     configurable: true,
     value: jest.fn(),
   });
-  window.history.replaceState({ retained: true }, "", "/settings?keep=yes#notifications");
+  window.history.replaceState(
+    { usr: { retained: true }, key: "initial", idx: 0 },
+    "",
+    "/settings?keep=yes#account",
+  );
   const next = deferred<Response>();
   let profileReads = 0;
   jest.mocked(globalThis.fetch).mockImplementation(async (input) => {
@@ -297,7 +301,7 @@ test("the actual settings composition keeps navigation and independent controls 
     .mockRejectedValue(new Error("provider unavailable"));
   jest.spyOn(apiClient, "getGitHubCodespaces").mockRejectedValue(new Error("provider unavailable"));
   show(
-    <MemoryRouter>
+    <BrowserRouter>
       <FeaturesProvider>
         <ThemeProvider>
           <GuideProvider>
@@ -305,7 +309,7 @@ test("the actual settings composition keeps navigation and independent controls 
           </GuideProvider>
         </ThemeProvider>
       </FeaturesProvider>
-    </MemoryRouter>,
+    </BrowserRouter>,
   );
   const navigation = screen.getByTestId("settings-nav");
   expect(navigation).toHaveAttribute("data-guide", "settings.nav");
@@ -318,14 +322,17 @@ test("the actual settings composition keeps navigation and independent controls 
   expect(within(account).getByText("profile unavailable")).toBeInTheDocument();
   expect(screen.getByTestId("settings-notifications-region")).toBe(notifications);
   expect(screen.getByTestId("settings-nav")).toBe(navigation);
-  fireEvent.click(screen.getByTestId("settings-nav-preferences"));
-  expect(window.location.pathname).toBe("/settings");
-  expect(window.location.search).toBe("?keep=yes");
-  expect(window.location.hash).toBe("#preferences");
-  expect(window.history.state).toEqual({ retained: true });
   fireEvent.click(within(account).getByRole("button", { name: "Retry" }));
   expect(await screen.findByTestId("profile-name-input")).toHaveValue("Stored name");
   expect(profileReads).toBe(2);
+  fireEvent.mouseDown(screen.getByTestId("settings-nav-preferences"), {
+    button: 0,
+    ctrlKey: false,
+  });
+  expect(window.location.pathname).toBe("/settings");
+  expect(window.location.search).toBe("?keep=yes");
+  expect(window.location.hash).toBe("#preferences");
+  expect(window.history.state.usr).toEqual({ retained: true });
   expect(screen.getByTestId("settings-notifications-region")).toBe(notifications);
   expect(screen.getByTestId("preferences-theme-dark")).toBe(theme);
 });
@@ -343,6 +350,7 @@ const storedProfile = {
 function mountSettingsProfile(
   profileTransport: (url: string, init?: RequestInit) => Promise<Response>,
   privateBoundary = false,
+  initialEntry = "/settings",
 ) {
   Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
     configurable: true,
@@ -369,12 +377,13 @@ function mountSettingsProfile(
     .spyOn(apiClient, "getOAuthConsents")
     .mockResolvedValue({ consents: [], total: 0, limit: 8, offset: 0 });
   jest.spyOn(apiClient, "getApiTokens").mockResolvedValue({ tokens: [], total: 0 });
+  jest.spyOn(apiClient, "getLocalDevices").mockResolvedValue({ devices: [], pairings: [] });
   jest
     .spyOn(apiClient, "getGitHubCodespaceConnection")
     .mockRejectedValue(new Error("provider unavailable"));
   jest.spyOn(apiClient, "getGitHubCodespaces").mockRejectedValue(new Error("provider unavailable"));
   return show(
-    <MemoryRouter>
+    <MemoryRouter initialEntries={[initialEntry]}>
       <FeaturesProvider>
         <ThemeProvider>
           <GuideProvider>
@@ -461,6 +470,69 @@ test.each([false, true])(
     expect(screen.getByRole("button", { name: "Change Handle" })).toBeDisabled();
   },
 );
+
+test("the whole Settings tab surface retains independent drafts and reveals only the selected panel", async () => {
+  mountSettingsProfile(async () => Response.json({ success: true, data: storedProfile }));
+  const name = await screen.findByTestId("profile-name-input");
+  fireEvent.change(name, { target: { value: "Unsaved across every tab" } });
+  const nav = screen.getByTestId("settings-nav");
+  expect(within(nav).getAllByRole("tab")).toHaveLength(6);
+  for (const id of ["security", "notifications", "development", "access", "preferences"]) {
+    fireEvent.mouseDown(screen.getByTestId(`settings-nav-${id}`), { button: 0, ctrlKey: false });
+    expect(screen.getByTestId(`settings-nav-${id}`)).toHaveAttribute("aria-selected", "true");
+    expect(name).not.toBeVisible();
+  }
+  fireEvent.mouseDown(screen.getByTestId("settings-nav-account"), { button: 0, ctrlKey: false });
+  await waitFor(() => expect(name).toBeVisible());
+  expect(screen.getByTestId("profile-name-input")).toBe(name);
+  expect(name).toHaveValue("Unsaved across every tab");
+});
+
+test.each([
+  ["integrations-github", "GitHub connection", "github-codespace-settings"],
+  ["integrations-local", "Local computers", "local-device-settings"],
+  ["api-tokens", "Apps & tokens", "settings-section-api-tokens"],
+])(
+  "legacy Settings hash #%s selects and reveals its actual retained target",
+  async (hash, selected, testId) => {
+    mountSettingsProfile(
+      async () => Response.json({ success: true, data: storedProfile }),
+      false,
+      `/settings?keep=yes#${hash}`,
+    );
+    await screen.findByTestId("profile-name-input");
+    expect(screen.getByRole("tab", { name: selected })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByTestId(testId)).toBeVisible();
+    expect(screen.getByTestId("profile-name-input")).not.toBeVisible();
+  },
+);
+
+test("a Settings task tour opens the required hidden development view before resolving its spotlight", async () => {
+  mountSettingsProfile(
+    async () => Response.json({ success: true, data: storedProfile }),
+    false,
+    "/settings?guide=settings-github&step=connect",
+  );
+  await screen.findByTestId("profile-name-input");
+  await waitFor(() =>
+    expect(screen.getByRole("tab", { name: "GitHub connection" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    ),
+  );
+  expect(screen.getByTestId("github-codespace-settings")).toBeVisible();
+  expect(screen.getByTestId("profile-name-input")).not.toBeVisible();
+});
+
+test("an unknown inherited-property hash leaves the account tab available", async () => {
+  mountSettingsProfile(
+    async () => Response.json({ success: true, data: storedProfile }),
+    false,
+    "/settings#constructor",
+  );
+  expect(await screen.findByTestId("profile-name-input")).toBeVisible();
+  expect(screen.getByTestId("settings-nav-account")).toHaveAttribute("aria-selected", "true");
+});
 
 test.each([
   { error: "Handle is already taken", status: 409, message: "Handle is already taken" },

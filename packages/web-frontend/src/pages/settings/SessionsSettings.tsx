@@ -24,6 +24,7 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { DataRegion } from "@/components/DataRegion";
 import { useResource } from "@/hooks/useResource";
+import { useRefreshOnActivation } from "@/components/settings/useRefreshOnActivation";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { EmptyState } from "@/components/empty-state";
 import { ServerPagination } from "@/components/ServerPagination";
@@ -53,7 +54,7 @@ function DeviceIcon({ agent }: { agent: ParsedUserAgent }) {
   return <Icon className="size-4" aria-hidden="true" />;
 }
 
-export const SessionsSettings: React.FC = () => {
+export const SessionsSettings: React.FC<{ active?: boolean }> = ({ active = true }) => {
   const { t, i18n } = useTranslation();
   const [page, setPage] = useState(1);
   const [revoking, setRevoking] = useState<string | null>(null);
@@ -78,6 +79,7 @@ export const SessionsSettings: React.FC = () => {
     return { ...result, ...query };
   });
   const sessions = resource.data?.sessions ?? [];
+  useRefreshOnActivation(active, resource.refresh);
   const total = resource.data?.total ?? 0;
 
   useEffect(() => {

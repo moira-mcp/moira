@@ -101,6 +101,8 @@ import {
   createLocalDeviceBinaryRoutes,
 } from "./routes/local-devices.js";
 import { createAdminCodespaceRoutes } from "./routes/admin-codespaces.js";
+import { createLocalGitHubDeliveryRoutes } from "./routes/local-github-delivery.js";
+import { getLocalGitHubDeliveryService } from "./services/local-github-delivery-factory.js";
 import { mcpClientAutoRegister } from "./middleware/mcp-client-auto-register.js";
 import { auth } from "./auth.js";
 import {
@@ -218,6 +220,11 @@ class MoiraApiServer {
     this.app.use(
       "/api/local-devices",
       apiLimiter,
+      createLocalGitHubDeliveryRoutes(
+        getLocalDeviceService(),
+        getLocalGitHubDeliveryService().delivery,
+        getBaseUrl(),
+      ),
       createLocalDeviceBinaryRoutes(
         getLocalDeviceService(),
         getCodespaceTransferService(),

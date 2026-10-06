@@ -16,6 +16,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Progress } from "@/components/ui/progress";
 import { DataRegion } from "@/components/DataRegion";
 import { useResource } from "@/hooks/useResource";
+import { useRefreshOnActivation } from "@/components/settings/useRefreshOnActivation";
 import { toast } from "sonner";
 import { authClient } from "@/auth/better-auth-client";
 
@@ -44,7 +45,7 @@ function refusalReason(body: unknown): string | undefined {
   return typeof reason === "string" ? reason : undefined;
 }
 
-export const SecuritySettings: React.FC = () => {
+export const SecuritySettings: React.FC<{ active?: boolean }> = ({ active = true }) => {
   const { t } = useTranslation();
 
   const resource = useResource<SignInMethods>("user-sign-in-methods", async () => {
@@ -58,6 +59,7 @@ export const SecuritySettings: React.FC = () => {
     };
   });
   const methods = resource.data;
+  useRefreshOnActivation(active, resource.refresh);
   const loadMethods = resource.refresh;
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");

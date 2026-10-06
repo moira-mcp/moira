@@ -105,16 +105,17 @@ frontend/src/
 │   ├── Executions.tsx           # Execution history (ExecutionCard list/grid)
 │   ├── Playbooks.tsx            # Playbooks page (PlaybookCard list/grid, editor, shared history)
 │   ├── ExecutionInspectorPage.tsx   # User execution inspector wrapper
-│   ├── Settings.tsx             # User settings (one page of sections, section navigation, tours)
+│   ├── Settings.tsx             # User settings (retained task tabs, Development views, tours)
 │   ├── settings/               # Settings sub-components
 │   │   ├── ProfileSettings.tsx  # Profile info, name editing, handle, email verification
 │   │   ├── SecuritySettings.tsx # Password change with strength indicator
 │   │   ├── SessionsSettings.tsx # Signed-in devices: search, paging, parsed device names, revoke
-│   │   ├── GitHubCodespacesData.tsx # One data source for the GitHub & Codespaces section
+│   │   ├── GitHubCodespacesData.tsx # Shared provider data and selection across Development views
 │   │   ├── GitHubCodespaceSettings.tsx # Website-only GitHub codespace connection
 │   │   ├── GitHubSetupSteps.tsx # Connect → install → grant repositories stepper
 │   │   ├── GitHubCodespaceManagement.tsx # Shared GitHub/local codespace card
-│   │   ├── LocalDeviceSettings.tsx      # Pair, review and revoke local devices
+│   │   ├── LocalDeviceSettings.tsx      # Pair, review, configure and revoke local devices
+│   │   ├── LocalDeviceEditor.tsx        # Requested owner settings within approved local ceilings
 │   │   ├── CodespaceAutoPause.tsx # Automatic pause card (idle settings)
 │   │   ├── CodespaceLimitsPanel.tsx # Your limits card
 │   │   ├── OAuthSettings.tsx    # Connected apps (OAuth consents): search, paging, revoke
@@ -325,7 +326,7 @@ page it explains.
 | `playbooks`         | screen   | `pages/playbooks.guide.ts`           | "What is this?" in the playbooks page header                     |
 | `artifacts`         | screen   | `pages/artifacts.guide.ts`           | "What is this?" in the artifacts page header                     |
 | `settings`          | screen   | `pages/settings/settings.guide.ts`   | "What is this?" in the Settings page header                      |
-| `settings-github`   | task     | `pages/settings/settings.guide.ts`   | **Setup guide** in the GitHub & Codespaces section               |
+| `settings-github`   | task     | `pages/settings/settings.guide.ts`   | **Setup guide** in Development → GitHub connection               |
 | `settings-telegram` | task     | `pages/settings/settings.guide.ts`   | **Telegram setup** in the Notifications section                  |
 | `build-flow`        | tutorial | `guides/tutorial/buildFlow.guide.ts` | **Tutorials** in the "Show me around" menu                       |
 | `flow-editor`       | task     | `pages/flowEditor.guide.ts`          | The first switch into edit mode; **Editor tour** in the edit bar |
@@ -785,23 +786,32 @@ Internal components: `CopyButton`, `CodeBlock`, `CollapsibleSection`, `ClientPan
 
 ### Settings Page
 
-One page at `/settings` whose sections are all always mounted. `Settings.tsx` does not use
-`PageShell`: it has its own two-column layout and per-section loading. The content container keeps
+One page at `/settings` with task tabs: Account, Security, Notifications, Development,
+Apps & tokens and Preferences. Development has Environments, GitHub connection and Local computers
+views. `Settings.tsx` composes the shared `Tabs` primitives with per-region loading instead of
+`PageShell`. All panels stay mounted with `forceMount`; inactive panels are hidden and unavailable
+to keyboard focus, preserving their drafts and dialogs. The content container keeps
 `data-testid="settings-flat-layout"`.
 
 **Frame:**
 
 - `PageHeader` with the title, a one-sentence description and **What is this?**, which opens the
   Settings screen tour.
-- `SettingsNav`: on wide screens a sticky list of the sections beside the content, on narrow screens
-  a sticky row of chips above it; the section being read is marked with `aria-current` as the reader
-  scrolls (`useActiveSection`), and choosing one moves to it.
-- Deep links: `/settings#<section-id>` scrolls to and briefly highlights the section once the page's
+- Sticky task and Development tab lists use the shared keyboard tab behavior; narrow screens
+  can scroll the navigation without clipping controls.
+- Deep links: `/settings#<section-id>` selects the owning tab and Development view, then scrolls to
+  and briefly highlights the section once the page's
   data has loaded, and keeps it in place while content above it settles until the reader scrolls,
   types or clicks (`useSectionHighlight`, built on `useHighlightTarget`).
+  `#integrations-github` selects GitHub, `#integrations-local` selects Local computers,
+  `#development-environments` selects Environments, and `#connected-apps`/`#api-tokens` select
+  Apps & tokens. Account, Security, Notifications and Preferences keep their section hashes.
+  Browser history and GitHub callback query outcomes use the same caller-owned navigation.
 - Profile, settings definitions/values and notification descriptors have independent data regions.
   An initial read shows its region's skeleton; later pending/error states retain accepted content
   and a local retry without removing other sections, navigation or drafts.
+  Returning to a panel refreshes its source through `useRefreshOnActivation` without unmounting
+  accepted content or overwriting independently edited fields.
 
 The profile resource owns accepted facts. A confirmed profile/handle readback publishes through
 `useResource.update`, superseding older GET replies. Untouched name/handle fields adopt fresh
@@ -813,24 +823,27 @@ and typed handle open, with the normalized string or API error message inside th
 **Sections** (each a `SettingsSection`: icon, heading, one-sentence description, optional
 `HelpPopover` and actions; the anchor is the section `id`):
 
-| Anchor                | Section             | `data-testid`                   | Content                                                                                                                                                                                                                                                                                                                                                     |
-| --------------------- | ------------------- | ------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `account`             | Account             | `settings-section-profile`      | `ProfileSettings`: name, email with verification badge, handle with a help popover on why changing it breaks links and a confirmation                                                                                                                                                                                                                       |
-| `security`            | Security & sign-in  | `settings-section-security`     | `SecuritySettings`: the change-password form, or for an account that signs in only through a social provider, how it signs in and a set-password form; an Active Sessions subsection (`settings-section-sessions`, help popover) with `SessionsSettings`                                                                                                    |
-| `notifications`       | Notifications       | `settings-section-dynamic`      | One `CommunicationChannelCard` per channel, a help popover, the **Telegram setup** tour button when Telegram is present, an empty state without channels                                                                                                                                                                                                    |
-| `integrations-github` | GitHub & Codespaces | `settings-section-integrations` | Help popover, **Setup guide** tour, local devices, GitHub connection, shared codespace management, Automatic pause and Your limits under one `GitHubCodespacesProvider`; `integrations-local` is the nested local-device anchor                                                                                                                             |
-| `connected-apps`      | Connected apps      | `settings-section-oauth`        | `OAuthSettings` with a help popover                                                                                                                                                                                                                                                                                                                         |
-| `api-tokens`          | API tokens          | `settings-section-api-tokens`   | `ApiTokensSettings` with a help popover on when a token is needed, the Bearer header and the one-time display                                                                                                                                                                                                                                               |
-| `preferences`         | Preferences         | `settings-section-preferences`  | `PreferencesSettings` theme (Light/Dark/System, via `useTheme`) and interface language, both kept in this browser; the beginner-panel switches (the account's `ui.hidden_panels`); the Guides block (`preferences-guides`: "Start the tour again", "Forget what I have seen"); then the generic editor for remaining definitions (`settings-section-other`) |
+| Anchor                     | Section                         | `data-testid`                   | Content                                                                                                                                                                                                                                                                                                                                                     |
+| -------------------------- | ------------------------------- | ------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `account`                  | Account                         | `settings-section-profile`      | `ProfileSettings`: name, email with verification badge, handle with a help popover on why changing it breaks links and a confirmation                                                                                                                                                                                                                       |
+| `security`                 | Security & sign-in              | `settings-section-security`     | `SecuritySettings`: the change-password form, or for an account that signs in only through a social provider, how it signs in and a set-password form; an Active Sessions subsection (`settings-section-sessions`, help popover) with `SessionsSettings`                                                                                                    |
+| `notifications`            | Notifications                   | `settings-section-dynamic`      | One `CommunicationChannelCard` per channel, a help popover, the **Telegram setup** tour button when Telegram is present, an empty state without channels                                                                                                                                                                                                    |
+| `development-environments` | Development → Environments      | `settings-section-integrations` | Shared GitHub/local environment management, selected-provider limits and Automatic pause under one `GitHubCodespacesProvider`                                                                                                                                                                                                                               |
+| `integrations-github`      | Development → GitHub connection | `settings-section-integrations` | Connection, installation/grants stepper, help, **Setup guide** and GitHub billing                                                                                                                                                                                                                                                                           |
+| `integrations-local`       | Development → Local computers   | `settings-section-integrations` | Local pairing, effective permissions, owner settings requests and revocation                                                                                                                                                                                                                                                                                |
+| `connected-apps`           | Connected apps                  | `settings-section-oauth`        | `OAuthSettings` with a help popover                                                                                                                                                                                                                                                                                                                         |
+| `api-tokens`               | API tokens                      | `settings-section-api-tokens`   | `ApiTokensSettings` with a help popover on when a token is needed, the Bearer header and the one-time display                                                                                                                                                                                                                                               |
+| `preferences`              | Preferences                     | `settings-section-preferences`  | `PreferencesSettings` theme (Light/Dark/System, via `useTheme`) and interface language, both kept in this browser; the beginner-panel switches (the account's `ui.hidden_panels`); the Guides block (`preferences-guides`: "Start the tour again", "Forget what I have seen"); then the generic editor for remaining definitions (`settings-section-other`) |
 
 **Guides:** `pages/settings/settings.guide.ts` declares the Settings screen tour (`settings`), one
-step per section, and two task tours, `settings-github` and `settings-telegram`, which the GitHub &
-Codespaces and Notifications sections start with their own buttons. They run on the guide engine
+steps for the task navigation and its sections, and two task tours, `settings-github` and
+`settings-telegram`, which GitHub connection and Notifications start with their own buttons. They run on the guide engine
 (see "Guides") and are addressed as `?guide=<id>&step=<step>`. Every step anchors an element the
-page always renders.
+page retains; its `prepare.section` selects the owning tab before the runner locates the visible
+anchor. Stable section hashes and guide identities do not depend on the current tab.
 
 **Reusable primitives** (`components/settings/`): `SettingsSection` and `SettingsSubsection`,
-`SettingsNav` with `useActiveSection`, `HelpPopover` (a question-mark button opening a
+the shared `Tabs` primitives, `HelpPopover` (a question-mark button opening a
 keyboard-operable card, optionally with a documentation link), `useSectionHighlight` and `localizeSettingDefinition`. `lib/user-agent.ts`
 turns a User-Agent header into a browser, operating system and device kind. `lib/docs-path.ts`
 (`localizedDocsPath`) maps a root documentation path (`/docs/...`) to the reader's language
@@ -848,13 +861,13 @@ execution inspector) receive `null` for a user that no longer exists and show th
 
 **Section details:**
 
-- Local devices: `LocalDeviceSettings` lives inside the GitHub & Codespaces section,
+- Local devices: `LocalDeviceSettings` lives in Development → Local computers,
   at `/settings#integrations-local`, with guide anchor `settings.local-devices`.
   Its independent `useResource`/`DataRegion` distinguishes a loaded empty device
   list from initial loading or failure, retains accepted devices during refresh,
   and retries only that region. Pairing instructions remain mounted separately.
   **Connect a device** creates a ten-minute pairing and displays a copyable
-  `moira-local enroll --server … --pairing-id …` command and a separately copied
+  `npm run local -- enroll --server … --pairing-id …` command and a separately copied
   pairing token, which the companion reads from stdin rather than command arguments.
   The token remains page-local and is absent from later device-list responses.
   After local enrollment, the confirmation dialog displays the device's repository
@@ -865,6 +878,18 @@ execution inspector) receive `null` for a user that no longer exists and show th
   Device cards show localized pending/active/revoked status and nullable last-seen
   time. Revocation fences server access; local lease expiry and disable enforce
   physical stop when a device cannot reach Moira.
+  `LocalDeviceEditor` edits the name, enabled state, finite lease, CPU/RAM, bounded disk and guest
+  Docker capacity, operation/network limits, repository read/push/PR/delete permissions and
+  public domains, and Git commit identity. It validates through the pure
+  `@mcp-moira/shared/local-management-types` export. Web control requires explicit local
+  `web-control --confirm` approval; numeric ceilings remain locally owned and the lease cannot
+  exceed seven days. A PUT carries the expected device generation and control revision.
+  Requested settings and pending/applied/rejected revisions stay separate from effective policy;
+  offline requests stay pending until the companion applies and acknowledges them. A refusal
+  exposes its reason while preserving fields. Fresh accepted settings update untouched fields;
+  a pending save cannot discard a newer draft, including when submitted text is normalized.
+  CPU/RAM/Docker defaults apply to new environments; existing environments retain their admitted
+  profile. Bounded disk changes require stopped owned work and companion verification.
 - Codespace provider choice: the existing `GitHubCodespaceManagement` card offers
   GitHub and Local providers. Readiness, connection and create limits use the selected
   provider's facts. Repository choices are filtered by provider, local targets also
@@ -891,7 +916,7 @@ execution inspector) receive `null` for a user that no longer exists and show th
 - API tokens: the token list inside a card with status badges (Active/Expired/Revoked); a create
   dialog with name and expiration (30d/90d/365d/never); a one-time token display with copy and
   warning; revoke through `ConfirmDialog` (variant="destructive").
-- GitHub & Codespaces: `GitHubCodespacesProvider` loads the connection view and the codespace view
+- Development: `GitHubCodespacesProvider` loads the connection view and the codespace view
   (repositories and `limits`) independently and reloads what a change can affect. Local pending,
   failure and retry retain the other view and form drafts. The connection card
   shows the `GitHubSetupSteps` stepper (connect GitHub, install the Moira App, grant repositories;
@@ -908,8 +933,9 @@ execution inspector) receive `null` for a user that no longer exists and show th
   `codespaces.auto_stop_enabled` and `codespaces.idle_timeout_minutes` (a switch and a timeout select
   within the server's 5–240 range) and states that only agent activity through Moira counts and that
   GitHub stops a codespace after 240 minutes regardless. `CodespaceLimitsPanel` shows the current
-  month's GitHub Codespaces compute, storage and billed amount for the connected personal account
-  above the separate Moira limits. Billing shows an unavailable state if the App lacks `Plan: read`
+  month's GitHub Codespaces compute, storage and billed amount in the GitHub connection view.
+  The Environments view shows the selected provider's separate Moira limits and Automatic pause.
+  Billing shows an unavailable state if the App lacks `Plan: read`
   permission or GitHub's billing API cannot be read; Codespace management and local limits remain
   available. For an existing connection, **Update GitHub permissions** opens GitHub's App user consent
   through `GET /api/integrations/github/reauthorize` to grant a new account permission without
@@ -961,7 +987,7 @@ save disables its Save action while the input remains editable. Successful compl
 the submitted draft: a newer edit to that same field stays dirty for the next save.
 
 **Implementation:** Settings.tsx → ProfileSettings.tsx, SecuritySettings.tsx, SessionsSettings.tsx,
-GitHubCodespacesData.tsx, GitHubCodespaceSettings.tsx, GitHubCodespaceManagement.tsx, LocalDeviceSettings.tsx,
+GitHubCodespacesData.tsx, GitHubCodespaceSettings.tsx, GitHubCodespaceManagement.tsx, LocalDeviceSettings.tsx, LocalDeviceEditor.tsx,
 CodespaceAutoPause.tsx, CodespaceLimitsPanel.tsx, OAuthSettings.tsx, ApiTokensSettings.tsx,
 PreferencesSettings.tsx
 

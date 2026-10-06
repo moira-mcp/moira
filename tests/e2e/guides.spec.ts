@@ -39,10 +39,11 @@ const RUN_STEPS = [
   "notifications",
   "explore",
 ];
-// Quick Task carries no level tag and names no playbook, so those optional steps are passed.
+// Bundled Quick Task is tagged complexity:complex; it names no playbook, so that step is skipped.
 const FLOW_SHARED_START = [
   "intro",
   "facts",
+  "level",
   "modes",
   "steps",
   "diagram-note",
@@ -62,6 +63,7 @@ const SETTINGS_STEPS = [
   "security",
   "notifications",
   "github",
+  "local-devices",
   "apps",
   "tokens",
   "preferences",
@@ -194,6 +196,12 @@ for (const [guideId, opener, steps] of [
     await page.setViewportSize({ width: 1600, height: 1000 });
     await page.goto(`${BASE_URL}/settings`);
     await expect(page.getByTestId("settings-section-profile")).toBeVisible({ timeout: 20000 });
+    if (guideId === "settings-github") {
+      await page.getByTestId("settings-nav-development").click();
+      await page.getByRole("tab", { name: "GitHub connection", exact: true }).click();
+    } else if (guideId === "settings-telegram") {
+      await page.getByTestId("settings-nav-notifications").click();
+    }
     await page.getByTestId(opener).click();
     await walk(page, guideId, steps);
   });

@@ -62,24 +62,25 @@ Font: **Inter Variable** (`--font-sans`), monospace: `--font-mono`.
 
 ## Component Mapping
 
-| UI Need                     | Component            | Import                              |
-| --------------------------- | -------------------- | ----------------------------------- |
-| Page wrapper (data pages)   | `PageShell`          | `@/components/PageShell`            |
-| Page title + description    | `PageHeader`         | `@/components/page-header`          |
-| Shared header presentation  | `PageHeaderContent`  | `@/components/page-header-content`  |
-| Retained data region        | `DataRegion`         | `@/components/DataRegion`           |
-| Settings section navigation | `SettingsNav`        | `@/components/settings/SettingsNav` |
-| Filter toolbar              | `FilterBar`          | `@/components/FilterBar`            |
-| Card wrapper (list/grid)    | `CardShell`          | `@/components/cards/CardShell`      |
-| Data list with pagination   | `DataListView`       | `@/components/DataListView`         |
-| Loading spinner             | `PageLoader`         | `@/components/page-loader`          |
-| Inline error with retry     | `InlineError`        | `@/components/inline-error`         |
-| Empty state                 | `EmptyState`         | `@/components/empty-state`          |
-| Confirmation dialog         | `ConfirmDialog`      | `@/components/confirm-dialog`       |
-| Debounced input value       | `useDebounce`        | `@/hooks/useDebounce`               |
-| List page size              | `useListPageSize`    | `@/hooks/useListPageSize`           |
-| Drop stale list answers     | `useLatestRequest`   | `@/hooks/useLatestRequest`          |
-| Table page size (rows)      | `useDynamicPageSize` | `@/hooks/useDynamicPageSize`        |
+| UI Need                           | Component            | Import                              |
+| --------------------------------- | -------------------- | ----------------------------------- |
+| Page wrapper (data pages)         | `PageShell`          | `@/components/PageShell`            |
+| Page title + description          | `PageHeader`         | `@/components/page-header`          |
+| Shared header presentation        | `PageHeaderContent`  | `@/components/page-header-content`  |
+| Retained data region              | `DataRegion`         | `@/components/DataRegion`           |
+| User settings task navigation     | `Tabs`               | `@/components/ui/tabs`              |
+| Administrator settings navigation | `SettingsNav`        | `@/components/settings/SettingsNav` |
+| Filter toolbar                    | `FilterBar`          | `@/components/FilterBar`            |
+| Card wrapper (list/grid)          | `CardShell`          | `@/components/cards/CardShell`      |
+| Data list with pagination         | `DataListView`       | `@/components/DataListView`         |
+| Loading spinner                   | `PageLoader`         | `@/components/page-loader`          |
+| Inline error with retry           | `InlineError`        | `@/components/inline-error`         |
+| Empty state                       | `EmptyState`         | `@/components/empty-state`          |
+| Confirmation dialog               | `ConfirmDialog`      | `@/components/confirm-dialog`       |
+| Debounced input value             | `useDebounce`        | `@/hooks/useDebounce`               |
+| List page size                    | `useListPageSize`    | `@/hooks/useListPageSize`           |
+| Drop stale list answers           | `useLatestRequest`   | `@/hooks/useLatestRequest`          |
+| Table page size (rows)            | `useDynamicPageSize` | `@/hooks/useDynamicPageSize`        |
 
 ### DO NOT use directly:
 
@@ -125,8 +126,11 @@ title that loses its facts or guide identity.
 
 `SettingsNav` renders caller-provided `items`, `active`, `onSelect`, `label` and optional `getHref`,
 `testIdPrefix` and `guide`. It does not write history or supply a settings guide by default.
-The user settings caller owns hash navigation and scrolling; administrator settings own the
-`tab` query parameter. Preserve native modified-link clicks.
+Administrator settings own the `tab` query parameter. Preserve native modified-link clicks.
+User Settings composes `Tabs` for task navigation and Development subviews, with caller-owned hash
+navigation and guide preparation. Keep inactive panels mounted with `forceMount` and hidden so
+drafts survive selection without exposing inactive controls to keyboard focus. A section hash
+selects its containing view before scrolling; returning refreshes only the relevant source.
 
 ### Loading and partial updates
 

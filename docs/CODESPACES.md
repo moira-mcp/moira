@@ -39,7 +39,8 @@ delete) over the same services. Administrators own the instance-wide kill switch
   `local-device-repository.ts` own pairing, device generations, public local grants
   and durable relay claims. The web backend's local provider adapts the common lifecycle and operations.
 - `packages/web-backend/src/routes/local-devices.ts` and the Settings
-  `LocalDeviceSettings` card own browser pairing confirmation and revocation.
+  `LocalDeviceSettings` card own browser pairing confirmation, revocation and
+  revision-fenced owner settings requests within a locally approved envelope.
 - `packages/shared/src/codespaces/credential-vault.ts` owns versioned
   AES-256-GCM credential envelopes bound to the Moira user, provider and opaque
   connection or revocation record.
@@ -76,14 +77,18 @@ Every internal resource or operation lookup supplies the authenticated Moira
 user ID and a codespace or operation ID. Ownership is resolved from SQLite;
 possession of an opaque ID does not grant access. Public projections omit provider
 resource names and credentials. GitHub credentials remain in the server vault;
-local repository credentials remain on the user's computer, separate from its device credential.
+enrolled local private Git and write operations use that server-held OAuth
+credential through a repository-scoped proxy. Local SDK credentials remain in the
+computer's owned store, separate from its device credential.
 
 ## Moira Local companion
 
 Moira Local uses outbound authenticated HTTPS to a locally selected Moira application URL.
 Server codespace work requires `CODESPACE_CODESPACES_ENABLED=true` and enabled instance controls;
-GitHub App credentials and the GitHub connector are not required for the local provider.
-The server cannot choose host commands, VM templates, updates or broader local grants.
+GitHub App credentials and the GitHub connector are not required for public read-only local work.
+Private Git, push and pull-request creation use the connected GitHub App user authorization.
+Agent work cannot choose host commands, VM templates, updates or broader local grants.
+Owner web settings require a separate explicit local approval and remain within its ceilings.
 Each codespace has its own persistent mountless microVM. The companion requires Node.js 24,
 macOS on Apple silicon and Docker Sandboxes `sbx` 0.46.0. Linux execution is refused because
 the required runtime ownership contract is not supported there; a container or host-shell fallback
@@ -109,7 +114,7 @@ npm run local -- doctor
 disabled. Use the same `--state` on every command when overriding it. The default bounded disk
 image is stored in that state and mounted at a short device-owned `/private/tmp/ml-…` path, so
 SDK Unix sockets fit the native path bound. `--storage-gib`, `--cpus`, `--memory-gib` and
-`--max-sandboxes` set local ceilings at initialization. `--storage-root` accepts an existing empty,
+`--max-sandboxes` set local defaults at initialization. `--storage-root` accepts an existing empty,
 private, separately mounted bounded filesystem, not an ordinary directory. Preserve the image and
 ownership records; a missing mount is a refusal, not permission to create unbounded storage.
 
@@ -128,13 +133,13 @@ against another process already acting as that same user. Personal Keychain lock
 
 `approve OWNER/REPO` grants read access and the built-in public package/Git domains.
 Use repeated `--domain HOST` to supply the complete allowed-domain list instead;
-`--private`, `--push` and `--delete` grant those capabilities explicitly. A private repository
-token is supplied through stdin to `npm run local -- git-token OWNER/REPO`; it is never an argv
-argument, browser field or device credential. The Git broker injects it only for the approved
-repository. Local ceilings, repositories and lease cannot be expanded by a relay request.
-`enable --hours N` grants at most 24 hours (8 by default), not an indefinite daemon permission.
+`--private`, `--push`, `--delete` and `--pull-requests` grant those capabilities explicitly.
+An enrolled private/write repository uses the server's GitHub connection and
+repository grant; the guest receives no OAuth token. Public read-only Git is direct
+and needs no App grant. Relay jobs cannot expand local authority.
+`enable --hours N` grants at most 168 hours (8 by default), not indefinite permission.
 
-Open **Settings → Codespaces → Local devices** (`/settings#integrations-local`, under the app's
+Open **Settings → Development → Local computers** (`/settings#integrations-local`, under the app's
 configured prefix), choose **Connect a device**, and copy the enrollment command and token
 separately. From this checkout, use `npm run local -- enroll` with the displayed `--server` and
 `--pairing-id` arguments. Enter the token on stdin and end input; do not append it to the command
@@ -168,6 +173,66 @@ refuses a live or unknown owner. After a confirmed ordinary stop, including idle
 restart `run` under an enabled, unexpired local lease; no unknown-outcome acknowledgement is
 needed unless that outcome remains fenced. Do not clear journals or adopt a VM by name to bypass
 recovery.
+
+### Owner web control and bundle updates
+
+Stop the foreground companion before updating its checkout and running `npm ci`
+and `npm run local:build`. Preserve the same `--state`, disk image, SDK profile,
+credential store and connection; do not initialize a replacement state. A device
+without the control capability must use the rebuilt companion before the website
+can apply owner settings.
+
+After pairing confirmation, grant web control once on the local machine:
+
+```bash
+npm run local -- web-control --confirm --max-lease-hours 168
+npm run local -- run
+```
+
+Use the same `--state` argument when configured. Omitted ceiling options use the
+current local policy. Choose larger approved bounds during this confirmation with
+`--cpus`, `--memory-gib`, `--storage-gib`, `--docker-gib`, `--max-sandboxes`,
+`--max-operation-ms`, `--max-output-bytes`, `--max-concurrent`,
+`--max-network-bytes` and `--max-network-connections`. The approval pins the server,
+user, device and connection; the command refuses an existing approval and does
+not replace it. Web or agent requests cannot change this envelope.
+
+The Local computers editor controls enablement, finite lease, defaults, storage,
+repository grants and permissions, egress domains and optional Git author identity.
+Saving creates a requested revision. Applied means the companion confirmed that
+revision; pending or rejected settings are distinct from the applied device policy.
+Offline contact does not imply application. The companion continues management
+polling while disabled or expired without dispatching work, so web renewal can
+restore work within the approved ceiling. Offline revocation still cannot promise
+instant physical shutdown.
+
+Application settles owned work before changing policy. CPU, RAM and Docker disk
+defaults apply to new VMs; existing VMs restart with their admitted machine and
+repository identity. The default owned APFS image can grow or shrink while stopped
+after native bounds and free-space checks, preserving data. Storage must be integral
+GiB, at least 8 GiB and at least Docker capacity plus 1 GiB; filesystem usable
+capacity includes native overhead. Unknown physical changes retain their journal
+and keep work fenced. Retrying the same settings may renew a finite lease; an
+unrelated request cannot erase an uncertain resize.
+
+### Local Git and pull requests
+
+Connect GitHub in **Settings → Development → GitHub** and grant the selected
+repository. Private push needs Contents write; pull-request creation also needs
+Pull requests write and the repository's `allowPullRequests` grant. Use **Update
+GitHub permissions** when the token needs newly approved permissions; Refresh only
+re-reads grants. Enrolled broker failures never select a host PAT fallback.
+
+Guest Git identity is repository-local: use owner-configured name/email or the
+verified GitHub login and numeric-account noreply address. Host Git configuration
+and secrets are not forwarded. An existing empty remote can open an unborn
+requested branch: the agent creates files, commits and pushes the first branch,
+then pushes a feature branch. A nonempty remote with an absent ref is refused.
+The MCP `pull_request_create`, `pull_request_get` and `pull_request_find` actions
+use the owned codespace and approved repository. Only creation requires the
+pull-request permission; reads and exact head/base lookup use read authority.
+After an uncertain create, find by exact head/base before retrying; there is no
+atomic exactly-once guarantee across Moira and GitHub.
 
 ### Local isolation boundary
 
@@ -209,9 +274,11 @@ generation, repository, the ref requested at creation, the ref the provider last
 reported checked out, exact provider identity, selected machine, desired and
 observed state, retention policy and lifecycle generation.
 
-The provider repository ID is the repository identity. Its full name is display
-metadata: lifecycle reconciliation accepts a provider-side rename, refreshes the
-stored name and still refuses a resource whose provider repository ID changed.
+For GitHub Codespaces, the provider repository ID is the repository identity. Its
+full name is display metadata: lifecycle reconciliation accepts a provider-side
+rename, refreshes the stored name and still refuses a resource whose provider
+repository ID changed. Local VMs retain the admitted repository full name as well
+as its local UUID; editing a grant cannot reassign an existing VM to another repository.
 
 The checked-out branch is working state, not identity. After creation, an exact
 provider resource belongs to a record when its provider name, Moira marker, owner,
@@ -572,7 +639,8 @@ digest and expiry but not the URL.
 The authenticated MCP catalog exposes the whole codespace surface as one tool,
 `codespace`, whose required `action` selects the operation: `list`, `setup_help`, `create`, `get`,
 `start`, `stop`, `delete`, `exec`, `stat`, `search`, `read`, `write`, `apply_patch`,
-`upload` and `download`. The public tools reference renders its schema from the typed
+`upload`, `download`, `pull_request_create`, `pull_request_get` and
+`pull_request_find`. The public tools reference renders its schema from the typed
 registry. Changing it changes `MCP_TOOLS_REVISION`, so a client holding an older catalog
 receives the ordinary HTTP 426 reconnect contract.
 
@@ -744,12 +812,16 @@ patches, argv, text and native references do not enter request context.
 
 ## Website management
 
-The Settings page's **Codespaces** section (anchor `#integrations-github`)
-holds Local devices (`#integrations-local`), the GitHub connection card, the Development environments
-card, Automatic pause and Your limits. The development-environment provider selector separates
+The Settings page's **Development** category separates **Environments**, **GitHub**
+and **Local computers**. The `#integrations-github` and `#integrations-local` links
+select their corresponding subsections. Environments holds development-environment
+management, Automatic pause and Your limits. The development-environment provider selector separates
 GitHub and local repository choices. Local choices include the device label and a qualified
-repository target, so the same repository on two devices remains distinct. Local creation uses
-the selected device's current grants and lease, independently of GitHub OAuth.
+repository target, so the same repository on two devices remains distinct. Local
+provider admission uses the selected device's current grants and lease. Public
+read-only local work needs no GitHub OAuth connection; enrolled private checkout
+and writes additionally require the connected GitHub account's App repository
+grant through the fixed broker described in **Local Git and pull requests**.
 One shared data source loads the connection
 view and the codespace view (with repositories and `limits`) together, and any change
 one card makes reloads what it can affect, so disconnecting never leaves codespaces of
@@ -936,7 +1008,8 @@ approve the updated permission on GitHub and obtain a new App user token through
 | Repository: Codespaces                 | write | create, list, inspect and delete the user's Codespaces                 |
 | Repository: Codespaces lifecycle admin | write | start and stop a Codespace                                             |
 | Repository: Codespaces metadata        | read  | list the machine types available for a repository                      |
-| Repository: Contents                   | read  | resolve the requested ref                                              |
+| Repository: Contents                   | write | read refs and perform approved local Git pushes                        |
+| Repository: Pull requests              | write | create approved local pull requests and read their metadata            |
 | Repository: Metadata                   | read  | enumerate the installation's approved repositories                     |
 | Account: Plan                          | read  | read the connected personal account's monthly Codespaces billing usage |
 

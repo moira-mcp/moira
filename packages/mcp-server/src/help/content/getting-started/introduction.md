@@ -66,11 +66,12 @@ management/health unchanged. Default self-host: health and **Users**, no analyti
 **Admin Settings** groups definitions/values/maintenance/Codespaces; `?tab=values` selects a section.
 Updates/errors/retry stay local; other controls, loaded data and drafts remain.
 
-## Development environments for your agent
+## Development environments
 
-The `codespace` tool provides persistent GitHub or local Docker Sandboxes environments.
-**Settings → Codespaces** connects Moira Local devices after approval on your computer.
-See [setup, permissions and security](/docs/getting-started/self-hosting/#connect-local-codespaces).
+Use `codespace` for persistent GitHub or local Docker Sandboxes environments.
+**Settings → Development:** environments, GitHub connection and local computers.
+Approve pairing on your computer; its companion applies pending owner settings within local limits.
+[Setup, permissions and security](/docs/getting-started/self-hosting/#connect-local-codespaces).
 
 ## A gradual path
 

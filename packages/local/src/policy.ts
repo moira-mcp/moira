@@ -1,11 +1,16 @@
 import { isAbsolute } from "node:path";
 import { z } from "zod";
+import { gitFetchRefSchema } from "../../shared/src/codespaces/git-ref.js";
+import {
+  MAX_LOCAL_WORK_LEASE_MS,
+  localGitAuthorSchema,
+} from "../../shared/src/codespaces/local-management-types.js";
 
 export const LOCAL_PROTOCOL_VERSION = 1 as const;
 export const LOCAL_PROVIDER = "local-sandboxes" as const;
 export const SUPPORTED_SBX_VERSION = "0.46.0";
 export const MAX_MESSAGE_BYTES = 8 * 1024 * 1024;
-export const MAX_LEASE_MS = 24 * 60 * 60_000;
+export const MAX_LEASE_MS = MAX_LOCAL_WORK_LEASE_MS;
 export const GiB = 1024 ** 3;
 
 const integer = (minimum: number, maximum: number) => z.number().int().min(minimum).max(maximum);
@@ -13,11 +18,6 @@ const hasControl = (value: string): boolean =>
   [...value].some((character) => {
     const code = character.codePointAt(0) ?? 0;
     return code < 0x20 || code === 0x7f;
-  });
-const hasUnsafeRefCharacter = (value: string): boolean =>
-  [...value].some((character) => {
-    const code = character.codePointAt(0) ?? 0;
-    return code <= 0x20 || code === 0x7f || "~^:?*[\\".includes(character);
   });
 export const repositoryName = z
   .string()
@@ -44,6 +44,7 @@ export const localRepositorySchema = z
     private: z.boolean(),
     allowPush: z.boolean(),
     allowDelete: z.boolean().default(false),
+    allowPullRequests: z.boolean().optional(),
     domains: z.array(domainName).max(64),
   })
   .strict();
@@ -60,6 +61,7 @@ export const localPolicySchema = z
       .refine((value) => !hasControl(value)),
     enabled: z.boolean(),
     leaseUntil: integer(0, Number.MAX_SAFE_INTEGER),
+    gitAuthor: localGitAuthorSchema.nullable().optional(),
     runtime: z
       .object({
         binary: absolutePath,
@@ -145,14 +147,7 @@ export function requireLocalGrant(
 
 export function requireRef(value: unknown): string {
   const ref = z.string().min(1).max(255).parse(value);
-  if (
-    ref.startsWith("-") ||
-    hasUnsafeRefCharacter(ref) ||
-    ref.includes("..") ||
-    ref.includes("@{") ||
-    ref.endsWith("/") ||
-    ref.endsWith(".")
-  ) {
+  if (!gitFetchRefSchema.safeParse(ref).success) {
     throw new LocalRefusal("LOCAL_REF_INVALID", "Invalid Git ref.");
   }
   return ref;

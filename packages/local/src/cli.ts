@@ -10,6 +10,11 @@ import { LocalManager } from "./manager.js";
 import { LocalJobs } from "./jobs.js";
 import { LocalRpc } from "./rpc.js";
 import { LocalRelay } from "./relay.js";
+import { LocalWebControl, LocalCompanion } from "./web-control.js";
+import {
+  localControlCeilingSchema,
+  MAX_LOCAL_WORK_LEASE_MS,
+} from "../../shared/src/codespaces/local-management-types.js";
 import { SbxRuntime } from "./sbx-runtime.js";
 import { admitStorage } from "./storage.js";
 import { LocalRefusal, MAX_MESSAGE_BYTES, publicPolicy } from "./policy.js";
@@ -48,6 +53,8 @@ Usage: moira-local <command> [options]
   enroll --server HTTPS_URL --pairing-id UUID
                Read the browser's pairing token from stdin; confirm the local grants in Moira
   run          Serve the paired Moira account through outbound HTTPS until stopped
+  web-control --confirm [--max-lease-hours 168]
+               Opt in locally to owner web settings within the approved numeric ceilings
 
 Options: --state PATH --sbx PATH --template IMAGE@sha256:DIGEST
          --storage-root PATH --storage-gib 32 --cpus 2 --memory-gib 4
@@ -96,12 +103,20 @@ export async function main(args: string[], environment: NodeJS.ProcessEnv): Prom
       private: { type: "boolean" },
       push: { type: "boolean" },
       delete: { type: "boolean" },
+      "pull-requests": { type: "boolean" },
       confirm: { type: "boolean" },
       json: { type: "boolean" },
       "new-store": { type: "boolean" },
       help: { type: "boolean" },
       server: { type: "string" },
       "pairing-id": { type: "string" },
+      "max-lease-hours": { type: "string" },
+      "docker-gib": { type: "string" },
+      "max-operation-ms": { type: "string" },
+      "max-output-bytes": { type: "string" },
+      "max-concurrent": { type: "string" },
+      "max-network-bytes": { type: "string" },
+      "max-network-connections": { type: "string" },
     },
   });
   const [command, target] = parsed.positionals;
@@ -144,6 +159,7 @@ export async function main(args: string[], environment: NodeJS.ProcessEnv): Prom
         private: options.private ?? false,
         allowPush: options.push ?? false,
         allowDelete: options.delete ?? false,
+        ...(options["pull-requests"] ? { allowPullRequests: true } : {}),
         domains: options.domain,
       }),
     );
@@ -200,11 +216,29 @@ export async function main(args: string[], environment: NodeJS.ProcessEnv): Prom
     process.once("SIGTERM", stop);
     const manager = new LocalManager(records);
     const relay = new LocalRelay(records);
+    const companion = new LocalCompanion(manager, relay);
+    const wait = () =>
+      new Promise<void>((resolve) => {
+        const finish = () => {
+          clearTimeout(timer);
+          controller.signal.removeEventListener("abort", finish);
+          resolve();
+        };
+        const timer = setTimeout(finish, 1000);
+        controller.signal.addEventListener("abort", finish, { once: true });
+        if (controller.signal.aborted) finish();
+      });
     try {
-      await relay.confirmed(controller.signal);
-      await manager.open();
-      const rpc = new LocalRpc(manager);
-      while (!controller.signal.aborted) await relay.poll(rpc, controller.signal);
+      while (!controller.signal.aborted) {
+        try {
+          if (!(await companion.cycle(controller.signal))) await wait();
+        } catch (error) {
+          if (controller.signal.aborted) break;
+          if (!relay.isUnavailable(error)) throw error;
+          await companion.pause();
+          await wait();
+        }
+      }
     } catch (error) {
       if (!controller.signal.aborted) throw error;
     } finally {
@@ -213,6 +247,37 @@ export async function main(args: string[], environment: NodeJS.ProcessEnv): Prom
       process.removeListener("SIGINT", stop);
       process.removeListener("SIGTERM", stop);
     }
+    return;
+  }
+  if (command === "web-control") {
+    const relay = new LocalRelay(records);
+    const identity = await relay.confirmed();
+    await new LocalWebControl(records).optIn(
+      identity,
+      localControlCeilingSchema.parse({
+        cpuCores: number(options.cpus) ?? policy.runtime.cpuCores,
+        memoryBytes:
+          (number(options["memory-gib"]) ?? policy.runtime.memoryBytes / 1024 ** 3) * 1024 ** 3,
+        storageBytes:
+          (number(options["storage-gib"]) ?? policy.runtime.maxStorageBytes / 1024 ** 3) *
+          1024 ** 3,
+        dockerBytes:
+          (number(options["docker-gib"]) ?? policy.runtime.dockerBytes / 1024 ** 3) * 1024 ** 3,
+        ...policy.limits,
+        maxSandboxes: number(options["max-sandboxes"]) ?? policy.limits.maxSandboxes,
+        maxOperationMs: number(options["max-operation-ms"]) ?? policy.limits.maxOperationMs,
+        maxOutputBytes: number(options["max-output-bytes"]) ?? policy.limits.maxOutputBytes,
+        maxConcurrent: number(options["max-concurrent"]) ?? policy.limits.maxConcurrent,
+        maxNetworkBytes: number(options["max-network-bytes"]) ?? policy.limits.maxNetworkBytes,
+        maxNetworkConnections:
+          number(options["max-network-connections"]) ?? policy.limits.maxNetworkConnections,
+        maxLeaseMs:
+          (number(options["max-lease-hours"]) ?? MAX_LOCAL_WORK_LEASE_MS / 3600000) * 3600000,
+      }),
+      options.confirm === true,
+    );
+    await relay.confirmed();
+    output({ webControlApproved: true, server: identity.origin });
     return;
   }
   if (command === "status") {

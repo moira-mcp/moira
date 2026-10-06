@@ -54,7 +54,8 @@ const config = {
       "@": path.resolve(__dirname, "src"),
       "@shared/types": path.resolve(__dirname, "src/types"),
       types: path.resolve(__dirname, "src/types"),
-      "@mcp-moira/shared": path.resolve(__dirname, "../shared/src"),
+      // Subpaths resolve through the package's exports, including nested source files.
+      "@mcp-moira/shared$": path.resolve(__dirname, "../shared/src"),
     },
   },
   module: {

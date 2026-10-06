@@ -526,6 +526,7 @@ export const codespaceLocalDevice = sqliteTable(
     credentialDigest: text("credentialDigest").notNull().unique(),
     policy: text("policy").notNull(),
     policyDigest: text("policyDigest").notNull(),
+    control: text("control"),
     lastSeenAt: integer("lastSeenAt"),
     createdAt: integer("createdAt").notNull(),
     updatedAt: integer("updatedAt").notNull(),

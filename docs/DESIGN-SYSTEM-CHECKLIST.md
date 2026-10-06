@@ -84,7 +84,8 @@ Cards use `rounded-xl` border radius and `shadow` by default.
 - Tabs: `Tabs`, `TabsList`, `TabsTrigger`, `TabsContent` from `@/components/ui/tabs`
 - Dropdown: `DropdownMenu` from `@/components/ui/dropdown-menu`
 - Sidebar: `AppSidebar` with `SidebarProvider`
-- Settings sections: `SettingsNav` with caller-owned links, query/hash changes and optional guide identity
+- User Settings: `Tabs` with retained hidden panels, caller-owned hashes and guide preparation
+- Administrator Settings: `SettingsNav` with caller-owned links, query changes and optional guide identity
 
 ## New Page Checklist
 

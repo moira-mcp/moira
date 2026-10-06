@@ -402,8 +402,24 @@ Repository, resource, claim and generation checks remain additional authority
 boundaries. Device revocation invalidates its requests without revoking other
 devices. It does not promise instantaneous physical stop on an offline host:
 the independent companion guard enforces the locally granted finite work lease
-and disable state. Local SDK sign-in and repository tokens remain on the user's
-machine and are not sent as enrollment policy or forwarded into guest environment.
+and disable state. Local SDK sign-in remains in the machine's owned credential
+store and is not sent as enrollment policy or forwarded into guest environment.
+
+Owner web control requires a separate, explicit local `web-control --confirm`
+approval pinned to the server, user, device and connection, with finite ceilings.
+`PUT /api/integrations/local/devices/:id/settings` accepts only an admitted browser
+session with the configured Origin and current device generation/revision. Device
+Bearer credentials, API tokens and MCP calls cannot write those settings. Companion
+heartbeats may report and receive management settings while work is disabled or
+expired; that authentication does not authorize jobs or Git operations.
+
+For enrolled private Git, push and pull-request creation, the server uses the
+connected user's expiring GitHub App OAuth credential from its vault and rechecks
+the exact approved repository and resource generation. Neither that credential
+nor the device credential reaches the guest. Public read-only Git needs no App
+grant. Pull-request creation additionally requires `allowPullRequests`; reads and
+exact head/base lookup use repository read authority. A refused enrolled broker
+request never falls back to a host repository token.
 See [Local Device Enrollment and Relay API](API.md#local-device-enrollment-and-relay-api)
 for endpoints and [Codespaces](CODESPACES.md) for local setup and recovery.
 

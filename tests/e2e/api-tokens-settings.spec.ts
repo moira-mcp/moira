@@ -25,7 +25,7 @@ test.describe("API Tokens Settings", () => {
 
   test("API Tokens section visible on settings page", async ({ page }) => {
     await login(page, testEmail, testPassword);
-    await page.goto(`${BASE_URL}/settings`);
+    await page.goto(`${BASE_URL}/settings#api-tokens`);
     await page.waitForSelector('h1:has-text("Settings")');
 
     const section = page.getByTestId("settings-section-api-tokens");
@@ -40,7 +40,7 @@ test.describe("API Tokens Settings", () => {
   test("create token, display once, and verify in list", async ({ page }) => {
     test.slow();
     await login(page, testEmail, testPassword);
-    await page.goto(`${BASE_URL}/settings`);
+    await page.goto(`${BASE_URL}/settings#api-tokens`);
     await page.waitForSelector('h1:has-text("Settings")');
 
     // Scroll to API Tokens section
@@ -94,7 +94,7 @@ test.describe("API Tokens Settings", () => {
   test("revoke token with confirmation", async ({ page }) => {
     test.slow();
     await login(page, testEmail, testPassword);
-    await page.goto(`${BASE_URL}/settings`);
+    await page.goto(`${BASE_URL}/settings#api-tokens`);
     await page.waitForSelector('h1:has-text("Settings")');
 
     // Create a token first (use default expiry to avoid Select interaction)

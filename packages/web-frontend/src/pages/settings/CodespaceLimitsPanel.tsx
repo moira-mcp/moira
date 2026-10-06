@@ -66,8 +66,10 @@ function Meter({
 
 export function CodespaceLimitsPanel({
   limits,
+  section = "all",
 }: {
   limits: CodespaceLimitsView;
+  section?: "all" | "billing" | "limits";
 }): React.JSX.Element {
   const { t, i18n } = useTranslation();
   const bytes = (value: number) => formatBytes(value, i18n.language);
@@ -130,174 +132,192 @@ export function CodespaceLimitsPanel({
     });
 
   return (
-    <div className="space-y-4" {...guideAnchor("settings.codespace-limits")}>
-      <Card data-testid="github-codespace-billing">
-        <CardHeader>
-          <CardTitle className="text-base">
-            {t("pages.settings.codespaces.billing.title")}
-          </CardTitle>
-          <CardDescription>{t("pages.settings.codespaces.billing.description")}</CardDescription>
-        </CardHeader>
-        <CardContent>
-          {billing === "unavailable" ? (
-            <p
-              className="text-sm text-muted-foreground"
-              data-testid="github-codespace-billing-unavailable"
-            >
-              {t("pages.settings.codespaces.billing.unavailable")}
-            </p>
-          ) : (
-            <div className="space-y-3" data-testid="github-codespace-billing-available">
-              <p className="text-sm text-muted-foreground">
-                {t("pages.settings.codespaces.billing.payerPeriod", {
-                  payer: billing.payer_login,
-                  period: new Date(
-                    Date.UTC(billing.period.year, billing.period.month - 1),
-                  ).toLocaleDateString(i18n.language, {
-                    month: "long",
-                    year: "numeric",
-                    timeZone: "UTC",
-                  }),
-                })}
-              </p>
-              <p className="text-xs text-muted-foreground">
-                {billing.plan
-                  ? t("pages.settings.codespaces.billing.plan", {
-                      plan: billing.plan === "free" ? "Free" : "Pro",
-                    })
-                  : t("pages.settings.codespaces.billing.planUnknown")}
-              </p>
-              <dl className="grid gap-3 sm:grid-cols-3">
-                <div className="rounded-lg border p-3">
-                  <dt className="text-sm text-muted-foreground">
-                    {t("pages.settings.codespaces.billing.compute")}
-                  </dt>
-                  <dd className="font-semibold tabular-nums">
-                    {billing.compute.included_core_hours === null
-                      ? t("pages.settings.codespaces.billing.usedUnknownAllowance", {
-                          used: number(billing.compute.used_core_hours),
-                          unit: t("pages.settings.codespaces.billing.coreHours"),
-                        })
-                      : t("pages.settings.codespaces.billing.usedOfAllowance", {
-                          used: number(billing.compute.used_core_hours),
-                          included: number(billing.compute.included_core_hours),
-                          unit: t("pages.settings.codespaces.billing.coreHours"),
-                        })}
-                  </dd>
-                </div>
-                <div className="rounded-lg border p-3">
-                  <dt className="text-sm text-muted-foreground">
-                    {t("pages.settings.codespaces.billing.storage")}
-                  </dt>
-                  <dd className="font-semibold tabular-nums">
-                    {billing.storage.included_gb_month === null
-                      ? t("pages.settings.codespaces.billing.usedUnknownAllowance", {
-                          used: number(billing.storage.used_gb_month),
-                          unit: t("pages.settings.codespaces.billing.gbMonth"),
-                        })
-                      : t("pages.settings.codespaces.billing.usedOfAllowance", {
-                          used: number(billing.storage.used_gb_month),
-                          included: number(billing.storage.included_gb_month),
-                          unit: t("pages.settings.codespaces.billing.gbMonth"),
-                        })}
-                  </dd>
-                </div>
-                <div className="rounded-lg border p-3">
-                  <dt className="text-sm text-muted-foreground">
-                    {t("pages.settings.codespaces.billing.billable")}
-                  </dt>
-                  <dd className="font-semibold tabular-nums">{dollars(billing.net_amount_usd)}</dd>
-                </div>
-              </dl>
-              <p className="text-xs text-muted-foreground">
-                {t("pages.settings.codespaces.billing.retrieved", {
-                  time: new Date(billing.retrieved_at).toLocaleString(i18n.language),
-                })}
-              </p>
-            </div>
-          )}
-        </CardContent>
-      </Card>
-      <Card data-testid="github-codespace-limits">
-        <CardHeader>
-          <div className="flex items-center gap-1.5">
-            <Gauge className="size-4 text-muted-foreground" aria-hidden="true" />
+    <div
+      className="space-y-4"
+      {...(section !== "billing" ? guideAnchor("settings.codespace-limits") : {})}
+    >
+      {section !== "limits" && (
+        <Card data-testid="github-codespace-billing">
+          <CardHeader>
             <CardTitle className="text-base">
-              {t("pages.settings.codespaces.limits.title")}
+              {t("pages.settings.codespaces.billing.title")}
             </CardTitle>
-            <HelpPopover
-              title={t("pages.settings.codespaces.limits.helpTitle")}
-              data-testid="codespace-limits-help"
-            >
-              <p>{t("pages.settings.codespaces.limits.helpHeld")}</p>
-              <p>{t("pages.settings.codespaces.limits.helpBilling")}</p>
-            </HelpPopover>
-          </div>
-          <CardDescription>{t("pages.settings.codespaces.limits.description")}</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          <div className="grid gap-3 sm:grid-cols-3">
-            <Meter
-              label={t("pages.settings.codespaces.limits.held")}
-              used={limits.codespaces.held}
-              max={limits.codespaces.max_per_user}
-              display={t("pages.settings.codespaces.limits.ofMax", {
-                used: limits.codespaces.held,
-                max: limits.codespaces.max_per_user,
-              })}
-              testId="codespace-limit-held"
-            />
-            <Meter
-              label={t("pages.settings.codespaces.limits.commands")}
-              used={limits.operations.active}
-              max={limits.operations.max_concurrent_per_user}
-              display={t("pages.settings.codespaces.limits.ofMax", {
-                used: limits.operations.active,
-                max: limits.operations.max_concurrent_per_user,
-              })}
-              testId="codespace-limit-commands"
-            />
-            <Meter
-              label={t("pages.settings.codespaces.limits.transfers")}
-              used={limits.transfers.used_bytes}
-              max={limits.transfers.max_bytes_per_user}
-              display={t("pages.settings.codespaces.limits.ofMax", {
-                used: bytes(limits.transfers.used_bytes),
-                max: bytes(limits.transfers.max_bytes_per_user),
-              })}
-              testId="codespace-limit-transfers"
-            />
-          </div>
-          <Collapsible>
-            <CollapsibleTrigger
-              className="group inline-flex items-center gap-1 rounded text-sm text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              data-testid="codespace-limits-more"
-            >
-              <ChevronDown
-                className="size-4 transition-transform group-data-[state=open]:rotate-180"
-                aria-hidden="true"
-              />
-              {t("pages.settings.codespaces.limits.more")}
-            </CollapsibleTrigger>
-            <CollapsibleContent>
-              <dl className="mt-2 grid gap-x-6 gap-y-2 rounded-lg border p-3 text-sm sm:grid-cols-2">
-                {facts.map(([label, value]) => (
-                  <div key={label} className="flex items-baseline justify-between gap-3">
-                    <dt className="text-muted-foreground">{label}</dt>
-                    <dd className="text-right font-medium tabular-nums">{value}</dd>
+            <CardDescription>{t("pages.settings.codespaces.billing.description")}</CardDescription>
+          </CardHeader>
+          <CardContent>
+            {billing === "unavailable" ? (
+              <p
+                className="text-sm text-muted-foreground"
+                data-testid="github-codespace-billing-unavailable"
+              >
+                {t("pages.settings.codespaces.billing.unavailable")}
+              </p>
+            ) : (
+              <div className="space-y-3" data-testid="github-codespace-billing-available">
+                <p className="text-sm text-muted-foreground">
+                  {t("pages.settings.codespaces.billing.payerPeriod", {
+                    payer: billing.payer_login,
+                    period: new Date(
+                      Date.UTC(billing.period.year, billing.period.month - 1),
+                    ).toLocaleDateString(i18n.language, {
+                      month: "long",
+                      year: "numeric",
+                      timeZone: "UTC",
+                    }),
+                  })}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  {billing.plan
+                    ? t("pages.settings.codespaces.billing.plan", {
+                        plan: billing.plan === "free" ? "Free" : "Pro",
+                      })
+                    : t("pages.settings.codespaces.billing.planUnknown")}
+                </p>
+                <dl className="grid gap-3 sm:grid-cols-3">
+                  <div className="rounded-lg border p-3">
+                    <dt className="text-sm text-muted-foreground">
+                      {t("pages.settings.codespaces.billing.compute")}
+                    </dt>
+                    <dd className="font-semibold tabular-nums">
+                      {billing.compute.included_core_hours === null
+                        ? t("pages.settings.codespaces.billing.usedUnknownAllowance", {
+                            used: number(billing.compute.used_core_hours),
+                            unit: t("pages.settings.codespaces.billing.coreHours"),
+                          })
+                        : t("pages.settings.codespaces.billing.usedOfAllowance", {
+                            used: number(billing.compute.used_core_hours),
+                            included: number(billing.compute.included_core_hours),
+                            unit: t("pages.settings.codespaces.billing.coreHours"),
+                          })}
+                    </dd>
                   </div>
-                ))}
-              </dl>
-            </CollapsibleContent>
-          </Collapsible>
-        </CardContent>
-      </Card>
+                  <div className="rounded-lg border p-3">
+                    <dt className="text-sm text-muted-foreground">
+                      {t("pages.settings.codespaces.billing.storage")}
+                    </dt>
+                    <dd className="font-semibold tabular-nums">
+                      {billing.storage.included_gb_month === null
+                        ? t("pages.settings.codespaces.billing.usedUnknownAllowance", {
+                            used: number(billing.storage.used_gb_month),
+                            unit: t("pages.settings.codespaces.billing.gbMonth"),
+                          })
+                        : t("pages.settings.codespaces.billing.usedOfAllowance", {
+                            used: number(billing.storage.used_gb_month),
+                            included: number(billing.storage.included_gb_month),
+                            unit: t("pages.settings.codespaces.billing.gbMonth"),
+                          })}
+                    </dd>
+                  </div>
+                  <div className="rounded-lg border p-3">
+                    <dt className="text-sm text-muted-foreground">
+                      {t("pages.settings.codespaces.billing.billable")}
+                    </dt>
+                    <dd className="font-semibold tabular-nums">
+                      {dollars(billing.net_amount_usd)}
+                    </dd>
+                  </div>
+                </dl>
+                <p className="text-xs text-muted-foreground">
+                  {t("pages.settings.codespaces.billing.retrieved", {
+                    time: new Date(billing.retrieved_at).toLocaleString(i18n.language),
+                  })}
+                </p>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
+      {section !== "billing" && (
+        <Card data-testid="github-codespace-limits">
+          <CardHeader>
+            <div className="flex items-center gap-1.5">
+              <Gauge className="size-4 text-muted-foreground" aria-hidden="true" />
+              <CardTitle className="text-base">
+                {t("pages.settings.codespaces.limits.title")}
+              </CardTitle>
+              <HelpPopover
+                title={t("pages.settings.codespaces.limits.helpTitle")}
+                data-testid="codespace-limits-help"
+              >
+                <p>{t("pages.settings.codespaces.limits.helpHeld")}</p>
+                <p>{t("pages.settings.codespaces.limits.helpBilling")}</p>
+              </HelpPopover>
+            </div>
+            <CardDescription>{t("pages.settings.codespaces.limits.description")}</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <div className="grid gap-3 sm:grid-cols-3">
+              <Meter
+                label={t("pages.settings.codespaces.limits.held")}
+                used={limits.codespaces.held}
+                max={limits.codespaces.max_per_user}
+                display={t("pages.settings.codespaces.limits.ofMax", {
+                  used: limits.codespaces.held,
+                  max: limits.codespaces.max_per_user,
+                })}
+                testId="codespace-limit-held"
+              />
+              <Meter
+                label={t("pages.settings.codespaces.limits.commands")}
+                used={limits.operations.active}
+                max={limits.operations.max_concurrent_per_user}
+                display={t("pages.settings.codespaces.limits.ofMax", {
+                  used: limits.operations.active,
+                  max: limits.operations.max_concurrent_per_user,
+                })}
+                testId="codespace-limit-commands"
+              />
+              <Meter
+                label={t("pages.settings.codespaces.limits.transfers")}
+                used={limits.transfers.used_bytes}
+                max={limits.transfers.max_bytes_per_user}
+                display={t("pages.settings.codespaces.limits.ofMax", {
+                  used: bytes(limits.transfers.used_bytes),
+                  max: bytes(limits.transfers.max_bytes_per_user),
+                })}
+                testId="codespace-limit-transfers"
+              />
+            </div>
+            <Collapsible>
+              <CollapsibleTrigger
+                className="group inline-flex items-center gap-1 rounded text-sm text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                data-testid="codespace-limits-more"
+              >
+                <ChevronDown
+                  className="size-4 transition-transform group-data-[state=open]:rotate-180"
+                  aria-hidden="true"
+                />
+                {t("pages.settings.codespaces.limits.more")}
+              </CollapsibleTrigger>
+              <CollapsibleContent>
+                <dl className="mt-2 grid gap-x-6 gap-y-2 rounded-lg border p-3 text-sm sm:grid-cols-2">
+                  {facts.map(([label, value]) => (
+                    <div key={label} className="flex items-baseline justify-between gap-3">
+                      <dt className="text-muted-foreground">{label}</dt>
+                      <dd className="text-right font-medium tabular-nums">{value}</dd>
+                    </div>
+                  ))}
+                </dl>
+              </CollapsibleContent>
+            </Collapsible>
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
 }
 
 /** The limits panel for the section's shared codespace data, once it has loaded. */
-export function CodespaceLimitsFromData(): React.JSX.Element | null {
-  const { management } = useGitHubCodespaces();
-  return management ? <CodespaceLimitsPanel limits={management.limits} /> : null;
+export function CodespaceLimitsFromData({
+  section = "all",
+}: {
+  section?: "all" | "billing" | "limits";
+}): React.JSX.Element | null {
+  const { management, provider } = useGitHubCodespaces();
+  const selected = management?.providers?.find(
+    (entry) => entry.provider === (section === "billing" ? "github-codespaces" : provider),
+  );
+  return management ? (
+    <CodespaceLimitsPanel limits={selected?.limits ?? management.limits} section={section} />
+  ) : null;
 }

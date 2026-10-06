@@ -29,7 +29,7 @@ initialization step described below. If the credential expires, re-authenticatio
 
 For MCP clients that do not support OAuth (custom scripts, CI/CD pipelines, headless environments), use API tokens:
 
-1. Log in to Moira web UI 2. Go to **Settings → API Tokens** 3. Click **Create Token**, enter a
+1. Log in to Moira web UI 2. Go to **Settings → Apps & tokens → API tokens** 3. Click **Create Token**, enter a
    name and expiration 4. Copy the token (shown once, starts with `moira_`) 5. Configure your client
    with the token as Bearer authorization
 

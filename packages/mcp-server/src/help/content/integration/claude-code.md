@@ -42,7 +42,7 @@ Claude Code is Anthropic's official CLI and VS Code extension for Claude. This g
 
    **Alternative: API Token**
 
-   If OAuth is not available, create an API token in Moira web UI (Settings → API Tokens) and add it to your MCP config as a Bearer token header. See [MCP Clients → API Tokens](/docs/integration/mcp-clients/#api-tokens) for details.
+   If OAuth is not available, create an API token in Moira web UI (Settings → Apps & tokens → API tokens) and add it to your MCP config as a Bearer token header. See [MCP Clients → API Tokens](/docs/integration/mcp-clients/#api-tokens) for details.
 
 ## Verify Connection
 

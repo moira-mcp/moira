@@ -10,7 +10,8 @@ Component and styling rules for `packages/web-frontend/`.
 | Process title + facts/actions | `diagram/PageHeader` over `PageHeaderContent`                |
 | Retained data region          | `DataRegion`                                                 |
 | Card list + server pagination | `DataListView` + `CardShell`                                 |
-| Settings navigation           | `settings/SettingsNav`                                       |
+| User settings task navigation | `ui/Tabs`                                                    |
+| Admin settings navigation     | `settings/SettingsNav`                                       |
 | Dashboard metric              | `StatCard`                                                   |
 | Execution status              | `StatusBadge`                                                |
 | Tabular data                  | `DataTable` + `DataTableColumnHeader`                        |
@@ -57,6 +58,10 @@ Compose the existing header wrappers: the standard header owns screen-tour disco
 compact process header preserves back navigation, facts, badges, actions and declared guide IDs.
 `PageHeaderContent` has no Router dependency. `SettingsNav` owns presentation only: callers pass
 links, selection and optional guide identity, and perform query/hash history changes and scrolling.
+User Settings uses `Tabs` for tasks and Development subviews. Retain inactive panels with
+`forceMount` and `hidden`, preserving drafts without focusable hidden controls. Section hashes and
+guide preparation select the owning view before revealing the target; panel activation refreshes
+its source locally.
 
 Drafts belong to fields, accepted facts to the resource. Adopt fresh source values for untouched
 fields, preserve other dirty fields, and supersede older reads after a confirmed mutation with

@@ -120,7 +120,7 @@ test("extension settings show ownership, editable structure and a masked secret"
     });
   });
 
-  await page.goto(`${BASE_URL}/settings?lang=en`);
+  await page.goto(`${BASE_URL}/settings?lang=en#notifications`);
   await expect(page.getByTestId("settings-flat-layout")).toBeVisible();
 
   const channel = page.getByTestId("communication-channel-probe.notifications");

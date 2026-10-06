@@ -7,6 +7,10 @@ import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
 import { connect } from "node:net";
 import type { SupervisorRepositoryBinding } from "../../web-backend/src/services/github-codespaces-remote-supervisor.mjs";
+import {
+  localGitAuthorSchema,
+  type LocalGitAuthor,
+} from "../../shared/src/codespaces/local-management-types.js";
 
 const execute = promisify(execFile);
 export interface GuestBootstrap {
@@ -17,6 +21,52 @@ export interface GuestBootstrap {
   repository: string;
   ref: string;
   clone: boolean;
+  gitAuthor?: LocalGitAuthor | null;
+}
+
+export async function configureGuestGitIdentity(
+  root: string,
+  author: LocalGitAuthor,
+  environment: NodeJS.ProcessEnv,
+): Promise<void> {
+  const validated = localGitAuthorSchema.parse(author);
+  for (const [key, value] of [
+    ["user.name", validated.name],
+    ["user.email", validated.email],
+  ])
+    await execute("git", ["-C", root, "config", "--local", "--", key, value], {
+      env: environment,
+      timeout: 10000,
+      maxBuffer: 65536,
+    });
+}
+
+/** A successful empty advertisement differs from an unavailable or missing requested ref. */
+export async function checkoutGuestRepository(
+  root: string,
+  ref: string,
+  environment: NodeJS.ProcessEnv,
+): Promise<void> {
+  const options = { env: environment, timeout: 120_000, maxBuffer: 1024 * 1024 };
+  const refs = await execute("git", ["-C", root, "ls-remote", "--refs", "origin"], options);
+  if (refs.stdout.trim() === "") {
+    const branch = ref.replace(/^refs\/heads\//, "");
+    if (ref.startsWith("refs/tags/") || /^[a-f0-9]{40}$/.test(ref))
+      throw new Error("An empty repository requires an initial branch name");
+    await execute("git", ["check-ref-format", "--branch", branch], options);
+    await execute("git", ["-C", root, "symbolic-ref", "HEAD", `refs/heads/${branch}`], options);
+    return;
+  }
+  await execute(
+    "git",
+    ["-C", root, "-c", "core.hooksPath=/dev/null", "fetch", "origin", ref],
+    options,
+  );
+  const checkout =
+    ref.startsWith("refs/tags/") || /^[a-f0-9]{40}$/.test(ref)
+      ? ["checkout", "--detach", "FETCH_HEAD"]
+      : ["checkout", "-B", ref.replace(/^refs\/heads\//, ""), "FETCH_HEAD"];
+  await execute("git", ["-C", root, "-c", "core.hooksPath=/dev/null", ...checkout], options);
 }
 
 /** Records the repository the local bootstrap owns; job messages cannot select this binding. */
@@ -168,20 +218,10 @@ export async function bootstrap(input: GuestBootstrap) {
       ],
       { env: environment, timeout: 120_000, maxBuffer: 1024 * 1024 },
     );
-    await execute(
-      "git",
-      ["-C", root, "-c", "core.hooksPath=/dev/null", "fetch", "origin", input.ref],
-      { env: environment, timeout: 120_000, maxBuffer: 1024 * 1024 },
-    );
-    const checkout =
-      input.ref.startsWith("refs/tags/") || /^[a-f0-9]{40}$/.test(input.ref)
-        ? ["checkout", "--detach", "FETCH_HEAD"]
-        : ["checkout", "-B", input.ref.replace(/^refs\/heads\//, ""), "FETCH_HEAD"];
-    await execute("git", ["-C", root, "-c", "core.hooksPath=/dev/null", ...checkout], {
-      env: environment,
-      timeout: 30_000,
-      maxBuffer: 1024 * 1024,
-    });
+    await checkoutGuestRepository(root, input.ref, environment);
+  }
+  if (input.gitAuthor) {
+    await configureGuestGitIdentity(root, input.gitAuthor, environment);
   }
   await access(root);
   await bindGuestRepository(input);

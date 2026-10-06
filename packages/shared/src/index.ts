@@ -109,8 +109,10 @@ export * from "./errors/domain-errors.js";
 export * from "./types/index.js";
 
 // Codespace provider connection primitives
+export * from "./codespaces/git-ref.js";
 export * from "./codespaces/types.js";
 export * from "./codespaces/local-device-types.js";
+export * from "./codespaces/local-management-types.js";
 export * from "./codespaces/local-device-repository.js";
 export * from "./codespaces/local-device-service.js";
 export * from "./codespaces/github-app-config.js";

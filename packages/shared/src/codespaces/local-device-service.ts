@@ -2,6 +2,11 @@ import { randomBytes } from "node:crypto";
 import { z } from "zod";
 import { LocalDeviceRepository, digestLocalSecret } from "./local-device-repository.js";
 import {
+  localControlReportSchema,
+  localControlRequestSchema,
+  type LocalControlReport,
+} from "./local-management-types.js";
+import {
   LocalDeviceError,
   localPublicPolicySchema,
   localRelayPayloadReferenceSchema,
@@ -96,8 +101,24 @@ export class LocalDeviceService {
       throw new LocalDeviceError("LOCAL_UNAUTHORIZED", "Device access denied.");
     return this.repository.authenticateDevice(digestLocalSecret(credential), this.now());
   }
-  heartbeat(auth: LocalDeviceAuth, policy: LocalPublicPolicy) {
-    return this.repository.heartbeat(auth, localPublicPolicySchema.parse(policy), this.now());
+  heartbeat(auth: LocalDeviceAuth, policy: LocalPublicPolicy, report?: LocalControlReport) {
+    return this.repository.heartbeat(
+      auth,
+      localPublicPolicySchema.parse(policy),
+      this.now(),
+      report ? localControlReportSchema.parse(report) : undefined,
+    );
+  }
+  requestSettings(userId: string, deviceId: string, value: unknown) {
+    const input = localControlRequestSchema.parse(value);
+    return this.repository.requestSettings(
+      userId,
+      id.parse(deviceId),
+      input.expectedGeneration,
+      input.expectedRevision,
+      input.settings,
+      this.now(),
+    );
   }
   revokeOwned(userId: string, deviceId: string, expectedGeneration: number) {
     return this.repository.revokeOwned(
@@ -109,6 +130,32 @@ export class LocalDeviceService {
   }
   getActiveDevice(userId: string, deviceId: string) {
     return this.repository.getActiveDevice(userId, id.parse(deviceId));
+  }
+  authorizeGitHubOperation(
+    auth: LocalDeviceAuth,
+    resourceId: string,
+    resourceGeneration: number,
+    action: "fetch" | "push" | "pull_request",
+  ) {
+    return this.repository.authorizeGitHubOperation(
+      auth,
+      id.parse(resourceId),
+      generation.parse(resourceGeneration),
+      action,
+      this.now(),
+    );
+  }
+  authorizeOwnedGitHubOperation(
+    userId: string,
+    resourceId: string,
+    action: "fetch" | "push" | "pull_request",
+  ) {
+    return this.repository.authorizeOwnedGitHubOperation(
+      userId,
+      id.parse(resourceId),
+      action,
+      this.now(),
+    );
   }
   bindResource(binding: LocalResourceBinding) {
     return this.repository.bindResource(binding, this.now());

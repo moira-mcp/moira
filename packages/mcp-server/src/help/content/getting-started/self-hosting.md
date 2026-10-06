@@ -214,9 +214,12 @@ Sign in with `ADMIN_EMAIL` (default `admin@moira.local`) and the printed passwor
 
 ### Connect local codespaces
 
-**Settings → Codespaces → Local devices** connects a computer running Moira Local to this
-account. Local and GitHub development environments share the `codespace` tool; a local device
-does not require the GitHub App, vault configuration or GitHub connector Compose profile below.
+**Settings → Development → Local computers** connects a computer running Moira Local to this
+account. Local and GitHub development environments share the `codespace` tool. Enrollment,
+public repository reads and basic local work do not require the GitHub App or server credential
+vault. Enrolled private-repository access, push and PR operations require the server's GitHub App
+OAuth connection and vault configuration. Local work does not require the GitHub connector
+Compose profile below.
 Server work still requires `CODESPACE_CODESPACES_ENABLED=true` and enabled instance controls.
 The companion makes outbound HTTPS requests and exposes no public listening port.
 
@@ -256,25 +259,63 @@ local file, and sleep/interval auto-lock is disabled only for that SDK store, no
 Repository permissions are granted on the computer. `approve OWNER/REPO` allows read access
 and the built-in public Git/package domains; repeated `--domain HOST` supplies a replacement
 allowed-domain list. Add `--private`, `--push` or `--delete` only for those rights.
-For a private repository, supply its GitHub token on stdin to
-`npm run local -- git-token OWNER/REPO`; do not put it in arguments or shell history.
-Repository tokens stay local and are separate from the device credential.
-The browser or server cannot expand these grants or the finite lease (8 hours by default,
-at most 24). Renew it locally with `enable --hours N`.
+For standalone work without enrollment, a private repository can use a GitHub token supplied on
+stdin to `npm run local -- git-token OWNER/REPO`; never put it in arguments or shell history.
+That repository token stays local and is separate from the device credential. An enrolled
+companion serving Moira uses server OAuth authorization for private access and push and never
+falls back to this local token.
+The finite work lease defaults to 8 hours and cannot exceed seven days. Renew it locally with
+`enable --hours N`. The browser can change these settings only after you explicitly approve web
+control on this computer, as described below.
 
-In **Local devices**, choose **Connect a device**. Copy the displayed command and pairing token
+In **Local computers**, choose **Connect a device**. Copy the displayed command and pairing token
 separately. From the source checkout, run the command as
 `npm run local -- enroll --server <displayed HTTPS application URL> --pairing-id <displayed ID>`.
 Enter the token on stdin and end input; never append it to the command. The server URL includes
 the app prefix when configured and contains no credentials, query or fragment.
 Refresh the browser, review the pending device's repositories, egress, push/delete rights,
-limits and lease, then confirm. Start the foreground relay only after confirmation:
+limits and lease, then confirm.
+
+To manage the computer from the browser, first stop the foreground companion. Then update the
+checkout, run `npm ci` and `npm run local:build`, preserving the same state directory and SDK
+credential store. After pairing is confirmed, approve the local ceilings:
+
+```bash
+npm run local -- web-control --confirm --max-lease-hours 168
+```
+
+Use the same `--state PATH` as setup. Unspecified numeric ceilings keep the current local values;
+the command's lease ceiling defaults to seven days. To permit larger resource settings, supply
+the intended ceilings with `--cpus`, `--memory-gib`, `--storage-gib`, `--docker-gib` and
+`--max-sandboxes`. This approval does not itself renew the work lease.
+An existing web-control approval is not replaced by rerunning this command; browser requests must
+fit its saved ceilings.
+Start the foreground companion after confirmation and local approval:
 
 ```bash
 npm run local -- run
 ```
 
-Choose **Local Docker Sandboxes** and the device's repository in **Development environments**, or discover
+In **Local computers**, edit the device name, enabled state, expiry, CPU/RAM, bounded disk and
+guest Docker capacity, repository permissions/domains and commit author. **Allow seven days** sets
+a finite expiry within the locally approved ceiling; it does not renew automatically. Advanced
+limits bound command duration, retained output per operation, concurrent operations, network bytes
+shared across the work lease and simultaneous broker connections.
+**Request settings change** records a request, not effective permission. Pending requests wait
+for the computer; applied and rejected revisions identify what the companion accepted. Read the
+effective permissions above the editor before starting work. Errors preserve the draft; updates
+adopt untouched fields without replacing independent edits. The control connection can receive a
+renewal while work is disabled or expired, but guest work remains off until it applies.
+CPU/RAM and guest Docker defaults apply to new environments; existing VMs retain their admitted
+profile. Bounded disk changes require stopped owned work and verified resizing; a refused change
+does not authorize further work or erase data.
+For private repositories, push and PR creation through Moira, connect GitHub and grant the App
+access to the repository. Those operations also require the device's matching repository rights;
+reading PR metadata uses repository read access. GitHub authorization remains on the server, not
+in the guest. Supply a commit author or leave both author fields empty to use your verified GitHub
+identity when available; the computer's Git configuration is not copied.
+
+Choose **Local Docker Sandboxes** and the device's repository in **Settings → Development → Environments**, or discover
 its qualified `repository_id` through `codespace({ action: "list" })`. Different computers
 offering the same repository are distinct choices. Further operations use the existing
 `codespace_id`, execution/session/file and native-transfer contracts. The GitHub provider remains
@@ -307,7 +348,7 @@ The GitHub codespace connection is separate from GitHub social login. It stays d
 all GitHub App and credential-vault values are present and valid. Create a GitHub App with expiring
 user authorization tokens and "Request user authorization (OAuth) during installation" enabled,
 grant it the repository permissions Codespaces (write), Codespaces lifecycle admin (write),
-Codespaces metadata (read), Contents (read) and Metadata (read), then configure its callback URL
+Codespaces metadata (read), Contents (write), Pull requests (write) and Metadata (read), then configure its callback URL
 to the exact Moira API path and its installation URL to the app's GitHub slug. No Setup URL is
 needed: GitHub returns the browser to the callback URL after an installation:
 
@@ -334,7 +375,7 @@ other low-diversity values are rejected. The vault key is not auto-generated and
 across container restarts; changing it makes existing connection credentials unreadable.
 
 If a key or ciphertext is lost, ordinary Reconnect and Disconnect cannot prove remote revocation.
-First remove the Moira GitHub App grant in GitHub settings. Then return to **Settings → Codespaces**
+First remove the Moira GitHub App grant in GitHub settings. Then return to **Settings → Development → GitHub connection**
 and choose **Forget after external revoke** in the GitHub card. The confirmation deletes
 unreadable local ciphertext; do not confirm while GitHub still lists the grant.
 If the original key and version are restored, Moira no longer offers this unreadable-credential
@@ -345,7 +386,7 @@ The same external-revoke confirmation appears if a refresh may have returned a n
 Moira could neither retain nor revoke. Revoke the entire GitHub App grant before confirming; this
 state deliberately disables Reconnect and ordinary Disconnect.
 
-After the container is healthy, each user opens **Settings → Codespaces**, selects
+After the container is healthy, each user opens **Settings → Development → GitHub connection**, selects
 **Connect GitHub** and authorizes once on GitHub. If the app is not installed on the account yet,
 the browser continues straight to GitHub's installation page; after the user installs it for the
 intended personal repositories, Settings shows the connection as connected without a second
@@ -379,7 +420,7 @@ starting any authorization flow. A codespace is
 personal rather than shared; collaboration happens through version-control branches.
 
 Users manage the same codespaces from the **Development environments** card in **Settings →
-Codespaces**, with GitHub selected: create one for an approved repository, start or stop it (stop keeps the repository
+Development → Environments**, with GitHub selected: create one for an approved repository, start or stop it (stop keeps the repository
 data) and delete it after an explicit confirmation. Each user's idle codespaces pause on their own:
 the **Automatic pause** card in the same section sets `codespaces.auto_stop_enabled` (on by default)
 and `codespaces.idle_timeout_minutes` (30 by default, 5 to 240), which decide when Moira stops a

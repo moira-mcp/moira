@@ -76,9 +76,10 @@ export const GitHubCodespaceManagement: React.FC = () => {
     managementError: loadError,
     reloadManagement,
     setManagement: setView,
+    provider,
+    setProvider,
   } = useGitHubCodespaces();
   const [repositoryId, setRepositoryId] = useState("");
-  const [provider, setProvider] = useState("github-codespaces");
   const [ref, setRef] = useState("main");
   const [creating, setCreating] = useState(false);
   const [busyCodespace, setBusyCodespace] = useState<string | null>(null);

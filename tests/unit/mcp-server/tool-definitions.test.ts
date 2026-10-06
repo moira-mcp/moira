@@ -214,16 +214,20 @@ describe("MCP tool definitions", () => {
       "action",
       "argv",
       "background",
+      "base",
+      "body",
       "cancel",
       "codespace_id",
       "confirm_delete",
       "cwd",
+      "draft",
       "env",
       "expected",
       "expected_generation",
       "file",
       "file_name",
       "files",
+      "head",
       "length",
       "max_bytes",
       "max_matches",
@@ -234,6 +238,7 @@ describe("MCP tool definitions", () => {
       "offset",
       "operation_id",
       "path",
+      "pull_request_number",
       "query",
       "ref",
       "refresh",
@@ -247,14 +252,52 @@ describe("MCP tool definitions", () => {
       "stream",
       "text",
       "timeout_seconds",
+      "title",
     ]);
     const operationId = published.properties.operation_id as { anyOf?: unknown[] };
     const maxBytes = published.properties.max_bytes as { anyOf?: unknown[] };
     expect(operationId.anyOf).toBeUndefined();
     expect(maxBytes.anyOf).toHaveLength(2);
-    expect(getToolOperations(definition("codespace"))).toEqual(
-      expect.arrayContaining(["list", "setup_help", "create", "get"]),
-    );
+    expect(getToolOperations(definition("codespace")).slice().sort()).toEqual([
+      "apply_patch",
+      "create",
+      "delete",
+      "download",
+      "exec",
+      "get",
+      "list",
+      "pull_request_create",
+      "pull_request_find",
+      "pull_request_get",
+      "read",
+      "search",
+      "setup_help",
+      "start",
+      "stat",
+      "stop",
+      "upload",
+      "write",
+    ]);
+    for (const authorityField of [
+      "provider",
+      "authorization",
+      "url",
+      "headers",
+      "credential",
+      "device_id",
+      "connection_id",
+    ]) {
+      expect(
+        definition("codespace").schema.safeParse({
+          action: "pull_request_create",
+          codespace_id: "00000000-0000-4000-8000-000000000000",
+          head: "feat/игра",
+          base: "main",
+          title: "Change",
+          [authorityField]: "untrusted",
+        }).success,
+      ).toBe(false);
+    }
     expect(resolveToolDescription(definition("codespace"))).toContain(
       "personal instrument for executing a flow",
     );

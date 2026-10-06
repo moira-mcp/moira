@@ -23,6 +23,9 @@ const actions = [
   "apply_patch",
   "upload",
   "download",
+  "pull_request_create",
+  "pull_request_get",
+  "pull_request_find",
 ];
 
 // Run the baked service against its actual database and transfer directory. No
@@ -158,6 +161,12 @@ describe("Codespace MCP HTTP contract on a default-disabled installation", () =>
         max_bytes: expect.any(Object),
         repository_id: expect.any(Object),
         confirm_delete: expect.any(Object),
+        head: expect.objectContaining({ type: "string", minLength: 1, maxLength: 255 }),
+        base: expect.objectContaining({ type: "string", minLength: 1, maxLength: 255 }),
+        title: expect.objectContaining({ type: "string", minLength: 1, maxLength: 256 }),
+        body: expect.objectContaining({ type: "string", maxLength: 65536 }),
+        draft: expect.objectContaining({ type: "boolean" }),
+        pull_request_number: expect.objectContaining({ type: "integer", exclusiveMinimum: 0 }),
       }),
     });
     expect(codespace.inputSchema).not.toHaveProperty("anyOf");
@@ -340,6 +349,12 @@ describe("Codespace MCP HTTP contract on a default-disabled installation", () =>
       },
     ],
     ["get", { codespace_id: codespaceId }],
+    [
+      "pull_request_create",
+      { codespace_id: codespaceId, head: "feat/игра", base: "main", title: "Change" },
+    ],
+    ["pull_request_get", { codespace_id: codespaceId, pull_request_number: 7 }],
+    ["pull_request_find", { codespace_id: codespaceId, head: "feat/игра", base: "main" }],
     ["start", { codespace_id: codespaceId }],
     ["stop", { codespace_id: codespaceId }],
     ["delete", { codespace_id: codespaceId, expected_generation: 1, confirm_delete: true }],
@@ -410,25 +425,32 @@ describe("Codespace MCP HTTP contract on a default-disabled installation", () =>
     expect(JSON.stringify(result)).not.toContain("exclusive-input-canary");
   });
 
-  test.each(["access_token", "chat_id", "session_id", "ssh_key"])(
-    "should reject agent-supplied %s at the MCP input boundary",
-    async (field) => {
-      const result = CallToolResultSchema.parse(
-        await client.callTool({
-          name: "codespace",
-          arguments: {
-            action: "exec",
-            codespace_id: codespaceId,
-            argv: ["pwd"],
-            timeout_seconds: 10,
-            [field]: "rejected-input-canary",
-          },
-        }),
-      );
-      expect(result.isError).toBe(true);
-      expect(JSON.stringify(result.content)).toMatch(/validat|invalid|unrecognized/i);
-      expect(JSON.stringify(result)).not.toContain("CODESPACE_NOT_CONFIGURED");
-      expect(JSON.stringify(result)).not.toContain("rejected-input-canary");
-    },
-  );
+  test.each([
+    "access_token",
+    "chat_id",
+    "session_id",
+    "ssh_key",
+    "provider",
+    "credential",
+    "url",
+    "device_id",
+    "connection_id",
+  ])("should reject agent-supplied %s at the MCP input boundary", async (field) => {
+    const result = CallToolResultSchema.parse(
+      await client.callTool({
+        name: "codespace",
+        arguments: {
+          action: "exec",
+          codespace_id: codespaceId,
+          argv: ["pwd"],
+          timeout_seconds: 10,
+          [field]: "rejected-input-canary",
+        },
+      }),
+    );
+    expect(result.isError).toBe(true);
+    expect(JSON.stringify(result.content)).toMatch(/validat|invalid|unrecognized/i);
+    expect(JSON.stringify(result)).not.toContain("CODESPACE_NOT_CONFIGURED");
+    expect(JSON.stringify(result)).not.toContain("rejected-input-canary");
+  });
 });
