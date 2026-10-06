@@ -339,13 +339,21 @@ export class LocalManager {
           "This sandbox was not fully initialized; inspect it locally.",
         );
       }
-      if (this.guards.get(id)?.active) {
+      const guard = this.guards.get(id);
+      if (guard?.active) {
         if (space.desiredState !== "running")
           throw new LocalRefusal(
             "LOCAL_STOP_PENDING",
             "The independent owner is completing local shutdown.",
           );
-        return space;
+        try {
+          await guard.validate();
+          return space;
+        } catch (error) {
+          if (!(error instanceof LocalRefusal) || error.code !== "LOCAL_NOT_RUNNING") throw error;
+          // An admitted guard can outlive a physically stopped VM. Prepare the
+          // same owned identity instead of treating the guard as a running receipt.
+        }
       }
       this.guards.delete(id);
       return this.prepare(space, false, true);

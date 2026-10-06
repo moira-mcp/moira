@@ -30,6 +30,20 @@ export class RequestJournal {
     return result;
   }
 
+  /** Inspect a retained admission without redispatching or accepting a completed request. */
+  async isAccepted(id: string, expiresAt: number, input: unknown): Promise<boolean> {
+    const entries = (await this.state.read("requests.json", receipts.parse)) ?? [];
+    const digest = createHash("sha256").update(JSON.stringify(input)).digest("hex");
+    return entries.some(
+      (entry) =>
+        entry.id === id &&
+        entry.state === "accepted" &&
+        entry.expiresAt === expiresAt &&
+        expiresAt > this.now() &&
+        entry.digest === digest,
+    );
+  }
+
   async run(
     id: string,
     expiresAt: number,

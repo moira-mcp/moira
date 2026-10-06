@@ -164,15 +164,20 @@ their final cleanup stops owned VM processes on exit. Persistent server/MCP work
 paired `run`; stop it before another command needs the same runner lock. Browser revocation denies
 new server work, but physical shutdown of an offline computer cannot be asserted by the browser;
 local disable and the independent lease guard remain authoritative. An unknown guest outcome remains
-fenced until physical stop is confirmed. `recover SPACE_ID --confirm` acknowledges that stopped
-outcome without retrying prior jobs. Device-level `recover --confirm` requires disabled work and
+fenced until physical stop is confirmed. `recover SPACE_ID --confirm` acknowledges either that
+outcome or a clean, initialized stopped VM whose generation no longer matches the server binding.
+It verifies the exact stopped VM, current grant and network boundary, then records a new generation
+receipt without retrying prior jobs. Missing identity, incomplete initialization and other failures
+remain refused. Device-level `recover --confirm` requires disabled work and
 acknowledges an orphan shutdown after proving owned processes stopped; it preserves jobs and data.
 After abrupt companion termination, do not manually unlink `runner.lock`. Disable local work,
 then use `recover --confirm`; it reclaims the marker only when its owner is proven absent and
 refuses a live or unknown owner. After a confirmed ordinary stop, including idle disconnection,
-restart `run` under an enabled, unexpired local lease; no unknown-outcome acknowledgement is
-needed unless that outcome remains fenced. Do not clear journals or adopt a VM by name to bypass
-recovery.
+restart `run` under an enabled, unexpired local lease: a verified clean stop retains a generation
+receipt for the same server binding. If an older stopped record has no receipt and restart reports
+`LOCAL_GENERATION_CONFLICT`, stop the companion, use `recover SPACE_ID --confirm` with the same
+state directory, then restart `run`. Recovery preserves retained jobs and their unknown outcomes;
+it authorizes subsequent work, not replay. Do not clear journals or adopt a VM by name to bypass recovery.
 
 ### Owner web control and bundle updates
 

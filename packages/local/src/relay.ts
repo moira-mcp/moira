@@ -14,6 +14,8 @@ import {
   type LocalDeviceControlView,
 } from "../../shared/src/codespaces/local-management-types.js";
 import { LocalWebControl } from "./web-control.js";
+import { RequestJournal } from "./journal.js";
+import { canonicalJson } from "../../shared/src/utils/canonical-json.js";
 
 const uuid = z.string().uuid();
 const deviceSecret = z.string().regex(/^[A-Za-z0-9_-]{43}$/);
@@ -124,8 +126,7 @@ export class LocalRelay {
       space.generation !== generation ||
       space.repositoryId !== repositoryId ||
       !space.runtimeId ||
-      space.desiredState !== "running" ||
-      (space.phase !== "creating" && space.phase !== "usable")
+      space.desiredState !== "running"
     )
       throw new LocalRefusal(
         "LOCAL_CREATE_UNKNOWN",
@@ -148,7 +149,47 @@ export class LocalRelay {
       )
         throw new LocalRefusal("LOCAL_IDENTITY_CHANGED", "Git resource authority changed.");
       if (binding.localSpaceId !== null) {
-        if (binding.localSpaceId !== spaceId || binding.localGeneration !== generation)
+        if (binding.localSpaceId !== spaceId)
+          throw new LocalRefusal("LOCAL_GENERATION_CONFLICT", "Git local generation changed.");
+        // Restart bootstrap runs before the lifecycle receipt updates the binding.
+        // Only its retained, live start intent may lend the new server authority.
+        const starts = [];
+        for (const key of await this.records.state.keys("relay-request-")) {
+          const intent = await this.records.state.read(key, intentSchema.parse);
+          if (
+            intent &&
+            key === `relay-request-${intent.message.id}.json` &&
+            intent.resourceId === binding.resourceId &&
+            intent.deviceGeneration === binding.deviceGeneration &&
+            intent.connectionId === binding.connectionId &&
+            intent.serverGeneration >= binding.serverGeneration &&
+            intent.message.expiresAt > Date.now() &&
+            intent.message.request.action === "start" &&
+            intent.message.request.spaceId === spaceId &&
+            hash(Buffer.from(canonicalJson(intent.message))) === intent.digest &&
+            (await new RequestJournal(this.records.state).isAccepted(
+              intent.message.id,
+              intent.message.expiresAt,
+              intent.message.request,
+            ))
+          )
+            starts.push(intent);
+        }
+        if (
+          starts.length === 1 &&
+          binding.localGeneration !== null &&
+          (generation === binding.localGeneration || generation === binding.localGeneration + 1) &&
+          (space.phase === "stopped" || space.phase === "usable") &&
+          space.failure === null
+        ) {
+          candidates.push({ ...binding, serverGeneration: starts[0].serverGeneration });
+          continue;
+        }
+        if (
+          starts.length !== 0 ||
+          binding.localGeneration !== generation ||
+          space.phase !== "usable"
+        )
           throw new LocalRefusal("LOCAL_GENERATION_CONFLICT", "Git local generation changed.");
       } else {
         const intent = await this.records.state.read(

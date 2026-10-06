@@ -73,6 +73,7 @@ export class RuntimeOwner {
     readonly id: string,
     private readonly protectRuntime: () => Promise<void>,
     private readonly prepareCredentials: () => Promise<void>,
+    private readonly loadAssets: typeof guestAssets = guestAssets,
   ) {}
 
   get active(): boolean {
@@ -287,7 +288,7 @@ export class RuntimeOwner {
             .digest("hex");
           await this.persist(space);
         }
-        const assets = await guestAssets();
+        const assets = await this.loadAssets();
         await installGuest(runtime, identity, assets);
         const latest = await this.current();
         let gitAuthor = policy.gitAuthor ?? null;
@@ -463,10 +464,11 @@ export class RuntimeOwner {
       this.space.phase = "stopped";
       const before = this.stopOrigin;
       if (
-        before?.phase === "usable" &&
+        (before?.phase === "usable" || before?.phase === "stopped") &&
         before.desiredState === "running" &&
         before.failure === null &&
         before.runtimeId &&
+        before.networkPolicy &&
         this.space.generation === before.generation + 1 &&
         this.space.desiredState === "stopped" &&
         this.space.failure === null &&
@@ -496,7 +498,7 @@ export class RuntimeOwner {
     await this.managementTail;
   }
 
-  /** Local operator acknowledgement opens a new generation, never retries the unknown job. */
+  /** Local acknowledgement rebinds a verified stopped VM, never retries retained work. */
   recover(generation: number): Promise<number> {
     const work = this.managementTail
       .catch(() => undefined)
@@ -511,11 +513,11 @@ export class RuntimeOwner {
           !space.runtimeId ||
           space.desiredState !== "stopped" ||
           space.phase !== "stopped" ||
-          space.failure !== "LOCAL_GUEST_SETTLEMENT_UNKNOWN"
+          (space.failure !== null && space.failure !== "LOCAL_GUEST_SETTLEMENT_UNKNOWN")
         )
           throw new LocalRefusal(
             "LOCAL_RECOVERY_REFUSED",
-            "Recovery requires a confirmed stopped VM with a retained unknown guest outcome.",
+            "Recovery requires an initialized stopped VM with no failure or a retained unknown guest outcome.",
           );
         await this.protectRuntime();
         this.space = space;

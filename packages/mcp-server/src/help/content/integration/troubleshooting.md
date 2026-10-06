@@ -322,7 +322,11 @@ existing stores are preserved.
 
 `LOCAL_GUEST_SETTLEMENT_UNKNOWN` means the previous guest effect cannot be safely retried.
 After confirmed physical stop, `npm run local -- recover SPACE_ID --confirm` acknowledges that
-outcome without replaying prior jobs. `npm run local -- recover --confirm` is the separate
+outcome without replaying prior jobs. For `LOCAL_GENERATION_CONFLICT` on an initialized, clean
+stopped VM, the same command verifies its exact identity and boundary and records a generation
+receipt; use the same `--state PATH`, then restart `run`. Ordinary confirmed clean stops retain this
+receipt automatically. Retained jobs and unknown outcomes are preserved, never replayed.
+`npm run local -- recover --confirm` is the separate
 disabled-device orphan-shutdown acknowledgement. Neither deletes codespace data or authorizes
 adoption by SDK name. If shutdown remains pending or identity is unknown, retain the records
 and resolve that refusal before enabling more work. See [local setup](/docs/getting-started/self-hosting/#connect-local-codespaces).
