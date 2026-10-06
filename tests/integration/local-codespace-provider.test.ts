@@ -415,6 +415,52 @@ async function fixture(partLimit = 4 * 1024 * 1024, maxObjects = 512, nativeSize
 }
 
 describe("actual local-only service composition and outbound relay", () => {
+  test("a full native file quota leaves authenticated local lifecycle and commands operational", async () => {
+    const actual = await fixture(4 * 1024 * 1024, 1);
+    const fullBytes = 4 * 1024 * 1024;
+    actual.policy.maxTransferBytesPerUser = fullBytes;
+    actual.policy.maxTransferBytesGlobal = fullBytes;
+    actual.policy.maxTransferInflightBytesPerUser = fullBytes;
+    actual.policy.maxTransferInflightBytesGlobal = fullBytes;
+    const native = await actual.services.transfer.createDownload("user-a", {
+      fileName: "held.bin",
+      mimeType: "application/octet-stream",
+      bytes: Buffer.alloc(fullBytes),
+    });
+    await expect(
+      actual.services.transfer.createDownload("user-a", {
+        fileName: "excess.bin",
+        mimeType: "application/octet-stream",
+        bytes: Buffer.from("x"),
+      }),
+    ).rejects.toMatchObject({ code: "CODESPACE_POLICY_LIMIT" });
+    const created = await actual.drive(
+      actual.services.resource.create("user-a", actual.target, "main"),
+    );
+    expect(created.resource.state).toBe("usable");
+    const executed = await actual.drive(
+      actual.services.operation.execute("user-a", created.resource.id, {
+        argv: ["echo", "control remains usable"],
+        stdin: { kind: "inline", bytes: new Uint8Array() },
+      }),
+    );
+    expect(executed.operation.state).toBe("succeeded");
+    expect(executed.result?.stdout).toBe("control remains usable");
+    expect(new CodespaceTransferRepository(sqlite).usageForUser("user-a")).toEqual({
+      objects: 1,
+      bytes: fullBytes,
+      inflightBytes: 0,
+    });
+    const claimed = await actual.services.transfer.claimDownload(native.referenceId);
+    expect(claimed.record.observedSize).toBe(fullBytes);
+    await actual.services.transfer.consume(claimed.record);
+    expect(new CodespaceTransferRepository(sqlite).usageForUser("user-a")).toEqual({
+      objects: 0,
+      bytes: 0,
+      inflightBytes: 0,
+    });
+  });
+
   test.each(["exec", "read"] as const)(
     "settles an old %s marker after the server generation advances and releases capacity",
     async (kind) => {

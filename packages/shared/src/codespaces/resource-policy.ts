@@ -1,5 +1,6 @@
 import { CODESPACE_IDLE_TIMEOUT_MINUTES } from "./resource-repository.js";
 import type { CodespaceResourcePolicy } from "./resource-types.js";
+import { LOCAL_RELAY_MAX_PARTS } from "./local-device-types.js";
 
 /** GitHub's longest idle timeout: it stops a codespace without activity after this many minutes. */
 const GITHUB_MAX_IDLE_MINUTES = CODESPACE_IDLE_TIMEOUT_MINUTES.maximum;
@@ -238,6 +239,7 @@ export interface CodespaceEffectiveLimits {
     maxInflightBytesGlobal: number;
     ttlMs: number;
   };
+  relayTransfers: CodespaceEffectiveLimits["transfers"];
 }
 
 /**
@@ -249,6 +251,19 @@ export function effectiveCodespaceLimits(
   policy: CodespaceResourcePolicy,
 ): CodespaceEffectiveLimits {
   const connector = CODESPACE_CONNECTOR_LIMITS;
+  const transfers = {
+    maxFileBytes: Math.min(
+      policy.maxTransferFileBytes ?? connector.maxTransferFileBytes,
+      connector.maxTransferFileBytes,
+    ),
+    maxBytesPerUser: policy.maxTransferBytesPerUser ?? 100 * 1024 * 1024,
+    maxBytesGlobal: policy.maxTransferBytesGlobal ?? 1024 * 1024 * 1024,
+    maxObjectsPerUser: policy.maxTransferObjectsPerUser ?? 10,
+    maxObjectsGlobal: policy.maxTransferObjectsGlobal ?? 1000,
+    maxInflightBytesPerUser: policy.maxTransferInflightBytesPerUser ?? 40 * 1024 * 1024,
+    maxInflightBytesGlobal: policy.maxTransferInflightBytesGlobal ?? 256 * 1024 * 1024,
+    ttlMs: policy.transferTtlMs ?? 10 * 60_000,
+  };
   return {
     persistentRetentionMs: policy.persistentRetentionMs ?? 30 * 24 * 60 * 60_000,
     operations: {
@@ -279,18 +294,19 @@ export function effectiveCodespaceLimits(
         connector.maxBackgroundMs,
       ),
     },
-    transfers: {
-      maxFileBytes: Math.min(
-        policy.maxTransferFileBytes ?? connector.maxTransferFileBytes,
-        connector.maxTransferFileBytes,
-      ),
-      maxBytesPerUser: policy.maxTransferBytesPerUser ?? 100 * 1024 * 1024,
-      maxBytesGlobal: policy.maxTransferBytesGlobal ?? 1024 * 1024 * 1024,
-      maxObjectsPerUser: policy.maxTransferObjectsPerUser ?? 10,
-      maxObjectsGlobal: policy.maxTransferObjectsGlobal ?? 1000,
-      maxInflightBytesPerUser: policy.maxTransferInflightBytesPerUser ?? 40 * 1024 * 1024,
-      maxInflightBytesGlobal: policy.maxTransferInflightBytesGlobal ?? 256 * 1024 * 1024,
-      ttlMs: policy.transferTtlMs ?? 10 * 60_000,
+    transfers,
+    // Control-plane multipart admission scales with supported resource and operation
+    // slots. Its byte budget is independent of native files; replay still owns expiry.
+    relayTransfers: {
+      ...transfers,
+      maxObjectsPerUser:
+        ((policy.maxConcurrentOperationsPerUser ?? 2) + policy.maxActivePerUser) *
+        2 *
+        LOCAL_RELAY_MAX_PARTS,
+      maxObjectsGlobal:
+        ((policy.maxConcurrentOperationsGlobal ?? 20) + policy.maxActiveGlobal) *
+        2 *
+        LOCAL_RELAY_MAX_PARTS,
     },
   };
 }

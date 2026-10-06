@@ -293,7 +293,8 @@ export class CodespaceObservabilityService {
         // The ceilings enforcement applies, from the one limits source, not the raw policy value.
         max_active_operations: limits.operations.maxConcurrentGlobal,
         transfer_live_bytes: transferLiveBytes,
-        max_transfer_live_bytes: limits.transfers.maxBytesGlobal,
+        max_transfer_live_bytes:
+          limits.transfers.maxBytesGlobal + limits.relayTransfers.maxBytesGlobal,
       },
       checked_at: now,
     };

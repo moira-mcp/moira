@@ -139,7 +139,7 @@ describe("codespace observability", () => {
         active_operations: 3,
         max_active_operations: 20,
         transfer_live_bytes: 512 + 4096,
-        max_transfer_live_bytes: 1024 ** 3,
+        max_transfer_live_bytes: 2 * 1024 ** 3,
       },
       checked_at: NOW,
     });
@@ -169,7 +169,9 @@ describe("codespace observability", () => {
 
     // The ceilings enforcement applies, never an absent value an operator would read as "no limit".
     expect(view.usage.max_active_operations).toBe(enforced.operations.maxConcurrentGlobal);
-    expect(view.usage.max_transfer_live_bytes).toBe(enforced.transfers.maxBytesGlobal);
+    expect(view.usage.max_transfer_live_bytes).toBe(
+      enforced.transfers.maxBytesGlobal + enforced.relayTransfers.maxBytesGlobal,
+    );
     expect(view.usage.max_active_operations).not.toBeNull();
     expect(view.usage.max_transfer_live_bytes).not.toBeNull();
   });

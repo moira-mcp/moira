@@ -648,7 +648,14 @@ Transfer bytes live under `<dirname(DB_PATH)>/codespace-transfers`, separate fro
 public artifacts. SQLite stores only a digest of the capability, tenant, purpose,
 size/MIME/digest metadata, expiry, claim state and the creating process identity.
 Per-user and instance-wide object, aggregate-byte and in-flight-byte reservations occur
-before source I/O. For outbound download, the declared `maxBytes` capacity is reserved
+before source I/O, independently for native file transfers and internal local-relay payloads.
+Native purposes `codespace_input` and `codespace_download` retain their configured object ceilings;
+companion purposes `local_relay_input` and `local_relay_output` do not consume those slots. Each
+relay object ceiling is `(maxConcurrentOperations + maxActiveResources) × 2 directions × 32 parts`,
+using the corresponding per-user or instance capacities. Existing
+byte, in-flight-byte, single-file and expiry bounds apply to each class. Public transfer usage
+reports native files only; internal relay objects have no public download capability.
+For outbound download, the declared `maxBytes` capacity is reserved
 before credential or connector contact and atomically reduced to the observed file size
 when the object is published. Published directory entries are synced before their SQLite
 state becomes ready. Expired physical objects remain quota-bound until cleanup removes
@@ -711,6 +718,9 @@ enforces, taken from the one definition every enforcement site reads
 | `transfers`       | `used_bytes`, `objects`, `inflight_bytes` (bytes still reserved or claimed), `max_bytes_per_user`, `max_inflight_bytes_per_user`, `max_objects_per_user`, `max_file_bytes`, `ttl_seconds`                                                                                                                                      |
 | `lifecycle`       | `retention_days`, `start_wait_seconds`, `idle` { `auto_stop_enabled`, `timeout_minutes` (the owner's settings), `provider_max_minutes` (GitHub's maximum idle timeout) }                                                                                                                                                       |
 | `provider`        | `billing` is either `"unavailable"` or the connected personal account's current UTC-month Codespaces usage: payer, period, retrieval time, Free/Pro plan when known, compute core-hours, storage GB-month including prebuilds, included allowances when known, and net USD amounts. This is GitHub's usage, not a Moira limit. |
+
+The `transfers` group counts native file transfers only, excluding internal companion relay
+messages. Its published ceilings remain the native file policy, not the relay control budget.
 
 `instance_held` is the only instance-wide figure; no other user's codespaces or
 identifiers appear. Billing requires the GitHub App user permission `Plan: read`.
@@ -932,7 +942,9 @@ configuration), `control_disabled` (a kill switch is on), `connector_unavailable
 also carries the configuration state, both controls, connector state, the
 reconciliation backlog (resources and operations awaiting reconciliation, including
 resources held by a claim or waiting out a retry backoff, plus the age of the oldest) and active resources/operations and live transfer bytes against
-their limits. It contains no user, codespace or operation identifier, and the
+their limits. Readiness counts physical native and relay bytes together against the sum of their
+independent byte ceilings; the user's transfer usage remains native-only.
+It contains no user, codespace or operation identifier, and the
 connector is never probed while the feature is disabled.
 
 The complete view is served to authenticated callers: the website management list,

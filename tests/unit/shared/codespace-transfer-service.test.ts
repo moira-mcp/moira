@@ -19,6 +19,7 @@ import { join, resolve } from "node:path";
 import {
   CodespaceTransferRepository,
   CodespaceTransferService,
+  effectiveCodespaceLimits,
   type CodespaceNativeReferenceFetcher,
   type CodespaceResourcePolicy,
 } from "@mcp-moira/shared";
@@ -120,6 +121,176 @@ function fetcher(bytes = Buffer.from([0, 255, 1, 2, 3])): CodespaceNativeReferen
 }
 
 describe("private codespace transfer service", () => {
+  test.each(["native", "relay"] as const)(
+    "a full %s byte budget does not consume the other transfer class",
+    async (first) => {
+      const value = fixture({
+        maxTransferFileBytes: 4,
+        maxTransferBytesPerUser: 8,
+        maxTransferBytesGlobal: 8,
+        maxTransferInflightBytesPerUser: 8,
+        maxTransferInflightBytesGlobal: 8,
+        maxTransferObjectsPerUser: 2,
+        maxTransferObjectsGlobal: 2,
+      });
+      const native = async () => {
+        for (const name of ["one.bin", "two.bin"])
+          await value.service.createDownload("user-1", {
+            fileName: name,
+            mimeType: "application/octet-stream",
+            bytes: Buffer.alloc(4),
+          });
+      };
+      const relay = async () => {
+        const input = await value.service.retainRelayPayload(
+          "user-1",
+          "local_relay_input",
+          Buffer.from("send"),
+        );
+        const output = await value.service.retainRelayPayload(
+          "user-1",
+          "local_relay_output",
+          Buffer.from("done"),
+        );
+        expect(await value.service.readRelayPayload("user-1", "local_relay_input", input)).toEqual(
+          Buffer.from("send"),
+        );
+        expect(
+          await value.service.readRelayPayload("user-1", "local_relay_output", output),
+        ).toEqual(Buffer.from("done"));
+      };
+      try {
+        await (first === "native" ? native() : relay());
+        await (first === "native" ? relay() : native());
+        expect(value.repository.usageForUser("user-1")).toEqual({
+          objects: 2,
+          bytes: 8,
+          inflightBytes: 0,
+        });
+        expect(value.repository.listLive()).toHaveLength(4);
+        await expect(
+          value.service.createDownload("user-1", {
+            fileName: "blocked.bin",
+            mimeType: "application/octet-stream",
+            bytes: Buffer.from("x"),
+          }),
+        ).rejects.toThrow(/quota/);
+        await expect(
+          value.service.retainRelayPayload("user-1", "local_relay_input", Buffer.from("x")),
+        ).rejects.toThrow(/quota/);
+        value.advance(60_001);
+        await value.service.cleanup();
+        expect(value.repository.listLive()).toEqual([]);
+        expect(readdirSync(value.root)).toEqual([]);
+      } finally {
+        value.sqlite.close();
+      }
+    },
+  );
+
+  test.each(["local_relay_input", "codespace_input"] as const)(
+    "%s reservations enforce their own byte/inflight limits without charging the other class",
+    (purpose) => {
+      const value = fixture({
+        maxTransferFileBytes: 4,
+        maxTransferBytesPerUser: 8,
+        maxTransferBytesGlobal: 8,
+        maxTransferInflightBytesPerUser: 4,
+        maxTransferInflightBytesGlobal: 4,
+      });
+      const reserve = (
+        userId: string,
+        selected: typeof purpose | "local_relay_input" | "codespace_input",
+        size: number,
+      ) =>
+        value.repository.reserve({
+          userId,
+          purpose: selected,
+          fileName: "payload.bin",
+          mimeType: "application/octet-stream",
+          declaredSize: size,
+          ownerPid: process.pid,
+          ownerStartTime: processStartTime(process.pid),
+          policy: {
+            ...basePolicy,
+            maxTransferFileBytes: 4,
+            maxTransferBytesPerUser: 8,
+            maxTransferBytesGlobal: 8,
+            maxTransferInflightBytesPerUser: 4,
+            maxTransferInflightBytesGlobal: 4,
+          },
+          now: 1_800_000_000_000,
+        });
+      try {
+        expect(reserve("user-1", purpose, 4)).not.toBeNull();
+        expect(reserve("user-1", purpose, 1)).toBeNull();
+        expect(reserve("user-2", purpose, 1)).toBeNull();
+        expect(
+          reserve(
+            "user-2",
+            purpose === "codespace_input" ? "local_relay_input" : "codespace_input",
+            4,
+          ),
+        ).not.toBeNull();
+        expect(reserve("user-2", purpose, 5)).toBeNull();
+      } finally {
+        value.sqlite.close();
+      }
+    },
+  );
+
+  test("relay part-count admission scales with supported slots and still has user/global ceilings", () => {
+    const selected = {
+      ...basePolicy,
+      maxConcurrentOperationsPerUser: 1,
+      maxConcurrentOperationsGlobal: 1,
+      maxActivePerUser: 1,
+      maxActiveGlobal: 2,
+    };
+    const value = fixture(selected);
+    const limits = effectiveCodespaceLimits(selected);
+    const reserve = (userId: string) =>
+      value.repository.reserve({
+        userId,
+        purpose: "local_relay_input",
+        fileName: "relay.bin",
+        mimeType: "application/octet-stream",
+        declaredSize: 0,
+        ownerPid: process.pid,
+        ownerStartTime: processStartTime(process.pid),
+        policy: selected,
+        now: 1_800_000_000_000,
+      });
+    try {
+      expect(limits.relayTransfers.maxObjectsPerUser).toBe(128);
+      expect(limits.relayTransfers.maxObjectsGlobal).toBe(192);
+      for (let index = 0; index < 128; index++) expect(reserve("user-1")).not.toBeNull();
+      expect(reserve("user-1")).toBeNull();
+      for (let index = 0; index < 64; index++) expect(reserve("user-2")).not.toBeNull();
+      expect(reserve("user-2")).toBeNull();
+      expect(value.repository.usageForUser("user-1")).toEqual({
+        objects: 0,
+        bytes: 0,
+        inflightBytes: 0,
+      });
+      expect(() =>
+        value.repository.reserve({
+          userId: "user-1",
+          purpose: "invalid" as "codespace_input",
+          fileName: "bad.bin",
+          mimeType: "application/octet-stream",
+          declaredSize: 0,
+          ownerPid: process.pid,
+          ownerStartTime: processStartTime(process.pid),
+          policy: selected,
+          now: 1_800_000_000_000,
+        }),
+      ).toThrow(/purpose/);
+    } finally {
+      value.sqlite.close();
+    }
+  });
+
   test("retains a multi-part relay payload across restart without public download authority", async () => {
     const value = fixture({
       maxTransferFileBytes: 4,
@@ -211,7 +382,7 @@ describe("private codespace transfer service", () => {
         bytes: Buffer.from([9]),
       });
       await expect(
-        value.service.retainRelayPayload("user-1", "local_relay_input", Buffer.alloc(8)),
+        value.service.retainRelayPayload("user-1", "local_relay_input", Buffer.alloc(9)),
       ).rejects.toThrow(/quota/);
       expect(value.repository.listLive()).toHaveLength(1);
       const claimed = await value.service.claimDownload(native.referenceId);
