@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import { z } from "zod";
 import {
   LocalRecords,
@@ -8,7 +7,8 @@ import {
   type LocalSpace,
 } from "./space-record.js";
 import { LocalRelay } from "./relay.js";
-import { SbxRuntime } from "./sbx-runtime.js";
+import type { LocalVmRuntime } from "./local-vm-runtime.js";
+import { createLocalVmRuntime } from "./local-vm-runtime-factory.js";
 import { runProcess, type RunProcess } from "./process.js";
 import { guestAssets, installGuest, runtimeApiAsset } from "./assets.js";
 import {
@@ -34,19 +34,6 @@ const operation = z
   })
   .passthrough();
 
-export class OwnedSbxRuntime extends SbxRuntime {
-  constructor(
-    policy: LocalPolicy,
-    run: RunProcess,
-    private readonly prepare: () => Promise<void>,
-  ) {
-    super(policy, run);
-  }
-  override prepareCredentials(): Promise<void> {
-    return this.prepare();
-  }
-}
-
 /** The independent guard owns every native call that can start this space. */
 export class RuntimeOwner {
   private readonly controller = new AbortController();
@@ -61,8 +48,8 @@ export class RuntimeOwner {
   private confirmingStop?: Promise<void>;
   private space?: LocalSpace;
   private policy?: LocalPolicy;
-  private runtime?: SbxRuntime;
-  private cleanupRuntime?: SbxRuntime;
+  private runtime?: LocalVmRuntime;
+  private cleanupRuntime?: LocalVmRuntime;
   private admission?: Promise<void>;
   private admittedGenerationValue = 0;
   private createdRuntimeId?: string;
@@ -158,20 +145,22 @@ export class RuntimeOwner {
       throw new LocalRefusal("LOCAL_NOT_RUNNING", "This sandbox has no local work admission.");
     this.admittedGenerationValue = this.space.generation;
     await this.protectRuntime();
-    this.runtime = new OwnedSbxRuntime(this.policy, this.run, this.prepareCredentials);
-    await this.runtime.prepareCredentials();
-    this.cleanupRuntime = new OwnedSbxRuntime(
-      this.policy,
-      this.cleanupRun,
-      this.prepareCredentials,
-    );
-    await this.cleanupRuntime.prepareCredentials();
+    this.runtime = createLocalVmRuntime(this.policy, {
+      run: this.run,
+      prepareCredentials: this.prepareCredentials,
+    });
+    await this.prepareCredentials();
+    this.cleanupRuntime = createLocalVmRuntime(this.policy, {
+      run: this.cleanupRun,
+      prepareCredentials: this.prepareCredentials,
+    });
+    await this.prepareCredentials();
   }
 
   private async current(): Promise<{
     space: LocalSpace;
     policy: LocalPolicy;
-    runtime: SbxRuntime;
+    runtime: LocalVmRuntime;
   }> {
     await this.admission;
     if (this.stopping || !this.space || !this.policy)
@@ -274,8 +263,7 @@ export class RuntimeOwner {
         const identity = { name: space.name, runtimeId: space.runtimeId };
         await runtime.start(identity);
         await this.protectRuntime();
-        await runtime.verifySettings();
-        await runtime.verifyBoundary(identity);
+        await runtime.boundary.verify(identity);
         const saved = await this.records.state.read(
           "broker.json",
           z.object({ port: z.number().int().min(1024).max(65535) }).strict().parse,
@@ -283,9 +271,7 @@ export class RuntimeOwner {
         if (!saved) throw new LocalRefusal("LOCAL_NOT_RUNNING", "The local broker is unavailable.");
         if (space.networkPolicy) await this.boundary(space, runtime);
         else {
-          space.networkPolicy = createHash("sha256")
-            .update(await runtime.configureBroker(identity, saved.port))
-            .digest("hex");
+          space.networkPolicy = await runtime.boundary.configureNetwork(identity, saved.port);
           await this.persist(space);
         }
         const assets = await this.loadAssets();
@@ -303,9 +289,9 @@ export class RuntimeOwner {
             space.repositoryId,
             this.controller.signal,
           );
-        const output = await runtime.guest(
+        const output = await runtime.runFixedGuest(
           identity,
-          ["node", "/tmp/moira-local-runtime/worker.mjs"],
+          "worker",
           Buffer.from(
             JSON.stringify({
               kind: "bootstrap",
@@ -336,17 +322,13 @@ export class RuntimeOwner {
     );
   }
 
-  private async boundary(space: LocalSpace, runtime: SbxRuntime): Promise<void> {
+  private async boundary(space: LocalSpace, runtime: LocalVmRuntime): Promise<void> {
     if (!space.runtimeId)
       throw new LocalRefusal("LOCAL_CREATE_UNKNOWN", "No confirmed runtime identity.");
     const identity = { name: space.name, runtimeId: space.runtimeId };
-    await runtime.verifySettings();
-    await runtime.verifyBoundary(identity);
-    const digest = createHash("sha256")
-      .update(await runtime.networkPolicy(identity))
-      .digest("hex");
-    if (!space.networkPolicy || digest !== space.networkPolicy)
+    if (!space.networkPolicy)
       throw new LocalRefusal("LOCAL_NETWORK_CHANGED", "The sandbox network policy changed.");
+    await runtime.boundary.verify(identity, space.networkPolicy);
   }
 
   operation(value: unknown): Promise<Buffer> {
@@ -379,16 +361,32 @@ export class RuntimeOwner {
         }
         const identity = { name: space.name, runtimeId: space.runtimeId };
         await this.protectRuntime();
-        if ((await runtime.exact(identity))?.status !== "running")
-          throw new LocalRefusal("LOCAL_NOT_RUNNING", "The owned sandbox is stopped.");
-        await this.boundary(space, runtime);
+        if (!space.networkPolicy)
+          throw new LocalRefusal(
+            "LOCAL_NETWORK_CHANGED",
+            "The sandbox network policy is unconfirmed.",
+          );
         const latest = await this.current();
-        return runtime.guest(
+        return runtime.runFixedGuest(
           identity,
-          ["node", "/tmp/moira-local-runtime/worker.mjs"],
+          "worker",
           Buffer.from(JSON.stringify({ kind: "operation", request })),
           Math.min(30_000, latest.policy.leaseUntil - Date.now()),
           this.controller.signal,
+          {
+            expectedNetworkDigest: space.networkPolicy,
+            confirm: async () => {
+              const admitted = await this.current();
+              if (
+                admitted.space.phase !== "usable" ||
+                admitted.space.networkPolicy !== space.networkPolicy
+              )
+                throw new LocalRefusal(
+                  "LOCAL_NETWORK_CHANGED",
+                  "The local dispatch receipt changed during verification.",
+                );
+            },
+          },
         );
       }),
     );
@@ -401,7 +399,7 @@ export class RuntimeOwner {
         throw new LocalRefusal("LOCAL_NOT_RUNNING", "This sandbox is not initialized.");
       await this.protectRuntime();
       if (
-        (await runtime.exact({ name: space.name, runtimeId: space.runtimeId }))?.status !==
+        (await runtime.inspectExact({ name: space.name, runtimeId: space.runtimeId }))?.status !==
         "running"
       )
         throw new LocalRefusal("LOCAL_NOT_RUNNING", "The owned sandbox is stopped.");
@@ -522,9 +520,12 @@ export class RuntimeOwner {
         await this.protectRuntime();
         this.space = space;
         this.policy = policy;
-        const runtime = new OwnedSbxRuntime(policy, this.cleanupRun, this.prepareCredentials);
+        const runtime = createLocalVmRuntime(policy, {
+          run: this.cleanupRun,
+          prepareCredentials: this.prepareCredentials,
+        });
         if (
-          (await runtime.exact({ name: space.name, runtimeId: space.runtimeId }))?.status !==
+          (await runtime.inspectExact({ name: space.name, runtimeId: space.runtimeId }))?.status !==
           "stopped"
         )
           throw new LocalRefusal(
@@ -584,11 +585,10 @@ export class RuntimeOwner {
         await this.protectRuntime();
         this.space = space;
         this.policy = policy;
-        this.cleanupRuntime ??= new OwnedSbxRuntime(
-          policy,
-          this.cleanupRun,
-          this.prepareCredentials,
-        );
+        this.cleanupRuntime ??= createLocalVmRuntime(policy, {
+          run: this.cleanupRun,
+          prepareCredentials: this.prepareCredentials,
+        });
         if (space.desiredState !== "running") {
           // An explicit management request is a new local stop intent even when an
           // older record already requested stop. Never authorize retirement from that old generation.
@@ -601,7 +601,7 @@ export class RuntimeOwner {
           throw new LocalRefusal("LOCAL_CREATE_UNKNOWN", "Inspect the pending local creation.");
         const identity = { name: space.name, runtimeId: space.runtimeId };
         await runtime.stop(identity);
-        const current = await runtime.exact(identity);
+        const current = await runtime.inspectExact(identity);
         if (current && current.status !== "stopped" && current.status !== "created")
           throw new LocalRefusal("LOCAL_STOP_PENDING", "The sandbox stop is not confirmed.");
         await this.confirmStopped();
@@ -630,11 +630,14 @@ export class RuntimeOwner {
       if (!space || !policy) return;
       const runtime =
         this.cleanupRuntime ??
-        new OwnedSbxRuntime(policy, this.cleanupRun, this.prepareCredentials);
+        createLocalVmRuntime(policy, {
+          run: this.cleanupRun,
+          prepareCredentials: this.prepareCredentials,
+        });
       if (space.runtimeId) {
         const identity = { name: space.name, runtimeId: space.runtimeId };
         await runtime.stop(identity);
-        const current = await runtime.exact(identity);
+        const current = await runtime.inspectExact(identity);
         if (current && current.status !== "stopped" && current.status !== "created")
           throw new LocalRefusal("LOCAL_STOP_PENDING", "Native sandbox shutdown has not settled.");
         await this.confirmStopped();

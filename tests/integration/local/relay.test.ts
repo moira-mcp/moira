@@ -7,7 +7,9 @@ import { PrivateState } from "../../../packages/local/src/private-state.js";
 import { LocalRelay, relayOrigin } from "../../../packages/local/src/relay.js";
 import { LocalManager } from "../../../packages/local/src/manager.js";
 import { LocalRpc } from "../../../packages/local/src/rpc.js";
+import { LocalDaemon } from "../../../packages/local/src/daemon.js";
 import { SbxRuntime } from "../../../packages/local/src/sbx-runtime.js";
+import { adaptSbxRuntime } from "../../../packages/local/src/local-vm-runtime-factory.js";
 import { RuntimeDeviceOwner } from "../../../packages/local/src/runtime-device-owner.js";
 import { RuntimeOwner } from "../../../packages/local/src/runtime-owner.js";
 import { publicPolicy, LocalRefusal } from "../../../packages/local/src/policy.js";
@@ -26,6 +28,15 @@ afterEach(async () => {
 });
 const hash = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex");
 const json = (data: unknown) => Response.json({ success: true, data });
+const brokenResponse = (status: number) =>
+  new Response(
+    new ReadableStream({
+      start(controller) {
+        controller.error(new TypeError("Controlled HTTP error body loss"));
+      },
+    }),
+    { status },
+  );
 
 async function fixture() {
   const state = await PrivateState.open(directory);
@@ -55,7 +66,13 @@ async function fixture() {
   });
   let maxPartBytes = 4 * 1024 * 1024;
   let loseAck = false;
-  let refuseRenew = false;
+  let refusedRenewStatus: number | undefined;
+  let nextRenewFailure: "network" | "server" | undefined;
+  let nextPartFailure: "network" | "server" | "body" | undefined;
+  let heartbeatFailure = false;
+  let brokenHeartbeatStatus: number | undefined;
+  let brokenRenewStatus: number | undefined;
+  let brokenIdentityStatus: number | undefined;
   let renewals = 0;
   let renewed!: () => void;
   const renewal = new Promise<void>((done) => {
@@ -70,9 +87,17 @@ async function fixture() {
     expect(new Headers(options?.headers).get("authorization")).toBe(
       `Bearer ${connection.credential}`,
     );
-    if (url.pathname.endsWith("/heartbeat")) return json(device);
+    if (url.pathname.endsWith("/heartbeat")) {
+      if (brokenHeartbeatStatus) return brokenResponse(brokenHeartbeatStatus);
+      if (heartbeatFailure) {
+        heartbeatFailure = false;
+        throw new TypeError("Controlled device connection loss");
+      }
+      return json(device);
+    }
     if (url.pathname.endsWith("/identity")) {
       gitIdentityRequests.push(url.pathname);
+      if (brokenIdentityStatus) return brokenResponse(brokenIdentityStatus);
       return json({ name: "Fixture Owner", email: "owner@example.test" });
     }
     if (url.pathname.endsWith("/relay/claim")) {
@@ -89,9 +114,14 @@ async function fixture() {
     if (url.pathname.endsWith("/renew")) {
       renewals++;
       renewed();
+      if (brokenRenewStatus) return brokenResponse(brokenRenewStatus);
+      const failure = nextRenewFailure;
+      nextRenewFailure = undefined;
+      if (failure === "network") throw new TypeError("Controlled relay transport failure");
+      if (failure === "server") return new Response(null, { status: 503 });
       expect(new Headers(options?.headers).get("X-Moira-Claim-Id")).toBe(claim.claimId);
-      return refuseRenew
-        ? new Response(null, { status: 401 })
+      return refusedRenewStatus
+        ? new Response(null, { status: refusedRenewStatus })
         : json({ ...claim, claimExpiresAt: Date.now() + 30_000 });
     }
     if (url.pathname.includes("/payload/0")) {
@@ -101,6 +131,18 @@ async function fixture() {
       return new Response(Uint8Array.from(bytes.subarray(offset, offset + length)));
     }
     if (url.pathname.endsWith("/result-part")) {
+      const failure = nextPartFailure;
+      nextPartFailure = undefined;
+      if (failure === "network") throw new TypeError("Controlled relay transport failure");
+      if (failure === "server") return new Response(null, { status: 503 });
+      if (failure === "body")
+        return new Response(
+          new ReadableStream({
+            start(controller) {
+              controller.error(new TypeError("Controlled response body loss"));
+            },
+          }),
+        );
       expect(new Headers(options?.headers).get("X-Moira-Claim-Id")).toBe(claim.claimId);
       const result = Buffer.from(options!.body as Uint8Array);
       expect(result.length).toBeLessThanOrEqual(maxPartBytes);
@@ -188,8 +230,29 @@ async function fixture() {
     loseAck: () => {
       loseAck = true;
     },
-    refuseRenew: () => {
-      refuseRenew = true;
+    refuseRenew: (status = 401) => {
+      refusedRenewStatus = status;
+    },
+    failNextRenew: (kind: "network" | "server") => {
+      nextRenewFailure = kind;
+    },
+    failNextPart: (kind: "network" | "server" | "body") => {
+      nextPartFailure = kind;
+    },
+    failNextHeartbeat: () => {
+      heartbeatFailure = true;
+    },
+    revokeDevice: () => {
+      device.status = "revoked";
+    },
+    breakHeartbeatBody: (status: number) => {
+      brokenHeartbeatStatus = status;
+    },
+    breakRenewBody: (status: number) => {
+      brokenRenewStatus = status;
+    },
+    breakIdentityBody: (status: number) => {
+      brokenIdentityStatus = status;
     },
     renewals: () => renewals,
     renewal,
@@ -211,6 +274,82 @@ async function fixture() {
 }
 
 describe("outbound companion authority and durable response replay", () => {
+  test.each([401, 403, 503])(
+    "broken Git identity HTTP %s body preserves its known scoped status",
+    async (status) => {
+      const local = await fixture();
+      await local.relay.poll(local.rpc);
+      local.breakIdentityBody(status);
+      const error = await local.relay
+        .gitIdentity(local.space.id, local.space.generation, local.space.repositoryId)
+        .catch((failure: unknown) => failure);
+      expect(error).toMatchObject({
+        code:
+          status === 401
+            ? "LOCAL_UNAUTHORIZED"
+            : status === 503
+              ? "LOCAL_RELAY_UNAVAILABLE"
+              : "LOCAL_RELAY_REFUSED",
+      });
+      expect(local.relay.isUnavailable(error)).toBe(status === 503);
+      expect(await local.records.get(local.space.id)).toMatchObject({
+        phase: "usable",
+        generation: 1,
+      });
+    },
+  );
+  test("daemon reconnect keeps real manager admission; validated device revocation settles it", async () => {
+    const local = await fixture();
+    await local.relay.poll(local.rpc);
+    local.manager.dependencies.guard = async () => ({
+      active: true,
+      stop: async () => {},
+      observe: async () => [],
+      retire: async () => {},
+      remove: async () => {},
+      space: async () => ({
+        active: true,
+        prepare: async () => {},
+        validate: async () => {},
+        operation: async () => Buffer.from("{}"),
+        stop: async () => {
+          const space = await local.records.get(local.space.id);
+          await local.records.put({
+            ...space!,
+            phase: "stopped",
+            desiredState: "stopped",
+            generation: space!.generation + 1,
+          });
+        },
+      }),
+    });
+    await local.manager.operation(local.space.id, {});
+    jest.spyOn(local.manager, "open").mockResolvedValue(undefined);
+    const daemon = new LocalDaemon(local.manager, local.relay, { report: () => {} });
+    try {
+      expect(await daemon.cycle()).toBe(true);
+      local.failNextHeartbeat();
+      expect(await daemon.cycle()).toBe(false);
+      expect(daemon.status.controlPlane).toBe("offline");
+      expect(await local.records.get(local.space.id)).toMatchObject({
+        phase: "usable",
+        desiredState: "running",
+        generation: 1,
+      });
+      expect(await daemon.cycle()).toBe(true);
+      expect(local.creates()).toBe(1);
+      local.revokeDevice();
+      expect(await daemon.cycle()).toBe(false);
+      expect(daemon.status).toEqual({ controlPlane: "disabled", code: "LOCAL_IDENTITY_CHANGED" });
+      expect(await local.records.get(local.space.id)).toMatchObject({
+        phase: "stopped",
+        desiredState: "stopped",
+        generation: 2,
+      });
+    } finally {
+      await local.manager.close();
+    }
+  });
   test.each(["running", "stopped", "changed-network"])(
     "an active guard verifies the actual VM before accepting a %s start",
     async (state) => {
@@ -284,7 +423,7 @@ describe("outbound companion authority and durable response replay", () => {
       jest.spyOn(SbxRuntime.prototype, "networkPolicy").mockResolvedValue(network);
       const bootstraps: unknown[] = [];
       jest
-        .spyOn(SbxRuntime.prototype, "guest")
+        .spyOn(SbxRuntime.prototype, "runFixedGuest")
         .mockImplementation(async (_identity, _argv, stdin) => {
           if (stdin && stdin.toString().startsWith("{")) {
             bootstraps.push(JSON.parse(stdin.toString()));
@@ -479,7 +618,7 @@ describe("outbound companion authority and durable response replay", () => {
           ];
         }
       }
-      local.manager.dependencies.runtime = (policy) => new ObservedStopped(policy);
+      local.manager.dependencies.runtime = (policy) => adaptSbxRuntime(new ObservedStopped(policy));
       local.setRequest({ action: "snapshot" }, 1);
       await reconnect.poll(new LocalRpc(local.manager));
       expect(local.receipts.at(-1)).toMatchObject({
@@ -669,7 +808,7 @@ describe("outbound companion authority and durable response replay", () => {
     expect(local.creates()).toBe(0);
     expect(local.receipts).toEqual([]);
   });
-  test("a real manager closure after lost ACK retains the cached receipt and its stopped local generation for a later read", async () => {
+  test("lost ACK preserves real manager admission and its cached receipt for a later claim", async () => {
     const local = await fixture();
     // Explicit external-runtime ownership substitute; actual manager closure and durable records remain real.
     local.manager.dependencies.guard = async () => ({
@@ -699,8 +838,9 @@ describe("outbound companion authority and durable response replay", () => {
     local.loseAck();
     await expect(local.relay.poll(local.rpc)).rejects.toThrow("Controlled response loss");
     expect(await local.records.get(local.space.id)).toMatchObject({
-      phase: "stopped",
-      generation: 2,
+      phase: "usable",
+      desiredState: "running",
+      generation: 1,
     });
     local.claim().claimId = randomUUID();
     await local.relay.poll(new LocalRpc(local.manager));
@@ -712,8 +852,81 @@ describe("outbound companion authority and durable response replay", () => {
     expect(local.receipts.at(-1)).toMatchObject({ ok: true });
     expect(
       JSON.parse(await readFile(join(directory, `relay-space-${local.resourceId}.json`), "utf8")),
-    ).toMatchObject({ localGeneration: 2, serverGeneration: 3 });
+    ).toMatchObject({ localGeneration: 1, serverGeneration: 3 });
+    await local.manager.close();
   });
+  test.each(["network", "server", "body"] as const)(
+    "transient %s result upload preserves a running operation and reclaims its cached result without redispatch",
+    async (kind) => {
+      const local = await fixture();
+      await local.relay.poll(local.rpc);
+      const lease = local.policy.leaseUntil;
+      const dispatch = jest
+        .spyOn(local.rpc.jobs, "dispatch")
+        .mockResolvedValue({ state: "running" });
+      const close = jest.spyOn(local.manager, "close").mockResolvedValue(undefined);
+      local.setRequest({ action: "operation", spaceId: local.space.id, job: {} });
+      local.failNextPart(kind);
+      await expect(local.relay.poll(local.rpc)).rejects.toBeDefined();
+      expect(dispatch).toHaveBeenCalledTimes(1);
+      expect(close).not.toHaveBeenCalled();
+      expect(await local.records.get(local.space.id)).toMatchObject({
+        phase: "usable",
+        desiredState: "running",
+        generation: 1,
+      });
+      expect((await local.records.policy()).leaseUntil).toBe(lease);
+      const reconnect = new LocalRpc(local.manager);
+      const redispatch = jest.spyOn(reconnect.jobs, "dispatch");
+      local.claim().claimId = randomUUID();
+      await expect(local.relay.poll(reconnect)).resolves.toBe(1);
+      expect(redispatch).not.toHaveBeenCalled();
+      expect(local.receipts.at(-1)).toEqual({ ok: true, result: { state: "running" } });
+    },
+  );
+  test.each(["network", "server"] as const)(
+    "transient %s renewal drains its claim without closing admission or repeating a completed side effect",
+    async (kind) => {
+      const local = await fixture();
+      let entered!: () => void, finish!: () => void;
+      const admitted = new Promise<void>((done) => {
+        entered = done;
+      });
+      const held = new Promise<void>((done) => {
+        finish = done;
+      });
+      let creates = 0;
+      local.manager.create = async (repositoryId, ref, operationMarker) => {
+        creates++;
+        Object.assign(local.space, { repositoryId, ref, operationMarker });
+        await local.records.put(local.space);
+        entered();
+        await held;
+        return local.space;
+      };
+      const close = jest.spyOn(local.manager, "close").mockResolvedValue(undefined);
+      local.failNextRenew(kind);
+      jest.useFakeTimers({ doNotFake: ["nextTick", "setImmediate"] });
+      const outcome = local.relay.poll(local.rpc).catch((error: unknown) => error);
+      await admitted;
+      await jest.advanceTimersByTimeAsync(10_000);
+      await local.renewal;
+      finish();
+      const failure = await outcome;
+      expect(local.relay.isUnavailable(failure)).toBe(true);
+      expect(close).not.toHaveBeenCalled();
+      expect(local.receipts).toEqual([]);
+      expect(await local.records.get(local.space.id)).toMatchObject({
+        phase: "usable",
+        desiredState: "running",
+        generation: 1,
+      });
+      local.claim().claimId = randomUUID();
+      await expect(local.relay.poll(new LocalRpc(local.manager))).resolves.toBe(1);
+      expect(creates).toBe(1);
+      expect(local.receipts).toEqual([{ ok: true, result: { spaceId: local.space.id } }]);
+    },
+  );
   test("result upload obeys the server's smaller effective chunk bound without changing the RPC result", async () => {
     const local = await fixture();
     local.partLimit(64);
@@ -760,7 +973,7 @@ describe("outbound companion authority and durable response replay", () => {
       }
     }
     const manager = new LocalManager(local.records, {
-      runtime: (policy) => new ExternalInventory(policy),
+      runtime: (policy) => adaptSbxRuntime(new ExternalInventory(policy)),
     });
     expect((await manager.snapshot()).spaces).toEqual([
       expect.objectContaining({ id: local.space.id, state: "unknown", phase: "creating" }),
@@ -877,9 +1090,9 @@ describe("outbound companion authority and durable response replay", () => {
     });
     expect(result.ok).toBe(false);
   });
-  test.each([false, true])(
-    "in-flight renewal keeps the same claim and revocation requests existing manager closure (refused: %s)",
-    async (refused) => {
+  test.each([200, 401, 410, "broken401"] as const)(
+    "request-scoped renewal status %s never owns VM shutdown",
+    async (status) => {
       const local = await fixture();
       let entered!: () => void, finish!: () => void;
       const admitted = new Promise<void>((done) => {
@@ -898,7 +1111,8 @@ describe("outbound companion authority and durable response replay", () => {
         closures++;
         finish();
       };
-      if (refused) local.refuseRenew();
+      if (status === "broken401") local.breakRenewBody(401);
+      else if (status !== 200) local.refuseRenew(status);
       jest.useFakeTimers({ doNotFake: ["nextTick", "setImmediate"] });
       const work = local.relay.poll(local.rpc);
       const outcome = work.then(
@@ -908,12 +1122,19 @@ describe("outbound companion authority and durable response replay", () => {
       await admitted;
       await jest.advanceTimersByTimeAsync(10_000);
       await local.renewal;
-      if (!refused) finish();
+      finish();
       const result = await outcome;
       expect(local.renewals()).toBe(1);
-      if (refused) {
-        expect(result).toMatchObject({ error: { code: "LOCAL_UNAUTHORIZED" } });
-        expect(closures).toBe(1);
+      if (status !== 200) {
+        expect(result).toMatchObject({
+          error: {
+            code:
+              status === 401 || status === "broken401"
+                ? "LOCAL_UNAUTHORIZED"
+                : "LOCAL_RELAY_REFUSED",
+          },
+        });
+        expect(closures).toBe(0);
         expect(local.receipts).toEqual([]);
       } else {
         expect(result).toEqual({ value: 1 });
@@ -922,4 +1143,88 @@ describe("outbound companion authority and durable response replay", () => {
       }
     },
   );
+  test.each([401, 503])(
+    "broken heartbeat HTTP %s body preserves device refusal versus offline status",
+    async (status) => {
+      const local = await fixture();
+      const pause = jest.spyOn(local.manager, "stopWork").mockResolvedValue(undefined);
+      const close = jest.spyOn(local.manager, "close").mockResolvedValue(undefined);
+      local.breakHeartbeatBody(status);
+      const daemon = new LocalDaemon(local.manager, local.relay, { report: () => {} });
+      expect(await daemon.cycle()).toBe(false);
+      expect(daemon.status).toEqual(
+        status === 401
+          ? { controlPlane: "disabled", code: "LOCAL_UNAUTHORIZED" }
+          : { controlPlane: "offline", code: "LOCAL_RELAY_UNAVAILABLE" },
+      );
+      expect(pause).toHaveBeenCalledTimes(status === 401 ? 1 : 0);
+      expect(close).not.toHaveBeenCalled();
+      close.mockRestore();
+      await local.manager.close();
+    },
+  );
+  test("device revocation during an in-flight claim reaches the daemon without waiting for guest work", async () => {
+    const local = await fixture();
+    // Observe the whole admitted delivery, including persistence after rpc.handle().
+    const delivery = local.relay as unknown as {
+      holdClaim(
+        connection: unknown,
+        claim: unknown,
+        work: (signal: AbortSignal) => Promise<void>,
+        signal?: AbortSignal,
+      ): Promise<void>;
+    };
+    const holdClaim = delivery.holdClaim.bind(local.relay);
+    let settled: Promise<void> | undefined;
+    jest.spyOn(delivery, "holdClaim").mockImplementation((connection, claim, execute, signal) =>
+      holdClaim(
+        connection,
+        claim,
+        (scope) => {
+          const executing = execute(scope);
+          settled = executing.then(
+            () => undefined,
+            () => undefined,
+          );
+          return executing;
+        },
+        signal,
+      ),
+    );
+    let entered!: () => void, finish!: () => void;
+    const admitted = new Promise<void>((done) => {
+      entered = done;
+    });
+    const held = new Promise<void>((done) => {
+      finish = done;
+    });
+    local.manager.create = async () => {
+      entered();
+      await held;
+      return local.space;
+    };
+    jest.spyOn(local.manager, "open").mockResolvedValue(undefined);
+    const stop = jest.spyOn(local.manager, "stopWork").mockResolvedValue(undefined);
+    const close = jest.spyOn(local.manager, "close").mockResolvedValue(undefined);
+    const daemon = new LocalDaemon(local.manager, local.relay, { report: () => {} });
+    jest.useFakeTimers({ doNotFake: ["nextTick", "setImmediate"] });
+    try {
+      const work = daemon.cycle();
+      await admitted;
+      local.revokeDevice();
+      await jest.advanceTimersByTimeAsync(10_000);
+      // The guest remains held: revocation must reach its owner before it finishes.
+      expect(await work).toBe(false);
+      expect(stop).toHaveBeenCalledTimes(1);
+      expect(close).not.toHaveBeenCalled();
+      expect(daemon.status).toEqual({ controlPlane: "disabled", code: "LOCAL_IDENTITY_CHANGED" });
+      expect(settled).toBeDefined();
+    } finally {
+      finish();
+      await settled;
+      close.mockRestore();
+      await local.manager.close();
+    }
+    expect(local.receipts).toEqual([]);
+  });
 });

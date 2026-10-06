@@ -8,11 +8,9 @@ import { PrivateState } from "../../../packages/local/src/private-state.js";
 import { LocalManager } from "../../../packages/local/src/manager.js";
 import { LocalJobs } from "../../../packages/local/src/jobs.js";
 import { LocalRefusal } from "../../../packages/local/src/policy.js";
-import {
-  SbxRuntime,
-  type SandboxIdentity,
-  type SandboxObservation,
-} from "../../../packages/local/src/sbx-runtime.js";
+import { SbxRuntime, type SandboxObservation } from "../../../packages/local/src/sbx-runtime.js";
+import type { LocalVmIdentity as SandboxIdentity } from "../../../packages/local/src/local-vm-runtime.js";
+import { adaptSbxRuntime } from "../../../packages/local/src/local-vm-runtime-factory.js";
 import { localFixture } from "./fixtures.js";
 
 let root: string;
@@ -82,7 +80,7 @@ async function fixture(now: () => number = Date.now) {
   }
   const runtime = new ExternalRuntime(local.policy);
   const manager = new LocalManager(local.records, {
-    runtime: () => runtime,
+    runtime: () => adaptSbxRuntime(runtime),
     now,
     // This suite explicitly substitutes external runtime ownership, not native guard IPC.
     guard: async () => ({

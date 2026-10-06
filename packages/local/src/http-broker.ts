@@ -34,7 +34,7 @@ export function httpBroker(
       response.writeHead(403, { connection: "close" }).end();
       return;
     }
-    const reservation = await budget.reserve(grant.policy);
+    const reservation = await budget.reserve(grant.policy, grant.admission);
     if (response.destroyed) {
       await reservation.release(0).catch(onFault);
       return;

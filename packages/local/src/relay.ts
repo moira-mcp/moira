@@ -98,6 +98,13 @@ export function relayOrigin(value: string): string {
   return url.href.replace(/\/$/, "");
 }
 
+/** Only a device confirmation can revoke the device owner's admitted work. */
+export class LocalDeviceAuthorityFailure extends LocalRefusal {
+  constructor(code: string) {
+    super(code, "Moira refused the confirmed device authority.");
+  }
+}
+
 export class LocalRelay {
   private established?: Connection;
   private readonly transportFailures = new WeakSet<object>();
@@ -264,6 +271,11 @@ export class LocalRelay {
       limit?: number;
     } = {},
   ): Promise<Buffer> {
+    const transportFailure = (error: unknown): never => {
+      if (!options.signal?.aborted && typeof error === "object" && error !== null)
+        this.transportFailures.add(error);
+      throw error;
+    };
     const response = await this.fetch(
       `${relayOrigin(connection.origin)}/api/local-devices${path}`,
       {
@@ -285,30 +297,32 @@ export class LocalRelay {
               : JSON.stringify(options.body)
             : Buffer.from(options.binary),
       },
-    ).catch((error: unknown) => {
-      if (!options.signal?.aborted && typeof error === "object" && error !== null)
-        this.transportFailures.add(error);
-      throw error;
-    });
+    ).catch(transportFailure);
     if (!response.ok) {
-      if (/^\/github\/[a-f0-9-]{36}\/\d+\/identity$/.test(path)) {
+      if (response.status === 401 && /^\/github\/[a-f0-9-]{36}\/\d+\/identity$/.test(path)) {
         const reader = response.body?.getReader();
         const chunks: Uint8Array[] = [];
         let size = 0;
+        let complete = false;
         if (reader)
           try {
             for (;;) {
               const item = await reader.read();
-              if (item.done) break;
+              if (item.done) {
+                complete = true;
+                break;
+              }
               size += item.value.length;
               if (size > 8192) break;
               chunks.push(item.value);
             }
+          } catch {
+            // Error details are optional; a broken body cannot override the known HTTP refusal.
           } finally {
-            await reader.cancel();
+            await reader.cancel().catch(() => undefined);
             reader.releaseLock();
           }
-        if (size <= 8192)
+        if (complete && size <= 8192)
           try {
             const refusal = z
               .object({
@@ -331,7 +345,7 @@ export class LocalRelay {
             if (error instanceof LocalRefusal) throw error;
           }
       }
-      await response.body?.cancel();
+      await response.body?.cancel().catch(() => undefined);
       throw new LocalRefusal(
         response.status === 401
           ? "LOCAL_UNAUTHORIZED"
@@ -347,7 +361,7 @@ export class LocalRelay {
     if (reader)
       try {
         for (;;) {
-          const { done, value } = await reader.read();
+          const { done, value } = await reader.read().catch(transportFailure);
           if (done) break;
           size += value.length;
           if (size > (options.limit ?? MAX_MESSAGE_BYTES)) {
@@ -434,6 +448,19 @@ export class LocalRelay {
   }
 
   async confirmed(signal?: AbortSignal): Promise<Connection> {
+    try {
+      return await this.confirmDevice(signal);
+    } catch (error) {
+      if (
+        error instanceof LocalRefusal &&
+        ["LOCAL_UNAUTHORIZED", "LOCAL_IDENTITY_CHANGED"].includes(error.code)
+      )
+        throw new LocalDeviceAuthorityFailure(error.code);
+      throw error;
+    }
+  }
+
+  private async confirmDevice(signal?: AbortSignal): Promise<Connection> {
     const connection = await this.records.state.read("connection.json", connectionSchema.parse);
     if (!connection)
       throw new LocalRefusal("LOCAL_NOT_ENROLLED", "Pair this device from Moira first.");
@@ -794,7 +821,6 @@ export class LocalRelay {
   private async holdClaim(
     connection: Connection,
     claim: LocalRelayClaim,
-    rpc: LocalRpc,
     work: (signal: AbortSignal) => Promise<void>,
     signal?: AbortSignal,
   ): Promise<void> {
@@ -845,45 +871,14 @@ export class LocalRelay {
       await Promise.race([executing, lost]);
     } catch (error) {
       controller.abort();
-      // A server revocation or lost lease cannot leave admitted guest work running.
-      const before = await this.records.list();
-      await rpc.manager.close();
-      await executing.catch(() => undefined);
-      // Only this confirmed closure may advance the local clock without a cloud lifecycle.
-      // Preserve pending request identity and server clock so a lost ACK replays its receipt.
-      for (const key of await this.records.state.keys("relay-space-")) {
-        const binding = await this.records.state.read(key, bindingSchema.parse);
-        const previous = before.find((space) => space.id === binding?.localSpaceId);
-        if (
-          !binding ||
-          !previous ||
-          binding.localGeneration !== previous.generation ||
-          binding.deviceId !== connection.deviceId ||
-          binding.deviceGeneration !== connection.deviceGeneration ||
-          binding.connectionId !== connection.connectionId ||
-          binding.userId !== connection.userId
-        )
-          continue;
-        const stopped = await this.records.get(previous.id);
-        if (
-          stopped &&
-          stopped.generation > previous.generation &&
-          stopped.runtimeId === previous.runtimeId &&
-          stopped.name === previous.name &&
-          stopped.repositoryId === binding.repositoryId &&
-          stopped.operationMarker === binding.createMarker &&
-          stopped.ref === previous.ref &&
-          stopped.createdAt === previous.createdAt &&
-          stopped.networkPolicy === previous.networkPolicy &&
-          stopped.brokerToken === previous.brokerToken &&
-          stopped.failure === null &&
-          stopped.phase === "stopped" &&
-          stopped.desiredState === "stopped"
-        ) {
-          binding.localGeneration = stopped.generation;
-          await this.records.state.write(key, binding);
-        }
+      // Delivery owns this request scope, never the VM or its generation clock.
+      // The daemon handles device revocation; the journal prevents redispatch.
+      if (error instanceof LocalDeviceAuthorityFailure) {
+        // Report device revocation promptly so its owner can settle admitted hardware work.
+        void executing.catch(() => undefined);
+        throw error;
       }
+      await executing.catch(() => undefined);
       throw error;
     } finally {
       controller.abort();
@@ -924,7 +919,6 @@ export class LocalRelay {
       await this.holdClaim(
         connection,
         claim,
-        rpc,
         async (scope) => {
           const payload = await this.payload(connection, claim, scope);
           let result;

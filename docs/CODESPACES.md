@@ -83,6 +83,15 @@ computer's owned store, separate from its device credential.
 
 ## Moira Local companion
 
+Local execution has four layers: the server control plane owns authenticated requests and
+repository authorization; `LocalDaemon` owns connection confirmation and reconnect; `LocalVmRuntime`
+owns exact VM lifecycle and its isolation boundary; the installed guest supervisor owns jobs,
+sessions, output and version-checked file operations. The CLI delegates persistent `run` to the
+daemon. The runtime factory currently selects only the supported SBX backend; no Lima backend
+is implemented. Before each fixed guest attachment, that backend verifies configuration, exact
+identity, mounts and network receipt once, then rechecks the current local grant and generation
+after those asynchronous proofs and before dispatch.
+
 Moira Local uses outbound authenticated HTTPS to a locally selected Moira application URL.
 Server codespace work requires `CODESPACE_CODESPACES_ENABLED=true` and enabled instance controls;
 GitHub App credentials and the GitHub connector are not required for public read-only local work.
@@ -153,6 +162,16 @@ npm run local -- run
 
 Keep that foreground process running to serve the account; Ctrl+C settles owned work. Reconnection
 uses durable request IDs, digests and claims, so a lost response does not authorize redispatch.
+Transient network failures, including failed response reads, and server 5xx responses pause relay
+contact without stopping already admitted work. A refused claim aborts and drains only its request
+scope; it does not close VM ownership or advance its generation. Malformed protocol or scoped
+refusals set the daemon's control-plane status to `faulted` and retry confirmation after 30 seconds;
+transport failures set `offline`. Neither permits new claims before successful confirmation.
+Only device-endpoint unauthorized responses or confirmed device identity/revocation failures
+invalidate device authority and make the daemon stop work. Local disable, lease expiry and explicit
+shutdown retain their independent stop boundaries. Existing work remains bounded by its current
+local grant and finite lease without extension. Reconnection may return retained receipts, but
+their effects are not redispatched.
 The browser can revoke a specific device; revocation invalidates its generation and denies new
 work. Local `disable` independently stops owned SDK/VM processes and preserves data, including when
 credentials cannot be read. Neither closing an MCP client nor losing the relay deletes a codespace.
@@ -265,6 +284,10 @@ Outside the VM, the dedicated profile denies direct egress, including host, LAN,
 other-sandbox destinations. Only the approved broker TCP path is allowed; UDP remains globally denied.
 The broker admits approved public DNS destinations and verifies connected addresses, with local
 connection/byte budgets. SDK network-user prompts are disabled rather than allowed to expand access.
+When the connection ceiling is busy, a bounded FIFO queue applies backpressure rather than an
+authorization refusal. Closed consumers and broker shutdown cancel their wait; admission refreshes
+the bound authority after waiting and before consuming credit. Revoked grants and exhausted byte
+budgets remain refusals; waiting never enlarges either budget.
 The guest loopback proxy authenticates CONNECT and absolute-HTTP requests to the host broker with
 its installed per-space broker credential, so clients such as npm need not send a proxy-auth header.
 A client-supplied proxy credential cannot select another space. Repository Git authorization remains
