@@ -10,9 +10,10 @@ import { LocalRpc } from "../../../packages/local/src/rpc.js";
 import { SbxRuntime } from "../../../packages/local/src/sbx-runtime.js";
 import { RuntimeDeviceOwner } from "../../../packages/local/src/runtime-device-owner.js";
 import { RuntimeOwner } from "../../../packages/local/src/runtime-owner.js";
-import { publicPolicy } from "../../../packages/local/src/policy.js";
+import { publicPolicy, LocalRefusal } from "../../../packages/local/src/policy.js";
 import { setEnabled } from "../../../packages/local/src/config.js";
 import { localFixture } from "./fixtures.js";
+import { canonicalJson } from "../../../packages/shared/src/utils/canonical-json.js";
 
 let directory: string;
 beforeEach(async () => {
@@ -20,6 +21,7 @@ beforeEach(async () => {
 });
 afterEach(async () => {
   jest.useRealTimers();
+  jest.restoreAllMocks();
   await rm(directory, { recursive: true, force: true });
 });
 const hash = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex");
@@ -45,6 +47,7 @@ async function fixture() {
   let bytes: Buffer;
   const receipts: unknown[] = [];
   const uploaded = new Map<string, Buffer>();
+  const gitIdentityRequests: string[] = [];
   let idleClaim = false;
   let enteredIdle!: () => void;
   const idleEntered = new Promise<void>((resolve) => {
@@ -68,6 +71,10 @@ async function fixture() {
       `Bearer ${connection.credential}`,
     );
     if (url.pathname.endsWith("/heartbeat")) return json(device);
+    if (url.pathname.endsWith("/identity")) {
+      gitIdentityRequests.push(url.pathname);
+      return json({ name: "Fixture Owner", email: "owner@example.test" });
+    }
     if (url.pathname.endsWith("/relay/claim")) {
       if (idleClaim) {
         enteredIdle();
@@ -139,7 +146,7 @@ async function fixture() {
   const relay = new LocalRelay(local.records, transport);
   const setRequest = (request: unknown, generation = 1) => {
     message = { version: 1, id: randomUUID(), expiresAt: Date.now() + 60_000, request };
-    bytes = Buffer.from(JSON.stringify(message));
+    bytes = Buffer.from(canonicalJson(message));
     const envelope = message as { id: string; expiresAt: number };
     claim = {
       ...connection,
@@ -190,6 +197,8 @@ async function fixture() {
       maxPartBytes = value;
     },
     uploaded,
+    transport,
+    gitIdentityRequests,
     idleEntered,
     idle: () => {
       idleClaim = true;
@@ -202,6 +211,190 @@ async function fixture() {
 }
 
 describe("outbound companion authority and durable response replay", () => {
+  test.each(["running", "stopped", "changed-network"])(
+    "an active guard verifies the actual VM before accepting a %s start",
+    async (state) => {
+      const local = await fixture();
+      let preparations = 0;
+      local.manager.dependencies.storage = async () => {};
+      local.manager.dependencies.brokerPorts = { http: 0, tunnel: 0 };
+      const guard = {
+        active: true,
+        prepare: async () => {
+          preparations++;
+        },
+        validate: async () => {
+          if (state !== "running")
+            throw new LocalRefusal(
+              state === "stopped" ? "LOCAL_NOT_RUNNING" : "LOCAL_NETWORK_CHANGED",
+              "Controlled observation",
+            );
+        },
+        operation: async () => Buffer.from("{}"),
+        stop: async () => {},
+      };
+      local.manager.dependencies.guard = async () => ({
+        active: true,
+        stop: async () => {},
+        observe: async () => [],
+        retire: async () => {},
+        remove: async () => {},
+        space: async () => guard,
+      });
+      await local.manager.open();
+      try {
+        await local.manager.operation(local.space.id, {});
+        if (state === "changed-network")
+          await expect(local.manager.start(local.space.id)).rejects.toMatchObject({
+            code: "LOCAL_NETWORK_CHANGED",
+          });
+        else
+          await expect(local.manager.start(local.space.id)).resolves.toMatchObject({
+            runtimeId: local.space.runtimeId,
+          });
+        expect(preparations).toBe(state === "stopped" ? 1 : 0);
+      } finally {
+        await local.manager.close();
+      }
+    },
+  );
+  test.each([1, 2])(
+    "a private restart uses its live start authority after observation generation %s",
+    async (observedGeneration) => {
+      const local = await fixture();
+      local.policy.repositories[0].private = true;
+      await local.state.write("policy.json", local.policy);
+      await local.relay.poll(local.rpc);
+      const network = Buffer.from("fixture-network-policy");
+      Object.assign(local.space, {
+        phase: "stopped",
+        desiredState: "stopped",
+        generation: 2,
+        recoveryGeneration: 2,
+        networkPolicy: hash(network),
+      });
+      await local.records.put(local.space);
+      local.manager.snapshot = async () => ({ ...publicPolicy(local.policy), spaces: [] });
+      local.setRequest({ action: "snapshot" }, observedGeneration);
+      await local.relay.poll(local.rpc);
+      jest.spyOn(globalThis, "fetch").mockImplementation(local.transport);
+      jest.spyOn(SbxRuntime.prototype, "start").mockResolvedValue(undefined);
+      jest.spyOn(SbxRuntime.prototype, "verifySettings").mockResolvedValue(undefined);
+      jest.spyOn(SbxRuntime.prototype, "verifyBoundary").mockResolvedValue(undefined);
+      jest.spyOn(SbxRuntime.prototype, "networkPolicy").mockResolvedValue(network);
+      const bootstraps: unknown[] = [];
+      jest
+        .spyOn(SbxRuntime.prototype, "guest")
+        .mockImplementation(async (_identity, _argv, stdin) => {
+          if (stdin && stdin.toString().startsWith("{")) {
+            bootstraps.push(JSON.parse(stdin.toString()));
+            expect(await local.records.get(local.space.id)).toMatchObject({
+              phase: "stopped",
+              generation: 3,
+            });
+          }
+          return Buffer.from(JSON.stringify({ ok: true, result: {} }));
+        });
+      const owner = new RuntimeOwner(
+        local.records,
+        local.space.id,
+        async () => {},
+        async () => {},
+        async () => ({ worker: Buffer.from("worker"), proxy: "proxy" }),
+      );
+      local.manager.dependencies.storage = async () => {};
+      local.manager.dependencies.brokerPorts = { http: 0, tunnel: 0 };
+      local.manager.dependencies.guard = async () => ({
+        active: true,
+        stop: async () => {},
+        observe: async () => [],
+        retire: async () => {},
+        remove: async () => {},
+        space: async (_id, activate) => {
+          await owner.admit(activate);
+          return {
+            active: true,
+            prepare: () => owner.prepare(),
+            validate: () => owner.validate(),
+            operation: (request) => owner.operation(request),
+            stop: async () => {
+              await owner.quiesce();
+              await owner.confirmStopped();
+            },
+          };
+        },
+      });
+      await local.manager.open();
+      try {
+        local.setRequest({ action: "start", spaceId: local.space.id }, 2);
+        await local.relay.poll(local.rpc);
+        expect(local.receipts.at(-1)).toEqual({ ok: true, result: { accepted: true } });
+        expect(local.gitIdentityRequests).toEqual([
+          `/prefix/api/local-devices/github/${local.resourceId}/2/identity`,
+        ]);
+        expect(bootstraps).toEqual([
+          expect.objectContaining({
+            kind: "bootstrap",
+            request: expect.objectContaining({
+              clone: false,
+              gitAuthor: { name: "Fixture Owner", email: "owner@example.test" },
+            }),
+          }),
+        ]);
+        expect(await local.records.get(local.space.id)).toMatchObject({
+          generation: 3,
+          phase: "usable",
+          runtimeId: local.space.runtimeId,
+        });
+        expect(
+          JSON.parse(
+            await readFile(join(directory, `relay-space-${local.resourceId}.json`), "utf8"),
+          ),
+        ).toMatchObject({ localGeneration: 3, serverGeneration: 2 });
+      } finally {
+        await local.manager.close();
+      }
+    },
+  );
+
+  test.each(["expired", "changed-space", "changed-digest", "changed-connection", "completed"])(
+    "restart Git authority refuses a %s retained start intent",
+    async (invalid) => {
+      const local = await fixture();
+      await local.relay.poll(local.rpc);
+      local.manager.start = async () => {
+        const current = await local.records.get(local.space.id);
+        await local.records.put({
+          ...current!,
+          generation: 2,
+          phase: "stopped",
+          desiredState: "running",
+        });
+        const key = `relay-request-${local.claim().requestId}.json`;
+        const intent = JSON.parse(await readFile(join(directory, key), "utf8"));
+        if (invalid === "expired") intent.message.expiresAt = Date.now() - 1;
+        if (invalid === "changed-space") intent.message.request.spaceId = randomUUID();
+        if (invalid === "changed-digest") intent.digest = "f".repeat(64);
+        if (invalid === "changed-connection") intent.connectionId = randomUUID();
+        if (invalid === "completed") {
+          const entries = JSON.parse(await readFile(join(directory, "requests.json"), "utf8"));
+          entries.find((entry: { id: string }) => entry.id === intent.message.id).state =
+            "complete";
+          await local.state.write("requests.json", entries);
+        }
+        if (invalid !== "changed-digest")
+          intent.digest = hash(Buffer.from(canonicalJson(intent.message)));
+        await local.state.write(key, intent);
+        await expect(
+          local.relay.gitAuthority(local.space.id, 2, local.space.repositoryId),
+        ).rejects.toMatchObject({ code: "LOCAL_GENERATION_CONFLICT" });
+        return current!;
+      };
+      local.setRequest({ action: "start", spaceId: local.space.id }, 2);
+      await local.relay.poll(local.rpc);
+      expect(local.gitIdentityRequests).toEqual([]);
+    },
+  );
   test.each(["parent", "lease", "emergency"] as const)(
     "an idle %s shutdown preserves the same relay resource for reconnect without recovery acknowledgement",
     async (cause) => {

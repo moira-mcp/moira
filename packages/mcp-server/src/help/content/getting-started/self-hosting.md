@@ -328,7 +328,11 @@ persistent server work uses `run`. Stop it before another command needs the same
 Ctrl+C closes the foreground companion; `npm run local -- disable` stops owned work independently
 and keeps VM data. Stop keeps files, while `remove SPACE_ID --confirm` deletes the exact owned VM.
 An uncertain guest outcome is fenced, not retried automatically. Once that VM is confirmed stopped,
-`recover SPACE_ID --confirm` acknowledges the outcome without replaying jobs. For an orphan device
+`recover SPACE_ID --confirm` acknowledges the outcome without replaying jobs. It also acknowledges
+an initialized clean stopped VM whose generation conflicts with its server binding, after checking
+exact identity and network policy. Use the same state directory and restart `run`; retained jobs
+and unknown outcomes remain unchanged. Confirmed ordinary clean stops retain that receipt automatically.
+For an orphan device
 shutdown, `recover --confirm` requires disabled work, proves physical stop and retains jobs/data.
 See [Troubleshooting](/docs/integration/troubleshooting/#local-codespaces) for refusal recovery.
 

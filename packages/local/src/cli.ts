@@ -44,7 +44,7 @@ Usage: moira-local <command> [options]
   create OWNER/REPO [--ref main]
   start SPACE_ID | stop SPACE_ID | remove SPACE_ID --confirm
   recover SPACE_ID --confirm
-               Acknowledge a stopped VM's unknown guest outcome; prior jobs are never retried
+               Acknowledge a verified stopped VM for recovery; prior jobs are never retried
   recover --confirm
                Acknowledge orphan device shutdown while work is disabled; preserve jobs and data
   exec SPACE_ID -- COMMAND [ARG ...]

@@ -1078,14 +1078,14 @@ supportedGuard("independent guard with a real subprocess SDK substitute", () => 
     },
   );
 
-  vmTest(
-    "local recovery refuses a running VM without clearing its retained unknown outcome",
-    async () => {
+  vmTest.each([null, "LOCAL_GUEST_SETTLEMENT_UNKNOWN"])(
+    "local recovery refuses a running VM without changing retained failure %s",
+    async (failure) => {
       const local = await fixture();
       Object.assign(local.space, {
         desiredState: "stopped",
         phase: "stopped",
-        failure: "LOCAL_GUEST_SETTLEMENT_UNKNOWN",
+        failure,
       });
       await local.records.put(local.space);
       await execute(process.execPath, [
@@ -1098,12 +1098,77 @@ supportedGuard("independent guard with a real subprocess SDK substitute", () => 
       try {
         await device.recover(${JSON.stringify(local.space.id)},1).then(()=>{throw new Error('Running recovery was accepted');},error=>{if(error.code!=='LOCAL_STOP_PENDING')throw error;});
         const record=JSON.parse(await f.readFile(${JSON.stringify(join(local.state.root, `space-${local.space.id}.json`))},'utf8'));
-        if(record.failure!=='LOCAL_GUEST_SETTLEMENT_UNKNOWN'||record.generation!==1)throw new Error('Refused recovery cleared the fence');
+        if(record.failure!==${JSON.stringify(failure)}||record.generation!==1)throw new Error('Refused recovery changed the retained admission');
       }finally{await device.stop();}
     `,
       ]);
     },
   );
+
+  vmTest(
+    "explicit local recovery rebinds a healthy stopped VM without replaying retained work",
+    async () => {
+      const local = await fixture(false, true);
+      Object.assign(local.space, {
+        desiredState: "stopped",
+        phase: "stopped",
+        generation: 4,
+        recoveryGeneration: 2,
+      });
+      await local.records.put(local.space);
+      const marker = `job-${"d".repeat(64)}.json`;
+      const journal = { unknown: true, terminal: false, marker: "moira-op-" + "d".repeat(32) };
+      await local.state.write(marker, journal);
+      await execute(process.execPath, [
+        "--input-type=module",
+        "-e",
+        `
+      import {startGuard} from ${JSON.stringify(`file://${join(root, "guard.js")}`)};
+      const device=await startGuard(${JSON.stringify(local.state.root)});
+      try {
+        const generation=await device.recover(${JSON.stringify(local.space.id)},4);
+        if(generation!==5)throw new Error('Stopped recovery did not advance the generation');
+      }finally{await device.stop();}
+    `,
+      ]);
+      expect(await local.records.get(local.space.id)).toEqual({
+        ...local.space,
+        generation: 5,
+        recoveryGeneration: 5,
+      });
+      expect(JSON.parse(await readFile(join(local.state.root, marker), "utf8"))).toEqual(journal);
+      await expect(readFile(local.pending)).rejects.toMatchObject({ code: "ENOENT" });
+      expect(JSON.parse(await readFile(local.observation, "utf8"))).toEqual({ status: "stopped" });
+    },
+  );
+
+  vmTest("a failed restart retains a confirmed stop receipt for its new generation", async () => {
+    const local = await fixture();
+    await execute(process.execPath, [
+      "--input-type=module",
+      "-e",
+      driver(local) +
+        `
+      try {
+        await guard.stop();
+        const fresh=await device.space(${JSON.stringify(local.space.id)},true);
+        await f.unlink(${JSON.stringify(join(local.state.root, "broker.json"))});
+        await fresh.prepare().then(()=>{throw new Error('Restart without broker succeeded');},error=>{if(error.code!=='LOCAL_NOT_RUNNING')throw error;});
+        await fresh.stop();
+      }finally{await device.stop();}
+    `,
+    ]);
+    expect(await local.records.get(local.space.id)).toMatchObject({
+      runtimeId: local.space.runtimeId,
+      phase: "stopped",
+      desiredState: "stopped",
+      failure: null,
+      generation: 4,
+      recoveryGeneration: 4,
+    });
+    expect(JSON.parse(await readFile(local.observation, "utf8"))).toEqual({ status: "stopped" });
+    await expect(readFile(local.pending)).rejects.toMatchObject({ code: "ENOENT" });
+  });
 
   test("IPC shutdown kills an outstanding native exec before it can auto-start the stopped sandbox", async () => {
     const local = await fixture();
