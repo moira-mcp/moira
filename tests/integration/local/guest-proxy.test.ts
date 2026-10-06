@@ -55,12 +55,42 @@ afterEach(async () => {
   await rm(root, { recursive: true, force: true });
 });
 
-async function fixture() {
+async function fixture(publicTarget = false) {
   const state = await PrivateState.open(root);
   const local = await localFixture(state);
+  const upstreamPeers = new Set<net.Socket>();
+  const upstream = net.createServer((socket) => {
+    upstreamPeers.add(socket);
+    socket.once("close", () => upstreamPeers.delete(socket));
+    socket.on("data", (bytes) => socket.write(bytes));
+  });
+  upstream.listen(0, "127.0.0.1");
+  await once(upstream, "listening");
+  const upstreamAddress = upstream.address();
+  if (!upstreamAddress || typeof upstreamAddress === "string") throw new Error("No upstream");
+  closers.push(
+    () =>
+      new Promise<void>((resolve, reject) => {
+        for (const socket of upstreamPeers) socket.destroy();
+        upstream.close((error) => (error ? reject(error) : resolve()));
+      }),
+  );
+  const authorizations: string[] = [];
+  const resolveTarget = jest.fn(async (_host: string) => [
+    { address: publicTarget ? "93.184.216.34" : "127.0.0.1", family: 4 as const },
+  ]);
   const broker = await startBroker({
-    authorize: (header) => local.records.authorize(header),
+    authorize: (header) => {
+      authorizations.push(header);
+      return local.records.authorize(header);
+    },
     budget: new NetworkBudget(state),
+    resolve: resolveTarget,
+    dial: (target) => {
+      const socket = net.connect({ host: "127.0.0.1", port: upstreamAddress.port });
+      Object.defineProperty(socket, "remoteAddress", { get: () => target.address });
+      return socket;
+    },
     git: async (request, response, grant) => {
       const chunks: Buffer[] = [];
       for await (const bytes of request) chunks.push(Buffer.from(bytes));
@@ -79,7 +109,7 @@ async function fixture() {
   closers.push(broker.close);
   const tunnel = await startBrokerTunnel(broker.port);
   closers.push(tunnel.close);
-  const closeProxy = await serveGuestProxy(tunnel.port, 0);
+  const closeProxy = await serveGuestProxy(tunnel.port, local.authorization, 0);
   const server = proxyServer;
   closers.push(async () => {
     const stopped = once(server, "close");
@@ -89,8 +119,29 @@ async function fixture() {
   const address = server.address();
   if (!address || typeof address === "string")
     throw new Error("Proxy did not listen on its ephemeral port");
-  return { ...local, state, port: address.port };
+  return { ...local, state, port: address.port, authorizations, resolveTarget };
 }
+
+function connectStatus(port: number, target: string, proxyAuthorization?: string) {
+  return new Promise<number>((resolve, reject) => {
+    const request = http.request({
+      host: "127.0.0.1",
+      port,
+      path: target,
+      method: "CONNECT",
+      agent: false,
+      headers: proxyAuthorization ? { "proxy-authorization": proxyAuthorization } : {},
+    });
+    request.once("connect", (response, socket) => {
+      socket.destroy();
+      resolve(response.statusCode!);
+    });
+    request.once("error", reject);
+    request.setTimeout(3000, () => request.destroy(new Error("CONNECT did not settle")));
+    request.end();
+  });
+}
+const foreignAuthorization = `Basic ${Buffer.from("another-space:another-token").toString("base64")}`;
 
 function exchange(port: number, path: string, authorization?: string, body?: Buffer) {
   return new Promise<{ status: number; body: Buffer }>((resolve, reject) => {
@@ -125,6 +176,40 @@ function exchange(port: number, path: string, authorization?: string, body?: Buf
 }
 
 describe("guest HTTP forwarding through the fixed broker tunnel", () => {
+  test.each([undefined, foreignAuthorization])(
+    "CONNECT uses the installed space authority instead of client authorization %s",
+    async (supplied) => {
+      const local = await fixture(true);
+      expect(await connectStatus(local.port, "packages.example.com:443", supplied)).toBe(200);
+      expect(local.authorizations).toContain(local.authorization);
+      expect(local.authorizations).not.toContain(foreignAuthorization);
+      expect(await connectStatus(local.port, "unapproved.example:443", supplied)).toBe(502);
+      local.policy.enabled = false;
+      await local.state.write("policy.json", local.policy);
+      expect(await connectStatus(local.port, "packages.example.com:443", supplied)).toBe(403);
+    },
+  );
+
+  test("HTTP dependency requests without client proxy auth reach the installed grant and retain DNS checks", async () => {
+    const local = await fixture();
+    // The controlled private DNS answer is refused after authenticating, before any remote dial.
+    expect((await exchange(local.port, "http://packages.example.com/package")).status).toBe(502);
+    expect(local.authorizations).toContain(local.authorization);
+    expect(local.resolveTarget).toHaveBeenCalledWith("packages.example.com");
+    local.policy.enabled = false;
+    await local.state.write("policy.json", local.policy);
+    expect((await exchange(local.port, "http://packages.example.com/package")).status).toBe(403);
+  });
+
+  test.each(["", "Bearer wrong", "Basic invalid value"])(
+    "refuses missing or invalid installed authorization before listening: %s",
+    async (authorization) => {
+      await expect(serveGuestProxy(3073, authorization, 0)).rejects.toThrow(
+        "Invalid installed broker authorization",
+      );
+    },
+  );
+
   test("approved Git GET query and POST binary body reach the broker without phantom DNS", async () => {
     const local = await fixture();
     const path = "/git/owner/project.git/info/refs?service=git-upload-pack";

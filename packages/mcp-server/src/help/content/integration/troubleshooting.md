@@ -298,6 +298,14 @@ The engine logs a warning naming the residual placeholder and the `executionId`.
 2. Ensure an upstream node writes the variable (via `globalInputs`) before its first use.
 3. Never echo `{{...}}` into data you return from `step()` — keep templates only in static node fields.
 
+### Editing files while a command runs
+
+A running command, including a background development server, does not itself block codespace
+`write`, `upload` or `apply_patch`. Shared concurrency ceilings still apply. Keep the expected file
+existence, size and digest guards; if another writer changes that version, reread and reconcile
+the edit before retrying. Another active file mutation can return `CODESPACE_OPERATION_BUSY`;
+commands and reads do not impose that serialization. A failed edit does not require stopping the development server.
+
 ## Local codespaces
 
 Use **Settings → Development → Local computers** and the companion's `status` to distinguish pending
@@ -311,6 +319,11 @@ the refusal and retains the last successfully acknowledged revision. A failed ap
 disable work in the reported policy; that revision alone does not mean work remains enabled.
 An offline computer keeps requests pending. Inspect the effective policy and compare requested
 and applied revisions before retrying work.
+
+The local guest proxy authenticates package requests with its installed per-space broker
+permission; npm need not send a proxy-auth header. The host still enforces the device lease,
+repository domains and public-address checks. A proxy refusal is not permission to broaden them
+or use a host/GitHub token.
 
 `doctor` requires an enabled, unexpired lease and checks prerequisites, not live VM isolation.
 Stop the foreground companion before commands that require its runner lock. Unsupported SDK

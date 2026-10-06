@@ -260,6 +260,11 @@ Outside the VM, the dedicated profile denies direct egress, including host, LAN,
 other-sandbox destinations. Only the approved broker TCP path is allowed; UDP remains globally denied.
 The broker admits approved public DNS destinations and verifies connected addresses, with local
 connection/byte budgets. SDK network-user prompts are disabled rather than allowed to expand access.
+The guest loopback proxy authenticates CONNECT and absolute-HTTP requests to the host broker with
+its installed per-space broker credential, so clients such as npm need not send a proxy-auth header.
+A client-supplied proxy credential cannot select another space. Repository Git authorization remains
+separate. The host still checks the current lease, grant, destination and public network address;
+this credential is neither a GitHub token nor a forwarded host credential.
 The guest may contain public SDK credential placeholders: API sentinel values and the pinned SDK's
 public GitHub sentinel are not forwarded user tokens. Their presence alone neither proves forwarding
 nor authorizes access. The companion supplies no AI-provider keys or host credential values.
@@ -491,6 +496,10 @@ only inspects, so a command still reaches the connector exactly once however its
 result is collected, and it does not change the operation deadline or any bound.
 File operations share this dispatch and behave the same way.
 
+Background reconciliation selects the oldest attempted due operation across reservation expiry,
+active work, cancellation and terminal cleanup. Each claim advances its attempt timestamp, so a
+failed cleanup cannot repeatedly take precedence over other due work.
+
 Before connector contact, SQLite reserves the authenticated tenant, codespace
 and authorization generations, per-user and global concurrency, input bytes,
 independent stdout/stderr bounds and deadline. SQLite stores only
@@ -602,6 +611,13 @@ inserted/deleted-byte totals. Ordered per-file summary entries fit a connector-s
 4 KiB serialized budget and set `truncated` when the complete totals describe more files
 than can be listed. The remote supervisor applies the supplied internal budget only
 within its separate protocol safety range.
+
+Running commands or reads in the same codespace do not by themselves block write, upload or patch
+admission. Those file mutations remain serialized against one another for their staged commits.
+All operations still share per-user and instance concurrency ceilings. File existence,
+size and digest preconditions are checked in the guest; another writer changing the expected
+version causes refusal rather than an overwrite. Patch staging and atomic journal recovery remain
+the mutation boundary.
 
 All patch targets are staged before mutation; a repository-relative transaction journal,
 backups and ordered file/directory sync produce one original or one replacement set after
