@@ -120,6 +120,197 @@ function fixture() {
   return { sqlite, repository, settleDelays, transport, credentials, service };
 }
 
+describe("observed local file-operation completion", () => {
+  function pendingLocal() {
+    const value = fixture();
+    value.sqlite.exec(`
+      UPDATE codespaceConnection SET provider = 'local-sandboxes';
+      UPDATE codespaceResource SET provider = 'local-sandboxes';
+    `);
+    const reserved = value.repository.reserve({
+      userId: "user-1",
+      resourceId: "codespace-1",
+      kind: "stat",
+      inputBytes: 0,
+      stdoutLimitBytes: 0,
+      stderrLimitBytes: 0,
+      deadlineAt: now + 30_000,
+      policy,
+      now,
+    });
+    expect(reserved.outcome).toBe("reserved");
+    const operation = reserved.operation!;
+    expect(
+      value.repository.beginDispatch("user-1", operation.id, 1, "claim", now + 5_000, now),
+    ).toBe(true);
+    return { ...value, operation };
+  }
+
+  test.each([1, 3])(
+    "releases observed file capacity at lifecycle generation %s without changing its generation",
+    (generation) => {
+      const value = pendingLocal();
+      try {
+        value.sqlite.prepare("UPDATE codespaceResource SET generation = ?").run(generation);
+        const observed = value.repository.getContext("user-1", value.operation.id)!.codespace;
+        expect(
+          value.repository.completeMetadata(
+            "user-1",
+            value.operation.id,
+            1,
+            0,
+            now + 30_000,
+            now,
+            "failed",
+            observed,
+          ),
+        ).toBe(true);
+        expect(value.repository.getOwned("user-1", value.operation.id)).toMatchObject({
+          state: "failed",
+          resourceGeneration: 1,
+          outputBytes: 0,
+          claimId: null,
+        });
+        expect(value.repository.countActiveForUser("user-1")).toBe(0);
+        expect(
+          value.repository.reserve({
+            userId: "user-1",
+            resourceId: "codespace-1",
+            kind: "stat",
+            inputBytes: 0,
+            stdoutLimitBytes: 0,
+            stderrLimitBytes: 0,
+            deadlineAt: now + 30_000,
+            policy,
+            now,
+          }).outcome,
+        ).toBe("reserved");
+        expect(value.repository.canDispatch("user-1", value.operation.id, now)).toBe(false);
+      } finally {
+        value.sqlite.close();
+      }
+    },
+  );
+
+  test.each([
+    ["newer lifecycle after observation", "UPDATE codespaceResource SET generation = 4"],
+    [
+      "sandbox identity changed",
+      "UPDATE codespaceResource SET providerResourceName = 'replacement'",
+    ],
+    ["provider changed", "UPDATE codespaceResource SET provider = 'github-codespaces'"],
+    ["owner changed", "UPDATE codespaceResource SET userId = 'user-2'"],
+    ["authorization changed", "UPDATE codespaceResource SET authorizationGeneration = 2"],
+    [
+      "operation identity changed",
+      "UPDATE codespaceOperation SET providerResourceName = 'replacement'",
+    ],
+    ["operation provider changed", "UPDATE codespaceOperation SET provider = 'github-codespaces'"],
+    [
+      "operation authorization changed",
+      "UPDATE codespaceOperation SET authorizationGeneration = 2",
+    ],
+    ["credential changed", "UPDATE codespaceConnection SET credentialGeneration = 2"],
+    ["connection revoked", "UPDATE codespaceConnection SET status = 'revoked'"],
+    ["repository grant revoked", "DELETE FROM codespaceConnectionRepository"],
+    ["resource stopped", "UPDATE codespaceResource SET desiredState = 'stopped'"],
+    ["future operation generation", "UPDATE codespaceOperation SET resourceGeneration = 4"],
+    ["exec operation", "UPDATE codespaceOperation SET kind = 'exec'"],
+    ["undispatched reservation", "UPDATE codespaceOperation SET state = 'reserved'"],
+  ])("preserves pending capacity when %s", (_name, mutation) => {
+    const value = pendingLocal();
+    try {
+      value.sqlite.exec("UPDATE codespaceResource SET generation = 3");
+      const observed = value.repository.getContext("user-1", value.operation.id)!.codespace;
+      value.sqlite.exec(mutation);
+      expect(
+        value.repository.completeMetadata(
+          "user-1",
+          value.operation.id,
+          value.repository.getOwned("user-1", value.operation.id)!.resourceGeneration,
+          0,
+          now + 30_000,
+          now,
+          "failed",
+          observed,
+        ),
+      ).toBe(false);
+      expect(value.repository.countActiveForUser("user-1")).toBe(1);
+    } finally {
+      value.sqlite.close();
+    }
+  });
+
+  test.each(["global", "provider:local-sandboxes"])(
+    "completes observed work under disabled %s control while refusing new reservations",
+    (scope) => {
+      const value = pendingLocal();
+      try {
+        value.sqlite.exec("UPDATE codespaceResource SET generation = 3");
+        const observed = value.repository.getContext("user-1", value.operation.id)!.codespace;
+        value.sqlite
+          .prepare(
+            "INSERT INTO codespaceProviderControl(scope, disabled, reason, updatedAt) VALUES (?, 1, 'incident', ?)",
+          )
+          .run(scope, now);
+        expect(
+          value.repository.completeMetadata(
+            "user-1",
+            value.operation.id,
+            1,
+            0,
+            now + 30_000,
+            now,
+            "failed",
+            observed,
+          ),
+        ).toBe(true);
+        expect(value.repository.countActiveForUser("user-1")).toBe(0);
+        expect(
+          value.repository.reserve({
+            userId: "user-1",
+            resourceId: "codespace-1",
+            kind: "stat",
+            inputBytes: 0,
+            stdoutLimitBytes: 0,
+            stderrLimitBytes: 0,
+            deadlineAt: now + 30_000,
+            policy,
+            now,
+          }).outcome,
+        ).toBe("disabled");
+      } finally {
+        value.sqlite.close();
+      }
+    },
+  );
+
+  test("retains the public exact-generation result and dispatch fences", () => {
+    const value = pendingLocal();
+    try {
+      value.sqlite.exec("UPDATE codespaceResource SET generation = 3");
+      expect(
+        value.repository.completeMetadata(
+          "user-1",
+          value.operation.id,
+          1,
+          0,
+          now + 30_000,
+          now,
+          "failed",
+        ),
+      ).toBe(false);
+      expect(() =>
+        value.repository.requireResultContext("user-1", value.operation.id, policy, now),
+      ).toThrow("Codespace operation authority changed");
+      expect(value.repository.canDispatch("user-1", value.operation.id, now)).toBe(false);
+      expect(value.repository.countActiveForUser("user-1")).toBe(1);
+    } finally {
+      value.sqlite.close();
+    }
+  });
+});
+
 describe("durable codespace file operations", () => {
   test("returns a file result that lands during the settle window", async () => {
     const value = fixture();

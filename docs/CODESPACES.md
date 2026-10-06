@@ -179,6 +179,14 @@ receipt for the same server binding. If an older stopped record has no receipt a
 state directory, then restart `run`. Recovery preserves retained jobs and their unknown outcomes;
 it authorizes subsequent work, not replay. Do not clear journals or adopt a VM by name to bypass recovery.
 
+Background reconciliation can inspect, cancel, finalize or read retained output and file outcomes
+from an earlier lifecycle generation of the same local VM. It uses current relay authority and
+requires unchanged ownership, provider identity and authorization; a future generation is refused.
+An observed file outcome releases operation capacity only while the observed resource generation,
+identity, connection and repository grant still match. Disabled instance controls do not block
+this settlement, but still deny new work. Recovery does not redispatch an old execute or file edit,
+and ordinary caller result reads retain their exact-generation fence.
+
 ### Owner web control and bundle updates
 
 Stop the foreground companion before updating its checkout and running `npm ci`

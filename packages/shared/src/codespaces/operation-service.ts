@@ -25,6 +25,7 @@ import type {
   CodespaceTransferService,
 } from "./transfer-service.js";
 import { startOnUse, type CodespaceLifecycleStarter } from "./start-on-use.js";
+import { CODESPACE_PROVIDER_LOCAL } from "./local-device-types.js";
 
 const DEFAULT_BOUNDED_TIMEOUT_MS = 300_000;
 // A reservation that is never dispatched is reaped on this deadline, whatever the command's own
@@ -832,6 +833,7 @@ export class CodespaceOperationService {
             this.now() + policy.cleanupDeadlineMs,
             this.now(),
             "failed",
+            context.codespace.provider === CODESPACE_PROVIDER_LOCAL ? context.codespace : undefined,
           );
           if (completed) {
             await this.emit(
@@ -848,6 +850,7 @@ export class CodespaceOperationService {
             this.now() + policy.cleanupDeadlineMs,
             this.now(),
             "state" in fileResult && fileResult.state === "failed" ? "failed" : "succeeded",
+            context.codespace.provider === CODESPACE_PROVIDER_LOCAL ? context.codespace : undefined,
           );
           if (completed) {
             await this.emit(
