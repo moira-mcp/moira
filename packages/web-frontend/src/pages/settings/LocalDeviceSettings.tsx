@@ -1,9 +1,14 @@
 import React, { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Laptop, RefreshCw } from "lucide-react";
-import type { LocalDeviceView, LocalPairingView } from "@mcp-moira/shared";
+import type {
+  LocalDeviceSettingsValue,
+  LocalDeviceView,
+  LocalPairingView,
+} from "@mcp-moira/shared";
 import { apiClient } from "@/services/api-client";
 import { useResource } from "@/hooks/useResource";
+import { useRefreshOnActivation } from "@/components/settings/useRefreshOnActivation";
 import { useReadOwnerGuard } from "@/auth/ReadScopeBoundary";
 import { DataRegion } from "@/components/DataRegion";
 import { ConfirmDialog } from "@/components/confirm-dialog";
@@ -14,6 +19,7 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { SettingsSubsection } from "@/components/settings/SettingsSection";
 import { useGitHubCodespaces } from "./GitHubCodespacesData";
+import { LocalDeviceEditor } from "./LocalDeviceEditor";
 
 function DevicePermissions({ device }: { device: LocalDeviceView }) {
   const { t, i18n } = useTranslation();
@@ -62,7 +68,7 @@ function DevicePermissions({ device }: { device: LocalDeviceView }) {
 }
 
 /** Pairing secrets remain page-local; the server sends only public device grants on later reads. */
-export function LocalDeviceSettings() {
+export function LocalDeviceSettings({ active = true }: { active?: boolean }) {
   const { t, i18n } = useTranslation();
   const guard = useReadOwnerGuard();
   const { reloadManagement } = useGitHubCodespaces();
@@ -71,6 +77,7 @@ export function LocalDeviceSettings() {
     () => apiClient.getLocalDevices(),
     () => t("localDevices.loadFailed"),
   );
+  useRefreshOnActivation(active, resource.refresh);
   const [pairing, setPairing] = useState<Awaited<
     ReturnType<typeof apiClient.beginLocalEnrollment>
   > | null>(null);
@@ -88,7 +95,7 @@ export function LocalDeviceSettings() {
     "",
   );
   const command = pairing
-    ? `moira-local enroll --server ${shellQuote(server)} --pairing-id ${shellQuote(pairing.pairingId)}`
+    ? `npm run local -- enroll --server ${shellQuote(server)} --pairing-id ${shellQuote(pairing.pairingId)}`
     : "";
 
   const begin = async () => {
@@ -138,6 +145,27 @@ export function LocalDeviceSettings() {
       if (owned()) setDecisionError(t("localDevices.actionFailed"));
       throw caught;
     }
+  };
+  const saveSettings = async (
+    device: LocalDeviceView,
+    settings: LocalDeviceSettingsValue,
+    expectedRevision: number,
+  ) => {
+    const owned = guard(false);
+    const next = await apiClient.updateLocalDeviceSettings(
+      device.deviceId,
+      device.deviceGeneration,
+      expectedRevision,
+      settings,
+    );
+    if (!owned()) throw new Error("Retired local device operation");
+    resource.update((value) => ({
+      ...value,
+      devices: value.devices.map((current) =>
+        current.deviceId === next.deviceId ? next : current,
+      ),
+    }));
+    await resource.refresh();
   };
 
   return (
@@ -222,7 +250,16 @@ export function LocalDeviceSettings() {
                     </h3>
                     <Badge variant="outline">{t(`localDevices.status.${device.status}`)}</Badge>
                   </div>
+                  <p className="text-sm font-medium">{t("localDevices.editor.appliedGrants")}</p>
                   <DevicePermissions device={device} />
+                  {device.status === "active" && (
+                    <LocalDeviceEditor
+                      device={device}
+                      onSave={(settings, expectedRevision) =>
+                        saveSettings(device, settings, expectedRevision)
+                      }
+                    />
+                  )}
                   <p className="text-xs text-muted-foreground">
                     {t("localDevices.lastSeen", {
                       date:

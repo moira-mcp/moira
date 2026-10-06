@@ -252,8 +252,8 @@
     "fingerprint": "88d8988f"
   },
   "settings.nav": {
-    "revision": 1,
-    "fingerprint": "804a41c8"
+    "revision": 2,
+    "fingerprint": "b96e8127"
   },
   "settings.account": {
     "revision": 1,
@@ -268,12 +268,12 @@
     "fingerprint": "f05ef91a"
   },
   "settings.github": {
-    "revision": 1,
-    "fingerprint": "f2a10a39"
+    "revision": 2,
+    "fingerprint": "a7eb5c7a"
   },
   "settings.local-devices": {
-    "revision": 1,
-    "fingerprint": "0113cfb4"
+    "revision": 2,
+    "fingerprint": "9fec8829"
   },
   "settings.apps": {
     "revision": 1,

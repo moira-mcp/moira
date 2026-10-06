@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { CodespaceMachine } from "./resource-types.js";
+import type { LocalDeviceControlView } from "./local-management-types.js";
 
 export const CODESPACE_PROVIDER_LOCAL = "local-sandboxes" as const;
 const identifier = z.string().uuid();
@@ -47,6 +48,7 @@ export const localPublicPolicySchema = z
             private: z.boolean(),
             allowPush: z.boolean(),
             allowDelete: z.boolean(),
+            allowPullRequests: z.boolean().optional(),
             domains: z
               .array(
                 z
@@ -96,6 +98,7 @@ export interface LocalDeviceAuth {
   connectionId: string;
 }
 export interface LocalDeviceView extends LocalDeviceAuth {
+  control?: LocalDeviceControlView;
   label: string;
   status: "pending" | "active" | "revoked";
   policy: LocalPublicPolicy;

@@ -1,6 +1,7 @@
 import type { CallToolResult, ResourceLink } from "@modelcontextprotocol/sdk/types.js";
 import {
   CodespaceConnectionError,
+  LocalDeviceError,
   CodespaceResourceError,
   createLogger,
   getBaseUrl,
@@ -125,6 +126,19 @@ type CodespaceNewToolParams<Action extends CodespaceAction> = Exclude<
 >;
 
 export interface CodespaceToolServices {
+  github?: {
+    createOwnedPullRequest: (
+      userId: string,
+      resourceId: string,
+      input: { head: string; base: string; title: string; body?: string; draft?: boolean },
+    ) => Promise<unknown>;
+    getOwnedPullRequest: (userId: string, resourceId: string, number: number) => Promise<unknown>;
+    findOwnedPullRequests: (
+      userId: string,
+      resourceId: string,
+      input: { head: string; base: string },
+    ) => Promise<unknown>;
+  };
   provider?: string;
   providers?: CodespaceToolServices[];
   select?: (
@@ -456,12 +470,14 @@ function publicExpected(expected: z.infer<typeof codespaceExpectedSchema>) {
 async function loadServices(): Promise<CodespaceToolServices> {
   const services = await import("@mcp-moira/web-backend/services");
   const providers = services.getCodespaceProviderBundles();
+  const github = services.getLocalGitHubDeliveryService();
   const preferred =
     providers.find((provider) => provider.provider === "github-codespaces" && provider.resource) ??
     providers.find((provider) => provider.resource)!;
   return {
     ...preferred,
     providers,
+    github,
     select: services.selectCodespaceProviderServices,
   };
 }
@@ -629,10 +645,14 @@ export async function executeCodespaceTool(
   }
   if (services.select && ("repository_id" in params || "codespace_id" in params)) {
     try {
-      services = services.select(userId, {
-        ...("repository_id" in params ? { repositoryId: params.repository_id } : {}),
-        ...("codespace_id" in params ? { codespaceId: params.codespace_id } : {}),
-      });
+      const github = services.github;
+      services = {
+        ...services.select(userId, {
+          ...("repository_id" in params ? { repositoryId: params.repository_id } : {}),
+          ...("codespace_id" in params ? { codespaceId: params.codespace_id } : {}),
+        }),
+        github,
+      };
     } catch (error) {
       if (error instanceof CodespaceResourceError) return errorResult(error.code);
       reportUnexpectedFailure(action, error);
@@ -837,6 +857,31 @@ export async function executeCodespaceTool(
     }
 
     switch (action) {
+      case "pull_request_create": {
+        const { codespace_id, ...input } = params as CodespaceToolParams["pull_request_create"];
+        if (!services.github) return errorResult("CODESPACE_NOT_CONFIGURED", status.settingsUrl);
+        return jsonResult({
+          pull_request: await services.github.createOwnedPullRequest(userId, codespace_id, input),
+        });
+      }
+      case "pull_request_get": {
+        const input = params as CodespaceToolParams["pull_request_get"];
+        if (!services.github) return errorResult("CODESPACE_NOT_CONFIGURED", status.settingsUrl);
+        return jsonResult({
+          pull_request: await services.github.getOwnedPullRequest(
+            userId,
+            input.codespace_id,
+            input.pull_request_number,
+          ),
+        });
+      }
+      case "pull_request_find": {
+        const { codespace_id, ...input } = params as CodespaceToolParams["pull_request_find"];
+        if (!services.github) return errorResult("CODESPACE_NOT_CONFIGURED", status.settingsUrl);
+        return jsonResult({
+          pull_requests: await services.github.findOwnedPullRequests(userId, codespace_id, input),
+        });
+      }
       case "create": {
         const input = params as CodespaceToolParams["create"];
         const created = await services.resource.create(userId, input.repository_id, input.ref);
@@ -999,6 +1044,13 @@ export async function executeCodespaceTool(
     // `list` and `get` answered above, before the readiness gate; the compiler knows they cannot
     // reach this switch, which is why they are not cases of it.
   } catch (error) {
+    if (error instanceof LocalDeviceError)
+      return {
+        ...jsonResult({
+          error: { code: error.code, message: error.message, settings_url: status.settingsUrl },
+        }),
+        isError: true,
+      };
     if (error instanceof CodespaceConnectionError || error instanceof CodespaceResourceError) {
       recordCodespaceRejection(error.code);
       if (PROVIDER_REFUSAL_CODES.has(error.code)) {

@@ -1,6 +1,12 @@
 import { z } from "zod";
 import { timingSafeEqual } from "node:crypto";
-import { localPolicySchema, requireLocalGrant, type LocalPolicy } from "./policy.js";
+import {
+  localPolicySchema,
+  requireLocalGrant,
+  repositoryName,
+  LocalRefusal,
+  type LocalPolicy,
+} from "./policy.js";
 import { PrivateState } from "./private-state.js";
 import type { BrokerGrant } from "./broker.js";
 
@@ -9,7 +15,12 @@ export const spaceSchema = z
     id: z.string().uuid(),
     name: z.string().regex(/^moira-[a-f0-9]{32}$/),
     runtimeId: z.string().min(1).max(255).nullable(),
+    admittedMachine: localPolicySchema
+      .innerType()
+      .shape.runtime.pick({ cpuCores: true, memoryBytes: true, dockerBytes: true })
+      .optional(),
     repositoryId: z.string().uuid(),
+    admittedRepositoryFullName: repositoryName.optional(),
     operationMarker: z.string().regex(/^moira-[a-f0-9]{24}$/),
     ref: z.string().min(1).max(255),
     createdAt: z.number().int(),
@@ -37,6 +48,20 @@ export const spaceSchema = z
       context.addIssue({ code: "custom", message: "Invalid local recovery acknowledgement." });
   });
 export type LocalSpace = z.infer<typeof spaceSchema>;
+
+/** Defaults can change without pretending an existing VM was resized. */
+export function policyForSpace(policy: LocalPolicy, space: LocalSpace): LocalPolicy {
+  return { ...policy, runtime: { ...policy.runtime, ...space.admittedMachine } };
+}
+export function requireSpaceGrant(policy: LocalPolicy, space: LocalSpace, now: number) {
+  const repository = requireLocalGrant(policy, space.repositoryId, now);
+  if (space.admittedRepositoryFullName && space.admittedRepositoryFullName !== repository.fullName)
+    throw new LocalRefusal(
+      "LOCAL_REPOSITORY_DENIED",
+      "The existing sandbox belongs to another repository name.",
+    );
+  return repository;
+}
 
 export class LocalRecords {
   constructor(readonly state: PrivateState) {}
@@ -77,6 +102,11 @@ export class LocalRecords {
     const policy = await this.policy();
     try {
       const repository = requireLocalGrant(policy, space.repositoryId, now);
+      if (
+        space.admittedRepositoryFullName &&
+        space.admittedRepositoryFullName !== repository.fullName
+      )
+        return null;
       const secret = await this.state.read(
         `git-${repository.id}.json`,
         z
@@ -89,7 +119,13 @@ export class LocalRecords {
           })
           .strict().parse,
       );
-      return { policy, repository, gitCredential: secret?.token ?? null };
+      return {
+        policy,
+        repository,
+        gitCredential: secret?.token ?? null,
+        spaceId: space.id,
+        generation: space.generation,
+      };
     } catch {
       return null;
     }

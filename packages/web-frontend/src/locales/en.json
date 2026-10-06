@@ -770,6 +770,14 @@
     },
     "settings": {
       "title": "Settings",
+      "tabs": {
+        "development": "Development",
+        "developmentDescription": "Manage development environments, GitHub access and your local computers.",
+        "access": "Apps & tokens",
+        "environments": "Environments",
+        "github": "GitHub connection",
+        "local": "Local computers"
+      },
       "channels": {
         "extension": "Extension",
         "test": "Send test",
@@ -3696,7 +3704,7 @@
       "steps": {
         "nav": {
           "title": "Jump between sections",
-          "body": "Every setting lives in one of these sections. Pick one to go straight to it; the section you are reading is marked as you scroll."
+          "body": "Choose a task tab. Development separates environments, the GitHub connection and your local computers. Switching tabs keeps your unsaved changes."
         },
         "account": {
           "title": "Your account",
@@ -3711,12 +3719,12 @@
           "body": "Moira tells you when a run needs you or moves on: a plan ready for approval, a result ready for review, the work finished. Each notification opens with the flow and the task, and its heading links to the run's page. Set up here where they reach you, such as a Telegram bot, and send a test message to be sure it works."
         },
         "github": {
-          "title": "GitHub & Codespaces",
-          "body": "Connect GitHub and choose repositories so agents can work in cloud codespaces. Limits and automatic pausing are set here too."
+          "title": "Development environments",
+          "body": "Create and manage environments here. Choose GitHub or a local computer and repository; connection setup and local computer controls have their own tabs. Limits and automatic pausing are kept with the environments."
         },
         "local-devices": {
           "title": "Connect your computer",
-          "body": "Create a one-time pairing here, run the local command and paste the token into its standard input. Approve the repositories and limits on your computer, refresh this list and confirm those grants here. Start the companion after confirmation. Revoke a device here to refuse its further requests without deleting its local files. The codespace form's Provider selector chooses GitHub or a locally approved repository and device."
+          "body": "Pair your computer once and enable local web control within its approved ceiling. Manage repositories, Git permissions, resources and a finite work lease here. A requested change becomes effective only after the companion applies it; pending or rejected changes do not replace the actual local grants. Revoking a computer refuses further server work and preserves its files."
         },
         "apps": {
           "title": "Connected apps",

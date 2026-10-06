@@ -15,6 +15,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { DataRegion } from "@/components/DataRegion";
 import { useResource } from "@/hooks/useResource";
+import { useRefreshOnActivation } from "@/components/settings/useRefreshOnActivation";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { EmptyState } from "@/components/empty-state";
 import { ServerPagination } from "@/components/ServerPagination";
@@ -31,7 +32,7 @@ interface OAuthConsent {
 
 const PAGE_SIZE = 8;
 
-export const OAuthSettings: React.FC = () => {
+export const OAuthSettings: React.FC<{ active?: boolean }> = ({ active = true }) => {
   const { t, i18n } = useTranslation();
   const [page, setPage] = useState(1);
   const [revoking, setRevoking] = useState<string | null>(null);
@@ -56,6 +57,7 @@ export const OAuthSettings: React.FC = () => {
     return { ...result, ...query };
   });
   const consents = resource.data?.consents ?? [];
+  useRefreshOnActivation(active, resource.refresh);
   const total = resource.data?.total ?? 0;
 
   useEffect(() => {

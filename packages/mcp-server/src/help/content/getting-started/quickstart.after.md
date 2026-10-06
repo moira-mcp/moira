@@ -5,7 +5,7 @@
 
     :::tip[No OAuth support?]
     If your client cannot open a browser for OAuth, create an API token instead:
-    1. Log in to Moira web UI → **Settings → API Tokens**
+    1. Log in to Moira web UI → **Settings → Apps & tokens → API tokens**
     2. Create a token and copy it (starts with `moira_`)
     3. Add it as `Authorization: Bearer moira_...` header in your client config
 

@@ -69,7 +69,9 @@ Updates/errors/retry stay local; other controls, loaded data and drafts remain.
 ## Development environments for your agent
 
 The `codespace` tool provides persistent GitHub or local Docker Sandboxes environments.
-**Settings → Codespaces** connects Moira Local devices after approval on your computer.
+**Settings → Development** separates environments, the GitHub connection and local computers.
+Local computers connect after approval on your computer; owner settings stay pending until the
+companion applies them within its locally approved ceilings.
 See [setup, permissions and security](/docs/getting-started/self-hosting/#connect-local-codespaces).
 
 ## A gradual path

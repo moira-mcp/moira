@@ -628,7 +628,23 @@ can reconcile that proof without operator acknowledgement: a resource-bound
 snapshot permits the retained server counter, while a new mutation requires a
 newer one. Uncertain outcomes and external lifetime changes remain fenced.
 
-`packages/local` owns the host policy, repository tokens and SDK profile. A local
+`LocalWebControl` applies owner-requested settings only within a separately pinned
+local approval. The browser sends device-generation and revision guards; the
+server stores requested settings separately from the companion's applied policy.
+Heartbeats publish applied/rejected revisions, while offline contact cannot certify
+application. `LocalCompanion` continues management polling after disable or lease
+expiry without opening a VM owner or claiming jobs, so an approved owner can renew
+a finite lease of up to seven days from the website.
+
+Applying settings first settles owned work under the runner lock. Durable control
+and stopped-policy intents fence interrupted changes; a persisted applied revision
+permits cleanup of its completed intent, not a newer uncertain intent. CPU, RAM and
+Docker disk changes are defaults for new VMs. Existing VMs retain their admitted
+machine and repository identity. Storage resizing uses only the exact owned disk
+image and APFS container, checks native bounds and capacity, and preserves data;
+uncertain native settlement retains its journal and disables work.
+
+`packages/local` owns the host policy and SDK profile. A local
 finite lease, repository grants, machine/storage ceilings and explicit permissions
 bound remote work. Each codespace has a persistent mountless VM. The shared guest
 supervisor verifies the provider-owned repository root and binding; both providers
@@ -637,6 +653,16 @@ use fixed local API operations that avoid automatic MCP gateway creation and
 verify the fresh VM boundary before guest work. Host environment and credential
 stores are not merged into guest environment. SDK-provided credential-named
 placeholders are not evidence of a usable host credential.
+
+Enrolled private Git and write operations use a repository-scoped server proxy
+with the existing encrypted GitHub App user OAuth credential. Local authority
+binds the device, server resource, local generation and approved repository;
+failure never selects a host token fallback. Public read-only Git remains direct
+and unauthenticated. Guest Git author identity is repository-local, supplied by
+owner settings or the verified GitHub account's noreply identity. An empty remote
+can create an unborn requested branch; a nonempty remote with a missing ref is
+refused. MCP pull-request create/get/find compose the same repository authority;
+only creation requires the explicit pull-request permission.
 
 An independent device guard owns SDK launch and calls before VM creation. It
 cancels and reaps tracked calls, holds exact kernel identities for the SDK daemon

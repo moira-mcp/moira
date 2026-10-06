@@ -63,6 +63,7 @@ import type {
   ExecutionTaskIdentity,
   ExecutionTaskTitleMutationResult,
   LocalDeviceView,
+  LocalDeviceSettingsValue,
   LocalPairingView,
 } from "@mcp-moira/shared";
 
@@ -965,6 +966,19 @@ export class MoiraApiClient {
     const response = await this.client.delete<ApiResponse<LocalDeviceView>>(
       `/integrations/local/devices/${encodeURIComponent(deviceId)}`,
       { data: { expectedGeneration } },
+    );
+    return response.data.data!;
+  }
+
+  async updateLocalDeviceSettings(
+    deviceId: string,
+    expectedGeneration: number,
+    expectedRevision: number,
+    settings: LocalDeviceSettingsValue,
+  ): Promise<LocalDeviceView> {
+    const response = await this.client.put<ApiResponse<LocalDeviceView>>(
+      `/integrations/local/devices/${encodeURIComponent(deviceId)}/settings`,
+      { expectedGeneration, expectedRevision, settings },
     );
     return response.data.data!;
   }

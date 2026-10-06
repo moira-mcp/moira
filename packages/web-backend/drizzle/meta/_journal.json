@@ -393,6 +393,13 @@
       "when": 1790001020000,
       "tag": "0054_local_devices_relay",
       "breakpoints": true
+    },
+    {
+      "idx": 56,
+      "version": "7",
+      "when": 1791230400000,
+      "tag": "0055_local_device_control",
+      "breakpoints": true
     }
   ]
 }

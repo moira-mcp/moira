@@ -13,8 +13,11 @@ import { apiClient } from "@/services/api-client";
 import type { CodespaceConnectionView } from "@mcp-moira/shared";
 import type { CodespaceManagementView } from "@/types/api-types";
 import { useLatestRequest } from "@/hooks/useLatestRequest";
+import { useRefreshOnActivation } from "@/components/settings/useRefreshOnActivation";
 
 export interface GitHubCodespacesState {
+  provider: string;
+  setProvider: React.Dispatch<React.SetStateAction<string>>;
   connection: CodespaceConnectionView | null;
   connectionLoading: boolean;
   connectionError: boolean;
@@ -31,8 +34,17 @@ export interface GitHubCodespacesState {
 
 const GitHubCodespacesContext = createContext<GitHubCodespacesState | null>(null);
 
-export function GitHubCodespacesProvider({ children }: { children: React.ReactNode }) {
+export function GitHubCodespacesProvider({
+  children,
+  active = true,
+  view = "environments",
+}: {
+  children: React.ReactNode;
+  active?: boolean;
+  view?: "environments" | "github" | "local";
+}) {
   const [connection, setConnection] = useState<CodespaceConnectionView | null>(null);
+  const [provider, setProvider] = useState("github-codespaces");
   const [connectionLoading, setConnectionLoading] = useState(true);
   const [connectionError, setConnectionError] = useState(false);
   const [management, setManagement] = useState<CodespaceManagementView | null>(null);
@@ -78,6 +90,8 @@ export function GitHubCodespacesProvider({ children }: { children: React.ReactNo
     void reloadConnection();
     void reloadManagement();
   }, [reloadConnection, reloadManagement]);
+  useRefreshOnActivation(active && view === "github", reloadConnection);
+  useRefreshOnActivation(active && view === "environments", reloadManagement);
 
   const applyConnection = useCallback(
     (next: CodespaceConnectionView) => {
@@ -92,6 +106,8 @@ export function GitHubCodespacesProvider({ children }: { children: React.ReactNo
 
   const value = useMemo(
     () => ({
+      provider,
+      setProvider,
       connection,
       connectionLoading,
       connectionError,
@@ -104,6 +120,7 @@ export function GitHubCodespacesProvider({ children }: { children: React.ReactNo
       setManagement,
     }),
     [
+      provider,
       connection,
       connectionLoading,
       connectionError,

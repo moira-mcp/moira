@@ -5,6 +5,7 @@ import {
   LocalDeviceError,
   localPublicPolicySchema,
   localAcknowledgementSchema,
+  localControlReportSchema,
   type LocalDeviceService,
   type LocalDeviceAuth,
   type LocalRelayAcknowledgement,
@@ -108,7 +109,7 @@ export function createLocalDeviceManagementRoutes(
 ): Router {
   const router = Router();
   protectOrigin(router, publicOrigin);
-  router.use(json({ limit: "256kb" }));
+  router.use(json({ limit: "2mb" }));
   const owner = (req: Request) => {
     const id = (req as AuthenticatedRequest).userId;
     if (typeof id !== "string" || !id)
@@ -154,6 +155,24 @@ export function createLocalDeviceManagementRoutes(
       });
     }),
   );
+  router.put(
+    "/devices/:id/settings",
+    endpoint((req, res) => {
+      if (
+        !(req as AuthenticatedRequest).session?.token ||
+        req.get("Authorization") ||
+        req.get("Origin") !== new URL(publicOrigin).origin
+      )
+        throw new LocalDeviceError(
+          "LOCAL_UNAUTHORIZED",
+          "A confirmed browser session and matching origin are required.",
+        );
+      res.json({
+        success: true,
+        data: service.requestSettings(owner(req), param(req, "id"), req.body),
+      });
+    }),
+  );
   return finishRouter(router);
 }
 
@@ -180,8 +199,11 @@ export function createLocalDeviceRoutes(
     "/heartbeat",
     endpoint((req, res) => {
       const auth = deviceAuth(service, req),
-        input = z.object({ policy: localPublicPolicySchema }).strict().parse(req.body);
-      res.json({ success: true, data: service.heartbeat(auth, input.policy) });
+        input = z
+          .object({ policy: localPublicPolicySchema, control: localControlReportSchema.optional() })
+          .strict()
+          .parse(req.body);
+      res.json({ success: true, data: service.heartbeat(auth, input.policy, input.control) });
     }),
   );
   router.post(

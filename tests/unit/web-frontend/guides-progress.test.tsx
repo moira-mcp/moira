@@ -42,6 +42,7 @@ import { ShowMeAround } from "../../../packages/web-frontend/src/guides/ShowMeAr
 import { SidebarProvider } from "../../../packages/web-frontend/src/components/ui/sidebar";
 import { guideAnchor } from "../../../packages/web-frontend/src/guides/anchors";
 import { guideById } from "../../../packages/web-frontend/src/guides/registry";
+import { anchorsOf } from "../../../packages/web-frontend/src/guides/types";
 import {
   GUIDE_PROGRESS_KEY,
   changeProgress,
@@ -67,16 +68,7 @@ import { fakeUserSettings } from "./helpers/fake-user-settings";
 
 const originalReact = (globalThis as typeof globalThis & { React?: typeof React }).React;
 const settingsGuide = guideById("settings")!;
-const SETTINGS_ANCHORS = [
-  "settings.nav",
-  "settings.account",
-  "settings.security",
-  "settings.notifications",
-  "settings.integrations",
-  "settings.apps",
-  "settings.api-tokens",
-  "settings.preferences",
-];
+const SETTINGS_ANCHORS = settingsGuide.steps.flatMap(anchorsOf);
 /** Every Settings step seen at its shipped revision. */
 const allSeen = Object.fromEntries(
   settingsGuide.steps.map((step) => [`settings.${step.id}`, step.revision]),
@@ -152,7 +144,7 @@ describe("the progress store", () => {
     expect(stored[GUIDE_PROGRESS_KEY]).toEqual({
       laterBuild: { mark: "later-build" },
       firstRun: "accepted",
-      seen: { "settings.nav": 1 },
+      seen: { "settings.nav": allSeen["settings.nav"] },
       resume: { guide: "settings", step: "nav", path: "/settings" },
     });
   });
@@ -167,7 +159,29 @@ describe("the progress store", () => {
       await changeProgress(recordStep("settings", settingsGuide.steps[0], "/settings"));
     });
     expect(storedProgress(server)?.firstRun).toBe("declined");
-    expect(storedProgress(server)?.seen).toEqual({ "settings.nav": 1 });
+    expect(storedProgress(server)?.seen).toEqual({ "settings.nav": allSeen["settings.nav"] });
+  });
+
+  test("walking the current step retains a newer revision saved by another build", async () => {
+    const futureRevision = allSeen["settings.nav"] + 1;
+    const server = fakeUserSettings({
+      [GUIDE_PROGRESS_KEY]: {
+        seen: { "settings.nav": futureRevision },
+        laterBuild: { mark: "retained" },
+      },
+    });
+    const { result } = renderHook(() => useGuideProgress());
+    await waitFor(() => expect(result.current.loaded).toBe(true));
+    await act(async () => {
+      await changeProgress(recordStep("settings", settingsGuide.steps[0], "/settings"));
+    });
+    expect(storedProgress(server)?.seen).toEqual({ "settings.nav": futureRevision });
+    expect(storedProgress(server)?.laterBuild).toEqual({ mark: "retained" });
+    expect(storedProgress(server)?.resume).toEqual({
+      guide: "settings",
+      step: "nav",
+      path: "/settings",
+    });
   });
 
   test("progress that cannot be read stays unknown through a change, so nothing asks on a guess", async () => {
@@ -236,7 +250,12 @@ describe("the rules read from progress", () => {
     expect(newSteps(settingsGuide, steps, { seen: allSeen })).toEqual([]);
     // Half-walked: the steps not reached yet are unseen, not new.
     expect(
-      newSteps(settingsGuide, steps, { seen: { "settings.nav": 1, "settings.account": 1 } }),
+      newSteps(settingsGuide, steps, {
+        seen: {
+          "settings.nav": allSeen["settings.nav"],
+          "settings.account": allSeen["settings.account"],
+        },
+      }),
     ).toEqual([]);
     const oneBehind = { seen: { ...allSeen, "settings.security": 0 } };
     expect(newSteps(settingsGuide, steps, oneBehind).map((step) => step.id)).toEqual(["security"]);
@@ -382,7 +401,10 @@ describe("walking a guide", () => {
         path: "/settings",
       }),
     );
-    expect(storedProgress(server)?.seen).toEqual({ "settings.nav": 1, "settings.account": 1 });
+    expect(storedProgress(server)?.seen).toEqual({
+      "settings.nav": allSeen["settings.nav"],
+      "settings.account": allSeen["settings.account"],
+    });
 
     fireEvent.click(screen.getByTestId("guide-close"));
     await waitFor(() => expect(screen.queryByTestId("guide-card")).toBeNull());
@@ -429,7 +451,10 @@ describe("walking a guide", () => {
   test("finishing a run of only the changed steps finishes nothing and keeps the place to resume", async () => {
     const resume = { guide: "settings", step: "account", path: "/settings" };
     const server = fakeUserSettings({
-      [GUIDE_PROGRESS_KEY]: { seen: { "settings.nav": 0, "settings.account": 1 }, resume },
+      [GUIDE_PROGRESS_KEY]: {
+        seen: { "settings.nav": 0, "settings.account": allSeen["settings.account"] },
+        resume,
+      },
     });
     renderSettings();
     const button = screen.getByTestId("guide-open");
@@ -438,7 +463,9 @@ describe("walking a guide", () => {
     await onStep("nav");
     fireEvent.click(screen.getByTestId("guide-finish"));
     await waitFor(() => expect(screen.queryByTestId("guide-card")).toBeNull());
-    await waitFor(() => expect(storedProgress(server)?.seen?.["settings.nav"]).toBe(1));
+    await waitFor(() =>
+      expect(storedProgress(server)?.seen?.["settings.nav"]).toBe(allSeen["settings.nav"]),
+    );
     expect(storedProgress(server)?.finished).toBeUndefined();
     expect(storedProgress(server)?.resume).toEqual(resume);
     expect(Object.keys(storedProgress(server)?.seen ?? {})).toEqual([
@@ -449,7 +476,9 @@ describe("walking a guide", () => {
 
   test("the whole tour opened from a run of its changed first step makes that step the place to resume", async () => {
     const server = fakeUserSettings({
-      [GUIDE_PROGRESS_KEY]: { seen: { "settings.nav": 0, "settings.account": 1 } },
+      [GUIDE_PROGRESS_KEY]: {
+        seen: { "settings.nav": 0, "settings.account": allSeen["settings.account"] },
+      },
     });
     renderSettings();
     const button = screen.getByTestId("guide-open");

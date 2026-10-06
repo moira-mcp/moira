@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { gitBranchSchema } from "@mcp-moira/shared/git-ref";
 import { zodToJsonSchema } from "zod-to-json-schema";
 import { AWAITING_USER_LIMITS } from "@mcp-moira/workflow-engine/awaiting-user";
 import { EXECUTION_TASK_TITLE_LIMIT } from "@mcp-moira/shared/execution-task-identity";
@@ -935,7 +936,34 @@ export const codespaceDownloadRequestSchema = z.union([
   }),
 ]);
 
+export const codespacePullRequestCreateSchema = z
+  .object({
+    codespace_id: codespaceIdSchema,
+    head: gitBranchSchema.describe("Pushed branch in this codespace's approved repository"),
+    base: gitBranchSchema.describe("Existing target branch in the same approved repository"),
+    title: z.string().trim().min(1).max(256),
+    body: z.string().max(65536).default(""),
+    draft: z.boolean().default(false),
+  })
+  .strict();
+export const codespacePullRequestGetSchema = z
+  .object({
+    codespace_id: codespaceIdSchema,
+    pull_request_number: z.number().int().positive(),
+  })
+  .strict();
+export const codespacePullRequestFindSchema = z
+  .object({
+    codespace_id: codespaceIdSchema,
+    head: gitBranchSchema,
+    base: gitBranchSchema,
+  })
+  .strict();
+
 export const CODESPACE_ACTION_REQUEST_SCHEMAS = {
+  pull_request_create: codespacePullRequestCreateSchema,
+  pull_request_get: codespacePullRequestGetSchema,
+  pull_request_find: codespacePullRequestFindSchema,
   list: codespaceListSchema,
   setup_help: codespaceSetupHelpSchema,
   create: codespaceCreateSchema,

@@ -1,13 +1,19 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
-import { LocalRecords, spaceSchema, type LocalSpace } from "./space-record.js";
+import {
+  LocalRecords,
+  spaceSchema,
+  policyForSpace,
+  requireSpaceGrant,
+  type LocalSpace,
+} from "./space-record.js";
+import { LocalRelay } from "./relay.js";
 import { SbxRuntime } from "./sbx-runtime.js";
 import { runProcess, type RunProcess } from "./process.js";
 import { guestAssets, installGuest, runtimeApiAsset } from "./assets.js";
 import {
   LocalRefusal,
   MAX_MESSAGE_BYTES,
-  requireLocalGrant,
   requireOperationOutputBudget,
   type LocalPolicy,
 } from "./policy.js";
@@ -128,12 +134,13 @@ export class RuntimeOwner {
     this.policy = await this.records.policy();
     if (!this.space)
       throw new LocalRefusal("LOCAL_NOT_RUNNING", "This sandbox has no local work admission.");
+    this.policy = policyForSpace(this.policy, this.space);
     if (this.space.failure === "LOCAL_GUEST_SETTLEMENT_UNKNOWN")
       throw new LocalRefusal(
         "LOCAL_GUEST_SETTLEMENT_UNKNOWN",
         "Acknowledge the retained unknown outcome locally before admitting new work.",
       );
-    requireLocalGrant(this.policy, this.space.repositoryId, Date.now());
+    requireSpaceGrant(this.policy, this.space, Date.now());
     if (activate) {
       if (this.space.phase !== "usable" && this.space.phase !== "stopped")
         throw new LocalRefusal(
@@ -169,7 +176,8 @@ export class RuntimeOwner {
     if (this.stopping || !this.space || !this.policy)
       throw new LocalRefusal("LOCAL_NOT_RUNNING", "The independent work guard is stopping.");
     const space = await this.records.get(this.id);
-    const policy = await this.records.policy();
+    const configured = await this.records.policy();
+    const policy = space ? policyForSpace(configured, space) : configured;
     if (
       !space ||
       space.generation !== this.space.generation ||
@@ -177,7 +185,7 @@ export class RuntimeOwner {
       space.desiredState !== "running"
     )
       throw new LocalRefusal("LOCAL_NOT_RUNNING", "The locally owned sandbox changed.");
-    requireLocalGrant(policy, space.repositoryId, Date.now());
+    requireSpaceGrant(policy, space, Date.now());
     if (
       policy.deviceId !== this.policy.deviceId ||
       JSON.stringify(policy.runtime) !== JSON.stringify(this.policy.runtime)
@@ -245,7 +253,7 @@ export class RuntimeOwner {
     return this.settleGuestResult(
       this.serial(async () => {
         const { space, policy, runtime } = await this.current();
-        const repository = requireLocalGrant(policy, space.repositoryId, Date.now());
+        const repository = requireSpaceGrant(policy, space, Date.now());
         const clone = space.phase === "creating";
         await this.protectRuntime();
         if (!space.runtimeId) {
@@ -282,6 +290,18 @@ export class RuntimeOwner {
         const assets = await guestAssets();
         await installGuest(runtime, identity, assets);
         const latest = await this.current();
+        let gitAuthor = policy.gitAuthor ?? null;
+        if (
+          !gitAuthor &&
+          (repository.private || repository.allowPush || repository.allowPullRequests === true) &&
+          (await this.records.state.read("connection.json", (value) => value))
+        )
+          gitAuthor = await new LocalRelay(this.records).gitIdentity(
+            space.id,
+            space.generation,
+            space.repositoryId,
+            this.controller.signal,
+          );
         const output = await runtime.guest(
           identity,
           ["node", "/tmp/moira-local-runtime/worker.mjs"],
@@ -296,6 +316,7 @@ export class RuntimeOwner {
                 repository: repository.fullName,
                 ref: space.ref,
                 clone,
+                gitAuthor,
               },
             }),
           ),
@@ -338,7 +359,7 @@ export class RuntimeOwner {
           );
         const request = operation.parse(value);
         const { space, policy, runtime } = await this.current();
-        const repository = requireLocalGrant(policy, space.repositoryId, Date.now());
+        const repository = requireSpaceGrant(policy, space, Date.now());
         if (request.repositoryFullName !== repository.fullName)
           throw new LocalRefusal(
             "LOCAL_REPOSITORY_DENIED",
@@ -481,10 +502,11 @@ export class RuntimeOwner {
       .catch(() => undefined)
       .then(async () => {
         const space = await this.records.get(this.id);
-        const policy = await this.records.policy();
+        const configured = await this.records.policy();
+        const policy = space ? policyForSpace(configured, space) : configured;
         if (!space || space.generation !== generation)
           throw new LocalRefusal("LOCAL_GENERATION_CONFLICT", "The recovery target changed.");
-        requireLocalGrant(policy, space.repositoryId, Date.now());
+        requireSpaceGrant(policy, space, Date.now());
         if (
           !space.runtimeId ||
           space.desiredState !== "stopped" ||
@@ -510,8 +532,8 @@ export class RuntimeOwner {
         await this.boundary(space, runtime);
         await this.protectRuntime();
         const current = await this.records.get(this.id);
-        const latest = await this.records.policy();
-        requireLocalGrant(latest, space.repositoryId, Date.now());
+        const latest = policyForSpace(await this.records.policy(), space);
+        requireSpaceGrant(latest, space, Date.now());
         if (
           !current ||
           JSON.stringify(current) !== JSON.stringify(space) ||
@@ -542,14 +564,15 @@ export class RuntimeOwner {
       .catch(() => undefined)
       .then(async () => {
         const space = await this.records.get(this.id);
-        const policy = await this.records.policy();
+        const configured = await this.records.policy();
+        const policy = space ? policyForSpace(configured, space) : configured;
         if (!space || space.generation !== generation)
           throw new LocalRefusal(
             "LOCAL_GENERATION_CONFLICT",
             "The local sandbox generation changed.",
           );
         if (remove && !localApproval) {
-          const repository = requireLocalGrant(policy, space.repositoryId, Date.now());
+          const repository = requireSpaceGrant(policy, space, Date.now());
           if (!repository.allowDelete)
             throw new LocalRefusal(
               "LOCAL_DELETE_APPROVAL_REQUIRED",

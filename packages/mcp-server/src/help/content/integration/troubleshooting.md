@@ -300,11 +300,17 @@ The engine logs a warning naming the residual placeholder and the `executionId`.
 
 ## Local codespaces
 
-Use **Settings → Codespaces → Local devices** and the companion's `status` to distinguish pending
+Use **Settings → Development → Local computers** and the companion's `status` to distinguish pending
 browser approval, revocation, an offline computer and an expired local lease. An offline row is
 not proof that the computer or its VM has physically stopped. Renew a lease on the computer with
 `npm run local -- enable --hours 8`, then run the confirmed companion in the foreground with
 `npm run local -- run`. A revoked device requires a new pairing and browser confirmation.
+With locally approved `web-control`, request a finite renewal in the device editor within its
+ceiling, up to seven days. Pending means the computer has not applied the request; rejected shows
+the refusal and retains the last successfully acknowledged revision. A failed application can
+disable work in the reported policy; that revision alone does not mean work remains enabled.
+An offline computer keeps requests pending. Inspect the effective policy and compare requested
+and applied revisions before retrying work.
 
 `doctor` requires an enabled, unexpired lease and checks prerequisites, not live VM isolation.
 Stop the foreground companion before commands that require its runner lock. Unsupported SDK

@@ -1,7 +1,7 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { totalmem, cpus } from "node:os";
 import { z } from "zod";
-import { LocalRecords, type LocalSpace } from "./space-record.js";
+import { LocalRecords, policyForSpace, type LocalSpace } from "./space-record.js";
 import {
   LocalRefusal,
   requireLocalGrant,
@@ -15,6 +15,8 @@ import { startGuard, type SpaceGuard, type StartGuard, type DeviceGuard } from "
 import { startBroker } from "./broker.js";
 import { startBrokerTunnel } from "./broker-tunnel.js";
 import { gitBroker } from "./git-broker.js";
+import { cloudGitBroker } from "./cloud-git-broker.js";
+import { LocalRelay } from "./relay.js";
 import { NetworkBudget } from "./network-budget.js";
 
 export interface ManagerDependencies {
@@ -66,8 +68,11 @@ export class LocalManager {
     return this.device;
   }
 
+  async holdRunnerLock(): Promise<void> {
+    this.releaseLock ??= await this.records.state.lock();
+  }
   async open(): Promise<void> {
-    this.releaseLock = await this.records.state.lock();
+    await this.holdRunnerLock();
     try {
       const policy = await this.records.policy();
       await (this.dependencies.storage ?? admitStorage)(policy);
@@ -75,11 +80,29 @@ export class LocalManager {
       if (this.dependencies.runtime) await this.runtime(policy).verifySettings();
       const onFault = this.dependencies.onFault ?? (() => undefined);
       const budget = new NetworkBudget(this.records.state);
+      const relay = new LocalRelay(this.records);
+      const direct = gitBroker(budget, onFault);
+      const cloud = cloudGitBroker(
+        (...args) => relay.gitAuthority(...args),
+        budget,
+        onFault,
+        direct,
+      );
       this.broker = await startBroker(
         {
           authorize: (credential) => this.records.authorize(credential, this.now()),
           budget,
-          git: gitBroker(budget, onFault),
+          git: async (request, response, grant) => {
+            if (
+              !grant.repository.private &&
+              !grant.repository.allowPush &&
+              grant.repository.allowPullRequests !== true
+            )
+              return direct(request, response, { ...grant, gitCredential: null });
+            const connected = await this.records.state.read("connection.json", (value) => value);
+            if (!connected && grant.gitCredential !== null) return direct(request, response, grant);
+            return cloud(request, response, grant);
+          },
           onFault,
         },
         this.dependencies.brokerPorts?.http,
@@ -102,7 +125,13 @@ export class LocalManager {
     }
   }
 
+  async stopWork(): Promise<void> {
+    await this.closeResources(true);
+  }
   async close(): Promise<void> {
+    await this.closeResources(false);
+  }
+  private async closeResources(keepLock: boolean): Promise<void> {
     const errors: unknown[] = [];
     for (const [id, guard] of this.guards) {
       try {
@@ -131,8 +160,10 @@ export class LocalManager {
       errors.push(error);
     }
     try {
-      await this.releaseLock?.();
-      this.releaseLock = undefined;
+      if (!keepLock) {
+        await this.releaseLock?.();
+        this.releaseLock = undefined;
+      }
     } catch (error) {
       errors.push(error);
     }
@@ -185,7 +216,14 @@ export class LocalManager {
         id,
         name: `moira-${id.replaceAll("-", "")}`,
         runtimeId: null,
+        admittedMachine: {
+          cpuCores: policy.runtime.cpuCores,
+          memoryBytes: policy.runtime.memoryBytes,
+          dockerBytes: policy.runtime.dockerBytes,
+        },
         repositoryId,
+        admittedRepositoryFullName: policy.repositories.find((repo) => repo.id === repositoryId)!
+          .fullName,
         operationMarker,
         ref,
         createdAt: this.now(),
@@ -260,7 +298,7 @@ export class LocalManager {
         );
       }
       if (this.dependencies.runtime) {
-        const runtime = this.runtime(policy);
+        const runtime = this.runtime(policyForSpace(policy, space));
         if ((await runtime.exact(this.identity(space)))?.status !== "running")
           throw new LocalRefusal("LOCAL_NOT_RUNNING", "The owned sandbox is stopped.");
         await this.boundary(space, runtime);
@@ -333,7 +371,9 @@ export class LocalManager {
       await this.records.put(space);
       this.guards.delete(id);
       if (space.runtimeId)
-        await this.runtime(await this.records.policy()).stop(this.identity(space));
+        await this.runtime(policyForSpace(await this.records.policy(), space)).stop(
+          this.identity(space),
+        );
       space.phase = "stopped";
       space.generation++;
       await this.records.put(space);
@@ -397,7 +437,7 @@ export class LocalManager {
           "LOCAL_CREATE_UNKNOWN",
           "Inspect the pending creation locally before removing its record.",
         );
-      await this.runtime(policy).remove(this.identity(space));
+      await this.runtime(policyForSpace(policy, space)).remove(this.identity(space));
       space.phase = "deleted";
       space.generation++;
       await this.records.put(space);

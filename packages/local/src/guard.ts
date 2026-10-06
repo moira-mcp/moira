@@ -9,7 +9,7 @@ import { RuntimeOwner } from "./runtime-owner.js";
 import { DeviceRuntimeControl } from "./runtime-control.js";
 import { RuntimeDeviceOwner } from "./runtime-device-owner.js";
 import type { SandboxObservation } from "./sbx-runtime.js";
-import { LocalRefusal, MAX_MESSAGE_BYTES, type LocalPolicy } from "./policy.js";
+import { LocalRefusal, MAX_MESSAGE_BYTES, localPolicySchema, type LocalPolicy } from "./policy.js";
 
 const receiptSchema = z
   .object({
@@ -35,6 +35,101 @@ async function settlePrivateRuntime(policy: LocalPolicy): Promise<void> {
       if (!(error instanceof LocalRefusal) || error.code !== "LOCAL_CONTROL_ABSENT") throw error;
     }
   }
+}
+
+/** Called only by the locally opted-in controller while it holds the runner gate. */
+export async function replaceStoppedPolicy(
+  records: LocalRecords,
+  next: LocalPolicy,
+): Promise<void> {
+  next = localPolicySchema.parse(next);
+  const previous = await records.policy();
+  const receipt = await records.state.read("runtime-owner.json", receiptSchema.parse);
+  const transitionSchema = z
+    .object({
+      previous: localPolicySchema,
+      next: localPolicySchema,
+      before: receiptSchema.nullable(),
+      after: receiptSchema.extend({ settled: z.literal(true) }),
+      intermediate: localPolicySchema.optional(),
+    })
+    .strict();
+  let transition = await records.state.read("policy-transition.json", transitionSchema.parse);
+  const equal = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+  const withoutLease = (policy: LocalPolicy) => ({ ...policy, enabled: false, leaseUntil: 0 });
+  if (!transition && receipt && (!receipt.settled || receipt.profile !== profile(previous)))
+    throw new LocalRefusal(
+      "LOCAL_STOP_PENDING",
+      "The previous runtime owner has not settled this profile.",
+    );
+  if (
+    next.deviceId !== previous.deviceId ||
+    next.runtime.binary !== previous.runtime.binary ||
+    next.runtime.template !== previous.runtime.template ||
+    next.runtime.storageRoot !== previous.runtime.storageRoot
+  )
+    throw new LocalRefusal(
+      "LOCAL_RUNTIME_CHANGED",
+      "Web control cannot choose another runtime or host path.",
+    );
+  if (transition) {
+    const states = [
+      transition.previous,
+      { ...transition.previous, enabled: false },
+      transition.next,
+      { ...transition.next, enabled: false },
+      transition.intermediate,
+    ];
+    if (
+      !states.some((state) => state && equal(state, previous)) ||
+      (!equal(receipt, transition.before) && !equal(receipt, transition.after)) ||
+      (transition.before &&
+        (!transition.before.settled ||
+          transition.before.profile !== profile(transition.previous))) ||
+      transition.after.profile !== profile(transition.next) ||
+      !equal(withoutLease(next), withoutLease(transition.next)) ||
+      (transition.intermediate &&
+        !equal(withoutLease(transition.intermediate), withoutLease(transition.previous)) &&
+        !equal(withoutLease(transition.intermediate), withoutLease(transition.next)))
+    )
+      throw new LocalRefusal(
+        "LOCAL_RUNTIME_CHANGED",
+        "The retained policy transition changed its exact local states.",
+      );
+    if (
+      transition.previous.deviceId !== previous.deviceId ||
+      transition.previous.runtime.binary !== previous.runtime.binary ||
+      transition.previous.runtime.template !== previous.runtime.template ||
+      transition.previous.runtime.storageRoot !== previous.runtime.storageRoot
+    )
+      throw new LocalRefusal(
+        "LOCAL_RUNTIME_CHANGED",
+        "The retained transition names another runtime.",
+      );
+    transition.intermediate = previous;
+    transition.next = next;
+  } else
+    transition = {
+      previous,
+      next,
+      before: receipt,
+      after: { owner: randomUUID(), profile: profile(next), settled: true },
+    };
+  await records.state.write("policy-transition.json", transition);
+  await settlePrivateRuntime(previous);
+  if (
+    JSON.stringify(await records.policy()) !== JSON.stringify(previous) ||
+    JSON.stringify(await records.state.read("runtime-owner.json", receiptSchema.parse)) !==
+      JSON.stringify(receipt)
+  )
+    throw new LocalRefusal(
+      "LOCAL_RUNTIME_CHANGED",
+      "Local policy changed during control settlement.",
+    );
+  await records.state.write("policy.json", { ...next, enabled: false });
+  await records.state.write("runtime-owner.json", transition.after);
+  await records.state.write("policy.json", next);
+  await records.state.remove("policy-transition.json");
 }
 
 function refuseLiveRecoveryOwner(receipt: z.infer<typeof receiptSchema> | null): void {

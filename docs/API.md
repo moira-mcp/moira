@@ -1579,12 +1579,13 @@ configured application origin. Successful JSON responses use `{success:true,data
 
 ### Browser device management
 
-| Method and path                                     | Input                                    | Returned `data`                                              |
-| --------------------------------------------------- | ---------------------------------------- | ------------------------------------------------------------ |
-| `GET /api/integrations/local/devices`               | None                                     | `{devices: LocalDeviceView[], pairings: LocalPairingView[]}` |
-| `POST /api/integrations/local/pairings`             | Empty object                             | `201`: `{pairingId, revision, expiresAt, pairingToken}`      |
-| `POST /api/integrations/local/pairings/:id/confirm` | `{expectedRevision: positive integer}`   | Confirmed `LocalDeviceView`                                  |
-| `DELETE /api/integrations/local/devices/:id`        | `{expectedGeneration: positive integer}` | Revoked `LocalDeviceView`                                    |
+| Method and path                                     | Input                                            | Returned `data`                                              |
+| --------------------------------------------------- | ------------------------------------------------ | ------------------------------------------------------------ |
+| `GET /api/integrations/local/devices`               | None                                             | `{devices: LocalDeviceView[], pairings: LocalPairingView[]}` |
+| `POST /api/integrations/local/pairings`             | Empty object                                     | `201`: `{pairingId, revision, expiresAt, pairingToken}`      |
+| `POST /api/integrations/local/pairings/:id/confirm` | `{expectedRevision: positive integer}`           | Confirmed `LocalDeviceView`                                  |
+| `DELETE /api/integrations/local/devices/:id`        | `{expectedGeneration: positive integer}`         | Revoked `LocalDeviceView`                                    |
+| `PUT /api/integrations/local/devices/:id/settings`  | `{expectedRevision,expectedGeneration,settings}` | Requested `LocalDeviceView`                                  |
 
 Pairing lasts ten minutes. Its secret is returned when created; subsequent list
 responses do not disclose it. The local companion must enroll with that secret
@@ -1594,17 +1595,53 @@ invalidates that device's authority without revoking sibling devices.
 
 `LocalDeviceView` contains `userId`, `deviceId`, `deviceGeneration`, `connectionId`,
 `label`, `status` (`pending|active|revoked`), public `policy`, nullable `lastSeenAt`
-and `createdAt`. `LocalPairingView` contains `id`, `revision`, nullable `deviceId`,
+and `createdAt`, plus optional `control`. `LocalPairingView` contains `id`, `revision`, nullable `deviceId`,
 `state` (`waiting_local|waiting_confirmation|confirmed|expired`) and `expiresAt`.
 Timestamps are epoch milliseconds.
 
 The version-1 public policy includes device identity and label, `enabled`,
 `leaseUntil`, approved repositories (`id`, `fullName`, `private`, `allowPush`,
-`allowDelete`, `domains`), machine ceilings and `maxSandboxes`. It has no host paths,
+`allowDelete`, optional `allowPullRequests`, `domains`), machine defaults and `maxSandboxes`. It has no host paths,
 repository tokens, SDK credentials or executable selection. Browser confirmation
-does not enlarge this locally approved policy. Server revocation fences requests;
+does not itself grant web control. Server revocation fences requests;
 an offline machine's physical stop still depends on its independent local lease
 and disable mechanism, rather than an instantaneous server-to-host command.
+
+### Owner settings control
+
+The settings PUT requires a Better Auth browser session and an explicit matching
+Origin; an Authorization header is refused. The owner must first approve a finite
+web-control envelope locally. Both revision and device generation are checked
+before storing a request. Saving returns pending desired settings, not proof that
+the host applied them. JSON management input is bounded to 2 MiB.
+
+```typescript
+interface LocalDeviceControlView {
+  optedIn: boolean;
+  revision: number;
+  appliedRevision: number;
+  status: "not-enabled" | "applied" | "pending" | "rejected";
+  settings: LocalDeviceSettingsValue;
+  ceiling: LocalControlCeiling | null;
+  error: { code: string; message: string } | null;
+}
+```
+
+`LocalDeviceSettingsValue` and `LocalControlCeiling` are defined by
+`packages/shared/src/codespaces/local-management-types.ts`. Settings contain
+`label`, `enabled`, epoch-ms `leaseUntil`, `cpuCores`, `memoryBytes`, `storageBytes`,
+`dockerBytes`, `maxSandboxes`, `maxOperationMs`, `maxOutputBytes`, `maxConcurrent`,
+`maxNetworkBytes`, `maxNetworkConnections`, repository grants and nullable
+`gitAuthor:{name,email}`. Repository grants carry UUID `id`, `fullName`, `private`,
+`allowPush`, `allowDelete`, optional `allowPullRequests` and allowed `domains`.
+The ceiling bounds numeric settings and `maxLeaseMs`; leases are finite and at
+most seven days. Storage is integral GiB, at least 8 GiB and at least Docker bytes
+plus 1 GiB. Requested settings cannot exceed the locally approved envelope.
+
+The device's `policy` remains its reported applied policy. The control view holds
+the latest requested settings and applied/rejected state; `lastSeenAt` separately
+describes contact, so an offline save does not report success on the machine.
+CPU, RAM and Docker disk are new-VM defaults, not in-place resizing of existing VMs.
 
 ### Companion enrollment and work
 
@@ -1623,12 +1660,18 @@ server responses cannot choose another origin. There is no HTTP-origin bypass fl
 
 | Method and path relative to `/api/local-devices` | Input                                                            | Returned `data`                               |
 | ------------------------------------------------ | ---------------------------------------------------------------- | --------------------------------------------- |
-| `POST /heartbeat`                                | `{policy}`                                                       | Current `LocalDeviceView`                     |
+| `POST /heartbeat`                                | `{policy,control?}`                                              | Current `LocalDeviceView`                     |
 | `POST /relay/claim`                              | Optional `limit` (1–8, default 1), `waitMs` (0–25000, default 0) | `{requests: LocalRelayClaim[], maxPartBytes}` |
 | `POST /relay/:requestId/renew`                   | Empty object and `X-Moira-Claim-Id`                              | Renewed `LocalRelayClaim`                     |
 | `GET /relay/:requestId/payload/:partIndex`       | `offset` ≥ 0; `length` 0–262144, plus `X-Moira-Claim-Id`         | Raw `application/octet-stream` bytes          |
 | `POST /relay/:requestId/result-part`             | Raw `application/octet-stream` and `X-Moira-Claim-Id`            | `201`: `{transferId,sha256,size}`             |
 | `POST /relay/ack`                                | `{requestId,digest,claimId,status,outcomeReference}`             | `LocalRelayResult`                            |
+
+The optional heartbeat control report contains `ceiling`, applied `settings`,
+`appliedRevision` and optional `rejectedRevision`/`error`. Acknowledgements cannot
+advance beyond the requested revision or report different settings as applied.
+Management polling remains authenticated while work is disabled or expired;
+relay dispatch and Git operations still require enabled, unexpired work authority.
 
 Request, claim and transfer IDs are UUIDs. A claim carries `userId`, `deviceId`,
 `deviceGeneration`, `connectionId`, `resourceId`, `resourceGeneration`, `requestId`,
@@ -1662,6 +1705,28 @@ Errors use `{success:false,error:{code,message}}`: `LOCAL_INVALID` → 400,
 `LOCAL_CAPACITY` → 429. An unacceptable Origin returns 403. Oversized parser
 input returns 413 without echoing the body. Companion routes precede global body
 logging, so device secrets and binary content do not enter request-context logs.
+
+### Repository-scoped Git and pull requests
+
+Device-authenticated Git routes are relative to
+`/api/local-devices/github/:resourceId/:resourceGeneration`. They require the
+current device/resource binding, enabled finite lease and exact approved repository.
+
+| Method and relative path                    | Purpose                                                                             |
+| ------------------------------------------- | ----------------------------------------------------------------------------------- |
+| `GET /identity`                             | Verified GitHub login and numeric-account noreply Git author email                  |
+| `GET /git/refs-fetch`, `GET /git/refs-push` | Fixed Git smart-HTTP ref discovery                                                  |
+| `POST /git/fetch`, `POST /git/push`         | Raw binary smart-HTTP request/response stream                                       |
+| `POST /pulls`                               | Create with typed `head`, `base`, `title`, optional `body` and `draft`; returns 201 |
+| `GET /pulls/:number`                        | Read an approved repository's pull request                                          |
+| `POST /pulls/find`                          | Find by exact `head` and `base` after an uncertain create                           |
+
+No route accepts a provider URL or exports OAuth tokens. Fetch and PR reads use
+repository read authority; push requires `allowPush`, and PR creation requires
+`allowPullRequests`. Git credentials stay in the server vault. Public read-only
+Git does not require a GitHub App grant. A failed enrolled private/write request
+does not fall back to a host token. Git-route domain errors map invalid input to
+400, conflicts to 409, expiry to 410 and other device-authority refusals to 403.
 
 ## Codespace Management API
 

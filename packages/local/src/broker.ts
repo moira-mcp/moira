@@ -7,6 +7,9 @@ import { resolvePublicTarget, type ResolveHost, type ResolvedTarget } from "./ne
 import { NetworkBudget } from "./network-budget.js";
 
 export interface BrokerGrant {
+  /** Exact locally owned resource bound to the server relay; not a GitHub credential. */
+  spaceId?: string;
+  generation?: number;
   repository: LocalRepository;
   policy: LocalPolicy;
   /** Read only by the Git request broker; never used for CONNECT. */

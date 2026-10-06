@@ -2,6 +2,7 @@ import { describe, expect, test } from "@jest/globals";
 import { BlockList } from "node:net";
 import {
   GiB,
+  LocalRefusal,
   localPolicySchema,
   requireLocalGrant,
   requireRef,
@@ -88,11 +89,19 @@ describe("local authority remains independent of cloud assertions", () => {
     "a@{b",
     "head ",
   ])("ref %s cannot become a Git option or traversal", (ref) => {
-    expect(() => requireRef(ref)).toThrow();
+    expect(() => requireRef(ref)).toThrow(LocalRefusal);
   });
-  test("ordinary named branches and immutable commits remain usable", () => {
-    expect(requireRef("feature/local-runtime")).toBe("feature/local-runtime");
-    expect(requireRef("a".repeat(40))).toBe("a".repeat(40));
+  test.each([
+    "feature/local-runtime",
+    "feat/игра",
+    "feat/🚀",
+    "HEAD",
+    "FETCH_HEAD",
+    "refs/tags/релиз",
+    "refs/heads/-topic",
+    "a".repeat(40),
+  ])("fetch ref %s retains its branch, tag, symbolic or immutable-commit role", (ref) => {
+    expect(requireRef(ref)).toBe(ref);
   });
 });
 

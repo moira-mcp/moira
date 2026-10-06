@@ -1,7 +1,6 @@
 /**
  * Settings Page E2E Tests
- * Validates settings page with flat layout:
- * Profile, Security, Notifications, OAuth, Sessions — all on one page
+ * Validates retained task panels and the existing settings operations.
  */
 
 import { test, expect } from "./fixtures.js";
@@ -9,8 +8,10 @@ import { createTestUser, login, loginAsAdmin } from "./helpers/auth-helper.js";
 import { getTestBaseUrl } from "../utils/test-config.js";
 const BASE_URL = getTestBaseUrl();
 
-test.describe("Settings Page — Flat Layout", () => {
-  test("settings page loads with all sections visible", async ({ page }) => {
+test.describe("Settings Page — Task Tabs", () => {
+  test("settings page retains all sections while only the chosen task is visible", async ({
+    page,
+  }) => {
     await loginAsAdmin(page);
     await page.waitForLoadState("domcontentloaded");
 
@@ -21,14 +22,19 @@ test.describe("Settings Page — Flat Layout", () => {
     const layout = page.getByTestId("settings-flat-layout");
     await expect(layout).toBeVisible();
 
-    // All sections visible on one page
     await expect(page.getByTestId("settings-section-profile")).toBeVisible();
+    await expect(page.getByTestId("settings-section-security")).toBeAttached();
+    await expect(page.getByTestId("settings-section-security")).toBeHidden();
+    await page.getByTestId("settings-nav-security").click();
     await expect(page.getByTestId("settings-section-security")).toBeVisible();
-    await expect(page.getByTestId("settings-section-oauth")).toBeVisible();
     await expect(page.getByTestId("settings-section-sessions")).toBeVisible();
+    await expect(page.getByTestId("settings-section-profile")).toBeHidden();
+    await page.getByTestId("settings-nav-access").click();
+    await expect(page.getByTestId("settings-section-oauth")).toBeVisible();
+    await expect(page.getByTestId("settings-section-api-tokens")).toBeVisible();
   });
 
-  test("all sections are scrollable on one page", async ({ page }) => {
+  test("keyboard task selection preserves the unsaved profile draft", async ({ page }) => {
     await loginAsAdmin(page);
     await page.waitForLoadState("domcontentloaded");
 
@@ -36,15 +42,24 @@ test.describe("Settings Page — Flat Layout", () => {
     await page.waitForLoadState("domcontentloaded");
     await page.waitForSelector('h1:has-text("Settings")');
 
-    // Scroll to bottom sections
+    const name = page.getByTestId("profile-name-input");
+    await name.fill("Unsaved tab draft");
+    await page.getByTestId("settings-nav-account").focus();
+    await page.keyboard.press("ArrowRight");
+    await expect(page.getByTestId("settings-nav-security")).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
     const sessionsSection = page.getByTestId("settings-section-sessions");
     await sessionsSection.scrollIntoViewIfNeeded();
     await expect(sessionsSection).toBeVisible();
 
-    // Scroll back to profile
+    await page.getByTestId("settings-nav-security").focus();
+    await page.keyboard.press("Home");
     const profileSection = page.getByTestId("settings-section-profile");
     await profileSection.scrollIntoViewIfNeeded();
     await expect(profileSection).toBeVisible();
+    await expect(name).toHaveValue("Unsaved tab draft");
   });
 
   test("notification settings render inside the Telegram channel card", async ({ page }) => {
@@ -56,6 +71,7 @@ test.describe("Settings Page — Flat Layout", () => {
     await page.waitForSelector('h1:has-text("Settings")');
 
     const dynamicSection = page.getByTestId("settings-section-dynamic");
+    await page.getByTestId("settings-nav-notifications").click();
     await expect(dynamicSection).toBeVisible({ timeout: 5000 });
     await dynamicSection.scrollIntoViewIfNeeded();
     const channel = page.getByTestId("communication-channel-telegram");
@@ -89,6 +105,7 @@ test.describe("Settings Page — Flat Layout", () => {
       await loginAsAdmin(page);
       await page.goto(`${BASE_URL}/settings?lang=${lang}`);
       const section = page.getByTestId("settings-section-dynamic");
+      await page.getByTestId("settings-nav-notifications").click();
       await expect(section).toBeVisible({ timeout: 5000 });
 
       await expect(page.getByTestId("telegram-guide-open")).toHaveText(tour);
@@ -100,7 +117,7 @@ test.describe("Settings Page — Flat Layout", () => {
 
   test("the sessions list carries its title inside its own card", async ({ page }) => {
     await loginAsAdmin(page);
-    await page.goto(`${BASE_URL}/settings?lang=en`);
+    await page.goto(`${BASE_URL}/settings?lang=en#security`);
     const sessions = page.getByTestId("settings-section-sessions");
     await expect(
       sessions.getByRole("heading", { name: "Active Sessions", level: 3 }),
@@ -122,6 +139,7 @@ test.describe("Settings Page — Flat Layout", () => {
     await page.waitForSelector('h1:has-text("Settings")');
 
     const dynamicSection = page.getByTestId("settings-section-dynamic");
+    await page.getByTestId("settings-nav-notifications").click();
     await expect(dynamicSection).toBeVisible({ timeout: 5000 });
     await dynamicSection.scrollIntoViewIfNeeded();
     const botTokenInput = page.locator(
@@ -142,6 +160,7 @@ test.describe("Settings Page — Flat Layout", () => {
     await page.goto(`${BASE_URL}/settings?lang=en`);
 
     const dynamicSection = page.getByTestId("settings-section-dynamic");
+    await page.getByTestId("settings-nav-notifications").click();
     await expect(dynamicSection).toBeVisible({ timeout: 5000 });
     await dynamicSection.scrollIntoViewIfNeeded();
 

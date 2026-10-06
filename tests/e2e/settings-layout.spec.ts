@@ -1,6 +1,6 @@
 /**
- * The Settings page's structure as a reader meets it: seven sections, always mounted, reached from
- * the in-page navigation; a deep link that lands on its section once the data has loaded; help and
+ * The Settings page's task tabs retain the sections they select; a legacy deep link reveals its
+ * section once the data has loaded; help and
  * tutorials that open with words in the reader's language; and the codespace auto-pause preference
  * saved through the settings API.
  */
@@ -20,6 +20,15 @@ const SECTIONS = [
   ["api-tokens", "settings-section-api-tokens"],
   ["preferences", "settings-section-preferences"],
 ] as const;
+const TAB_FOR_SECTION: Record<string, string> = {
+  account: "account",
+  security: "security",
+  notifications: "notifications",
+  "integrations-github": "development",
+  "connected-apps": "access",
+  "api-tokens": "access",
+  preferences: "preferences",
+};
 
 async function openSettings(page: Page, suffix = "") {
   await page.goto(`${BASE_URL}/settings${suffix}`);
@@ -27,7 +36,7 @@ async function openSettings(page: Page, suffix = "") {
 }
 
 test.describe("Settings page structure", () => {
-  test("all seven sections are mounted and each is reached from the navigation", async ({
+  test("six task tabs retain every settings section and reveal the chosen task", async ({
     page,
   }) => {
     await loginAsAdmin(page);
@@ -36,13 +45,18 @@ test.describe("Settings page structure", () => {
     for (const [, testId] of SECTIONS) {
       await expect(page.getByTestId(testId)).toBeAttached();
     }
+    await expect(page.getByTestId("settings-nav").getByRole("tab")).toHaveCount(6);
     // Picking a section brings that section into view and marks it as the one being read.
     for (const [id, testId] of [...SECTIONS].reverse()) {
-      await page.getByTestId(`settings-nav-${id}`).click();
+      const tab = TAB_FOR_SECTION[id];
+      await page.getByTestId(`settings-nav-${tab}`).click();
+      if (id === "integrations-github")
+        await page.getByRole("tab", { name: "GitHub connection", exact: true }).click();
+      await page.getByTestId(testId).scrollIntoViewIfNeeded();
       await expect(page.getByTestId(testId)).toBeInViewport();
-      await expect(page.getByTestId(`settings-nav-${id}`)).toHaveAttribute(
-        "aria-current",
-        "location",
+      await expect(page.getByTestId(`settings-nav-${tab}`)).toHaveAttribute(
+        "aria-selected",
+        "true",
       );
     }
   });
@@ -52,7 +66,7 @@ test.describe("Settings page structure", () => {
   }) => {
     await loginAsAdmin(page);
     await page.goto(`${BASE_URL}/settings?lang=en#integrations-github`);
-    const github = page.getByTestId("settings-section-integrations");
+    const github = page.locator("#integrations-github");
     await expect(github).toHaveAttribute("data-highlighted", "true");
     await expect(github).toBeInViewport();
     // The look-alike this rejects: the anchor present but the page still at its top.
@@ -60,20 +74,21 @@ test.describe("Settings page structure", () => {
     await expect(page.getByTestId("github-codespace-settings")).toBeInViewport();
   });
 
-  test("narrow screens reach sections through the chip row", async ({ page }) => {
+  test("narrow screens select accessible tabs without widening the page", async ({ page }) => {
     await loginAsAdmin(page);
     await page.setViewportSize({ width: 390, height: 844 });
     await openSettings(page, "?lang=en");
-    await expect(page.getByTestId("settings-nav")).toBeHidden();
+    await expect(page.getByTestId("settings-nav")).toBeVisible();
     // The chip row scrolls on its own; it must not widen the page past the screen.
     const overflow = await page.evaluate(() => {
       const main = document.querySelector<HTMLElement>("main#main-content")!;
       return main.scrollWidth - main.clientWidth;
     });
     expect(overflow).toBeLessThanOrEqual(0);
-    await page.getByTestId("settings-nav-chip-api-tokens").click();
+    await page.getByTestId("settings-nav-access").click();
+    await page.getByTestId("settings-section-api-tokens").scrollIntoViewIfNeeded();
     await expect(page.getByTestId("settings-section-api-tokens")).toBeInViewport();
-    await expect(page.getByTestId("settings-nav-chips")).toBeInViewport();
+    await expect(page.getByTestId("settings-nav")).toBeInViewport();
   });
 
   for (const [lang, helpTitle, tourTitle, tourStep] of [
@@ -83,6 +98,7 @@ test.describe("Settings page structure", () => {
     test(`help and the page tour open with localized words (${lang})`, async ({ page }) => {
       await loginAsAdmin(page);
       await openSettings(page, `?lang=${lang}`);
+      await page.getByTestId("settings-nav-access").click();
 
       await page.getByTestId("api-tokens-help").click();
       await expect(page.getByTestId("api-tokens-help-content")).toContainText(helpTitle);
@@ -113,7 +129,7 @@ test.describe("Settings page structure", () => {
 
   test("the GitHub setup guide walks the section's cards", async ({ page }) => {
     await loginAsAdmin(page);
-    await openSettings(page, "?lang=en");
+    await openSettings(page, "?lang=en#integrations-github");
     await page.getByTestId("github-guide-open").click();
     await expect(page.getByTestId("guide-card")).toContainText("Three steps to connect");
     await expect(page.getByTestId("guide-spotlight")).toHaveAttribute(
@@ -129,6 +145,7 @@ test.describe("Codespace auto-pause preference", () => {
   }) => {
     await loginAsAdmin(page);
     await openSettings(page, "?lang=en#integrations-github");
+    await page.getByRole("tab", { name: "Environments", exact: true }).click();
     const card = page.getByTestId("codespace-auto-pause");
     await card.scrollIntoViewIfNeeded();
     await expect(card).toContainText("Only agent activity through Moira counts");

@@ -126,6 +126,7 @@ export async function approveRepository(
     private: boolean;
     allowPush: boolean;
     allowDelete: boolean;
+    allowPullRequests?: boolean;
     domains?: string[];
   },
 ) {

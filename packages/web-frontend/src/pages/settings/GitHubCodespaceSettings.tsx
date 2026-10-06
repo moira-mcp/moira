@@ -24,7 +24,9 @@ function statusVariant(
   return "secondary";
 }
 
-export const GitHubCodespaceSettings: React.FC = () => {
+export const GitHubCodespaceSettings: React.FC<{ onConsumeOutcome?: (url: string) => void }> = ({
+  onConsumeOutcome,
+}) => {
   const { t } = useTranslation();
   const {
     connection: status,
@@ -61,9 +63,11 @@ export const GitHubCodespaceSettings: React.FC = () => {
         toast.warning(message);
       else toast.error(message);
       url.searchParams.delete("github");
-      window.history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
+      const next = `${url.pathname}${url.search}${url.hash}`;
+      if (onConsumeOutcome) onConsumeOutcome(next);
+      else window.history.replaceState(window.history.state, "", next);
     }
-  }, [t]);
+  }, [t, onConsumeOutcome]);
 
   const disconnect = async () => {
     try {

@@ -216,7 +216,7 @@ test("codespaces are created, stopped and deleted with confirmation from Setting
     await route.fulfill({ status: 404, json: { success: false } });
   });
 
-  await page.goto(`${baseUrl}/settings?lang=en#integrations-github`);
+  await page.goto(`${baseUrl}/settings?lang=en#development-environments`);
   const management = page.getByTestId("github-codespace-management");
   await management.scrollIntoViewIfNeeded();
   await expect(page.getByTestId("github-codespace-instance-state")).toHaveText("Ready");
@@ -332,7 +332,7 @@ test("a failed codespace request is explained in Russian, for a known and an unk
     });
   });
 
-  await page.goto(`${baseUrl}/settings?lang=ru#integrations-github`);
+  await page.goto(`${baseUrl}/settings?lang=ru#development-environments`);
   await page.getByTestId("github-codespace-ref").fill("feature/probe");
 
   await page.getByTestId("github-codespace-create-submit").click();
@@ -390,7 +390,7 @@ test("a codespace the server finished disappears from the card", async ({ page }
     await route.fulfill({ status: 404, json: { success: false } });
   });
 
-  await page.goto(`${baseUrl}/settings?lang=en#integrations-github`);
+  await page.goto(`${baseUrl}/settings?lang=en#development-environments`);
   const management = page.getByTestId("github-codespace-management");
   await management.scrollIntoViewIfNeeded();
   await expect(page.getByTestId(`github-codespace-state-${CODESPACE_ID}`)).toBeVisible();
@@ -428,7 +428,7 @@ test("disabled and administrator-stopped instances explain themselves in both la
       },
     }),
   );
-  await page.goto(`${baseUrl}/settings?lang=en#integrations-github`);
+  await page.goto(`${baseUrl}/settings?lang=en#development-environments`);
   await expect(page.getByTestId("github-codespace-management")).toContainText(
     "An administrator must configure the GitHub App",
   );
@@ -436,7 +436,7 @@ test("disabled and administrator-stopped instances explain themselves in both la
   await expect(page.getByTestId("github-codespace-empty")).toBeVisible();
 
   state = { ...readiness, state: "control_disabled", reason: "global" };
-  await page.goto(`${baseUrl}/settings?lang=ru#integrations-github`);
+  await page.goto(`${baseUrl}/settings?lang=ru#development-environments`);
   await expect(page.getByTestId("github-codespace-instance-state")).toHaveText(
     "Остановлено администратором",
   );

@@ -2,6 +2,7 @@ import { describe, expect, it, jest } from "@jest/globals";
 import { z } from "zod";
 import {
   CodespaceConnectionError,
+  LocalDeviceError,
   CodespaceResourceError,
   evaluateCodespaceResourcePolicy,
   projectCodespaceLimits,
@@ -286,6 +287,141 @@ function data(result: Awaited<ReturnType<typeof executeCodespaceTool>>) {
 }
 
 describe("codespace MCP adapter", () => {
+  it("publishes and accepts the same Unicode PR branches as Git", () => {
+    const input = {
+      action: "pull_request_create",
+      codespace_id: CODESPACE_ID,
+      head: "feat/игра",
+      base: "релиз",
+      title: "Игра",
+    };
+    expect(codespaceSchema.safeParse(input).success).toBe(true);
+    expect(parseCodespaceToolParams(input)).toMatchObject({
+      action: "pull_request_create",
+      request: { head: "feat/игра", base: "релиз" },
+    });
+    expect(
+      parseCodespaceToolParams({
+        action: "pull_request_find",
+        codespace_id: CODESPACE_ID,
+        head: "feat/игра",
+        base: "релиз",
+      }),
+    ).toMatchObject({ action: "pull_request_find", request: { head: "feat/игра", base: "релиз" } });
+  });
+  it("creates and reads pull requests through the selected codespace without host access", async () => {
+    let saved: {
+      number: number;
+      url: string;
+      title: string;
+      head: string;
+      base: string;
+      draft: boolean;
+      body: string;
+    } | null = null;
+    const selected = services({ provider: "local-sandboxes" });
+    const dependencies = services({
+      select: () => selected,
+      github: {
+        createOwnedPullRequest: async (userId, id, input) => {
+          if (userId !== USER_ID || id !== CODESPACE_ID)
+            throw new LocalDeviceError("LOCAL_UNAUTHORIZED", "Denied");
+          saved = {
+            number: 7,
+            url: "https://github.com/owner/repository/pull/7",
+            ...input,
+            body: input.body ?? "",
+            draft: input.draft ?? false,
+          };
+          return saved;
+        },
+        getOwnedPullRequest: async (userId, id, number) => {
+          if (userId !== USER_ID || id !== CODESPACE_ID || number !== saved?.number)
+            throw new LocalDeviceError("LOCAL_UNAUTHORIZED", "Denied");
+          return saved;
+        },
+        findOwnedPullRequests: async (userId, id, input) => {
+          if (userId !== USER_ID || id !== CODESPACE_ID)
+            throw new LocalDeviceError("LOCAL_UNAUTHORIZED", "Denied");
+          return saved && saved.head === input.head && saved.base === input.base ? [saved] : [];
+        },
+      },
+    });
+    const created = await executeCodespaceTool(
+      parseCodespaceToolParams({
+        action: "pull_request_create",
+        codespace_id: CODESPACE_ID,
+        head: "feature/change",
+        base: "main",
+        title: "Change",
+      }),
+      USER_ID,
+      dependencies,
+    );
+    const read = await executeCodespaceTool(
+      parseCodespaceToolParams({
+        action: "pull_request_get",
+        codespace_id: CODESPACE_ID,
+        pull_request_number: 7,
+      }),
+      USER_ID,
+      dependencies,
+    );
+    expect(data(created)).toEqual({
+      pull_request: {
+        number: 7,
+        url: "https://github.com/owner/repository/pull/7",
+        head: "feature/change",
+        base: "main",
+        title: "Change",
+        body: "",
+        draft: false,
+      },
+    });
+    expect(data(read)).toEqual(data(created));
+    const found = await executeCodespaceTool(
+      parseCodespaceToolParams({
+        action: "pull_request_find",
+        codespace_id: CODESPACE_ID,
+        head: "feature/change",
+        base: "main",
+      }),
+      USER_ID,
+      dependencies,
+    );
+    expect(data(found)).toEqual({ pull_requests: [saved] });
+    const denied = await executeCodespaceTool(
+      parseCodespaceToolParams({
+        action: "pull_request_get",
+        codespace_id: OTHER_CODESPACE_ID,
+        pull_request_number: 7,
+      }),
+      USER_ID,
+      dependencies,
+    );
+    expect(denied).toMatchObject({
+      isError: true,
+      structuredContent: { error: { code: "LOCAL_UNAUTHORIZED", message: "Denied" } },
+    });
+  });
+  it.each([
+    {
+      action: "pull_request_create",
+      codespace_id: CODESPACE_ID,
+      head: "feature",
+      base: "main",
+      title: "Change",
+      url: "https://api.github.com/user",
+    },
+    {
+      action: "pull_request_get",
+      codespace_id: CODESPACE_ID,
+      pull_request_number: 7,
+      head: "feature",
+    },
+  ])("refuses mixed and arbitrary GitHub API fields", (input) => {
+    expect(() => parseCodespaceToolParams(input)).toThrow(CodespaceRequestInvalidError);
+  });
   it.each(["private-token", "x".repeat(10000), `${CODESPACE_ID}\nprivate-source`, 42, null])(
     "omits malformed identifiers from pre-validation logging (%#)",
     (identifier) => {

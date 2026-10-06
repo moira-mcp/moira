@@ -9,6 +9,11 @@ import {
 import { LocalRecords } from "./space-record.js";
 import { LocalRefusal, MAX_MESSAGE_BYTES, publicPolicy } from "./policy.js";
 import { LocalRpc, localEnvelopeSchema } from "./rpc.js";
+import {
+  localDeviceControlViewSchema,
+  type LocalDeviceControlView,
+} from "../../shared/src/codespaces/local-management-types.js";
+import { LocalWebControl } from "./web-control.js";
 
 const uuid = z.string().uuid();
 const deviceSecret = z.string().regex(/^[A-Za-z0-9_-]{43}$/);
@@ -33,6 +38,7 @@ const deviceSchema = z
     connectionId: uuid,
     status: z.enum(["pending", "active", "revoked"]),
     policy: localPublicPolicySchema,
+    control: localDeviceControlViewSchema.optional(),
   })
   .passthrough();
 const claimSchema = z
@@ -92,10 +98,119 @@ export function relayOrigin(value: string): string {
 
 export class LocalRelay {
   private established?: Connection;
+  private readonly transportFailures = new WeakSet<object>();
+  isUnavailable(error: unknown): boolean {
+    return (
+      (error instanceof LocalRefusal && error.code === "LOCAL_RELAY_UNAVAILABLE") ||
+      (typeof error === "object" && error !== null && this.transportFailures.has(error))
+    );
+  }
+  control?: LocalDeviceControlView;
   constructor(
     readonly records: LocalRecords,
     private readonly fetch: typeof globalThis.fetch = globalThis.fetch,
   ) {}
+
+  async gitAuthority(
+    spaceId: string,
+    generation: number,
+    repositoryId: string,
+    signal?: AbortSignal,
+  ) {
+    const connection = await this.confirmed(signal);
+    const space = await this.records.get(spaceId);
+    if (
+      !space ||
+      space.generation !== generation ||
+      space.repositoryId !== repositoryId ||
+      !space.runtimeId ||
+      space.desiredState !== "running" ||
+      (space.phase !== "creating" && space.phase !== "usable")
+    )
+      throw new LocalRefusal(
+        "LOCAL_CREATE_UNKNOWN",
+        "Git requires the exact locally admitted space.",
+      );
+    const candidates = [];
+    for (const key of await this.records.state.keys("relay-space-")) {
+      const binding = await this.records.state.read(key, bindingSchema.parse);
+      if (
+        !binding ||
+        binding.repositoryId !== repositoryId ||
+        binding.createMarker !== space.operationMarker
+      )
+        continue;
+      if (
+        binding.deviceId !== connection.deviceId ||
+        binding.userId !== connection.userId ||
+        binding.deviceGeneration !== connection.deviceGeneration ||
+        binding.connectionId !== connection.connectionId
+      )
+        throw new LocalRefusal("LOCAL_IDENTITY_CHANGED", "Git resource authority changed.");
+      if (binding.localSpaceId !== null) {
+        if (binding.localSpaceId !== spaceId || binding.localGeneration !== generation)
+          throw new LocalRefusal("LOCAL_GENERATION_CONFLICT", "Git local generation changed.");
+      } else {
+        const intent = await this.records.state.read(
+          `relay-request-${binding.createRequestId}.json`,
+          intentSchema.parse,
+        );
+        const request = intent?.message.request;
+        if (
+          space.phase !== "creating" ||
+          !intent ||
+          intent.digest !== binding.createDigest ||
+          intent.resourceId !== binding.resourceId ||
+          intent.deviceGeneration !== binding.deviceGeneration ||
+          intent.connectionId !== binding.connectionId ||
+          intent.serverGeneration !== binding.serverGeneration ||
+          intent.message.expiresAt <= Date.now() ||
+          request?.action !== "create" ||
+          request.repositoryId !== repositoryId ||
+          request.operationMarker !== space.operationMarker
+        )
+          throw new LocalRefusal(
+            "LOCAL_CREATE_UNKNOWN",
+            "Initial Git requires our retained live creation intent.",
+          );
+      }
+      candidates.push(binding);
+    }
+    if (candidates.length !== 1)
+      throw new LocalRefusal("LOCAL_CREATE_UNKNOWN", "Git has no unique server resource binding.");
+    signal?.throwIfAborted();
+    return {
+      origin: connection.origin,
+      credential: connection.credential,
+      resourceId: candidates[0].resourceId,
+      resourceGeneration: candidates[0].serverGeneration,
+    };
+  }
+
+  async gitIdentity(
+    spaceId: string,
+    generation: number,
+    repositoryId: string,
+    signal?: AbortSignal,
+  ) {
+    const authority = await this.gitAuthority(spaceId, generation, repositoryId, signal);
+    const connection = await this.records.state.read("connection.json", connectionSchema.parse);
+    if (!connection) throw new LocalRefusal("LOCAL_NOT_ENROLLED", "Pair this device first.");
+    const bytes = await this.request(
+      connection,
+      `/github/${authority.resourceId}/${authority.resourceGeneration}/identity`,
+      { limit: 8192, signal },
+    );
+    return z
+      .object({
+        success: z.literal(true),
+        data: z
+          .object({ name: z.string().min(1).max(200), email: z.string().email().max(254) })
+          .strict(),
+      })
+      .passthrough()
+      .parse(JSON.parse(bytes.toString("utf8"))).data;
+  }
 
   private async request(
     connection: Connection,
@@ -129,11 +244,59 @@ export class LocalRelay {
               : JSON.stringify(options.body)
             : Buffer.from(options.binary),
       },
-    );
+    ).catch((error: unknown) => {
+      if (!options.signal?.aborted && typeof error === "object" && error !== null)
+        this.transportFailures.add(error);
+      throw error;
+    });
     if (!response.ok) {
+      if (/^\/github\/[a-f0-9-]{36}\/\d+\/identity$/.test(path)) {
+        const reader = response.body?.getReader();
+        const chunks: Uint8Array[] = [];
+        let size = 0;
+        if (reader)
+          try {
+            for (;;) {
+              const item = await reader.read();
+              if (item.done) break;
+              size += item.value.length;
+              if (size > 8192) break;
+              chunks.push(item.value);
+            }
+          } finally {
+            await reader.cancel();
+            reader.releaseLock();
+          }
+        if (size <= 8192)
+          try {
+            const refusal = z
+              .object({
+                success: z.literal(false),
+                error: z
+                  .object({
+                    code: z.literal("LOCAL_UNAUTHORIZED"),
+                    message: z.enum([
+                      "Refresh GitHub repository access in Settings.",
+                      "Add this repository to the Moira GitHub App installation in Settings.",
+                      "Reconnect GitHub to restore the verified commit identity.",
+                    ]),
+                  })
+                  .strict(),
+              })
+              .strict()
+              .parse(JSON.parse(Buffer.concat(chunks).toString("utf8")));
+            throw new LocalRefusal(refusal.error.code, refusal.error.message);
+          } catch (error) {
+            if (error instanceof LocalRefusal) throw error;
+          }
+      }
       await response.body?.cancel();
       throw new LocalRefusal(
-        response.status === 401 ? "LOCAL_UNAUTHORIZED" : "LOCAL_RELAY_REFUSED",
+        response.status === 401
+          ? "LOCAL_UNAUTHORIZED"
+          : response.status >= 500
+            ? "LOCAL_RELAY_UNAVAILABLE"
+            : "LOCAL_RELAY_REFUSED",
         "Moira refused the current local connection or relay claim.",
       );
     }
@@ -269,8 +432,14 @@ export class LocalRelay {
       delete connection.pairingToken;
       await this.records.state.write("connection.json", connection);
     }
+    const control = await new LocalWebControl(this.records).report(connection);
     const device = deviceSchema.parse(
-      await this.json(connection, "/heartbeat", { policy: publicPolicy(policy) }, signal),
+      await this.json(
+        connection,
+        "/heartbeat",
+        { policy: publicPolicy(policy), ...(control ? { control } : {}) },
+        signal,
+      ),
     );
     if (
       device.status !== "active" ||
@@ -303,6 +472,7 @@ export class LocalRelay {
         "The locally pinned relay connection changed during this run.",
       );
     this.established = { ...connection };
+    this.control = device.control;
     return connection;
   }
 

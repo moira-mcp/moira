@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { DataRegion } from "@/components/DataRegion";
 import { useResource } from "@/hooks/useResource";
+import { useRefreshOnActivation } from "@/components/settings/useRefreshOnActivation";
 import { EmptyState } from "@/components/empty-state";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -49,13 +50,14 @@ interface ApiToken {
 
 type ExpirationOption = "30d" | "90d" | "365d" | "never";
 
-export const ApiTokensSettings: React.FC = () => {
+export const ApiTokensSettings: React.FC<{ active?: boolean }> = ({ active = true }) => {
   const { t, i18n } = useTranslation();
 
   const resource = useResource<{ tokens: ApiToken[] }>("user-api-tokens", () =>
     apiClient.getApiTokens(),
   );
   const tokens = resource.data?.tokens ?? [];
+  useRefreshOnActivation(active, resource.refresh);
   const [revoking, setRevoking] = useState<string | null>(null);
   const [revokeTarget, setRevokeTarget] = useState<string | null>(null);
 
