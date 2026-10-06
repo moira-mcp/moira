@@ -9,6 +9,7 @@ import { join } from "node:path";
 import {
   CodespaceFileService,
   CodespaceOperationRepository,
+  CodespaceOperationService,
   CodespaceResourceRepository,
   CodespaceTransferRepository,
   CodespaceTransferService,
@@ -675,17 +676,21 @@ describe("durable codespace file operations", () => {
       "user-1",
       "codespace-1",
       (value: ReturnType<typeof fixture>): void => {
-        value.repository.reserve({
-          userId: "user-1",
-          resourceId: "codespace-1",
-          kind: "exec",
-          inputBytes: 0,
-          stdoutLimitBytes: 16,
-          stderrLimitBytes: 16,
-          deadlineAt: now + 30_000,
-          policy,
-          now,
-        });
+        for (let index = 0; index < policy.maxConcurrentOperationsPerUser!; index++) {
+          expect(
+            value.repository.reserve({
+              userId: "user-1",
+              resourceId: "codespace-1",
+              kind: "exec",
+              inputBytes: 0,
+              stdoutLimitBytes: 16,
+              stderrLimitBytes: 16,
+              deadlineAt: now + 30_000,
+              policy,
+              now,
+            }).outcome,
+          ).toBe("reserved");
+        }
       },
       "input.bin",
     ],
@@ -1072,32 +1077,137 @@ describe("durable codespace file operations", () => {
     }
   });
 
-  test("rejects a mutating file operation while the same codespace has active work", async () => {
-    const value = fixture();
-    try {
-      value.repository.reserve({
-        userId: "user-1",
-        resourceId: "codespace-1",
-        kind: "exec",
-        inputBytes: 0,
-        stdoutLimitBytes: 10,
-        stderrLimitBytes: 10,
-        deadlineAt: now + 10_000,
-        policy,
-        now,
-      });
-      await expect(
-        value.service.execute("user-1", "codespace-1", {
-          action: "write",
-          path: "file.txt",
-          bytes: Buffer.from("new"),
-          expected: { exists: false },
-        }),
-      ).rejects.toMatchObject({ code: "CODESPACE_OPERATION_BUSY" });
-      expect(value.credentials.getCredential).not.toHaveBeenCalled();
-      expect(value.transport.executeCalls).not.toHaveBeenCalled();
-    } finally {
-      value.sqlite.close();
-    }
-  });
+  test.each(["write", "upload", "apply_patch"] as const)(
+    "serializes file mutations behind %s without excluding reads or commands",
+    (activeKind) => {
+      const value = fixture();
+      const reserve = (kind: "write" | "upload" | "apply_patch" | "read" | "exec" | "stat") =>
+        value.repository.reserve({
+          userId: "user-1",
+          resourceId: "codespace-1",
+          kind,
+          inputBytes: 0,
+          stdoutLimitBytes: 0,
+          stderrLimitBytes: 0,
+          deadlineAt: now + 30_000,
+          policy,
+          now,
+        });
+      try {
+        const active = reserve(activeKind);
+        expect(active.outcome).toBe("reserved");
+        expect(
+          value.repository.beginDispatch(
+            "user-1",
+            active.operation!.id,
+            1,
+            "file-claim",
+            now + 1000,
+            now,
+          ),
+        ).toBe(true);
+        expect(value.repository.markRunning("user-1", active.operation!.id, 1, now)).toBe(true);
+        for (const nextKind of ["write", "upload", "apply_patch"] as const) {
+          expect(reserve(nextKind).outcome).toBe("busy");
+        }
+        const read = reserve("read");
+        expect(read.outcome).toBe("reserved");
+        expect(reserve("stat").outcome).toBe("busy");
+        expect(value.repository.cancelBeforeDispatch("user-1", read.operation!.id, now)).toBe(true);
+        expect(reserve("exec").outcome).toBe("reserved");
+        expect(reserve("stat").outcome).toBe("busy");
+        expect(value.repository.countActiveForUser("user-1")).toBe(2);
+      } finally {
+        value.sqlite.close();
+      }
+    },
+  );
+
+  test.each(["write", "upload", "apply_patch"] as const)(
+    "admits %s beside a background command while retaining file preconditions and shared ceilings",
+    async (action) => {
+      const value = fixture();
+      try {
+        const operations = new CodespaceOperationService({
+          repository: value.repository,
+          credentials: value.credentials,
+          policy: () => policy,
+          now: () => now,
+          transport: {
+            health: async () => ({ ok: true, reason: null }),
+            execute: async () => ({ state: "running" }),
+            inspect: async () => ({ state: "running" }),
+            cancel: async () => ({ state: "running" }),
+            finalize: async () => {},
+            readOutput: async () => ({ state: "absent" }),
+          },
+        });
+        const background = await operations.execute("user-1", "codespace-1", {
+          argv: ["npm", "run", "dev"],
+          background: true,
+          stdin: { kind: "inline", bytes: new Uint8Array() },
+        });
+        expect(background.operation.state).toBe("running");
+        const expected = { exists: true, size: 3, sha256: "a".repeat(64) };
+        const current = { size: 3, sha256: "b".repeat(64), modifiedAt: now };
+        const request =
+          action === "apply_patch"
+            ? {
+                action,
+                files: [
+                  {
+                    path: "file.txt",
+                    expected,
+                    edits: [{ start: 0, end: 3, bytes: Buffer.from("new") }],
+                  },
+                ],
+              }
+            : { action, path: "file.txt", bytes: Buffer.from("new"), expected };
+        value.transport.executeFile = async (...args) => {
+          expect(value.repository.countActiveForUser("user-1")).toBe(2);
+          expect(
+            value.repository.reserve({
+              userId: "user-1",
+              resourceId: "codespace-1",
+              kind: "stat",
+              inputBytes: 0,
+              stdoutLimitBytes: 0,
+              stderrLimitBytes: 0,
+              deadlineAt: now + 30_000,
+              policy,
+              now,
+            }).outcome,
+          ).toBe("busy");
+          expect(args[3]).toEqual(request);
+          return action === "apply_patch"
+            ? {
+                action,
+                files: [{ path: "file.txt", previous: current, current }],
+                summary: {
+                  filesChanged: 1,
+                  editsApplied: 1,
+                  insertedBytes: 3,
+                  deletedBytes: 3,
+                  entries: [],
+                  truncated: false,
+                },
+              }
+            : { action, path: "file.txt", previous: current, current };
+        };
+        const result = await value.service.execute("user-1", "codespace-1", request);
+        expect(result.operation.state).toBe("succeeded");
+        expect(operations.get("user-1", background.operation.id)?.state).toBe("running");
+        expect(value.repository.countActiveForUser("user-1")).toBe(1);
+        value.transport.result = { action, state: "failed", code: "CODESPACE_FILE_REJECTED" };
+        value.transport.executeFile = FakeFileTransport.prototype.executeFile;
+        const stale = await value.service.execute("user-1", "codespace-1", request);
+        expect(stale.operation.state).toBe("failed");
+        expect(stale.result).toEqual({ action, state: "failed", code: "CODESPACE_FILE_REJECTED" });
+        expect(value.transport.lastRequest).toEqual(request);
+        expect(value.repository.countActiveForUser("user-1")).toBe(1);
+      } finally {
+        value.sqlite.close();
+      }
+    },
+  );
 });

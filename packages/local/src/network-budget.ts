@@ -18,6 +18,15 @@ export class NetworkBudget {
     return result;
   }
 
+  /** The broker fences admission before waiting for its final reservation releases. */
+  async settle(): Promise<void> {
+    let pending: Promise<unknown>;
+    do {
+      pending = this.tail;
+      await pending;
+    } while (pending !== this.tail);
+  }
+
   async reserve(
     policy: LocalPolicy,
   ): Promise<{ maximumBytes: number; release: (used: number) => Promise<void> }> {

@@ -4,9 +4,11 @@ import { pathToFileURL } from "node:url";
 import { BROKER_PREFACE } from "./broker-tunnel.js";
 
 /** Built as a separate guest asset. The host reads its bytes, never imports or runs this entry. */
-export async function serveGuestProxy(hostPort: number, guestPort = 3437) {
+export async function serveGuestProxy(hostPort: number, authorization: string, guestPort = 3437) {
   if (!Number.isSafeInteger(hostPort) || hostPort < 1024 || hostPort > 65535)
     throw new Error("Invalid broker port");
+  if (!/^Basic [A-Za-z0-9+/]+={0,2}$/.test(authorization) || authorization.length >= 512)
+    throw new Error("Invalid installed broker authorization");
   const peers = new Set<Socket>();
   const tunnel = (ready: (error: Error | null, socket?: Socket) => void) => {
     const socket = connect({ host: "host.docker.internal", port: hostPort });
@@ -30,7 +32,11 @@ export async function serveGuestProxy(hostPort: number, guestPort = 3437) {
           method: request.method,
           path: request.url,
           host: "moira-local",
-          headers: { ...request.headers, connection: "close" },
+          headers: {
+            ...request.headers,
+            ...(request.url?.startsWith("http://") ? { "proxy-authorization": authorization } : {}),
+            connection: "close",
+          },
           createConnection: (_options, ready) => {
             tunnel((error, socket) => ready(error, socket!));
             return undefined;
@@ -53,12 +59,7 @@ export async function serveGuestProxy(hostPort: number, guestPort = 3437) {
   );
   server.on("connect", (request, client, head) => {
     const target = request.url ?? "";
-    const credential = request.headers["proxy-authorization"];
-    if (
-      !/^[a-z0-9.-]+:443$/.test(target) ||
-      typeof credential !== "string" ||
-      credential.length > 512
-    ) {
+    if (!/^[a-z0-9.-]+:443$/.test(target) || request.headers.origin) {
       client.end("HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n");
       return;
     }
@@ -69,7 +70,7 @@ export async function serveGuestProxy(hostPort: number, guestPort = 3437) {
         return;
       }
       upstream.write(
-        `CONNECT ${target} HTTP/1.1\r\nHost: ${target}\r\nProxy-Authorization: ${credential}\r\n\r\n`,
+        `CONNECT ${target} HTTP/1.1\r\nHost: ${target}\r\nProxy-Authorization: ${authorization}\r\n\r\n`,
       );
       if (head.length) upstream.write(head);
       client.once("close", () => upstream.destroy());
@@ -93,5 +94,7 @@ export async function serveGuestProxy(hostPort: number, guestPort = 3437) {
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  await serveGuestProxy(Number(process.argv[2]));
+  // This guest asset receives its fixed VM capability only from the local bootstrap child environment.
+  // eslint-disable-next-line no-restricted-syntax
+  await serveGuestProxy(Number(process.argv[2]), process.env.MOIRA_LOCAL_PROXY_AUTHORIZATION ?? "");
 }

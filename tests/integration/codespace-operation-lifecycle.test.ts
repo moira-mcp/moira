@@ -1428,6 +1428,117 @@ describe("durable direct codespace operations", () => {
     }
   });
 
+  test.each(["reserved", "running", "cancel_pending", "reconcile_pending"] as const)(
+    "a failed terminal cleanup cannot starve %s work",
+    async (state) => {
+      const value = fixture();
+      try {
+        const cleanup = await value.service.execute("user-1", "codespace-1", {
+          argv: ["true"],
+          stdin: { kind: "inline", bytes: new Uint8Array() },
+          timeoutMs: 1000,
+        });
+        value.advance(1);
+        const pending = value.repository.reserve({
+          userId: "user-1",
+          resourceId: "codespace-1",
+          inputBytes: 0,
+          stdoutLimitBytes: 1024,
+          stderrLimitBytes: 512,
+          deadlineAt: now + 1000,
+          policy,
+          now: now + 1,
+        });
+        expect(pending.outcome).toBe("reserved");
+        if (state !== "reserved") {
+          value.sqlite
+            .prepare(
+              "UPDATE codespaceOperation SET state=?,claimId=NULL,claimExpiresAt=NULL,deadlineAt=? WHERE id=?",
+            )
+            .run(state, now + 60_000, pending.operation!.id);
+        }
+        value.transport.throwFinalize = true;
+        value.transport.inspectResult = execResult({
+          state: "succeeded",
+          stdout: "observed",
+          stderr: "",
+          exitCode: 0,
+        });
+        value.transport.cancelResult = execResult({
+          state: "cancelled",
+          stdout: "",
+          stderr: "",
+          exitCode: null,
+        });
+        value.advance(policy.cleanupDeadlineMs + 1);
+        await expect(value.service.reconcileOnce("user-1")).resolves.toBe(true);
+        expect(value.repository.getOwned("user-1", cleanup.operation.id)).toMatchObject({
+          state: "succeeded",
+          remoteCleanupPending: 1,
+          lastOutcome: "remote_cleanup_required",
+        });
+        value.advance(1);
+        await expect(value.service.reconcileOnce("user-1")).resolves.toBe(true);
+        expect(value.repository.getOwned("user-1", pending.operation!.id)).toMatchObject({
+          state: state === "reserved" || state === "cancel_pending" ? "cancelled" : "succeeded",
+          claimId: null,
+        });
+        expect(value.repository.countActiveForUser("user-1")).toBe(0);
+        expect(value.transport.finalizeCalls).toHaveBeenCalledTimes(1);
+        expect(value.transport.inspectCalls).toHaveBeenCalledTimes(
+          state === "running" || state === "reconcile_pending" ? 1 : 0,
+        );
+        expect(value.transport.cancelCalls).toHaveBeenCalledTimes(
+          state === "cancel_pending" ? 1 : 0,
+        );
+        value.advance(1);
+        await expect(value.service.reconcileOnce("user-1")).resolves.toBe(true);
+        expect(value.transport.finalizeCalls).toHaveBeenCalledTimes(2);
+      } finally {
+        value.sqlite.close();
+      }
+    },
+  );
+
+  test("a stale claim cannot release or overwrite a replacement reconciliation claim", () => {
+    const value = fixture();
+    try {
+      const pending = value.repository.reserve({
+        userId: "user-1",
+        resourceId: "codespace-1",
+        inputBytes: 0,
+        stdoutLimitBytes: 0,
+        stderrLimitBytes: 0,
+        deadlineAt: now + 1000,
+        policy,
+        now,
+      });
+      const first = value.repository.claimDue("old-claim", now + 1000, now + 2000, "user-1");
+      expect(first?.id).toBe(pending.operation!.id);
+      expect(value.repository.claimDue("other-claim", now + 1001, now + 2001, "user-1")).toBeNull();
+      const next = value.repository.claimDue("new-claim", now + 2000, now + 3000, "user-1");
+      expect(next?.id).toBe(first!.id);
+      expect(value.repository.releaseClaim(first!.id, "old-claim", "stale", now + 2001)).toBe(
+        false,
+      );
+      expect(value.repository.getOwned("user-1", first!.id)).toMatchObject({
+        claimId: "new-claim",
+        claimExpiresAt: now + 3000,
+        updatedAt: now + 2000,
+      });
+      expect(value.repository.releaseClaim(first!.id, "new-claim", "observed", now + 2002)).toBe(
+        true,
+      );
+      expect(value.repository.getOwned("user-1", first!.id)).toMatchObject({
+        claimId: null,
+        claimExpiresAt: null,
+        lastOutcome: "observed",
+      });
+    } finally {
+      value.sqlite.close();
+    }
+  });
+
   test("returns the observed output when a concurrent reconcile completes the same operation first", async () => {
     const value = fixture();
     try {

@@ -18,6 +18,7 @@ export function gitBroker(
     response: ServerResponse,
     grant: BrokerGrant,
   ): Promise<void> => {
+    if (response.destroyed) return;
     const prefix = `/git/${grant.repository.fullName}.git/`;
     if (!request.url?.startsWith(prefix) || /[\\%\x00-\x20]/.test(request.url)) {
       response.writeHead(403, { connection: "close" }).end();
@@ -44,6 +45,10 @@ export function gitBroker(
       return;
     }
     const reservation = await budget.reserve(grant.policy);
+    if (response.destroyed) {
+      await reservation.release(0).catch(onFault);
+      return;
+    }
     let bytes = 0;
     let released = false;
     const release = () => {

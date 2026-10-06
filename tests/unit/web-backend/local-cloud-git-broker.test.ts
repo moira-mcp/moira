@@ -1,4 +1,4 @@
-import { describe, expect, it } from "@jest/globals";
+import { describe, expect, it, jest } from "@jest/globals";
 import { Readable, Writable } from "node:stream";
 import { finished } from "node:stream/promises";
 import type { IncomingMessage, ServerResponse, ClientRequest } from "node:http";
@@ -6,6 +6,8 @@ import type { request as httpsRequest } from "node:https";
 import { cloudGitBroker } from "../../../packages/local/src/cloud-git-broker.js";
 import type { NetworkBudget } from "../../../packages/local/src/network-budget.js";
 import type { BrokerGrant } from "../../../packages/local/src/broker.js";
+import { gitBroker } from "../../../packages/local/src/git-broker.js";
+import { httpBroker } from "../../../packages/local/src/http-broker.js";
 
 const grant: BrokerGrant = {
   spaceId: "owned-space",
@@ -48,6 +50,191 @@ function output() {
   return { response: response as unknown as ServerResponse, chunks, status: () => status };
 }
 describe("cloud Git broker", () => {
+  it("keeps its handler active until downstream shutdown closes HTTPS and refunds its reservation", async () => {
+    let enterClose!: () => void;
+    let finishClose!: () => void;
+    let enterRelease!: () => void;
+    let finishRelease!: () => void;
+    const closing = new Promise<void>((resolve) => {
+      enterClose = resolve;
+    });
+    const closeGate = new Promise<void>((resolve) => {
+      finishClose = resolve;
+    });
+    const releasing = new Promise<void>((resolve) => {
+      enterRelease = resolve;
+    });
+    const releaseGate = new Promise<void>((resolve) => {
+      finishRelease = resolve;
+    });
+    const release = jest.fn(async () => {
+      enterRelease();
+      await releaseGate;
+    });
+    const requestHttps = ((
+      _url: URL,
+      _options: unknown,
+      callback: (reply: IncomingMessage) => void,
+    ) => {
+      const upstream = new Writable({
+        autoDestroy: false,
+        write(_chunk, _encoding, done) {
+          done();
+        },
+        destroy(_error, done) {
+          enterClose();
+          void closeGate.then(() => done(null));
+        },
+      });
+      upstream.once("finish", () =>
+        callback(
+          Object.assign(Readable.from([Buffer.from("reply")]), {
+            statusCode: 200,
+            headers: {},
+          }) as unknown as IncomingMessage,
+        ),
+      );
+      return upstream as unknown as ClientRequest;
+    }) as typeof httpsRequest;
+    const broker = cloudGitBroker(
+      async () => ({
+        origin: "https://moira.example",
+        credential: "device-secret",
+        resourceId: "server-resource",
+        resourceGeneration: 4,
+      }),
+      { reserve: async () => ({ maximumBytes: 1024, release }) } as unknown as NetworkBudget,
+      () => {},
+      async () => {
+        throw Error("No fallback expected");
+      },
+      requestHttps,
+    );
+    const result = output();
+    let completed = false;
+    const work = broker(incoming("git-receive-pack"), result.response, grant).then(() => {
+      completed = true;
+    });
+    await Promise.all([closing, releasing]);
+    try {
+      expect(completed).toBe(false);
+      finishRelease();
+      await Promise.resolve();
+      expect(completed).toBe(false);
+    } finally {
+      finishRelease();
+      finishClose();
+      await work;
+    }
+    expect(release).toHaveBeenCalledTimes(1);
+    expect(completed).toBe(true);
+  });
+
+  it.each(["authority", "reservation"] as const)(
+    "does not open HTTPS when its downstream closes during %s",
+    async (phase) => {
+      let enter!: () => void;
+      let resume!: () => void;
+      const entered = new Promise<void>((resolve) => {
+        enter = resolve;
+      });
+      const gate = new Promise<void>((resolve) => {
+        resume = resolve;
+      });
+      const release = jest.fn(async () => {});
+      const reserve = jest.fn(async () => {
+        if (phase === "reservation") {
+          enter();
+          await gate;
+        }
+        return { maximumBytes: 1024, release };
+      });
+      const requestHttps = jest.fn(() => {
+        throw Error("Closed request reached HTTPS");
+      });
+      const broker = cloudGitBroker(
+        async () => {
+          if (phase === "authority") {
+            enter();
+            await gate;
+          }
+          return {
+            origin: "https://moira.example",
+            credential: "device-secret",
+            resourceId: "server-resource",
+            resourceGeneration: 4,
+          };
+        },
+        { reserve } as unknown as NetworkBudget,
+        () => {},
+        async () => {
+          throw Error("No fallback expected");
+        },
+        requestHttps as unknown as typeof httpsRequest,
+      );
+      const result = output();
+      const work = broker(incoming("git-receive-pack"), result.response, grant);
+      await entered;
+      result.response.destroy();
+      resume();
+      await work;
+      expect(requestHttps).not.toHaveBeenCalled();
+      expect(reserve).toHaveBeenCalledTimes(phase === "reservation" ? 1 : 0);
+      expect(release.mock.calls).toEqual(phase === "reservation" ? [[0]] : []);
+    },
+  );
+
+  it.each(["git", "http"] as const)(
+    "%s broker refunds a late reservation without resolving or opening its destination",
+    async (kind) => {
+      let enter!: () => void;
+      let resume!: () => void;
+      const entered = new Promise<void>((resolve) => {
+        enter = resolve;
+      });
+      const gate = new Promise<void>((resolve) => {
+        resume = resolve;
+      });
+      const release = jest.fn(async () => {});
+      const budget = {
+        reserve: async () => {
+          enter();
+          await gate;
+          return { maximumBytes: 1024, release };
+        },
+      } as unknown as NetworkBudget;
+      const resolve = jest.fn(async () => {
+        throw Error("Closed request reached DNS");
+      });
+      const requestHttps = jest.fn(() => {
+        throw Error("Closed request reached HTTPS");
+      });
+      const broker =
+        kind === "git"
+          ? gitBroker(budget, () => {}, resolve, requestHttps as unknown as typeof httpsRequest)
+          : httpBroker(budget, () => {}, resolve);
+      const result = output();
+      const request =
+        kind === "git"
+          ? incoming("git-receive-pack")
+          : Object.assign(incoming(""), {
+              url: "http://packages.example.com/package",
+              method: "GET",
+            });
+      const work = broker(request, result.response, {
+        ...grant,
+        gitCredential: "fixed-test-token",
+      });
+      await entered;
+      result.response.destroy();
+      resume();
+      await work;
+      expect(resolve).not.toHaveBeenCalled();
+      expect(requestHttps).not.toHaveBeenCalled();
+      expect(release.mock.calls).toEqual([[0]]);
+    },
+  );
+
   it("forwards raw pack bytes to the pinned relay and uses only the device credential", async () => {
     const forwarded: Buffer[] = [];
     let destination = "";

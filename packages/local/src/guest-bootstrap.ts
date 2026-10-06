@@ -141,6 +141,10 @@ export async function bootstrap(input: GuestBootstrap) {
   }
   await writeFile(proxyPath, input.proxySource, { mode: 0o600 });
   const proxy = spawn(process.execPath, [proxyPath, String(input.hostPort)], {
+    env: {
+      ...process.env,
+      MOIRA_LOCAL_PROXY_AUTHORIZATION: `Basic ${Buffer.from(`${input.spaceId}:${input.brokerToken}`).toString("base64")}`,
+    },
     detached: true,
     stdio: "ignore",
   });

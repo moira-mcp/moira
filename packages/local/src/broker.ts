@@ -34,6 +34,15 @@ function deny(socket: Duplex, status = "403 Forbidden"): void {
 export async function startBroker(options: BrokerOptions, port = 0) {
   const sockets = new Set<Socket>();
   const active = new Map<Duplex, string>();
+  const requests = new Set<Promise<unknown>>();
+  let shuttingDown = false;
+  const track = (work: Promise<unknown>): void => {
+    requests.add(work);
+    void work.then(
+      () => requests.delete(work),
+      () => requests.delete(work),
+    );
+  };
   const authorize = (request: IncomingMessage, proxy: boolean) => {
     const header = request.headers[proxy ? "proxy-authorization" : "authorization"];
     return typeof header === "string" && header.length < 512
@@ -43,40 +52,43 @@ export async function startBroker(options: BrokerOptions, port = 0) {
   const server = createServer(
     { maxHeaderSize: 8192, requestTimeout: 120_000, headersTimeout: 5000 },
     (request, response) => {
-      void (async () => {
-        const proxy = request.url?.startsWith("http://") ?? false;
-        const grant = await authorize(request, proxy);
-        if (
-          !grant &&
-          !request.headers.authorization &&
-          !request.headers.origin &&
-          request.url?.startsWith("/git/")
-        ) {
-          response.writeHead(401, {
-            "www-authenticate": 'Basic realm="Moira Local Git"',
-            connection: "close",
-          });
+      track(
+        (async () => {
+          const proxy = request.url?.startsWith("http://") ?? false;
+          const grant = await authorize(request, proxy);
+          if (shuttingDown || response.destroyed) return;
+          if (
+            !grant &&
+            !request.headers.authorization &&
+            !request.headers.origin &&
+            request.url?.startsWith("/git/")
+          ) {
+            response.writeHead(401, {
+              "www-authenticate": 'Basic realm="Moira Local Git"',
+              connection: "close",
+            });
+            response.end();
+            return;
+          }
+          if (!grant || request.headers.origin) {
+            response.writeHead(403, { connection: "close" });
+            response.end();
+            return;
+          }
+          // Fixed Git operations and approved public HTTP downloads have separate handlers.
+          if (proxy)
+            await httpBroker(options.budget, options.onFault, options.resolve)(
+              request,
+              response,
+              grant,
+            );
+          else await options.git(request, response, grant);
+        })().catch((error) => {
+          if (!response.headersSent) response.writeHead(502, { connection: "close" });
           response.end();
-          return;
-        }
-        if (!grant || request.headers.origin) {
-          response.writeHead(403, { connection: "close" });
-          response.end();
-          return;
-        }
-        // Fixed Git operations and approved public HTTP downloads have separate handlers.
-        if (proxy)
-          await httpBroker(options.budget, options.onFault, options.resolve)(
-            request,
-            response,
-            grant,
-          );
-        else await options.git(request, response, grant);
-      })().catch((error) => {
-        if (!response.headersSent) response.writeHead(502, { connection: "close" });
-        response.end();
-        if (!(error instanceof Error)) options.onFault(error);
-      });
+          if (!(error instanceof Error)) options.onFault(error);
+        }),
+      );
     },
   );
   server.keepAliveTimeout = 1000;
@@ -89,88 +101,95 @@ export async function startBroker(options: BrokerOptions, port = 0) {
   });
   server.on("clientError", (_error, socket) => deny(socket, "400 Bad Request"));
   server.on("connect", (request, client, head) => {
-    void (async () => {
-      const match = /^([a-z0-9.-]+):443$/.exec(request.url ?? "");
-      const grant = await authorize(request, true);
-      if (!match || !grant || request.headers.origin || head.length > 8192) {
-        deny(client);
-        return;
-      }
-      const reservation = await options.budget.reserve(grant.policy);
-      let used = 0;
-      let upstream: Socket | undefined;
-      let released = false;
-      const release = () => {
-        if (released) return;
-        released = true;
-        active.delete(client);
-        upstream?.destroy();
-        void reservation.release(used).catch(options.onFault);
-      };
-      client.once("close", release);
-      client.once("error", release);
-      const lifetime = setTimeout(
-        () => client.destroy(),
-        Math.max(1, Math.min(120_000, grant.policy.leaseUntil - Date.now())),
-      );
-      client.once("close", () => clearTimeout(lifetime));
-      const count = (chunk: Buffer) => {
-        used += chunk.length;
-        if (used > reservation.maximumBytes) client.destroy();
-      };
-      const credential = String(request.headers["proxy-authorization"]);
-      active.set(client, credential);
-      try {
-        const target = await resolvePublicTarget(
-          match[1],
-          grant.repository.domains,
-          options.resolve,
-        );
-        if (client.destroyed) {
+    track(
+      (async () => {
+        const match = /^([a-z0-9.-]+):443$/.exec(request.url ?? "");
+        const grant = await authorize(request, true);
+        if (shuttingDown || client.destroyed) return;
+        if (!match || !grant || request.headers.origin || head.length > 8192) {
+          deny(client);
+          return;
+        }
+        const reservation = await options.budget.reserve(grant.policy);
+        let used = 0;
+        let upstream: Socket | undefined;
+        let released = false;
+        const release = () => {
+          if (released) return;
+          released = true;
+          active.delete(client);
+          upstream?.destroy();
+          void reservation.release(used).catch(options.onFault);
+        };
+        if (shuttingDown || client.destroyed) {
           release();
           return;
         }
-        upstream = (
-          options.dial ??
-          ((peer, targetPort) =>
-            connect({ host: peer.address, port: targetPort, family: peer.family }))
-        )(target, 443);
-        let established = false;
-        upstream.setTimeout(15_000, () => client.destroy());
-        upstream.once("connect", () => {
-          if (!upstream || client.destroyed) {
+        client.once("close", release);
+        client.once("error", release);
+        const lifetime = setTimeout(
+          () => client.destroy(),
+          Math.max(1, Math.min(120_000, grant.policy.leaseUntil - Date.now())),
+        );
+        client.once("close", () => clearTimeout(lifetime));
+        const count = (chunk: Buffer) => {
+          used += chunk.length;
+          if (used > reservation.maximumBytes) client.destroy();
+        };
+        const credential = String(request.headers["proxy-authorization"]);
+        active.set(client, credential);
+        try {
+          const target = await resolvePublicTarget(
+            match[1],
+            grant.repository.domains,
+            options.resolve,
+          );
+          if (client.destroyed) {
             release();
             return;
           }
-          if (
-            upstream.remoteAddress !== target.address &&
-            upstream.remoteAddress !== `::ffff:${target.address}`
-          ) {
-            deny(client, "502 Bad Gateway");
+          upstream = (
+            options.dial ??
+            ((peer, targetPort) =>
+              connect({ host: peer.address, port: targetPort, family: peer.family }))
+          )(target, 443);
+          let established = false;
+          upstream.setTimeout(15_000, () => client.destroy());
+          upstream.once("connect", () => {
+            if (!upstream || client.destroyed) {
+              release();
+              return;
+            }
+            if (
+              upstream.remoteAddress !== target.address &&
+              upstream.remoteAddress !== `::ffff:${target.address}`
+            ) {
+              deny(client, "502 Bad Gateway");
+              release();
+              return;
+            }
+            established = true;
+            client.write("HTTP/1.1 200 Connection Established\r\n\r\n");
+            count(head);
+            if (client.destroyed) return;
+            if (head.length) upstream.write(head);
+            client.on("data", count);
+            upstream.on("data", count);
+            client.pipe(upstream);
+            upstream.pipe(client);
+          });
+          upstream.once("error", () => {
+            if (established) client.destroy();
+            else deny(client, "502 Bad Gateway");
             release();
-            return;
-          }
-          established = true;
-          client.write("HTTP/1.1 200 Connection Established\r\n\r\n");
-          count(head);
-          if (client.destroyed) return;
-          if (head.length) upstream.write(head);
-          client.on("data", count);
-          upstream.on("data", count);
-          client.pipe(upstream);
-          upstream.pipe(client);
-        });
-        upstream.once("error", () => {
-          if (established) client.destroy();
-          else deny(client, "502 Bad Gateway");
+          });
+          upstream.once("close", () => client.destroy());
+        } catch {
+          deny(client, "502 Bad Gateway");
           release();
-        });
-        upstream.once("close", () => client.destroy());
-      } catch {
-        deny(client, "502 Bad Gateway");
-        release();
-      }
-    })().catch(() => deny(client));
+        }
+      })().catch(() => deny(client)),
+    );
   });
   const sweep = setInterval(() => {
     for (const [socket, credential] of active) {
@@ -193,10 +212,24 @@ export async function startBroker(options: BrokerOptions, port = 0) {
   return {
     port: address.port,
     close: () =>
-      (closing ??= new Promise<void>((resolve, reject) => {
+      (closing ??= (async () => {
+        shuttingDown = true;
         clearInterval(sweep);
-        for (const socket of sockets) socket.destroy();
-        server.close((error) => (error ? reject(error) : resolve()));
-      })),
+        const closedSockets = Promise.all(
+          [...sockets].map(
+            (socket) =>
+              new Promise<void>((resolve) => {
+                socket.once("close", resolve);
+                socket.destroy();
+              }),
+          ),
+        );
+        const closedServer = new Promise<void>((resolve, reject) => {
+          server.close((error) => (error ? reject(error) : resolve()));
+        });
+        await Promise.all([closedSockets, closedServer]);
+        await Promise.allSettled([...requests]);
+        await options.budget.settle();
+      })()),
   };
 }

@@ -102,11 +102,14 @@ export class CodespaceOperationRepository {
       if (userCount >= limits.maxConcurrentPerUser || globalCount >= limits.maxConcurrentGlobal) {
         return { outcome: "busy" } as ReserveOperationResult;
       }
+      // Serialize cooperating file mutations for their staged atomic commits. Commands
+      // and reads can stay active while an agent edits through the file API.
       if (
         ["write", "apply_patch", "upload"].includes(input.kind ?? "exec") &&
         this.sqlite
           .prepare(
             `SELECT 1 FROM codespaceOperation WHERE resourceId = ?
+             AND kind IN ('write', 'apply_patch', 'upload')
              AND state IN (${activeSql}) LIMIT 1`,
           )
           .get(input.resourceId, ...ACTIVE_OPERATION_STATES)
@@ -635,6 +638,8 @@ export class CodespaceOperationRepository {
     userId?: string,
     providerId?: string,
   ): CodespaceOperationRecord | null {
+    // Every category shares the oldest-attempt order. Claiming/releasing stamps the
+    // attempt, so an unavailable terminal cleanup cannot starve active work or expiry.
     const transaction = this.sqlite.transaction(() => {
       const row = this.sqlite
         .prepare(
@@ -659,12 +664,7 @@ export class CodespaceOperationRepository {
              AND (? IS NULL OR operation.userId = ?)
              AND (? IS NULL OR operation.provider = ?)
              AND (claimExpiresAt IS NULL OR claimExpiresAt <= ?)
-           ORDER BY CASE WHEN state = 'reserved' THEN 0
-             WHEN remoteCleanupPending = 1
-               AND state IN ('succeeded', 'failed', 'cancelled', 'timed_out') THEN 0
-             WHEN state = 'cancel_pending' THEN 1 WHEN state = 'reconcile_pending' THEN 2
-             ELSE 3 END,
-                    updatedAt, id LIMIT 1`,
+           ORDER BY updatedAt, id LIMIT 1`,
         )
         .get(
           now,
