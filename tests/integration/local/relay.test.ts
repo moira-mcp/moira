@@ -1165,6 +1165,32 @@ describe("outbound companion authority and durable response replay", () => {
   );
   test("device revocation during an in-flight claim reaches the daemon without waiting for guest work", async () => {
     const local = await fixture();
+    // Observe the whole admitted delivery, including persistence after rpc.handle().
+    const delivery = local.relay as unknown as {
+      holdClaim(
+        connection: unknown,
+        claim: unknown,
+        work: (signal: AbortSignal) => Promise<void>,
+        signal?: AbortSignal,
+      ): Promise<void>;
+    };
+    const holdClaim = delivery.holdClaim.bind(local.relay);
+    let settled: Promise<void> | undefined;
+    jest.spyOn(delivery, "holdClaim").mockImplementation((connection, claim, execute, signal) =>
+      holdClaim(
+        connection,
+        claim,
+        (scope) => {
+          const executing = execute(scope);
+          settled = executing.then(
+            () => undefined,
+            () => undefined,
+          );
+          return executing;
+        },
+        signal,
+      ),
+    );
     let entered!: () => void, finish!: () => void;
     const admitted = new Promise<void>((done) => {
       entered = done;
@@ -1178,27 +1204,27 @@ describe("outbound companion authority and durable response replay", () => {
       return local.space;
     };
     jest.spyOn(local.manager, "open").mockResolvedValue(undefined);
-    const stop = jest.spyOn(local.manager, "stopWork").mockImplementation(async () => {
-      finish();
-    });
+    const stop = jest.spyOn(local.manager, "stopWork").mockResolvedValue(undefined);
     const close = jest.spyOn(local.manager, "close").mockResolvedValue(undefined);
     const daemon = new LocalDaemon(local.manager, local.relay, { report: () => {} });
     jest.useFakeTimers({ doNotFake: ["nextTick", "setImmediate"] });
-    const work = daemon.cycle();
-    await admitted;
-    local.revokeDevice();
-    await jest.advanceTimersByTimeAsync(10_000);
-    expect(await work).toBe(false);
-    expect(stop).toHaveBeenCalledTimes(1);
-    expect(close).not.toHaveBeenCalled();
-    expect(daemon.status).toEqual({ controlPlane: "disabled", code: "LOCAL_IDENTITY_CHANGED" });
-    // Await the existing accepted journal promise; this is not a second side effect.
-    const intent = JSON.parse(
-      await readFile(join(directory, `relay-request-${local.claim().requestId}.json`), "utf8"),
-    );
-    await local.rpc.handle(intent.message);
+    try {
+      const work = daemon.cycle();
+      await admitted;
+      local.revokeDevice();
+      await jest.advanceTimersByTimeAsync(10_000);
+      // The guest remains held: revocation must reach its owner before it finishes.
+      expect(await work).toBe(false);
+      expect(stop).toHaveBeenCalledTimes(1);
+      expect(close).not.toHaveBeenCalled();
+      expect(daemon.status).toEqual({ controlPlane: "disabled", code: "LOCAL_IDENTITY_CHANGED" });
+      expect(settled).toBeDefined();
+    } finally {
+      finish();
+      await settled;
+      close.mockRestore();
+      await local.manager.close();
+    }
     expect(local.receipts).toEqual([]);
-    close.mockRestore();
-    await local.manager.close();
   });
 });
