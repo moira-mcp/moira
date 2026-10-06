@@ -61,6 +61,8 @@ export class LocalCompanion {
   }
   async cycle(signal?: AbortSignal): Promise<boolean> {
     await this.manager.holdRunnerLock();
+    const local = await this.manager.records.policy();
+    if ((!local.enabled || local.leaseUntil <= Date.now()) && this.opened) await this.pause();
     await this.relay.confirmed(signal);
     if (await this.control.apply(this.relay.control, this.manager)) {
       this.opened = false;

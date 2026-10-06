@@ -10,7 +10,8 @@ import { LocalManager } from "./manager.js";
 import { LocalJobs } from "./jobs.js";
 import { LocalRpc } from "./rpc.js";
 import { LocalRelay } from "./relay.js";
-import { LocalWebControl, LocalCompanion } from "./web-control.js";
+import { LocalWebControl } from "./web-control.js";
+import { LocalDaemon } from "./daemon.js";
 import {
   localControlCeilingSchema,
   MAX_LOCAL_WORK_LEASE_MS,
@@ -216,34 +217,9 @@ export async function main(args: string[], environment: NodeJS.ProcessEnv): Prom
     process.once("SIGTERM", stop);
     const manager = new LocalManager(records);
     const relay = new LocalRelay(records);
-    const companion = new LocalCompanion(manager, relay);
-    const wait = () =>
-      new Promise<void>((resolve) => {
-        const finish = () => {
-          clearTimeout(timer);
-          controller.signal.removeEventListener("abort", finish);
-          resolve();
-        };
-        const timer = setTimeout(finish, 1000);
-        controller.signal.addEventListener("abort", finish, { once: true });
-        if (controller.signal.aborted) finish();
-      });
     try {
-      while (!controller.signal.aborted) {
-        try {
-          if (!(await companion.cycle(controller.signal))) await wait();
-        } catch (error) {
-          if (controller.signal.aborted) break;
-          if (!relay.isUnavailable(error)) throw error;
-          await companion.pause();
-          await wait();
-        }
-      }
-    } catch (error) {
-      if (!controller.signal.aborted) throw error;
+      await new LocalDaemon(manager, relay).run(controller.signal);
     } finally {
-      controller.abort();
-      await manager.close();
       process.removeListener("SIGINT", stop);
       process.removeListener("SIGTERM", stop);
     }

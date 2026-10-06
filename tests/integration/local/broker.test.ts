@@ -10,6 +10,7 @@ import { NetworkBudget } from "../../../packages/local/src/network-budget.js";
 import { localFixture } from "./fixtures.js";
 import { LocalManager } from "../../../packages/local/src/manager.js";
 import { SbxRuntime } from "../../../packages/local/src/sbx-runtime.js";
+import { adaptSbxRuntime } from "../../../packages/local/src/local-vm-runtime-factory.js";
 import { LocalRefusal } from "../../../packages/local/src/policy.js";
 
 let root: string;
@@ -161,7 +162,7 @@ describe("local broker authority and address boundary", () => {
     }
     const manager = new LocalManager(fixture.records, {
       storage: async () => {},
-      runtime: (policy) => new ExternalRuntime(policy),
+      runtime: (policy) => adaptSbxRuntime(new ExternalRuntime(policy)),
       guard: async () => ({
         active: true,
         stop: async () => {},

@@ -323,10 +323,20 @@ disable work in the reported policy; that revision alone does not mean work rema
 An offline computer keeps requests pending. Inspect the effective policy and compare requested
 and applied revisions before retrying work.
 
+The daemon reports `connected`, `offline`, `faulted` or `disabled` in its structured stderr status.
+Network/5xx failures mean `offline`; malformed protocol or a refused individual claim means `faulted`
+and a 30-second confirmation retry. Both suspend new claims without stopping admitted VM work.
+Device-endpoint unauthorized responses or confirmed device identity/revocation failures stop work;
+local disable, lease expiry and explicit shutdown do so independently. Current grants and finite
+deadlines remain unchanged. Cached results can return without repeating effects; an offline row
+cannot promise immediate delivery of a remote revocation.
+
 The local guest proxy authenticates package requests with its installed per-space broker
 permission; npm need not send a proxy-auth header. The host still enforces the device lease,
 repository domains and public-address checks. A proxy refusal is not permission to broaden them
 or use a host/GitHub token.
+Busy connection capacity queues requests in FIFO order; disconnected consumers stop waiting.
+Authority is checked again after the wait. Revocation and exhausted byte budgets still refuse access.
 
 `doctor` requires an enabled, unexpired lease and checks prerequisites, not live VM isolation.
 Stop the foreground companion before commands that require its runner lock. Unsupported SDK

@@ -7,7 +7,6 @@ import { LocalRecords } from "./space-record.js";
 import { SbxRuntime } from "./sbx-runtime.js";
 import { runProcess, type RunProcess, type ProcessRequest } from "./process.js";
 import { DeviceRuntimeControl, RuntimeControl, type RuntimeCoverage } from "./runtime-control.js";
-import { OwnedSbxRuntime } from "./runtime-owner.js";
 import { runtimeApiAsset } from "./assets.js";
 
 /** Local device ownership; bootstrap is selected only by the fixed local CLI entry. */
@@ -89,7 +88,7 @@ export class RuntimeDeviceOwner {
     await this.current();
     await control.assertDockerHeld();
     const names = new Set<string>();
-    const observer = new OwnedSbxRuntime(
+    const observer = new SbxRuntime(
       this.initial,
       (request) => this.inventoryRead(control, request, names),
       () => this.runtime.prepareCredentials(),

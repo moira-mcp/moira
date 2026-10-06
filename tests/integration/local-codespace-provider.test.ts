@@ -25,11 +25,9 @@ import { PrivateState } from "../../packages/local/src/private-state.js";
 import { LocalManager } from "../../packages/local/src/manager.js";
 import { LocalRelay } from "../../packages/local/src/relay.js";
 import { LocalRpc } from "../../packages/local/src/rpc.js";
-import {
-  SbxRuntime,
-  type SandboxIdentity,
-  type SandboxObservation,
-} from "../../packages/local/src/sbx-runtime.js";
+import { SbxRuntime, type SandboxObservation } from "../../packages/local/src/sbx-runtime.js";
+import type { LocalVmIdentity as SandboxIdentity } from "../../packages/local/src/local-vm-runtime.js";
+import { adaptSbxRuntime } from "../../packages/local/src/local-vm-runtime-factory.js";
 import { LocalRefusal, requireLocalGrant } from "../../packages/local/src/policy.js";
 import { localFixture } from "./local/fixtures.js";
 import {
@@ -272,7 +270,7 @@ async function fixture(partLimit = 4 * 1024 * 1024, maxObjects = 512, nativeSize
   }
   const runtime = new ExternalRuntime(local.policy);
   const manager = new LocalManager(local.records, {
-    runtime: () => runtime,
+    runtime: () => adaptSbxRuntime(runtime),
     storage: async () => undefined,
     guard: async () => ({
       active: true,

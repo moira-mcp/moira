@@ -4,7 +4,8 @@ import { connect, type Socket } from "node:net";
 import type { Duplex } from "node:stream";
 import type { LocalPolicy, LocalRepository } from "./policy.js";
 import { resolvePublicTarget, type ResolveHost, type ResolvedTarget } from "./network.js";
-import { NetworkBudget } from "./network-budget.js";
+import { NetworkBudget, MAX_BROKER_CONNECTIONS, type NetworkAdmission } from "./network-budget.js";
+import { LocalRefusal } from "./policy.js";
 
 export interface BrokerGrant {
   /** Exact locally owned resource bound to the server relay; not a GitHub credential. */
@@ -14,6 +15,8 @@ export interface BrokerGrant {
   policy: LocalPolicy;
   /** Read only by the Git request broker; never used for CONNECT. */
   gitCredential: string | null;
+  /** Socket lifetime and fresh bound authority govern waiting, never the VM lifetime. */
+  admission?: NetworkAdmission;
 }
 export type AuthorizeBroker = (credential: string) => Promise<BrokerGrant | null>;
 export interface BrokerOptions {
@@ -34,6 +37,7 @@ function deny(socket: Duplex, status = "403 Forbidden"): void {
 export async function startBroker(options: BrokerOptions, port = 0) {
   const sockets = new Set<Socket>();
   const active = new Map<Duplex, string>();
+  const responses = new Map<ServerResponse, string>();
   const requests = new Set<Promise<unknown>>();
   let shuttingDown = false;
   const track = (work: Promise<unknown>): void => {
@@ -49,6 +53,33 @@ export async function startBroker(options: BrokerOptions, port = 0) {
       ? options.authorize(header)
       : Promise.resolve(null);
   };
+  const admission = (
+    credential: string,
+    grant: BrokerGrant,
+    signal: AbortSignal,
+  ): NetworkAdmission => ({
+    signal,
+    refreshPolicy: async () => {
+      const fresh = await options.authorize(credential);
+      if (
+        !fresh ||
+        fresh.spaceId !== grant.spaceId ||
+        fresh.generation !== grant.generation ||
+        fresh.repository.id !== grant.repository.id ||
+        fresh.repository.fullName !== grant.repository.fullName
+      )
+        throw new LocalRefusal("LOCAL_NETWORK_DENIED", "The bound network authority changed.");
+      Object.assign(grant, fresh);
+      return fresh.policy;
+    },
+  });
+  const failureStatus = (error: unknown) =>
+    error instanceof LocalRefusal && error.code === "LOCAL_NETWORK_CAPACITY"
+      ? "429 Too Many Requests"
+      : error instanceof LocalRefusal &&
+          ["LOCAL_NETWORK_BUDGET", "LOCAL_NETWORK_DENIED"].includes(error.code)
+        ? "403 Forbidden"
+        : "502 Bad Gateway";
   const server = createServer(
     { maxHeaderSize: 8192, requestTimeout: 120_000, headersTimeout: 5000 },
     (request, response) => {
@@ -75,6 +106,18 @@ export async function startBroker(options: BrokerOptions, port = 0) {
             response.end();
             return;
           }
+          const credential = String(
+            request.headers[proxy ? "proxy-authorization" : "authorization"],
+          );
+          const controller = new AbortController();
+          const close = () => {
+            controller.abort();
+            responses.delete(response);
+          };
+          response.once("close", close);
+          request.once("aborted", close);
+          responses.set(response, credential);
+          grant.admission = admission(credential, grant, controller.signal);
           // Fixed Git operations and approved public HTTP downloads have separate handlers.
           if (proxy)
             await httpBroker(options.budget, options.onFault, options.resolve)(
@@ -84,7 +127,8 @@ export async function startBroker(options: BrokerOptions, port = 0) {
             );
           else await options.git(request, response, grant);
         })().catch((error) => {
-          if (!response.headersSent) response.writeHead(502, { connection: "close" });
+          if (!response.headersSent)
+            response.writeHead(Number(failureStatus(error).slice(0, 3)), { connection: "close" });
           response.end();
           if (!(error instanceof Error)) options.onFault(error);
         }),
@@ -93,7 +137,7 @@ export async function startBroker(options: BrokerOptions, port = 0) {
   );
   server.keepAliveTimeout = 1000;
   server.maxRequestsPerSocket = 16;
-  server.maxConnections = 128;
+  server.maxConnections = MAX_BROKER_CONNECTIONS;
   server.on("connection", (socket) => {
     sockets.add(socket);
     socket.once("close", () => sockets.delete(socket));
@@ -110,7 +154,19 @@ export async function startBroker(options: BrokerOptions, port = 0) {
           deny(client);
           return;
         }
-        const reservation = await options.budget.reserve(grant.policy);
+        const credential = String(request.headers["proxy-authorization"]);
+        const controller = new AbortController();
+        const abort = () => {
+          controller.abort();
+          active.delete(client);
+        };
+        client.once("close", abort);
+        client.once("error", abort);
+        active.set(client, credential);
+        const reservation = await options.budget.reserve(
+          grant.policy,
+          admission(credential, grant, controller.signal),
+        );
         let used = 0;
         let upstream: Socket | undefined;
         let released = false;
@@ -136,8 +192,6 @@ export async function startBroker(options: BrokerOptions, port = 0) {
           used += chunk.length;
           if (used > reservation.maximumBytes) client.destroy();
         };
-        const credential = String(request.headers["proxy-authorization"]);
-        active.set(client, credential);
         try {
           const target = await resolvePublicTarget(
             match[1],
@@ -188,7 +242,10 @@ export async function startBroker(options: BrokerOptions, port = 0) {
           deny(client, "502 Bad Gateway");
           release();
         }
-      })().catch(() => deny(client)),
+      })().catch((error) => {
+        active.delete(client);
+        deny(client, failureStatus(error));
+      }),
     );
   });
   const sweep = setInterval(() => {
@@ -198,6 +255,14 @@ export async function startBroker(options: BrokerOptions, port = 0) {
           if (!grant) socket.destroy();
         },
         () => socket.destroy(),
+      );
+    }
+    for (const [response, credential] of responses) {
+      void options.authorize(credential).then(
+        (grant) => {
+          if (!grant) response.destroy();
+        },
+        () => response.destroy(),
       );
     }
   }, 2000);
@@ -214,6 +279,7 @@ export async function startBroker(options: BrokerOptions, port = 0) {
     close: () =>
       (closing ??= (async () => {
         shuttingDown = true;
+        options.budget.closeAdmission();
         clearInterval(sweep);
         const closedSockets = Promise.all(
           [...sockets].map(

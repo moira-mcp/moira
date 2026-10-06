@@ -1,4 +1,4 @@
-import { createHash, randomBytes, randomUUID } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { totalmem, cpus } from "node:os";
 import { z } from "zod";
 import { LocalRecords, policyForSpace, type LocalSpace } from "./space-record.js";
@@ -9,7 +9,8 @@ import {
   publicPolicy,
   type LocalPolicy,
 } from "./policy.js";
-import { SbxRuntime, type SandboxIdentity } from "./sbx-runtime.js";
+import type { LocalVmRuntime, LocalVmIdentity, LocalVmRuntimeFactory } from "./local-vm-runtime.js";
+import { createLocalVmRuntime } from "./local-vm-runtime-factory.js";
 import { admitStorage } from "./storage.js";
 import { startGuard, type SpaceGuard, type StartGuard, type DeviceGuard } from "./guard.js";
 import { startBroker } from "./broker.js";
@@ -21,7 +22,7 @@ import { NetworkBudget } from "./network-budget.js";
 
 export interface ManagerDependencies {
   brokerPorts?: { http: number; tunnel: number };
-  runtime?: (policy: LocalPolicy) => SbxRuntime;
+  runtime?: LocalVmRuntimeFactory;
   storage?: typeof admitStorage;
   guard?: StartGuard;
   now?: () => number;
@@ -43,10 +44,10 @@ export class LocalManager {
   ) {
     this.now = dependencies.now ?? Date.now;
   }
-  runtime(policy: LocalPolicy): SbxRuntime {
-    return this.dependencies.runtime?.(policy) ?? new SbxRuntime(policy);
+  runtime(policy: LocalPolicy): LocalVmRuntime {
+    return this.dependencies.runtime?.(policy) ?? createLocalVmRuntime(policy);
   }
-  identity(space: LocalSpace): SandboxIdentity {
+  identity(space: LocalSpace): LocalVmIdentity {
     if (!space.runtimeId)
       throw new LocalRefusal(
         "LOCAL_CREATE_UNKNOWN",
@@ -77,7 +78,7 @@ export class LocalManager {
       const policy = await this.records.policy();
       await (this.dependencies.storage ?? admitStorage)(policy);
       await this.owner();
-      if (this.dependencies.runtime) await this.runtime(policy).verifySettings();
+      if (this.dependencies.runtime) await this.runtime(policy).boundary.verifyConfiguration();
       const onFault = this.dependencies.onFault ?? (() => undefined);
       const budget = new NetworkBudget(this.records.state);
       const relay = new LocalRelay(this.records);
@@ -268,18 +269,14 @@ export class LocalManager {
     return guard.operation(request);
   }
 
-  async boundary(space: LocalSpace, runtime: SbxRuntime): Promise<void> {
-    await runtime.verifySettings();
-    await runtime.verifyBoundary(this.identity(space));
-    const observed = createHash("sha256")
-      .update(await runtime.networkPolicy(this.identity(space)))
-      .digest("hex");
-    if (!space.networkPolicy || observed !== space.networkPolicy) {
+  async boundary(space: LocalSpace, runtime: LocalVmRuntime): Promise<void> {
+    if (!space.networkPolicy) {
       throw new LocalRefusal(
         "LOCAL_NETWORK_CHANGED",
         "The sandbox network policy changed; restore it locally before allowing work.",
       );
     }
+    await runtime.boundary.verify(this.identity(space), space.networkPolicy);
   }
 
   /** Hold the existing lifecycle boundary until this guest contact has settled. */
@@ -299,7 +296,7 @@ export class LocalManager {
       }
       if (this.dependencies.runtime) {
         const runtime = this.runtime(policyForSpace(policy, space));
-        if ((await runtime.exact(this.identity(space)))?.status !== "running")
+        if ((await runtime.inspectExact(this.identity(space)))?.status !== "running")
           throw new LocalRefusal("LOCAL_NOT_RUNNING", "The owned sandbox is stopped.");
         await this.boundary(space, runtime);
       } else {
@@ -308,7 +305,7 @@ export class LocalManager {
           guard = await (await this.owner()).space(id);
           this.guards.set(id, guard);
         }
-        await guard.validate();
+        // Fixed guest dispatch performs the backend proof after these local metadata checks.
       }
       // Local configuration and the independent guard can change while runtime checks await.
       const current = await this.require(id);

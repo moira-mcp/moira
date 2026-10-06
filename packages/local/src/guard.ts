@@ -8,7 +8,7 @@ import { LocalRecords } from "./space-record.js";
 import { RuntimeOwner } from "./runtime-owner.js";
 import { DeviceRuntimeControl } from "./runtime-control.js";
 import { RuntimeDeviceOwner } from "./runtime-device-owner.js";
-import type { SandboxObservation } from "./sbx-runtime.js";
+import type { LocalVmObservation } from "./local-vm-runtime.js";
 import { LocalRefusal, MAX_MESSAGE_BYTES, localPolicySchema, type LocalPolicy } from "./policy.js";
 
 const receiptSchema = z
@@ -276,7 +276,7 @@ export interface SpaceGuard {
 export interface DeviceGuard {
   readonly active: boolean;
   space(id: string, activate?: boolean): Promise<SpaceGuard>;
-  observe(): Promise<SandboxObservation[]>;
+  observe(): Promise<LocalVmObservation[]>;
   retire(id: string, generation: number): Promise<void>;
   remove(id: string, generation: number, localApproval: boolean): Promise<void>;
   recover?(id: string, generation: number): Promise<number>;
@@ -437,7 +437,7 @@ export const startGuard: StartGuard = (root) =>
             return !closed && !shutdown && child.connected;
           },
           stop,
-          observe: async () => (await request(undefined, "observe")) as SandboxObservation[],
+          observe: async () => (await request(undefined, "observe")) as LocalVmObservation[],
           retire: async (id, generation) => {
             await request(id, "retire-space", undefined, generation);
           },

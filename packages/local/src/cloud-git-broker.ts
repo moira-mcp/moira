@@ -44,12 +44,7 @@ export function cloudGitBroker(
       response.writeHead(403, { connection: "close" }).end();
       return;
     }
-    const binding = await authority(grant.spaceId, grant.generation, grant.repository.id);
-    if (response.destroyed) return;
-    const target = new URL(
-      `${relayOrigin(binding.origin)}/api/local-devices/github/${binding.resourceId}/${binding.resourceGeneration}/git/${action}`,
-    );
-    const reservation = await budget.reserve(grant.policy);
+    const reservation = await budget.reserve(grant.policy, grant.admission);
     if (response.destroyed) {
       await reservation.release(0).catch(onFault);
       return;
@@ -59,6 +54,15 @@ export function cloudGitBroker(
     const release = () => (releasing ??= reservation.release(used).catch(onFault));
     response.once("close", release);
     try {
+      if ((action === "push" || action === "refs-push") && !grant.repository.allowPush) {
+        response.writeHead(403, { connection: "close" }).end();
+        return;
+      }
+      const binding = await authority(grant.spaceId, grant.generation, grant.repository.id);
+      if (response.destroyed) return;
+      const target = new URL(
+        `${relayOrigin(binding.origin)}/api/local-devices/github/${binding.resourceId}/${binding.resourceGeneration}/git/${action}`,
+      );
       const upstream = requestHttps(
         target,
         {

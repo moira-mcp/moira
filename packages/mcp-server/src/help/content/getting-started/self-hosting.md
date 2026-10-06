@@ -325,6 +325,10 @@ and lease expiry enforce shutdown independently.
 
 Manager-backed CLI create/start/exec commands are one-shot and stop owned VM processes on exit;
 persistent server work uses `run`. Stop it before another command needs the same runner lock.
+The local daemon separates server contact from VM lifetime. Network/5xx failures reconnect;
+malformed responses or refused claims suspend new claims and retry confirmation without stopping
+already-admitted work. Confirmed device revocation/identity failure, local disable and lease expiry
+stop work. Existing grants and finite deadlines are never extended; cached results do not repeat effects.
 Ctrl+C closes the foreground companion; `npm run local -- disable` stops owned work independently
 and keeps VM data. Stop keeps files, while `remove SPACE_ID --confirm` deletes the exact owned VM.
 An uncertain guest outcome is fenced, not retried automatically. Once that VM is confirmed stopped,

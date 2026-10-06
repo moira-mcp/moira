@@ -44,7 +44,7 @@ export function gitBroker(
       response.writeHead(403, { connection: "close" }).end();
       return;
     }
-    const reservation = await budget.reserve(grant.policy);
+    const reservation = await budget.reserve(grant.policy, grant.admission);
     if (response.destroyed) {
       await reservation.release(0).catch(onFault);
       return;
@@ -58,6 +58,14 @@ export function gitBroker(
     };
     response.once("close", release);
     try {
+      if (
+        (push && !grant.repository.allowPush) ||
+        (grant.repository.private && !grant.gitCredential)
+      ) {
+        response.writeHead(403, { connection: "close" }).end();
+        release();
+        return;
+      }
       const target = await resolvePublicTarget("github.com", ["github.com"], resolve);
       if (response.destroyed) {
         release();

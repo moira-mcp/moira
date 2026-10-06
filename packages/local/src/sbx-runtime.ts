@@ -1,4 +1,5 @@
 import { lstat, mkdir, realpath } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import { basename, dirname, isAbsolute, join, sep } from "node:path";
 import { z } from "zod";
 import { LocalRefusal, SUPPORTED_SBX_VERSION, type LocalPolicy } from "./policy.js";
@@ -22,10 +23,8 @@ const sandboxSchema = z
   .passthrough();
 const inventorySchema = z.object({ sandboxes: z.array(sandboxSchema).max(128) }).passthrough();
 export type SandboxObservation = z.infer<typeof sandboxSchema>;
-export interface SandboxIdentity {
-  name: string;
-  runtimeId: string;
-}
+import type { LocalVmIdentity as SandboxIdentity } from "./local-vm-runtime.js";
+import type { FixedGuestEntrypoint, LocalVmDispatchAdmission } from "./local-vm-runtime.js";
 export const containerIdentitySchema = z
   .object({
     containerId: z.string().regex(/^[a-f0-9]{64}$/),
@@ -64,6 +63,7 @@ export class SbxRuntime {
   constructor(
     readonly policy: LocalPolicy,
     private readonly run: RunProcess = runProcess,
+    private readonly credentialPreparation?: () => Promise<void>,
   ) {
     this.home = join(policy.runtime.storageRoot, "runtime");
     this.environment = {
@@ -131,6 +131,7 @@ export class SbxRuntime {
   }
 
   async prepareCredentials(options: { newStore?: boolean } = {}): Promise<void> {
+    if (this.credentialPreparation) return this.credentialPreparation();
     if (process.platform !== "darwin") {
       if (options.newStore)
         throw new LocalRefusal(
@@ -562,8 +563,12 @@ export class SbxRuntime {
     await this.inspectBoundary(identity);
   }
 
-  private async inspectBoundary(identity: SandboxIdentity, beforeStart = false): Promise<boolean> {
-    const observed = await this.exact(identity);
+  private async inspectBoundary(
+    identity: SandboxIdentity,
+    beforeStart = false,
+    observation?: SandboxObservation,
+  ): Promise<boolean> {
+    const observed = observation ?? (await this.exact(identity));
     if (!observed || observed.agent !== "shell" || (beforeStart && observed.status !== "stopped")) {
       throw new LocalRefusal(
         "LOCAL_SANDBOX_UNSAFE",
@@ -760,6 +765,48 @@ export class SbxRuntime {
     await this.prepareCredentials();
     if (signal?.aborted)
       throw new LocalRefusal("LOCAL_CANCELLED", "Guest work was canceled before dispatch.");
+    return this.attachGuest(identity, mode, stdin, timeoutMs, signal);
+  }
+
+  /** One final backend proof for an owned portable dispatch, with fresh caller authority before I/O. */
+  async runFixedGuest(
+    identity: SandboxIdentity,
+    entrypoint: FixedGuestEntrypoint,
+    stdin?: Uint8Array,
+    timeoutMs = 30_000,
+    signal?: AbortSignal,
+    admission?: LocalVmDispatchAdmission,
+  ): Promise<Buffer> {
+    if (entrypoint !== "installer" && entrypoint !== "worker")
+      throw new LocalRefusal("LOCAL_GUEST_COMMAND_INVALID", "Unknown fixed guest entrypoint.");
+    await this.verifySettings();
+    const observed = await this.exact(identity);
+    if (!observed)
+      throw new LocalRefusal("LOCAL_SANDBOX_ABSENT", "The owned sandbox no longer exists.");
+    if (observed.status !== "running")
+      throw new LocalRefusal("LOCAL_NOT_RUNNING", "The owned sandbox is not running.");
+    await this.inspectBoundary(identity, false, observed);
+    if (admission) {
+      const digest = createHash("sha256")
+        .update(await this.call(["policy", "ls", identity.name, "--json"]))
+        .digest("hex");
+      if (digest !== admission.expectedNetworkDigest)
+        throw new LocalRefusal("LOCAL_NETWORK_CHANGED", "The sandbox network policy changed.");
+    }
+    await this.prepareCredentials();
+    await admission?.confirm();
+    if (signal?.aborted)
+      throw new LocalRefusal("LOCAL_CANCELLED", "Guest work was canceled before dispatch.");
+    return this.attachGuest(identity, entrypoint, stdin, timeoutMs, signal);
+  }
+
+  private async attachGuest(
+    identity: SandboxIdentity,
+    mode: "installer" | "worker",
+    stdin: Uint8Array | undefined,
+    timeoutMs: number,
+    signal?: AbortSignal,
+  ): Promise<Buffer> {
     let result: ProcessResult;
     try {
       result = await this.run({

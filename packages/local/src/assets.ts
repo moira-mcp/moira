@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
-import type { SbxRuntime, SandboxIdentity } from "./sbx-runtime.js";
+import type { LocalVmRuntime, LocalVmIdentity } from "./local-vm-runtime.js";
 
 export interface GuestAssets {
   worker: Buffer;
@@ -42,10 +42,10 @@ export const GUEST_WORKER_COMMAND = ["node", "/tmp/moira-local-runtime/worker.mj
 export const VERIFIED_GUEST_FAILURE_EXIT = 200;
 
 export async function installGuest(
-  runtime: SbxRuntime,
-  identity: SandboxIdentity,
+  runtime: LocalVmRuntime,
+  identity: LocalVmIdentity,
   assets: GuestAssets,
 ): Promise<void> {
   // This fixed installer runs inside the VM. Workload requests are delivered separately as JSON.
-  await runtime.guest(identity, GUEST_INSTALL_COMMAND, assets.worker);
+  await runtime.runFixedGuest(identity, "installer", assets.worker);
 }
