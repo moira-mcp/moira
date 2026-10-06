@@ -2,8 +2,11 @@ import { createHash, randomBytes, randomUUID } from "node:crypto";
 import type Database from "better-sqlite3";
 import { effectiveCodespaceLimits } from "./resource-policy.js";
 import type { CodespaceResourcePolicy, CodespaceTransferRecord } from "./resource-types.js";
+import { CodespaceResourceError } from "./resource-types.js";
 
 const LIVE_STATES = ["reserved", "ready", "claimed"] as const;
+const NATIVE_PURPOSES = ["codespace_input", "codespace_download"] as const;
+const RELAY_PURPOSES = ["local_relay_input", "local_relay_output"] as const;
 
 export function digestCodespaceTransferToken(token: string): string {
   return createHash("sha256").update(token).digest("hex");
@@ -23,16 +26,22 @@ export class CodespaceTransferRepository {
     policy: CodespaceResourcePolicy;
     now: number;
   }): { token: string; record: CodespaceTransferRecord } | null {
+    if (![...NATIVE_PURPOSES, ...RELAY_PURPOSES].includes(input.purpose)) {
+      throw new CodespaceResourceError("CODESPACE_RESOURCE_INVALID", "Invalid transfer purpose");
+    }
     return this.sqlite
       .transaction(() => {
+        const relay =
+          input.purpose === "local_relay_input" || input.purpose === "local_relay_output";
+        const purposes = relay ? RELAY_PURPOSES : NATIVE_PURPOSES;
         const states = LIVE_STATES.map(() => "?").join(",");
         const user = this.sqlite
           .prepare(
             `SELECT COUNT(*) count, COALESCE(SUM(declaredSize), 0) bytes,
              COALESCE(SUM(CASE WHEN state IN ('reserved','claimed') THEN declaredSize ELSE 0 END), 0) inflight
-           FROM codespaceTransfer WHERE userId = ? AND state IN (${states})`,
+           FROM codespaceTransfer WHERE userId = ? AND purpose IN (?, ?) AND state IN (${states})`,
           )
-          .get(input.userId, ...LIVE_STATES) as {
+          .get(input.userId, ...purposes, ...LIVE_STATES) as {
           count: number;
           bytes: number;
           inflight: number;
@@ -41,10 +50,11 @@ export class CodespaceTransferRepository {
           .prepare(
             `SELECT COUNT(*) count, COALESCE(SUM(declaredSize), 0) bytes,
              COALESCE(SUM(CASE WHEN state IN ('reserved','claimed') THEN declaredSize ELSE 0 END), 0) inflight
-           FROM codespaceTransfer WHERE state IN (${states})`,
+           FROM codespaceTransfer WHERE purpose IN (?, ?) AND state IN (${states})`,
           )
-          .get(...LIVE_STATES) as { count: number; bytes: number; inflight: number };
-        const limits = effectiveCodespaceLimits(input.policy).transfers;
+          .get(...purposes, ...LIVE_STATES) as { count: number; bytes: number; inflight: number };
+        const effective = effectiveCodespaceLimits(input.policy);
+        const limits = relay ? effective.relayTransfers : effective.transfers;
         if (
           input.declaredSize > limits.maxFileBytes ||
           user.count >= limits.maxObjectsPerUser ||
@@ -177,7 +187,7 @@ export class CodespaceTransferRepository {
   }
 
   /**
-   * The user's live transfers: the objects and declared bytes the per-user ceilings limit, and the
+   * The user's native file transfers: the objects and declared bytes the per-user ceilings limit, and the
    * bytes still in flight (reserved or claimed), which the in-flight ceiling limits — the same
    * predicates `reserve` applies.
    */
@@ -188,9 +198,13 @@ export class CodespaceTransferRepository {
          COALESCE(SUM(CASE WHEN state IN ('reserved','claimed') THEN declaredSize ELSE 0 END), 0)
            inflightBytes
          FROM codespaceTransfer
-         WHERE userId = ? AND state IN (${LIVE_STATES.map(() => "?").join(",")})`,
+         WHERE userId = ? AND purpose IN (?, ?) AND state IN (${LIVE_STATES.map(() => "?").join(",")})`,
       )
-      .get(userId, ...LIVE_STATES) as { objects: number; bytes: number; inflightBytes: number };
+      .get(userId, ...NATIVE_PURPOSES, ...LIVE_STATES) as {
+      objects: number;
+      bytes: number;
+      inflightBytes: number;
+    };
   }
 
   listLive(): CodespaceTransferRecord[] {

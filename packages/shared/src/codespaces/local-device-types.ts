@@ -3,6 +3,7 @@ import type { CodespaceMachine } from "./resource-types.js";
 import type { LocalDeviceControlView } from "./local-management-types.js";
 
 export const CODESPACE_PROVIDER_LOCAL = "local-sandboxes" as const;
+export const LOCAL_RELAY_MAX_PARTS = 32;
 const identifier = z.string().uuid();
 export function localRepositoryTargetId(deviceId: string, repositoryId: string): string {
   return `local:${identifier.parse(deviceId)}:${identifier.parse(repositoryId)}`;
@@ -122,7 +123,7 @@ const localRelayPartSchema = z
   .strict();
 export const localRelayPayloadReferenceSchema = z
   .object({
-    parts: z.array(localRelayPartSchema).min(1).max(32),
+    parts: z.array(localRelayPartSchema).min(1).max(LOCAL_RELAY_MAX_PARTS),
     sha256: z.string().regex(/^[a-f0-9]{64}$/),
     size: integer.max(24 * 1024 * 1024),
   })

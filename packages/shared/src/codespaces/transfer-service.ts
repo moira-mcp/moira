@@ -12,6 +12,7 @@ import { effectiveCodespaceLimits } from "./resource-policy.js";
 import { CodespaceResourceError } from "./resource-types.js";
 import { CodespaceTransferRepository } from "./transfer-repository.js";
 import {
+  LOCAL_RELAY_MAX_PARTS,
   localRelayPayloadReferenceSchema,
   type LocalRelayPayloadReference,
 } from "./local-device-types.js";
@@ -395,7 +396,7 @@ export class CodespaceTransferService {
         offset < bytes.length || reference.parts.length === 0;
         offset += partSize
       ) {
-        if (reference.parts.length >= 32) {
+        if (reference.parts.length >= LOCAL_RELAY_MAX_PARTS) {
           throw new CodespaceResourceError(
             "CODESPACE_POLICY_LIMIT",
             "Relay payload has too many parts",

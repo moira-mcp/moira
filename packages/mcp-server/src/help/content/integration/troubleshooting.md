@@ -308,6 +308,9 @@ commands and reads do not impose that serialization. A failed edit does not requ
 
 ## Local codespaces
 
+Internal companion messages have a separate bounded transfer budget; they do not consume the
+native file-upload/download slots or their displayed usage. Native file limits still apply.
+
 Use **Settings → Development → Local computers** and the companion's `status` to distinguish pending
 browser approval, revocation, an offline computer and an expired local lease. An offline row is
 not proof that the computer or its VM has physically stopped. Renew a lease on the computer with
