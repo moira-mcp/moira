@@ -14,6 +14,7 @@ export function httpBroker(
     response: ServerResponse,
     grant: BrokerGrant,
   ): Promise<void> => {
+    if (response.destroyed) return;
     let target: URL;
     try {
       target = new URL(request.url ?? "");
@@ -34,6 +35,10 @@ export function httpBroker(
       return;
     }
     const reservation = await budget.reserve(grant.policy);
+    if (response.destroyed) {
+      await reservation.release(0).catch(onFault);
+      return;
+    }
     let bytes = 0;
     let released = false;
     const release = () => {

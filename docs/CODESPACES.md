@@ -157,6 +157,11 @@ The browser can revoke a specific device; revocation invalidates its generation 
 work. Local `disable` independently stops owned SDK/VM processes and preserves data, including when
 credentials cannot be read. Neither closing an MCP client nor losing the relay deletes a codespace.
 
+Broker shutdown fences new admission and waits for owned HTTP/CONNECT tasks, accepted socket
+closure and serialized network-budget reservation/release writes. A CONNECT reservation finishing after
+shutdown is released without destination lookup or connection, so closed service ownership does
+not leave a ledger write running against its state directory.
+
 Local diagnostics use `status`, `create OWNER/REPO --ref REF`, `start SPACE_ID`, `stop SPACE_ID`
 and `exec SPACE_ID -- COMMAND ARG…`. Stop retains files; `remove SPACE_ID --confirm` deletes the
 owned VM through that explicit local confirmation. Manager-backed CLI commands are one-shot:
