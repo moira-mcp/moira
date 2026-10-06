@@ -10,6 +10,7 @@ import type {
 import { effectiveCodespaceLimits } from "./resource-policy.js";
 import { CodespaceResourceRepository } from "./resource-repository.js";
 import { CodespaceResourceError } from "./resource-types.js";
+import { CODESPACE_PROVIDER_LOCAL } from "./local-device-types.js";
 
 const ACTIVE_OPERATION_STATES = [
   "reserved",
@@ -512,7 +513,66 @@ export class CodespaceOperationRepository {
     resultExpiresAt: number,
     now: number,
     state: "succeeded" | "failed" = "succeeded",
+    observedCodespace?: CodespaceResourceRecord,
   ): boolean {
+    // Background recovery may observe an older marker in the same local sandbox. Its
+    // current snapshot fences the write; it never grants permission to dispatch again.
+    if (observedCodespace) {
+      if (
+        observedCodespace.userId !== userId ||
+        observedCodespace.provider !== CODESPACE_PROVIDER_LOCAL ||
+        !observedCodespace.providerResourceName ||
+        expectedGeneration > observedCodespace.generation
+      ) {
+        return false;
+      }
+      return (
+        this.sqlite
+          .prepare(
+            `UPDATE codespaceOperation SET state = ?, outputBytes = ?, exitCode = NULL,
+             resultExpiresAt = ?, lastOutcome = 'remote_terminal', claimId = NULL,
+             claimExpiresAt = NULL, updatedAt = ?
+             WHERE id = ? AND userId = ? AND resourceGeneration = ? AND kind <> 'exec'
+               AND state IN ('running', 'cancel_pending', 'reconcile_pending')
+               AND EXISTS (SELECT 1 FROM codespaceResource resource
+                 JOIN codespaceConnection connection ON connection.id = resource.connectionId
+                 JOIN codespaceConnectionRepository grantRow
+                   ON grantRow.connectionId = connection.id
+                   AND grantRow.externalRepositoryId = resource.repositoryId
+                 WHERE resource.id = codespaceOperation.resourceId AND resource.id = ?
+                   AND resource.userId = codespaceOperation.userId
+                   AND resource.generation = ?
+                   AND resource.generation >= codespaceOperation.resourceGeneration
+                   AND resource.provider = ? AND resource.provider = codespaceOperation.provider
+                   AND resource.providerResourceName = ?
+                   AND resource.providerResourceName = codespaceOperation.providerResourceName
+                   AND resource.authorizationGeneration = ?
+                   AND resource.authorizationGeneration = codespaceOperation.authorizationGeneration
+                   AND resource.connectionId = ? AND resource.repositoryId = ?
+                   AND resource.desiredState = 'running' AND resource.state = 'usable'
+                   AND connection.userId = resource.userId AND connection.provider = resource.provider
+                   AND connection.status = 'connected'
+                   AND connection.externalAccountId = resource.externalOwnerId
+                   AND connection.credentialGeneration = codespaceOperation.authorizationGeneration)`,
+          )
+          .run(
+            state,
+            outputBytes,
+            resultExpiresAt,
+            now,
+            operationId,
+            userId,
+            expectedGeneration,
+            observedCodespace.id,
+            observedCodespace.generation,
+            observedCodespace.provider,
+            observedCodespace.providerResourceName,
+            observedCodespace.authorizationGeneration,
+            observedCodespace.connectionId,
+            observedCodespace.repositoryId,
+          ).changes === 1
+      );
+    }
     return (
       this.sqlite
         .prepare(

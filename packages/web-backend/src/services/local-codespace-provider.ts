@@ -41,6 +41,7 @@ const spaceSchema = z
 const snapshotSchema = z
   .object({ deviceId: z.string().uuid(), spaces: z.array(spaceSchema).max(8) })
   .passthrough();
+const RECOVERY_JOB_ACTIONS = new Set(["inspect", "cancel", "finalize", "output", "file-inspect"]);
 
 /** Internal credentials identify the already authenticated caller; they never leave this server. */
 export function localCodespaceCredential(userId: string): string {
@@ -348,13 +349,19 @@ export class LocalCodespaceJobTransport extends CodespaceJobTransport {
     credential: string,
     codespace: CodespaceResourceRecord,
     operation: import("@mcp-moira/shared").CodespaceOperationRecord,
+    action?: unknown,
   ): void {
+    const recovering = typeof action === "string" && RECOVERY_JOB_ACTIONS.has(action);
     if (
       userFromCredential(credential) !== codespace.userId ||
       operation.userId !== codespace.userId ||
       codespace.provider !== CODESPACE_PROVIDER_LOCAL ||
+      operation.provider !== codespace.provider ||
       operation.resourceId !== codespace.id ||
-      operation.resourceGeneration !== codespace.generation ||
+      operation.providerResourceName !== codespace.providerResourceName ||
+      operation.authorizationGeneration !== codespace.authorizationGeneration ||
+      operation.resourceGeneration > codespace.generation ||
+      (!recovering && operation.resourceGeneration !== codespace.generation) ||
       !codespace.providerResourceName
     ) {
       throw new CodespaceResourceError(
@@ -370,7 +377,7 @@ export class LocalCodespaceJobTransport extends CodespaceJobTransport {
     job: Record<string, unknown>,
     timeoutMs: number,
   ) {
-    this.requireOperation(credential, codespace, operation);
+    this.requireOperation(credential, codespace, operation, job.action);
     const result = await this.relay.send(
       codespace,
       {

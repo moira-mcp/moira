@@ -32,6 +32,11 @@ import {
 } from "../../packages/local/src/sbx-runtime.js";
 import { LocalRefusal, requireLocalGrant } from "../../packages/local/src/policy.js";
 import { localFixture } from "./local/fixtures.js";
+import {
+  LocalCodespaceJobTransport,
+  localCodespaceCredential,
+} from "../../packages/web-backend/src/services/local-codespace-provider.js";
+import { LocalCodespaceRelay } from "../../packages/web-backend/src/services/local-codespace-relay.js";
 
 let root: string, sqlite: Database.Database;
 beforeEach(async () => {
@@ -124,7 +129,9 @@ async function fixture(partLimit = 4 * 1024 * 1024, maxObjects = 512, nativeSize
     },
     createLocalDeviceManagementRoutes(services.devices, "https://moira.example"),
   );
-  const faults = { dropNextAck: false, lostAcknowledgements: 0 };
+  const faults = { dropNextAck: false, lostAcknowledgements: 0, holdOperations: false };
+  const guestActions: string[] = [];
+  const retainedResults = new Map<string, unknown>();
   let transportRefusal: { status: number; code: string; route: string } | undefined;
   const fetch: typeof globalThis.fetch = async (input, options) => {
     const url = new URL(String(input));
@@ -193,6 +200,7 @@ async function fixture(partLimit = 4 * 1024 * 1024, maxObjects = 512, nativeSize
       const envelope = JSON.parse(Buffer.from(input!).toString("utf8"));
       expect(envelope.kind).toBe("operation");
       const job = envelope.request as Record<string, unknown>;
+      guestActions.push(String(job.action));
       let result: unknown;
       if (job.action === "execute") {
         await state.write(`effect-${job.remoteMarker}.json`, { argv: job.argv, stdin: job.stdin });
@@ -247,8 +255,18 @@ async function fixture(partLimit = 4 * 1024 * 1024, maxObjects = 512, nativeSize
             },
           };
         } else throw new Error("Unexpected controlled file request");
+      } else if (job.action === "inspect" || job.action === "cancel") {
+        result = faults.holdOperations ? { state: "running" } : { state: "absent" };
+      } else if (job.action === "file-inspect") {
+        result = faults.holdOperations
+          ? { state: "running" }
+          : (retainedResults.get(String(job.remoteMarker)) ?? { state: "absent" });
       } else if (job.action === "finalize") result = { state: "absent" };
       else throw new Error("Unexpected controlled operation request");
+      if (job.action === "execute" || job.action === "file-execute") {
+        retainedResults.set(String(job.remoteMarker), result);
+        if (faults.holdOperations) result = { state: "running" };
+      }
       return Buffer.from(JSON.stringify({ ok: true, result }));
     }
   }
@@ -390,11 +408,122 @@ async function fixture(partLimit = 4 * 1024 * 1024, maxObjects = 512, nativeSize
     nativeBytes,
     guestRoot,
     faults,
+    policy,
+    guestActions,
     target: localRepositoryTargetId(local.policy.deviceId, local.policy.repositories[0].id),
   };
 }
 
 describe("actual local-only service composition and outbound relay", () => {
+  test.each(["exec", "read"] as const)(
+    "settles an old %s marker after the server generation advances and releases capacity",
+    async (kind) => {
+      const actual = await fixture();
+      actual.policy.maxConcurrentOperationsPerUser = 1;
+      const created = await actual.drive(
+        actual.services.resource.create("user-a", actual.target, "main"),
+      );
+      actual.faults.holdOperations = true;
+      await writeFile(join(actual.guestRoot, "payload.bin"), Buffer.from("retained file"));
+      const pending =
+        kind === "exec"
+          ? await actual.drive(
+              actual.services.operation.execute("user-a", created.resource.id, {
+                argv: ["echo", "old command"],
+                stdin: { kind: "inline", bytes: new Uint8Array() },
+                background: true,
+                timeoutMs: 5000,
+              }),
+            )
+          : await actual.drive(
+              actual.services.file.execute("user-a", created.resource.id, {
+                action: "read",
+                path: "payload.bin",
+                offset: 0,
+                length: 13,
+              }),
+            );
+      expect(pending.operation.state).toBe("running");
+      await expect(
+        actual.services.operation.execute("user-a", created.resource.id, {
+          argv: ["true"],
+          stdin: { kind: "inline", bytes: new Uint8Array() },
+        }),
+      ).rejects.toMatchObject({ code: "CODESPACE_OPERATION_BUSY" });
+      const originalGeneration = pending.operation.resourceGeneration;
+      sqlite
+        .prepare("UPDATE codespaceResource SET generation=generation+2 WHERE id=?")
+        .run(created.resource.id);
+      sqlite
+        .prepare(
+          "UPDATE codespaceOperation SET state='cancel_pending',claimId=NULL,claimExpiresAt=NULL WHERE id=?",
+        )
+        .run(pending.operation.id);
+      actual.faults.holdOperations = false;
+      expect(await actual.drive(actual.services.operation.reconcileOnce("user-a"))).toBe(true);
+      const settled = actual.services.operation.get("user-a", pending.operation.id)!;
+      expect(settled.state).toBe(kind === "exec" ? "cancelled" : "succeeded");
+      expect(settled.resourceGeneration).toBe(originalGeneration);
+      expect(
+        actual.guestActions.filter(
+          (action) => action === (kind === "exec" ? "execute" : "file-execute"),
+        ),
+      ).toHaveLength(1);
+      const fresh = await actual.drive(
+        actual.services.operation.execute("user-a", created.resource.id, {
+          argv: ["echo", "fresh"],
+          stdin: { kind: "inline", bytes: new Uint8Array() },
+        }),
+      );
+      expect(fresh.operation.state).toBe("succeeded");
+      expect(fresh.result?.stdout).toBe("fresh");
+    },
+  );
+
+  test.each(["generation", "future", "name", "provider", "owner", "authorization"])(
+    "old operation recovery refuses changed %s before contacting relay",
+    async (change) => {
+      const actual = await fixture();
+      const created = await actual.drive(
+        actual.services.resource.create("user-a", actual.target, "main"),
+      );
+      const executed = await actual.drive(
+        actual.services.operation.execute("user-a", created.resource.id, {
+          argv: ["true"],
+          stdin: { kind: "inline", bytes: new Uint8Array() },
+        }),
+      );
+      const resource = { ...created.resource, generation: created.resource.generation + 1 };
+      const operation = { ...executed.operation };
+      let sends = 0;
+      class NoGuestRelay extends LocalCodespaceRelay {
+        override async send() {
+          sends++;
+          return { state: "absent" };
+        }
+      }
+      const transport = new LocalCodespaceJobTransport(
+        new NoGuestRelay(actual.services.devices, actual.services.transfer),
+      );
+      if (change === "future") operation.resourceGeneration = resource.generation + 1;
+      if (change === "name") operation.providerResourceName = "another-owned-space";
+      if (change === "provider") operation.provider = "github-codespaces";
+      if (change === "owner") operation.userId = "user-b";
+      if (change === "authorization") operation.authorizationGeneration++;
+      if (change === "generation")
+        await expect(
+          transport.execute(localCodespaceCredential("user-a"), resource, operation, {
+            argv: ["true"],
+            stdin: { kind: "inline", bytes: new Uint8Array() },
+          }),
+        ).rejects.toMatchObject({ code: "CODESPACE_GENERATION_CONFLICT" });
+      else
+        await expect(
+          transport.cancel(localCodespaceCredential("user-a"), resource, operation),
+        ).rejects.toMatchObject({ code: "CODESPACE_GENERATION_CONFLICT" });
+      expect(sends).toBe(0);
+    },
+  );
   test("creates and adopts a local resource through owned SQL, private blobs, HTTP and actual RPC without GitHub OAuth", async () => {
     const actual = await fixture();
     expect(actual.services.connection.getStatus("user-a").state).toBe("connected");
