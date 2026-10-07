@@ -276,9 +276,14 @@ the app prefix when configured and contains no credentials, query or fragment.
 Refresh the browser, review the pending device's repositories, egress, push/delete rights,
 limits and lease, then confirm.
 
-To manage the computer from the browser, first stop the foreground companion. Then update the
-checkout, run `npm ci` and `npm run local:build`, preserving the same state directory and SDK
-credential store. After pairing is confirmed, approve the local ceilings:
+The server, companion and running owner guards need a matching control-contract edition.
+Strict heartbeat/approval schemas refuse mixed editions even with delegation off; rebuilding the
+CLI does not update a live guard. Before updating, use the companion's ordinary owner-managed
+shutdown and confirm settlement of its owned work and guards. Update server and local checkout
+together, run `npm ci` and `npm run local:build`, then restart normally. Preserve the same state,
+disks, SDK profile, credentials and connection. Management and running jobs may be interrupted;
+there is no uninterrupted mixed-edition rolling upgrade. Live repository append within the matched
+edition separately preserves existing VMs. After pairing is confirmed, approve the local ceilings:
 
 ```bash
 npm run local -- web-control --confirm --max-lease-hours 168
@@ -314,6 +319,41 @@ access to the repository. Those operations also require the device's matching re
 reading PR metadata uses repository read access. GitHub authorization remains on the server, not
 in the guest. Supply a commit author or leave both author fields empty to use your verified GitHub
 identity when available; the computer's Git configuration is not copied.
+
+With local web control approved, the owner can enable limited agent repository management here.
+It defaults off and binds the verified personal GitHub account, separate existing/new-private permissions,
+optional push, an admission ceiling and the fixed `node-react-playwright` network profile.
+Only companion acknowledgement makes it effective. `codespace({ action: "local_devices" })`
+shows applied consent and eligible personal App installations; `github_setup_required` asks for
+GitHub setup while retaining device discovery. `repository_add` takes `device_id`, the GitHub numeric `repository_id`
+and a stable UUID `request_id`. Reuse that request until `applied` returns `local_repository_id`;
+pending/rejected is not permission. The App must already expose the repository. Agent additions
+preserve existing grants, VMs and lease; agents cannot change consent or supply domains/rights.
+For a new empty private repository, enable and apply new-private consent, then use `repository_create`
+with `device_id`, stable UUID `request_id`, `repository_name` and discovered `installation_id`.
+Only the connected personal account is supported. Resume the same complete payload: `unknown`
+does not retry creation blindly, and `setup_required` can retain the confirmed GitHub ID/name while
+permissions or installation access are repaired. Only `applied` returns usable `local_repository_id`.
+Selected installation access is checked after adding only the confirmed new repository.
+Unknown requests hold an admission slot; confirmed rejections release their reservation.
+The private repository description contains a recovery marker, not a credential. Keep it while
+an unknown outcome is unresolved; Moira never adopts an unrelated same-name repository.
+
+The owner must approve **Repository creation: write** or **Administration: write** for the
+[create API](https://docs.github.com/en/rest/repos/repos#create-a-repository-for-the-authenticated-user),
+and **GitHub App installation repository access: write** for a
+[selected installation](https://docs.github.com/en/rest/apps/installations#add-a-repository-to-an-app-installation).
+Approved push still needs Contents write. Use **Update GitHub permissions** after approval;
+OAuth stays on the server. Live App permissions and provider compatibility require separate verification.
+
+Each codespace has its own VM; a repository can have multiple codespaces within existing limits.
+Background `exec` runs development processes in that VM. The fixed profile includes package mirrors
+and official Playwright CDN; browser/system-library installation still uses guest commands and
+requires compatible guest privileges. It does not certify Chromium compatibility. `preview_image`
+returns a repository PNG/JPEG as native MCP image content: pass `codespace_id`, `path` and optional
+`max_bytes` up to 4 MiB, or resume with only `codespace_id` and `operation_id`. Header/container
+checks cap dimensions at 8192 per edge and 16 million pixels; they do not fully decode pixels.
+Inspect the image before treating a screenshot as visual evidence.
 
 Choose **Local Docker Sandboxes** and the device's repository in **Settings → Development → Environments**, or discover
 its qualified `repository_id` through `codespace({ action: "list" })`. Different computers

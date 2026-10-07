@@ -63,6 +63,7 @@ test("local computer settings keep requested and applied week policy distinct th
     maxNetworkConnections: 8,
     repositories: policy.repositories,
     gitAuthor: null,
+    agentRepositoryManagement: null,
   };
   const ceiling: LocalControlCeiling = {
     cpuCores: 4,

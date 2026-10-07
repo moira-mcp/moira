@@ -17,6 +17,7 @@ import {
   MAX_LOCAL_WORK_LEASE_MS,
   type LocalControlCeiling,
   type LocalDeviceControlView,
+  LOCAL_BROWSER_DEVELOPMENT_DOMAINS,
 } from "../../../packages/shared/src/codespaces/local-management-types.js";
 let directory: string;
 beforeEach(async () => {
@@ -49,6 +50,145 @@ async function fixture() {
   return { ...local, state, connection, ceiling };
 }
 describe("Locally pinned owner web control", () => {
+  test.each(["existing", "created"])(
+    "applied %s delegation and repository append preserve an existing live space and broker capability",
+    async (origin) => {
+      const f = await fixture();
+      const manager = new LocalManager(f.records);
+      const control = new LocalWebControl(f.records);
+      await control.optIn(f.connection, f.ceiling, true);
+      const beforeSpace = await f.records.get(f.space.id);
+      const beforeGrant = await f.records.authorize(f.authorization);
+      const delegation = {
+        githubUserId: "42",
+        owner: "owner",
+        allowExistingPrivate: origin === "existing",
+        allowNewPrivate: origin === "created",
+        allowPush: true,
+        maxRepositories: 2,
+        networkProfile: "node-react-playwright" as const,
+      };
+      const base: LocalDeviceControlView = {
+        optedIn: true,
+        revision: 1,
+        appliedRevision: 0,
+        status: "pending",
+        settings: { ...controlSettings(f.policy), agentRepositoryManagement: delegation },
+        ceiling: f.ceiling,
+        error: null,
+      };
+      try {
+        expect(await control.apply(base, manager)).toBe("live");
+        const repository = {
+          id: randomUUID(),
+          fullName: "owner/another",
+          private: true,
+          allowPush: true,
+          allowDelete: false,
+          allowPullRequests: false,
+          domains: [...LOCAL_BROWSER_DEVELOPMENT_DOMAINS],
+        };
+        const view = {
+          ...base,
+          revision: 2,
+          appliedRevision: 1,
+          settings: { ...base.settings, repositories: [...base.settings.repositories, repository] },
+          repositoryAdmissions: [
+            {
+              requestId: randomUUID(),
+              githubRepositoryId: "77",
+              localRepositoryId: repository.id,
+              revision: 2,
+              deviceGeneration: 1,
+              connectionId: f.connection.connectionId,
+              repository,
+              ...(origin === "created" ? { creationRequestId: randomUUID() } : {}),
+            },
+          ],
+        };
+        expect(await control.apply(view, manager)).toBe("live");
+        expect(await f.records.get(f.space.id)).toEqual(beforeSpace);
+        expect((await f.records.authorize(f.authorization))?.repository).toEqual(
+          beforeGrant?.repository,
+        );
+        expect((await f.records.policy()).runtime).toEqual(f.policy.runtime);
+        expect((await f.records.policy()).leaseUntil).toBe(f.policy.leaseUntil);
+        expect(await control.report(f.connection)).toMatchObject({
+          appliedRevision: 2,
+          settings: {
+            agentRepositoryManagement: delegation,
+            repositories: view.settings.repositories,
+          },
+        });
+        expect(await control.apply(view, manager)).toBe(false);
+        expect((await f.records.policy()).repositories).toHaveLength(2);
+      } finally {
+        await manager.close();
+      }
+    },
+  );
+  test("invalid delegated network or changed old rights are refused without disabling existing work", async () => {
+    const f = await fixture();
+    const manager = new LocalManager(f.records);
+    const control = new LocalWebControl(f.records);
+    await control.optIn(f.connection, f.ceiling, true);
+    const beforeSpace = await f.records.get(f.space.id);
+    const repository = {
+      id: randomUUID(),
+      fullName: "owner/another",
+      private: true,
+      allowPush: true,
+      allowDelete: false,
+      domains: ["evil.example.com"],
+    };
+    const view: LocalDeviceControlView = {
+      optedIn: true,
+      revision: 1,
+      appliedRevision: 0,
+      status: "pending",
+      settings: {
+        ...controlSettings(f.policy),
+        repositories: [...f.policy.repositories, repository],
+      },
+      ceiling: f.ceiling,
+      error: null,
+      repositoryAdmissions: [
+        {
+          requestId: randomUUID(),
+          githubRepositoryId: "77",
+          localRepositoryId: repository.id,
+          revision: 1,
+          deviceGeneration: 1,
+          connectionId: f.connection.connectionId,
+          repository,
+        },
+      ],
+    };
+    try {
+      expect(await control.apply(view, manager)).toBe(false);
+      expect(await f.records.policy()).toEqual(f.policy);
+      expect(await f.records.get(f.space.id)).toEqual(beforeSpace);
+      expect(await f.state.read("control-intent.json", (value) => value)).toBeNull();
+      expect(
+        await control.apply(
+          {
+            ...view,
+            revision: 2,
+            settings: {
+              ...view.settings,
+              repositories: [{ ...f.policy.repositories[0], allowPush: true }, repository],
+            },
+            repositoryAdmissions: [{ ...view.repositoryAdmissions![0], revision: 2 }],
+          },
+          manager,
+        ),
+      ).toBe(false);
+      expect(await f.records.policy()).toEqual(f.policy);
+      expect(await f.records.get(f.space.id)).toEqual(beforeSpace);
+    } finally {
+      await manager.close();
+    }
+  });
   test("a retained completed control intent cannot block a different subsequent owner revision", async () => {
     const f = await fixture();
     f.space.desiredState = "stopped";

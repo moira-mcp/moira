@@ -115,6 +115,7 @@ export * from "./codespaces/local-device-types.js";
 export * from "./codespaces/local-management-types.js";
 export * from "./codespaces/local-device-repository.js";
 export * from "./codespaces/local-device-service.js";
+export * from "./codespaces/repository-creation-repository.js";
 export * from "./codespaces/github-app-config.js";
 export * from "./codespaces/credential-vault.js";
 export * from "./codespaces/connection-service.js";

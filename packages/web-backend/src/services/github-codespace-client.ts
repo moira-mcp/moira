@@ -18,6 +18,16 @@ import {
 
 type AvailableConfig = Extract<CodespaceGitHubConfigStatus, { state: "available" }>;
 type Fetch = typeof fetch;
+export interface GitHubPrivateRepositoryIdentity {
+  id: string;
+  fullName: string;
+  private: boolean;
+  ownerId: string;
+  ownerLogin: string;
+  description: string | null;
+  canRead: boolean;
+  canPush: boolean;
+}
 
 const API_ORIGIN = "https://api.github.com";
 const TOKEN_URL = "https://github.com/login/oauth/access_token";
@@ -54,7 +64,7 @@ export function githubCodespaceGuidance(
       authorization_repair_required:
         "Repair the GitHub authorization in Moira settings and follow any displayed revocation or reconnection step.",
       repository_not_approved:
-        "Moira cannot create a repository: create it on GitHub if needed, then add it to the Moira GitHub App installation.",
+        "Approve this repository for the Moira GitHub App installation. For a new personal private repository, use repository_create with applied owner delegation on a local device, or create it on GitHub and approve it.",
       ceiling_reached:
         "You have reached a codespace limit; delete one you no longer need, or wait for capacity to become available.",
       ready: "GitHub is connected and the repositories you granted are available.",
@@ -447,6 +457,7 @@ export class HttpGitHubCodespaceClient implements GitHubCodespaceClient, Codespa
     accessToken: string,
     init: Pick<RequestInit, "method" | "body"> = {},
     acceptedStatuses?: readonly number[],
+    maximumResponseBytes?: number,
   ): Promise<{ body: T; response: Response }> {
     const parsed = new URL(url, API_ORIGIN);
     if (parsed.origin !== API_ORIGIN) {
@@ -473,15 +484,57 @@ export class HttpGitHubCodespaceClient implements GitHubCodespaceClient, Codespa
     if (!(acceptedStatuses?.includes(response.status) ?? response.ok)) {
       // The body is where the provider says which rule was broken; reading it here means every
       // operation carries the reason, not only the one that happens to have a rejected outcome.
-      const failureBody = await response.text().catch(() => "");
+      const failureBody = maximumResponseBytes
+        ? await this.boundedResponseBody(response, maximumResponseBytes).catch(() => "")
+        : await response.text().catch(() => "");
       throw new GitHubCodespaceClientError(
         `GitHub API request failed (HTTP ${response.status})`,
         response.status,
         providerRefusalMessage(failureBody),
       );
     }
-    const body = response.status === 204 ? undefined : await response.json().catch(() => undefined);
+    const body =
+      response.status === 204 || response.status === 304
+        ? undefined
+        : maximumResponseBytes
+          ? await this.boundedResponseJSON(response, maximumResponseBytes)
+          : await response.json().catch(() => undefined);
     return { body: body as T, response };
+  }
+
+  private async boundedResponseJSON(response: Response, maximum: number): Promise<unknown> {
+    const body = await this.boundedResponseBody(response, maximum);
+    try {
+      return JSON.parse(body);
+    } catch {
+      throw new GitHubCodespaceClientError("GitHub returned malformed repository JSON", 502);
+    }
+  }
+
+  private async boundedResponseBody(response: Response, maximum: number): Promise<string> {
+    const reader = response.body?.getReader();
+    if (!reader) return "";
+    let bytes = 0;
+    const chunks: Uint8Array[] = [];
+    try {
+      for (;;) {
+        const part = await reader.read();
+        if (part.done) break;
+        bytes += part.value.length;
+        if (bytes > maximum)
+          throw new GitHubCodespaceClientError(
+            "GitHub repository response exceeded its bound",
+            502,
+          );
+        chunks.push(part.value);
+      }
+      return Buffer.concat(chunks).toString("utf8");
+    } catch (error) {
+      if (error instanceof GitHubCodespaceClientError) throw error;
+      throw new GitHubCodespaceClientError("GitHub repository response was interrupted", 503);
+    } finally {
+      await reader.cancel().catch(() => undefined);
+    }
   }
 
   private async api<T>(path: string, accessToken: string): Promise<T> {
@@ -521,6 +574,107 @@ export class HttpGitHubCodespaceClient implements GitHubCodespaceClient, Codespa
 
   getIdentity(accessToken: string): Promise<GitHubCodespaceUser> {
     return this.getUser(accessToken);
+  }
+
+  private parseRepositoryIdentity(value: unknown): GitHubPrivateRepositoryIdentity {
+    if (!value || typeof value !== "object" || Array.isArray(value))
+      throw new GitHubCodespaceClientError("GitHub returned an invalid repository", 502);
+    const repository = value as Record<string, unknown>;
+    const owner = repository.owner as Record<string, unknown> | undefined;
+    const permissions = repository.permissions as Record<string, unknown> | undefined;
+    const fullName = requiredString(repository.full_name, "repository name");
+    repositoryPath(fullName);
+    if (
+      typeof repository.private !== "boolean" ||
+      (repository.description !== null && typeof repository.description !== "string")
+    )
+      throw new GitHubCodespaceClientError("GitHub returned an invalid repository identity", 502);
+    return {
+      id: decimalId(repository.id),
+      fullName,
+      private: repository.private,
+      ownerId: decimalId(owner?.id),
+      ownerLogin: requiredString(owner?.login, "repository owner"),
+      description: repository.description,
+      canRead: permissions?.pull === true,
+      canPush: permissions?.push === true,
+    };
+  }
+
+  async inspectRepositoryByName(
+    accessToken: string,
+    owner: string,
+    name: string,
+  ): Promise<GitHubPrivateRepositoryIdentity | null> {
+    const result = await this.apiResponse<unknown>(
+      `/repos/${repositoryPath(`${owner}/${name}`)}`,
+      accessToken,
+      {},
+      [200, 404],
+      256 * 1024,
+    );
+    return result.response.status === 404 ? null : this.parseRepositoryIdentity(result.body);
+  }
+
+  async inspectRepositoryById(
+    accessToken: string,
+    repositoryId: string,
+  ): Promise<GitHubPrivateRepositoryIdentity> {
+    decimalId(repositoryId);
+    const result = await this.apiResponse<unknown>(
+      `/repositories/${repositoryId}`,
+      accessToken,
+      {},
+      [200],
+      256 * 1024,
+    );
+    return this.parseRepositoryIdentity(result.body);
+  }
+
+  async createPrivateRepository(
+    accessToken: string,
+    input: { name: string; description: string },
+  ): Promise<GitHubPrivateRepositoryIdentity> {
+    if (
+      !/^[A-Za-z0-9_.-]{1,100}$/.test(input.name) ||
+      input.name.endsWith(".git") ||
+      input.name === "." ||
+      input.name === ".." ||
+      input.description.length > 350
+    )
+      throw new GitHubCodespaceClientError("Invalid private repository request", 400);
+    const result = await this.apiResponse<unknown>(
+      "/user/repos",
+      accessToken,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          name: input.name,
+          description: input.description,
+          private: true,
+          auto_init: false,
+        }),
+      },
+      [201],
+      256 * 1024,
+    );
+    return this.parseRepositoryIdentity(result.body);
+  }
+
+  async addRepositoryToInstallation(
+    accessToken: string,
+    installationId: string,
+    repositoryId: string,
+  ): Promise<void> {
+    decimalId(installationId);
+    decimalId(repositoryId);
+    await this.apiResponse<unknown>(
+      `/user/installations/${installationId}/repositories/${repositoryId}`,
+      accessToken,
+      { method: "PUT" },
+      [204, 304],
+      256 * 1024,
+    );
   }
 
   async getMonthlyBilling(

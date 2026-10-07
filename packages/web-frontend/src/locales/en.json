@@ -3724,7 +3724,7 @@
         },
         "local-devices": {
           "title": "Connect your computer",
-          "body": "Pair your computer once and enable local web control within its approved ceiling. Manage repositories, Git permissions, resources and a finite work lease here. A requested change becomes effective only after the companion applies it; pending or rejected changes do not replace the actual local grants. Revoking a computer refuses further server work and preserves its files."
+          "body": "Pair your computer once and enable local web control within its approved ceiling. Manage repositories, Git permissions, resources and a finite work lease here. Agent repository access is off by default: enable it for your verified connected personal GitHub account. Separately allow adding existing private repositories or creating new private repositories, then choose push rights and a maximum number of additions. Its fixed Node.js, React and Playwright network profile does not let agents choose other domains. Requests take effect only after the companion confirms them; pending or rejected requests do not replace applied permissions. Disabling agent access blocks new additions while preserving existing grants and files. Revoking the computer refuses further server work and preserves its files."
         },
         "apps": {
           "title": "Connected apps",

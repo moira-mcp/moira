@@ -707,6 +707,43 @@ export const codespaceSetupHelpSchema = z
   })
   .strict();
 
+export const codespaceLocalDevicesSchema = z.object({}).strict();
+export const codespaceRepositoryAddSchema = z
+  .object({
+    device_id: z.string().uuid().describe("Owner-approved local device"),
+    repository_id: z
+      .string()
+      .regex(/^[1-9][0-9]*$/)
+      .describe("Verified GitHub repository ID"),
+    request_id: z.string().uuid().describe("Stable admission identity; reuse it until applied"),
+  })
+  .strict();
+
+export const codespaceRepositoryCreateSchema = z
+  .object({
+    device_id: z
+      .string()
+      .uuid()
+      .describe("Local device with applied new-private-repository consent"),
+    request_id: z
+      .string()
+      .uuid()
+      .describe("Stable creation identity; reuse the exact payload to resume"),
+    repository_name: z
+      .string()
+      .min(1)
+      .max(100)
+      .regex(/^[A-Za-z0-9_.-]+$/)
+      .refine((name) => name !== "." && name !== "..", "Choose a GitHub repository name")
+      .refine((name) => !name.toLowerCase().endsWith(".git"), "Omit the .git suffix")
+      .describe("New private repository name in the connected personal GitHub account"),
+    installation_id: z
+      .string()
+      .regex(/^[1-9][0-9]{0,39}$/)
+      .describe("Approved GitHub App installation on that personal account"),
+  })
+  .strict();
+
 export const codespaceCreateSchema = z
   .object({
     repository_id: z.string().min(1).max(255),
@@ -936,6 +973,11 @@ export const codespaceDownloadRequestSchema = z.union([
   }),
 ]);
 
+export const codespacePreviewImageRequestSchema = z.union([
+  codespaceDownloadStartSchema.omit({ file_name: true, mime_type: true }),
+  codespaceOperationResumeSchema,
+]);
+
 export const codespacePullRequestCreateSchema = z
   .object({
     codespace_id: codespaceIdSchema,
@@ -961,6 +1003,10 @@ export const codespacePullRequestFindSchema = z
   .strict();
 
 export const CODESPACE_ACTION_REQUEST_SCHEMAS = {
+  local_devices: codespaceLocalDevicesSchema,
+  repository_add: codespaceRepositoryAddSchema,
+  repository_create: codespaceRepositoryCreateSchema,
+  preview_image: codespacePreviewImageRequestSchema,
   pull_request_create: codespacePullRequestCreateSchema,
   pull_request_get: codespacePullRequestGetSchema,
   pull_request_find: codespacePullRequestFindSchema,

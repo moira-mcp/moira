@@ -10,6 +10,10 @@ const operationId = "00000000-0000-4000-8000-000000000163";
 const actions = [
   "create",
   "list",
+  "local_devices",
+  "repository_add",
+  "repository_create",
+  "preview_image",
   "setup_help",
   "get",
   "start",
@@ -160,6 +164,8 @@ describe("Codespace MCP HTTP contract on a default-disabled installation", () =>
         path: expect.any(Object),
         max_bytes: expect.any(Object),
         repository_id: expect.any(Object),
+        repository_name: expect.objectContaining({ type: "string", minLength: 1, maxLength: 100 }),
+        installation_id: expect.objectContaining({ type: "string" }),
         confirm_delete: expect.any(Object),
         head: expect.objectContaining({ type: "string", minLength: 1, maxLength: 255 }),
         base: expect.objectContaining({ type: "string", minLength: 1, maxLength: 255 }),
@@ -204,6 +210,21 @@ describe("Codespace MCP HTTP contract on a default-disabled installation", () =>
     const text = result.content.find((item) => item.type === "text");
     expect(text?.type).toBe("text");
     expect(JSON.parse((text as { text: string }).text)).toEqual(result.structuredContent);
+  });
+
+  test("should discover only owned local devices without provisioning or granting consent", async () => {
+    const result = CallToolResultSchema.parse(
+      await client.callTool({ name: "codespace", arguments: { action: "local_devices" } }),
+    );
+    expect(result.isError).not.toBe(true);
+    expect(result.structuredContent).toEqual({
+      devices: [],
+      installations: [],
+      github_setup_required: true,
+    });
+    expect(JSON.stringify(result)).not.toMatch(
+      /accessToken|refreshToken|clientSecret|vaultKey|credential/,
+    );
   });
 
   test("should return provider-owned setup guidance without provisioning", async () => {
@@ -349,6 +370,7 @@ describe("Codespace MCP HTTP contract on a default-disabled installation", () =>
       },
     ],
     ["get", { codespace_id: codespaceId }],
+    ["preview_image", { codespace_id: codespaceId, path: "screenshot.png" }],
     [
       "pull_request_create",
       { codespace_id: codespaceId, head: "feat/игра", base: "main", title: "Change" },

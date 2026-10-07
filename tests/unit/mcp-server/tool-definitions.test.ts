@@ -220,6 +220,7 @@ describe("MCP tool definitions", () => {
       "codespace_id",
       "confirm_delete",
       "cwd",
+      "device_id",
       "draft",
       "env",
       "expected",
@@ -228,6 +229,7 @@ describe("MCP tool definitions", () => {
       "file_name",
       "files",
       "head",
+      "installation_id",
       "length",
       "max_bytes",
       "max_matches",
@@ -243,6 +245,8 @@ describe("MCP tool definitions", () => {
       "ref",
       "refresh",
       "repository_id",
+      "repository_name",
+      "request_id",
       "script",
       "session",
       "session_end",
@@ -266,10 +270,14 @@ describe("MCP tool definitions", () => {
       "exec",
       "get",
       "list",
+      "local_devices",
+      "preview_image",
       "pull_request_create",
       "pull_request_find",
       "pull_request_get",
       "read",
+      "repository_add",
+      "repository_create",
       "search",
       "setup_help",
       "start",
@@ -392,6 +400,38 @@ describe("MCP tool definitions", () => {
     );
     expect(renderToolReference("en")).toContain('"openai/fileParams"');
     expect(renderToolReference("ru")).toContain('"stdin_file"');
+  });
+
+  it("preserves native image content through the registered MCP boundary", async () => {
+    const native = { type: "image" as const, mimeType: "image/png", data: "aW1hZ2UtYnl0ZXM=" };
+    const restore = replaceToolBinding("codespace", async () => ({ content: [native] }));
+    const server = new McpServer(
+      { name: "codespace-image-contract", version: "1.0.0" },
+      { capabilities: { tools: {} } },
+    );
+    registerTools(server, undefined, () => null);
+    const client = new Client({ name: "image-consumer", version: "1.0.0" }, {});
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    try {
+      await server.connect(serverTransport);
+      await client.connect(clientTransport);
+      const result = await client.callTool({
+        name: "codespace",
+        arguments: {
+          action: "preview_image",
+          codespace_id: "00000000-0000-4000-8000-000000000000",
+          path: "app.png",
+        },
+      });
+      expect(result.content).toEqual([native]);
+      expect(TOOL_DEFINITIONS.find((tool) => tool.name === "codespace")?.responsePolicy).toBe(
+        "native",
+      );
+    } finally {
+      restore();
+      await client.close();
+      await server.close();
+    }
   });
 
   it("publishes a strict communication contract without authority controls", () => {

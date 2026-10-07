@@ -23,6 +23,9 @@ import {
   MAX_LOCAL_WORK_LEASE_MS,
   assertLocalControlSettings,
   localDeviceControlViewSchema,
+  assertAgentRepositoryAdmission,
+  localRepositoryAdmissionReceiptSchema,
+  type LocalRepositoryAdmissionReceipt,
   type LocalControlReport,
   type LocalDeviceControlView,
   type LocalDeviceSettingsValue,
@@ -401,6 +404,7 @@ export class LocalDeviceRepository {
           control.optedIn = true;
           control.ceiling = report.ceiling;
           control.appliedRevision = report.appliedRevision;
+          control.appliedAgentRepositoryManagement = report.settings.agentRepositoryManagement;
           if (report.appliedRevision === control.revision) {
             control.status = "applied";
             control.settings = report.settings;
@@ -467,6 +471,145 @@ export class LocalDeviceRepository {
           .prepare("UPDATE codespaceLocalDevice SET control=?,updatedAt=? WHERE id=?")
           .run(canonicalJson(control), now, row.id);
         return deviceView(this.device(row.id)!);
+      })
+      .immediate();
+  }
+
+  /** The caller supplies a freshly verified GitHub identity, never arbitrary settings. */
+  requestRepositoryAdmission(
+    userId: string,
+    deviceId: string,
+    input: Omit<
+      LocalRepositoryAdmissionReceipt,
+      "revision" | "connectionId" | "localRepositoryId"
+    > & {
+      expectedRevision: number;
+    },
+    now: number,
+  ): LocalDeviceView {
+    return this.sqlite
+      .transaction(() => {
+        const device = this.getActiveDevice(userId, deviceId);
+        const control = device.control;
+        if (!control?.optedIn || !control.ceiling)
+          throw new LocalDeviceError(
+            "LOCAL_UNAUTHORIZED",
+            "Approve web control on this device first.",
+          );
+        const receipts = control.repositoryAdmissions ?? [];
+        const previous = receipts.find((receipt) => receipt.requestId === input.requestId);
+        if (previous) {
+          if (
+            previous.githubRepositoryId !== input.githubRepositoryId ||
+            previous.creationRequestId !== input.creationRequestId ||
+            previous.deviceGeneration !== input.deviceGeneration ||
+            canonicalJson(previous.repository) !== canonicalJson(input.repository)
+          )
+            throw new LocalDeviceError("LOCAL_CONFLICT", "Repository request identity changed.");
+          return device;
+        }
+        if (
+          device.deviceGeneration !== input.deviceGeneration ||
+          control.revision !== input.expectedRevision ||
+          control.status !== "applied" ||
+          control.appliedRevision !== control.revision
+        )
+          throw new LocalDeviceError(
+            "LOCAL_CONFLICT",
+            "Wait for applied device settings and reload before adding a repository.",
+          );
+        this.requireLease(device.policy, now);
+        if (input.creationRequestId) {
+          const creation = this.sqlite
+            .prepare(
+              `SELECT requestId FROM codespaceRepositoryRequest
+            WHERE requestId=? AND userId=? AND deviceId=? AND deviceGeneration=? AND localConnectionId=?
+              AND admissionRequestId=? AND repositoryId=? AND fullName=? AND state='created' AND installationVerified=1`,
+            )
+            .get(
+              input.creationRequestId,
+              userId,
+              deviceId,
+              device.deviceGeneration,
+              device.connectionId,
+              input.requestId,
+              input.githubRepositoryId,
+              input.repository.fullName,
+            );
+          if (!creation)
+            throw new LocalDeviceError(
+              "LOCAL_UNAUTHORIZED",
+              "New repository admission requires confirmed Moira creation provenance.",
+            );
+        }
+        try {
+          assertAgentRepositoryAdmission(
+            control.settings.agentRepositoryManagement,
+            input.repository,
+            input.creationRequestId ? "created" : "existing",
+          );
+        } catch {
+          throw new LocalDeviceError(
+            "LOCAL_UNAUTHORIZED",
+            "Repository exceeds the applied owner delegation.",
+          );
+        }
+        const held = (
+          this.sqlite
+            .prepare(
+              "SELECT COUNT(*) count FROM codespaceRepositoryRequest WHERE deviceId=? AND reservationHeld=1 AND (? IS NULL OR requestId!=?)",
+            )
+            .get(deviceId, input.creationRequestId ?? null, input.creationRequestId ?? null) as {
+            count: number;
+          }
+        ).count;
+        if (
+          receipts.length + held >= control.settings.agentRepositoryManagement!.maxRepositories ||
+          control.settings.repositories.length + held >= 64
+        )
+          throw new LocalDeviceError(
+            "LOCAL_CAPACITY",
+            "The owner repository admission limit is reached.",
+          );
+        if (
+          control.settings.repositories.some(
+            (repository) =>
+              repository.id === input.repository.id ||
+              repository.fullName.toLowerCase() === input.repository.fullName.toLowerCase(),
+          )
+        )
+          throw new LocalDeviceError(
+            "LOCAL_CONFLICT",
+            "This repository already has a local grant.",
+          );
+        const receipt = localRepositoryAdmissionReceiptSchema.parse({
+          requestId: input.requestId,
+          githubRepositoryId: input.githubRepositoryId,
+          deviceGeneration: input.deviceGeneration,
+          repository: input.repository,
+          ...(input.creationRequestId ? { creationRequestId: input.creationRequestId } : {}),
+          localRepositoryId: input.repository.id,
+          connectionId: device.connectionId,
+          revision: control.revision + 1,
+        });
+        control.revision = receipt.revision;
+        control.settings = {
+          ...control.settings,
+          repositories: [...control.settings.repositories, receipt.repository],
+        };
+        control.repositoryAdmissions = [...receipts, receipt];
+        control.status = "pending";
+        control.error = null;
+        this.sqlite
+          .prepare("UPDATE codespaceLocalDevice SET control=?,updatedAt=? WHERE id=?")
+          .run(canonicalJson(control), now, deviceId);
+        if (input.creationRequestId)
+          this.sqlite
+            .prepare(
+              "UPDATE codespaceRepositoryRequest SET reservationHeld=0,updatedAt=? WHERE requestId=? AND userId=?",
+            )
+            .run(now, input.creationRequestId, userId);
+        return deviceView(this.device(deviceId)!);
       })
       .immediate();
   }
