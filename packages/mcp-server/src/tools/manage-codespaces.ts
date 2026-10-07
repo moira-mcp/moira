@@ -23,6 +23,7 @@ import {
 } from "@mcp-moira/shared";
 import { z } from "zod";
 import { getUserContext } from "../core/request-context.js";
+import { previewImageResult } from "./codespace-image-preview.js";
 import {
   codespaceGetSchema,
   codespaceNativeFileSchema,
@@ -126,6 +127,24 @@ type CodespaceNewToolParams<Action extends CodespaceAction> = Exclude<
 >;
 
 export interface CodespaceToolServices {
+  localRepositoryCreation?: {
+    createRepository: (
+      userId: string,
+      input: {
+        deviceId: string;
+        requestId: string;
+        repositoryName: string;
+        installationId: string;
+      },
+    ) => Promise<unknown>;
+  };
+  localRepositories?: {
+    listDevices: (userId: string) => unknown;
+    addExistingRepository: (
+      userId: string,
+      input: { deviceId: string; repositoryId: string; requestId: string },
+    ) => Promise<unknown>;
+  };
   github?: {
     createOwnedPullRequest: (
       userId: string,
@@ -478,6 +497,8 @@ async function loadServices(): Promise<CodespaceToolServices> {
     ...preferred,
     providers,
     github,
+    localRepositories: services.getLocalRepositoryAdmissionService(),
+    localRepositoryCreation: services.getLocalPrivateRepositoryCreationService(),
     select: services.selectCodespaceProviderServices,
   };
 }
@@ -594,6 +615,50 @@ export async function executeCodespaceTool(
 ): Promise<CallToolResult> {
   const { action } = call;
   const params = call.request as CodespaceToolParams[CodespaceAction];
+  // Admission is device-scoped, before repository-provider selection: its GitHub ID is not yet
+  // an approved local repository ID. Only owner-applied delegation can grant that authority.
+  if (action === "local_devices" || action === "repository_add" || action === "repository_create") {
+    try {
+      if (action === "repository_create") {
+        if (!services.localRepositoryCreation) return errorResult("CODESPACE_NOT_CONFIGURED");
+        const input = params as CodespaceToolParams["repository_create"];
+        return jsonResult({
+          repository: await services.localRepositoryCreation.createRepository(userId, {
+            deviceId: input.device_id,
+            requestId: input.request_id,
+            repositoryName: input.repository_name,
+            installationId: input.installation_id,
+          }),
+        });
+      }
+      if (!services.localRepositories) return errorResult("CODESPACE_NOT_CONFIGURED");
+      if (action === "local_devices") {
+        return jsonResult(
+          (await services.localRepositories.listDevices(userId)) as Record<string, unknown>,
+        );
+      }
+      const input = params as CodespaceToolParams["repository_add"];
+      return jsonResult({
+        admission: await services.localRepositories.addExistingRepository(userId, {
+          deviceId: input.device_id,
+          repositoryId: input.repository_id,
+          requestId: input.request_id,
+        }),
+      });
+    } catch (error) {
+      if (error instanceof LocalDeviceError) {
+        return {
+          ...jsonResult({ error: { code: error.code, message: error.message } }),
+          isError: true,
+        };
+      }
+      if (error instanceof CodespaceConnectionError || error instanceof CodespaceResourceError) {
+        return errorResult(error.code);
+      }
+      reportUnexpectedFailure(action, error);
+      return errorResult("INTERNAL_ERROR");
+    }
+  }
   if (
     action === "setup_help" &&
     services.providers &&
@@ -808,6 +873,7 @@ export async function executeCodespaceTool(
         apply_patch: "apply_patch",
         upload: "upload",
         download: "download",
+        preview_image: "download",
       };
       const expectedKind = resumableKind[action];
       const existing = services.operation.get(userId, params.operation_id);
@@ -853,10 +919,21 @@ export async function executeCodespaceTool(
         );
       }
       const response = await services.file.reconcile(userId, params.operation_id);
+      if (action === "preview_image") return previewImageResult(response);
       return fileOperationResult(response);
     }
 
     switch (action) {
+      case "preview_image": {
+        const input = params as CodespaceNewToolParams<"preview_image">;
+        return previewImageResult(
+          await services.file.execute(userId, input.codespace_id, {
+            action: "download",
+            path: input.path,
+            maxBytes: input.max_bytes,
+          }),
+        );
+      }
       case "pull_request_create": {
         const { codespace_id, ...input } = params as CodespaceToolParams["pull_request_create"];
         if (!services.github) return errorResult("CODESPACE_NOT_CONFIGURED", status.settingsUrl);

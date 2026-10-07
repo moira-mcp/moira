@@ -23,6 +23,38 @@ export const localGitAuthorSchema = z
   })
   .strict();
 export type LocalGitAuthor = z.infer<typeof localGitAuthorSchema>;
+export const LOCAL_BROWSER_DEVELOPMENT_DOMAINS = [
+  "registry.npmjs.org",
+  "nodejs.org",
+  "github.com",
+  "codeload.github.com",
+  "objects.githubusercontent.com",
+  "release-assets.githubusercontent.com",
+  "raw.githubusercontent.com",
+  "registry-1.docker.io",
+  "auth.docker.io",
+  "production.cloudflare.docker.com",
+  "production.cloudfront.docker.com",
+  "cdn.playwright.dev",
+  "playwright.download.prss.microsoft.com",
+  "deb.debian.org",
+  "security.debian.org",
+  "archive.ubuntu.com",
+  "security.ubuntu.com",
+  "ports.ubuntu.com",
+] as const;
+export const agentRepositoryManagementSchema = z
+  .object({
+    githubUserId: z.string().regex(/^[1-9][0-9]*$/),
+    owner: z.string().regex(/^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$/),
+    allowExistingPrivate: z.boolean(),
+    allowNewPrivate: z.boolean(),
+    allowPush: z.boolean(),
+    maxRepositories: integer(1, 64),
+    networkProfile: z.literal("node-react-playwright"),
+  })
+  .strict();
+export type AgentRepositoryManagement = z.infer<typeof agentRepositoryManagementSchema>;
 export const localManagementRepositorySchema = z
   .object({
     id: z.string().uuid(),
@@ -63,6 +95,7 @@ export const localDeviceSettingsSchema = z
     maxNetworkConnections: integer(1, 64),
     repositories: z.array(localManagementRepositorySchema).max(64),
     gitAuthor: localGitAuthorSchema.nullable(),
+    agentRepositoryManagement: agentRepositoryManagementSchema.nullable().default(null),
   })
   .strict()
   .superRefine((value, ctx) => {
@@ -101,6 +134,19 @@ export type LocalControlCeiling = z.infer<typeof localControlCeilingSchema>;
 export const localControlErrorSchema = z
   .object({ code: z.string().regex(/^LOCAL_[A-Z0-9_]{1,80}$/), message: text(500) })
   .strict();
+export const localRepositoryAdmissionReceiptSchema = z
+  .object({
+    requestId: z.string().uuid(),
+    githubRepositoryId: z.string().regex(/^[1-9][0-9]*$/),
+    localRepositoryId: z.string().uuid(),
+    revision: integer(1, Number.MAX_SAFE_INTEGER),
+    deviceGeneration: integer(1, Number.MAX_SAFE_INTEGER),
+    connectionId: z.string().uuid(),
+    repository: localManagementRepositorySchema,
+    creationRequestId: z.string().uuid().optional(),
+  })
+  .strict();
+export type LocalRepositoryAdmissionReceipt = z.infer<typeof localRepositoryAdmissionReceiptSchema>;
 export const localDeviceControlViewSchema = z
   .object({
     optedIn: z.boolean(),
@@ -110,6 +156,8 @@ export const localDeviceControlViewSchema = z
     settings: localDeviceSettingsSchema,
     ceiling: localControlCeilingSchema.nullable(),
     error: localControlErrorSchema.nullable(),
+    repositoryAdmissions: z.array(localRepositoryAdmissionReceiptSchema).max(64).optional(),
+    appliedAgentRepositoryManagement: agentRepositoryManagementSchema.nullable().optional(),
   })
   .strict();
 export type LocalDeviceControlView = z.infer<typeof localDeviceControlViewSchema>;
@@ -130,6 +178,45 @@ export const localControlReportSchema = z
   })
   .strict();
 export type LocalControlReport = z.infer<typeof localControlReportSchema>;
+
+/** A delegated addition cannot replace a grant or supply its own network authority. */
+export function assertAgentRepositoryAdmission(
+  delegation: AgentRepositoryManagement | null | undefined,
+  repository: z.infer<typeof localManagementRepositorySchema>,
+  origin: "existing" | "created" = "existing",
+): void {
+  if (
+    !delegation ||
+    !(origin === "created" ? delegation.allowNewPrivate : delegation.allowExistingPrivate) ||
+    !repository.private ||
+    repository.fullName.split("/")[0].toLowerCase() !== delegation.owner.toLowerCase() ||
+    repository.allowPush !== delegation.allowPush ||
+    repository.allowDelete ||
+    repository.allowPullRequests === true ||
+    JSON.stringify(repository.domains) !== JSON.stringify(LOCAL_BROWSER_DEVELOPMENT_DOMAINS)
+  )
+    throw new Error("Repository addition exceeds the applied agent delegation.");
+}
+
+/** Compare parsed settings, preserving the exact order and content of every previous grant. */
+export function isLiveLocalSettingsChange(
+  previous: LocalDeviceSettingsValue,
+  next: LocalDeviceSettingsValue,
+): boolean {
+  const stable = (settings: LocalDeviceSettingsValue) => ({
+    ...settings,
+    repositories: [],
+    agentRepositoryManagement: null,
+  });
+  return (
+    JSON.stringify(stable(previous)) === JSON.stringify(stable(next)) &&
+    next.repositories.length >= previous.repositories.length &&
+    previous.repositories.every(
+      (repository, index) =>
+        JSON.stringify(repository) === JSON.stringify(next.repositories[index]),
+    )
+  );
+}
 
 /** The local opt-in and server save use exactly the same finite upper-bound decision. */
 export function assertLocalControlSettings(

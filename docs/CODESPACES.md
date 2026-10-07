@@ -98,7 +98,9 @@ GitHub App credentials and the GitHub connector are not required for public read
 Private Git, push and pull-request creation use the connected GitHub App user authorization.
 Agent work cannot choose host commands, VM templates, updates or broader local grants.
 Owner web settings require a separate explicit local approval and remain within its ceilings.
-Each codespace has its own persistent mountless microVM. The companion requires Node.js 24,
+Each codespace has its own persistent mountless microVM. One repository may have multiple codespaces,
+each with a separate VM, disk and lifecycle within the device and instance limits. Backend, frontend
+and browser jobs in one codespace share that VM. The companion requires Node.js 24,
 macOS on Apple silicon and Docker Sandboxes `sbx` 0.46.0. Linux execution is refused because
 the required runtime ownership contract is not supported there; a container or host-shell fallback
 is not used. Install the pinned SDK from the [official Docker release artifacts](https://github.com/docker/sandboxes/releases/tag/v0.46.0)
@@ -213,11 +215,22 @@ and ordinary caller result reads retain their exact-generation fence.
 
 ### Owner web control and bundle updates
 
-Stop the foreground companion before updating its checkout and running `npm ci`
-and `npm run local:build`. Preserve the same `--state`, disk image, SDK profile,
-credential store and connection; do not initialize a replacement state. A device
-without the control capability must use the rebuilt companion before the website
-can apply owner settings.
+The server, companion and every running owner guard must use a coordinated control-contract
+edition. Strict nested heartbeat fields and the local `web-control.json` schema are not compatible
+with an older reader, even when delegation is disabled. Rebuilding the CLI does not replace an
+already running guard. Mixed-edition rolling upgrades and uninterrupted management during an
+upgrade are not supported.
+
+Arrange a controlled owner-managed stop before changing editions: use the companion's ordinary
+shutdown/settlement path and confirm that its owned work and guards have stopped. Then update the
+server and local checkout to the matching edition, run `npm ci` and `npm run local:build`, and
+restart the companion through its ordinary owner-managed path. Preserve the same `--state`, disk
+image, SDK profile, credential store and connection; do not initialize replacement state, erase
+journals or terminate guards by arbitrary PID. A stopped VM retains its data, but active processes
+can be interrupted and management may be unavailable during this coordinated update. This update
+prerequisite is distinct from live repository append inside a coordinated running edition, which
+preserves existing VMs and grants. A device without the control capability must use the rebuilt
+companion before the website can apply owner settings.
 
 After pairing confirmation, grant web control once on the local machine:
 
@@ -243,7 +256,11 @@ polling while disabled or expired without dispatching work, so web renewal can
 restore work within the approved ceiling. Offline revocation still cannot promise
 instant physical shutdown.
 
-Application settles owned work before changing policy. CPU, RAM and Docker disk
+Ordinary settings changes settle owned work before changing policy. A consent-only revision or
+verified delegated repository append that preserves all other settings applies live without stopping
+existing VMs or changing their grants, generation, runtime, Git identity or lease. A refusal before
+that append preserves the effective policy; an uncertain transition retains its durable intent.
+CPU, RAM and Docker disk
 defaults apply to new VMs; existing VMs restart with their admitted machine and
 repository identity. The default owned APFS image can grow or shrink while stopped
 after native bounds and free-space checks, preserving data. Storage must be integral
@@ -251,6 +268,61 @@ GiB, at least 8 GiB and at least Docker capacity plus 1 GiB; filesystem usable
 capacity includes native overhead. Unknown physical changes retain their journal
 and keep work fenced. Retrying the same settings may renew a finite lease; an
 unrelated request cannot erase an uncertain resize.
+
+### Delegated repository additions
+
+After local web-control opt-in, the owner can enable limited agent repository management in the
+Local computers editor. It is off by default and binds the connected, verified personal GitHub
+account, separate permissions for existing and new private repositories, optional push, an admission ceiling and
+the fixed `node-react-playwright` network profile. Saving requests a revision; only the companion's
+acknowledgement makes its delegation effective. The MCP caller cannot enable that consent, change
+its account, supply domains or rights, or extend the device lease. New-private consent authorizes the
+separate `repository_create` action; it does not authorize adding unrelated existing repositories.
+
+`codespace({ action: "local_devices" })` discovers owned device IDs and their applied delegation,
+plus eligible personal GitHub App `installations` with `installation_id`, owner and repository
+selection. `github_setup_required` indicates missing or unavailable GitHub installation setup;
+the caller's local devices remain discoverable.
+`repository_add` takes that `device_id`, the existing GitHub numeric `repository_id` and a caller-chosen
+UUID `request_id`. It verifies the current GitHub App installation grant, repository ID, owner,
+private visibility and required read/push rights. It adds only a private repository owned by the
+connected personal account. Its receipt is `pending`, `applied` or `rejected`; `local_repository_id`
+is null until the exact grant is acknowledged. Reuse the same request identity and payload to collect
+the result. An existing local grant is reused through discovery rather than added again. Requests
+exceeding the admission ceiling or racing unapplied owner settings are refused.
+
+`repository_create` takes `device_id`, a stable UUID `request_id`, `repository_name` and the personal
+`installation_id` from discovery. The name is 1–100 ASCII letters, digits, underscores, dots or
+hyphens, excluding `.`/`..` and a `.git` suffix. The server creates only an empty private repository
+in the connected user's personal account through fixed GitHub API endpoints; callers cannot select
+another owner or visibility. Current applied new-private consent, device/account identity, finite
+lease and admission capacity are checked before the durable submit fence permits an external create.
+
+Resume using the same complete payload. `pending`, `unknown`, `setup_required` and `rejected` are
+not local authority. A confirmed `github_repository_id` and `full_name` may remain available while
+installation setup is incomplete; only `applied` returns `local_repository_id` after companion ACK.
+A selected installation receives only that confirmed new repository, then the refreshed actual App
+grant is checked; a successful installation PUT alone does not grant access. Missing permissions
+return Settings/install guidance and preserve the confirmed result for continuation.
+
+A lost create response is inspected rather than blindly submitted again. Recovery requires the
+exact saved owner, name, private visibility and server-generated marker in the repository description;
+a same-name object or an absent inspection result does not authorize adoption or another create.
+The description marker is visible private-repository metadata, not a credential, and is not exported
+in MCP results. Preserve it while an unknown create is unresolved. Unknown requests retain an admission
+slot; confirmed rejected requests release their reservation and rejected history does not consume
+the owner's ceiling. Creation reservations and existing-repository admissions share both the
+delegated admission ceiling and the device's total repository-grant ceiling. A creation's own
+reservation becomes its admission receipt without taking a second slot; unrelated admission cannot
+consume that reserved place. Existing owner grants count toward the total ceiling.
+
+The fixed profile covers npm/Node, GitHub, Docker, official Playwright CDN and Debian/Ubuntu package
+mirrors; it is not arbitrary Internet access. The current approved domains are defined by
+`LOCAL_BROWSER_DEVELOPMENT_DOMAINS` in the shared local-management contract. Existing direct-egress,
+public-address, connection and byte-budget boundaries still apply. Browser binaries and guest system
+libraries are installed through ordinary guest commands; no browser is supplied or certified by the
+profile, and guest privileges, package routing and actual Chromium compatibility need separate
+verification. No host forwarding or replacement VM template is implied.
 
 ### Local Git and pull requests
 
@@ -703,14 +775,16 @@ digest and expiry but not the URL.
 The authenticated MCP catalog exposes the whole codespace surface as one tool,
 `codespace`, whose required `action` selects the operation: `list`, `setup_help`, `create`, `get`,
 `start`, `stop`, `delete`, `exec`, `stat`, `search`, `read`, `write`, `apply_patch`,
-`upload`, `download`, `pull_request_create`, `pull_request_get` and
+`upload`, `download`, `local_devices`, `repository_add`, `repository_create`, `preview_image`, `pull_request_create`, `pull_request_get` and
 `pull_request_find`. The public tools reference renders its schema from the typed
 registry. Changing it changes `MCP_TOOLS_REVISION`, so a client holding an older catalog
 receives the ordinary HTTP 426 reconnect contract.
 
-Every action derives the user from the MCP request context and addresses a persistent
-resource by `codespace_id`; the tool accepts no user, chat, session, OAuth, provider
-token, SSH or capability field. The published schema is one flat root object carrying
+Every action derives the user from the MCP request context. Lifecycle, execution, file and PR
+actions address a persistent resource by `codespace_id`; local discovery and repository admission
+use the owned device and applied delegation. The tool accepts no user, chat, OAuth, provider token,
+SSH or internal capability field. Execution sessions are guest working contexts, not authorization
+identities. The published schema is one flat root object carrying
 `action` plus the union of every action's fields, of which only `action` is required —
 the projection this repository uses wherever a client may not read a root `anyOf`. It
 stays strict, so a field no action declares is refused there; the adapter then applies
@@ -850,13 +924,24 @@ ordered byte-offset edits with UTF-8 replacement text and returns old/new versio
 the content-free summary. The `download` action returns the private transfer as a
 `resource_link` (see the previous section).
 
+`preview_image` instead returns a complete repository-relative PNG/JPEG as standard MCP
+`ImageContent`, with safe operation and image metadata. Pass `codespace_id`, `path` and optional
+`max_bytes` (default and maximum 4 MiB). It uses the existing download operation and its authorization
+and generation checks. Resume with only `codespace_id` and `operation_id`; the owned operation must
+have download kind. Pending remains a JSON operation envelope with no image. Successful projection
+checks complete bytes, digest, container/header framing, dimensions up to 8192 per edge and 16 million
+pixels; SVG, other formats, animated PNG, truncated and over-limit containers are refused. These
+checks are not full pixel decoding. Binary data appears only in the native image block, never in
+JSON text or a public URL. A captured screenshot is not evidence of visual correctness until inspected.
+
 `setup_help` diagnoses the current configuration, connection, installation, repository
 approval, instance-control and capacity condition after the same bounded grant refresh.
 It returns `repositories_stale` with the provider-owned instruction and the applicable
 Settings, installation, repository-creation and console links; the installation link is
 present when its configured URL is valid. This surface remains available when operational
-services cannot start. Moira cannot create a repository, so repository guidance tells the
-user to create it at the provider and then add it to the provider installation.
+services cannot start. Repository guidance offers owner-delegated `repository_create` for a new
+personal private repository on a local device, or manual provider creation followed by App approval.
+An existing repository must be exposed by the App before delegated local admission.
 
 Known connection, codespace, state, policy and provider failures become bounded tool
 errors with `code`, safe `message` and `retryable`; actionable setup, authorization and
@@ -1082,6 +1167,15 @@ approve the updated permission on GitHub and obtain a new App user token through
 | Repository: Metadata                   | read  | enumerate the installation's approved repositories                     |
 | Account: Plan                          | read  | read the connected personal account's monthly Codespaces billing usage |
 
+For local private repository creation, GitHub requires **Repository creation: write** or
+**Administration: write**. Adding the confirmed repository to a selected installation requires
+**GitHub App installation repository access: write**. These are the official
+[personal repository creation](https://docs.github.com/en/rest/repos/repos#create-a-repository-for-the-authenticated-user)
+and [installation-add](https://docs.github.com/en/rest/apps/installations#add-a-repository-to-an-app-installation)
+permissions. Contents write remains required for approved push. The owner must approve requested
+App permissions and refresh authorization through **Update GitHub permissions**; discovery or a
+source test does not establish that the live App has them. OAuth remains in the server vault.
+
 Enable "Request user authorization (OAuth) during installation" and expiring user
 authorization tokens; the callback URL is the exact same-origin Moira path below.
 Adding `Account: Plan` does not by itself require reinstalling the App. The
@@ -1273,6 +1367,11 @@ use the `codespace` vocabulary. Credential tables
 contain versioned ciphertext; resource, operation and transfer tables contain
 authority and accounting metadata but no command, path, query, patch, file content,
 native source URL, result stream, provider token or SSH material.
+
+Migration `0056_repository_creation_requests.sql` adds the tenant-owned durable private-repository
+request journal. It stores request fingerprint, device/account/installation authority, name,
+recovery marker, submitted/unknown/created/rejected state and admission reservation independently
+of VM operations. Public creation results exclude the internal journal, marker and credentials.
 
 Credential envelope version 1 keeps its original authenticated-context label so
 pre-rename ciphertext remains decryptable. New writes use envelope version 2 and

@@ -280,6 +280,7 @@ function editableDevice(): LocalDeviceView {
       domains: [...repository.domains],
     })),
     gitAuthor: null,
+    agentRepositoryManagement: null,
   };
   return {
     ...device,
@@ -307,6 +308,233 @@ function editableDevice(): LocalDeviceView {
     },
   };
 }
+
+test("agent access defaults off and requires a connected verified GitHub owner", async () => {
+  devices = [editableDevice()];
+  show();
+  const enable = await screen.findByLabelText("Allow agents to add repositories");
+  expect(enable).not.toBeChecked();
+  expect(enable).toBeDisabled();
+  expect(
+    screen.getByText("Applied permission: agent repository additions are disabled."),
+  ).toBeInTheDocument();
+  expect(requests.filter((entry) => entry.method === "put")).toHaveLength(0);
+});
+
+test("agent consent sends only the verified owner and bounded profile and stays pending until companion acknowledgement", async () => {
+  devices = [editableDevice()];
+  jest.mocked(apiClient.getGitHubCodespaceConnection).mockResolvedValue({
+    state: "connected",
+    account: { id: "123", login: "verified-owner" },
+  } as never);
+  show();
+  const enable = await screen.findByLabelText("Allow agents to add repositories");
+  await waitFor(() => expect(enable).not.toBeDisabled());
+  fireEvent.click(enable);
+  fireEvent.click(screen.getByLabelText("Allow push to added repositories"));
+  fireEvent.change(screen.getByLabelText("Maximum repositories agents may add"), {
+    target: { value: "65" },
+  });
+  fireEvent.submit(screen.getByRole("form", { name: "Settings for Approved laptop" }));
+  expect(requests.filter((entry) => entry.method === "put")).toHaveLength(0);
+  fireEvent.change(screen.getByLabelText("Maximum repositories agents may add"), {
+    target: { value: "3" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Request settings change" }));
+  await screen.findByText("Requested revision 4; applied revision 3. Waiting for the computer.");
+  const sent = (
+    requests.find((entry) => entry.method === "put")!.body as { settings: LocalDeviceSettingsValue }
+  ).settings;
+  expect(sent.agentRepositoryManagement).toEqual({
+    githubUserId: "123",
+    owner: "verified-owner",
+    allowExistingPrivate: true,
+    allowNewPrivate: false,
+    allowPush: true,
+    maxRepositories: 3,
+    networkProfile: "node-react-playwright",
+  });
+  expect(sent.repositories).toEqual(editableDevice().control!.settings.repositories);
+  expect(
+    screen.getByText("Applied permission: agent repository additions are disabled."),
+  ).toBeInTheDocument();
+  devices = [
+    {
+      ...devices[0],
+      control: {
+        ...devices[0].control!,
+        status: "rejected",
+        error: { code: "LOCAL_POLICY_LIMIT", message: "Local consent rejected" },
+      },
+    },
+  ];
+  fireEvent.click(screen.getByRole("button", { name: "Refresh devices" }));
+  await screen.findByText("Local consent rejected");
+  expect(
+    screen.getByText("Applied permission: agent repository additions are disabled."),
+  ).toBeInTheDocument();
+  devices = [
+    {
+      ...devices[0],
+      control: {
+        ...devices[0].control!,
+        status: "applied",
+        appliedRevision: 4,
+        appliedAgentRepositoryManagement: sent.agentRepositoryManagement,
+        error: null,
+      },
+    },
+  ];
+  fireEvent.click(screen.getByRole("button", { name: "Refresh devices" }));
+  await screen.findByText(
+    "Applied permission: verified-owner, up to 3 repositories; existing private allowed; new private not allowed; push allowed.",
+  );
+});
+
+test.each([
+  ["existing only", true, false],
+  ["new only", false, true],
+  ["both", true, true],
+] as const)(
+  "owner may independently request %s private repository permissions with applied acknowledgement",
+  async (_name, existing, created) => {
+    devices = [editableDevice()];
+    jest.mocked(apiClient.getGitHubCodespaceConnection).mockResolvedValue({
+      state: "connected",
+      account: { id: "123", login: "verified-owner" },
+    } as never);
+    show();
+    const enable = await screen.findByLabelText("Allow agents to add repositories");
+    await waitFor(() => expect(enable).not.toBeDisabled());
+    fireEvent.click(enable);
+    expect(screen.getByLabelText("Create and add new private repositories")).not.toBeChecked();
+    if (!existing) fireEvent.click(screen.getByLabelText("Add existing private repositories"));
+    if (created) fireEvent.click(screen.getByLabelText("Create and add new private repositories"));
+    fireEvent.click(screen.getByRole("button", { name: "Request settings change" }));
+    await screen.findByText("Requested revision 4; applied revision 3. Waiting for the computer.");
+    const sent = (
+      requests.find((entry) => entry.method === "put")!.body as {
+        settings: LocalDeviceSettingsValue;
+      }
+    ).settings;
+    expect(sent.agentRepositoryManagement).toEqual({
+      githubUserId: "123",
+      owner: "verified-owner",
+      allowExistingPrivate: existing,
+      allowNewPrivate: created,
+      allowPush: false,
+      maxRepositories: 1,
+      networkProfile: "node-react-playwright",
+    });
+    expect(sent.repositories).toEqual(device.policy.repositories);
+    expect(
+      screen.getByText("Applied permission: agent repository additions are disabled."),
+    ).toBeInTheDocument();
+    devices = [
+      {
+        ...devices[0],
+        control: {
+          ...devices[0].control!,
+          status: "applied",
+          appliedRevision: 4,
+          appliedAgentRepositoryManagement: sent.agentRepositoryManagement,
+        },
+      },
+    ];
+    fireEvent.click(screen.getByRole("button", { name: "Refresh devices" }));
+    await screen.findByText(
+      `Applied permission: verified-owner, up to 1 repositories; existing private ${existing ? "allowed" : "not allowed"}; new private ${created ? "allowed" : "not allowed"}; push not allowed.`,
+    );
+    expect(screen.getByLabelText("Add existing private repositories")).toHaveAttribute(
+      "aria-checked",
+      String(existing),
+    );
+    expect(screen.getByLabelText("Create and add new private repositories")).toHaveAttribute(
+      "aria-checked",
+      String(created),
+    );
+  },
+);
+
+test("revoking agent additions preserves existing grants and effective consent until acknowledgement", async () => {
+  const current = editableDevice();
+  const consent = {
+    githubUserId: "123",
+    owner: "verified-owner",
+    allowExistingPrivate: true,
+    allowNewPrivate: false,
+    allowPush: true,
+    maxRepositories: 3,
+    networkProfile: "node-react-playwright" as const,
+  };
+  current.control!.settings.agentRepositoryManagement = consent;
+  current.control!.appliedAgentRepositoryManagement = consent;
+  devices = [current];
+  show();
+  fireEvent.click(await screen.findByLabelText("Allow agents to add repositories"));
+  fireEvent.click(screen.getByRole("button", { name: "Request settings change" }));
+  await screen.findByText("Requested revision 4; applied revision 3. Waiting for the computer.");
+  const sent = (
+    requests.find((entry) => entry.method === "put")!.body as { settings: LocalDeviceSettingsValue }
+  ).settings;
+  expect(sent.agentRepositoryManagement).toBeNull();
+  expect(sent.repositories).toEqual(current.control!.settings.repositories);
+  expect(
+    screen.getByText(
+      "Applied permission: verified-owner, up to 3 repositories; existing private allowed; new private not allowed; push allowed.",
+    ),
+  ).toBeInTheDocument();
+  devices = [
+    {
+      ...devices[0],
+      control: {
+        ...devices[0].control!,
+        status: "applied",
+        appliedRevision: 4,
+        appliedAgentRepositoryManagement: null,
+      },
+    },
+  ];
+  fireEvent.click(screen.getByRole("button", { name: "Refresh devices" }));
+  await screen.findByText("Applied permission: agent repository additions are disabled.");
+  expect(screen.getByText("owner/project")).toBeInTheDocument();
+});
+
+test("changed GitHub identity cannot authorize an old consent draft and failed account refresh retains focused fields", async () => {
+  devices = [editableDevice()];
+  jest.mocked(apiClient.getGitHubCodespaceConnection).mockResolvedValue({
+    state: "connected",
+    account: { id: "123", login: "verified-owner" },
+  } as never);
+  show();
+  const enable = await screen.findByLabelText("Allow agents to add repositories");
+  await waitFor(() => expect(enable).not.toBeDisabled());
+  fireEvent.click(enable);
+  fireEvent.click(screen.getByLabelText("Create and add new private repositories"));
+  const count = screen.getByLabelText("Maximum repositories agents may add");
+  fireEvent.change(count, { target: { value: "2" } });
+  count.focus();
+  jest
+    .mocked(apiClient.getGitHubCodespaceConnection)
+    .mockRejectedValueOnce(new Error("unavailable"));
+  fireEvent.click(screen.getByRole("button", { name: "Refresh GitHub account" }));
+  await waitFor(() =>
+    expect(screen.getByRole("button", { name: "Refresh GitHub account" })).not.toBeDisabled(),
+  );
+  expect(count).toHaveFocus();
+  expect(count).toHaveValue(2);
+  fireEvent.click(screen.getByRole("button", { name: "Request settings change" }));
+  expect(requests.filter((entry) => entry.method === "put")).toHaveLength(0);
+  jest.mocked(apiClient.getGitHubCodespaceConnection).mockResolvedValue({
+    state: "connected",
+    account: { id: "456", login: "replacement" },
+  } as never);
+  fireEvent.click(screen.getByRole("button", { name: "Refresh GitHub account" }));
+  await screen.findByText("Verified connected account: replacement");
+  fireEvent.click(screen.getByRole("button", { name: "Request settings change" }));
+  expect(requests.filter((entry) => entry.method === "put")).toHaveLength(0);
+  expect(screen.getByText("Requested owner: verified-owner")).toBeInTheDocument();
+});
 
 test("owner settings request carries revision, week, machine and repository rights but keeps actual grants until local acknowledgement", async () => {
   const now = Date.now();

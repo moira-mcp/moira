@@ -27,7 +27,7 @@ import {
  */
 export const CODESPACE_TOOL_NAME = "codespace" as const;
 
-export type ToolResponsePolicy = "json" | "text" | "json-or-text" | "formatted-text";
+export type ToolResponsePolicy = "json" | "text" | "json-or-text" | "formatted-text" | "native";
 
 export interface ToolDocumentation {
   summary: string;
@@ -367,10 +367,34 @@ export const TOOL_DEFINITIONS = [
     // Both native file parameters belong to the same tool now, so the host is told about both.
     _meta: { "openai/fileParams": ["stdin_file", "file"] },
     schema: codespaceSchema,
-    responsePolicy: "json",
+    responsePolicy: "native",
     examples: [
       { action: "list" },
       { action: "setup_help" },
+      { action: "local_devices" },
+      {
+        action: "repository_add",
+        device_id: "00000000-0000-4000-8000-000000000000",
+        repository_id: "123456",
+        request_id: "11111111-1111-4111-8111-111111111111",
+      },
+      {
+        action: "repository_create",
+        device_id: "00000000-0000-4000-8000-000000000000",
+        request_id: "11111111-1111-4111-8111-111111111111",
+        repository_name: "private-app",
+        installation_id: "123456",
+      },
+      {
+        action: "preview_image",
+        codespace_id: "00000000-0000-4000-8000-000000000000",
+        path: "screenshots/app.png",
+      },
+      {
+        action: "preview_image",
+        codespace_id: "00000000-0000-4000-8000-000000000000",
+        operation_id: "11111111-1111-4111-8111-111111111111",
+      },
       { action: "create", repository_id: "123456", ref: "main" },
       { action: "get", codespace_id: "00000000-0000-4000-8000-000000000000" },
       {
@@ -429,13 +453,13 @@ export const TOOL_DEFINITIONS = [
         summary:
           "Work in a persistent GitHub or local Docker Sandboxes codespace: lifecycle, commands and files, by action.",
         result:
-          "The result the requested action produces, sanitized: codespace state, durable operation state with bounded output, file versions, or a one-use native download link.",
+          "Sanitized device/delegation, repository admission or private creation state (pending, applied, unknown, setup_required, rejected), codespace state, durable operation output, file versions, a one-use native download link, or bounded PNG/JPEG ImageContent. Resume creation with the same request identity and payload; local repository access requires applied companion acknowledgement. Each local codespace has its own VM; one repository may have multiple codespaces.",
       },
       ru: {
         summary:
           "Работа в постоянном codespace GitHub или локальной Docker Sandboxes VM: жизненный цикл, команды и файлы, по action.",
         result:
-          "Безопасный результат запрошенного действия: состояние codespace, состояние операции с ограниченным выводом, версии файлов или одноразовая нативная ссылка на скачивание.",
+          "Безопасное состояние устройства/делегирования, допуска или создания приватного репозитория (pending, applied, unknown, setup_required, rejected), состояние codespace и операции, версии файлов, одноразовая нативная ссылка или ограниченный PNG/JPEG ImageContent. Создание продолжают с прежними идентичностью и данными запроса; локальный доступ требует применённого подтверждения companion. У каждого локального codespace своя VM; один репозиторий может иметь несколько codespaces.",
       },
     },
   }),

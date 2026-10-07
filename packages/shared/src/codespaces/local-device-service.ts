@@ -5,6 +5,7 @@ import {
   localControlReportSchema,
   localControlRequestSchema,
   type LocalControlReport,
+  type LocalRepositoryAdmissionReceipt,
 } from "./local-management-types.js";
 import {
   LocalDeviceError,
@@ -125,6 +126,23 @@ export class LocalDeviceService {
       userId,
       id.parse(deviceId),
       generation.parse(expectedGeneration),
+      this.now(),
+    );
+  }
+  requestRepositoryAdmission(
+    userId: string,
+    deviceId: string,
+    input: Omit<
+      LocalRepositoryAdmissionReceipt,
+      "revision" | "connectionId" | "localRepositoryId"
+    > & {
+      expectedRevision: number;
+    },
+  ) {
+    return this.repository.requestRepositoryAdmission(
+      userId,
+      id.parse(deviceId),
+      input,
       this.now(),
     );
   }

@@ -14,6 +14,7 @@ import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { InlineError } from "@/components/inline-error";
+import { useGitHubCodespaces } from "./GitHubCodespacesData";
 
 type NumericKey =
   | "cpuCores"
@@ -50,6 +51,12 @@ export function LocalDeviceEditor({
 }) {
   const { t } = useTranslation();
   const guard = useReadOwnerGuard();
+  const { connection, connectionLoading, connectionError, reloadConnection } =
+    useGitHubCodespaces();
+  const account =
+    !connectionLoading && !connectionError && connection?.state === "connected"
+      ? connection.account
+      : null;
   const control = device.control;
   const [draft, setDraft] = useState<LocalDeviceSettingsValue | null>(control?.settings ?? null);
   const dirty = useRef(new Set<keyof LocalDeviceSettingsValue>());
@@ -82,6 +89,15 @@ export function LocalDeviceEditor({
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
     if (!draft || !control?.optedIn || pending) return;
+    if (
+      draft.agentRepositoryManagement &&
+      (!account ||
+        draft.agentRepositoryManagement.githubUserId !== account.id ||
+        draft.agentRepositoryManagement.owner.toLowerCase() !== account.login.toLowerCase())
+    ) {
+      setError(t("localDevices.editor.agent.accountRequired"));
+      return;
+    }
     const parsed = localDeviceSettingsSchema.safeParse(draft);
     if (!parsed.success) {
       setError(t("localDevices.editor.invalid"));
@@ -217,6 +233,126 @@ export function LocalDeviceEditor({
           </p>
         </div>
       </div>
+      <fieldset className="space-y-3 rounded-md border p-4">
+        <legend className="px-1 font-medium">{t("localDevices.editor.agent.title")}</legend>
+        <p className="text-sm text-muted-foreground">{t("localDevices.editor.agent.hint")}</p>
+        <p className="text-sm" role="status">
+          {control.appliedAgentRepositoryManagement
+            ? t("localDevices.editor.agent.applied", {
+                owner: control.appliedAgentRepositoryManagement.owner,
+                count: control.appliedAgentRepositoryManagement.maxRepositories,
+                existing: t(
+                  control.appliedAgentRepositoryManagement.allowExistingPrivate
+                    ? "localDevices.yes"
+                    : "localDevices.no",
+                ),
+                created: t(
+                  control.appliedAgentRepositoryManagement.allowNewPrivate
+                    ? "localDevices.yes"
+                    : "localDevices.no",
+                ),
+                push: t(
+                  control.appliedAgentRepositoryManagement.allowPush
+                    ? "localDevices.yes"
+                    : "localDevices.no",
+                ),
+              })
+            : t("localDevices.editor.agent.disabled")}
+        </p>
+        <div className="flex items-center gap-2">
+          <Checkbox
+            id={`${prefix}-agent-enabled`}
+            checked={Boolean(draft.agentRepositoryManagement)}
+            disabled={!draft.agentRepositoryManagement && !account}
+            onCheckedChange={(value) =>
+              change(
+                "agentRepositoryManagement",
+                value === true && account
+                  ? {
+                      githubUserId: account.id,
+                      owner: account.login,
+                      allowExistingPrivate: true,
+                      allowNewPrivate: false,
+                      allowPush: false,
+                      maxRepositories: 1,
+                      networkProfile: "node-react-playwright",
+                    }
+                  : null,
+              )
+            }
+          />
+          <Label htmlFor={`${prefix}-agent-enabled`}>{t("localDevices.editor.agent.enable")}</Label>
+        </div>
+        <p className="text-sm text-muted-foreground">
+          {account
+            ? t("localDevices.editor.agent.account", { owner: account.login })
+            : t("localDevices.editor.agent.accountRequired")}
+        </p>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          disabled={connectionLoading}
+          onClick={() => void reloadConnection()}
+        >
+          {t(
+            connectionLoading
+              ? "localDevices.editor.agent.refreshing"
+              : "localDevices.editor.agent.refresh",
+          )}
+        </Button>
+        {draft.agentRepositoryManagement && (
+          <div className="space-y-3">
+            <p className="text-sm">
+              {t("localDevices.editor.agent.requested", {
+                owner: draft.agentRepositoryManagement.owner,
+              })}
+            </p>
+            <div className="flex flex-wrap gap-4">
+              {(["allowExistingPrivate", "allowNewPrivate", "allowPush"] as const).map((key) => (
+                <div key={key} className="flex items-center gap-2">
+                  <Checkbox
+                    id={`${prefix}-agent-${key}`}
+                    checked={draft.agentRepositoryManagement?.[key] === true}
+                    onCheckedChange={(value) =>
+                      change("agentRepositoryManagement", {
+                        ...draft.agentRepositoryManagement!,
+                        [key]: value === true,
+                      })
+                    }
+                  />
+                  <Label htmlFor={`${prefix}-agent-${key}`}>
+                    {t(`localDevices.editor.agent.${key}`)}
+                  </Label>
+                </div>
+              ))}
+            </div>
+            <div className="max-w-xs space-y-1.5">
+              <Label htmlFor={`${prefix}-agent-count`}>
+                {t("localDevices.editor.agent.count")}
+              </Label>
+              <Input
+                id={`${prefix}-agent-count`}
+                type="number"
+                min={1}
+                max={64}
+                step={1}
+                value={draft.agentRepositoryManagement.maxRepositories}
+                onChange={(event) =>
+                  change("agentRepositoryManagement", {
+                    ...draft.agentRepositoryManagement!,
+                    maxRepositories: Number(event.currentTarget.value),
+                  })
+                }
+              />
+            </div>
+            <p className="text-sm text-muted-foreground">
+              {t("localDevices.editor.agent.network")}
+            </p>
+          </div>
+        )}
+        <p className="text-sm text-muted-foreground">{t("localDevices.editor.agent.revokeHint")}</p>
+      </fieldset>
       <fieldset className="space-y-3">
         <legend className="font-medium">{t("localDevices.repositories")}</legend>
         {draft.repositories.map((repository, index) => {

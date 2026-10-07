@@ -57,7 +57,7 @@ describe("HttpGitHubCodespaceClient", () => {
         { id: "provider_console", url: "https://github.com/codespaces" },
       ],
       instructions: {
-        repository_not_approved: expect.stringContaining("Moira cannot create a repository"),
+        repository_not_approved: expect.stringContaining("repository_create"),
       },
     });
     expect(

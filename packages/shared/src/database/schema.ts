@@ -556,6 +556,52 @@ export const codespaceLocalPairing = sqliteTable(
     ),
   }),
 );
+/** A private GitHub repository create can be unknown before any VM exists. */
+export const codespaceRepositoryRequest = sqliteTable(
+  "codespaceRepositoryRequest",
+  {
+    requestId: text("requestId").primaryKey(),
+    userId: text("userId")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    deviceId: text("deviceId")
+      .notNull()
+      .references(() => codespaceLocalDevice.id),
+    deviceGeneration: integer("deviceGeneration").notNull(),
+    localConnectionId: text("localConnectionId").notNull(),
+    githubConnectionId: text("githubConnectionId").notNull(),
+    githubUserId: text("githubUserId").notNull(),
+    owner: text("owner").notNull(),
+    credentialGeneration: integer("credentialGeneration").notNull(),
+    repositoryName: text("repositoryName").notNull(),
+    installationId: text("installationId").notNull(),
+    fingerprint: text("fingerprint").notNull(),
+    delegation: text("delegation").notNull(),
+    marker: text("marker").notNull(),
+    admissionRequestId: text("admissionRequestId").notNull().unique(),
+    state: text("state").notNull(),
+    repositoryId: text("repositoryId"),
+    fullName: text("fullName"),
+    installationVerified: integer("installationVerified").notNull().default(0),
+    reservationHeld: integer("reservationHeld").notNull().default(1),
+    claimId: text("claimId"),
+    claimExpiresAt: integer("claimExpiresAt"),
+    errorCode: text("errorCode"),
+    createdAt: integer("createdAt").notNull(),
+    updatedAt: integer("updatedAt").notNull(),
+  },
+  (table) => ({
+    deviceCapacityIdx: index("codespace_repository_request_device_capacity_idx").on(
+      table.deviceId,
+      table.reservationHeld,
+    ),
+    ownerNameIdx: index("codespace_repository_request_owner_name_idx").on(
+      table.userId,
+      table.githubUserId,
+      table.repositoryName,
+    ),
+  }),
+);
 export const codespaceLocalResourceBinding = sqliteTable(
   "codespaceLocalResourceBinding",
   {

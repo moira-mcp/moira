@@ -7,6 +7,7 @@ import {
   requireLocalGrant,
   requireRef,
   publicPolicy,
+  localPolicySchema,
   type LocalPolicy,
 } from "./policy.js";
 import type { LocalVmRuntime, LocalVmIdentity, LocalVmRuntimeFactory } from "./local-vm-runtime.js";
@@ -128,6 +129,33 @@ export class LocalManager {
 
   async stopWork(): Promise<void> {
     await this.closeResources(true);
+  }
+  /** The same runner/lifecycle gate admits an exact repository-only expansion. */
+  async appendRepositoryPolicy(previous: LocalPolicy, next: LocalPolicy): Promise<void> {
+    await this.serial(async () => {
+      await this.holdRunnerLock();
+      next = localPolicySchema.parse(next);
+      const stable = (policy: LocalPolicy) => JSON.stringify({ ...policy, repositories: [] });
+      if (
+        stable(previous) !== stable(next) ||
+        next.repositories.length < previous.repositories.length ||
+        previous.repositories.some(
+          (repository, index) =>
+            JSON.stringify(repository) !== JSON.stringify(next.repositories[index]),
+        )
+      )
+        throw new LocalRefusal(
+          "LOCAL_CONTROL_CONFLICT",
+          "Live control may only append repository grants.",
+        );
+      const current = JSON.stringify(await this.records.policy());
+      if (current !== JSON.stringify(previous) && current !== JSON.stringify(next))
+        throw new LocalRefusal(
+          "LOCAL_CONTROL_CONFLICT",
+          "Local policy changed before repository admission.",
+        );
+      if (current !== JSON.stringify(next)) await this.records.state.write("policy.json", next);
+    });
   }
   async close(): Promise<void> {
     await this.closeResources(false);

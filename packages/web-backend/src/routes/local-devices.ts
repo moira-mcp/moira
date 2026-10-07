@@ -6,12 +6,14 @@ import {
   localPublicPolicySchema,
   localAcknowledgementSchema,
   localControlReportSchema,
+  localControlRequestSchema,
   type LocalDeviceService,
   type LocalDeviceAuth,
   type LocalRelayAcknowledgement,
   type CodespaceTransferService,
 } from "@mcp-moira/shared";
 import type { AuthenticatedRequest } from "../types/express-types.js";
+import { getLocalRepositoryAdmissionService } from "../services/local-repository-admission-factory.js";
 
 type Handler = (req: Request, res: Response, next: NextFunction) => unknown | Promise<unknown>;
 function endpoint(handler: Handler) {
@@ -157,7 +159,7 @@ export function createLocalDeviceManagementRoutes(
   );
   router.put(
     "/devices/:id/settings",
-    endpoint((req, res) => {
+    endpoint(async (req, res) => {
       if (
         !(req as AuthenticatedRequest).session?.token ||
         req.get("Authorization") ||
@@ -167,9 +169,15 @@ export function createLocalDeviceManagementRoutes(
           "LOCAL_UNAUTHORIZED",
           "A confirmed browser session and matching origin are required.",
         );
+      const input = localControlRequestSchema.parse(req.body);
+      if (input.settings.agentRepositoryManagement)
+        await getLocalRepositoryAdmissionService().validateOwner(
+          owner(req),
+          input.settings.agentRepositoryManagement,
+        );
       res.json({
         success: true,
-        data: service.requestSettings(owner(req), param(req, "id"), req.body),
+        data: service.requestSettings(owner(req), param(req, "id"), input),
       });
     }),
   );
