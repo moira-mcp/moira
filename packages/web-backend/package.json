@@ -15,6 +15,6 @@
     "multer": "^2.4.0"
   },
   "devDependencies": {
-    "@types/multer": "^2.2.0"
+    "@types/multer": "^2.3.0"
   }
 }
