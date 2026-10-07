@@ -1,6 +1,7 @@
 import { isAbsolute } from "node:path";
 import { z } from "zod";
 import { gitFetchRefSchema } from "../../shared/src/codespaces/git-ref.js";
+import { CODESPACE_CONNECTOR_LIMITS } from "../../shared/src/codespaces/resource-policy.js";
 import {
   MAX_LOCAL_WORK_LEASE_MS,
   localGitAuthorSchema,
@@ -45,7 +46,6 @@ export const localRepositorySchema = z
     allowPush: z.boolean(),
     allowDelete: z.boolean().default(false),
     allowPullRequests: z.boolean().optional(),
-    domains: z.array(domainName).max(64),
   })
   .strict();
 export type LocalRepository = z.infer<typeof localRepositorySchema>;
@@ -76,17 +76,7 @@ export const localPolicySchema = z
         dockerBytes: integer(GiB, 128 * GiB),
       })
       .strict(),
-    limits: z
-      .object({
-        maxSandboxes: integer(1, 8),
-        maxOperationMs: integer(1000, 4 * 60 * 60_000),
-        maxOutputBytes: integer(1024, 256 * 1024 * 1024),
-        maxConcurrent: integer(1, 16),
-        maxNetworkBytes: integer(1024, 16 * GiB),
-        maxNetworkConnections: integer(1, 64),
-      })
-      .strict(),
-    repositories: z.array(localRepositorySchema).max(64),
+    repositories: z.array(localRepositorySchema),
   })
   .strict()
   .superRefine((value, context) => {
@@ -129,6 +119,19 @@ export function requireOperationOutputBudget(stdout: unknown, stderr: unknown): 
     );
 }
 
+/** Request bounds belong to the guest protocol, independent of owner settings. */
+export function requireOperationExecutionBudget(
+  timeout: unknown,
+  retainedBytes: unknown,
+  remainingLeaseMs: number,
+): number {
+  const requested = integer(1, Number.MAX_SAFE_INTEGER).parse(timeout);
+  integer(1, CODESPACE_CONNECTOR_LIMITS.maxRetainedOutputBytes).parse(retainedBytes);
+  if (remainingLeaseMs <= 0)
+    throw new LocalRefusal("LOCAL_LEASE_EXPIRED", "The accepted work deadline expired.");
+  return Math.min(requested, remainingLeaseMs);
+}
+
 export function requireLocalGrant(
   policy: LocalPolicy,
   repositoryId: string,
@@ -169,6 +172,5 @@ export function publicPolicy(policy: LocalPolicy) {
       memoryBytes: policy.runtime.memoryBytes,
       storageBytes: policy.runtime.maxStorageBytes,
     },
-    maxSandboxes: policy.limits.maxSandboxes,
   };
 }

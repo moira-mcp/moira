@@ -16,8 +16,6 @@ import { useLatestRequest } from "@/hooks/useLatestRequest";
 import { useRefreshOnActivation } from "@/components/settings/useRefreshOnActivation";
 
 export interface GitHubCodespacesState {
-  provider: string;
-  setProvider: React.Dispatch<React.SetStateAction<string>>;
   connection: CodespaceConnectionView | null;
   connectionLoading: boolean;
   connectionError: boolean;
@@ -28,7 +26,7 @@ export interface GitHubCodespacesState {
   applyConnection: (next: CodespaceConnectionView) => void;
   reloadConnection: () => Promise<void>;
   /** `sync` asks GitHub for current resource state; `silent` keeps the current view on screen. */
-  reloadManagement: (options?: { silent?: boolean; sync?: boolean }) => Promise<void>;
+  reloadManagement: (options?: { silent?: boolean; sync?: boolean }) => Promise<boolean>;
   setManagement: React.Dispatch<React.SetStateAction<CodespaceManagementView | null>>;
 }
 
@@ -44,7 +42,6 @@ export function GitHubCodespacesProvider({
   view?: "environments" | "github" | "local";
 }) {
   const [connection, setConnection] = useState<CodespaceConnectionView | null>(null);
-  const [provider, setProvider] = useState("github-codespaces");
   const [connectionLoading, setConnectionLoading] = useState(true);
   const [connectionError, setConnectionError] = useState(false);
   const [management, setManagement] = useState<CodespaceManagementView | null>(null);
@@ -68,17 +65,21 @@ export function GitHubCodespacesProvider({
   }, [beginConnectionRequest]);
 
   const reloadManagement = useCallback(
-    async ({ sync = false }: { silent?: boolean; sync?: boolean } = {}) => {
+    async ({ sync = false, silent = false }: { silent?: boolean; sync?: boolean } = {}) => {
       const isCurrent = beginManagementRequest();
       try {
-        setManagementLoading(true);
-        setManagementError(false);
+        if (!silent) {
+          setManagementLoading(true);
+          setManagementError(false);
+        }
         const next = sync
           ? await apiClient.refreshGitHubCodespaces()
           : await apiClient.getGitHubCodespaces();
         if (isCurrent()) setManagement(next);
+        return true;
       } catch {
-        if (isCurrent()) setManagementError(true);
+        if (isCurrent() && !silent) setManagementError(true);
+        return false;
       } finally {
         if (isCurrent()) setManagementLoading(false);
       }
@@ -91,7 +92,7 @@ export function GitHubCodespacesProvider({
     void reloadManagement();
   }, [reloadConnection, reloadManagement]);
   useRefreshOnActivation(active && view === "github", reloadConnection);
-  useRefreshOnActivation(active && view === "environments", reloadManagement);
+  useRefreshOnActivation(active && (view === "environments" || view === "local"), reloadManagement);
 
   const applyConnection = useCallback(
     (next: CodespaceConnectionView) => {
@@ -106,8 +107,6 @@ export function GitHubCodespacesProvider({
 
   const value = useMemo(
     () => ({
-      provider,
-      setProvider,
       connection,
       connectionLoading,
       connectionError,
@@ -120,7 +119,6 @@ export function GitHubCodespacesProvider({
       setManagement,
     }),
     [
-      provider,
       connection,
       connectionLoading,
       connectionError,

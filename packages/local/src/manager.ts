@@ -1,5 +1,4 @@
 import { randomBytes, randomUUID } from "node:crypto";
-import { totalmem, cpus } from "node:os";
 import { z } from "zod";
 import { LocalRecords, policyForSpace, type LocalSpace } from "./space-record.js";
 import {
@@ -81,7 +80,7 @@ export class LocalManager {
       await this.owner();
       if (this.dependencies.runtime) await this.runtime(policy).boundary.verifyConfiguration();
       const onFault = this.dependencies.onFault ?? (() => undefined);
-      const budget = new NetworkBudget(this.records.state);
+      const budget = new NetworkBudget();
       const relay = new LocalRelay(this.records);
       const direct = gitBroker(budget, onFault);
       const cloud = cloudGitBroker(
@@ -227,17 +226,6 @@ export class LocalManager {
             "Creation marker belongs to another repository or revision.",
           );
         return duplicate;
-      }
-      const count = spaces.filter((space) => space.phase !== "deleted").length;
-      if (
-        count >= policy.limits.maxSandboxes ||
-        (count + 1) * policy.runtime.memoryBytes > totalmem() * 0.8 ||
-        policy.runtime.cpuCores > cpus().length
-      ) {
-        throw new LocalRefusal(
-          "LOCAL_RESOURCE_LIMIT",
-          "The locally approved machine or sandbox capacity is exhausted.",
-        );
       }
       await (this.dependencies.storage ?? admitStorage)(policy);
       const id = randomUUID();
@@ -503,17 +491,19 @@ export class LocalManager {
         createdAt: space.createdAt,
         lastStartedAt: space.lastStartedAt,
         generation: space.generation,
-        state:
-          actual?.status ??
-          (!admitted
-            ? space.phase === "stopped"
-              ? "stopped"
-              : "unknown"
-            : space.runtimeId
-              ? "absent"
-              : "unknown"),
+        state: actual?.status ?? (!admitted ? "unknown" : space.runtimeId ? "absent" : "unknown"),
         phase: space.phase,
         failure: space.failure,
+        // Only the independent native owner can attest physical settlement. The persisted
+        // phase alone is historical; an injected runtime or unavailable observation cannot.
+        nativeStopConfirmed:
+          !this.dependencies.runtime &&
+          admitted &&
+          actual !== undefined &&
+          actual.id === space.runtimeId &&
+          (actual.status === "stopped" || actual.status === "created") &&
+          space.desiredState === "stopped" &&
+          space.phase === "stopped",
       });
     }
     return { ...publicPolicy(policy), spaces };

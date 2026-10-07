@@ -346,6 +346,8 @@ export const codespaceResource = sqliteTable(
     lastActivityAt: integer("lastActivityAt", { mode: "timestamp_ms" }),
     /** The provider's last start time (GitHub's `last_used_at`), for display only. */
     providerLastUsedAt: integer("providerLastUsedAt", { mode: "timestamp_ms" }),
+    /** Last exact verified provider observation; retry bookkeeping does not advance it. */
+    observedAt: integer("observedAt", { mode: "timestamp_ms" }),
     lastOutcome: text("lastOutcome"),
     createdAt: integer("createdAt", { mode: "timestamp_ms" }).notNull(),
     updatedAt: integer("updatedAt", { mode: "timestamp_ms" }).notNull(),

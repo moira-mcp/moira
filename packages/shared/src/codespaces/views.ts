@@ -1,5 +1,8 @@
 import { effectiveCodespaceLimits } from "./resource-policy.js";
+import { CODESPACE_PROVIDER_LOCAL } from "./local-device-types.js";
+import { codespaceLifecycleErrorCode } from "./resource-types.js";
 import type {
+  CodespaceResourceErrorCode,
   CodespaceOperationRecord,
   CodespaceResourcePolicy,
   CodespaceResourceRecord,
@@ -34,6 +37,9 @@ export interface CodespaceSummaryView {
   retention_policy: CodespaceResourceRecord["retentionPolicy"];
   desired_state: CodespaceResourceRecord["desiredState"];
   observed_state: CodespaceResourceRecord["observedState"];
+  /** Null until an exact provider observation succeeds; retries do not advance it. */
+  observed_at: number | null;
+  lifecycle_error: CodespaceResourceErrorCode | null;
   generation: number;
   created_at: number;
   updated_at: number;
@@ -59,6 +65,8 @@ export function projectCodespaceSummary(codespace: CodespaceResourceRecord): Cod
     retention_policy: codespace.retentionPolicy,
     desired_state: codespace.desiredState,
     observed_state: codespace.observedState,
+    observed_at: codespace.observedAt,
+    lifecycle_error: codespaceLifecycleErrorCode(codespace.lastOutcome),
     generation: codespace.generation,
     created_at: codespace.createdAt,
     updated_at: codespace.updatedAt,
@@ -131,15 +139,15 @@ export interface CodespaceLimitsView {
   codespaces: {
     /** Codespaces the user holds; stopped ones and ones still being created or cleaned up count. */
     held: number;
-    max_per_user: number;
+    max_per_user: number | null;
     instance_held: number;
-    max_instance: number;
-    create_throttle_seconds: number;
+    max_instance: number | null;
+    create_throttle_seconds: number | null;
   };
-  machine_ceiling: { cpu_cores: number; memory_bytes: number; storage_bytes: number };
+  machine_ceiling: { cpu_cores: number; memory_bytes: number; storage_bytes: number } | null;
   operations: {
     active: number;
-    max_concurrent_per_user: number;
+    max_concurrent_per_user: number | null;
     max_input_bytes: number;
     max_stdout_bytes: number;
     max_stderr_bytes: number;
@@ -168,6 +176,7 @@ export interface CodespaceLimitsView {
 }
 
 export function projectCodespaceLimits(input: {
+  provider?: string;
   policy: CodespaceResourcePolicy;
   held: number;
   instanceHeld: number;
@@ -177,24 +186,27 @@ export function projectCodespaceLimits(input: {
   providerIdleMaxMinutes: number;
 }): CodespaceLimitsView {
   const { policy } = input;
+  const local = input.provider === CODESPACE_PROVIDER_LOCAL;
   const limits = effectiveCodespaceLimits(policy);
   const seconds = (milliseconds: number) => Math.floor(milliseconds / 1000);
   return {
     codespaces: {
       held: input.held,
-      max_per_user: policy.maxActivePerUser,
+      max_per_user: local ? null : policy.maxActivePerUser,
       instance_held: input.instanceHeld,
-      max_instance: policy.maxActiveGlobal,
-      create_throttle_seconds: seconds(policy.createThrottleMs),
+      max_instance: local ? null : policy.maxActiveGlobal,
+      create_throttle_seconds: local ? null : seconds(policy.createThrottleMs),
     },
-    machine_ceiling: {
-      cpu_cores: policy.maxCpuCores,
-      memory_bytes: policy.maxMemoryBytes,
-      storage_bytes: policy.maxStorageBytes,
-    },
+    machine_ceiling: local
+      ? null
+      : {
+          cpu_cores: policy.maxCpuCores,
+          memory_bytes: policy.maxMemoryBytes,
+          storage_bytes: policy.maxStorageBytes,
+        },
     operations: {
       active: input.activeOperations,
-      max_concurrent_per_user: limits.operations.maxConcurrentPerUser,
+      max_concurrent_per_user: local ? null : limits.operations.maxConcurrentPerUser,
       max_input_bytes: limits.operations.maxInputBytes,
       max_stdout_bytes: limits.operations.maxStdoutBytes,
       max_stderr_bytes: limits.operations.maxStderrBytes,
@@ -290,9 +302,9 @@ export interface CodespaceReadinessView {
   };
   usage: {
     active_resources: number;
-    max_active_resources: number;
+    max_active_resources: number | null;
     active_operations: number;
-    max_active_operations: number;
+    max_active_operations: number | null;
     transfer_live_bytes: number;
     max_transfer_live_bytes: number;
   };

@@ -501,13 +501,14 @@ export class SbxRuntime {
       !observed ||
       !z.string().uuid().safeParse(observed.id).success ||
       observed.agent !== response.agent ||
-      !["stopped", "running"].includes(observed.status)
+      !["stopped", "running", "created"].includes(observed.status)
     )
       throw new LocalRefusal(
         "LOCAL_CREATE_UNKNOWN",
         "Creation was not observed; inspect the pending local record.",
       );
     const identity = { name, runtimeId: observed.id };
+    if (observed.status === "created") await this.verifyCreatedContainer(identity);
     await this.verifyBoundary(identity);
     return identity;
   }
@@ -520,7 +521,7 @@ export class SbxRuntime {
       await this.verifyBoundary(identity);
       return;
     }
-    if (observed.status !== "stopped")
+    if (observed.status !== "stopped" && observed.status !== "created")
       throw new LocalRefusal("LOCAL_START_FAILED", "The owned sandbox is not ready for startup.");
     await this.prepareCredentials();
     await this.verifyDaemonOwnership();
@@ -563,18 +564,33 @@ export class SbxRuntime {
     await this.inspectBoundary(identity);
   }
 
+  /** Created is actionable inventory, never a certificate that the VM has stopped. */
+  private async verifyCreatedContainer(identity: SandboxIdentity): Promise<void> {
+    const container = await this.containerIdentity(identity.name);
+    if (container.state !== "created" && container.state !== "exited")
+      throw new LocalRefusal(
+        "LOCAL_CONTAINER_UNKNOWN",
+        "The created SDK snapshot disagrees with its exact Engine container.",
+      );
+  }
+
   private async inspectBoundary(
     identity: SandboxIdentity,
     beforeStart = false,
     observation?: SandboxObservation,
   ): Promise<boolean> {
     const observed = observation ?? (await this.exact(identity));
-    if (!observed || observed.agent !== "shell" || (beforeStart && observed.status !== "stopped")) {
+    if (
+      !observed ||
+      observed.agent !== "shell" ||
+      (beforeStart && observed.status !== "stopped" && observed.status !== "created")
+    ) {
       throw new LocalRefusal(
         "LOCAL_SANDBOX_UNSAFE",
         "The sandbox has unexpected host mounts, ports or agent configuration.",
       );
     }
+    if (beforeStart && observed.status === "created") await this.verifyCreatedContainer(identity);
     const parsed = z
       .object({
         name: z.string(),
@@ -845,7 +861,9 @@ export class SbxRuntime {
   }
 
   async stop(identity: SandboxIdentity): Promise<void> {
-    if (await this.exact(identity)) await this.call(["stop", identity.name]);
+    const observed = await this.exact(identity);
+    if (observed?.status === "created") await this.verifyCreatedContainer(identity);
+    if (observed) await this.call(["stop", identity.name]);
   }
 
   async remove(identity: SandboxIdentity): Promise<void> {

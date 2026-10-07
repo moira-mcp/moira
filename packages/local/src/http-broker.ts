@@ -36,19 +36,18 @@ export function httpBroker(
     }
     const reservation = await budget.reserve(grant.policy, grant.admission);
     if (response.destroyed) {
-      await reservation.release(0).catch(onFault);
+      await reservation.release().catch(onFault);
       return;
     }
-    let bytes = 0;
     let released = false;
     const release = () => {
       if (released) return;
       released = true;
-      void reservation.release(bytes).catch(onFault);
+      void reservation.release().catch(onFault);
     };
     response.once("close", release);
     try {
-      const address = await resolvePublicTarget(target.hostname, grant.repository.domains, resolve);
+      const address = await resolvePublicTarget(target.hostname, resolve);
       if (response.destroyed) {
         release();
         return;
@@ -89,20 +88,13 @@ export function httpBroker(
             if (typeof value === "string") outgoing[name] = value;
           }
           response.writeHead(reply.statusCode ?? 502, outgoing);
-          reply.on("data", (chunk: Buffer) => {
-            bytes += chunk.length;
-            if (bytes > reservation.maximumBytes) {
-              reply.destroy();
-              response.destroy();
-            }
-          });
           reply.once("error", () => response.destroy());
           reply.pipe(response);
         },
       );
       const timer = setTimeout(
         () => upstream.destroy(),
-        Math.max(1, Math.min(120_000, grant.policy.leaseUntil - Date.now())),
+        Math.max(1, grant.policy.leaseUntil - Date.now()),
       );
       upstream.once("close", () => clearTimeout(timer));
       upstream.once("timeout", () => upstream.destroy());

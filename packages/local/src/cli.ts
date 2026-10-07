@@ -34,8 +34,8 @@ Usage: moira-local <command> [options]
   login        Sign in to Docker within the companion's separate runtime
                --new-store creates a separate encrypted store; existing credentials are preserved
   setup        Initialize an empty dedicated runtime with host integrations disabled
-  approve OWNER/REPO [--private] [--push] [--delete] [--domain HOST ...]
-               Grant repository, egress and optional destructive rights locally
+  approve OWNER/REPO [--private] [--push] [--delete]
+               Grant repository and optional destructive rights locally
   git-token OWNER/REPO
                Read this repository's GitHub token from stdin; never from arguments
   enable [--hours 8] | disable
@@ -59,7 +59,7 @@ Usage: moira-local <command> [options]
 
 Options: --state PATH --sbx PATH --template IMAGE@sha256:DIGEST
          --storage-root PATH --storage-gib 32 --cpus 2 --memory-gib 4
-         --max-sandboxes 2 --label NAME --json --help
+         --label NAME --json --help
 
 The verified runtime supports macOS; init creates a private bounded disk image.
 Linux execution is refused until its kernel ownership contract is supported.
@@ -96,11 +96,9 @@ export async function main(args: string[], environment: NodeJS.ProcessEnv): Prom
       "storage-gib": { type: "string" },
       cpus: { type: "string" },
       "memory-gib": { type: "string" },
-      "max-sandboxes": { type: "string" },
       label: { type: "string" },
       ref: { type: "string" },
       hours: { type: "string" },
-      domain: { type: "string", multiple: true },
       private: { type: "boolean" },
       push: { type: "boolean" },
       delete: { type: "boolean" },
@@ -113,11 +111,6 @@ export async function main(args: string[], environment: NodeJS.ProcessEnv): Prom
       "pairing-id": { type: "string" },
       "max-lease-hours": { type: "string" },
       "docker-gib": { type: "string" },
-      "max-operation-ms": { type: "string" },
-      "max-output-bytes": { type: "string" },
-      "max-concurrent": { type: "string" },
-      "max-network-bytes": { type: "string" },
-      "max-network-connections": { type: "string" },
     },
   });
   const [command, target] = parsed.positionals;
@@ -146,7 +139,6 @@ export async function main(args: string[], environment: NodeJS.ProcessEnv): Prom
         storageGiB: number(options["storage-gib"]),
         cpuCores: number(options.cpus),
         memoryGiB: number(options["memory-gib"]),
-        maxSandboxes: number(options["max-sandboxes"]),
       },
       environment,
     );
@@ -161,7 +153,6 @@ export async function main(args: string[], environment: NodeJS.ProcessEnv): Prom
         allowPush: options.push ?? false,
         allowDelete: options.delete ?? false,
         ...(options["pull-requests"] ? { allowPullRequests: true } : {}),
-        domains: options.domain,
       }),
     );
     return;
@@ -239,14 +230,6 @@ export async function main(args: string[], environment: NodeJS.ProcessEnv): Prom
           1024 ** 3,
         dockerBytes:
           (number(options["docker-gib"]) ?? policy.runtime.dockerBytes / 1024 ** 3) * 1024 ** 3,
-        ...policy.limits,
-        maxSandboxes: number(options["max-sandboxes"]) ?? policy.limits.maxSandboxes,
-        maxOperationMs: number(options["max-operation-ms"]) ?? policy.limits.maxOperationMs,
-        maxOutputBytes: number(options["max-output-bytes"]) ?? policy.limits.maxOutputBytes,
-        maxConcurrent: number(options["max-concurrent"]) ?? policy.limits.maxConcurrent,
-        maxNetworkBytes: number(options["max-network-bytes"]) ?? policy.limits.maxNetworkBytes,
-        maxNetworkConnections:
-          number(options["max-network-connections"]) ?? policy.limits.maxNetworkConnections,
         maxLeaseMs:
           (number(options["max-lease-hours"]) ?? MAX_LOCAL_WORK_LEASE_MS / 3600000) * 3600000,
       }),
@@ -389,7 +372,6 @@ async function runManagerCommand(
         throw new LocalRefusal("LOCAL_COMMAND_REQUIRED", "Provide the guest command after --.");
       await manager.start(target);
       const jobs = new LocalJobs(manager);
-      const policy = await records.policy();
       const remoteMarker = `moira-op-${randomBytes(16).toString("hex")}`;
       let result = await jobs.dispatch(target, {
         version: 1,
@@ -397,10 +379,10 @@ async function runManagerCommand(
         remoteMarker,
         argv,
         stdin: "",
-        timeoutMs: policy.limits.maxOperationMs,
+        timeoutMs: 60 * 60_000,
         maxStdoutBytes: 1024 * 1024,
         maxStderrBytes: 256 * 1024,
-        maxRetainedBytes: policy.limits.maxOutputBytes,
+        maxRetainedBytes: 64 * 1024 * 1024,
       });
       while (
         typeof result === "object" &&

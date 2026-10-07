@@ -181,12 +181,11 @@ describe("local operation dispatch with an external-runtime substitute", () => {
     expect(await local.records.policy()).toMatchObject({ enabled: false });
     expect(local.requests).toEqual([]);
   });
-  test("a shortened local lease and work limit bound the dispatched request and durable deadline", async () => {
+  test("a shortened local lease bounds the dispatched request and durable deadline", async () => {
     const acceptedAt = Date.now();
     const local = await fixture(() => acceptedAt);
     local.boundary(async () => {
       local.policy.leaseUntil = local.manager.now() + 500;
-      local.policy.limits.maxOperationMs = 1000;
       await state.write("policy.json", local.policy);
     });
     expect(await local.jobs.dispatch(local.space.id, { ...command(), timeoutMs: 6000 })).toEqual({
@@ -197,14 +196,10 @@ describe("local operation dispatch with an external-runtime substitute", () => {
     const ledger = JSON.parse(await readFile(join(root, (await state.keys("job-"))[0]), "utf8"));
     expect(ledger.deadlineAt).toBeLessThanOrEqual(local.policy.leaseUntil);
   });
-  test("a lowered retained output ceiling during boundary validation refuses the original request", async () => {
+  test("retained output above the guest protocol bound is refused before dispatch", async () => {
     const local = await fixture();
-    local.boundary(async () => {
-      local.policy.limits.maxOutputBytes = 1024;
-      await state.write("policy.json", local.policy);
-    });
     await expect(
-      local.jobs.dispatch(local.space.id, { ...command(), maxRetainedBytes: 2048 }),
+      local.jobs.dispatch(local.space.id, { ...command(), maxRetainedBytes: 4 * 1024 ** 3 + 1 }),
     ).rejects.toThrow();
     expect(local.requests).toEqual([]);
   });
@@ -285,32 +280,31 @@ describe("local operation dispatch with an external-runtime substitute", () => {
     finish();
     await first;
   });
-  test("cloud fields cannot override repository authority, work time or retained output", async () => {
+  test("requests choose execution bounds independently of owner settings while repository and enabled authority remain fenced", async () => {
     const local = await fixture();
     await expect(
       local.jobs.dispatch(local.space.id, { ...command(), repositoryFullName: "other/private" }),
     ).rejects.toMatchObject({ code: "LOCAL_REPOSITORY_DENIED" });
     await expect(
       local.jobs.dispatch(local.space.id, { ...command(), timeoutMs: 3_600_000 }),
-    ).rejects.toThrow();
+    ).resolves.toEqual({ state: "running" });
     await expect(
       local.jobs.dispatch(local.space.id, { ...command(), maxRetainedBytes: 2 * 1024 * 1024 }),
-    ).rejects.toThrow();
+    ).resolves.toEqual({ state: "running" });
     local.policy.enabled = false;
     await state.write("policy.json", local.policy);
     await expect(local.jobs.dispatch(local.space.id, command())).rejects.toMatchObject({
       code: "LOCAL_DISABLED",
     });
-    expect(local.requests).toEqual([]);
+    expect(local.requests).toHaveLength(2);
   });
-  test("local concurrency and restart generations hold even when the server ignores them", async () => {
+  test("multiple active jobs are admitted without an owner concurrency quota and old generations cannot execute", async () => {
     const local = await fixture();
     const first = command();
     await local.jobs.dispatch(local.space.id, first);
-    for (let index = 1; index < local.policy.limits.maxConcurrent; index++)
-      await local.jobs.dispatch(local.space.id, command());
-    await expect(local.jobs.dispatch(local.space.id, command())).rejects.toMatchObject({
-      code: "LOCAL_JOB_CAPACITY",
+    for (let index = 1; index < 5; index++) await local.jobs.dispatch(local.space.id, command());
+    await expect(local.jobs.dispatch(local.space.id, command())).resolves.toEqual({
+      state: "running",
     });
     const count = local.requests.length;
     local.space.generation++;

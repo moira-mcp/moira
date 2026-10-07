@@ -98,20 +98,6 @@ export class RepositoryCreationRepository {
           return old;
         }
         const { device, delegation } = this.deviceAuthority(userId, input, authority, now);
-        const receipts = device.control!.repositoryAdmissions ?? [];
-        const usage = this.sqlite
-          .prepare(
-            "SELECT COALESCE(SUM(reservationHeld),0) held FROM codespaceRepositoryRequest WHERE deviceId=?",
-          )
-          .get(input.deviceId) as { held: number };
-        if (
-          receipts.length + usage.held >= delegation.maxRepositories ||
-          device.policy.repositories.length + usage.held >= 64
-        )
-          throw new LocalDeviceError(
-            "LOCAL_CAPACITY",
-            "Repository creation reservations exhaust the owner's admission limit.",
-          );
         if (
           this.sqlite
             .prepare(

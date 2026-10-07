@@ -12,33 +12,16 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { InlineError } from "@/components/inline-error";
 import { useGitHubCodespaces } from "./GitHubCodespacesData";
 
-type NumericKey =
-  | "cpuCores"
-  | "memoryBytes"
-  | "storageBytes"
-  | "dockerBytes"
-  | "maxSandboxes"
-  | "maxOperationMs"
-  | "maxOutputBytes"
-  | "maxConcurrent"
-  | "maxNetworkBytes"
-  | "maxNetworkConnections";
+type NumericKey = "cpuCores" | "memoryBytes" | "storageBytes" | "dockerBytes";
 const GIB = 1024 ** 3;
-const numericFields: Array<{ key: NumericKey; scale: number; advanced?: boolean }> = [
+const numericFields: Array<{ key: NumericKey; scale: number }> = [
   { key: "cpuCores", scale: 1 },
   { key: "memoryBytes", scale: GIB },
   { key: "storageBytes", scale: GIB },
   { key: "dockerBytes", scale: GIB },
-  { key: "maxSandboxes", scale: 1 },
-  { key: "maxOperationMs", scale: 1000, advanced: true },
-  { key: "maxOutputBytes", scale: 1024 ** 2, advanced: true },
-  { key: "maxConcurrent", scale: 1, advanced: true },
-  { key: "maxNetworkBytes", scale: 1024 ** 2, advanced: true },
-  { key: "maxNetworkConnections", scale: 1, advanced: true },
 ];
 
 /** Requested settings and local applied policy are deliberately separate. Drafts belong to fields. */
@@ -62,7 +45,6 @@ export function LocalDeviceEditor({
   const dirty = useRef(new Set<keyof LocalDeviceSettingsValue>());
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [domainText, setDomainText] = useState<Record<string, string>>({});
   useEffect(() => {
     if (!control) return;
     setDraft((previous) =>
@@ -141,26 +123,24 @@ export function LocalDeviceEditor({
   if (!control?.optedIn || !control.ceiling || !draft)
     return <p className="text-sm text-muted-foreground">{t("localDevices.editor.optIn")}</p>;
   const ceiling = control.ceiling;
-  const numeric = (advanced: boolean) =>
-    numericFields
-      .filter((field) => Boolean(field.advanced) === advanced)
-      .map(({ key, scale }) => (
-        <div key={key} className="space-y-1.5">
-          <Label htmlFor={`${prefix}-${key}`}>{t(`localDevices.editor.${key}`)}</Label>
-          <Input
-            id={`${prefix}-${key}`}
-            type="number"
-            min={0}
-            max={ceiling[key] / scale}
-            step={1}
-            value={draft[key] / scale}
-            onChange={(event) => change(key, Number(event.currentTarget.value) * scale)}
-          />
-          <p className="text-xs text-muted-foreground">
-            {t("localDevices.editor.ceiling", { value: ceiling[key] / scale })}
-          </p>
-        </div>
-      ));
+  const numeric = () =>
+    numericFields.map(({ key, scale }) => (
+      <div key={key} className="space-y-1.5">
+        <Label htmlFor={`${prefix}-${key}`}>{t(`localDevices.editor.${key}`)}</Label>
+        <Input
+          id={`${prefix}-${key}`}
+          type="number"
+          min={0}
+          max={ceiling[key] / scale}
+          step={1}
+          value={draft[key] / scale}
+          onChange={(event) => change(key, Number(event.currentTarget.value) * scale)}
+        />
+        <p className="text-xs text-muted-foreground">
+          {t("localDevices.editor.ceiling", { value: ceiling[key] / scale })}
+        </p>
+      </div>
+    ));
   return (
     <form
       onSubmit={(event) => void submit(event)}
@@ -198,7 +178,7 @@ export function LocalDeviceEditor({
           />
           <Label htmlFor={`${prefix}-enabled`}>{t("localDevices.editor.enabled")}</Label>
         </div>
-        {numeric(false)}
+        {numeric()}
         <div className="space-y-1.5">
           <Label htmlFor={`${prefix}-lease`}>{t("localDevices.editor.lease")}</Label>
           <Input
@@ -240,7 +220,6 @@ export function LocalDeviceEditor({
           {control.appliedAgentRepositoryManagement
             ? t("localDevices.editor.agent.applied", {
                 owner: control.appliedAgentRepositoryManagement.owner,
-                count: control.appliedAgentRepositoryManagement.maxRepositories,
                 existing: t(
                   control.appliedAgentRepositoryManagement.allowExistingPrivate
                     ? "localDevices.yes"
@@ -274,8 +253,6 @@ export function LocalDeviceEditor({
                       allowExistingPrivate: true,
                       allowNewPrivate: false,
                       allowPush: false,
-                      maxRepositories: 1,
-                      networkProfile: "node-react-playwright",
                     }
                   : null,
               )
@@ -327,28 +304,6 @@ export function LocalDeviceEditor({
                 </div>
               ))}
             </div>
-            <div className="max-w-xs space-y-1.5">
-              <Label htmlFor={`${prefix}-agent-count`}>
-                {t("localDevices.editor.agent.count")}
-              </Label>
-              <Input
-                id={`${prefix}-agent-count`}
-                type="number"
-                min={1}
-                max={64}
-                step={1}
-                value={draft.agentRepositoryManagement.maxRepositories}
-                onChange={(event) =>
-                  change("agentRepositoryManagement", {
-                    ...draft.agentRepositoryManagement!,
-                    maxRepositories: Number(event.currentTarget.value),
-                  })
-                }
-              />
-            </div>
-            <p className="text-sm text-muted-foreground">
-              {t("localDevices.editor.agent.network")}
-            </p>
           </div>
         )}
         <p className="text-sm text-muted-foreground">{t("localDevices.editor.agent.revokeHint")}</p>
@@ -390,28 +345,6 @@ export function LocalDeviceEditor({
                   ),
                 )}
               </div>
-              <Label htmlFor={`${prefix}-domains-${repository.id}`}>
-                {t("localDevices.editor.domains")}
-              </Label>
-              <Input
-                id={`${prefix}-domains-${repository.id}`}
-                value={
-                  dirty.current.has("repositories")
-                    ? (domainText[repository.id] ?? repository.domains.join(", "))
-                    : repository.domains.join(", ")
-                }
-                onChange={(event) => {
-                  const value = event.currentTarget.value;
-                  setDomainText((previous) => ({ ...previous, [repository.id]: value }));
-                  update({
-                    ...repository,
-                    domains: value
-                      .split(",")
-                      .map((domain) => domain.trim())
-                      .filter(Boolean),
-                  });
-                }}
-              />
               <Button
                 type="button"
                 variant="outline"
@@ -442,7 +375,6 @@ export function LocalDeviceEditor({
                 allowPush: false,
                 allowDelete: false,
                 allowPullRequests: false,
-                domains: ["github.com"],
               },
             ])
           }
@@ -475,16 +407,6 @@ export function LocalDeviceEditor({
           </div>
         ))}
       </fieldset>
-      <Collapsible>
-        <CollapsibleTrigger asChild>
-          <Button type="button" variant="outline">
-            {t("localDevices.editor.advanced")}
-          </Button>
-        </CollapsibleTrigger>
-        <CollapsibleContent className="mt-4 grid gap-4 sm:grid-cols-2">
-          {numeric(true)}
-        </CollapsibleContent>
-      </Collapsible>
       {error && <InlineError title={t("common.errors.failedToLoad")} message={error} />}
       <Button type="submit" disabled={pending || dirty.current.size === 0}>
         {t(pending ? "localDevices.editor.saving" : "localDevices.editor.save")}

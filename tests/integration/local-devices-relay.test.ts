@@ -68,7 +68,6 @@ function policy(deviceId = randomUUID()): LocalPublicPolicy {
         private: true,
         allowPush: false,
         allowDelete: false,
-        domains: ["github.com"],
       },
     ],
     machine: {
@@ -79,7 +78,6 @@ function policy(deviceId = randomUUID()): LocalPublicPolicy {
       memoryBytes: 4 * 1024 ** 3,
       storageBytes: 8 * 1024 ** 3,
     },
-    maxSandboxes: 2,
   };
 }
 function enroll(userId = "user-a", input = policy()) {
@@ -993,17 +991,15 @@ describe("Durable local device enrollment and relay", () => {
       }
     },
   );
-  test("HTTP enrollment accepts the full bounded public policy instead of imposing a smaller hidden body cap", async () => {
+  test("HTTP enrollment accepts more than 64 repository grants within its transport envelope", async () => {
     const pair = service.beginEnrollment("user-a"),
       base = policy();
-    const domain = `${"a".repeat(63)}.${"b".repeat(63)}.${"c".repeat(63)}.${"d".repeat(61)}`;
     const full = {
       ...base,
-      repositories: Array.from({ length: 64 }, (_, index) => ({
+      repositories: Array.from({ length: 65 }, (_, index) => ({
         ...base.repositories[0],
         id: randomUUID(),
         fullName: `owner/project-${index}`,
-        domains: Array(64).fill(domain),
       })),
     };
     const body = {
@@ -1012,7 +1008,6 @@ describe("Durable local device enrollment and relay", () => {
       credential: randomBytes(32).toString("base64url"),
       policy: full,
     };
-    expect(Buffer.byteLength(JSON.stringify(body))).toBeGreaterThan(256 * 1024);
     const app = express();
     app.use(
       "/api/local-devices",
@@ -1020,6 +1015,6 @@ describe("Durable local device enrollment and relay", () => {
     );
     const response = await httpRequest(app).post("/api/local-devices/enroll").send(body);
     expect(response.status).toBe(201);
-    expect(response.body.data.policy.repositories).toHaveLength(64);
+    expect(response.body.data.policy.repositories).toHaveLength(65);
   });
 });

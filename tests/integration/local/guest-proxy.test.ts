@@ -84,7 +84,7 @@ async function fixture(publicTarget = false) {
       authorizations.push(header);
       return local.records.authorize(header);
     },
-    budget: new NetworkBudget(state),
+    budget: new NetworkBudget(),
     resolve: resolveTarget,
     dial: (target) => {
       const socket = net.connect({ host: "127.0.0.1", port: upstreamAddress.port });
@@ -183,7 +183,10 @@ describe("guest HTTP forwarding through the fixed broker tunnel", () => {
       expect(await connectStatus(local.port, "packages.example.com:443", supplied)).toBe(200);
       expect(local.authorizations).toContain(local.authorization);
       expect(local.authorizations).not.toContain(foreignAuthorization);
-      expect(await connectStatus(local.port, "unapproved.example:443", supplied)).toBe(502);
+      expect(await connectStatus(local.port, "pypi.org:443", supplied)).toBe(200);
+      expect(await connectStatus(local.port, "repo.maven.apache.org:8443", supplied)).toBe(200);
+      expect(await connectStatus(local.port, "pypi.org:0", supplied)).toBe(403);
+      expect(await connectStatus(local.port, "pypi.org:65536", supplied)).toBe(403);
       local.policy.enabled = false;
       await local.state.write("policy.json", local.policy);
       expect(await connectStatus(local.port, "packages.example.com:443", supplied)).toBe(403);

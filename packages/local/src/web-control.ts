@@ -30,7 +30,7 @@ const approvalSchema = z
     ceiling: localControlCeilingSchema,
     appliedRevision: z.number().int().nonnegative(),
     agentRepositoryManagement: agentRepositoryManagementSchema.nullable().default(null),
-    repositoryRequests: z.array(z.string().uuid()).max(64).default([]),
+    repositoryRequests: z.array(z.string().uuid()).default([]),
     rejectedRevision: z.number().int().positive().optional(),
     error: z.object({ code: z.string(), message: z.string() }).strict().optional(),
   })
@@ -48,7 +48,6 @@ export function controlSettings(
     memoryBytes: policy.runtime.memoryBytes,
     storageBytes: policy.runtime.maxStorageBytes,
     dockerBytes: policy.runtime.dockerBytes,
-    ...policy.limits,
     repositories: policy.repositories,
     gitAuthor: policy.gitAuthor ?? null,
     agentRepositoryManagement: delegation,
@@ -280,14 +279,6 @@ export class LocalWebControl {
             additions[0],
             receipt.creationRequestId ? "created" : "existing",
           );
-          if (
-            !approval.repositoryRequests.includes(receipt.requestId) &&
-            approval.repositoryRequests.length >= previousDelegation!.maxRepositories
-          )
-            throw new LocalRefusal(
-              "LOCAL_CONTROL_CONFLICT",
-              "The local repository delegation limit is reached.",
-            );
         }
         await this.records.state.write("control-intent.json", {
           revision: view.revision,
@@ -360,14 +351,6 @@ export class LocalWebControl {
           memoryBytes: s.memoryBytes,
           maxStorageBytes: s.storageBytes,
           dockerBytes: s.dockerBytes,
-        },
-        limits: {
-          maxSandboxes: s.maxSandboxes,
-          maxOperationMs: s.maxOperationMs,
-          maxOutputBytes: s.maxOutputBytes,
-          maxConcurrent: s.maxConcurrent,
-          maxNetworkBytes: s.maxNetworkBytes,
-          maxNetworkConnections: s.maxNetworkConnections,
         },
         repositories: s.repositories,
       });

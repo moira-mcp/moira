@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Laptop, RefreshCw } from "lucide-react";
 import type {
@@ -20,6 +20,8 @@ import { Badge } from "@/components/ui/badge";
 import { SettingsSubsection } from "@/components/settings/SettingsSection";
 import { useGitHubCodespaces } from "./GitHubCodespacesData";
 import { LocalDeviceEditor } from "./LocalDeviceEditor";
+import { CodespaceManagement } from "./CodespaceManagement";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 
 function DevicePermissions({ device }: { device: LocalDeviceView }) {
   const { t, i18n } = useTranslation();
@@ -31,7 +33,6 @@ function DevicePermissions({ device }: { device: LocalDeviceView }) {
           cpu: policy.machine.cpuCores,
           memory: policy.machine.memoryBytes / 1024 ** 3,
           storage: policy.machine.storageBytes / 1024 ** 3,
-          count: policy.maxSandboxes,
         })}
       </p>
       <p>
@@ -54,11 +55,6 @@ function DevicePermissions({ device }: { device: LocalDeviceView }) {
                   delete: t(repository.allowDelete ? "localDevices.yes" : "localDevices.no"),
                 })}
               </p>
-              <p className="text-muted-foreground">
-                {t("localDevices.domains", {
-                  domains: repository.domains.join(", ") || t("localDevices.noDomains"),
-                })}
-              </p>
             </li>
           ))}
         </ul>
@@ -77,7 +73,23 @@ export function LocalDeviceSettings({ active = true }: { active?: boolean }) {
     () => apiClient.getLocalDevices(),
     () => t("localDevices.loadFailed"),
   );
+  const reloadDevices = resource.refresh;
   useRefreshOnActivation(active, resource.refresh);
+  const appliedVersions = resource.data?.devices
+    .map((device) => `${device.deviceId}:${device.control?.appliedRevision ?? 0}`)
+    .join("|");
+  const previousAppliedVersions = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    if (appliedVersions === undefined) return;
+    const previous = previousAppliedVersions.current;
+    previousAppliedVersions.current = appliedVersions;
+    if (previous !== undefined && previous !== appliedVersions)
+      void reloadManagement({ silent: true });
+  }, [appliedVersions, reloadManagement]);
+  const refreshComputer = useCallback(
+    () => Promise.all([reloadDevices(), reloadManagement({ silent: true })]),
+    [reloadDevices, reloadManagement],
+  );
   const [pairing, setPairing] = useState<Awaited<
     ReturnType<typeof apiClient.beginLocalEnrollment>
   > | null>(null);
@@ -88,6 +100,7 @@ export function LocalDeviceSettings({ active = true }: { active?: boolean }) {
     pairing?: LocalPairingView;
   } | null>(null);
   const [decisionError, setDecisionError] = useState<string | null>(null);
+  const [openSettings, setOpenSettings] = useState<Set<string>>(new Set());
   const date = (timestamp: number) => new Date(timestamp).toLocaleString(i18n.language);
   const shellQuote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
   const server = new URL(apiClient.getConfig().baseURL || "/", window.location.origin).href.replace(
@@ -166,6 +179,7 @@ export function LocalDeviceSettings({ active = true }: { active?: boolean }) {
       ),
     }));
     await resource.refresh();
+    if (owned()) await reloadManagement({ silent: true });
   };
 
   return (
@@ -178,7 +192,7 @@ export function LocalDeviceSettings({ active = true }: { active?: boolean }) {
           <Button
             variant="outline"
             size="sm"
-            onClick={() => void resource.refresh()}
+            onClick={() => void refreshComputer()}
             aria-label={t("localDevices.refresh")}
           >
             <RefreshCw className="size-4" aria-hidden="true" />
@@ -252,13 +266,33 @@ export function LocalDeviceSettings({ active = true }: { active?: boolean }) {
                   </div>
                   <p className="text-sm font-medium">{t("localDevices.editor.appliedGrants")}</p>
                   <DevicePermissions device={device} />
+                  <CodespaceManagement scope={{ provider: "local-sandboxes", computer: device }} />
                   {device.status === "active" && (
-                    <LocalDeviceEditor
-                      device={device}
-                      onSave={(settings, expectedRevision) =>
-                        saveSettings(device, settings, expectedRevision)
+                    <Collapsible
+                      open={openSettings.has(device.deviceId)}
+                      onOpenChange={(open) =>
+                        setOpenSettings((previous) => {
+                          const next = new Set(previous);
+                          if (open) next.add(device.deviceId);
+                          else next.delete(device.deviceId);
+                          return next;
+                        })
                       }
-                    />
+                    >
+                      <CollapsibleTrigger asChild>
+                        <Button type="button" variant="outline" size="sm">
+                          {t("localDevices.codespaces.computerSettings")}
+                        </Button>
+                      </CollapsibleTrigger>
+                      <CollapsibleContent forceMount hidden={!openSettings.has(device.deviceId)}>
+                        <LocalDeviceEditor
+                          device={device}
+                          onSave={(settings, expectedRevision) =>
+                            saveSettings(device, settings, expectedRevision)
+                          }
+                        />
+                      </CollapsibleContent>
+                    </Collapsible>
                   )}
                   <p className="text-xs text-muted-foreground">
                     {t("localDevices.lastSeen", {

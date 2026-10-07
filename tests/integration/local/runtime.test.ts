@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { PrivateState } from "../../../packages/local/src/private-state.js";
 import { SbxRuntime } from "../../../packages/local/src/sbx-runtime.js";
+import { LocalManager } from "../../../packages/local/src/manager.js";
 import {
   GUEST_WORKER_COMMAND,
   VERIFIED_GUEST_FAILURE_EXIT,
@@ -83,12 +84,15 @@ async function startupRuntime(
   replaceIdentity = false,
   restoreGateway = false,
   gatewayPresent = true,
+  initialStatus: "stopped" | "created" = "stopped",
 ) {
   const fixture = await localFixture(state);
   let started = false;
   let socket = "";
   const runtime = simulatedRuntime(fixture.policy, async (request) => {
     if (request.binary === process.execPath) {
+      if (request.argv[3] === "container-identity")
+        return result({ containerId: "c".repeat(64), name, state: "created" });
       started = true;
       return result();
     }
@@ -100,7 +104,7 @@ async function startupRuntime(
             id: started && replaceIdentity ? "replacement" : "runtime-1",
             name,
             agent: "shell",
-            status: started ? "running" : "stopped",
+            status: started ? "running" : initialStatus,
           },
         ],
       });
@@ -124,6 +128,25 @@ async function startupRuntime(
 }
 
 describe("Docker Sandboxes lifecycle boundary", () => {
+  test.each(["disabled", "expired"])(
+    "snapshot without %s observation never presents a historical stopped phase as physical proof",
+    async (reason) => {
+      const fixture = await localFixture(state);
+      fixture.space.phase = "stopped";
+      fixture.space.desiredState = "stopped";
+      await fixture.records.put(fixture.space);
+      if (reason === "disabled") fixture.policy.enabled = false;
+      else fixture.policy.leaseUntil = Date.now() - 1;
+      await state.write("policy.json", fixture.policy);
+      const snapshot = await new LocalManager(fixture.records).snapshot();
+      expect(snapshot.spaces).toHaveLength(1);
+      expect(snapshot.spaces[0]).toMatchObject({
+        state: "unknown",
+        phase: "stopped",
+        nativeStopConfirmed: false,
+      });
+    },
+  );
   test.each([false, true])(
     "broker-only admission preserves inherited global UDP denial (broker grant refused: %s)",
     async (grantRefused) => {
@@ -509,7 +532,7 @@ describe("Docker Sandboxes lifecycle boundary", () => {
     );
     await expect(runtime.containerIdentity(name)).rejects.toThrow();
   });
-  test.each(["created", "starting"])(
+  test.each(["starting"])(
     "startup refuses unconfirmed stopped state %s before contacting the API",
     async (status) => {
       const fixture = await localFixture(state);
@@ -521,6 +544,32 @@ describe("Docker Sandboxes lifecycle boundary", () => {
       await expect(runtime.start({ name, runtimeId: "runtime-1" })).rejects.toMatchObject({
         code: "LOCAL_START_FAILED",
       });
+    },
+  );
+  test("created startup requires corroborated exact Engine identity before the fixed API", async () => {
+    const runtime = await startupRuntime(false, false, false, "created");
+    await expect(runtime.start({ name, runtimeId: "runtime-1" })).resolves.toBeUndefined();
+    await expect(runtime.exact({ name, runtimeId: "runtime-1" })).resolves.toMatchObject({
+      status: "running",
+    });
+  });
+  test.each(["running", "paused", "restarting", "dead"])(
+    "created stop refuses contradictory Engine %s before issuing stop or start",
+    async (engineState) => {
+      const fixture = await localFixture(state);
+      const calls: string[][] = [];
+      const runtime = simulatedRuntime(fixture.policy, async (request) => {
+        calls.push([...request.argv]);
+        return request.binary === process.execPath
+          ? result({ containerId: "c".repeat(64), name, state: engineState })
+          : result({ sandboxes: [{ id: "runtime-1", name, agent: "shell", status: "created" }] });
+      });
+      await expect(runtime.stop({ name, runtimeId: "runtime-1" })).rejects.toMatchObject({
+        code: "LOCAL_CONTAINER_UNKNOWN",
+      });
+      expect(calls.every((argv) => argv[0] === "ls" || argv[3] === "container-identity")).toBe(
+        true,
+      );
     },
   );
   test.each([true, false])(
@@ -1009,6 +1058,13 @@ describe("Docker Sandboxes lifecycle boundary", () => {
       expected: { name, runtimeId: "7c34dff2-c6a5-4859-be73-3a8914bc4ceb" },
     },
     {
+      label: "corroborated created shell",
+      status: "created",
+      gateway: false,
+      mounts: [],
+      expected: { name, runtimeId: "7c34dff2-c6a5-4859-be73-3a8914bc4ceb" },
+    },
+    {
       label: "active host gateway",
       status: "running",
       gateway: true,
@@ -1031,6 +1087,8 @@ describe("Docker Sandboxes lifecycle boundary", () => {
       let socket = "";
       const runtime = simulatedRuntime(fixture.policy, async (request) => {
         if (request.binary === process.execPath) {
+          if (request.argv[3] === "container-identity")
+            return result({ containerId: "c".repeat(64), name, state: "created" });
           created = true;
           return result({ name, agent: "shell", workspace: "" });
         }

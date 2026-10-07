@@ -85,22 +85,23 @@ export class CodespaceOperationRepository {
       if (disabled) return { outcome: "disabled" } as ReserveOperationResult;
 
       const activeSql = ACTIVE_OPERATION_STATES.map(() => "?").join(", ");
-      const userCount = (
-        this.sqlite
+      if (codespace.provider !== CODESPACE_PROVIDER_LOCAL) {
+        const limits = effectiveCodespaceLimits(input.policy).operations;
+        const counts = this.sqlite
           .prepare(
-            `SELECT COUNT(*) count FROM codespaceOperation
-             WHERE userId = ? AND state IN (${activeSql})`,
+            `SELECT COUNT(*) globalCount, COALESCE(SUM(userId = ?), 0) userCount
+             FROM codespaceOperation WHERE provider <> ? AND state IN (${activeSql})`,
           )
-          .get(input.userId, ...ACTIVE_OPERATION_STATES) as { count: number }
-      ).count;
-      const globalCount = (
-        this.sqlite
-          .prepare(`SELECT COUNT(*) count FROM codespaceOperation WHERE state IN (${activeSql})`)
-          .get(...ACTIVE_OPERATION_STATES) as { count: number }
-      ).count;
-      const limits = effectiveCodespaceLimits(input.policy).operations;
-      if (userCount >= limits.maxConcurrentPerUser || globalCount >= limits.maxConcurrentGlobal) {
-        return { outcome: "busy" } as ReserveOperationResult;
+          .get(input.userId, CODESPACE_PROVIDER_LOCAL, ...ACTIVE_OPERATION_STATES) as {
+          globalCount: number;
+          userCount: number;
+        };
+        if (
+          counts.userCount >= limits.maxConcurrentPerUser ||
+          counts.globalCount >= limits.maxConcurrentGlobal
+        ) {
+          return { outcome: "busy" } as ReserveOperationResult;
+        }
       }
       // Serialize cooperating file mutations for their staged atomic commits. Commands
       // and reads can stay active while an agent edits through the file API.
@@ -182,25 +183,29 @@ export class CodespaceOperationRepository {
   }
 
   /** The user's operations still running or about to run: the count the per-user ceiling limits. */
-  countActiveForUser(userId: string): number {
+  countActiveForUser(userId: string, provider?: string): number {
     return (
       this.sqlite
         .prepare(
           `SELECT COUNT(*) count FROM codespaceOperation
-           WHERE userId = ? AND state IN (${ACTIVE_OPERATION_STATES.map(() => "?").join(", ")})`,
+           WHERE userId = ? AND (? IS NULL OR provider = ?)
+             AND state IN (${ACTIVE_OPERATION_STATES.map(() => "?").join(", ")})`,
         )
-        .get(userId, ...ACTIVE_OPERATION_STATES) as { count: number }
+        .get(userId, provider ?? null, provider ?? null, ...ACTIVE_OPERATION_STATES) as {
+        count: number;
+      }
     ).count;
   }
 
-  countActive(): number {
+  countActive(provider?: string): number {
     return (
       this.sqlite
         .prepare(
           `SELECT COUNT(*) count FROM codespaceOperation
-           WHERE state IN ('reserved', 'running', 'cancel_pending', 'reconcile_pending')`,
+           WHERE (? IS NULL OR provider = ?)
+             AND state IN ('reserved', 'running', 'cancel_pending', 'reconcile_pending')`,
         )
-        .get() as { count: number }
+        .get(provider ?? null, provider ?? null) as { count: number }
     ).count;
   }
 

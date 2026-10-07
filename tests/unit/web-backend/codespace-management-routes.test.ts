@@ -73,6 +73,7 @@ function codespace(overrides: Partial<CodespaceResourceRecord> = {}): CodespaceR
     reconcileFailures: 0,
     lastActivityAt: null,
     providerLastUsedAt: null,
+    observedAt: null,
     lastOutcome: "provider-private-diagnostic",
     createdAt: 10,
     updatedAt: 20,
@@ -332,6 +333,41 @@ describe("website codespace management routes", () => {
       expect(response.text).not.toContain(secret);
     }
   });
+
+  test.each([
+    ["CODESPACE_PROVIDER_UNAVAILABLE", "CODESPACE_PROVIDER_UNAVAILABLE"],
+    ["private-provider-message-with-secret", null],
+  ])(
+    "projects safe lifecycle diagnostic %s with actual observation freshness",
+    async (outcome, expectedCode) => {
+      const base = services();
+      const dependencies = services({
+        resource: {
+          ...base.resource!,
+          listResources: () => [
+            codespace({
+              state: "stop_pending",
+              desiredState: "stopped",
+              observedAt: 15,
+              updatedAt: 500,
+              lastOutcome: outcome,
+            }),
+          ],
+        },
+      });
+      const response = await request(appWith(dependencies)).get(
+        "/api/integrations/github/codespaces",
+      );
+      expect(response.status).toBe(200);
+      expect(response.body.data.codespaces[0]).toMatchObject({
+        state: "stop_pending",
+        observed_at: 15,
+        updated_at: 500,
+        lifecycle_error: expectedCode,
+      });
+      expect(response.text).not.toContain("private-provider-message-with-secret");
+    },
+  );
 
   test("fails closed with the same-origin Settings link when the feature is not configured", async () => {
     const disabled = services({

@@ -29,7 +29,11 @@ afterEach(async () => {
   await rm(root, { recursive: true, force: true });
 });
 
-async function fixture(pendingCreation = false, stoppedInventory = false) {
+async function fixture(
+  pendingCreation = false,
+  stoppedInventory = false,
+  createdInventory = false,
+) {
   const state = await PrivateState.open(join(root, "state"));
   const local = await localFixture(state);
   const sdkId = randomUUID();
@@ -44,7 +48,13 @@ async function fixture(pendingCreation = false, stoppedInventory = false) {
   await writeFile(
     observation,
     JSON.stringify({
-      status: pendingCreation ? "absent" : stoppedInventory ? "stopped" : "running",
+      status: pendingCreation
+        ? "absent"
+        : createdInventory
+          ? "created"
+          : stoppedInventory
+            ? "stopped"
+            : "running",
     }),
   );
   // A separate real executable models SDK effects; this is not a microVM proof.
@@ -54,10 +64,11 @@ async function fixture(pendingCreation = false, stoppedInventory = false) {
     `
 const f=require('node:fs');const path=${JSON.stringify(observation)};
 const args=process.argv.slice(2);const current=()=>JSON.parse(f.readFileSync(path));
+f.appendFileSync(path+'.calls',JSON.stringify(args)+'\\n');
 const peersPath=path+'.peers';const peers=()=>f.existsSync(peersPath)?JSON.parse(f.readFileSync(peersPath)):[];
 const sdkRows=()=>[...(current().status==='absent'?[]:[{id:${JSON.stringify(sdkId)},name:${JSON.stringify(local.space.name)},agent:'shell',status:current().status}]),...peers()];
 const cid=name=>require('node:crypto').createHash('sha256').update(name).digest('hex');
-process.on('exit',()=>f.writeFileSync(path+'.running-cids',sdkRows().filter(row=>row.status==='running').map(row=>cid(row.name)).join('')));
+process.on('exit',()=>f.writeFileSync(path+'.running-cids',sdkRows().filter(row=>row.status==='running'||(row.status==='created'&&current().keepWorker===true)).map(row=>cid(row.name)).join('')));
 const pending=${JSON.stringify(pending)};const release=${JSON.stringify(release)};const sentinel=${JSON.stringify(sentinel)};
 const settings={'env.rememberHostCommands':false,'ssh.autoCreate':false,'ssh.workspaceRoot':'','clipboard.imagePaste':false,'ssh.agentForwardingEnabled':false,'ssh.agentSocketPath':'','skills.defaultMode':'off','diagnostics.autoUpload':'no','proxy.integratedAuth':false,'proxy.sandbox':'direct','no_proxy.sandbox':''};
 if(args[0]==='version')process.stdout.write('sbx version: v0.46.0 verified ');
@@ -75,7 +86,7 @@ else if(args[0]==='ls') {
 }
 else if(args[0]==='docker-identity'){
   const filter=JSON.parse(decodeURIComponent(args[1].split('filters=')[1]));const name=filter.label[0].split('=')[1];
-  const row=sdkRows().find(row=>row.name===name);const data=row?[{Id:cid(name),Names:['/'+name],State:row.status==='running'?'running':'exited',Labels:{'com.docker.sandbox.name':name,'com.docker.sdk':'true','docker/sandbox':'true'}}]:[];
+  const row=sdkRows().find(row=>row.name===name);const data=row?[{Id:cid(name),Names:['/'+name],State:current().engineState||(row.status==='running'?'running':row.status==='created'?'created':'exited'),Labels:{'com.docker.sandbox.name':name,'com.docker.sdk':'true','docker/sandbox':'true'}}]:[];
   f.writeFileSync(path+'.container-response',JSON.stringify(data));
 }
 else if(args[0]==='worker-id')f.writeFileSync(path+'.worker-id',cid(args[1]));
@@ -103,7 +114,7 @@ else if(args[0]==='api-create'){
   const complete=()=>{f.writeFileSync(path,JSON.stringify({status:'running'}));f.writeFileSync(path+'.create-response',JSON.stringify({name:body.name,agent:'shell',workspace:'',status:'created'}));};
   ${pendingCreation ? `f.writeFileSync(path,JSON.stringify({status:'starting'}));f.writeFileSync(pending,JSON.stringify({pid:process.pid}));f.writeFileSync(pending+'.'+body.name,JSON.stringify({pid:process.pid}));const timer=setInterval(()=>{if(f.existsSync(release)){clearInterval(timer);complete();f.writeFileSync(sentinel,'late side effect');}},10);` : `complete();`}
 }
-else if(args[0]==='stop'){if(args[1]===${JSON.stringify(local.space.name)})f.writeFileSync(path,JSON.stringify({status:'stopped'}));f.writeFileSync(peersPath,JSON.stringify(peers().map(peer=>peer.name===args[1]?{...peer,status:'stopped'}:peer)));}
+else if(args[0]==='stop'){if(args[1]===${JSON.stringify(local.space.name)})f.writeFileSync(path,JSON.stringify({status:current().stopKeepsCreated?'created':'stopped'}));f.writeFileSync(peersPath,JSON.stringify(peers().map(peer=>peer.name===args[1]?{...peer,status:'stopped'}:peer)));}
 else if(args[0]==='daemon'&&args[1]==='status')process.stdout.write(JSON.stringify({status:f.existsSync(path+'.daemon-stopped')?'stopped':'running',socket:process.env.HOME+'/.sbx/run_'+process.env.DOCKER_SANDBOXES_APP_NAME+'/d/sandboxd.sock'}));
 else if(args[0]==='daemon'&&args[1]==='stop'){if(current().status!=='absent')f.writeFileSync(path,JSON.stringify({status:'stopped'}));f.writeFileSync(path+'.daemon-stopped','stopped');f.writeFileSync(peersPath,JSON.stringify(peers().map(peer=>({...peer,status:'stopped'}))));}
 else if(args[0]==='exec'||args[0]==='create'){
@@ -238,15 +249,37 @@ int main(int argc,char **argv){
       "packages/local/src/space-record.ts",
       "packages/local/src/sbx-runtime.ts",
       "packages/local/src/cli.ts",
+      "packages/local/src/manager.ts",
     ],
     outdir: root,
     bundle: true,
     platform: "node",
     target: "node24",
     format: "esm",
+    // Native ownership is real in this fixture; Docker credentials are an external boundary.
+    // No guard test may create or unlock an OS Keychain. A changed credential marker still refuses.
+    plugins: [
+      {
+        name: "isolated-guard-credentials",
+        setup(builder) {
+          builder.onLoad({ filter: /[/\\]keychain\.ts$/ }, (args) => ({
+            loader: "ts",
+            resolveDir: dirname(args.path),
+            contents: `
+            import {readFile} from 'node:fs/promises';
+            import {join} from 'node:path';
+            import {LocalRefusal} from './policy.js';
+            export async function prepareKeychain(home) {
+              try { await readFile(join(home, 'keychain-current.json')); }
+              catch (error) { if (error.code === 'ENOENT') return; throw error; }
+              throw new LocalRefusal('LOCAL_KEYCHAIN_UNSAFE', 'Controlled credential state was changed.');
+            }
+          `,
+          }));
+        },
+      },
+    ],
   });
-  if (process.platform === "darwin")
-    await copyFile("packages/local/dist/keychain-helper", join(root, "keychain-helper"));
   await copyFile(
     "packages/local/dist/runtime-control-helper",
     join(root, "runtime-control-helper"),
@@ -422,6 +455,84 @@ const vmTest = process.platform === "darwin" ? test : test.skip;
 const supportedGuard = process.platform === "darwin" ? describe : describe.skip;
 
 supportedGuard("independent guard with a real subprocess SDK substitute", () => {
+  vmTest.each([false, true])(
+    "created inventory is actionable until exact native stop without startup (held worker: %s)",
+    async (heldWorker) => {
+      const local = await fixture(false, false, !heldWorker);
+      await execute(process.execPath, [
+        "--input-type=module",
+        "-e",
+        `
+        import {startGuard} from ${JSON.stringify(`file://${join(root, "guard.js")}`)};
+        import f from 'node:fs/promises';
+        import {LocalManager} from ${JSON.stringify(`file://${join(root, "manager.js")}`)};
+        import {LocalRecords} from ${JSON.stringify(`file://${join(root, "space-record.js")}`)};
+        import {PrivateState} from ${JSON.stringify(`file://${join(root, "private-state.js")}`)};
+        const device = await startGuard(${JSON.stringify(local.state.root)});
+        try {
+          if (${heldWorker}) await f.writeFile(${JSON.stringify(local.observation)}, JSON.stringify({status:'created',keepWorker:true}));
+          else await f.writeFile(${JSON.stringify(local.observation)}, JSON.stringify({status:'created',stopKeepsCreated:true}));
+          const before = await device.observe();
+          if (before.length !== 1 || before[0].status !== 'created') throw new Error('Created inventory was pretended stopped');
+          const manager=new LocalManager(new LocalRecords(await PrivateState.open(${JSON.stringify(local.state.root)})),{guard:async()=>device});
+          if ((await manager.snapshot()).spaces[0].nativeStopConfirmed !== false) throw new Error('Bare created inventory claimed stop proof');
+          const guard = await device.space(${JSON.stringify(local.space.id)});
+          await guard.stop();
+          const after = await device.observe();
+          if (after.length !== 1 || after[0].status !== (${heldWorker} ? 'stopped' : 'created')) throw new Error('Exact stop changed the independent observation');
+          if ((await manager.snapshot()).spaces[0].nativeStopConfirmed !== true) throw new Error('Native settlement did not provide stop proof');
+        } finally { await device.stop(); }
+      `,
+      ]);
+      const calls = (await readFile(local.observation + ".calls", "utf8"))
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line) as string[]);
+      expect(calls.some((argv) => argv[0] === "stop" && argv[1] === local.space.name)).toBe(true);
+      expect(
+        calls.some((argv) =>
+          ["api-start", "api-create", "api-guest", "run", "exec", "create"].includes(argv[0]),
+        ),
+      ).toBe(false);
+      expect(await local.records.get(local.space.id)).toMatchObject({
+        runtimeId: local.space.runtimeId,
+        phase: "stopped",
+        desiredState: "stopped",
+        generation: local.space.generation + 1,
+      });
+      await expect(
+        readFile(join(local.policy.runtime.storageRoot, "runtime", "keychain-current.json")),
+      ).rejects.toMatchObject({ code: "ENOENT" });
+    },
+  );
+  vmTest(
+    "created inventory with contradictory running Engine is refused before lifecycle admission",
+    async () => {
+      const local = await fixture(false, false, true);
+      await writeFile(
+        local.observation,
+        JSON.stringify({ status: "created", engineState: "running" }),
+      );
+      await execute(process.execPath, [
+        "--input-type=module",
+        "-e",
+        `
+      import {startGuard} from ${JSON.stringify(`file://${join(root, "guard.js")}`)};
+      await startGuard(${JSON.stringify(local.state.root)}).then(async device=>{
+        await device.stop(); throw new Error('Contradictory Engine was admitted');
+      }, error=>{if(error.code!=='LOCAL_CONTROL_WORKER_UNVERIFIED')throw error;});
+    `,
+      ]);
+      expect(await local.records.get(local.space.id)).toEqual(local.space);
+      const calls = (await readFile(local.observation + ".calls", "utf8"))
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line) as string[]);
+      expect(
+        calls.some((argv) => ["api-start", "api-create", "api-guest", "stop"].includes(argv[0])),
+      ).toBe(false);
+    },
+  );
   test.each([0, 7])(
     "inventory readiness refuses an early driver exit %s without a marker",
     async (exitCode) => {

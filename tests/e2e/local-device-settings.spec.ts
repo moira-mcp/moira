@@ -27,7 +27,6 @@ test("local computer settings keep requested and applied week policy distinct th
     label: "Browser test computer",
     enabled: true,
     leaseUntil: Date.now() + 3600000,
-    maxSandboxes: 1,
     machine: {
       name: "local-approved",
       displayName: "Local approved",
@@ -43,7 +42,6 @@ test("local computer settings keep requested and applied week policy distinct th
         private: true,
         allowPush: false,
         allowDelete: false,
-        domains: ["github.com"],
       },
     ],
   };
@@ -55,12 +53,6 @@ test("local computer settings keep requested and applied week policy distinct th
     memoryBytes: 2 * GiB,
     storageBytes: 8 * GiB,
     dockerBytes: 2 * GiB,
-    maxSandboxes: 1,
-    maxOperationMs: 300000,
-    maxOutputBytes: 1024 ** 2,
-    maxConcurrent: 1,
-    maxNetworkBytes: 64 * 1024 ** 2,
-    maxNetworkConnections: 8,
     repositories: policy.repositories,
     gitAuthor: null,
     agentRepositoryManagement: null,
@@ -70,12 +62,6 @@ test("local computer settings keep requested and applied week policy distinct th
     memoryBytes: 8 * GiB,
     storageBytes: 32 * GiB,
     dockerBytes: 8 * GiB,
-    maxSandboxes: 2,
-    maxOperationMs: 3600000,
-    maxOutputBytes: 8 * 1024 ** 2,
-    maxConcurrent: 4,
-    maxNetworkBytes: GiB,
-    maxNetworkConnections: 32,
     maxLeaseMs: MAX_LOCAL_WORK_LEASE_MS,
   };
   const begin = await page.request.post(`${base}/api/integrations/local/pairings`, { data: {} });
@@ -87,8 +73,8 @@ test("local computer settings keep requested and applied week policy distinct th
   expect(enroll.status()).toBe(201);
   await page.goto(`${base}/settings?lang=en#integrations-local`);
   const device = page.getByTestId(`local-device-${deviceId}`);
-  await device.getByRole("button", { name: "Confirm device" }).click();
-  await page.getByRole("alertdialog").getByRole("button", { name: "Confirm device" }).click();
+  await device.getByRole("button", { name: "Confirm computer" }).click();
+  await page.getByRole("alertdialog").getByRole("button", { name: "Confirm computer" }).click();
   await expect(page.getByRole("alertdialog")).toBeHidden();
   const heartbeat = (next: LocalDeviceSettingsValue, appliedRevision: number) =>
     request.post(`${base}/api/local-devices/heartbeat`, {
@@ -97,7 +83,8 @@ test("local computer settings keep requested and applied week policy distinct th
     });
   expect((await heartbeat(settings, 0)).status()).toBe(200);
   try {
-    await page.getByRole("button", { name: "Refresh devices" }).click();
+    await page.getByRole("button", { name: "Refresh computers" }).click();
+    await device.getByRole("button", { name: "Computer settings and access" }).click();
     const name = device.getByLabel("Computer name");
     await expect(name).toHaveValue(policy.label);
     await name.fill("Edited local computer");
@@ -133,10 +120,11 @@ test("local computer settings keep requested and applied week policy distinct th
       machine: { ...policy.machine, memoryBytes: 4 * GiB },
     };
     expect((await heartbeat(requested.settings, requested.revision)).status()).toBe(200);
-    await page.getByRole("button", { name: "Refresh devices" }).click();
+    await page.getByRole("button", { name: "Refresh computers" }).click();
     await expect(device).toContainText(`Applied revision ${requested.revision}.`);
     await expect(device).toContainText("Push: allowed · Delete: not allowed");
     await page.reload();
+    await device.getByRole("button", { name: "Computer settings and access" }).click();
     await expect(device.getByLabel("RAM (GiB)")).toHaveValue("4");
     await expect(device.getByLabel("Computer name")).toHaveValue("Edited local computer");
   } finally {

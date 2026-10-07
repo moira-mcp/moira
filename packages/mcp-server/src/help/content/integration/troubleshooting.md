@@ -301,7 +301,8 @@ The engine logs a warning naming the residual placeholder and the `executionId`.
 ### Editing files while a command runs
 
 A running command, including a background development server, does not itself block codespace
-`write`, `upload` or `apply_patch`. Shared concurrency ceilings still apply. Keep the expected file
+`write`, `upload` or `apply_patch`. Cloud concurrency ceilings apply to cloud operations;
+local operations do not consume them. Keep the expected file
 existence, size and digest guards; if another writer changes that version, reread and reconcile
 the edit before retrying. Another active file mutation can return `CODESPACE_OPERATION_BUSY`;
 commands and reads do not impose that serialization. A failed edit does not require stopping the development server.
@@ -315,8 +316,8 @@ For `repository_add`, inspect applied consent with `local_devices` and reuse the
 `request_id` with the same device/repository. Pending returns no usable local repository identity;
 rejected or changed account/grants require owner action. The repository must be private, owned by
 the connected personal GitHub account and exposed by the App installation. Another pending owner
-revision must settle before admission. Neither an admission refusal nor a reached ceiling permits
-the agent to broaden consent, egress or the lease. An existing local grant is discovered, not added twice.
+revision must settle before admission. An admission refusal does not permit the agent to broaden
+consent or the lease. An existing local grant is discovered, not added twice.
 
 For `repository_create`, choose a personal `installation_id` from `local_devices`; organization
 installations and public creation are unsupported. `github_setup_required` directs the owner to
@@ -324,14 +325,14 @@ GitHub connection/installation settings. Repeat the same device/request/name/ins
 `setup_required` preserves any confirmed repository ID while permissions/access are repaired;
 it does not mean creation failed or authorize another create. `unknown` inspects the retained
 description marker instead of repeating POST. Another same-name repository or no observed repository
-cannot settle that ambiguity. Keep the marker while unresolved; unknown retains its admission slot.
-Confirmed rejected requests release their reservation, so rejected history does not exhaust the limit.
+cannot settle that ambiguity. Keep the marker while unresolved; other repository requests are
+not blocked by a repository-count quota.
 Only `applied` after actual installation grant and companion ACK authorizes codespace creation.
 
 `preview_image` needs a complete bounded PNG/JPEG download. Resume a pending image with only
 its `codespace_id` and `operation_id`, not another file dispatch. SVG, animated PNG, malformed,
 truncated or oversized framing is refused. Use `download` for other binary files. Browser installation
-and actual Playwright compatibility remain guest-runtime questions; the fixed egress profile and
+and actual browser compatibility remain guest-runtime questions; network availability and
 successful image projection do not establish that a browser ran or that its screenshot is correct.
 
 Use **Settings → Development → Local computers** and the companion's `status` to distinguish pending
@@ -339,6 +340,20 @@ browser approval, revocation, an offline computer and an expired local lease. An
 not proof that the computer or its VM has physically stopped. Renew a lease on the computer with
 `npm run local -- enable --hours 8`, then run the confirmed companion in the foreground with
 `npm run local -- run`. A revoked device requires a new pairing and browser confirmation.
+Open that computer's codespace card and use **Check state again** for a pending start, stop or
+delete. This retries the saved intent for its exact codespace ID; deletion keeps the current
+generation check. It does not create a replacement VM. Pending creation or unavailable applied
+access instead uses read-only refresh. Errors and loaders stay on the affected card.
+
+`observed_at` in a codespace summary is the last verified provider observation, nullable until
+one succeeds. `updated_at` may change because of a claim or retry and does not prove runtime
+freshness. `lifecycle_error` is a safe known refusal code, not raw provider output. Unknown runtime
+state returns `CODESPACE_PROVIDER_UNAVAILABLE` without certifying shutdown. A local `created`
+VM remains actionable but needs independent native settlement before stop completion; an SDK
+error is distinct from unknown and does not itself complete a local stop. Recovery uses the same
+mutation receipt within its private-transfer TTL, even after the delivery deadline, without a
+second start/stop/delete effect. If that receipt has expired, inspect the existing codespace and
+its verified observation instead of repeating creation or editing the database state.
 With locally approved `web-control`, request a finite renewal in the device editor within its
 ceiling, up to seven days. Pending means the computer has not applied the request; rejected shows
 the refusal and retains the last successfully acknowledged revision. A failed application can
@@ -355,11 +370,13 @@ deadlines remain unchanged. Cached results can return without repeating effects;
 cannot promise immediate delivery of a remote revocation.
 
 The local guest proxy authenticates package requests with its installed per-space broker
-permission; npm need not send a proxy-auth header. The host still enforces the device lease,
-repository domains and public-address checks. A proxy refusal is not permission to broaden them
+permission; package clients need not send a proxy-auth header. The host still enforces the computer's
+lease, repository authority and public-address/computer-network checks. A proxy refusal is not permission to broaden them
 or use a host/GitHub token.
 Busy connection capacity queues requests in FIFO order; disconnected consumers stop waiting.
-Authority is checked again after the wait. Revocation and exhausted byte budgets still refuse access.
+Authority is checked again after the wait. Revocation and lease expiry still refuse access.
+Public destinations are independent of technology; network downloads have no cumulative traffic or
+per-response byte quota. Native MCP file-transfer limits still apply. Host, LAN and service destinations remain denied.
 
 `doctor` requires an enabled, unexpired lease and checks prerequisites, not live VM isolation.
 Stop the foreground companion before commands that require its runner lock. Unsupported SDK
@@ -376,6 +393,14 @@ settlement, coordinate matching server/companion editions, then restart with the
 Do not erase approval/journals, create replacement state or kill arbitrary guard processes. Management
 can be interrupted; mixed-edition rolling upgrade is unsupported. Live append in a matched edition
 does not make the upgrade itself uninterrupted.
+
+An unsupported saved control format also requires offline conversion, not only new executables.
+Back up server database and local private state/disks, stop both sides, remove only obsolete quota,
+repository-domain and delegation-profile fields from all policy/control/intent copies and retained
+creation delegation, and validate against the matching strict schemas. Recompute the server's
+canonical public-policy digest. Preserve grants, receipts, IDs, generations, markers, jobs,
+credentials and disks. Restart matching bundles; rollback restores paired snapshots and bundles.
+Do not replace enrollment, reset the SDK or discard journals to resolve a schema refusal.
 
 `LOCAL_GUEST_SETTLEMENT_UNKNOWN` means the previous guest effect cannot be safely retried.
 After confirmed physical stop, `npm run local -- recover SPACE_ID --confirm` acknowledges that

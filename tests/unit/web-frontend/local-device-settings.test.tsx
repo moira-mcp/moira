@@ -10,6 +10,7 @@ import {
   type LocalDeviceView,
   type LocalPairingView,
   type LocalDeviceSettingsValue,
+  type CodespaceSummaryView,
 } from "@mcp-moira/shared";
 import i18n from "../../../packages/web-frontend/src/i18n";
 import { apiClient, MoiraApiClient } from "../../../packages/web-frontend/src/services/api-client";
@@ -36,7 +37,6 @@ const device: LocalDeviceView = {
     label: "Approved laptop",
     enabled: true,
     leaseUntil: Date.now() + 600000,
-    maxSandboxes: 1,
     machine: {
       name: "local-approved",
       displayName: "Local approved",
@@ -52,7 +52,6 @@ const device: LocalDeviceView = {
         private: true,
         allowPush: false,
         allowDelete: false,
-        domains: ["github.com"],
       },
     ],
   },
@@ -167,9 +166,13 @@ beforeEach(async () => {
   jest
     .spyOn(apiClient, "getGitHubCodespaceConnection")
     .mockResolvedValue({ state: "disconnected" } as never);
-  jest
-    .spyOn(apiClient, "getGitHubCodespaces")
-    .mockResolvedValue({ codespaces: [], repositories: [] } as never);
+  jest.spyOn(apiClient, "getGitHubCodespaces").mockResolvedValue({
+    codespaces: [],
+    repositories: [],
+    readiness: { state: "ready" },
+    connection: { state: "connected" },
+    limits: { codespaces: { held: 0, max_per_user: null } },
+  } as never);
 });
 afterEach(() => {
   cleanup();
@@ -177,20 +180,193 @@ afterEach(() => {
   axios.defaults.adapter = originalAdapter;
   globalThis.React = originalReact;
 });
-function show() {
-  return render(
+async function show({ openSettings = true } = {}) {
+  const result = render(
     <I18nextProvider i18n={i18n}>
       <GitHubCodespacesProvider>
         <LocalDeviceSettings />
       </GitHubCodespacesProvider>
     </I18nextProvider>,
   );
+  await waitFor(() =>
+    expect(screen.getByTestId("local-device-region")).toHaveAttribute("aria-busy", "false"),
+  );
+  if (openSettings) {
+    for (const button of screen.queryAllByRole("button", { name: "Computer settings and access" }))
+      fireEvent.click(button);
+  }
+  return result;
 }
 
+function localCodespace(
+  computerId: string,
+  id: string,
+  state: "usable" | "stop_pending" = "usable",
+): CodespaceSummaryView {
+  return {
+    codespace_id: id,
+    provider: "local-sandboxes",
+    repository_id: `local:${computerId}:44444444-4444-4444-8444-444444444444`,
+    repository: "owner/project",
+    requested_ref: "main",
+    current_ref: "feature/work",
+    machine: {
+      name: "local-approved",
+      display_name: "Duplicate label",
+      operating_system: "linux",
+      cpu_cores: 2,
+      memory_bytes: 4 * 1024 ** 3,
+      storage_bytes: 8 * 1024 ** 3,
+    },
+    state,
+    retention_policy: "persistent",
+    desired_state: state === "usable" ? "running" : "stopped",
+    observed_state: state === "usable" ? "running" : "unknown",
+    generation: 3,
+    created_at: 1,
+    updated_at: 2000,
+    observed_at: null,
+    lifecycle_error: state === "usable" ? null : "CODESPACE_PROVIDER_UNAVAILABLE",
+  };
+}
+
+test("computers with equal labels contain only their codespaces and separate VM identities of the same repository", async () => {
+  const secondId = "55555555-5555-4555-8555-555555555555";
+  devices = [
+    { ...device, status: "active", label: "Duplicate label" },
+    {
+      ...device,
+      deviceId: secondId,
+      status: "active",
+      label: "Duplicate label",
+      policy: { ...device.policy, deviceId: secondId },
+    },
+  ];
+  const first = localCodespace(deviceId, "66666666-6666-4666-8666-666666666666");
+  const sibling = localCodespace(deviceId, "77777777-7777-4777-8777-777777777777");
+  const second = localCodespace(secondId, "88888888-8888-4888-8888-888888888888", "stop_pending");
+  const cloud = {
+    ...first,
+    codespace_id: "99999999-9999-4999-8999-999999999999",
+    provider: "github-codespaces",
+    repository_id: "123",
+  };
+  const fixture = {
+    readiness: { state: "ready" },
+    connection: { state: "connected" },
+    repositories: [],
+    codespaces: [first, sibling, second, cloud],
+    limits: { codespaces: { held: 4, max_per_user: null } },
+  };
+  jest.mocked(apiClient.getGitHubCodespaces).mockResolvedValue(fixture as never);
+  const stop = jest
+    .spyOn(apiClient, "stopGitHubCodespace")
+    .mockRejectedValue({ code: "CODESPACE_PROVIDER_UNAVAILABLE" });
+  await show({ openSettings: false });
+  for (const button of screen.getAllByRole("button", { name: "Computer settings and access" }))
+    expect(button).toHaveAttribute("aria-expanded", "false");
+  const firstComputer = await screen.findByTestId(`local-device-${deviceId}`);
+  const secondComputer = screen.getByTestId(`local-device-${secondId}`);
+  expect(
+    within(firstComputer).getByTestId(`github-codespace-${first.codespace_id}`),
+  ).toHaveTextContent("feature/work");
+  expect(
+    within(firstComputer).getByTestId(`github-codespace-${sibling.codespace_id}`),
+  ).toBeInTheDocument();
+  expect(within(firstComputer).queryByTestId(`github-codespace-${second.codespace_id}`)).toBeNull();
+  expect(
+    within(secondComputer).getByTestId(`github-codespace-${second.codespace_id}`),
+  ).toHaveTextContent("State has not been confirmed yet");
+  expect(screen.queryByTestId(`github-codespace-${cloud.codespace_id}`)).toBeNull();
+  fireEvent.click(
+    within(firstComputer).getByTestId(`github-codespace-stop-${sibling.codespace_id}`),
+  );
+  await within(firstComputer).findByText(
+    "The computer could not confirm the codespace state. Check its connection and try again.",
+  );
+  expect(stop).toHaveBeenCalledWith(sibling.codespace_id);
+  expect(
+    within(firstComputer).getByTestId(`github-codespace-stop-${first.codespace_id}`),
+  ).toBeEnabled();
+  const pending = within(secondComputer).getByTestId(`github-codespace-${second.codespace_id}`);
+  expect(pending).toHaveTextContent("Stopping");
+  expect(within(pending).getAllByRole("button", { name: "Check state again" })).toHaveLength(2);
+  const confirmed = {
+    ...second,
+    state: "stopped" as const,
+    observed_state: "stopped" as const,
+    observed_at: 3000,
+    updated_at: 9000,
+    lifecycle_error: null,
+  };
+  let settleStop!: (value: CodespaceSummaryView) => void;
+  stop.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        settleStop = resolve;
+      }),
+  );
+  let settleList!: (value: Awaited<ReturnType<typeof apiClient.getGitHubCodespaces>>) => void;
+  jest.mocked(apiClient.getGitHubCodespaces).mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        settleList = resolve;
+      }),
+  );
+  const readonlyRefresh = jest
+    .spyOn(apiClient, "refreshGitHubCodespaces")
+    .mockResolvedValue(fixture as never);
+  fireEvent.click(within(pending).getByTestId(`codespace-reconcile-${second.codespace_id}`));
+  await waitFor(() => expect(stop).toHaveBeenLastCalledWith(second.codespace_id));
+  expect(within(firstComputer).getByTestId(`local-codespaces-${deviceId}-region`)).toHaveAttribute(
+    "aria-busy",
+    "false",
+  );
+  expect(within(pending).getByTestId(`codespace-reconcile-${second.codespace_id}`)).toBeDisabled();
+  await act(async () => settleStop(confirmed));
+  await within(secondComputer).findByText("Stopped (data kept)");
+  // The companion mutation's accepted result is visible while its silent list read is pending;
+  // a read-only refresh returning the old pending state cannot pass this assertion.
+  expect(readonlyRefresh).not.toHaveBeenCalled();
+  expect(within(firstComputer).getByTestId(`local-codespaces-${deviceId}-region`)).toHaveAttribute(
+    "aria-busy",
+    "false",
+  );
+  await act(async () =>
+    settleList({ ...fixture, codespaces: [first, sibling, confirmed, cloud] } as never),
+  );
+  const timestamp = within(secondComputer).getByText(/^State confirmed/);
+  expect(timestamp).toHaveTextContent(new Date(3000).toLocaleString("en"));
+  expect(within(secondComputer).queryByText("State has not been confirmed yet")).toBeNull();
+  let rejectRefresh!: (error: Error) => void;
+  readonlyRefresh.mockImplementationOnce(
+    () =>
+      new Promise((_resolve, reject) => {
+        rejectRefresh = reject;
+      }),
+  );
+  fireEvent.click(within(firstComputer).getByRole("button", { name: "Refresh" }));
+  expect(within(firstComputer).getByTestId(`local-codespaces-${deviceId}-region`)).toHaveAttribute(
+    "aria-busy",
+    "true",
+  );
+  expect(within(secondComputer).getByTestId(`local-codespaces-${secondId}-region`)).toHaveAttribute(
+    "aria-busy",
+    "false",
+  );
+  await act(async () => rejectRefresh(new Error("Computer unavailable")));
+  expect(
+    await within(firstComputer).findByText("Could not load this computer's codespaces."),
+  ).toBeInTheDocument();
+  expect(
+    within(secondComputer).queryByText("Could not load this computer's codespaces."),
+  ).toBeNull();
+});
+
 test("pairing exposes a transient token separately from the token-free local command and retains it on failed refresh", async () => {
-  show();
-  await screen.findByText("No local devices connected.");
-  fireEvent.click(screen.getByRole("button", { name: "Connect a device" }));
+  await show();
+  await screen.findByText("No local computers connected.");
+  fireEvent.click(screen.getByRole("button", { name: "Connect a computer" }));
   const token = await screen.findByLabelText("One-time pairing token");
   expect(token).toHaveValue(pairingToken);
   const command = screen.getByLabelText("Local command");
@@ -198,12 +374,12 @@ test("pairing exposes a transient token separately from the token-free local com
   expect((command as HTMLInputElement).value).not.toContain(pairingToken);
   expect(requests.find((request) => request.method === "post")?.body).toEqual({});
   await waitFor(() =>
-    expect(screen.getByRole("button", { name: "Connect a device" })).not.toBeDisabled(),
+    expect(screen.getByRole("button", { name: "Connect a computer" })).not.toBeDisabled(),
   );
   token.focus();
   failRead = true;
-  fireEvent.click(screen.getByRole("button", { name: "Refresh devices" }));
-  await screen.findByText("Could not load local devices.");
+  fireEvent.click(screen.getByRole("button", { name: "Refresh computers" }));
+  await screen.findByText("Could not load local computers.");
   expect(screen.getByLabelText("One-time pairing token")).toBe(token);
   expect(token).toHaveValue(pairingToken);
   expect(token).toHaveFocus();
@@ -212,13 +388,12 @@ test("pairing exposes a transient token separately from the token-free local com
 test("confirmation reviews actual grants and submits the accepted pairing revision", async () => {
   devices = [device];
   pairings = [pair];
-  show();
-  fireEvent.click(await screen.findByRole("button", { name: "Confirm device" }));
+  await show();
+  fireEvent.click(await screen.findByRole("button", { name: "Confirm computer" }));
   const dialog = screen.getByRole("alertdialog");
   expect(within(dialog).getByText("owner/project")).toBeInTheDocument();
   expect(within(dialog).getByText("Push: not allowed · Delete: not allowed")).toBeInTheDocument();
-  expect(within(dialog).getByText("Allowed outbound domains: github.com")).toBeInTheDocument();
-  fireEvent.click(within(dialog).getByRole("button", { name: "Confirm device" }));
+  fireEvent.click(within(dialog).getByRole("button", { name: "Confirm computer" }));
   await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
   expect(await screen.findByText("Connected")).toBeInTheDocument();
   expect(requests.find((request) => request.url.endsWith("/confirm"))?.body).toEqual({
@@ -229,14 +404,14 @@ test("confirmation reviews actual grants and submits the accepted pairing revisi
 test("revoke conflict keeps the device and accessible confirmation error, then retries its generation", async () => {
   devices = [{ ...device, status: "active" }];
   refuse = true;
-  show();
-  fireEvent.click(await screen.findByRole("button", { name: "Revoke device" }));
+  await show();
+  fireEvent.click(await screen.findByRole("button", { name: "Disconnect computer" }));
   const dialog = screen.getByRole("alertdialog");
-  fireEvent.click(within(dialog).getByRole("button", { name: "Revoke device" }));
+  fireEvent.click(within(dialog).getByRole("button", { name: "Disconnect computer" }));
   expect(await within(dialog).findByRole("alert")).toHaveTextContent("The operation failed.");
   expect(screen.getByTestId(`local-device-${deviceId}`)).toHaveTextContent("Connected");
   refuse = false;
-  fireEvent.click(within(dialog).getByRole("button", { name: "Revoke device" }));
+  fireEvent.click(within(dialog).getByRole("button", { name: "Disconnect computer" }));
   await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
   expect(await screen.findByText("Revoked")).toBeInTheDocument();
   expect(
@@ -249,9 +424,9 @@ test("an earlier enrollment response cannot expose its pairing token after accou
   heldBegin = new Promise((yes) => {
     resolve = yes;
   });
-  show();
-  await screen.findByText("No local devices connected.");
-  fireEvent.click(screen.getByRole("button", { name: "Connect a device" }));
+  await show();
+  await screen.findByText("No local computers connected.");
+  fireEvent.click(screen.getByRole("button", { name: "Connect a computer" }));
   await waitFor(() => expect(requests.some((request) => request.method === "post")).toBe(true));
   act(() => observeReadSession("replacement", "other-session"));
   await act(async () =>
@@ -269,16 +444,7 @@ function editableDevice(): LocalDeviceView {
     memoryBytes: 2 * 1024 ** 3,
     storageBytes: 8 * 1024 ** 3,
     dockerBytes: 2 * 1024 ** 3,
-    maxSandboxes: 1,
-    maxOperationMs: 300000,
-    maxOutputBytes: 1024 ** 2,
-    maxConcurrent: 1,
-    maxNetworkBytes: 64 * 1024 ** 2,
-    maxNetworkConnections: 8,
-    repositories: device.policy.repositories.map((repository) => ({
-      ...repository,
-      domains: [...repository.domains],
-    })),
+    repositories: device.policy.repositories.map((repository) => ({ ...repository })),
     gitAuthor: null,
     agentRepositoryManagement: null,
   };
@@ -296,12 +462,6 @@ function editableDevice(): LocalDeviceView {
         memoryBytes: 8 * 1024 ** 3,
         storageBytes: 32 * 1024 ** 3,
         dockerBytes: 8 * 1024 ** 3,
-        maxSandboxes: 2,
-        maxOperationMs: 3600000,
-        maxOutputBytes: 8 * 1024 ** 2,
-        maxConcurrent: 4,
-        maxNetworkBytes: 1024 ** 3,
-        maxNetworkConnections: 32,
         maxLeaseMs: MAX_LOCAL_WORK_LEASE_MS,
       },
       error: null,
@@ -311,7 +471,7 @@ function editableDevice(): LocalDeviceView {
 
 test("agent access defaults off and requires a connected verified GitHub owner", async () => {
   devices = [editableDevice()];
-  show();
+  await show();
   const enable = await screen.findByLabelText("Allow agents to add repositories");
   expect(enable).not.toBeChecked();
   expect(enable).toBeDisabled();
@@ -321,25 +481,21 @@ test("agent access defaults off and requires a connected verified GitHub owner",
   expect(requests.filter((entry) => entry.method === "put")).toHaveLength(0);
 });
 
-test("agent consent sends only the verified owner and bounded profile and stays pending until companion acknowledgement", async () => {
+test("agent consent sends only the verified owner and rights and stays pending until computer acknowledgement", async () => {
   devices = [editableDevice()];
   jest.mocked(apiClient.getGitHubCodespaceConnection).mockResolvedValue({
     state: "connected",
     account: { id: "123", login: "verified-owner" },
   } as never);
-  show();
+  await show();
   const enable = await screen.findByLabelText("Allow agents to add repositories");
   await waitFor(() => expect(enable).not.toBeDisabled());
   fireEvent.click(enable);
   fireEvent.click(screen.getByLabelText("Allow push to added repositories"));
-  fireEvent.change(screen.getByLabelText("Maximum repositories agents may add"), {
-    target: { value: "65" },
-  });
-  fireEvent.submit(screen.getByRole("form", { name: "Settings for Approved laptop" }));
-  expect(requests.filter((entry) => entry.method === "put")).toHaveLength(0);
-  fireEvent.change(screen.getByLabelText("Maximum repositories agents may add"), {
-    target: { value: "3" },
-  });
+  expect(screen.queryByLabelText("Maximum repositories agents may add")).toBeNull();
+  expect(screen.queryByLabelText("Allowed public domains (comma-separated)")).toBeNull();
+  expect(screen.queryByText("Operation and network limits")).toBeNull();
+  expect(screen.getByLabelText("Allow agents to work with local codespaces")).toBeChecked();
   fireEvent.click(screen.getByRole("button", { name: "Request settings change" }));
   await screen.findByText("Requested revision 4; applied revision 3. Waiting for the computer.");
   const sent = (
@@ -351,8 +507,6 @@ test("agent consent sends only the verified owner and bounded profile and stays 
     allowExistingPrivate: true,
     allowNewPrivate: false,
     allowPush: true,
-    maxRepositories: 3,
-    networkProfile: "node-react-playwright",
   });
   expect(sent.repositories).toEqual(editableDevice().control!.settings.repositories);
   expect(
@@ -368,7 +522,7 @@ test("agent consent sends only the verified owner and bounded profile and stays 
       },
     },
   ];
-  fireEvent.click(screen.getByRole("button", { name: "Refresh devices" }));
+  fireEvent.click(screen.getByRole("button", { name: "Refresh computers" }));
   await screen.findByText("Local consent rejected");
   expect(
     screen.getByText("Applied permission: agent repository additions are disabled."),
@@ -385,9 +539,9 @@ test("agent consent sends only the verified owner and bounded profile and stays 
       },
     },
   ];
-  fireEvent.click(screen.getByRole("button", { name: "Refresh devices" }));
+  fireEvent.click(screen.getByRole("button", { name: "Refresh computers" }));
   await screen.findByText(
-    "Applied permission: verified-owner, up to 3 repositories; existing private allowed; new private not allowed; push allowed.",
+    "Applied permission: verified-owner; existing private allowed; new private not allowed; push allowed.",
   );
 });
 
@@ -403,7 +557,7 @@ test.each([
       state: "connected",
       account: { id: "123", login: "verified-owner" },
     } as never);
-    show();
+    await show();
     const enable = await screen.findByLabelText("Allow agents to add repositories");
     await waitFor(() => expect(enable).not.toBeDisabled());
     fireEvent.click(enable);
@@ -423,8 +577,6 @@ test.each([
       allowExistingPrivate: existing,
       allowNewPrivate: created,
       allowPush: false,
-      maxRepositories: 1,
-      networkProfile: "node-react-playwright",
     });
     expect(sent.repositories).toEqual(device.policy.repositories);
     expect(
@@ -441,9 +593,9 @@ test.each([
         },
       },
     ];
-    fireEvent.click(screen.getByRole("button", { name: "Refresh devices" }));
+    fireEvent.click(screen.getByRole("button", { name: "Refresh computers" }));
     await screen.findByText(
-      `Applied permission: verified-owner, up to 1 repositories; existing private ${existing ? "allowed" : "not allowed"}; new private ${created ? "allowed" : "not allowed"}; push not allowed.`,
+      `Applied permission: verified-owner; existing private ${existing ? "allowed" : "not allowed"}; new private ${created ? "allowed" : "not allowed"}; push not allowed.`,
     );
     expect(screen.getByLabelText("Add existing private repositories")).toHaveAttribute(
       "aria-checked",
@@ -464,13 +616,11 @@ test("revoking agent additions preserves existing grants and effective consent u
     allowExistingPrivate: true,
     allowNewPrivate: false,
     allowPush: true,
-    maxRepositories: 3,
-    networkProfile: "node-react-playwright" as const,
   };
   current.control!.settings.agentRepositoryManagement = consent;
   current.control!.appliedAgentRepositoryManagement = consent;
   devices = [current];
-  show();
+  await show();
   fireEvent.click(await screen.findByLabelText("Allow agents to add repositories"));
   fireEvent.click(screen.getByRole("button", { name: "Request settings change" }));
   await screen.findByText("Requested revision 4; applied revision 3. Waiting for the computer.");
@@ -481,7 +631,7 @@ test("revoking agent additions preserves existing grants and effective consent u
   expect(sent.repositories).toEqual(current.control!.settings.repositories);
   expect(
     screen.getByText(
-      "Applied permission: verified-owner, up to 3 repositories; existing private allowed; new private not allowed; push allowed.",
+      "Applied permission: verified-owner; existing private allowed; new private not allowed; push allowed.",
     ),
   ).toBeInTheDocument();
   devices = [
@@ -495,7 +645,7 @@ test("revoking agent additions preserves existing grants and effective consent u
       },
     },
   ];
-  fireEvent.click(screen.getByRole("button", { name: "Refresh devices" }));
+  fireEvent.click(screen.getByRole("button", { name: "Refresh computers" }));
   await screen.findByText("Applied permission: agent repository additions are disabled.");
   expect(screen.getByText("owner/project")).toBeInTheDocument();
 });
@@ -506,14 +656,14 @@ test("changed GitHub identity cannot authorize an old consent draft and failed a
     state: "connected",
     account: { id: "123", login: "verified-owner" },
   } as never);
-  show();
+  await show();
   const enable = await screen.findByLabelText("Allow agents to add repositories");
   await waitFor(() => expect(enable).not.toBeDisabled());
   fireEvent.click(enable);
   fireEvent.click(screen.getByLabelText("Create and add new private repositories"));
-  const count = screen.getByLabelText("Maximum repositories agents may add");
-  fireEvent.change(count, { target: { value: "2" } });
-  count.focus();
+  const name = screen.getByLabelText("Computer name");
+  fireEvent.change(name, { target: { value: "Draft computer name" } });
+  name.focus();
   jest
     .mocked(apiClient.getGitHubCodespaceConnection)
     .mockRejectedValueOnce(new Error("unavailable"));
@@ -521,8 +671,8 @@ test("changed GitHub identity cannot authorize an old consent draft and failed a
   await waitFor(() =>
     expect(screen.getByRole("button", { name: "Refresh GitHub account" })).not.toBeDisabled(),
   );
-  expect(count).toHaveFocus();
-  expect(count).toHaveValue(2);
+  expect(name).toHaveFocus();
+  expect(name).toHaveValue("Draft computer name");
   fireEvent.click(screen.getByRole("button", { name: "Request settings change" }));
   expect(requests.filter((entry) => entry.method === "put")).toHaveLength(0);
   jest.mocked(apiClient.getGitHubCodespaceConnection).mockResolvedValue({
@@ -540,14 +690,16 @@ test("owner settings request carries revision, week, machine and repository righ
   const now = Date.now();
   jest.spyOn(Date, "now").mockReturnValue(now);
   devices = [editableDevice()];
-  show();
+  await show();
   const cpu = await screen.findByLabelText("CPU cores");
   fireEvent.change(cpu, { target: { value: "4" } });
   fireEvent.change(screen.getByLabelText("RAM (GiB)"), { target: { value: "4" } });
-  fireEvent.change(screen.getByLabelText("Bounded disk capacity (GiB)"), {
+  fireEvent.change(screen.getByLabelText("Shared local codespace storage on this computer (GiB)"), {
     target: { value: "16" },
   });
-  fireEvent.change(screen.getByLabelText("Guest Docker storage (GiB)"), { target: { value: "4" } });
+  fireEvent.change(screen.getByLabelText("Docker storage inside each codespace (GiB)"), {
+    target: { value: "4" },
+  });
   fireEvent.click(screen.getByLabelText("Push commits"));
   fireEvent.click(screen.getByLabelText("Create pull requests"));
   fireEvent.change(screen.getByLabelText("Commit author name"), {
@@ -582,23 +734,27 @@ test("owner settings request carries revision, week, machine and repository righ
       control: { ...devices[0].control!, status: "applied", appliedRevision: 4 },
     },
   ];
-  fireEvent.click(screen.getByRole("button", { name: "Refresh devices" }));
+  fireEvent.click(screen.getByRole("button", { name: "Refresh computers" }));
   await screen.findByText("Applied revision 4.");
-  expect(screen.getByText(/4 CPU · 2 GiB memory/)).toBeInTheDocument();
+  expect(
+    screen.getByText(
+      "Per new codespace: 4 CPU · 2 GiB memory. Shared storage on this computer: 8 GiB.",
+    ),
+  ).toBeInTheDocument();
 });
 
 test("a settings conflict and failed source refresh preserve the focused draft for revision-bound retry", async () => {
   devices = [editableDevice()];
-  show();
+  await show();
   const input = await screen.findByLabelText("Computer name");
   fireEvent.change(input, { target: { value: "Unfinished computer name" } });
   input.focus();
   refuse = true;
   fireEvent.click(screen.getByRole("button", { name: "Request settings change" }));
-  await screen.findByText("The operation failed. Refresh the device and try again.");
+  await screen.findByText("The operation failed. Refresh the computer and try again.");
   failRead = true;
-  fireEvent.click(screen.getByRole("button", { name: "Refresh devices" }));
-  await screen.findByText("Could not load local devices.");
+  fireEvent.click(screen.getByRole("button", { name: "Refresh computers" }));
+  await screen.findByText("Could not load local computers.");
   expect(screen.getByLabelText("Computer name")).toBe(input);
   expect(input).toHaveValue("Unfinished computer name");
   expect(input).toHaveFocus();
@@ -625,7 +781,7 @@ test("a newer device draft survives an earlier successful settings request", asy
     release = resolve;
   });
   devices = [editableDevice()];
-  show();
+  await show();
   const input = await screen.findByLabelText("Computer name");
   fireEvent.change(input, { target: { value: "First submitted name" } });
   fireEvent.click(screen.getByRole("button", { name: "Request settings change" }));
@@ -653,7 +809,7 @@ test("a successful trimmed settings value becomes clean while a newer independen
     release = resolve;
   });
   devices = [editableDevice()];
-  show();
+  await show();
   const name = await screen.findByLabelText("Computer name");
   fireEvent.change(name, { target: { value: "  Trimmed computer  " } });
   fireEvent.click(screen.getByRole("button", { name: "Request settings change" }));
@@ -679,7 +835,7 @@ test("a successful trimmed settings value becomes clean while a newer independen
 
 test("local ceiling and expired or longer-than-week work permission refuse a request without changing applied data", async () => {
   devices = [editableDevice()];
-  show();
+  await show();
   const input = await screen.findByLabelText("CPU cores");
   fireEvent.change(input, { target: { value: "5" } });
   fireEvent.submit(screen.getByRole("form", { name: "Settings for Approved laptop" }));
@@ -704,7 +860,7 @@ test("a companion rejection discloses the reason and retains applied grants and 
     error: { code: "LOCAL_CONTROL_CAPACITY", message: "Disk resize refused" },
   };
   devices = [next];
-  show();
+  await show();
   expect(
     await screen.findByText("Revision 4 was rejected; revision 3 remains applied."),
   ).toBeInTheDocument();
@@ -713,7 +869,7 @@ test("a companion rejection discloses the reason and retains applied grants and 
   const input = screen.getByLabelText("Computer name");
   fireEvent.change(input, { target: { value: "Still editing after refusal" } });
   input.focus();
-  fireEvent.click(screen.getByRole("button", { name: "Refresh devices" }));
+  fireEvent.click(screen.getByRole("button", { name: "Refresh computers" }));
   await waitFor(() =>
     expect(screen.getByRole("button", { name: "Request settings change" })).toBeEnabled(),
   );

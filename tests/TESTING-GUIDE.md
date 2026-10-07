@@ -180,8 +180,22 @@ companion relay and LocalRpc, with the external runtime substituted. They check 
 and repository binding, independent generations, revocation, replay after response loss,
 native bytes retained before input consumption and bounded payload/metadata storage.
 Settings tests cover pairing, confirmation, revocation and provider selection without a
-GitHub connection. See [COVERAGE-MAP.md](COVERAGE-MAP.md#codespace-connections) for each
+GitHub connection, exact computer UUID grouping and existing-intent retries with local pending/error
+regions. Provider lifecycle fixtures set physical state independently of desired state: created
+is actionable but not a stop certificate, unknown preserves the last verified state/time, and
+receipt replay after the delivery deadline does not dispatch a second effect. Native guard cases
+independently check SDK/Engine identity, held workers and durable stop generation without launching
+a VM. Verified observation time is tested separately from retry and connector-probe bookkeeping.
+See [COVERAGE-MAP.md](COVERAGE-MAP.md#codespace-connections) for each
 suite's responsibility.
+
+Local quota-isolation cases use actual migrated SQLite and controlled provider responses to
+distinguish local VM/operation admission from cloud count, throttle, concurrency and machine limits.
+Repository-admission cases retain stable recovery identities alongside multiple additions without
+an owner repository-count quota. Broker cases exercise public destinations beyond a technology
+profile, no cumulative traffic budget, retained public-address/computer-network refusal and
+bounded socket backpressure. Job cases preserve explicit lease and protocol output bounds without
+owner concurrency settings. These checks do not execute a physical VM.
 
 `tests/integration/local/guest-docker.test.ts` requires Docker and the configured pinned
 template image. It runs real Linux descriptor-limit behavior with substituted Docker
@@ -209,7 +223,7 @@ against documented public placeholders rather than assuming that their presence 
 host forwarding.
 
 For physical network checks, establish controlled receivers and prove host-side reachability
-before guest probes. Verify approved broker egress as the positive guest control, then
+before guest probes. Verify broker egress to a controlled public destination as the positive guest control, then
 observe denied host, LAN, VPN, metadata and other-VM access without exposing a personal
 service. SDK policy lookup and failure to reach an unavailable target are insufficient
 evidence of isolation. Mark an unavailable controlled receiver as not executed and state

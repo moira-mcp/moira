@@ -36,10 +36,11 @@ const spaceSchema = z
     ]),
     phase: z.string().max(80),
     failure: z.string().max(160).nullable(),
+    nativeStopConfirmed: z.boolean(),
   })
   .passthrough();
 const snapshotSchema = z
-  .object({ deviceId: z.string().uuid(), spaces: z.array(spaceSchema).max(8) })
+  .object({ deviceId: z.string().uuid(), spaces: z.array(spaceSchema) })
   .passthrough();
 const RECOVERY_JOB_ACTIONS = new Set(["inspect", "cancel", "finalize", "output", "file-inspect"]);
 
@@ -240,6 +241,12 @@ export class LocalCodespaceProvider implements CodespaceProviderAdapter {
         "Local sandbox identity changed",
       );
     }
+    if (space.state === "unknown") {
+      throw new CodespaceResourceError(
+        "CODESPACE_PROVIDER_UNAVAILABLE",
+        "The local runtime cannot verify this codespace's state",
+      );
+    }
     return {
       name: space.id,
       displayName: record.operationMarker,
@@ -258,7 +265,9 @@ export class LocalCodespaceProvider implements CodespaceProviderAdapter {
               : space.state === "stopping"
                 ? "stopping"
                 : space.state === "created"
-                  ? "provisioning"
+                  ? space.nativeStopConfirmed
+                    ? "shutdown"
+                    : "created"
                   : "failed",
       lastUsedAt: space.lastStartedAt,
       machine: record.machine,

@@ -78,7 +78,6 @@ function fixture(
         allowPush: true,
         allowPullRequests: true,
         allowDelete: false,
-        domains: [],
       };
     },
     fetch: (async (url, init) => {

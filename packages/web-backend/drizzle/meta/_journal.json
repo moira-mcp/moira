@@ -407,6 +407,13 @@
       "when": 1791320400000,
       "tag": "0056_repository_creation_requests",
       "breakpoints": true
+    },
+    {
+      "idx": 58,
+      "version": "7",
+      "when": 1791406800000,
+      "tag": "0057_codespace_observation",
+      "breakpoints": true
     }
   ]
 }

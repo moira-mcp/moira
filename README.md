@@ -137,7 +137,8 @@ default-off profile and read-only bundle mount.
 
 Moira Local connects your computer to your Moira account through outbound HTTPS. It runs approved
 repositories in persistent, mountless Docker Sandboxes microVMs. GitHub Codespaces remains a separate
-provider; local devices do not require a Moira GitHub App connection.
+provider. Public read-only local work needs no GitHub App connection; enrolled private Git and
+write operations use the account's server-held GitHub authorization.
 
 The companion requires Node.js 24, macOS on Apple silicon and the pinned Docker Sandboxes
 `sbx` 0.46.0 runtime. Linux execution is refused. From this source checkout:
@@ -149,8 +150,8 @@ npm run local -- --help
 ```
 
 The package is private and is not a published global npm installer. Configure local repository
-rights and a finite work lease before connecting **Settings → Codespaces → Local devices**.
-The pairing token goes to the companion through stdin; review the device's grants in the browser
+rights and a finite work lease before connecting **Settings → Development → Local computers**.
+The pairing token goes to the companion through stdin; review the computer's grants in the browser
 before confirming. See [Codespaces: Moira Local](docs/CODESPACES.md#moira-local-companion)
 for setup, run, stop, recovery and the limits of isolation evidence. Codespace contents are visible
 to Moira; review returned code before executing it on your computer. The `moira-local` MCP connection

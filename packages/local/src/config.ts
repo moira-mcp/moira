@@ -19,19 +19,6 @@ import { initializeStorage } from "./storage.js";
 // Docker's multi-platform shell-docker image, resolved and inspected on 2026-10-02.
 export const DEFAULT_TEMPLATE =
   "docker.io/docker/sandbox-templates@sha256:1560168ac5fb9ce23d413c878349334c5845c07e264cd675d7867f0c78ad1761";
-export const DEFAULT_DOMAINS = [
-  "registry.npmjs.org",
-  "nodejs.org",
-  "github.com",
-  "codeload.github.com",
-  "objects.githubusercontent.com",
-  "release-assets.githubusercontent.com",
-  "raw.githubusercontent.com",
-  "registry-1.docker.io",
-  "auth.docker.io",
-  "production.cloudflare.docker.com",
-  "production.cloudfront.docker.com",
-];
 
 export async function openLocalState(directory?: string): Promise<PrivateState> {
   const path = resolve(directory ?? join(homedir(), ".moira-local"));
@@ -71,7 +58,6 @@ export async function initializeLocal(
     storageRoot?: string;
     cpuCores?: number;
     memoryGiB?: number;
-    maxSandboxes?: number;
   },
   environment: NodeJS.ProcessEnv,
 ) {
@@ -99,14 +85,6 @@ export async function initializeLocal(
       memoryBytes: (options.memoryGiB ?? 4) * GiB,
       dockerBytes: 4 * GiB,
     },
-    limits: {
-      maxSandboxes: options.maxSandboxes ?? 2,
-      maxOperationMs: 60 * 60_000,
-      maxOutputBytes: 64 * 1024 * 1024,
-      maxConcurrent: 4,
-      maxNetworkBytes: 8 * GiB,
-      maxNetworkConnections: 16,
-    },
     repositories: [],
   });
   policy.runtime.storageRoot = await initializeStorage(
@@ -127,7 +105,6 @@ export async function approveRepository(
     allowPush: boolean;
     allowDelete: boolean;
     allowPullRequests?: boolean;
-    domains?: string[];
   },
 ) {
   repositoryName.parse(input.fullName);
@@ -138,7 +115,6 @@ export async function approveRepository(
   const grant = localRepositorySchema.parse({
     ...input,
     id: previous?.id ?? randomUUID(),
-    domains: input.domains ?? DEFAULT_DOMAINS,
   });
   policy.repositories = policy.repositories.filter((entry) => entry.id !== grant.id).concat(grant);
   await records.state.write("policy.json", localPolicySchema.parse(policy));

@@ -13,6 +13,7 @@ import {
   CodespaceTransferService,
   CodespaceTransferRepository,
   localRepositoryTargetId,
+  projectCodespaceSummary,
   type CodespaceResourcePolicy,
 } from "@mcp-moira/shared";
 import { createLocalCodespaceServices } from "../../packages/web-backend/src/services/local-codespace-services.js";
@@ -58,6 +59,7 @@ const boundaryBytes = Buffer.from("controlled external-runtime boundary");
 const hash = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex");
 
 async function fixture(partLimit = 4 * 1024 * 1024, maxObjects = 512, nativeSize = 5) {
+  const clock = { now: Date.now() };
   const state = await PrivateState.open(join(root, "companion"));
   const local = await localFixture(state);
   local.policy.leaseUntil = Date.now() + 3600_000;
@@ -96,6 +98,7 @@ async function fixture(partLimit = 4 * 1024 * 1024, maxObjects = 512, nativeSize
   });
   const services = createLocalCodespaceServices(transfer, {
     sqlite,
+    now: () => clock.now,
     policy: () => policy,
     settingsUrl: "https://moira.example/app/settings",
     resourceAudit: () => undefined,
@@ -128,6 +131,8 @@ async function fixture(partLimit = 4 * 1024 * 1024, maxObjects = 512, nativeSize
     createLocalDeviceManagementRoutes(services.devices, "https://moira.example"),
   );
   const faults = { dropNextAck: false, lostAcknowledgements: 0, holdOperations: false };
+  const physical = new Map<string, SandboxObservation["status"]>();
+  const lifecycle = { stopSettles: true, stopEffects: 0, unknown: false };
   const guestActions: string[] = [];
   const retainedResults = new Map<string, unknown>();
   let transportRefusal: { status: number; code: string; route: string } | undefined;
@@ -181,7 +186,7 @@ async function fixture(partLimit = 4 * 1024 * 1024, maxObjects = 512, nativeSize
           id: space.runtimeId!,
           name: space.name,
           agent: "shell",
-          status: space.desiredState === "running" ? "running" : "stopped",
+          status: physical.get(space.id) ?? "error",
           workspaces: [],
           ports: [],
         }));
@@ -293,13 +298,16 @@ async function fixture(partLimit = 4 * 1024 * 1024, maxObjects = 512, nativeSize
         },
         stop: async () => {
           const space = await local.records.get(id);
-          if (space)
+          if (space) {
+            lifecycle.stopEffects++;
+            if (lifecycle.stopSettles) physical.set(id, "stopped");
             await local.records.put({
               ...space,
               desiredState: "stopped",
               phase: "stopped",
               generation: space.generation + 1,
             });
+          }
         },
       }),
     }),
@@ -325,7 +333,19 @@ async function fixture(partLimit = 4 * 1024 * 1024, maxObjects = 512, nativeSize
       networkPolicy: hash(boundaryBytes),
     };
     await local.records.put(space);
+    physical.set(id, "running");
     return space;
+  };
+  const snapshot = manager.snapshot.bind(manager);
+  manager.snapshot = async () => {
+    const result = await snapshot();
+    return {
+      ...result,
+      spaces: result.spaces.map((space) => ({
+        ...space,
+        state: lifecycle.unknown ? ("unknown" as const) : space.state,
+      })),
+    };
   };
   const rpc = new LocalRpc(manager),
     relay = new LocalRelay(local.records, fetch);
@@ -406,6 +426,9 @@ async function fixture(partLimit = 4 * 1024 * 1024, maxObjects = 512, nativeSize
     nativeBytes,
     guestRoot,
     faults,
+    physical,
+    lifecycle,
+    clock,
     policy,
     guestActions,
     target: localRepositoryTargetId(local.policy.deviceId, local.policy.repositories[0].id),
@@ -413,6 +436,121 @@ async function fixture(partLimit = 4 * 1024 * 1024, maxObjects = 512, nativeSize
 }
 
 describe("actual local-only service composition and outbound relay", () => {
+  test("created is actionable but not a stop certificate, and a pending stop reuses its durable receipt", async () => {
+    const actual = await fixture();
+    const created = await actual.drive(
+      actual.services.resource.create("user-a", actual.target, "main"),
+    );
+    const spaceId = created.resource.providerResourceName!;
+    actual.physical.set(spaceId, "created");
+    actual.lifecycle.stopSettles = false;
+    const pending = await actual.drive(
+      actual.services.resource.stopCodespace("user-a", created.resource.id),
+    );
+    expect(pending).toMatchObject({
+      state: "stop_pending",
+      observedState: "created",
+      desiredState: "stopped",
+    });
+    expect(actual.lifecycle.stopEffects).toBe(1);
+    actual.clock.now += 6 * 60_000;
+    const replay = await actual.drive(
+      actual.services.resource.stopCodespace("user-a", created.resource.id),
+    );
+    expect(replay.state).toBe("stop_pending");
+    expect(replay.generation).toBe(pending.generation);
+    expect(actual.lifecycle.stopEffects).toBe(1);
+    const saved = sqlite
+      .prepare(
+        "SELECT outputReference FROM codespaceLocalRelay WHERE resourceId=? AND status='completed' AND outputReference IS NOT NULL",
+      )
+      .all(created.resource.id) as { outputReference: string }[];
+    expect(
+      saved.some((row) =>
+        sqlite
+          .prepare("SELECT 1 FROM codespaceTransfer WHERE id=?")
+          .get(JSON.parse(row.outputReference).parts[0].transferId),
+      ),
+    ).toBe(true);
+    actual.physical.set(spaceId, "stopped");
+    const stopped = await actual.drive(
+      actual.services.resource.stopCodespace("user-a", created.resource.id),
+    );
+    expect(stopped).toMatchObject({
+      state: "stopped",
+      observedState: "stopped",
+      desiredState: "stopped",
+    });
+    expect(actual.lifecycle.stopEffects).toBe(1);
+  });
+
+  test("unknown observation persists a safe refusal without changing verified freshness and recovers on retry", async () => {
+    const actual = await fixture();
+    const created = await actual.drive(
+      actual.services.resource.create("user-a", actual.target, "main"),
+    );
+    expect(created.resource.observedAt).not.toBeNull();
+    actual.lifecycle.unknown = true;
+    await expect(
+      actual.drive(actual.services.resource.stopCodespace("user-a", created.resource.id)),
+    ).rejects.toMatchObject({ code: "CODESPACE_PROVIDER_UNAVAILABLE" });
+    const unavailable = actual.services.resource.getCodespace("user-a", created.resource.id);
+    expect(unavailable).toMatchObject({
+      state: "stop_pending",
+      observedState: "running",
+      observedAt: created.resource.observedAt,
+    });
+    expect(projectCodespaceSummary(unavailable)).toMatchObject({
+      observed_at: created.resource.observedAt,
+      lifecycle_error: "CODESPACE_PROVIDER_UNAVAILABLE",
+    });
+    expect(actual.lifecycle.stopEffects).toBe(0);
+    sqlite.prepare("UPDATE codespaceResource SET observedAt=7 WHERE id=?").run(created.resource.id);
+    await actual.drive(actual.services.resource.reconcileOnce("user-a"));
+    expect(actual.services.resource.getCodespace("user-a", created.resource.id)).toMatchObject({
+      observedAt: 7,
+      lastOutcome: "CODESPACE_PROVIDER_UNAVAILABLE",
+    });
+    actual.lifecycle.unknown = false;
+    const stopped = await actual.drive(
+      actual.services.resource.stopCodespace("user-a", created.resource.id),
+    );
+    expect(projectCodespaceSummary(stopped)).toMatchObject({
+      state: "stopped",
+      lifecycle_error: null,
+    });
+    expect(stopped.observedAt).toBeGreaterThan(7);
+    actual.physical.set(created.resource.providerResourceName!, "running");
+    const observationTime = actual.clock.now;
+    const probe = actual.services.provider.probeConnector.bind(actual.services.provider);
+    actual.services.provider.probeConnector = async (credential, name) => {
+      actual.clock.now += 100;
+      await probe(credential, name);
+    };
+    const restarted = await actual.drive(
+      actual.services.resource.startCodespace("user-a", created.resource.id),
+    );
+    expect(restarted).toMatchObject({
+      state: "usable",
+      observedAt: observationTime,
+      updatedAt: observationTime + 100,
+    });
+  });
+
+  test("an explicit local runtime error cannot certify stopped", async () => {
+    const actual = await fixture();
+    const created = await actual.drive(
+      actual.services.resource.create("user-a", actual.target, "main"),
+    );
+    actual.physical.set(created.resource.providerResourceName!, "error");
+    actual.lifecycle.stopSettles = false;
+    const pending = await actual.drive(
+      actual.services.resource.stopCodespace("user-a", created.resource.id),
+    );
+    expect(pending).toMatchObject({ state: "stop_pending", observedState: "failed" });
+    expect(actual.lifecycle.stopEffects).toBe(1);
+  });
+
   test("a full native file quota leaves authenticated local lifecycle and commands operational", async () => {
     const actual = await fixture(4 * 1024 * 1024, 1);
     const fullBytes = 4 * 1024 * 1024;
@@ -460,10 +598,9 @@ describe("actual local-only service composition and outbound relay", () => {
   });
 
   test.each(["exec", "read"] as const)(
-    "settles an old %s marker after the server generation advances and releases capacity",
+    "settles an old %s marker after the server generation advances without redispatch",
     async (kind) => {
       const actual = await fixture();
-      actual.policy.maxConcurrentOperationsPerUser = 1;
       const created = await actual.drive(
         actual.services.resource.create("user-a", actual.target, "main"),
       );
@@ -488,12 +625,6 @@ describe("actual local-only service composition and outbound relay", () => {
               }),
             );
       expect(pending.operation.state).toBe("running");
-      await expect(
-        actual.services.operation.execute("user-a", created.resource.id, {
-          argv: ["true"],
-          stdin: { kind: "inline", bytes: new Uint8Array() },
-        }),
-      ).rejects.toMatchObject({ code: "CODESPACE_OPERATION_BUSY" });
       const originalGeneration = pending.operation.resourceGeneration;
       sqlite
         .prepare("UPDATE codespaceResource SET generation=generation+2 WHERE id=?")

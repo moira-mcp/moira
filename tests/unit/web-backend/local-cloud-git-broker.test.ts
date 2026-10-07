@@ -20,7 +20,6 @@ const grant: BrokerGrant = {
     allowPush: true,
     allowPullRequests: true,
     allowDelete: false,
-    domains: [],
   },
   policy: { enabled: true, leaseUntil: Date.now() + 60000 } as BrokerGrant["policy"],
 };
@@ -61,7 +60,7 @@ describe("cloud Git broker", () => {
       const release = jest.fn(async () => {});
       const reserve = jest.fn(async () => {
         fresh.repository.allowPush = false;
-        return { maximumBytes: 1024, release };
+        return { release };
       });
       const authority = jest.fn(async () => {
         throw Error("Revoked push reached authority");
@@ -91,11 +90,11 @@ describe("cloud Git broker", () => {
       expect(authority).not.toHaveBeenCalled();
       expect(resolve).not.toHaveBeenCalled();
       expect(requestHttps).not.toHaveBeenCalled();
-      expect(release.mock.calls).toEqual([[0]]);
+      expect(release.mock.calls).toEqual([[]]);
     },
   );
 
-  it("keeps its handler active until downstream shutdown closes HTTPS and refunds its reservation", async () => {
+  it("keeps its handler active until downstream shutdown closes HTTPS and releases its connection", async () => {
     let enterClose!: () => void;
     let finishClose!: () => void;
     let enterRelease!: () => void;
@@ -148,7 +147,7 @@ describe("cloud Git broker", () => {
         resourceId: "server-resource",
         resourceGeneration: 4,
       }),
-      { reserve: async () => ({ maximumBytes: 1024, release }) } as unknown as NetworkBudget,
+      { reserve: async () => ({ release }) } as unknown as NetworkBudget,
       () => {},
       async () => {
         throw Error("No fallback expected");
@@ -192,7 +191,7 @@ describe("cloud Git broker", () => {
           enter();
           await gate;
         }
-        return { maximumBytes: 1024, release };
+        return { release };
       });
       const requestHttps = jest.fn(() => {
         throw Error("Closed request reached HTTPS");
@@ -225,12 +224,12 @@ describe("cloud Git broker", () => {
       await work;
       expect(requestHttps).not.toHaveBeenCalled();
       expect(reserve).toHaveBeenCalledTimes(1);
-      expect(release.mock.calls).toEqual([[0]]);
+      expect(release.mock.calls).toEqual([[]]);
     },
   );
 
   it.each(["git", "http"] as const)(
-    "%s broker refunds a late reservation without resolving or opening its destination",
+    "%s broker releases a late reservation without resolving or opening its destination",
     async (kind) => {
       let enter!: () => void;
       let resume!: () => void;
@@ -245,7 +244,7 @@ describe("cloud Git broker", () => {
         reserve: async () => {
           enter();
           await gate;
-          return { maximumBytes: 1024, release };
+          return { release };
         },
       } as unknown as NetworkBudget;
       const resolve = jest.fn(async () => {
@@ -276,7 +275,7 @@ describe("cloud Git broker", () => {
       await work;
       expect(resolve).not.toHaveBeenCalled();
       expect(requestHttps).not.toHaveBeenCalled();
-      expect(release.mock.calls).toEqual([[0]]);
+      expect(release.mock.calls).toEqual([[]]);
     },
   );
 
@@ -284,7 +283,7 @@ describe("cloud Git broker", () => {
     const forwarded: Buffer[] = [];
     let destination = "";
     let authorization = "";
-    let accounted = 0;
+    let released = false;
     const requestHttps = ((
       url: URL,
       options: { headers: { authorization: string } },
@@ -310,9 +309,8 @@ describe("cloud Git broker", () => {
     }) as typeof httpsRequest;
     const budget = {
       reserve: async () => ({
-        maximumBytes: 1024,
-        release: async (bytes: number) => {
-          accounted = bytes;
+        release: async () => {
+          released = true;
         },
       }),
     } as unknown as NetworkBudget;
@@ -346,7 +344,7 @@ describe("cloud Git broker", () => {
       "https://moira.example/api/local-devices/github/server-resource/4/git/push",
     );
     expect(authorization).toBe("Bearer device-secret");
-    expect(accounted).toBe(6);
+    expect(released).toBe(true);
   });
   it.each([
     "other.git/git-receive-pack",
@@ -373,7 +371,7 @@ describe("cloud Git broker", () => {
       async () => {
         throw Error("Revoked binding");
       },
-      { reserve: async () => ({ maximumBytes: 1024, release }) } as unknown as NetworkBudget,
+      { reserve: async () => ({ release }) } as unknown as NetworkBudget,
       () => {},
       async () => {
         throw Error("Secret fallback happened");
@@ -385,6 +383,6 @@ describe("cloud Git broker", () => {
         gitCredential: "old-host-token",
       }),
     ).rejects.toThrow("Revoked binding");
-    expect(release.mock.calls).toEqual([[0]]);
+    expect(release.mock.calls).toEqual([[]]);
   });
 });

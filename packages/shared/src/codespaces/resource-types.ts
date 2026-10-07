@@ -32,7 +32,14 @@ export interface CodespaceMachine {
 }
 
 export type CodespaceProviderState =
-  "provisioning" | "starting" | "available" | "stopping" | "shutdown" | "deleting" | "failed";
+  | "created"
+  | "provisioning"
+  | "starting"
+  | "available"
+  | "stopping"
+  | "shutdown"
+  | "deleting"
+  | "failed";
 
 export interface CodespaceProviderResource {
   name: string;
@@ -208,7 +215,14 @@ export interface CodespaceResourceRecord {
   retentionPolicy: "legacy_disposable" | "persistent";
   desiredState: "running" | "stopped" | "deleted";
   observedState:
-    "unknown" | "provisioning" | "running" | "stopped" | "deleting" | "absent" | "failed";
+    | "unknown"
+    | "created"
+    | "provisioning"
+    | "running"
+    | "stopped"
+    | "deleting"
+    | "absent"
+    | "failed";
   generation: number;
   createDeadlineAt: number;
   /**
@@ -229,6 +243,8 @@ export interface CodespaceResourceRecord {
   lastActivityAt: number | null;
   /** The provider's last start time as last observed, for display only; `null` until observed. */
   providerLastUsedAt: number | null;
+  /** Last verified provider observation, independent of bookkeeping and retry timestamps. */
+  observedAt: number | null;
   lastOutcome: string | null;
   createdAt: number;
   updatedAt: number;
@@ -250,6 +266,32 @@ export type CodespaceResourceErrorCode =
   | "CODESPACE_GENERATION_CONFLICT"
   | "CODESPACE_RESOURCE_INVALID"
   | "CODESPACE_NOT_FOUND";
+
+/** Only these known lifecycle outcomes may be projected to callers; never provider text. */
+export function codespaceLifecycleErrorCode(
+  outcome: string | null,
+): CodespaceResourceErrorCode | null {
+  switch (outcome) {
+    case "CODESPACE_PROVIDER_DISABLED":
+    case "CODESPACE_PROVIDER_UNAVAILABLE":
+    case "CODESPACE_POLICY_LIMIT":
+    case "CODESPACE_SESSION_UNAVAILABLE":
+    case "CODESPACE_OPERATION_BUSY":
+    case "CODESPACE_AUTHORIZATION_REQUIRED":
+    case "CODESPACE_RESULT_EXPIRED":
+    case "CODESPACE_CREATE_REJECTED":
+    case "CODESPACE_BILLING_UNSUPPORTED":
+    case "CODESPACE_CREATE_PENDING":
+    case "CODESPACE_NOT_RUNNING":
+    case "CODESPACE_START_TIMEOUT":
+    case "CODESPACE_GENERATION_CONFLICT":
+    case "CODESPACE_RESOURCE_INVALID":
+    case "CODESPACE_NOT_FOUND":
+      return outcome;
+    default:
+      return null;
+  }
+}
 
 export type CodespaceOperationState =
   | "reserved"

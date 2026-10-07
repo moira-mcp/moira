@@ -145,7 +145,7 @@ test.describe("Codespace auto-pause preference", () => {
   }) => {
     await loginAsAdmin(page);
     await openSettings(page, "?lang=en#integrations-github");
-    await page.getByRole("tab", { name: "Environments", exact: true }).click();
+    await page.getByRole("tab", { name: "GitHub Codespaces", exact: true }).click();
     const card = page.getByTestId("codespace-auto-pause");
     await card.scrollIntoViewIfNeeded();
     await expect(card).toContainText("Only agent activity through Moira counts");

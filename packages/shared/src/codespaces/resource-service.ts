@@ -18,6 +18,7 @@ import {
   type CodespaceRepositoryTarget,
 } from "./resource-types.js";
 import { CodespaceConnectionError } from "./types.js";
+import { CODESPACE_PROVIDER_LOCAL } from "./local-device-types.js";
 
 export interface CodespaceCredentialResolver {
   getCredential(userId: string, providerId: string): Promise<string>;
@@ -116,6 +117,8 @@ function observedStateFor(state: CodespaceProviderState): CodespaceResourceRecor
       return "deleting";
     case "failed":
       return "failed";
+    case "created":
+      return "created";
     case "provisioning":
     case "starting":
       return "provisioning";
@@ -265,6 +268,7 @@ function lifecycleAuditAction(record: CodespaceResourceRecord): "start" | "stop"
 function smallestPermittedMachine(
   machines: CodespaceMachine[],
   policy: CodespaceResourcePolicy,
+  provider: string,
 ): CodespaceMachine | null {
   return (
     machines
@@ -272,11 +276,11 @@ function smallestPermittedMachine(
         (machine) =>
           machine.operatingSystem.toLowerCase() === "linux" &&
           machine.cpuCores > 0 &&
-          machine.cpuCores <= policy.maxCpuCores &&
+          (provider === CODESPACE_PROVIDER_LOCAL || machine.cpuCores <= policy.maxCpuCores) &&
           machine.memoryBytes > 0 &&
-          machine.memoryBytes <= policy.maxMemoryBytes &&
+          (provider === CODESPACE_PROVIDER_LOCAL || machine.memoryBytes <= policy.maxMemoryBytes) &&
           machine.storageBytes > 0 &&
-          machine.storageBytes <= policy.maxStorageBytes,
+          (provider === CODESPACE_PROVIDER_LOCAL || machine.storageBytes <= policy.maxStorageBytes),
       )
       .sort(
         (left, right) =>
@@ -319,9 +323,10 @@ function resourceMatches(
     machine.cpuCores === expected.machine.cpuCores &&
     machine.memoryBytes === expected.machine.memoryBytes &&
     machine.storageBytes === expected.machine.storageBytes &&
-    machine.cpuCores <= policy.maxCpuCores &&
-    machine.memoryBytes <= policy.maxMemoryBytes &&
-    machine.storageBytes <= policy.maxStorageBytes
+    (expected.provider === CODESPACE_PROVIDER_LOCAL ||
+      (machine.cpuCores <= policy.maxCpuCores &&
+        machine.memoryBytes <= policy.maxMemoryBytes &&
+        machine.storageBytes <= policy.maxStorageBytes))
   );
 }
 
@@ -546,6 +551,7 @@ export class CodespaceResourceService {
               repositoryFullName: exact.repositoryFullName,
               observedRef: exact.ref,
               lastUsedAt: exact.lastUsedAt,
+              state: observedStateFor(exact.state),
             },
             this.now(),
           );
@@ -648,6 +654,7 @@ export class CodespaceResourceService {
         .listMachines(credential, approved.repository, requestedRef)
         .catch(providerFailure),
       policy,
+      provider.id,
     );
     if (!machine) {
       throw new CodespaceResourceError(
@@ -801,7 +808,20 @@ export class CodespaceResourceService {
       this.requiresPersonalBilling(),
     );
     let usable = valid && actual.state === "available";
-    if (valid && isTransitional(actual.state)) {
+    if (valid) {
+      this.dependencies.repository.recordProviderObservation(
+        record.id,
+        record.generation,
+        {
+          repositoryFullName: actual.repositoryFullName,
+          observedRef: actual.ref,
+          lastUsedAt: actual.lastUsedAt,
+          state: observedStateFor(actual.state),
+        },
+        this.now(),
+      );
+    }
+    if (valid && (isTransitional(actual.state) || actual.state === "created")) {
       this.dependencies.repository.bindSubmittedResource({
         resourceId: record.id,
         expectedGeneration: record.generation,
@@ -809,12 +829,16 @@ export class CodespaceResourceService {
         ownerId: actual.ownerId,
         billableOwnerId: actual.billableOwnerId,
         observedRef: actual.ref,
-        outcome: "provisioning",
+        outcome: actual.state === "created" ? "provider_created" : "provisioning",
         claimId,
         now: this.now(),
       });
       const pending = this.dependencies.repository.getOwned(record.userId, record.id)!;
-      await this.emit("create_pending", pending, "provisioning");
+      await this.emit(
+        "create_pending",
+        pending,
+        actual.state === "created" ? "provider_created" : "provisioning",
+      );
       return { resource: pending, lifecycleCapability: capability };
     }
     let probeReason: string | undefined;
@@ -1185,8 +1209,9 @@ export class CodespaceResourceService {
       let failure: string | null = null;
       try {
         await this.applyPersistentLifecycle(record);
-      } catch {
-        failure = "lifecycle_reconcile_required";
+      } catch (error) {
+        failure =
+          error instanceof CodespaceResourceError ? error.code : "lifecycle_reconcile_required";
       }
       // A pass that left the record in the same pending generation did not converge it, whether
       // the provider refused or is still moving the codespace. Either way it waits its backoff
@@ -1210,8 +1235,12 @@ export class CodespaceResourceService {
       } else {
         this.deferReconcile(record, claimId, "manual_ambiguous_cleanup_required");
       }
-    } catch {
-      this.deferReconcile(record, claimId, "reconcile_retry_required");
+    } catch (error) {
+      this.deferReconcile(
+        record,
+        claimId,
+        error instanceof CodespaceResourceError ? error.code : "reconcile_retry_required",
+      );
     }
     this.deferIfUnconverged(record, claimId);
     return true;
@@ -1241,7 +1270,19 @@ export class CodespaceResourceService {
           .digest("hex")}`;
         await this.emit(action, record, outcome, detail, dedupeKey);
       }
-      providerFailure(error);
+      try {
+        providerFailure(error);
+      } catch (classified) {
+        if (classified instanceof CodespaceResourceError) {
+          this.dependencies.repository.recordLifecycleFailure(
+            record.id,
+            record.generation,
+            classified.code,
+            this.now(),
+          );
+        }
+        throw classified;
+      }
     }
   }
 
@@ -1398,6 +1439,7 @@ export class CodespaceResourceService {
         repositoryFullName: exact.repositoryFullName,
         observedRef: exact.ref,
         lastUsedAt: exact.lastUsedAt,
+        state: observedStateFor(exact.state),
       },
       this.now(),
     );
@@ -1440,7 +1482,8 @@ export class CodespaceResourceService {
     // provider's observation kept as `failed`, so the view does not claim a clean shutdown.
     if (
       record.desiredState === "stopped" &&
-      (observed.state === "shutdown" || observed.state === "failed")
+      (observed.state === "shutdown" ||
+        (record.provider !== CODESPACE_PROVIDER_LOCAL && observed.state === "failed"))
     ) {
       const failed = observed.state === "failed";
       this.dependencies.repository.completeLifecycle({
@@ -1623,6 +1666,7 @@ export class CodespaceResourceService {
           repositoryFullName: exact.repositoryFullName,
           observedRef: exact.ref,
           lastUsedAt: exact.lastUsedAt,
+          state: observedStateFor(exact.state),
         },
         this.now(),
       );
@@ -1826,6 +1870,7 @@ export class CodespaceResourceService {
           repositoryFullName: actual.repositoryFullName,
           observedRef: actual.ref,
           lastUsedAt: actual.lastUsedAt,
+          state: observedStateFor(actual.state),
         },
         this.now(),
       );

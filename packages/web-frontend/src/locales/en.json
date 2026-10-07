@@ -772,9 +772,10 @@
       "title": "Settings",
       "tabs": {
         "development": "Development",
-        "developmentDescription": "Manage development environments, GitHub access and your local computers.",
+        "developmentDescription": "Manage GitHub Codespaces, your local computers and their codespaces.",
         "access": "Apps & tokens",
         "environments": "Environments",
+        "cloudCodespaces": "GitHub Codespaces",
         "github": "GitHub connection",
         "local": "Local computers"
       },
@@ -830,7 +831,7 @@
         }
       },
       "codespaces": {
-        "title": "Cloud codespaces",
+        "title": "GitHub Codespaces",
         "description": "Persistent Codespaces created by Moira for approved repositories. Agents work in them through the MCP codespace tools by codespace ID; the same codespace can be reused from any connected client.",
         "loadFailed": "Failed to load cloud codespaces",
         "loadFailedDescription": "Your other settings are still available. Retry this request.",
@@ -841,7 +842,7 @@
         "requestFailed": "The codespace request was rejected",
         "created": "Codespace creation was accepted",
         "started": "Codespace start was requested",
-        "stopped": "Codespace stopped; repository data is preserved",
+        "stopped": "Codespace stop was requested; repository data is preserved",
         "deleted": "Codespace deletion was requested",
         "disclosureTitle": "Agents get full Codespace access",
         "disclosureDescription": "Inside a codespace the agent acts as the Codespace user: it can read the repository, use the network and read any secrets configured for that Codespace. Moira protects this server and other users, not the codespace from the agent you authorize.",
@@ -889,6 +890,7 @@
         },
         "observed": {
           "unknown": "unknown",
+          "created": "created, not running",
           "provisioning": "provisioning",
           "running": "running",
           "stopped": "stopped",
@@ -3704,7 +3706,7 @@
       "steps": {
         "nav": {
           "title": "Jump between sections",
-          "body": "Choose a task tab. Development separates environments, the GitHub connection and your local computers. Switching tabs keeps your unsaved changes."
+          "body": "Development separates GitHub Codespaces, the GitHub connection and local computers. Each local computer contains its own codespaces and settings. Switching tabs keeps your unsaved changes."
         },
         "account": {
           "title": "Your account",
@@ -3720,11 +3722,11 @@
         },
         "github": {
           "title": "Development environments",
-          "body": "Create and manage environments here. Choose GitHub or a local computer and repository; connection setup and local computer controls have their own tabs. Limits and automatic pausing are kept with the environments."
+          "body": "GitHub Codespaces are listed separately. Choose a repository and branch to create one; Stop keeps its files and Delete removes them. Refresh checks changes on GitHub. For local development, open Local computers and manage codespaces under the computer they belong to."
         },
         "local-devices": {
           "title": "Connect your computer",
-          "body": "Pair your computer once and enable local web control within its approved ceiling. Manage repositories, Git permissions, resources and a finite work lease here. Agent repository access is off by default: enable it for your verified connected personal GitHub account. Separately allow adding existing private repositories or creating new private repositories, then choose push rights and a maximum number of additions. Its fixed Node.js, React and Playwright network profile does not let agents choose other domains. Requests take effect only after the companion confirms them; pending or rejected requests do not replace applied permissions. Disabling agent access blocks new additions while preserving existing grants and files. Revoking the computer refuses further server work and preserves its files."
+          "body": "Connect your computer once. Its card lists only its own codespaces, with repository, branch, state, CPU and memory. Several codespaces may use the same repository. Create, start, stop or delete them here; Check state again retries the requested start, stop or deletion and checks its state. While creation is pending, it checks the existing request without creating another codespace. Computer settings control agent access and its expiry, CPU, memory and Docker storage defaults for new codespaces, and shared storage for all local codespaces on this computer. Separately allow adding existing private repositories, creating new ones and pushing commits in your connected personal GitHub account. Access may last up to seven days. Public services for different technologies are available; agents cannot change computer settings or access the private network. Settings take effect after the computer confirms them; pending or rejected changes keep the applied permissions. Disconnecting the computer blocks further agent work and preserves local files."
         },
         "apps": {
           "title": "Connected apps",
@@ -3754,7 +3756,7 @@
         },
         "codespaces": {
           "title": "Create a codespace",
-          "body": "Choose GitHub Codespaces in Provider, then pick a repository and branch to create a personally billed codespace. Agents find it by ID. Stop keeps its files; Delete removes them. Refresh checks GitHub for changes made outside Moira."
+          "body": "Open the GitHub Codespaces tab and pick a repository and branch to create a personally billed codespace. Agents find it by ID. Stop keeps its files; Delete removes them. Refresh checks GitHub for changes made outside Moira. Local codespaces are listed under their computer in Local computers."
         },
         "limits": {
           "title": "Know your limits",

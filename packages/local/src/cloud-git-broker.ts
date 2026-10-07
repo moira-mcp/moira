@@ -46,12 +46,11 @@ export function cloudGitBroker(
     }
     const reservation = await budget.reserve(grant.policy, grant.admission);
     if (response.destroyed) {
-      await reservation.release(0).catch(onFault);
+      await reservation.release().catch(onFault);
       return;
     }
-    let used = 0;
     let releasing: Promise<void> | undefined;
-    const release = () => (releasing ??= reservation.release(used).catch(onFault));
+    const release = () => (releasing ??= reservation.release().catch(onFault));
     response.once("close", release);
     try {
       if ((action === "push" || action === "refs-push") && !grant.repository.allowPush) {
@@ -97,21 +96,13 @@ export function cloudGitBroker(
             "cache-control": "no-store",
             connection: "close",
           });
-          reply.on("data", count);
           reply.once("error", () => response.destroy());
           reply.pipe(response);
         },
       );
-      const count = (chunk: Buffer) => {
-        used += chunk.length;
-        if (used > reservation.maximumBytes) {
-          upstream.destroy();
-          response.destroy();
-        }
-      };
       const lifetime = setTimeout(
         () => upstream.destroy(),
-        Math.max(1, Math.min(120000, grant.policy.leaseUntil - Date.now())),
+        Math.max(1, grant.policy.leaseUntil - Date.now()),
       );
       let checking = false;
       const recheck = setInterval(() => {
@@ -138,7 +129,6 @@ export function cloudGitBroker(
         if (!response.headersSent) response.writeHead(502, { connection: "close" });
         response.end();
       });
-      request.on("data", count);
       request.once("aborted", () => upstream.destroy());
       response.once("close", () => upstream.destroy());
       request.pipe(upstream);

@@ -110,6 +110,8 @@ function codespace(overrides: Partial<CodespaceSummaryView> = {}): CodespaceSumm
     generation: 3,
     created_at: Date.now() - 3_600_000,
     updated_at: Date.now() - 60_000,
+    observed_at: Date.now() - 60_000,
+    lifecycle_error: null,
     ...overrides,
   };
 }

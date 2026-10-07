@@ -252,8 +252,8 @@
     "fingerprint": "88d8988f"
   },
   "settings.nav": {
-    "revision": 2,
-    "fingerprint": "b96e8127"
+    "revision": 3,
+    "fingerprint": "7b136267"
   },
   "settings.account": {
     "revision": 1,
@@ -268,12 +268,12 @@
     "fingerprint": "f05ef91a"
   },
   "settings.github": {
-    "revision": 2,
-    "fingerprint": "a7eb5c7a"
+    "revision": 3,
+    "fingerprint": "ec54a42a"
   },
   "settings.local-devices": {
-    "revision": 4,
-    "fingerprint": "f23ec1f5"
+    "revision": 7,
+    "fingerprint": "29b86ad4"
   },
   "settings.apps": {
     "revision": 1,
@@ -296,8 +296,8 @@
     "fingerprint": "52012de3"
   },
   "settings-github.codespaces": {
-    "revision": 3,
-    "fingerprint": "9314a92d"
+    "revision": 4,
+    "fingerprint": "ebc2bb3f"
   },
   "settings-github.limits": {
     "revision": 2,

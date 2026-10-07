@@ -25,21 +25,12 @@ const rawPolicy = {
     memoryBytes: 2 * GiB,
     dockerBytes: 4 * GiB,
   },
-  limits: {
-    maxSandboxes: 2,
-    maxOperationMs: 300_000,
-    maxOutputBytes: 1024 * 1024,
-    maxConcurrent: 4,
-    maxNetworkBytes: GiB,
-    maxNetworkConnections: 4,
-  },
   repositories: [
     {
       id: repositoryId,
       fullName: "owner/project",
       private: true,
       allowPush: false,
-      domains: ["registry.npmjs.org"],
     },
   ],
 };
@@ -139,22 +130,32 @@ describe("public destination resolution", () => {
   );
   test("pins a public answer but rejects mixed private answers and the host's own public subnet", async () => {
     const lookup = async () => [{ address: "140.82.112.3", family: 4 as const }];
-    expect(
-      await resolvePublicTarget("github.com", ["github.com"], lookup, () => new BlockList()),
-    ).toEqual({ address: "140.82.112.3", family: 4 });
+    expect(await resolvePublicTarget("github.com", lookup, () => new BlockList())).toEqual({
+      address: "140.82.112.3",
+      family: 4,
+    });
     await expect(
-      resolvePublicTarget("github.com", ["github.com"], async () => [
+      resolvePublicTarget("github.com", async () => [
         ...(await lookup()),
         { address: "127.0.0.1", family: 4 },
       ]),
     ).rejects.toThrow("unsafe address");
     const local = new BlockList();
     local.addSubnet("140.82.112.0", 24, "ipv4");
-    await expect(
-      resolvePublicTarget("github.com", ["github.com"], lookup, () => local),
-    ).rejects.toThrow("unsafe address");
-    await expect(
-      resolvePublicTarget("github.com.attacker.example", ["github.com"], lookup),
-    ).rejects.toThrow("not locally approved");
+    await expect(resolvePublicTarget("github.com", lookup, () => local)).rejects.toThrow(
+      "unsafe address",
+    );
+    for (const host of [
+      "pypi.org",
+      "crates.io",
+      "repo.maven.apache.org",
+      "github.com.attacker.example",
+    ]) {
+      expect(await resolvePublicTarget(host, lookup, () => new BlockList())).toEqual({
+        address: "140.82.112.3",
+        family: 4,
+      });
+    }
+    await expect(resolvePublicTarget("localhost", lookup)).rejects.toThrow("public DNS name");
   });
 });

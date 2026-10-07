@@ -25,7 +25,7 @@ export interface RuntimeCoverage {
   runtimeId: string;
   name: string;
   containerId: string;
-  state: "running" | "stopped";
+  state: "running" | "stopped" | "created";
   generation?: number;
   expectedStopGeneration?: number;
 }
@@ -187,7 +187,10 @@ export class DeviceRuntimeControl {
             "LOCAL_CONTROL_WORKER_UNVERIFIED",
             "A captured worker has no exact SDK container binding.",
           );
-        if (row.state === "stopped") {
+        if (
+          row.state === "stopped" ||
+          (row.state === "created" && row.expectedStopGeneration !== undefined)
+        ) {
           if (
             !binding ||
             binding.generation === undefined ||
@@ -220,7 +223,13 @@ export class DeviceRuntimeControl {
           binding.generation = row.generation;
       }
       const running = rows.filter((row) => row.state === "running");
-      if (running.length !== active.size || running.some((row) => !active.has(row.containerId)))
+      // A created container may still have a held VM worker. Keep that exact incarnation
+      // covered until a newer durable stop intent retires it; never count it as stopped.
+      const actionable = rows.filter((row) => row.state === "running" || row.state === "created");
+      if (
+        running.some((row) => !active.has(row.containerId)) ||
+        [...active].some((id) => !actionable.some((row) => row.containerId === id))
+      )
         throw new LocalRefusal(
           "LOCAL_CONTROL_WORKER_UNVERIFIED",
           "Running SDK containers do not match the held worker incarnations.",
