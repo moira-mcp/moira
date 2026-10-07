@@ -10,6 +10,10 @@ import { DeviceRuntimeControl } from "./runtime-control.js";
 import { RuntimeDeviceOwner } from "./runtime-device-owner.js";
 import type { LocalVmObservation } from "./local-vm-runtime.js";
 import { LocalRefusal, MAX_MESSAGE_BYTES, localPolicySchema, type LocalPolicy } from "./policy.js";
+import {
+  localManagementOutcomeSchema,
+  type LocalManagementOutcome,
+} from "../../shared/src/codespaces/local-protocol.js";
 
 const receiptSchema = z
   .object({
@@ -276,7 +280,7 @@ export interface SpaceGuard {
 export interface DeviceGuard {
   readonly active: boolean;
   space(id: string, activate?: boolean): Promise<SpaceGuard>;
-  observe(): Promise<LocalVmObservation[]>;
+  observe(spaceId?: string): Promise<LocalVmObservation[]>;
   retire(id: string, generation: number): Promise<void>;
   remove(id: string, generation: number, localApproval: boolean): Promise<void>;
   recover?(id: string, generation: number): Promise<number>;
@@ -286,7 +290,13 @@ export type StartGuard = (root: string) => Promise<DeviceGuard>;
 const scope = { id: z.number().int().positive(), spaceId: z.string().uuid() };
 const admittedScope = { ...scope, generation: z.number().int().positive() };
 const callSchema = z.discriminatedUnion("action", [
-  z.object({ id: z.number().int().positive(), action: z.literal("observe") }).strict(),
+  z
+    .object({
+      id: z.number().int().positive(),
+      action: z.literal("observe"),
+      spaceId: z.string().uuid().optional(),
+    })
+    .strict(),
   z.object({ ...scope, action: z.literal("admit") }).strict(),
   z.object({ ...scope, action: z.literal("start-space") }).strict(),
   z.object({ ...admittedScope, action: z.literal("prepare") }).strict(),
@@ -330,7 +340,7 @@ export const startGuard: StartGuard = (root) =>
       reject(unavailable());
     }, 45_000);
     const fail = () => {
-      for (const call of pending.values()) call.reject(unavailable());
+      for (const call of pending.values()) call.reject(startupError ?? unavailable());
       pending.clear();
     };
     child.once("error", () => {
@@ -370,7 +380,7 @@ export const startGuard: StartGuard = (root) =>
         pending.set(id, { resolve: done, reject: failed });
         const message =
           action === "observe"
-            ? { id, action }
+            ? { id, action, ...(spaceId ? { spaceId } : {}) }
             : action === "remove-space"
               ? { id, action, spaceId, generation, localApproval: value }
               : action === "operation"
@@ -409,7 +419,7 @@ export const startGuard: StartGuard = (root) =>
       return shutdown;
     };
     child.on("message", (value: unknown) => {
-      if (!ready) {
+      {
         const failed = z
           .object({
             localError: z
@@ -426,6 +436,7 @@ export const startGuard: StartGuard = (root) =>
             failed.data.localError.code,
             failed.data.localError.message,
           );
+          if (ready) fail();
           return;
         }
       }
@@ -437,7 +448,7 @@ export const startGuard: StartGuard = (root) =>
             return !closed && !shutdown && child.connected;
           },
           stop,
-          observe: async () => (await request(undefined, "observe")) as LocalVmObservation[],
+          observe: async (spaceId) => (await request(spaceId, "observe")) as LocalVmObservation[],
           retire: async (id, generation) => {
             await request(id, "retire-space", undefined, generation);
           },
@@ -515,6 +526,7 @@ export const startGuard: StartGuard = (root) =>
         result?: unknown;
         code?: string;
         message?: string;
+        management?: LocalManagementOutcome;
       };
       const call = pending.get(response.id);
       if (!call) return;
@@ -525,6 +537,9 @@ export const startGuard: StartGuard = (root) =>
           new LocalRefusal(
             response.code ?? "LOCAL_GUARD_REFUSED",
             response.message ?? "The device owner refused work.",
+            response.management
+              ? localManagementOutcomeSchema.parse(response.management)
+              : undefined,
           ),
         );
     });
@@ -648,7 +663,7 @@ async function runGuard(root: string, action: "work" | "doctor" | "setup" = "wor
   let stopping: Promise<void> | undefined;
   let poll: ReturnType<typeof setTimeout> | undefined;
   let leaseTimer: ReturnType<typeof setTimeout> | undefined;
-  let admissionTail: Promise<unknown> = Promise.resolve();
+  const admissionTails = new Map<string, Promise<unknown>>();
   const shutdown = (): Promise<void> => {
     if (poll) clearTimeout(poll);
     if (leaseTimer) clearTimeout(leaseTimer);
@@ -667,7 +682,9 @@ async function runGuard(root: string, action: "work" | "doctor" | "setup" = "wor
     })();
     return stopping;
   };
-  const emergency = () => {
+  const emergency = (error?: unknown) => {
+    if (error instanceof LocalRefusal && process.connected)
+      process.send?.({ localError: { code: error.code, message: error.message } });
     void shutdown().then(
       () => process.exit(0),
       () => process.exit(1),
@@ -691,6 +708,9 @@ async function runGuard(root: string, action: "work" | "doctor" | "setup" = "wor
               error instanceof LocalRefusal
                 ? error.message
                 : "The locally owned operation was refused.",
+            ...(error instanceof LocalRefusal && error.management
+              ? { management: error.management }
+              : {}),
           }
         : { id, ok: true, result },
       () => {
@@ -698,6 +718,15 @@ async function runGuard(root: string, action: "work" | "doctor" | "setup" = "wor
       },
     );
   };
+  // Only loss of shared device custody/authority retires independent spaces together.
+  // SDK identity and repository admission failures belong to their addressed owner.
+  const deviceFailure = (error: unknown, sharedObservation = false): boolean =>
+    error instanceof LocalRefusal &&
+    (/^(LOCAL_KEYCHAIN_|LOCAL_CONTROL_|LOCAL_DAEMON_|LOCAL_STATE_|LOCAL_(?:RUNTIME_(?:UNSAFE|CHANGED|VERSION|UNAVAILABLE)|BINARY_UNSAFE|DOCKER_LOGIN_REQUIRED)$)/.test(
+      error.code,
+    ) ||
+      (sharedObservation &&
+        /^LOCAL_(?:SANDBOX_UNSAFE|NETWORK_(?:UNSAFE|CHANGED))$/.test(error.code)));
   process.on("message", (value: unknown) => {
     if (value === "stop") {
       emergency();
@@ -716,7 +745,7 @@ async function runGuard(root: string, action: "work" | "doctor" | "setup" = "wor
     }
     const call = parsed.data;
     void (async () => {
-      if (call.action === "observe") return control.observe();
+      if (call.action === "observe") return control.observe(call.spaceId);
       if (
         call.action === "retire-space" ||
         call.action === "remove-space" ||
@@ -727,7 +756,7 @@ async function runGuard(root: string, action: "work" | "doctor" | "setup" = "wor
           owner = new RuntimeOwner(
             records,
             call.spaceId,
-            () => control.protect(),
+            (closure) => control.protect(call.spaceId, closure),
             () => control.prepareCredentials(),
           );
           owners.set(call.spaceId, owner);
@@ -746,28 +775,43 @@ async function runGuard(root: string, action: "work" | "doctor" | "setup" = "wor
         return;
       }
       if (call.action === "admit" || call.action === "start-space") {
-        const admitted = admissionTail.then(async () => {
-          if (stopping)
-            throw new LocalRefusal("LOCAL_NOT_RUNNING", "The device owner is stopping.");
-          let owner = owners.get(call.spaceId);
-          if (!owner?.active) {
-            await owner?.stop();
+        const admitted = (admissionTails.get(call.spaceId) ?? Promise.resolve())
+          .catch(() => undefined)
+          .then(async () => {
+            if (stopping)
+              throw new LocalRefusal("LOCAL_NOT_RUNNING", "The device owner is stopping.");
+            let owner = owners.get(call.spaceId);
+            if (!owner?.active) {
+              await owner?.stop();
+              if (stopping)
+                throw new LocalRefusal("LOCAL_NOT_RUNNING", "The device admission was revoked.");
+              owner = new RuntimeOwner(
+                records,
+                call.spaceId,
+                (closure) => control.protect(call.spaceId, closure),
+                () => control.prepareCredentials(),
+              );
+              owners.set(call.spaceId, owner);
+              try {
+                await owner.admit(call.action === "start-space");
+              } catch (error) {
+                // Failed initialization has no guest work to retire. Do not cache its rejected
+                // admission forever, nor mutate its generation just to discard that promise.
+                if (owners.get(call.spaceId) === owner) owners.delete(call.spaceId);
+                throw error;
+              }
+            }
+            await owner.admit();
             if (stopping)
               throw new LocalRefusal("LOCAL_NOT_RUNNING", "The device admission was revoked.");
-            owner = new RuntimeOwner(
-              records,
-              call.spaceId,
-              () => control.protect(),
-              () => control.prepareCredentials(),
-            );
-            owners.set(call.spaceId, owner);
-            await owner.admit(call.action === "start-space");
-          }
-          if (stopping)
-            throw new LocalRefusal("LOCAL_NOT_RUNNING", "The device admission was revoked.");
-          return owner.generation;
-        });
-        admissionTail = admitted.catch(() => undefined);
+            return owner.generation;
+          });
+        admissionTails.set(call.spaceId, admitted);
+        void admitted
+          .finally(() => {
+            if (admissionTails.get(call.spaceId) === admitted) admissionTails.delete(call.spaceId);
+          })
+          .catch(() => undefined);
         return admitted;
       }
       const owner = owners.get(call.spaceId);
@@ -787,13 +831,11 @@ async function runGuard(root: string, action: "work" | "doctor" | "setup" = "wor
       if (call.action === "prepare" || call.action === "operation") {
         try {
           return call.action === "prepare"
-            ? await owner.prepare()
+            ? await control.prepareSpace(call.spaceId, call.generation, () => owner.prepare())
             : await owner.operation(call.request);
         } catch (error) {
           if (error instanceof LocalRefusal && error.code === "LOCAL_GUEST_SETTLEMENT_UNKNOWN")
             process.send?.({ retired: call.spaceId });
-          else if (error instanceof LocalRefusal && error.code === "LOCAL_STOP_PENDING")
-            await shutdown();
           throw error;
         }
       }
@@ -801,24 +843,16 @@ async function runGuard(root: string, action: "work" | "doctor" | "setup" = "wor
       try {
         await owner.stop();
       } catch (error) {
-        await shutdown();
+        if (deviceFailure(error)) await shutdown();
         throw error;
       }
       process.send?.({ retired: call.spaceId });
-      if (owner.unknownIdentity) {
-        await shutdown();
-      }
     })().then(
       (result) => {
         reply(call.id, result, undefined, Boolean(stopping));
       },
       (error) => {
-        if (
-          error instanceof LocalRefusal &&
-          /^(LOCAL_KEYCHAIN_|LOCAL_CONTROL_|LOCAL_DAEMON_|LOCAL_STATE_|LOCAL_(?:RUNTIME_(?:UNSAFE|CHANGED|VERSION|UNAVAILABLE)|SANDBOX_UNSAFE|NETWORK_(?:UNSAFE|CHANGED)|IDENTITY_CHANGED|BINARY_UNSAFE|DOCKER_LOGIN_REQUIRED)$)/.test(
-            error.code,
-          )
-        ) {
+        if (deviceFailure(error, call.action === "observe")) {
           void shutdown().then(
             () => reply(call.id, undefined, error, true),
             (failure) => reply(call.id, undefined, failure),
@@ -828,29 +862,24 @@ async function runGuard(root: string, action: "work" | "doctor" | "setup" = "wor
     );
   });
   // Recovered running records are observed by the same owner; unknown pending creation is not adopted.
-  let refused = false;
   for (const space of await records.list()) {
     if (space.desiredState !== "running") continue;
+    // Pending manifests are retained for addressed management, not re-admitted as SDK create.
+    // Their unknown VM identity is not a revocation of independent, initialized peers.
+    if (!space.runtimeId) continue;
     const owner = new RuntimeOwner(
       records,
       space.id,
-      () => control.protect(),
+      (closure) => control.protect(space.id, closure),
       () => control.prepareCredentials(),
     );
     owners.set(space.id, owner);
-    try {
-      await owner.admit();
-    } catch {
-      refused = true;
-    }
-    if (!space.runtimeId) refused = true;
-  }
-  if (refused) {
-    await shutdown();
-    throw new LocalRefusal(
-      "LOCAL_CREATE_UNKNOWN",
-      "Previous local work could not be safely recovered.",
-    );
+    void owner.admit().catch((error: unknown) => {
+      if (owners.get(space.id) === owner) owners.delete(space.id);
+      if (deviceFailure(error)) {
+        emergency(error);
+      }
+    });
   }
   const check = async () => {
     try {
@@ -871,13 +900,32 @@ async function runGuard(root: string, action: "work" | "doctor" | "setup" = "wor
         if (owner.active) {
           try {
             await owner.check();
-          } catch {
-            await owner.stop();
-            process.send?.({ retired: owner.id });
-            if (owner.unknownIdentity) {
-              emergency();
+          } catch (error) {
+            if (owners.get(owner.id) !== owner) continue;
+            if (deviceFailure(error)) {
+              emergency(error);
               return;
             }
+            // Rejected admission has no guest effects. Metadata refusal must not become
+            // a native stop intent merely because the checker observed its promise.
+            if (
+              !owner.admitted ||
+              (error instanceof LocalRefusal && error.code === "LOCAL_OBSERVATION_UNKNOWN")
+            ) {
+              owners.delete(owner.id);
+              continue;
+            }
+            try {
+              await owner.stop();
+            } catch (failure) {
+              if (deviceFailure(failure)) {
+                emergency(failure);
+                return;
+              }
+              // Own physical settlement remains unknown; custody is retained independently.
+              // A later addressed management request can retry this exact stopped owner.
+            }
+            process.send?.({ retired: owner.id });
           }
         }
       if (!stopping)
@@ -887,11 +935,11 @@ async function runGuard(root: string, action: "work" | "doctor" | "setup" = "wor
           },
           Math.max(1, Math.min(1000, policy.leaseUntil - Date.now())),
         );
-    } catch {
-      emergency();
+    } catch (error) {
+      emergency(error);
     }
   };
-  await check();
+  void check();
   if (!stopping && process.connected) process.send?.("ready");
 }
 if (

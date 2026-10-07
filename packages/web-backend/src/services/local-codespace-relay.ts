@@ -5,6 +5,8 @@ import {
   CodespaceResourceError,
   LocalDeviceError,
   canonicalJson,
+  localManagementOutcomeSchema,
+  LOCAL_REQUEST_MAX_WINDOW_MS,
   type CodespaceResourceRecord,
   type CodespaceTransferService,
   type LocalDeviceService,
@@ -20,6 +22,7 @@ const replySchema = z.discriminatedUnion("ok", [
         .object({
           code: z.string().regex(/^LOCAL_[A-Z0-9_]{1,80}$/),
           message: z.string().max(500),
+          management: localManagementOutcomeSchema.optional(),
         })
         .strict(),
     })
@@ -42,14 +45,28 @@ function mutationId(resource: CodespaceResourceRecord, request: Record<string, u
 
 function refuseLocalReply(code: string): never {
   throw new CodespaceResourceError(
-    /(?:LEASE|CAPACITY|LIMIT|TOO_LARGE)/.test(code)
-      ? "CODESPACE_POLICY_LIMIT"
-      : /(?:IDENTITY|GENERATION|REPLAY|SETTLEMENT)/.test(code)
-        ? "CODESPACE_GENERATION_CONFLICT"
-        : /(?:NOT_RUNNING)/.test(code)
-          ? "CODESPACE_NOT_RUNNING"
-          : "CODESPACE_RESOURCE_INVALID",
+    code === "LOCAL_DELETE_APPROVAL_REQUIRED"
+      ? "CODESPACE_LOCAL_DELETE_APPROVAL_REQUIRED"
+      : code === "LOCAL_SETUP_INCOMPLETE"
+        ? "CODESPACE_LOCAL_SETUP_INCOMPLETE"
+        : code === "LOCAL_CREATE_UNKNOWN"
+          ? "CODESPACE_LOCAL_CREATION_UNKNOWN"
+          : code === "LOCAL_REQUEST_INVALID" || code === "LOCAL_PAYLOAD_CHANGED"
+            ? "CODESPACE_LOCAL_PROTOCOL_ERROR"
+            : code === "LOCAL_UNAUTHORIZED" || code === "LOCAL_REPOSITORY_DENIED"
+              ? "CODESPACE_AUTHORIZATION_REQUIRED"
+              : code === "LOCAL_SANDBOX_ABSENT"
+                ? "CODESPACE_NOT_FOUND"
+                : /(?:LEASE|CAPACITY|LIMIT|TOO_LARGE)/.test(code)
+                  ? "CODESPACE_POLICY_LIMIT"
+                  : /(?:IDENTITY|GENERATION|REPLAY|SETTLEMENT)/.test(code)
+                    ? "CODESPACE_GENERATION_CONFLICT"
+                    : /(?:NOT_RUNNING)/.test(code)
+                      ? "CODESPACE_NOT_RUNNING"
+                      : "CODESPACE_LOCAL_RUNTIME_ERROR",
     `Local companion refused the request (${code})`,
+    undefined,
+    !/(?:UNKNOWN|SETTLEMENT)/.test(code),
   );
 }
 
@@ -121,7 +138,7 @@ export class LocalCodespaceRelay {
     if (!reply.ok) refuseLocalReply(reply.error.code);
     if (result.status !== "completed") {
       throw new CodespaceResourceError(
-        "CODESPACE_RESOURCE_INVALID",
+        "CODESPACE_LOCAL_PROTOCOL_ERROR",
         "Local outcome status disagrees",
       );
     }
@@ -171,7 +188,15 @@ export class LocalCodespaceRelay {
       const requestId = options.mutation ? mutationId(resource, request) : randomUUID();
       const previous = this.devices.getRequest(resource.userId, requestId);
       const deadlineAt =
-        previous?.deadlineAt ?? Math.min(this.now() + 5 * 60_000, device.policy.leaseUntil);
+        previous?.deadlineAt ??
+        Math.min(
+          this.now() +
+            (request.action === "create"
+              ? LOCAL_REQUEST_MAX_WINDOW_MS
+              : Math.min(options.waitMs ?? 120_000, LOCAL_REQUEST_MAX_WINDOW_MS)),
+          request.action === "create" ? resource.createDeadlineAt : Number.MAX_SAFE_INTEGER,
+          device.policy.leaseUntil,
+        );
       const bytes = Buffer.from(
         canonicalJson({ version: 1, id: requestId, expiresAt: deadlineAt, request }),
       );
@@ -305,6 +330,11 @@ export class LocalCodespaceRelay {
   }
 
   private failure(error: unknown): never {
+    if (error instanceof z.ZodError || error instanceof SyntaxError)
+      throw new CodespaceResourceError(
+        "CODESPACE_LOCAL_PROTOCOL_ERROR",
+        "The local computer returned an invalid protocol response; update the companion and server together",
+      );
     if (error instanceof LocalDeviceError) {
       throw new CodespaceResourceError(
         error.code === "LOCAL_UNAUTHORIZED"

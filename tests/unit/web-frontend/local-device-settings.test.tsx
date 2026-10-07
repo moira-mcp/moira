@@ -5,6 +5,7 @@ import { beforeEach, afterEach, test, expect, jest } from "@jest/globals";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import "@testing-library/jest-dom/jest-globals";
 import { I18nextProvider } from "react-i18next";
+import { toast } from "sonner";
 import {
   MAX_LOCAL_WORK_LEASE_MS,
   type LocalDeviceView,
@@ -201,7 +202,7 @@ async function show({ openSettings = true } = {}) {
 function localCodespace(
   computerId: string,
   id: string,
-  state: "usable" | "stop_pending" = "usable",
+  state: CodespaceSummaryView["state"] = "usable",
 ): CodespaceSummaryView {
   return {
     codespace_id: id,
@@ -290,7 +291,7 @@ test("computers with equal labels contain only their codespaces and separate VM 
   ).toBeEnabled();
   const pending = within(secondComputer).getByTestId(`github-codespace-${second.codespace_id}`);
   expect(pending).toHaveTextContent("Stopping");
-  expect(within(pending).getAllByRole("button", { name: "Check state again" })).toHaveLength(2);
+  expect(within(pending).getAllByRole("button", { name: "Check state again" })).toHaveLength(1);
   const confirmed = {
     ...second,
     state: "stopped" as const,
@@ -361,6 +362,292 @@ test("computers with equal labels contain only their codespaces and separate VM 
   expect(
     within(secondComputer).queryByText("Could not load this computer's codespaces."),
   ).toBeNull();
+});
+
+test.each(["create_pending", "create_submitted", "stop_pending", "ambiguous", "rejected"] as const)(
+  "%s permits owner-confirmed deletion and keeps a concrete refusal in its dialog",
+  async (state) => {
+    devices = [{ ...device, status: "active" }];
+    const row = {
+      ...localCodespace(deviceId, "66666666-6666-4666-8666-666666666666", state),
+      desired_state: "running" as const,
+    };
+    const fixture = {
+      readiness: { state: "ready" },
+      connection: { state: "connected" },
+      repositories: [],
+      codespaces: [row],
+      limits: { codespaces: { held: 1, max_per_user: null } },
+    };
+    jest.mocked(apiClient.getGitHubCodespaces).mockResolvedValue(fixture as never);
+    const remove = jest
+      .spyOn(apiClient, "deleteGitHubCodespace")
+      .mockImplementationOnce(async () => {
+        // The domain records the delete intent before the companion refuses its permission.
+        jest.mocked(apiClient.getGitHubCodespaces).mockResolvedValue({
+          ...fixture,
+          codespaces: [
+            {
+              ...row,
+              generation: row.generation + 1,
+              state: "delete_pending",
+              desired_state: "deleted",
+            },
+          ],
+        } as never);
+        throw Object.assign(new Error("Delete permission refused"), {
+          code: "CODESPACE_LOCAL_DELETE_APPROVAL_REQUIRED",
+        });
+      });
+    const success = jest.spyOn(toast, "success");
+    await show({ openSettings: false });
+    const card = await screen.findByTestId(`github-codespace-${row.codespace_id}`);
+    const button = within(card).getByRole("button", { name: "Delete" });
+    expect(button).toBeEnabled();
+    fireEvent.click(button);
+    const dialog = screen.getByRole("alertdialog");
+    expect(remove).not.toHaveBeenCalled();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Delete" }));
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent(
+      "Deletion is not permitted for this repository",
+    );
+    expect(remove).toHaveBeenCalledWith(row.codespace_id, row.generation);
+    expect(card).toBeInTheDocument();
+    expect(success).not.toHaveBeenCalled();
+    remove.mockResolvedValueOnce({
+      ...row,
+      generation: row.generation + 1,
+      state: "delete_pending",
+      desired_state: "deleted",
+      lifecycle_error: null,
+    });
+    await waitFor(() =>
+      expect(within(dialog).getByRole("button", { name: "Delete" })).toBeEnabled(),
+    );
+    expect(remove).toHaveBeenCalledTimes(1);
+    fireEvent.click(within(dialog).getByRole("button", { name: "Delete" }));
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+    expect(card).toBeInTheDocument();
+    expect(success).not.toHaveBeenCalled();
+    expect(remove).toHaveBeenLastCalledWith(row.codespace_id, row.generation + 1);
+  },
+);
+
+test.each(["generation", "observation", "outcome"] as const)(
+  "a newer %s from list refresh retires the old request failure",
+  async (change) => {
+    devices = [{ ...device, status: "active" }];
+    const row = localCodespace(deviceId, "66666666-6666-4666-8666-666666666666");
+    const fixture = {
+      readiness: { state: "ready" },
+      connection: { state: "connected" },
+      repositories: [],
+      codespaces: [row],
+      limits: { codespaces: { held: 1, max_per_user: null } },
+    };
+    jest.mocked(apiClient.getGitHubCodespaces).mockResolvedValue(fixture as never);
+    jest
+      .spyOn(apiClient, "stopGitHubCodespace")
+      .mockRejectedValue({ code: "CODESPACE_LOCAL_RUNTIME_ERROR" });
+    await show({ openSettings: false });
+    const card = await screen.findByTestId(`github-codespace-${row.codespace_id}`);
+    fireEvent.click(within(card).getByRole("button", { name: "Stop" }));
+    expect(await within(card).findByRole("alert")).toHaveTextContent(
+      "VM runtime could not complete",
+    );
+    const next = {
+      ...row,
+      ...(change === "generation"
+        ? { generation: row.generation + 1 }
+        : change === "observation"
+          ? { observed_at: 3000 }
+          : {
+              updated_at: row.updated_at + 1,
+              state: "stopped",
+              observed_state: "stopped",
+              desired_state: "stopped",
+            }),
+    };
+    jest
+      .spyOn(apiClient, "refreshGitHubCodespaces")
+      .mockResolvedValue({ ...fixture, codespaces: [next] } as never);
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+    await waitFor(() => expect(within(card).queryByRole("alert")).toBeNull());
+    expect(within(card).queryByRole("button", { name: "Check state again" })).toBeNull();
+  },
+);
+
+test("failed delete generation refresh blocks confirmation until a read-only retry obtains the current target", async () => {
+  devices = [{ ...device, status: "active" }];
+  const row = localCodespace(deviceId, "66666666-6666-4666-8666-666666666666", "stop_pending");
+  const fixture = {
+    readiness: { state: "ready" },
+    connection: { state: "connected" },
+    repositories: [],
+    codespaces: [row],
+    limits: { codespaces: { held: 1, max_per_user: null } },
+  };
+  jest.mocked(apiClient.getGitHubCodespaces).mockResolvedValue(fixture as never);
+  const remove = jest.spyOn(apiClient, "deleteGitHubCodespace").mockImplementationOnce(async () => {
+    jest.mocked(apiClient.getGitHubCodespaces).mockRejectedValueOnce(new Error("Read unavailable"));
+    throw Object.assign(new Error("Delete target changed"), {
+      code: "CODESPACE_GENERATION_CONFLICT",
+    });
+  });
+  await show({ openSettings: false });
+  const card = await screen.findByTestId(`github-codespace-${row.codespace_id}`);
+  fireEvent.click(within(card).getByRole("button", { name: "Delete" }));
+  const dialog = screen.getByRole("alertdialog");
+  fireEvent.click(within(dialog).getByRole("button", { name: "Delete" }));
+  await within(dialog).findByRole("alert");
+  await waitFor(() => expect(within(dialog).getByRole("button", { name: "Cancel" })).toBeEnabled());
+  expect(within(dialog).getByRole("button", { name: "Delete" })).toBeDisabled();
+  jest.mocked(apiClient.getGitHubCodespaces).mockResolvedValue({
+    ...fixture,
+    codespaces: [{ ...row, generation: row.generation + 1 }],
+  } as never);
+  fireEvent.click(within(dialog).getByRole("button", { name: "Check state again" }));
+  await waitFor(() => expect(within(dialog).getByRole("button", { name: "Delete" })).toBeEnabled());
+  expect(remove).toHaveBeenCalledTimes(1);
+  remove.mockResolvedValueOnce({ ...row, generation: row.generation + 1, state: "deleted" });
+  fireEvent.click(within(dialog).getByRole("button", { name: "Delete" }));
+  await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+  expect(remove).toHaveBeenLastCalledWith(row.codespace_id, row.generation + 1);
+});
+
+test("a failed state check renders one concrete error and retry while keeping deletion available", async () => {
+  devices = [{ ...device, status: "active" }];
+  const row = {
+    ...localCodespace(deviceId, "66666666-6666-4666-8666-666666666666", "stop_pending"),
+    lifecycle_error: "CODESPACE_LOCAL_RUNTIME_ERROR" as const,
+  };
+  jest.mocked(apiClient.getGitHubCodespaces).mockResolvedValue({
+    readiness: { state: "ready" },
+    connection: { state: "connected" },
+    repositories: [],
+    codespaces: [row],
+    limits: { codespaces: { held: 1, max_per_user: null } },
+  } as never);
+  jest
+    .spyOn(apiClient, "stopGitHubCodespace")
+    .mockRejectedValue({ code: "CODESPACE_LOCAL_RUNTIME_ERROR" });
+  await show({ openSettings: false });
+  const card = await screen.findByTestId(`github-codespace-${row.codespace_id}`);
+  fireEvent.click(within(card).getByRole("button", { name: "Check state again" }));
+  await waitFor(() =>
+    expect(within(card).getByRole("button", { name: "Check state again" })).toBeEnabled(),
+  );
+  expect(within(card).getAllByRole("alert")).toHaveLength(1);
+  expect(within(card).getByRole("alert")).toHaveTextContent(
+    "VM runtime could not complete the operation",
+  );
+  expect(card).toHaveTextContent("Needs attention");
+  expect(card).not.toHaveTextContent("Check the repository and the branch");
+  expect(within(card).getAllByRole("button", { name: "Check state again" })).toHaveLength(1);
+  expect(within(card).getByRole("button", { name: "Delete" })).toBeEnabled();
+});
+
+test("incomplete preparation blocks Start while permitting confirmed deletion of the stopped codespace", async () => {
+  devices = [{ ...device, status: "active" }];
+  const row = {
+    ...localCodespace(deviceId, "66666666-6666-4666-8666-666666666666", "stopped"),
+    lifecycle_error: "CODESPACE_LOCAL_SETUP_INCOMPLETE" as const,
+  };
+  jest.mocked(apiClient.getGitHubCodespaces).mockResolvedValue({
+    readiness: { state: "ready" },
+    connection: { state: "connected" },
+    repositories: [],
+    codespaces: [row],
+    limits: { codespaces: { held: 1, max_per_user: null } },
+  } as never);
+  const start = jest.spyOn(apiClient, "startGitHubCodespace").mockResolvedValue(row);
+  const remove = jest
+    .spyOn(apiClient, "deleteGitHubCodespace")
+    .mockResolvedValue({ ...row, state: "deleted", lifecycle_error: null });
+  await show({ openSettings: false });
+  const card = await screen.findByTestId(`github-codespace-${row.codespace_id}`);
+  expect(within(card).getByRole("alert")).toHaveTextContent(
+    "Environment preparation did not finish",
+  );
+  const startButton = within(card).getByRole("button", { name: "Start" });
+  fireEvent.click(startButton);
+  expect(startButton).toBeDisabled();
+  expect(start).not.toHaveBeenCalled();
+  expect(within(card).getByRole("button", { name: "Delete" })).toBeEnabled();
+  fireEvent.click(within(card).getByRole("button", { name: "Delete" }));
+  const dialog = screen.getByRole("alertdialog");
+  expect(remove).not.toHaveBeenCalled();
+  fireEvent.click(within(dialog).getByRole("button", { name: "Delete" }));
+  await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+  expect(remove).toHaveBeenCalledWith(row.codespace_id, row.generation);
+});
+
+test.each(["running", "stopped"] as const)(
+  "checking incomplete preparation with desired %s refreshes observation without starting or stopping",
+  async (desired_state) => {
+    devices = [{ ...device, status: "active" }];
+    const row = {
+      ...localCodespace(deviceId, "66666666-6666-4666-8666-666666666666", "stopped"),
+      desired_state,
+      lifecycle_error: "CODESPACE_LOCAL_SETUP_INCOMPLETE" as const,
+    };
+    const fixture = {
+      readiness: { state: "ready" },
+      connection: { state: "connected" },
+      repositories: [],
+      codespaces: [row],
+      limits: { codespaces: { held: 1, max_per_user: null } },
+    };
+    jest.mocked(apiClient.getGitHubCodespaces).mockResolvedValue(fixture as never);
+    const start = jest.spyOn(apiClient, "startGitHubCodespace").mockResolvedValue(row);
+    const stop = jest.spyOn(apiClient, "stopGitHubCodespace").mockResolvedValue(row);
+    jest.spyOn(apiClient, "refreshGitHubCodespaces").mockResolvedValue({
+      ...fixture,
+      codespaces: [{ ...row, observed_at: 3000 }],
+    } as never);
+    await show({ openSettings: false });
+    const card = await screen.findByTestId(`github-codespace-${row.codespace_id}`);
+    fireEvent.click(within(card).getByRole("button", { name: "Check state again" }));
+    expect(await within(card).findByText(/^State confirmed/)).toHaveTextContent(
+      new Date(3000).toLocaleString("en"),
+    );
+    expect(start).not.toHaveBeenCalled();
+    expect(stop).not.toHaveBeenCalled();
+    expect(within(card).getByRole("button", { name: "Start" })).toBeDisabled();
+    expect(within(card).getByRole("button", { name: "Delete" })).toBeEnabled();
+    expect(within(card).getByRole("alert")).toHaveTextContent(
+      "Environment preparation did not finish",
+    );
+  },
+);
+
+test("create requires an explicit repository ref and pending creation is not announced as completed", async () => {
+  devices = [{ ...device, status: "active" }];
+  const row = localCodespace(deviceId, "66666666-6666-4666-8666-666666666666", "create_submitted");
+  const fixture = {
+    readiness: { state: "ready" },
+    connection: { state: "connected" },
+    repositories: [
+      { repository_id: row.repository_id, name: row.repository, provider: "local-sandboxes" },
+    ],
+    codespaces: [],
+    limits: { codespaces: { held: 0, max_per_user: null } },
+  };
+  jest.mocked(apiClient.getGitHubCodespaces).mockResolvedValue(fixture as never);
+  const create = jest.spyOn(apiClient, "createGitHubCodespace").mockResolvedValue(row);
+  const success = jest.spyOn(toast, "success");
+  await show({ openSettings: false });
+  const ref = await screen.findByTestId(`local-codespace-${deviceId}-ref`);
+  expect(ref).toHaveValue("");
+  const submit = screen.getByTestId(`local-codespace-${deviceId}-create-submit`);
+  expect(submit).toBeDisabled();
+  fireEvent.change(ref, { target: { value: "master" } });
+  fireEvent.click(submit);
+  await waitFor(() =>
+    expect(create).toHaveBeenCalledWith({ repository_id: row.repository_id, ref: "master" }),
+  );
+  await waitFor(() => expect(submit).toBeEnabled());
+  expect(success).not.toHaveBeenCalled();
 });
 
 test("pairing exposes a transient token separately from the token-free local command and retains it on failed refresh", async () => {

@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { z } from "zod";
 import { PrivateState } from "./private-state.js";
 import { LocalRefusal, MAX_MESSAGE_BYTES } from "./policy.js";
+import { LOCAL_REQUEST_MAX_WINDOW_MS } from "../../shared/src/codespaces/local-protocol.js";
 
 const receipt = z
   .object({
@@ -31,13 +32,18 @@ export class RequestJournal {
   }
 
   /** Inspect a retained admission without redispatching or accepting a completed request. */
-  async isAccepted(id: string, expiresAt: number, input: unknown): Promise<boolean> {
+  async isAccepted(
+    id: string,
+    expiresAt: number,
+    input: unknown,
+    includeComplete = false,
+  ): Promise<boolean> {
     const entries = (await this.state.read("requests.json", receipts.parse)) ?? [];
     const digest = createHash("sha256").update(JSON.stringify(input)).digest("hex");
     return entries.some(
       (entry) =>
         entry.id === id &&
-        entry.state === "accepted" &&
+        (entry.state === "accepted" || (includeComplete && entry.state === "complete")) &&
         entry.expiresAt === expiresAt &&
         expiresAt > this.now() &&
         entry.digest === digest,
@@ -58,7 +64,7 @@ export class RequestJournal {
     if (
       !Number.isSafeInteger(expiresAt) ||
       expiresAt <= this.now() ||
-      expiresAt > this.now() + 15 * 60_000
+      expiresAt > this.now() + LOCAL_REQUEST_MAX_WINDOW_MS
     ) {
       throw new LocalRefusal(
         "LOCAL_REQUEST_EXPIRED",

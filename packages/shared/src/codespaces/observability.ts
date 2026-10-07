@@ -25,6 +25,7 @@ import type { CodespaceTransferRepository } from "./transfer-repository.js";
 import { CODESPACE_IDLE_TIMEOUT_MINUTES } from "./resource-repository.js";
 import { effectiveCodespaceLimits } from "./resource-policy.js";
 import { CODESPACE_PROVIDER_LOCAL } from "./local-device-types.js";
+import { LOCAL_CODESPACE_FAILURE_GUIDANCE } from "./local-failure-guidance.js";
 import {
   projectCodespaceLimits,
   type CodespaceLimitsView,
@@ -90,7 +91,8 @@ const REJECTION_CODES: ReadonlySet<string> = new Set<
 
 /** Count a bounded pre-provider refusal. Unknown codes are ignored to keep labels closed. */
 export function recordCodespaceRejection(code: string): void {
-  if (REJECTION_CODES.has(code)) codespaceRejectionsTotal.inc({ code });
+  if (REJECTION_CODES.has(code) || Object.hasOwn(LOCAL_CODESPACE_FAILURE_GUIDANCE, code))
+    codespaceRejectionsTotal.inc({ code });
 }
 
 export interface CodespaceObservabilityDependencies {

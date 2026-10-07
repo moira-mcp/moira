@@ -151,6 +151,37 @@ const LIMITS = projectCodespaceLimits({
 });
 
 describe("website codespace management routes", () => {
+  test.each([
+    ["CODESPACE_LOCAL_CREATION_UNKNOWN", 409, "do not create a replacement"],
+    ["CODESPACE_LOCAL_PROTOCOL_ERROR", 409, "matching server and companion"],
+    ["CODESPACE_LOCAL_RUNTIME_ERROR", 503, "runtime diagnostics"],
+    ["CODESPACE_LOCAL_DELETE_APPROVAL_REQUIRED", 403, "Allow deletion"],
+  ] as const)(
+    "local diagnostic %s reaches the website with an actionable safe message",
+    async (code, status, instruction) => {
+      const base = services();
+      const dependencies = services({
+        resource: {
+          ...base.resource!,
+          stopCodespace: async () => {
+            throw new CodespaceResourceError(code, "private-host-path credential-not-for-user");
+          },
+        },
+      });
+      const response = await request(appWith(dependencies)).post(
+        `/api/integrations/github/codespaces/${CODESPACE_ID}/stop`,
+      );
+      expect(response.status).toBe(status);
+      expect(response.body.error.code).toBe(code);
+      expect(response.body.error.message).toContain(instruction);
+      expect(response.text).not.toContain("private-host-path");
+      expect(response.text).not.toContain("credential-not-for-user");
+      expect(response.text).not.toContain("data are preserved");
+      expect(response.text).not.toContain("data is preserved");
+      if (code !== "CODESPACE_LOCAL_DELETE_APPROVAL_REQUIRED")
+        expect(response.body.error.message).toContain("physical outcome is not confirmed");
+    },
+  );
   test.each(["create", "start", "stop", "delete"] as const)(
     "%s preserves the selected unconfigured provider response while another provider is available",
     async (action) => {

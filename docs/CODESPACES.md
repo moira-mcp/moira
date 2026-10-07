@@ -61,7 +61,8 @@ delete) over the same services. Administrators own the instance-wide kill switch
   readiness decision, projects the Prometheus gauges and counts audit events with
   closed labels.
 - `packages/web-backend/src/routes/codespace-management.ts` and
-  `packages/web-frontend/src/pages/settings/GitHubCodespaceManagement.tsx` own the
+  `packages/web-frontend/src/pages/settings/CodespaceManagement.tsx` own shared
+  resource cards; `GitHubCodespaceManagement.tsx` owns their GitHub section. They provide
   authenticated website codespace management; `routes/admin-codespaces.ts` and
   `packages/web-frontend/src/pages/AdminCodespaceControls.tsx` own the administrator
   readiness view and kill switches.
@@ -168,10 +169,13 @@ npm run local -- run
 Keep that foreground process running to serve the account; Ctrl+C settles owned work. Reconnection
 uses durable request IDs, digests and claims, so a lost response does not authorize redispatch.
 Transient network failures, including failed response reads, and server 5xx responses pause relay
-contact without stopping already admitted work. A refused claim aborts and drains only its request
-scope; it does not close VM ownership or advance its generation. Malformed protocol or scoped
-refusals set the daemon's control-plane status to `faulted` and retry confirmation after 30 seconds;
-transport failures set `offline`. Neither permits new claims before successful confirmation.
+contact without stopping already admitted work. An addressed resource refusal returns that request's
+bounded error. A refused delivery claim aborts only its request scope; it does not close VM ownership
+or advance its generation. Background delivery confirms the same current device/account/connection
+and generation before continuing independent claims. Successful confirmation does not fault the
+daemon or impose a global retry delay for that refusal. Malformed control-plane protocol sets
+`faulted` and retries confirmation after 30 seconds; transport failures set `offline`. Those
+connection failures suspend new claims until successful confirmation.
 Only device-endpoint unauthorized responses or confirmed device identity/revocation failures
 invalidate device authority and make the daemon stop work. Local disable, lease expiry and explicit
 shutdown retain their independent stop boundaries. Existing work remains bounded by its current
@@ -219,14 +223,17 @@ and ordinary caller result reads retain their exact-generation fence.
 ### Owner web control and bundle updates
 
 The server, companion and every running owner guard must use a coordinated control-contract
-edition. Strict nested heartbeat fields and the local `web-control.json` schema are not compatible
+edition, including the shared scoped snapshot and typed management-result schemas in
+`packages/shared/src/codespaces/local-protocol.ts`. Strict nested heartbeat fields and the local `web-control.json` schema are not compatible
 with an older reader, even when delegation is disabled. Rebuilding the CLI does not replace an
 already running guard. Mixed-edition rolling upgrades and uninterrupted management during an
 upgrade are not supported.
 
 Arrange a controlled owner-managed stop before changing editions: use the companion's ordinary
 shutdown/settlement path and confirm that its owned work and guards have stopped. Then update the
-server and local checkout to the matching edition, run `npm ci` and `npm run local:build`, and
+server and local checkout only after taking a cold backup while both sides are stopped: retain
+the server database, complete private companion state and SDK backing storage, including VM disks,
+with their matching bundles. Run `npm ci` and `npm run local:build`, and
 restart the companion through its ordinary owner-managed path. Preserve the same `--state`, disk
 image, SDK profile, credential store and connection; do not initialize replacement state, erase
 journals or terminate guards by arbitrary PID. A stopped VM retains its data, but active processes
@@ -248,7 +255,7 @@ Validate the converted values against the matching strict schemas before restart
 Preserve repository grants and receipts, account/device/VM IDs, generations, request fingerprints,
 recovery markers, jobs, SDK credentials and disks. The new bundles do not automatically read an
 unsupported saved shape. Rollback restores the corresponding database, local state and matching
-bundles together; resetting the SDK, deleting journals or enrolling a replacement computer is not
+bundles and SDK backing storage together; resetting the SDK, deleting journals or enrolling a replacement computer is not
 the conversion procedure.
 
 After pairing confirmation, grant web control once on the local machine:
@@ -323,6 +330,13 @@ installation setup is incomplete; only `applied` returns `local_repository_id` a
 A selected installation receives only that confirmed new repository, then the refreshed actual App
 grant is checked; a successful installation PUT alone does not grant access. Missing permissions
 return Settings/install guidance and preserve the confirmed result for continuation.
+When present, `error.stage` names the failed setup step (`github_connection`, `device_delegation`,
+`authority_validation`, `repository_lookup`, `repository_create`, `installation_access` or
+`local_admission`); `error.provider_status` carries the GitHub HTTP status. The returned
+`instruction` describes the applicable repair. A returned rejected local admission preserves
+the already-created repository identity. An unchanged rejected receipt remains rejected: restore
+its original grant in Settings, or use `repository_add` with the retained GitHub ID and a fresh
+`request_id` if existing-private consent permits it. Do not submit another repository creation.
 
 A lost create response is inspected rather than blindly submitted again. Recovery requires the
 exact saved owner, name, private visibility and server-generated marker in the repository description;
@@ -464,8 +478,9 @@ the provider already shut down makes no stop call, a stop of a Codespace the
 GitHub provider reports as failed completes as stopped with the observed state `failed`,
 and a start of an available one only probes the connector. While the provider
 reports the Codespace as
-provisioning, starting or stopping, a start or stop stays pending and issues
-nothing. Delete is issued directly, without a stop first, for persistent delete
+provisioning, starting or stopping, GitHub start/stop stays pending and issues
+nothing. Local stop/delete can address the exact owned VM during preparation or an unknown
+guest outcome; they drain accepted creation/work before claiming completion. Delete is issued directly, without a stop first, for persistent delete
 and for legacy cleanup. When the provider refuses a mutation, the Codespace is
 observed again: a record whose goal was reached anyway settles, and one the
 provider is still moving stays pending instead of reporting the refusal.
@@ -475,8 +490,24 @@ observation, so a stop can address the exact existing VM without starting it. It
 certify shutdown. A local created VM completes as stopped only when the independent native
 owner has confirmed its exact SDK UUID/name, Docker Engine container and worker settlement
 against the durable stop generation. A saved stopped phase without a current runtime
-observation is unknown. Unknown observation returns `CODESPACE_PROVIDER_UNAVAILABLE`;
-an explicit SDK error remains a failed observation and cannot itself complete a local stop.
+observation is unknown. Unknown observation preserves the last verified state/time and reports
+a bounded local diagnostic; an explicit SDK error cannot itself complete a local stop.
+
+Guest readiness is separate from physical runtime state. A physically running VM is available
+only when its durable phase is `usable`, preparation has completed and no guest failure remains.
+Preparing guests stay pending without adoption or a new work generation. A failed preparation,
+including a retained stopped VM without completed first-use preparation, reports
+`CODESPACE_LOCAL_SETUP_INCOMPLETE`. A confirmed physical stop can settle stop intent while keeping
+that cause visible through both lifecycle settlement and read-only refresh. Start and guest work
+remain refused; delete and confirm removal before recreating. Recovery of an initialized clean
+stop never completes a failed initial preparation.
+
+Local status inspection is scoped to the retained resource and its exact owned creation marker.
+It can recover the owned durable manifest after the create reply expires, without adopting an
+unrelated SDK VM. Only settled authenticated absence proves removal; failed or partial inventory
+is not an empty successful list. Each failing resource retains its diagnostic and verified state,
+while healthy peers refresh and run; the aggregate refresh reports stale data when any observation
+could not be confirmed.
 
 Resource summaries expose nullable `observed_at`, the time of a verified provider observation,
 and nullable `lifecycle_error`, a known `CodespaceResourceErrorCode`. They never expose raw
@@ -484,13 +515,20 @@ provider diagnostics. Claims, retries and a later connector probe do not advance
 time; `updated_at` remains bookkeeping time. A refused observation retains the last verified
 state and observation time until ordinary reconciliation succeeds.
 
-Repeating a pending lifecycle request does not advance its generation. A
+Repeating an active pending lifecycle request does not advance its generation. After a confirmed
+authenticated refusal, an explicit owner action can advance to a fresh guarded attempt after the
+permission/runtime repair. Unknown outcomes continue inspection of the retained intent, not blind
+redispatch. A
 provider response lost during create, start, stop or delete is reconciled from
 the exact stored identity and intent; broad discovery or deletion is not used.
 The local relay retains authenticated create/start/stop/delete request and reply payloads until
 their existing private-transfer expiry. A retry reads the same mutation receipt even after the
 original delivery deadline, without dispatching the effect again. Snapshot and guest-operation
 payloads retain their ordinary cleanup behavior.
+Input and new dispatch require current resource authority. Already accepted output/ACK settlement
+can complete an older exact claim after reconciliation advances the resource, without rewriting
+the newer generation. Identical terminal ACK and terminal renewal are read-only receipts: they do
+not extend expiry, revive dispatch or bypass current account/device/connection/repository/lease checks.
 Finishing a command, disconnecting an MCP client or ending a conversation never
 deletes a persistent codespace.
 
@@ -1036,8 +1074,10 @@ bookkeeping update and the codespace ID. Local cards separately show verified ob
 or that no verified observation exists. Safe lifecycle diagnostic codes have localized
 explanations. Start and Stop are available for stopped and
 running codespaces; Delete requires a confirmation that names the repository and
-points to Stop for keeping data. Actions are disabled while a codespace is in a
-pending, cleanup or ambiguous state, while local cards offer **Check state again**. For an existing
+points to Stop for keeping data. Local Delete remains available with confirmation in
+pending, cleanup, ambiguous and rejected states; an already-confirmed never-created refusal can
+retire its card without a runtime effect. Start is withheld for incomplete guest preparation.
+Local cards offer **Check state again**. For an existing
 start/stop/delete intent with applied access, it retries that exact resource's existing endpoint;
 delete uses the displayed current generation. A pending create or unavailable access instead
 requests read-only refresh and never creates another VM. Action errors and loaders belong to
@@ -1086,6 +1126,15 @@ billing 422, quota and busy 429, provider disabled or unavailable 503, and a
 missing feature configuration 503 with the
 same-origin Settings link. Responses never carry provider resource names, markers,
 claims, capabilities or credentials.
+
+Local lifecycle errors share the bounded guidance in
+`packages/shared/src/codespaces/local-failure-guidance.ts`: `CODESPACE_LOCAL_CREATION_UNKNOWN`
+(409) asks for exact inspection without replacement; `CODESPACE_LOCAL_SETUP_INCOMPLETE` (409)
+asks for confirmed cleanup before recreation; `CODESPACE_LOCAL_PROTOCOL_ERROR` (409) asks for
+matching bundles and saved-state checks; `CODESPACE_LOCAL_RUNTIME_ERROR` (503) asks for runtime
+repair and exact inspection; `CODESPACE_LOCAL_DELETE_APPROVAL_REQUIRED` (403) asks for applied
+repository delete permission before confirming the same deletion. Public troubleshooting owns
+the [owner recovery steps](../packages/mcp-server/src/help/content/integration/troubleshooting.md#local-codespaces).
 
 ## Readiness, metrics and controls
 

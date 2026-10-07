@@ -24,8 +24,13 @@ interface RuntimeLaunchIdentity {
 export interface RuntimeCoverage {
   runtimeId: string;
   name: string;
-  containerId: string;
-  state: "running" | "stopped" | "created";
+  containerId?: string;
+  state: "running" | "stopped" | "created" | "starting" | "stopping" | "error";
+  workerRequired?: boolean;
+  /** The actual native creator's original durable generation, not an adopted SDK identity. */
+  creationGeneration?: number;
+  containerState?: "created" | "running" | "paused" | "restarting" | "removing" | "exited" | "dead";
+  observationUnknown?: boolean;
   generation?: number;
   expectedStopGeneration?: number;
 }
@@ -87,7 +92,47 @@ export class DeviceRuntimeControl {
     return this.controls.size > 0;
   }
 
-  private capture(shutdown: boolean): Promise<void> {
+  /** Physical custody only. SDK resource names and UUIDs never admit a new incarnation here. */
+  holdsWorker(containerId: string): boolean {
+    return [...this.controls.values()].some(
+      (control) => control.containerId === containerId && control.active,
+    );
+  }
+
+  hasWorker(containerId: string): boolean {
+    return [...this.controls.values()].some((control) => control.containerId === containerId);
+  }
+
+  hasBoundWorker(runtimeId: string, name: string): boolean {
+    return [...this.bindings].some(
+      ([containerId, binding]) =>
+        binding.runtimeId === runtimeId && binding.name === name && this.hasWorker(containerId),
+    );
+  }
+
+  hasWorkerAt(containerId: string): boolean {
+    return [...this.controls.values()].some(
+      (control) => control.containerId?.slice(0, 12) === containerId.slice(0, 12),
+    );
+  }
+
+  hasUnindexedWorkers(
+    containerIds: ReadonlySet<string>,
+    knownOthers: readonly { runtimeId: string; name: string }[] = [],
+  ): boolean {
+    return [...this.controls.values()].some((control) => {
+      if (!control.containerId || containerIds.has(control.containerId)) return false;
+      const binding = this.bindings.get(control.containerId);
+      return (
+        !binding ||
+        !knownOthers.some(
+          (other) => other.runtimeId === binding.runtimeId && other.name === binding.name,
+        )
+      );
+    });
+  }
+
+  private capture(shutdown: boolean, rows: RuntimeCoverage[] = []): Promise<void> {
     const work = this.tail.then(async () => {
       if (this.stopping || (!shutdown && this.retired))
         throw new LocalRefusal("LOCAL_CONTROL_RETIRED", "The owned runtime incarnation changed.");
@@ -136,6 +181,7 @@ export class DeviceRuntimeControl {
               );
             return undefined;
           }
+          if (socket !== daemonSocket && socket !== dockerSocket && !shutdown) return undefined;
           throw error;
         });
         if (!control) continue;
@@ -155,87 +201,111 @@ export class DeviceRuntimeControl {
         return;
       }
       await this.assertDockerHeld();
-      if (!this.readCoverage)
-        throw new LocalRefusal(
-          "LOCAL_CONTROL_WORKER_UNVERIFIED",
-          "No provider-owned coverage reader.",
-        );
-      const rows = await this.readCoverage(this);
       await this.assertDockerHeld();
       if (
         new Set(rows.map((row) => row.runtimeId)).size !== rows.length ||
         new Set(rows.map((row) => row.name)).size !== rows.length ||
-        new Set(rows.map((row) => row.containerId)).size !== rows.length
+        new Set(rows.filter((row) => row.containerId).map((row) => row.containerId)).size !==
+          rows.filter((row) => row.containerId).length
       )
-        throw new LocalRefusal(
-          "LOCAL_CONTROL_WORKER_UNVERIFIED",
-          "Ambiguous SDK container identity.",
+        rows = [];
+      const byContainer = new Map(
+        rows.filter((row) => row.containerId).map((row) => [row.containerId!, row]),
+      );
+      // Workers can be born after the directory scan. Capture their exact Engine CID endpoint
+      // using the existing kernel helper; its returned CID and incarnation must agree.
+      for (const row of rows.filter((item) => item.workerRequired ?? item.state === "running")) {
+        if (!row.containerId) continue;
+        const existing = [...this.controls.values()].find(
+          (control) => control.containerId === row.containerId,
         );
-      const byContainer = new Map(rows.map((row) => [row.containerId, row]));
-      const active = new Set<string>();
+        if (existing?.active) continue;
+        if (existing) continue;
+        const socket = join(directory, `${row.containerId.slice(0, 12)}-vm.sock`);
+        // A metadata CID mismatch cannot supersede custody of the socket's actual peer.
+        if (this.controls.has(socket)) continue;
+        const control = await RuntimeControl.capture({
+          root,
+          executable: this.policy.runtime.binary,
+          sockets: [socket],
+          transport: "vm",
+        }).catch(() => undefined);
+        if (!control) continue;
+        // The helper attests the physical incarnation. A different SDK CID is only an
+        // unverifiable metadata row, never authority to stop or forget this worker.
+        this.controls.set(socket, control);
+      }
       for (const [socket, control] of this.controls) {
         if (socket === daemonSocket || socket === dockerSocket) continue;
         const id = control.containerId;
         const row = id ? byContainer.get(id) : undefined;
-        const binding = id ? this.bindings.get(id) : undefined;
-        if (
-          !id ||
-          !row ||
-          (binding && (binding.runtimeId !== row.runtimeId || binding.name !== row.name))
-        )
+        let binding = id ? this.bindings.get(id) : undefined;
+        if (!id)
           throw new LocalRefusal(
             "LOCAL_CONTROL_WORKER_UNVERIFIED",
-            "A captured worker has no exact SDK container binding.",
+            "The held native worker has no verified kernel container identity.",
           );
+        const indexed =
+          row && (!binding || (binding.runtimeId === row.runtimeId && binding.name === row.name));
+        if (!binding && indexed && row.creationGeneration !== undefined) {
+          binding = {
+            runtimeId: row.runtimeId,
+            name: row.name,
+            generation: row.creationGeneration,
+          };
+          this.bindings.set(id, binding);
+        }
         if (
-          row.state === "stopped" ||
-          (row.state === "created" && row.expectedStopGeneration !== undefined)
+          indexed &&
+          binding?.generation !== undefined &&
+          row.expectedStopGeneration !== undefined &&
+          row.expectedStopGeneration > binding.generation &&
+          (row.containerState === "exited" ||
+            row.containerState === "created" ||
+            (row.containerState === undefined &&
+              (row.state === "stopped" || row.state === "created")))
         ) {
-          if (
-            !binding ||
-            binding.generation === undefined ||
-            row.expectedStopGeneration === undefined ||
-            row.expectedStopGeneration <= binding.generation
-          )
-            throw new LocalRefusal(
-              "LOCAL_CONTROL_RETIRED",
-              "A VM worker retired without a durable matching stop intent.",
-            );
-          await control.stop();
+          try {
+            await control.stop();
+          } catch {
+            continue;
+          }
           this.controls.delete(socket);
           this.bindings.delete(id);
           continue;
         }
-        await control.check();
-        if (active.has(id))
-          throw new LocalRefusal(
-            "LOCAL_CONTROL_WORKER_UNVERIFIED",
-            "Duplicate captured container identity.",
-          );
-        active.add(id);
-        if (!binding)
+        if (!control.active) {
+          try {
+            await control.stop();
+          } catch {
+            continue;
+          }
+          this.controls.delete(socket);
+          this.bindings.delete(id);
+          continue;
+        }
+        try {
+          await control.check();
+        } catch {
+          continue;
+        }
+        if (!binding && indexed)
           this.bindings.set(id, {
             runtimeId: row.runtimeId,
             name: row.name,
             generation: row.generation,
           });
-        else if (binding.generation === undefined && row.generation !== undefined)
+        else if (
+          binding &&
+          indexed &&
+          binding.generation === undefined &&
+          row.generation !== undefined
+        )
           binding.generation = row.generation;
       }
-      const running = rows.filter((row) => row.state === "running");
-      // A created container may still have a held VM worker. Keep that exact incarnation
-      // covered until a newer durable stop intent retires it; never count it as stopped.
-      const actionable = rows.filter((row) => row.state === "running" || row.state === "created");
-      if (
-        running.some((row) => !active.has(row.containerId)) ||
-        [...active].some((id) => !actionable.some((row) => row.containerId === id))
-      )
-        throw new LocalRefusal(
-          "LOCAL_CONTROL_WORKER_UNVERIFIED",
-          "Running SDK containers do not match the held worker incarnations.",
-        );
     });
     const settled = work.catch(async (error: unknown) => {
+      if (error instanceof LocalRefusal && error.code === "LOCAL_OBSERVATION_UNKNOWN") throw error;
       this.retired = true;
       const cleanup = await Promise.allSettled(
         [...this.controls.values()].map((control) => control.stop()),
@@ -251,8 +321,19 @@ export class DeviceRuntimeControl {
     return settled;
   }
 
-  protect(): Promise<void> {
-    return this.capture(false);
+  async protect(rows?: RuntimeCoverage[]): Promise<void> {
+    if (rows !== undefined) return this.capture(false, rows);
+    await this.capture(false);
+    // SDK observation never owns the shared kernel-custody serialization boundary.
+    if (this.readCoverage) {
+      let coverage: RuntimeCoverage[] = [];
+      try {
+        coverage = await this.readCoverage(this);
+      } catch {
+        await this.assertDockerHeld();
+      }
+      await this.capture(false, coverage);
+    }
   }
 
   /** Closure only: captures fixed kernel peers without SDK credentials or work admission. */

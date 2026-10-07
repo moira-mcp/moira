@@ -327,7 +327,7 @@ export function createLocalDeviceBinaryRoutes(
   router.post(
     "/relay/:requestId/result-part",
     endpoint((req, _res, next) => {
-      service.authorizePayload(deviceAuth(service, req), param(req, "requestId"), claimHeader(req));
+      service.authorizeResult(deviceAuth(service, req), param(req, "requestId"), claimHeader(req));
       next();
     }),
     raw({ type: "application/octet-stream", limit: 4 * 1024 * 1024 }),
@@ -335,7 +335,7 @@ export function createLocalDeviceBinaryRoutes(
       const auth = deviceAuth(service, req),
         requestId = param(req, "requestId"),
         claimId = claimHeader(req);
-      service.authorizePayload(auth, requestId, claimId);
+      service.authorizeResult(auth, requestId, claimId);
       if (!Buffer.isBuffer(req.body))
         throw new LocalDeviceError("LOCAL_INVALID", "Binary result part required.");
       const part = await transfers.retainRelayPart(auth.userId, "local_relay_output", req.body);

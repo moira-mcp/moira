@@ -7,6 +7,7 @@ import {
   getBaseUrl,
   projectCodespaceSummary,
   recordCodespaceRejection,
+  localCodespaceFailureGuidance,
   type CodespaceObservabilityService,
   type CodespaceConnectionService,
   type CodespaceFileOperationResponse,
@@ -284,7 +285,10 @@ function errorResult(
   detail?: string,
   links: CodespaceProviderGuidance["links"] = [],
 ): CallToolResult {
-  const safeMessage = SAFE_ERROR_MESSAGES[code] ?? SAFE_ERROR_MESSAGES.INTERNAL_ERROR;
+  const safeMessage =
+    localCodespaceFailureGuidance(code)?.message ??
+    SAFE_ERROR_MESSAGES[code] ??
+    SAFE_ERROR_MESSAGES.INTERNAL_ERROR;
   // A refusal the user can act on carries the same destinations the guidance action returns, so an
   // agent never has to compose a link or send the user hunting for the right page.
   const guided = GUIDED_ERROR_CODES.has(code) ? links : [];

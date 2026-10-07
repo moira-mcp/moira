@@ -87,7 +87,10 @@ export class LocalDaemon {
       if (!signal.aborted) throw error;
     } finally {
       // Only the explicit owner shutdown aborts this daemon, not a relay request scope.
-      if (signal.aborted) await this.manager.close();
+      if (signal.aborted) {
+        await this.manager.close();
+        await this.relay.drain();
+      }
     }
   }
 }

@@ -7,6 +7,7 @@ import {
 } from "./resource-repository.js";
 import {
   CodespaceResourceError,
+  codespaceLifecycleErrorCode,
   type CodespaceMachine,
   type CodespaceProviderAdapter,
   type CodespaceProviderResource,
@@ -108,6 +109,8 @@ function isTransitional(state: CodespaceProviderState): boolean {
  */
 function observedStateFor(state: CodespaceProviderState): CodespaceResourceRecord["observedState"] {
   switch (state) {
+    case "unknown":
+      return "unknown";
     case "available":
     case "stopping":
       return "running";
@@ -543,7 +546,7 @@ export class CodespaceResourceService {
         if (exact && (exact.ownerId !== identity.id || !exactIdentityMatches(exact, record))) {
           continue;
         }
-        if (exact) {
+        if (exact && exact.state !== "unknown") {
           this.dependencies.repository.recordProviderObservation(
             record.id,
             record.generation,
@@ -732,15 +735,17 @@ export class CodespaceResourceService {
           Math.max(1, Math.ceil(effectiveCodespaceLimits(policy).persistentRetentionMs / 60_000)),
         ),
       });
-    } catch {
+    } catch (error) {
+      const outcome =
+        error instanceof CodespaceResourceError ? error.code : "provider_outcome_unknown";
       this.dependencies.repository.releaseClaim(
         submitted.id,
         submitted.generation,
         submissionClaimId,
-        "provider_outcome_unknown",
+        outcome,
         this.now(),
       );
-      await this.emit("create_pending", submitted, "provider_outcome_unknown");
+      await this.emit("create_pending", submitted, outcome);
       return {
         resource: this.dependencies.repository.getOwned(userId, submitted.id)!,
         lifecycleCapability: reservation.capability,
@@ -808,7 +813,7 @@ export class CodespaceResourceService {
       this.requiresPersonalBilling(),
     );
     let usable = valid && actual.state === "available";
-    if (valid) {
+    if (valid && actual.state !== "unknown") {
       this.dependencies.repository.recordProviderObservation(
         record.id,
         record.generation,
@@ -821,7 +826,21 @@ export class CodespaceResourceService {
         this.now(),
       );
     }
-    if (valid && (isTransitional(actual.state) || actual.state === "created")) {
+    if (
+      valid &&
+      (isTransitional(actual.state) ||
+        actual.state === "created" ||
+        actual.state === "unknown" ||
+        (record.provider === CODESPACE_PROVIDER_LOCAL && actual.state === "shutdown"))
+    ) {
+      const outcome =
+        actual.state === "unknown"
+          ? (actual.stateError ?? "CODESPACE_LOCAL_CREATION_UNKNOWN")
+          : actual.state === "shutdown"
+            ? (actual.stateError ?? "CODESPACE_NOT_RUNNING")
+            : actual.state === "created"
+              ? "provider_created"
+              : "provisioning";
       this.dependencies.repository.bindSubmittedResource({
         resourceId: record.id,
         expectedGeneration: record.generation,
@@ -829,16 +848,12 @@ export class CodespaceResourceService {
         ownerId: actual.ownerId,
         billableOwnerId: actual.billableOwnerId,
         observedRef: actual.ref,
-        outcome: actual.state === "created" ? "provider_created" : "provisioning",
+        outcome,
         claimId,
         now: this.now(),
       });
       const pending = this.dependencies.repository.getOwned(record.userId, record.id)!;
-      await this.emit(
-        "create_pending",
-        pending,
-        actual.state === "created" ? "provider_created" : "provisioning",
-      );
+      await this.emit("create_pending", pending, outcome);
       return { resource: pending, lifecycleCapability: capability };
     }
     let probeReason: string | undefined;
@@ -934,6 +949,16 @@ export class CodespaceResourceService {
    */
   async ensureRunning(userId: string, resourceId: string): Promise<CodespaceResourceRecord> {
     const current = this.getCodespace(userId, resourceId);
+    const failure = codespaceLifecycleErrorCode(current.lastOutcome);
+    if (
+      failure === "CODESPACE_LOCAL_CREATION_UNKNOWN" ||
+      failure === "CODESPACE_LOCAL_SETUP_INCOMPLETE" ||
+      failure === "CODESPACE_LOCAL_RUNTIME_ERROR"
+    )
+      throw new CodespaceResourceError(
+        failure,
+        "Confirm this local codespace's runtime state before requesting work",
+      );
     if (current.state === "usable" && current.desiredState === "running") return current;
     if (
       current.retentionPolicy !== "persistent" ||
@@ -1012,7 +1037,13 @@ export class CodespaceResourceService {
     if (!requested) {
       throw new CodespaceResourceError("CODESPACE_NOT_FOUND", "Codespace was not found");
     }
-    if (["usable", "create_pending", "create_submitted"].includes(requested.state))
+    if (
+      (requested.state === "usable" &&
+        requested.lastOutcome !== "CODESPACE_LOCAL_CREATION_UNKNOWN" &&
+        requested.lastOutcome !== "CODESPACE_LOCAL_RUNTIME_ERROR") ||
+      requested.state === "create_pending" ||
+      (requested.state === "create_submitted" && !requested.providerResourceName)
+    )
       return requested;
     await this.applyPersistentLifecycle(requested);
     const current = this.getCodespace(userId, resourceId);
@@ -1044,6 +1075,13 @@ export class CodespaceResourceService {
     expectedGeneration: number,
   ): Promise<CodespaceResourceRecord> {
     this.requireCurrentLifecycleAuthority(userId, resourceId);
+    const before = this.getCodespace(userId, resourceId);
+    if (before.generation !== expectedGeneration)
+      throw new CodespaceResourceError(
+        "CODESPACE_GENERATION_CONFLICT",
+        "Codespace generation changed; refresh it before deleting",
+      );
+    if (before.state === "deleted") return before;
     const requested = this.dependencies.repository.requestDelete(
       userId,
       resourceId,
@@ -1059,7 +1097,17 @@ export class CodespaceResourceService {
     if (!requested) {
       throw new CodespaceResourceError("CODESPACE_NOT_FOUND", "Codespace was not found");
     }
-    await this.applyPersistentLifecycle(requested);
+    if (before.state === "rejected" && before.providerResourceName === null) {
+      this.dependencies.repository.completeLifecycle({
+        resourceId,
+        generation: requested.generation,
+        desiredState: "deleted",
+        observedState: "absent",
+        state: "deleted",
+        outcome: "verified_never_created",
+        now: this.now(),
+      });
+    } else await this.applyPersistentLifecycle(requested);
     const current = this.getCodespace(userId, resourceId);
     if (current.state === "deleted")
       await this.emit("delete", current, current.lastOutcome ?? "deleted");
@@ -1073,7 +1121,7 @@ export class CodespaceResourceService {
     }
     if (!this.dependencies.repository.hasCurrentAuthorization(userId, resourceId)) {
       throw new CodespaceResourceError(
-        "CODESPACE_RESOURCE_INVALID",
+        "CODESPACE_AUTHORIZATION_REQUIRED",
         "Reconnect the same provider account and repository in Moira settings",
       );
     }
@@ -1211,7 +1259,11 @@ export class CodespaceResourceService {
         await this.applyPersistentLifecycle(record);
       } catch (error) {
         failure =
-          error instanceof CodespaceResourceError ? error.code : "lifecycle_reconcile_required";
+          error instanceof CodespaceResourceError
+            ? error.confirmedRefusal
+              ? `refused:${error.code}`
+              : error.code
+            : "lifecycle_reconcile_required";
       }
       // A pass that left the record in the same pending generation did not converge it, whether
       // the provider refused or is still moving the codespace. Either way it waits its backoff
@@ -1246,6 +1298,39 @@ export class CodespaceResourceService {
     return true;
   }
 
+  private async findCreation(
+    record: CodespaceResourceRecord,
+    provider: CodespaceProviderAdapter,
+    credential: string,
+    accountId: string,
+  ): Promise<{ matches: CodespaceProviderResource[]; verifiedAbsent: boolean }> {
+    const scoped = provider.inspectCreation
+      ? await provider.inspectCreation(credential, {
+          resourceId: record.id,
+          operationMarker: record.operationMarker,
+          repositoryId: record.repositoryId,
+        })
+      : null;
+    if (scoped?.outcome === "absent") return { matches: [], verifiedAbsent: true };
+    const candidates =
+      scoped?.outcome === "found" ? [scoped.resource] : await provider.listOwned(credential);
+    const matches = candidates.filter(
+      (resource) =>
+        resource.displayName === record.operationMarker &&
+        resource.repositoryId === record.repositoryId &&
+        resource.ownerId === accountId &&
+        (!this.requiresPersonalBilling() || resource.billableOwnerId === accountId) &&
+        resource.createdAt >= record.createdAt - 60_000 &&
+        resource.createdAt <= record.createDeadlineAt + PROVIDER_CLOCK_SKEW_MS,
+    );
+    if (scoped && matches.length !== 1)
+      throw new CodespaceResourceError(
+        "CODESPACE_GENERATION_CONFLICT",
+        "Reserved codespace identity changed",
+      );
+    return { matches, verifiedAbsent: false };
+  }
+
   private async applyPersistentLifecycle(record: CodespaceResourceRecord): Promise<void> {
     // Start, stop and delete reach the provider through this one funnel. Without this catch a
     // provider refusal leaves as an unclassified error and the caller is told only that something
@@ -1277,7 +1362,7 @@ export class CodespaceResourceService {
           this.dependencies.repository.recordLifecycleFailure(
             record.id,
             record.generation,
-            classified.code,
+            classified.confirmedRefusal ? `refused:${classified.code}` : classified.code,
             this.now(),
           );
         }
@@ -1290,9 +1375,9 @@ export class CodespaceResourceService {
    * Moves one pending persistent codespace toward its desired state, looking before it acts.
    *
    * The provider's current state decides what happens: a codespace already where it should be is
-   * completed without a provider call; one the provider is still moving is left pending; only a
-   * codespace that is settled somewhere else receives a mutation. A delete is issued directly,
-   * whatever the codespace is doing. When a mutation fails, the codespace is observed again, because
+   * completed without a provider call; one the provider is still moving is left pending. An exact
+   * owned local VM can receive stop while its guest is starting or its readiness is unknown. A
+   * delete is issued directly, whatever the codespace is doing. When a mutation fails, the codespace is observed again, because
    * a refused stop of a codespace that meanwhile shut down has nonetheless reached its goal.
    */
   private async applyPersistentLifecycleThroughProvider(
@@ -1306,20 +1391,17 @@ export class CodespaceResourceService {
     let resourceName = record.providerResourceName;
     if (!resourceName) {
       const identity = await provider.getIdentity(credential);
-      const matches = (await provider.listOwned(credential)).filter(
-        (candidate) =>
-          candidate.displayName === record.operationMarker &&
-          candidate.ownerId === identity.id &&
-          (!this.requiresPersonalBilling() || candidate.billableOwnerId === identity.id) &&
-          candidate.repositoryId === record.repositoryId &&
-          candidate.createdAt >= record.createdAt - 60_000 &&
-          candidate.createdAt <= record.createDeadlineAt + PROVIDER_CLOCK_SKEW_MS,
+      const { matches, verifiedAbsent } = await this.findCreation(
+        record,
+        provider,
+        credential,
+        identity.id,
       );
       if (matches.length !== 1) {
         if (
           matches.length === 0 &&
           record.desiredState === "stopped" &&
-          this.now() >= record.createDeadlineAt
+          (verifiedAbsent || this.now() >= record.createDeadlineAt)
         ) {
           this.dependencies.repository.completeAbsentPersistentLifecycle(
             record.id,
@@ -1333,7 +1415,7 @@ export class CodespaceResourceService {
         if (
           matches.length === 0 &&
           record.desiredState === "deleted" &&
-          this.now() >= record.createDeadlineAt
+          (verifiedAbsent || this.now() >= record.createDeadlineAt)
         ) {
           this.dependencies.repository.completeLifecycle({
             resourceId: record.id,
@@ -1375,9 +1457,17 @@ export class CodespaceResourceService {
     const observe = () => this.observeExact(record, provider, credential);
     const exact = await observe();
     if ((await this.settleLifecycleVerified(record, exact, provider, credential)) || !exact) return;
+    if (exact.state === "unknown" && record.desiredState === "running") {
+      throw new CodespaceResourceError(
+        exact.stateError ?? "CODESPACE_LOCAL_CREATION_UNKNOWN",
+        "The owned local codespace exists, but its runtime state is not confirmed; delete the pending codespace or inspect the local computer",
+      );
+    }
     if (
       exact.state === "deleting" ||
-      (record.desiredState !== "deleted" && isTransitional(exact.state))
+      (record.desiredState !== "deleted" &&
+        !(record.provider === CODESPACE_PROVIDER_LOCAL && record.desiredState === "stopped") &&
+        isTransitional(exact.state))
     ) {
       this.markTransitionPending(record, exact);
       return;
@@ -1404,12 +1494,18 @@ export class CodespaceResourceService {
     this.dependencies.repository.markLifecyclePending(
       record.id,
       record.generation,
-      record.desiredState === "running"
-        ? "start_pending"
-        : record.desiredState === "stopped"
-          ? "stop_pending"
-          : "delete_pending",
-      observed ? observedStateFor(observed.state) : "absent",
+      observed?.state === "unknown"
+        ? (observed.stateError ?? "CODESPACE_LOCAL_CREATION_UNKNOWN")
+        : record.desiredState === "running"
+          ? "start_pending"
+          : record.desiredState === "stopped"
+            ? "stop_pending"
+            : "delete_pending",
+      observed?.state === "unknown"
+        ? record.observedState
+        : observed
+          ? observedStateFor(observed.state)
+          : "absent",
       this.now(),
     );
   }
@@ -1432,17 +1528,18 @@ export class CodespaceResourceService {
         "Codespace exact identity changed",
       );
     }
-    this.dependencies.repository.recordProviderObservation(
-      record.id,
-      record.generation,
-      {
-        repositoryFullName: exact.repositoryFullName,
-        observedRef: exact.ref,
-        lastUsedAt: exact.lastUsedAt,
-        state: observedStateFor(exact.state),
-      },
-      this.now(),
-    );
+    if (exact.state !== "unknown")
+      this.dependencies.repository.recordProviderObservation(
+        record.id,
+        record.generation,
+        {
+          repositoryFullName: exact.repositoryFullName,
+          observedRef: exact.ref,
+          lastUsedAt: exact.lastUsedAt,
+          state: observedStateFor(exact.state),
+        },
+        this.now(),
+      );
     return exact;
   }
 
@@ -1492,7 +1589,8 @@ export class CodespaceResourceService {
         desiredState: "stopped",
         observedState: failed ? "failed" : "stopped",
         state: "stopped",
-        outcome: failed ? "verified_failed_not_running" : "verified_stopped",
+        outcome:
+          observed.stateError ?? (failed ? "verified_failed_not_running" : "verified_stopped"),
         now: this.now(),
       });
       return true;
@@ -1542,25 +1640,20 @@ export class CodespaceResourceService {
     policy: CodespaceResourcePolicy,
   ): Promise<void> {
     const identity = await provider.getIdentity(credential);
+    const discovery = record.providerResourceName
+      ? null
+      : await this.findCreation(record, provider, credential, identity.id);
     const candidates = record.providerResourceName
       ? [await provider.getExact(credential, record.providerResourceName)].filter(
           (value): value is CodespaceProviderResource => value !== null,
         )
-      : (await provider.listOwned(credential)).filter(
-          (resource) =>
-            resource.displayName === record.operationMarker &&
-            resource.repositoryId === record.repositoryId &&
-            resource.ownerId === identity.id &&
-            (!this.requiresPersonalBilling() || resource.billableOwnerId === identity.id) &&
-            resource.createdAt >= record.createdAt - 60_000 &&
-            resource.createdAt <= record.createDeadlineAt + PROVIDER_CLOCK_SKEW_MS,
-        );
+      : discovery!.matches;
     if (candidates.length > 1) {
       this.dependencies.repository.markAmbiguous(record.id, record.generation, claimId, this.now());
       return;
     }
     if (candidates.length === 0) {
-      if (this.now() >= record.createDeadlineAt) {
+      if (discovery?.verifiedAbsent || this.now() >= record.createDeadlineAt) {
         this.dependencies.repository.markClaimedCreateRejected(
           record.id,
           record.generation,
@@ -1599,21 +1692,18 @@ export class CodespaceResourceService {
     let resourceName = record.providerResourceName;
     if (!resourceName) {
       const identity = await provider.getIdentity(credential);
-      const matches = (await provider.listOwned(credential)).filter(
-        (resource) =>
-          resource.displayName === record.operationMarker &&
-          resource.repositoryId === record.repositoryId &&
-          resource.ownerId === identity.id &&
-          (!this.requiresPersonalBilling() || resource.billableOwnerId === identity.id) &&
-          resource.createdAt >= record.createdAt - 60_000 &&
-          resource.createdAt <= record.createDeadlineAt + PROVIDER_CLOCK_SKEW_MS,
+      const { matches, verifiedAbsent } = await this.findCreation(
+        record,
+        provider,
+        credential,
+        identity.id,
       );
       if (matches.length > 1) {
         this.deferReconcile(record, claimId, "multiple_cleanup_matches");
         return;
       }
       if (matches.length === 0) {
-        if (this.now() >= record.createDeadlineAt) {
+        if (verifiedAbsent || this.now() >= record.createDeadlineAt) {
           this.dependencies.repository.completeWithoutRemoteResource(
             record.id,
             record.generation,
@@ -1659,17 +1749,18 @@ export class CodespaceResourceService {
         this.deferReconcile(record, claimId, "exact_identity_mismatch");
         return;
       }
-      this.dependencies.repository.recordProviderObservation(
-        record.id,
-        record.generation,
-        {
-          repositoryFullName: exact.repositoryFullName,
-          observedRef: exact.ref,
-          lastUsedAt: exact.lastUsedAt,
-          state: observedStateFor(exact.state),
-        },
-        this.now(),
-      );
+      if (exact.state !== "unknown")
+        this.dependencies.repository.recordProviderObservation(
+          record.id,
+          record.generation,
+          {
+            repositoryFullName: exact.repositoryFullName,
+            observedRef: exact.ref,
+            lastUsedAt: exact.lastUsedAt,
+            state: observedStateFor(exact.state),
+          },
+          this.now(),
+        );
       if (exact.state === "deleting") {
         this.deferReconcile(record, claimId, "delete_pending");
         return;
@@ -1813,9 +1904,12 @@ export class CodespaceResourceService {
     }
     const credential = await this.dependencies.credentials.getCredential(userId, provider.id);
     const identity = await provider.getIdentity(credential);
-    const listed = new Map(
-      (await provider.listOwned(credential)).map((resource) => [resource.name, resource]),
-    );
+    // A scoped provider never needs a sibling's successful inventory to observe this resource.
+    const listed = provider.inspectCreation
+      ? null
+      : new Map(
+          (await provider.listOwned(credential)).map((resource) => [resource.name, resource]),
+        );
     let stale = false;
     for (const record of records) {
       if (
@@ -1826,11 +1920,18 @@ export class CodespaceResourceService {
         continue;
       }
       observed.add(record.id);
-      let actual = listed.get(record.providerResourceName!);
+      let actual = listed?.get(record.providerResourceName!);
       if (!actual || !exactIdentityMatches(actual, record)) {
         try {
           actual = (await provider.getExact(credential, record.providerResourceName!)) ?? undefined;
-        } catch {
+        } catch (error) {
+          if (error instanceof CodespaceResourceError)
+            this.dependencies.repository.recordLifecycleFailure(
+              record.id,
+              record.generation,
+              error.code,
+              this.now(),
+            );
           stale = true;
           continue;
         }
@@ -1863,6 +1964,16 @@ export class CodespaceResourceService {
         stale = true;
         continue;
       }
+      if (actual.state === "unknown") {
+        stale = true;
+        this.dependencies.repository.recordLifecycleFailure(
+          record.id,
+          record.generation,
+          actual.stateError ?? "CODESPACE_LOCAL_CREATION_UNKNOWN",
+          this.now(),
+        );
+        continue;
+      }
       this.dependencies.repository.recordProviderObservation(
         record.id,
         record.generation,
@@ -1874,10 +1985,19 @@ export class CodespaceResourceService {
         },
         this.now(),
       );
+      if (!actual.stateError)
+        this.dependencies.repository.recordLifecycleFailure(
+          record.id,
+          record.generation,
+          "provider_state_verified",
+          this.now(),
+        );
+      let generation = record.generation;
       if (
         actual.state === "shutdown" &&
         this.dependencies.repository.markObservedStopped(record.id, record.generation, this.now())
       ) {
+        generation++;
         await this.emit(
           "stop",
           this.dependencies.repository.getOwned(userId, record.id)!,
@@ -1887,12 +2007,22 @@ export class CodespaceResourceService {
         actual.state === "available" &&
         this.dependencies.repository.markObservedRunning(record.id, record.generation, this.now())
       ) {
+        generation++;
         await this.emit(
           "start",
           this.dependencies.repository.getOwned(userId, record.id)!,
           "provider_observed_running",
         );
       }
+      // Physical observation and guest readiness are separate facts. Preserve a bounded known
+      // setup failure after the observation's own transition; never write onto a later intent.
+      if (actual.stateError)
+        this.dependencies.repository.recordLifecycleFailure(
+          record.id,
+          generation,
+          actual.stateError,
+          this.now(),
+        );
     }
     return { observed, stale };
   }

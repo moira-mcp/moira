@@ -901,13 +901,13 @@ export class LocalDeviceRepository {
         const row = this.requireRelayOwner(auth, ack.requestId);
         if (row.digest !== ack.digest || row.claimId !== ack.claimId)
           throw new LocalDeviceError("LOCAL_CONFLICT", "Relay acknowledgement changed.");
+        this.requireResourceAuthority(row, now, true);
         const encoded = canonicalJson(ack.outcomeReference);
         if (row.status === "completed" || row.status === "refused") {
           if (row.status !== ack.status || row.outputReference !== encoded)
             throw new LocalDeviceError("LOCAL_CONFLICT", "Relay result changed.");
           return result(row);
         }
-        this.requireDispatch(row, now);
         if (row.status !== "claimed" || row.claimExpiresAt === null || row.claimExpiresAt <= now)
           throw new LocalDeviceError("LOCAL_EXPIRED", "Relay claim expired.");
         this.authorizeOutput(auth, ack, now);
@@ -944,7 +944,7 @@ export class LocalDeviceRepository {
     };
   }
   authorizeOutput(auth: LocalDeviceAuth, ack: LocalRelayAcknowledgement, now: number): void {
-    const claim = this.authorizePayload(auth, ack.requestId, ack.claimId, now);
+    const claim = this.authorizeResult(auth, ack.requestId, ack.claimId, now);
     if (claim.digest !== ack.digest)
       throw new LocalDeviceError("LOCAL_CONFLICT", "Relay acknowledgement changed.");
     this.verifyPayload(auth.userId, ack.outcomeReference, "local_relay_output", now);
@@ -972,7 +972,7 @@ export class LocalDeviceRepository {
   ): void {
     this.sqlite
       .transaction(() => {
-        this.authorizePayload(auth, requestId, claimId, now);
+        this.authorizeResult(auth, requestId, claimId, now);
         this.verifyPayload(
           auth.userId,
           { parts: [part], sha256: part.sha256, size: part.size },
@@ -1004,7 +1004,12 @@ export class LocalDeviceRepository {
   ): LocalRelayClaim {
     return this.sqlite
       .transaction(() => {
-        const claim = this.authorizePayload(auth, requestId, claimId, now);
+        const row = this.requireRelayOwner(auth, requestId);
+        if (row.status === "completed" || row.status === "refused") {
+          this.requireResourceAuthority(row, now, true);
+          return this.retainedClaim(auth, row, claimId);
+        }
+        const claim = this.authorizeResult(auth, requestId, claimId, now);
         const policy = localPublicPolicySchema.parse(JSON.parse(this.requireDevice(auth).policy));
         this.sqlite
           .prepare(
@@ -1016,12 +1021,12 @@ export class LocalDeviceRepository {
             requestId,
             claimId,
           );
-        return this.authorizePayload(auth, requestId, claimId, now);
+        return this.authorizeResult(auth, requestId, claimId, now);
       })
       .immediate();
   }
 
-  /** Blob reads/uploads must call this after authenticating the device and before touching bytes. */
+  /** Input bytes authorize work only for the current resource generation. */
   authorizePayload(
     auth: LocalDeviceAuth,
     requestId: string,
@@ -1030,6 +1035,28 @@ export class LocalDeviceRepository {
   ): LocalRelayClaim {
     const row = this.requireRelayOwner(auth, requestId);
     this.requireDispatch(row, now);
+    return this.acceptedClaim(auth, row, claimId, now);
+  }
+
+  /** Settle an already accepted claim; this never authorizes input or dispatches new work. */
+  authorizeResult(
+    auth: LocalDeviceAuth,
+    requestId: string,
+    claimId: string,
+    now: number,
+  ): LocalRelayClaim {
+    const row = this.requireRelayOwner(auth, requestId);
+    const policy = this.requireResourceAuthority(row, now, true);
+    this.requireDeliveryDeadline(row, policy, now);
+    return this.acceptedClaim(auth, row, claimId, now);
+  }
+
+  private acceptedClaim(
+    auth: LocalDeviceAuth,
+    row: RelayRow,
+    claimId: string,
+    now: number,
+  ): LocalRelayClaim {
     if (
       row.status !== "claimed" ||
       row.claimId !== claimId ||
@@ -1037,6 +1064,12 @@ export class LocalDeviceRepository {
       row.claimExpiresAt <= now
     )
       throw new LocalDeviceError("LOCAL_EXPIRED", "Relay claim expired.");
+    return this.retainedClaim(auth, row, claimId);
+  }
+
+  private retainedClaim(auth: LocalDeviceAuth, row: RelayRow, claimId: string): LocalRelayClaim {
+    if (row.claimId !== claimId || row.claimExpiresAt === null)
+      throw new LocalDeviceError("LOCAL_CONFLICT", "Relay acknowledgement changed.");
     return {
       ...auth,
       requestId: row.requestId,
@@ -1097,6 +1130,14 @@ export class LocalDeviceRepository {
     input: LocalDeviceAuth & { resourceId: string; resourceGeneration: number; deadlineAt: number },
     now: number,
   ): void {
+    const policy = this.requireResourceAuthority(input, now, false);
+    this.requireDeliveryDeadline(input, policy, now);
+  }
+  private requireResourceAuthority(
+    input: LocalDeviceAuth & { resourceId: string; resourceGeneration: number; deadlineAt: number },
+    now: number,
+    acceptedResult: boolean,
+  ): LocalPublicPolicy {
     const row = this.requireDevice(input),
       policy = localPublicPolicySchema.parse(JSON.parse(row.policy));
     this.requireLease(policy, now);
@@ -1122,11 +1163,17 @@ export class LocalDeviceRepository {
       binding.deviceId !== input.deviceId ||
       binding.deviceGeneration !== input.deviceGeneration ||
       !resource ||
-      resource.generation !== input.resourceGeneration ||
+      (acceptedResult
+        ? resource.generation < input.resourceGeneration
+        : resource.generation !== input.resourceGeneration) ||
       resource.authorizationGeneration !== resource.credentialGeneration ||
       resource.status !== "connected" ||
-      resource.state === "deleted" ||
-      resource.state === "rejected" ||
+      (!acceptedResult && (resource.state === "deleted" || resource.state === "rejected")) ||
+      !this.sqlite
+        .prepare(
+          "SELECT 1 FROM codespaceConnectionRepository WHERE connectionId=? AND externalRepositoryId=? AND lower(fullName)=lower(?)",
+        )
+        .get(input.connectionId, resource.repositoryId, resource.repositoryFullName) ||
       !policy.repositories.some(
         (repo) =>
           repo.id === binding.repositoryId &&
@@ -1136,6 +1183,13 @@ export class LocalDeviceRepository {
       policy.machine.name !== binding.profileId
     )
       throw new LocalDeviceError("LOCAL_UNAUTHORIZED", "Relay resource authority changed.");
+    return policy;
+  }
+  private requireDeliveryDeadline(
+    input: { deadlineAt: number },
+    policy: LocalPublicPolicy,
+    now: number,
+  ): void {
     if (input.deadlineAt <= now || input.deadlineAt > policy.leaseUntil)
       throw new LocalDeviceError("LOCAL_EXPIRED", "Relay work lease expired.");
   }

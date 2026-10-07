@@ -10,9 +10,10 @@ function fixture() {
     close: jest.fn<() => Promise<void>>().mockResolvedValue(undefined),
   } as unknown as LocalManager;
   const relay = {
+    drain: jest.fn<() => Promise<void>>().mockResolvedValue(undefined),
     isUnavailable: (error: unknown) =>
       error instanceof LocalRefusal && error.code === "LOCAL_RELAY_UNAVAILABLE",
-  } as LocalRelay;
+  } as unknown as LocalRelay;
   const cycle = jest.fn<(signal?: AbortSignal) => Promise<boolean>>();
   const pause = jest.fn<() => Promise<void>>().mockResolvedValue(undefined);
   const companion = { cycle, pause } as unknown as LocalCompanion;

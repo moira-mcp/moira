@@ -39,7 +39,8 @@ export type CodespaceProviderState =
   | "stopping"
   | "shutdown"
   | "deleting"
-  | "failed";
+  | "failed"
+  | "unknown";
 
 export interface CodespaceProviderResource {
   name: string;
@@ -60,6 +61,8 @@ export interface CodespaceProviderResource {
    * instead of issuing another mutation.
    */
   state: CodespaceProviderState;
+  /** Bounded physical-state or guest-readiness diagnosis; a confirmed shutdown may still have incomplete guest preparation. */
+  stateError?: CodespaceResourceErrorCode;
   /**
    * When the provider last started the codespace (GitHub's `last_used_at`, documented as "last
    * known time this codespace was started"). It is not a sign of use and is shown for information
@@ -150,6 +153,11 @@ export interface CodespaceProviderAdapter {
     },
   ): Promise<CodespaceCreateProviderResult>;
   listOwned(credential: string): Promise<CodespaceProviderResource[]>;
+  /** Exact reserved creation identity; absence means creation has settled without a resource. */
+  inspectCreation?(
+    credential: string,
+    input: { resourceId: string; operationMarker: string; repositoryId: string },
+  ): Promise<{ outcome: "found"; resource: CodespaceProviderResource } | { outcome: "absent" }>;
   getExact(credential: string, resourceName: string): Promise<CodespaceProviderResource | null>;
   startExact(credential: string, resourceName: string): Promise<"accepted" | "absent">;
   stopExact(credential: string, resourceName: string): Promise<"accepted" | "absent">;
@@ -265,13 +273,19 @@ export type CodespaceResourceErrorCode =
   | "CODESPACE_START_TIMEOUT"
   | "CODESPACE_GENERATION_CONFLICT"
   | "CODESPACE_RESOURCE_INVALID"
+  | "CODESPACE_LOCAL_CREATION_UNKNOWN"
+  | "CODESPACE_LOCAL_SETUP_INCOMPLETE"
+  | "CODESPACE_LOCAL_PROTOCOL_ERROR"
+  | "CODESPACE_LOCAL_RUNTIME_ERROR"
+  | "CODESPACE_LOCAL_DELETE_APPROVAL_REQUIRED"
   | "CODESPACE_NOT_FOUND";
 
 /** Only these known lifecycle outcomes may be projected to callers; never provider text. */
 export function codespaceLifecycleErrorCode(
   outcome: string | null,
 ): CodespaceResourceErrorCode | null {
-  switch (outcome) {
+  const code = outcome?.startsWith("refused:") ? outcome.slice("refused:".length) : outcome;
+  switch (code) {
     case "CODESPACE_PROVIDER_DISABLED":
     case "CODESPACE_PROVIDER_UNAVAILABLE":
     case "CODESPACE_POLICY_LIMIT":
@@ -286,8 +300,13 @@ export function codespaceLifecycleErrorCode(
     case "CODESPACE_START_TIMEOUT":
     case "CODESPACE_GENERATION_CONFLICT":
     case "CODESPACE_RESOURCE_INVALID":
+    case "CODESPACE_LOCAL_CREATION_UNKNOWN":
+    case "CODESPACE_LOCAL_SETUP_INCOMPLETE":
+    case "CODESPACE_LOCAL_PROTOCOL_ERROR":
+    case "CODESPACE_LOCAL_RUNTIME_ERROR":
+    case "CODESPACE_LOCAL_DELETE_APPROVAL_REQUIRED":
     case "CODESPACE_NOT_FOUND":
-      return outcome;
+      return code;
     default:
       return null;
   }
@@ -625,6 +644,8 @@ export class CodespaceResourceError extends Error {
     public readonly code: CodespaceResourceErrorCode,
     message: string,
     public readonly detail?: string,
+    /** Internal provenance: an authenticated provider reply explicitly refused this intent. */
+    public readonly confirmedRefusal = false,
   ) {
     super(message);
     this.name = "CodespaceResourceError";

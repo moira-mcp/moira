@@ -12,6 +12,7 @@ import { SbxRuntime } from "../../../packages/local/src/sbx-runtime.js";
 import { adaptSbxRuntime } from "../../../packages/local/src/local-vm-runtime-factory.js";
 import { RuntimeDeviceOwner } from "../../../packages/local/src/runtime-device-owner.js";
 import { RuntimeOwner } from "../../../packages/local/src/runtime-owner.js";
+import { DeviceRuntimeControl } from "../../../packages/local/src/runtime-control.js";
 import { publicPolicy, LocalRefusal } from "../../../packages/local/src/policy.js";
 import { setEnabled } from "../../../packages/local/src/config.js";
 import { localFixture } from "./fixtures.js";
@@ -56,6 +57,8 @@ async function fixture() {
   let message: unknown;
   let claim: Record<string, unknown>;
   let bytes: Buffer;
+  const claims = new Map<string, Record<string, unknown>>();
+  const payloads = new Map<string, Buffer>();
   const receipts: unknown[] = [];
   const uploaded = new Map<string, Buffer>();
   const gitIdentityRequests: string[] = [];
@@ -68,7 +71,8 @@ async function fixture() {
   let loseAck = false;
   let refusedRenewStatus: number | undefined;
   let nextRenewFailure: "network" | "server" | undefined;
-  let nextPartFailure: "network" | "server" | "body" | undefined;
+  let nextPartFailure: "network" | "server" | "body" | "unauthorized" | undefined;
+  let payloadReads = 0;
   let heartbeatFailure = false;
   let brokenHeartbeatStatus: number | undefined;
   let brokenRenewStatus: number | undefined;
@@ -81,6 +85,8 @@ async function fixture() {
   const transport: typeof globalThis.fetch = async (input, options) => {
     options?.signal?.throwIfAborted();
     const url = new URL(String(input));
+    const requestId = /\/relay\/([a-f0-9-]{36})\//.exec(url.pathname)?.[1];
+    const scopedClaim = requestId ? claims.get(requestId)! : claim;
     expect(url.origin).toBe("https://moira.example");
     expect(url.pathname.startsWith("/prefix/api/local-devices/")).toBe(true);
     expect(options?.redirect).toBe("error");
@@ -119,22 +125,26 @@ async function fixture() {
       nextRenewFailure = undefined;
       if (failure === "network") throw new TypeError("Controlled relay transport failure");
       if (failure === "server") return new Response(null, { status: 503 });
-      expect(new Headers(options?.headers).get("X-Moira-Claim-Id")).toBe(claim.claimId);
+      expect(new Headers(options?.headers).get("X-Moira-Claim-Id")).toBe(scopedClaim.claimId);
       return refusedRenewStatus
         ? new Response(null, { status: refusedRenewStatus })
-        : json({ ...claim, claimExpiresAt: Date.now() + 30_000 });
+        : json({ ...scopedClaim, claimExpiresAt: Date.now() + 30_000 });
     }
     if (url.pathname.includes("/payload/0")) {
-      expect(new Headers(options?.headers).get("X-Moira-Claim-Id")).toBe(claim.claimId);
+      payloadReads++;
+      expect(new Headers(options?.headers).get("X-Moira-Claim-Id")).toBe(scopedClaim.claimId);
       const offset = Number(url.searchParams.get("offset")),
         length = Number(url.searchParams.get("length"));
-      return new Response(Uint8Array.from(bytes.subarray(offset, offset + length)));
+      return new Response(
+        Uint8Array.from(payloads.get(requestId!)!.subarray(offset, offset + length)),
+      );
     }
     if (url.pathname.endsWith("/result-part")) {
       const failure = nextPartFailure;
       nextPartFailure = undefined;
       if (failure === "network") throw new TypeError("Controlled relay transport failure");
       if (failure === "server") return new Response(null, { status: 503 });
+      if (failure === "unauthorized") return new Response(null, { status: 401 });
       if (failure === "body")
         return new Response(
           new ReadableStream({
@@ -143,7 +153,7 @@ async function fixture() {
             },
           }),
         );
-      expect(new Headers(options?.headers).get("X-Moira-Claim-Id")).toBe(claim.claimId);
+      expect(new Headers(options?.headers).get("X-Moira-Claim-Id")).toBe(scopedClaim.claimId);
       const result = Buffer.from(options!.body as Uint8Array);
       expect(result.length).toBeLessThanOrEqual(maxPartBytes);
       const transferId = randomUUID();
@@ -166,8 +176,8 @@ async function fixture() {
         throw new Error("Controlled response loss after receipt");
       }
       return json({
-        requestId: claim.requestId,
-        digest: claim.digest,
+        requestId: ack.requestId,
+        digest: ack.digest,
         status: "completed",
         outcomeReference: JSON.parse(String(options?.body)).outcomeReference,
       });
@@ -208,6 +218,8 @@ async function fixture() {
     delete claim.origin;
     delete claim.credential;
     delete claim.pairingId;
+    claims.set(envelope.id, claim);
+    payloads.set(envelope.id, bytes);
   };
   setRequest({
     action: "create",
@@ -236,7 +248,7 @@ async function fixture() {
     failNextRenew: (kind: "network" | "server") => {
       nextRenewFailure = kind;
     },
-    failNextPart: (kind: "network" | "server" | "body") => {
+    failNextPart: (kind: "network" | "server" | "body" | "unauthorized") => {
       nextPartFailure = kind;
     },
     failNextHeartbeat: () => {
@@ -260,6 +272,7 @@ async function fixture() {
       maxPartBytes = value;
     },
     uploaded,
+    payloadReads: () => payloadReads,
     transport,
     gitIdentityRequests,
     idleEntered,
@@ -274,6 +287,1028 @@ async function fixture() {
 }
 
 describe("outbound companion authority and durable response replay", () => {
+  test("legacy stopped record without first usability timestamp refuses work but retains exact cleanup", async () => {
+    const local = await fixture();
+    await local.relay.poll(local.rpc);
+    Object.assign(local.space, {
+      generation: 2,
+      desiredState: "stopped",
+      phase: "stopped",
+      failure: null,
+      lastStartedAt: null,
+    });
+    await local.records.put(local.space);
+    local.manager.dependencies.storage = async () => {};
+    const protect = jest.fn(async () => {});
+    const owner = new RuntimeOwner(local.records, local.space.id, protect, async () => {});
+    await expect(owner.admit(true)).rejects.toMatchObject({ code: "LOCAL_SETUP_INCOMPLETE" });
+    await expect(local.manager.start(local.space.id)).rejects.toMatchObject({
+      code: "LOCAL_SETUP_INCOMPLETE",
+    });
+    expect(protect).not.toHaveBeenCalled();
+    expect(await local.records.get(local.space.id)).toMatchObject({
+      generation: 2,
+      desiredState: "stopped",
+      phase: "stopped",
+      lastStartedAt: null,
+    });
+    const key = `relay-space-${local.resourceId}.json`;
+    const before = await local.state.read(key, (value) => value);
+    jest.spyOn(local.manager, "snapshot").mockImplementation(async () => ({
+      ...publicPolicy(local.policy),
+      spaces: [{ ...local.space, state: "stopped", nativeStopConfirmed: true }],
+    }));
+    local.setRequest({ action: "snapshot" }, 3);
+    await local.relay.poll(local.rpc);
+    expect(local.receipts.at(-1)).toMatchObject({
+      ok: true,
+      result: { spaces: [{ generation: 2, lastStartedAt: null }] },
+    });
+    expect(await local.state.read(key, (value) => value)).toEqual(before);
+    const remove = jest
+      .spyOn(local.manager, "remove")
+      .mockImplementation(async (_id, generation) => {
+        expect(generation).toBe(2);
+        const current = (await local.records.get(local.space.id))!;
+        Object.assign(current, { generation: 4, desiredState: "deleted", phase: "deleted" });
+        await local.records.put(current);
+      });
+    local.setRequest({ action: "delete", spaceId: local.space.id, generation: 3 }, 3);
+    await local.relay.poll(local.rpc);
+    expect(local.receipts.at(-1)).toMatchObject({ ok: true, result: { accepted: true } });
+    expect(remove).toHaveBeenCalledTimes(1);
+  });
+  test.each(["manager-read", "owner-ready"] as const)(
+    "stop expected generation remains fenced at native admission after %s changes it",
+    async (boundary) => {
+      const local = await fixture();
+      local.space.generation = 2;
+      await local.records.put(local.space);
+      const owner = new RuntimeOwner(
+        local.records,
+        local.space.id,
+        async () => {
+          throw new Error("No stale native effect may reach custody");
+        },
+        async () => {},
+      );
+      const retire = jest.fn(async (_id: string, generation: number) =>
+        owner.manage(generation, false),
+      );
+      const actualGet = local.records.get.bind(local.records);
+      let reads = 0;
+      jest.spyOn(local.records, "get").mockImplementation(async (id) => {
+        if (boundary === "manager-read" && ++reads === 2) {
+          const space = (await actualGet(id))!;
+          space.generation = 3;
+          await local.records.put(space);
+        }
+        return actualGet(id);
+      });
+      local.manager.dependencies.guard = async () => {
+        if (boundary === "owner-ready") {
+          const space = (await actualGet(local.space.id))!;
+          space.generation = 3;
+          await local.records.put(space);
+        }
+        return {
+          active: true,
+          stop: async () => {},
+          observe: async () => [],
+          remove: async () => {},
+          retire,
+          space: async () => {
+            throw new Error("Stop must not admit guest work");
+          },
+        };
+      };
+      const result = await local.rpc.handle({
+        version: 1,
+        id: randomUUID(),
+        expiresAt: Date.now() + 60000,
+        request: { action: "stop", spaceId: local.space.id, generation: 2 },
+      });
+      expect(result).toMatchObject({ ok: false, error: { code: "LOCAL_GENERATION_CONFLICT" } });
+      expect(await actualGet(local.space.id)).toMatchObject({
+        generation: 3,
+        desiredState: "running",
+        phase: "usable",
+      });
+      if (boundary === "manager-read") expect(retire).not.toHaveBeenCalled();
+      else expect(retire).toHaveBeenCalledWith(local.space.id, 2);
+    },
+  );
+
+  test.each([null, "LOCAL_NETWORK_CHANGED"] as const)(
+    "injected runtime closure preserves creating-origin readiness and failure (%s)",
+    async (failure) => {
+      const local = await fixture();
+      Object.assign(local.space, { phase: "creating", lastStartedAt: null, failure });
+      await local.records.put(local.space);
+      class ClosedRuntime extends SbxRuntime {
+        override async stop() {}
+        override async exact(identity: { name: string; runtimeId: string }) {
+          return {
+            id: identity.runtimeId,
+            name: identity.name,
+            agent: "shell",
+            status: "stopped" as const,
+          };
+        }
+      }
+      local.manager.dependencies.runtime = (policy) => adaptSbxRuntime(new ClosedRuntime(policy));
+      expect(await local.manager.stop(local.space.id)).toMatchObject({
+        phase: "failed",
+        desiredState: "stopped",
+        generation: 2,
+        failure: failure ?? "LOCAL_SETUP_INCOMPLETE",
+      });
+      await expect(local.manager.start(local.space.id)).rejects.toMatchObject({
+        code: "LOCAL_SETUP_INCOMPLETE",
+      });
+    },
+  );
+
+  test.each([null, "LOCAL_NETWORK_CHANGED"] as const)(
+    "creating-origin confirmed stop preserves incomplete guest readiness and original failure (%s)",
+    async (failure) => {
+      const local = await fixture();
+      Object.assign(local.space, { phase: "creating", lastStartedAt: null, failure });
+      await local.records.put(local.space);
+      const owner = new RuntimeOwner(
+        local.records,
+        local.space.id,
+        async () => {},
+        async () => {},
+      );
+      await owner.admit();
+      await owner.quiesce();
+      // This isolated boundary substitutes physical completion, not bootstrap readiness.
+      await owner.confirmStopped();
+      const stopped = (await local.records.get(local.space.id))!;
+      expect(stopped).toMatchObject({
+        desiredState: "stopped",
+        phase: "failed",
+        generation: 2,
+        lastStartedAt: null,
+        failure: failure ?? "LOCAL_SETUP_INCOMPLETE",
+      });
+      await expect(local.manager.start(local.space.id)).rejects.toMatchObject({
+        code: "LOCAL_SETUP_INCOMPLETE",
+      });
+      await expect(
+        new RuntimeOwner(
+          local.records,
+          local.space.id,
+          async () => {},
+          async () => {},
+        ).admit(true),
+      ).rejects.toMatchObject({ code: "LOCAL_SETUP_INCOMPLETE" });
+      expect(stopped.recoveryGeneration).toBeUndefined();
+    },
+  );
+  test("fresh operation publishes its validated server generation before ready-VM Git contact", async () => {
+    const local = await fixture();
+    await local.relay.poll(local.rpc);
+    const key = `relay-space-${local.resourceId}.json`;
+    const previous = await local.state.read(key, (value) => value as Record<string, unknown>);
+    await local.state.write(key, { ...previous, serverGeneration: 2 });
+    let authority: unknown;
+    const dispatch = jest.spyOn(local.rpc.jobs, "dispatch").mockImplementation(async () => {
+      authority = await local.relay.gitAuthority(local.space.id, 1, local.space.repositoryId);
+      // This is the actual server authorizeGitHubOperation equality boundary.
+      if ((authority as { resourceGeneration: number }).resourceGeneration !== 3)
+        throw new LocalRefusal("LOCAL_UNAUTHORIZED", "Git server resource generation differs");
+      return { state: "complete" };
+    });
+    local.setRequest({ action: "operation", spaceId: local.space.id, job: { kind: "git" } }, 3);
+    await local.relay.poll(local.rpc);
+    expect(local.receipts.at(-1)).toMatchObject({ ok: true, result: { state: "complete" } });
+    expect(authority).toMatchObject({ resourceGeneration: 3 });
+    expect(dispatch).toHaveBeenCalledTimes(1);
+    expect(await local.state.read(key, (value) => value)).toMatchObject({
+      serverGeneration: 3,
+      localGeneration: 1,
+    });
+  });
+
+  test.each(["stop", "delete"] as const)(
+    "fresh %s cleans a failed creation's own newer stopped generation without admitting work",
+    async (action) => {
+      const local = await fixture();
+      await local.relay.poll(local.rpc);
+      const key = `relay-space-${local.resourceId}.json`;
+      const binding = await local.state.read(key, (value) => value as Record<string, unknown>);
+      await local.state.write(key, { ...binding, serverGeneration: 2 });
+      Object.assign(local.space, {
+        generation: 2,
+        phase: "failed",
+        desiredState: "stopped",
+        failure: "LOCAL_SETUP_INCOMPLETE",
+        lastStartedAt: null,
+      });
+      delete local.space.recoveryGeneration;
+      await local.records.put(local.space);
+      await local.state.write(`result-${binding!.createRequestId}.json`, {
+        ok: false,
+        error: { code: "LOCAL_SETUP_INCOMPLETE", message: "Bootstrap stopped after adoption" },
+      });
+      const start = jest.spyOn(local.manager, "start");
+      const work = jest.spyOn(local.rpc.jobs, "dispatch");
+      local.setRequest({ action: "start", spaceId: local.space.id }, 3);
+      await local.relay.poll(local.rpc);
+      expect(local.receipts.at(-1)).toMatchObject({
+        ok: false,
+        error: { code: "LOCAL_GENERATION_CONFLICT" },
+      });
+      expect(start).not.toHaveBeenCalled();
+      expect(work).not.toHaveBeenCalled();
+      local.setRequest({ action: "operation", spaceId: local.space.id, job: { kind: "git" } }, 3);
+      await local.relay.poll(local.rpc);
+      expect(local.receipts.at(-1)).toMatchObject({
+        ok: false,
+        error: { code: "LOCAL_GENERATION_CONFLICT" },
+      });
+      const cleanup =
+        action === "stop"
+          ? jest.spyOn(local.manager, "stop").mockImplementation(async () => {
+              const space = (await local.records.get(local.space.id))!;
+              space.generation++;
+              await local.records.put(space);
+              return space;
+            })
+          : jest.spyOn(local.manager, "remove").mockImplementation(async (_id, generation) => {
+              expect(generation).toBe(2);
+              const space = (await local.records.get(local.space.id))!;
+              Object.assign(space, { generation: 4, phase: "deleted", desiredState: "deleted" });
+              await local.records.put(space);
+            });
+      local.setRequest(
+        action === "stop"
+          ? { action, spaceId: local.space.id }
+          : { action, spaceId: local.space.id, generation: 3 },
+        3,
+      );
+      await local.relay.poll(local.rpc);
+      expect(local.receipts.at(-1)).toMatchObject({ ok: true, result: { accepted: true } });
+      expect(cleanup).toHaveBeenCalledTimes(1);
+      expect(await local.state.read(key, (value) => value)).toMatchObject({
+        serverGeneration: 3,
+        localGeneration: action === "stop" ? 3 : 4,
+      });
+      expect(start).not.toHaveBeenCalled();
+      expect(work).not.toHaveBeenCalled();
+    },
+  );
+
+  test("held peer Engine metadata does not serialize healthy protection or scoped observation", async () => {
+    const local = await fixture();
+    local.space.runtimeId = randomUUID();
+    await local.records.put(local.space);
+    const peer = {
+      ...local.space,
+      id: randomUUID(),
+      name: `moira-${randomUUID().replaceAll("-", "")}`,
+      runtimeId: randomUUID(),
+    };
+    await local.records.put(peer);
+    let entered!: () => void, release!: () => void;
+    const waiting = new Promise<void>((done) => {
+      entered = done;
+    });
+    const held = new Promise<void>((done) => {
+      release = done;
+    });
+    const native = jest
+      .spyOn(DeviceRuntimeControl.prototype, "protect")
+      .mockResolvedValue(undefined);
+    jest.spyOn(DeviceRuntimeControl.prototype, "assertDockerHeld").mockResolvedValue(undefined);
+    jest.spyOn(DeviceRuntimeControl.prototype, "holdsWorker").mockReturnValue(true);
+    jest.spyOn(DeviceRuntimeControl.prototype, "hasUnindexedWorkers").mockReturnValue(false);
+    jest.spyOn(SbxRuntime.prototype, "list").mockResolvedValue([
+      { id: local.space.runtimeId!, name: local.space.name, status: "running", agent: "shell" },
+      { id: peer.runtimeId!, name: peer.name, status: "running", agent: "shell" },
+    ]);
+    jest.spyOn(SbxRuntime.prototype, "verifySettings").mockResolvedValue(undefined);
+    jest.spyOn(SbxRuntime.prototype, "verifyGlobalNetworkPolicy").mockResolvedValue(undefined);
+    jest.spyOn(SbxRuntime.prototype, "containerIdentity").mockImplementation(async (name) => {
+      if (name === peer.name) {
+        entered();
+        await held;
+      }
+      return {
+        name,
+        containerId: createHash("sha256").update(name).digest("hex"),
+        state: "running",
+      };
+    });
+    const owner = new RuntimeDeviceOwner(local.records, local.policy);
+    const bad = owner.observe(peer.id);
+    try {
+      await Promise.race([
+        waiting,
+        bad.then(() => {
+          throw new Error("Peer observation unexpectedly completed before barrier");
+        }),
+      ]);
+      await owner.protect(local.space.id);
+      const healthy = await owner.observe(local.space.id);
+      expect(healthy).toEqual([
+        { id: local.space.runtimeId, name: local.space.name, status: "running" },
+      ]);
+      expect(native).toHaveBeenCalled();
+    } finally {
+      release();
+      await bad;
+    }
+  });
+
+  test.each(["matching", "foreign-generation", "missing-tuple"] as const)(
+    "completed management outcome repairs a crashed binding only with exact receipt (%s)",
+    async (variant) => {
+      const local = await fixture();
+      await local.relay.poll(local.rpc);
+      const key = `relay-space-${local.resourceId}.json`;
+      const original = await local.state.read(key, (value) => value as Record<string, unknown>);
+      const stop = jest.spyOn(local.manager, "stop").mockImplementation(async () => {
+        const space = (await local.records.get(local.space.id))!;
+        space.desiredState = "stopped";
+        space.phase = "stopped";
+        space.generation++;
+        await local.records.put(space);
+        return space;
+      });
+      local.setRequest({ action: "stop", spaceId: local.space.id }, 4);
+      const normal = local.state.write.bind(local.state);
+      const gate = jest.spyOn(local.state, "write").mockImplementation(async (name, value) => {
+        if (name === key && (value as { serverGeneration?: number }).serverGeneration === 4)
+          throw new Error("Controlled crash after RPC completion");
+        await normal(name, value);
+      });
+      await expect(local.relay.poll(local.rpc)).rejects.toThrow(
+        "Controlled crash after RPC completion",
+      );
+      gate.mockRestore();
+      expect(stop).toHaveBeenCalledTimes(1);
+      if (variant === "foreign-generation") {
+        const space = (await local.records.get(local.space.id))!;
+        space.generation++;
+        await local.records.put(space);
+      } else if (variant === "missing-tuple") {
+        await local.state.write(`result-${local.claim().requestId}.json`, {
+          ok: true,
+          result: { accepted: true },
+        });
+      }
+      const reads = local.payloadReads();
+      await local.relay.poll(local.rpc);
+      expect(stop).toHaveBeenCalledTimes(1);
+      expect(local.payloadReads()).toBe(reads);
+      expect(local.receipts.at(-1)).toMatchObject({ ok: true, result: { accepted: true } });
+      expect(await local.state.read(key, (value) => value)).toMatchObject(
+        variant === "matching" ? { serverGeneration: 4, localGeneration: 2 } : original!,
+      );
+      if (variant === "matching") {
+        local.setRequest({ action: "stop", spaceId: local.space.id }, 5);
+        await local.relay.poll(local.rpc);
+        expect(stop).toHaveBeenCalledTimes(2);
+      }
+    },
+  );
+  test("retained completed outcome skips strict input after resource generation advances without rerunning work", async () => {
+    const local = await fixture();
+    await local.relay.poll(local.rpc);
+    const key = `relay-space-${local.resourceId}.json`;
+    const binding = await local.state.read(key, (value) => value as Record<string, unknown>);
+    await local.state.write(key, { ...binding, serverGeneration: 3 });
+    const reads = local.payloadReads();
+    await local.relay.poll(local.rpc);
+    expect(local.creates()).toBe(1);
+    expect(local.payloadReads()).toBe(reads);
+    expect(local.receipts).toHaveLength(2);
+    expect(local.receipts[1]).toEqual(local.receipts[0]);
+    expect(await local.state.read(key, (value) => value)).toMatchObject({ serverGeneration: 3 });
+    local.claim().digest = "b".repeat(64);
+    await local.relay.poll(local.rpc);
+    expect(local.receipts.at(-1)).toMatchObject({
+      ok: false,
+      error: { code: "LOCAL_REPLAY_CONFLICT" },
+    });
+    expect(local.creates()).toBe(1);
+    expect(local.payloadReads()).toBe(reads);
+    local.claim().userId = "another-owner";
+    await expect(local.relay.poll(local.rpc)).rejects.toMatchObject({
+      code: "LOCAL_IDENTITY_CHANGED",
+    });
+    expect(local.creates()).toBe(1);
+  });
+
+  test("request-scoped result refusal with confirmed device does not fault the next background claim", async () => {
+    const local = await fixture();
+    local.failNextPart("unauthorized");
+    await local.relay.poll(local.rpc, undefined, true);
+    await local.relay.drain();
+    expect(local.receipts).toEqual([]);
+    const reads = local.payloadReads();
+    await local.relay.poll(local.rpc, undefined, true);
+    await local.relay.drain();
+    expect(local.receipts).toHaveLength(1);
+    expect(local.creates()).toBe(1);
+    expect(local.payloadReads()).toBe(reads);
+    const snapshot = jest.spyOn(local.manager, "snapshot").mockResolvedValue({
+      ...publicPolicy(local.policy),
+      spaces: [],
+    });
+    // A fresh claim proves the refused delivery did not put the whole poller into backoff.
+    local.setRequest({ action: "snapshot" }, 2);
+    await local.relay.poll(local.rpc, undefined, true);
+    await local.relay.drain();
+    expect(local.receipts).toHaveLength(2);
+    expect(snapshot).toHaveBeenCalledTimes(1);
+  });
+  test.each(["valid", "completed", "expired", "other-resource", "changed-source"] as const)(
+    "private bootstrap after scoped creation observation accepts only its own live accepted intent (%s)",
+    async (variant) => {
+      const local = await fixture();
+      local.policy.repositories[0].private = true;
+      local.policy.repositories[0].allowPush = true;
+      await local.state.write("policy.json", local.policy);
+      let entered!: () => void, release!: () => void;
+      const preparing = new Promise<void>((done) => {
+        entered = done;
+      });
+      const held = new Promise<void>((done) => {
+        release = done;
+      });
+      local.manager.create = async (repositoryId, ref, operationMarker, onAdmitted) => {
+        Object.assign(local.space, { repositoryId, ref, operationMarker, phase: "creating" });
+        await local.records.put(local.space);
+        onAdmitted?.();
+        entered();
+        await held;
+        local.space.phase = "usable";
+        await local.records.put(local.space);
+        return local.space;
+      };
+      const createId = String(local.claim().requestId);
+      await local.relay.poll(local.rpc, undefined, true);
+      await preparing;
+      local.manager.snapshot = async () => ({ ...publicPolicy(local.policy), spaces: [] });
+      local.setRequest({ action: "snapshot" }, 2);
+      try {
+        await local.relay.poll(local.rpc);
+        const binding = JSON.parse(
+          await readFile(join(directory, `relay-space-${local.resourceId}.json`), "utf8"),
+        );
+        expect(binding).toMatchObject({
+          localSpaceId: local.space.id,
+          localGeneration: 1,
+          serverGeneration: 2,
+        });
+        const key = `relay-request-${createId}.json`;
+        if (variant === "completed") {
+          const journal = JSON.parse(await readFile(join(directory, "requests.json"), "utf8"));
+          journal.find((entry: { id: string }) => entry.id === createId).state = "complete";
+          await local.state.write("requests.json", journal);
+        } else if (variant !== "valid") {
+          const intent = JSON.parse(await readFile(join(directory, key), "utf8"));
+          if (variant === "expired") intent.message.expiresAt = Date.now() - 1;
+          if (variant === "other-resource") intent.resourceId = randomUUID();
+          if (variant === "changed-source") intent.message.request.ref = "another-branch";
+          await local.state.write(key, intent);
+        }
+        if (variant === "valid") {
+          expect(
+            await local.relay.gitIdentity(local.space.id, 1, local.space.repositoryId),
+          ).toEqual({ name: "Fixture Owner", email: "owner@example.test" });
+          expect(local.gitIdentityRequests).toEqual([
+            `/prefix/api/local-devices/github/${local.resourceId}/2/identity`,
+          ]);
+        } else {
+          await expect(
+            local.relay.gitIdentity(local.space.id, 1, local.space.repositoryId),
+          ).rejects.toMatchObject({ code: "LOCAL_CREATE_UNKNOWN" });
+          expect(local.gitIdentityRequests).toEqual([]);
+        }
+      } finally {
+        release();
+        await local.relay.drain();
+      }
+    },
+  );
+
+  test("native remove refusal returns the exact fenced generation through RPC and permits a fresh same-VM retry", async () => {
+    const local = await fixture();
+    local.policy.repositories[0].allowDelete = true;
+    await local.state.write("policy.json", local.policy);
+    await local.relay.poll(local.rpc);
+    let removed = false;
+    let fail = true;
+    jest.spyOn(SbxRuntime.prototype, "stop").mockResolvedValue(undefined);
+    jest.spyOn(SbxRuntime.prototype, "exact").mockImplementation(async () =>
+      removed
+        ? null
+        : {
+            id: local.space.runtimeId!,
+            name: local.space.name,
+            status: "stopped",
+            agent: "shell",
+          },
+    );
+    jest.spyOn(SbxRuntime.prototype, "remove").mockImplementation(async () => {
+      if (fail)
+        throw new LocalRefusal("LOCAL_COMMAND_TIMEOUT", "Controlled exact deletion refusal");
+      removed = true;
+    });
+    const owner = new RuntimeOwner(
+      local.records,
+      local.space.id,
+      async () => {},
+      async () => {},
+    );
+    local.manager.dependencies.guard = async () => ({
+      active: true,
+      stop: async () => {},
+      observe: async () => [],
+      retire: async (_id, generation) => owner.manage(generation, false),
+      remove: async (_id, generation, approval) => owner.manage(generation, true, approval),
+      space: async () => {
+        throw new Error("Deletion must use native management");
+      },
+    });
+    local.setRequest({ action: "delete", spaceId: local.space.id, generation: 2 }, 2);
+    await local.relay.poll(local.rpc);
+    expect(local.receipts.at(-1)).toMatchObject({
+      ok: false,
+      error: {
+        code: "LOCAL_COMMAND_TIMEOUT",
+        management: {
+          spaceId: local.space.id,
+          originGeneration: 1,
+          generation: 2,
+          action: "delete",
+        },
+      },
+    });
+    expect(await local.records.get(local.space.id)).toMatchObject({
+      phase: "deleting",
+      desiredState: "deleted",
+      generation: 2,
+    });
+    fail = false;
+    local.setRequest({ action: "delete", spaceId: local.space.id, generation: 3 }, 3);
+    await local.relay.poll(local.rpc);
+    expect(local.receipts.at(-1)).toMatchObject({ ok: true, result: { accepted: true } });
+    const tombstone = await local.records.get(local.space.id);
+    expect(tombstone).toMatchObject({
+      phase: "deleted",
+      desiredState: "deleted",
+      runtimeId: local.space.runtimeId,
+    });
+    local.setRequest({ action: "delete", spaceId: local.space.id, generation: 4 }, 4);
+    await local.relay.poll(local.rpc);
+    expect(await local.records.get(local.space.id)).toEqual(tombstone);
+    await local.manager.close();
+  });
+
+  test("an admitted native create does not block another VM's work or the short repository-policy append", async () => {
+    const local = await fixture();
+    let entered!: () => void, cancel!: () => void;
+    const preparing = new Promise<void>((done) => {
+      entered = done;
+    });
+    const held = new Promise<void>((done) => {
+      cancel = done;
+    });
+    let creatingId = "";
+    const manager = new LocalManager(local.records, {
+      storage: async () => {},
+      brokerPorts: { http: 0, tunnel: 0 },
+      guard: async () => ({
+        active: true,
+        stop: async () => {},
+        observe: async () => [],
+        remove: async () => {},
+        retire: async (id, generation) => {
+          const space = await local.records.get(id);
+          await local.records.put({
+            ...space!,
+            generation: generation + 1,
+            desiredState: "stopped",
+            phase: "stopped",
+          });
+          cancel();
+        },
+        space: async (id) => ({
+          active: true,
+          validate: async () => {},
+          operation: async () => Buffer.from("{}"),
+          stop: async () => {},
+          prepare: async () => {
+            creatingId = id;
+            entered();
+            await held;
+            throw new LocalRefusal("LOCAL_CANCELLED", "Own creation interrupted");
+          },
+        }),
+      }),
+    });
+    await manager.open();
+    const create = manager
+      .create(local.space.repositoryId, "main", `moira-${"d".repeat(24)}`)
+      .catch((error: unknown) => error);
+    try {
+      await preparing;
+      expect(await manager.dispatchGuest(local.space.id, async () => "peer work completed")).toBe(
+        "peer work completed",
+      );
+      const next = {
+        ...local.policy,
+        repositories: [
+          ...local.policy.repositories,
+          { ...local.policy.repositories[0], id: randomUUID(), fullName: "owner/another" },
+        ],
+      };
+      await manager.appendRepositoryPolicy(local.policy, next);
+      expect((await local.records.policy()).repositories).toEqual(next.repositories);
+      expect(await manager.stop(creatingId)).toMatchObject({
+        desiredState: "stopped",
+        phase: "stopped",
+      });
+      expect(await create).toMatchObject({ code: "LOCAL_CANCELLED" });
+      expect(await local.records.get(local.space.id)).toMatchObject({
+        desiredState: "running",
+        generation: 1,
+      });
+    } finally {
+      cancel();
+      await create;
+      await manager.close();
+    }
+  });
+
+  test("background relay delivers a long claim while a second claim and device confirmation remain available", async () => {
+    const local = await fixture();
+    let entered!: () => void, release!: () => void;
+    const accepted = new Promise<void>((done) => {
+      entered = done;
+    });
+    const held = new Promise<void>((done) => {
+      release = done;
+    });
+    local.manager.create = async (repositoryId, ref, operationMarker, onAdmitted) => {
+      Object.assign(local.space, { repositoryId, ref, operationMarker });
+      await local.records.put(local.space);
+      onAdmitted?.();
+      entered();
+      await held;
+      return local.space;
+    };
+    expect(await local.relay.poll(local.rpc, undefined, true)).toBe(1);
+    await accepted;
+    expect(local.receipts).toEqual([]);
+    expect(await local.relay.confirmed()).toMatchObject({ deviceId: local.policy.deviceId });
+    local.manager.snapshot = async () => ({ ...publicPolicy(local.policy), spaces: [] });
+    local.setRequest({ action: "snapshot" }, 2);
+    await local.relay.poll(local.rpc);
+    expect(local.receipts.at(-1)).toMatchObject({
+      ok: true,
+      result: { creation: { state: "manifest", spaceId: local.space.id } },
+    });
+    release();
+    await local.relay.drain();
+    const binding = JSON.parse(
+      await readFile(join(directory, `relay-space-${local.resourceId}.json`), "utf8"),
+    );
+    expect(binding).toMatchObject({ serverGeneration: 2, localSpaceId: local.space.id });
+  });
+
+  async function loseCreationReceipt(local: Awaited<ReturnType<typeof fixture>>) {
+    await local.relay.poll(local.rpc);
+    const key = `relay-space-${local.resourceId}.json`;
+    const binding = JSON.parse(await readFile(join(directory, key), "utf8"));
+    await local.state.write(key, { ...binding, localSpaceId: null, localGeneration: null });
+    await local.state.remove(`relay-request-${binding.createRequestId}.json`);
+    await local.state.remove("requests.json");
+  }
+
+  test("expired creation receipt recovers the own manifest and observes only that resource despite a stale peer", async () => {
+    const local = await fixture();
+    await loseCreationReceipt(local);
+    const peerId = randomUUID();
+    await local.records.put({
+      ...local.space,
+      id: peerId,
+      name: `moira-${peerId.replaceAll("-", "")}`,
+      operationMarker: `moira-${"c".repeat(24)}`,
+      runtimeId: "stale-peer",
+    });
+    local.manager.dependencies.guard = async () => ({
+      active: true,
+      stop: async () => {},
+      retire: async () => {},
+      remove: async () => {},
+      space: async () => {
+        throw new Error("No work admission during observation");
+      },
+      observe: async () => [
+        { id: local.space.runtimeId!, name: local.space.name, status: "running" },
+        { id: "foreign-peer", name: `moira-${peerId.replaceAll("-", "")}`, status: "running" },
+      ],
+    });
+    local.setRequest({ action: "snapshot" }, 2);
+    await local.relay.poll(local.rpc);
+    expect(local.receipts.at(-1)).toMatchObject({
+      ok: true,
+      result: {
+        creation: { state: "manifest", spaceId: local.space.id },
+        spaces: [{ id: local.space.id, state: "running" }],
+      },
+    });
+    expect(local.creates()).toBe(1);
+    expect(await local.records.get(peerId)).toMatchObject({
+      runtimeId: "stale-peer",
+      desiredState: "running",
+    });
+    await local.manager.close();
+  });
+
+  test("native observation failure preserves recovered manifest identity as unknown instead of false absence", async () => {
+    const local = await fixture();
+    await loseCreationReceipt(local);
+    local.manager.dependencies.guard = async () => ({
+      active: true,
+      stop: async () => {},
+      retire: async () => {},
+      remove: async () => {},
+      space: async () => {
+        throw new Error("No work admission during observation");
+      },
+      observe: async () => {
+        throw new LocalRefusal("LOCAL_GUARD_UNAVAILABLE", "Controlled owner loss");
+      },
+    });
+    local.setRequest({ action: "snapshot" }, 2);
+    await local.relay.poll(local.rpc);
+    expect(local.receipts.at(-1)).toMatchObject({
+      ok: true,
+      result: {
+        creation: { state: "manifest", spaceId: local.space.id },
+        spaces: [
+          {
+            id: local.space.id,
+            state: "unknown",
+            failure: "LOCAL_GUARD_UNAVAILABLE",
+            nativeStopConfirmed: false,
+          },
+        ],
+      },
+    });
+    expect(local.creates()).toBe(1);
+    await local.manager.close();
+  });
+
+  test("settled creation without a manifest proves absence and fences a stale accepted create", async () => {
+    const local = await fixture();
+    await loseCreationReceipt(local);
+    await local.state.remove(`space-${local.space.id}.json`);
+    local.setRequest({ action: "snapshot" }, 2);
+    await local.relay.poll(local.rpc);
+    expect(local.receipts.at(-1)).toMatchObject({
+      ok: true,
+      result: { creation: { state: "absent" }, spaces: [] },
+    });
+    local.setRequest(
+      {
+        action: "create",
+        repositoryId: local.space.repositoryId,
+        ref: "main",
+        operationMarker: local.space.operationMarker,
+      },
+      1,
+    );
+    await local.relay.poll(local.rpc);
+    expect(local.receipts.at(-1)).toMatchObject({
+      ok: false,
+      error: { code: "LOCAL_GENERATION_CONFLICT" },
+    });
+    expect(local.creates()).toBe(1);
+    expect(await local.records.get(local.space.id)).toBeNull();
+  });
+
+  test("confirmed never-created intent fences a delayed journal create at the same generation after restart", async () => {
+    const local = await fixture();
+    await loseCreationReceipt(local);
+    await local.state.remove(`space-${local.space.id}.json`);
+    const manager = new LocalManager(local.records);
+    const rpc = new LocalRpc(manager);
+    let release!: () => void;
+    let entered!: () => void;
+    const delayed = new Promise<void>((done) => {
+      release = done;
+    });
+    const accepted = new Promise<void>((done) => {
+      entered = done;
+    });
+    const request = {
+      action: "create" as const,
+      repositoryId: local.space.repositoryId,
+      ref: "main",
+      operationMarker: local.space.operationMarker,
+    };
+    const pending = rpc.journal
+      .run(randomUUID(), Date.now() + 60_000, request, async () => {
+        entered();
+        await delayed;
+        return manager.create(request.repositoryId, request.ref, request.operationMarker);
+      })
+      .catch((error: unknown) => error);
+    await accepted;
+    local.setRequest({ action: "snapshot" }, 1);
+    await local.relay.poll(local.rpc);
+    expect(local.receipts.at(-1)).toMatchObject({
+      ok: true,
+      result: { creation: { state: "absent" } },
+    });
+    release();
+    expect(await pending).toMatchObject({ code: "LOCAL_CREATE_UNKNOWN" });
+    // The existing retained binding carries closure across manager restart, without a second journal.
+    await expect(
+      new LocalManager(local.records).create(
+        request.repositoryId,
+        request.ref,
+        request.operationMarker,
+      ),
+    ).rejects.toMatchObject({ code: "LOCAL_CREATE_UNKNOWN" });
+    expect(await local.records.list()).toEqual([]);
+  });
+
+  test("ambiguous durable manifests refuse recovery without observing or adopting a VM", async () => {
+    const local = await fixture();
+    await loseCreationReceipt(local);
+    const otherId = randomUUID();
+    await local.records.put({
+      ...local.space,
+      id: otherId,
+      name: `moira-${otherId.replaceAll("-", "")}`,
+    });
+    local.setRequest({ action: "snapshot" }, 2);
+    await local.relay.poll(local.rpc);
+    expect(local.receipts.at(-1)).toMatchObject({
+      ok: false,
+      error: { code: "LOCAL_IDENTITY_CHANGED" },
+    });
+    expect(local.creates()).toBe(1);
+  });
+
+  test.each(["absent", "occupied", "inventory-error"] as const)(
+    "pending manifest deletion handles %s without name adoption or effects on peers",
+    async (observation) => {
+      const local = await fixture();
+      Object.assign(local.space, { runtimeId: null, phase: "creating", networkPolicy: null });
+      await local.records.put(local.space);
+      local.policy.repositories[0].allowDelete = true;
+      await local.state.write("policy.json", local.policy);
+      const peer = {
+        id: randomUUID(),
+        name: `moira-${"e".repeat(32)}`,
+        status: "running" as const,
+        agent: "shell" as const,
+        workspaces: [],
+        ports: [],
+      };
+      const inventory =
+        observation === "occupied"
+          ? [peer, { ...peer, id: randomUUID(), name: local.space.name }]
+          : [peer];
+      jest.spyOn(SbxRuntime.prototype, "list").mockImplementation(async () => {
+        if (observation === "inventory-error")
+          throw new LocalRefusal("LOCAL_COMMAND_TIMEOUT", "Controlled inventory failure");
+        return inventory;
+      });
+      jest.spyOn(SbxRuntime.prototype, "stop").mockImplementation(async () => {
+        throw new Error("No UUID: never stop by name");
+      });
+      jest.spyOn(SbxRuntime.prototype, "remove").mockImplementation(async () => {
+        throw new Error("No UUID: never delete by name");
+      });
+      const owner = new RuntimeOwner(
+        local.records,
+        local.space.id,
+        async () => {},
+        async () => {},
+      );
+      if (observation === "absent") {
+        await owner.manage(1, true);
+        const deleted = await local.records.get(local.space.id);
+        expect(deleted).toMatchObject({
+          runtimeId: null,
+          desiredState: "deleted",
+          phase: "deleted",
+        });
+        await owner.manage(deleted!.generation, true);
+        expect(await local.records.get(local.space.id)).toEqual(deleted);
+      } else {
+        await expect(owner.manage(1, true)).rejects.toMatchObject({
+          code: observation === "occupied" ? "LOCAL_CREATE_UNKNOWN" : "LOCAL_COMMAND_TIMEOUT",
+        });
+        expect(await local.records.get(local.space.id)).toMatchObject({
+          runtimeId: null,
+          phase: "failed",
+        });
+      }
+      expect(inventory[0]).toEqual(peer);
+    },
+  );
+
+  test("failed pending deletion retains its concrete cause and can retry the same owned manifest after absence is verified", async () => {
+    const local = await fixture();
+    Object.assign(local.space, { runtimeId: null, phase: "creating", networkPolicy: null });
+    await local.records.put(local.space);
+    local.policy.repositories[0].allowDelete = true;
+    await local.state.write("policy.json", local.policy);
+    await local.relay.poll(local.rpc);
+    let occupied = true;
+    jest.spyOn(SbxRuntime.prototype, "list").mockImplementation(async () =>
+      occupied
+        ? [
+            {
+              id: randomUUID(),
+              name: local.space.name,
+              status: "running",
+              agent: "shell",
+              workspaces: [],
+              ports: [],
+            },
+          ]
+        : [],
+    );
+    const owner = new RuntimeOwner(
+      local.records,
+      local.space.id,
+      async () => {},
+      async () => {},
+    );
+    local.manager.dependencies.guard = async () => ({
+      active: true,
+      stop: async () => {},
+      observe: async () => [],
+      retire: async (_id, generation) => owner.manage(generation, false),
+      remove: async (_id, generation, approval) => owner.manage(generation, true, approval),
+      space: async () => {
+        throw new Error("Deletion must not re-admit pending SDK creation");
+      },
+    });
+    local.setRequest({ action: "delete", spaceId: local.space.id, generation: 2 }, 2);
+    await local.relay.poll(local.rpc);
+    expect(local.receipts.at(-1)).toMatchObject({
+      ok: false,
+      error: { code: "LOCAL_CREATE_UNKNOWN" },
+    });
+    expect(await local.records.get(local.space.id)).toMatchObject({
+      runtimeId: null,
+      generation: 2,
+      phase: "failed",
+      desiredState: "stopped",
+    });
+    occupied = false;
+    local.setRequest({ action: "delete", spaceId: local.space.id, generation: 3 }, 3);
+    await local.relay.poll(local.rpc);
+    expect(local.receipts.at(-1)).toMatchObject({ ok: true, result: { accepted: true } });
+    const deleted = await local.records.get(local.space.id);
+    expect(deleted).toMatchObject({ runtimeId: null, desiredState: "deleted", phase: "deleted" });
+    local.setRequest({ action: "delete", spaceId: local.space.id, generation: 4 }, 4);
+    await local.relay.poll(local.rpc);
+    expect(local.receipts.at(-1)).toMatchObject({ ok: true, result: { accepted: true } });
+    expect(await local.records.get(local.space.id)).toEqual(deleted);
+    await local.manager.close();
+  });
+
+  test("a foreign generation change during failed deletion cannot become an owned management receipt", async () => {
+    const local = await fixture();
+    await local.relay.poll(local.rpc);
+    local.manager.remove = async () => {
+      await local.records.put({
+        ...local.space,
+        generation: 2,
+        desiredState: "stopped",
+        phase: "failed",
+        failure: "LOCAL_CREATE_UNKNOWN",
+      });
+      throw new LocalRefusal("LOCAL_CREATE_UNKNOWN", "Unrelated local actor changed the record");
+    };
+    local.setRequest({ action: "delete", spaceId: local.space.id, generation: 2 }, 2);
+    await local.relay.poll(local.rpc);
+    expect(local.receipts.at(-1)).toMatchObject({
+      ok: false,
+      error: { code: "LOCAL_GENERATION_CONFLICT" },
+    });
+    const binding = JSON.parse(
+      await readFile(join(directory, `relay-space-${local.resourceId}.json`), "utf8"),
+    );
+    expect(binding).toMatchObject({ localGeneration: 1, serverGeneration: 1 });
+  });
+
   test.each([401, 403, 503])(
     "broken Git identity HTTP %s body preserves its known scoped status",
     async (status) => {
@@ -593,10 +1628,17 @@ describe("outbound companion authority and durable response replay", () => {
       // The reconnect uses a new LocalRelay/LocalRpc, as the next CLI run does.
       const reconnect = local.resume();
       await reconnect.poll(new LocalRpc(local.manager));
-      expect(local.receipts.at(-1)).toMatchObject({
-        ok: false,
-        error: { code: "LOCAL_GENERATION_CONFLICT" },
-      });
+      expect(local.receipts.at(-1)).toMatchObject(
+        cause === "parent"
+          ? { ok: true, result: { spaceId: local.space.id } }
+          : {
+              ok: false,
+              error: { code: cause === "lease" ? "LOCAL_LEASE_EXPIRED" : "LOCAL_DISABLED" },
+            },
+      );
+      expect(
+        await local.state.read(`relay-space-${local.resourceId}.json`, (value) => value),
+      ).toMatchObject({ serverGeneration: 1, localGeneration: 1 });
       expect(local.creates()).toBe(1);
       local.setRequest({ action: "start", spaceId: local.space.id }, 1);
       await reconnect.poll(new LocalRpc(local.manager));
@@ -1041,7 +2083,7 @@ describe("outbound companion authority and durable response replay", () => {
       JSON.parse(await readFile(join(directory, `relay-space-${local.resourceId}.json`), "utf8")),
     ).toMatchObject({ serverGeneration: 3, localGeneration: 1 });
   });
-  test("local recovery rebases only a new server counter and never revives a retained pre-recovery request", async () => {
+  test("local recovery permits read-only completed replay and rebases only a new server counter", async () => {
     const local = await fixture();
     await local.relay.poll(local.rpc);
     local.manager.snapshot = async () => ({ ...publicPolicy(local.policy), spaces: [] });
@@ -1057,10 +2099,10 @@ describe("outbound companion authority and durable response replay", () => {
     });
     await local.records.put(local.space);
     await local.relay.poll(local.rpc);
-    expect(local.receipts.at(-1)).toMatchObject({
-      ok: false,
-      error: { code: "LOCAL_GENERATION_CONFLICT" },
-    });
+    expect(local.receipts.at(-1)).toMatchObject({ ok: true });
+    expect(
+      await local.state.read(`relay-space-${local.resourceId}.json`, (value) => value),
+    ).toMatchObject({ serverGeneration: 3, localGeneration: 1 });
     local.setRequest({ action: "start", spaceId: local.space.id }, 3);
     await local.relay.poll(local.rpc);
     expect(local.receipts.at(-1)).toMatchObject({
@@ -1203,9 +2245,11 @@ describe("outbound companion authority and durable response replay", () => {
     const held = new Promise<void>((done) => {
       finish = done;
     });
+    let guestFinished = false;
     local.manager.create = async () => {
       entered();
       await held;
+      guestFinished = true;
       return local.space;
     };
     jest.spyOn(local.manager, "open").mockResolvedValue(undefined);
@@ -1214,12 +2258,16 @@ describe("outbound companion authority and durable response replay", () => {
     const daemon = new LocalDaemon(local.manager, local.relay, { report: () => {} });
     jest.useFakeTimers({ doNotFake: ["nextTick", "setImmediate"] });
     try {
-      const work = daemon.cycle();
+      const initialCycle = daemon.cycle();
       await admitted;
+      // Control returns after background admission; the native request remains held.
+      expect(await initialCycle).toBe(true);
+      expect(daemon.status).toEqual({ controlPlane: "connected", code: null });
       local.revokeDevice();
       await jest.advanceTimersByTimeAsync(10_000);
-      // The guest remains held: revocation must reach its owner before it finishes.
-      expect(await work).toBe(false);
+      // The next control confirmation must settle authority before the held guest finishes.
+      expect(await daemon.cycle()).toBe(false);
+      expect(guestFinished).toBe(false);
       expect(stop).toHaveBeenCalledTimes(1);
       expect(close).not.toHaveBeenCalled();
       expect(daemon.status).toEqual({ controlPlane: "disabled", code: "LOCAL_IDENTITY_CHANGED" });

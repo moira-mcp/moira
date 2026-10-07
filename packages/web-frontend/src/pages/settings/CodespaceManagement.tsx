@@ -75,6 +75,22 @@ const TONE_BADGE: Record<ReturnType<typeof stateTone>, string> = {
 export type CodespaceManagementScope =
   { provider: "github-codespaces" } | { provider: "local-sandboxes"; computer: LocalDeviceView };
 
+type ResourceRequestError = { message: string; origin: CodespaceSummaryView };
+
+function errorStillCurrent(error: ResourceRequestError | undefined, current: CodespaceSummaryView) {
+  if (!error) return false;
+  const origin = error.origin;
+  return !(
+    current.generation > origin.generation ||
+    (current.observed_at ?? -1) > (origin.observed_at ?? -1) ||
+    (current.updated_at > origin.updated_at &&
+      (current.lifecycle_error !== origin.lifecycle_error ||
+        current.state !== origin.state ||
+        current.desired_state !== origin.desired_state ||
+        current.observed_state !== origin.observed_state))
+  );
+}
+
 function localComputerId(repositoryId: string): string | null {
   try {
     return parseLocalRepositoryTargetId(repositoryId).deviceId;
@@ -109,15 +125,18 @@ export function CodespaceManagement({ scope }: { scope: CodespaceManagementScope
     setManagement: setView,
   } = useGitHubCodespaces();
   const [repositoryId, setRepositoryId] = useState("");
-  const [ref, setRef] = useState("main");
+  // Repository metadata has no default branch; require a ref instead of guessing one.
+  const [ref, setRef] = useState("");
   const [creating, setCreating] = useState(false);
   const [busyCodespaces, setBusyCodespaces] = useState<Set<string>>(new Set());
   const [actionErrors, setActionErrors] = useState<
-    Record<string, { message: string; action: "start" | "stop" }>
+    Record<string, ResourceRequestError & { action: "start" | "stop" }>
   >({});
   const [createError, setCreateError] = useState<string | null>(null);
   const [checkingCodespaces, setCheckingCodespaces] = useState<Set<string>>(new Set());
-  const [checkErrors, setCheckErrors] = useState<Record<string, string>>({});
+  const [checkErrors, setCheckErrors] = useState<Record<string, ResourceRequestError>>({});
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [deleteNeedsRefresh, setDeleteNeedsRefresh] = useState(false);
   const checkState = async (codespace: CodespaceSummaryView) => {
     const id = codespace.codespace_id;
     const owned = guard(false);
@@ -132,6 +151,7 @@ export function CodespaceManagement({ scope }: { scope: CodespaceManagementScope
       // provider refresh only observes and cannot complete a pending stop/start/delete effect.
       if (
         accessEnabled &&
+        codespace.lifecycle_error !== "CODESPACE_LOCAL_SETUP_INCOMPLETE" &&
         codespace.state !== "create_pending" &&
         codespace.state !== "create_submitted"
       ) {
@@ -146,10 +166,17 @@ export function CodespaceManagement({ scope }: { scope: CodespaceManagementScope
       } else {
         const refreshed = await reloadManagement({ sync: true, silent: true });
         if (owned() && !refreshed)
-          setCheckErrors((previous) => ({ ...previous, [id]: loadFailed }));
+          setCheckErrors((previous) => ({
+            ...previous,
+            [id]: { message: loadFailed, origin: codespace },
+          }));
       }
     } catch (error) {
-      if (owned()) setCheckErrors((previous) => ({ ...previous, [id]: failureMessage(error) }));
+      if (owned())
+        setCheckErrors((previous) => ({
+          ...previous,
+          [id]: { message: failureMessage(error), origin: codespace },
+        }));
     } finally {
       if (owned())
         setCheckingCodespaces((previous) => {
@@ -220,6 +247,16 @@ export function CodespaceManagement({ scope }: { scope: CodespaceManagementScope
    * offers. Show it at once, then take the server's listing as the authority on what remains.
    */
   const replaceCodespace = (codespace: CodespaceSummaryView) => {
+    setCheckErrors((previous) => {
+      const next = { ...previous };
+      delete next[codespace.codespace_id];
+      return next;
+    });
+    setActionErrors((previous) => {
+      const next = { ...previous };
+      delete next[codespace.codespace_id];
+      return next;
+    });
     setView((current) => {
       if (!current) return current;
       const exists = current.codespaces.some(
@@ -264,7 +301,8 @@ export function CodespaceManagement({ scope }: { scope: CodespaceManagementScope
       });
       if (!owned()) return;
       replaceCodespace(codespace);
-      toast.success(t("pages.settings.codespaces.created"));
+      if (codespace.state === "usable") toast.success(t("pages.settings.codespaces.created"));
+      else toast(t("localDevices.codespaces.requestAccepted"));
     } catch (error) {
       if (owned()) setCreateError(failureMessage(error));
     } finally {
@@ -273,7 +311,11 @@ export function CodespaceManagement({ scope }: { scope: CodespaceManagementScope
   };
 
   const lifecycle = async (codespace: CodespaceSummaryView, action: "start" | "stop") => {
-    if (!accessEnabled) return;
+    if (
+      !accessEnabled ||
+      (action === "start" && codespace.lifecycle_error === "CODESPACE_LOCAL_SETUP_INCOMPLETE")
+    )
+      return;
     const owned = guard(false);
     try {
       markBusy(codespace.codespace_id, true);
@@ -288,38 +330,73 @@ export function CodespaceManagement({ scope }: { scope: CodespaceManagementScope
           : await apiClient.stopGitHubCodespace(codespace.codespace_id);
       if (!owned()) return;
       replaceCodespace(next);
-      toast.success(
-        t(
-          action === "start"
-            ? "pages.settings.codespaces.started"
-            : "pages.settings.codespaces.stopped",
-        ),
-      );
+      const completed = action === "start" ? next.state === "usable" : next.state === "stopped";
+      if (completed)
+        toast.success(
+          t(
+            action === "start"
+              ? "pages.settings.codespaces.started"
+              : "pages.settings.codespaces.stopped",
+          ),
+        );
+      else toast(t("localDevices.codespaces.requestAccepted"));
     } catch (error) {
       if (owned())
         setActionErrors((previous) => ({
           ...previous,
-          [codespace.codespace_id]: { message: failureMessage(error), action },
+          [codespace.codespace_id]: { message: failureMessage(error), action, origin: codespace },
         }));
     } finally {
       if (owned()) markBusy(codespace.codespace_id, false);
     }
   };
 
+  const refreshDeleteTarget = async (target: CodespaceSummaryView): Promise<void> => {
+    const owned = guard(false);
+    setDeleteNeedsRefresh(true);
+    try {
+      // Read server bookkeeping only. A refused delete may already have advanced its intent
+      // generation; observing that result never authorizes another destructive request.
+      const next = await apiClient.getGitHubCodespaces();
+      if (!owned()) return;
+      const current = next.codespaces.find(
+        (row) =>
+          row.codespace_id === target.codespace_id &&
+          row.provider === target.provider &&
+          row.repository_id === target.repository_id,
+      );
+      setView(next);
+      if (current) {
+        setPendingDelete((pending) =>
+          pending?.codespace_id === target.codespace_id ? current : pending,
+        );
+        setDeleteNeedsRefresh(false);
+      }
+    } catch {
+      // Keep confirmation disabled until a current generation can be read. The existing
+      // refusal remains visible and the dialog offers a read-only retry.
+    }
+  };
+
   const remove = async () => {
-    if (!pendingDelete) return;
+    if (!pendingDelete || deleteNeedsRefresh) return;
     const owned = guard(false);
     try {
       markBusy(pendingDelete.codespace_id, true);
+      setDeleteError(null);
       const next = await apiClient.deleteGitHubCodespace(
         pendingDelete.codespace_id,
         pendingDelete.generation,
       );
       if (!owned()) return;
       replaceCodespace(next);
-      toast.success(t("pages.settings.codespaces.deleted"));
+      if (next.state === "deleted") toast.success(t("pages.settings.codespaces.deleted"));
+      else toast(t("localDevices.codespaces.requestAccepted"));
     } catch (error) {
-      if (owned()) toast.error(failureMessage(error));
+      if (owned()) {
+        setDeleteError(failureMessage(error));
+        await refreshDeleteTarget(pendingDelete);
+      }
       throw error;
     } finally {
       if (owned()) markBusy(pendingDelete.codespace_id, false);
@@ -516,6 +593,8 @@ export function CodespaceManagement({ scope }: { scope: CodespaceManagementScope
                   id={`${formId}-ref`}
                   data-testid={`${formId}-ref`}
                   value={ref}
+                  required
+                  placeholder={t("localDevices.codespaces.refPlaceholder")}
                   maxLength={255}
                   onChange={(event) => setRef(event.target.value)}
                 />
@@ -575,10 +654,31 @@ export function CodespaceManagement({ scope }: { scope: CodespaceManagementScope
           ) : (
             <ul className="space-y-2" data-testid="github-codespace-list">
               {codespaces.map((codespace) => {
+                const setupIncomplete =
+                  codespace.lifecycle_error === "CODESPACE_LOCAL_SETUP_INCOMPLETE";
                 const busy =
                   BUSY_STATES.has(codespace.state) ||
                   busyCodespaces.has(codespace.codespace_id) ||
+                  checkingCodespaces.has(codespace.codespace_id) ||
                   !accessEnabled;
+                const requestBusy =
+                  busyCodespaces.has(codespace.codespace_id) ||
+                  checkingCodespaces.has(codespace.codespace_id);
+                const storedActionError = actionErrors[codespace.codespace_id];
+                const actionError = errorStillCurrent(storedActionError, codespace)
+                  ? storedActionError
+                  : undefined;
+                const storedCheckError = checkErrors[codespace.codespace_id];
+                const checkError = errorStillCurrent(storedCheckError, codespace)
+                  ? storedCheckError
+                  : undefined;
+                const errorMessage =
+                  actionError?.message ??
+                  checkError?.message ??
+                  (codespace.lifecycle_error
+                    ? failureMessage({ code: codespace.lifecycle_error })
+                    : null);
+                const needsAttention = BUSY_STATES.has(codespace.state) && Boolean(errorMessage);
                 return (
                   <li
                     key={codespace.codespace_id}
@@ -590,7 +690,7 @@ export function CodespaceManagement({ scope }: { scope: CodespaceManagementScope
                         <span
                           className={cn(
                             "mt-2 size-2 shrink-0 rounded-full",
-                            TONE_DOT[stateTone(codespace.state)],
+                            TONE_DOT[needsAttention ? "problem" : stateTone(codespace.state)],
                           )}
                           aria-hidden="true"
                         />
@@ -616,10 +716,16 @@ export function CodespaceManagement({ scope }: { scope: CodespaceManagementScope
                       </div>
                       <Badge
                         variant="outline"
-                        className={TONE_BADGE[stateTone(codespace.state)]}
+                        className={
+                          TONE_BADGE[needsAttention ? "problem" : stateTone(codespace.state)]
+                        }
                         data-testid={`github-codespace-state-${codespace.codespace_id}`}
                       >
-                        {t(`pages.settings.codespaces.states.${codespace.state}`)}
+                        {needsAttention
+                          ? t("localDevices.codespaces.needsAttention", {
+                              state: t(`pages.settings.codespaces.states.${codespace.state}`),
+                            })
+                          : t(`pages.settings.codespaces.states.${codespace.state}`)}
                       </Badge>
                     </div>
                     <p className="mt-2 text-xs text-muted-foreground">
@@ -644,40 +750,27 @@ export function CodespaceManagement({ scope }: { scope: CodespaceManagementScope
                             })}
                       </p>
                     )}
-                    {codespace.lifecycle_error && (
+                    {errorMessage && (
                       <InlineError
-                        title={t("localDevices.codespaces.observationFailed")}
-                        message={t(`localDevices.codespaces.errors.${codespace.lifecycle_error}`, {
-                          defaultValue: failureMessage({ code: codespace.lifecycle_error }),
-                        })}
-                        onRetry={() => void checkState(codespace)}
-                        retryLabel={t("localDevices.codespaces.reconcile")}
-                      />
-                    )}
-                    {checkErrors[codespace.codespace_id] && (
-                      <InlineError
-                        title={t("localDevices.codespaces.observationFailed")}
-                        message={checkErrors[codespace.codespace_id]}
-                        onRetry={() => void checkState(codespace)}
-                        retryLabel={t("localDevices.codespaces.reconcile")}
-                      />
-                    )}
-                    {actionErrors[codespace.codespace_id] && (
-                      <InlineError
-                        title={t("pages.settings.codespaces.requestFailed")}
-                        message={actionErrors[codespace.codespace_id].message}
-                        onRetry={() =>
-                          void lifecycle(codespace, actionErrors[codespace.codespace_id].action)
-                        }
+                        title={t(
+                          actionError
+                            ? "pages.settings.codespaces.requestFailed"
+                            : "localDevices.codespaces.observationFailed",
+                        )}
+                        message={errorMessage}
                       />
                     )}
                     <div className="mt-3 flex flex-wrap items-center gap-2">
-                      {computer && BUSY_STATES.has(codespace.state) && (
+                      {(errorMessage || (computer && BUSY_STATES.has(codespace.state))) && (
                         <Button
                           size="sm"
                           variant="outline"
-                          disabled={checkingCodespaces.has(codespace.codespace_id)}
-                          onClick={() => void checkState(codespace)}
+                          disabled={requestBusy}
+                          onClick={() =>
+                            actionError && !setupIncomplete
+                              ? void lifecycle(codespace, actionError.action)
+                              : void checkState(codespace)
+                          }
                           data-testid={`codespace-reconcile-${codespace.codespace_id}`}
                         >
                           {checkingCodespaces.has(codespace.codespace_id) && (
@@ -690,7 +783,7 @@ export function CodespaceManagement({ scope }: { scope: CodespaceManagementScope
                         <Button
                           size="sm"
                           variant="outline"
-                          disabled={busy}
+                          disabled={busy || setupIncomplete}
                           onClick={() => void lifecycle(codespace, "start")}
                           data-testid={`github-codespace-start-${codespace.codespace_id}`}
                         >
@@ -713,9 +806,11 @@ export function CodespaceManagement({ scope }: { scope: CodespaceManagementScope
                       <Button
                         size="sm"
                         variant="destructive"
-                        disabled={busy}
+                        disabled={requestBusy || !accessEnabled}
                         onClick={(event) => {
                           deleteTriggerRef.current = event.currentTarget;
+                          setDeleteError(null);
+                          setDeleteNeedsRefresh(false);
                           setPendingDelete(codespace);
                         }}
                         data-testid={`github-codespace-delete-${codespace.codespace_id}`}
@@ -797,6 +892,22 @@ export function CodespaceManagement({ scope }: { scope: CodespaceManagementScope
         cancelLabel={t("common.cancel")}
         variant="destructive"
         onConfirm={remove}
+        confirmDisabled={deleteNeedsRefresh || !accessEnabled}
+        content={
+          deleteError ? (
+            <>
+              <InlineError
+                title={t("pages.settings.codespaces.requestFailed")}
+                message={deleteError}
+              />
+              {deleteNeedsRefresh && pendingDelete && (
+                <Button variant="outline" onClick={() => void refreshDeleteTarget(pendingDelete)}>
+                  {t("localDevices.codespaces.reconcile")}
+                </Button>
+              )}
+            </>
+          ) : null
+        }
         onReturnFocus={() => deleteTriggerRef.current?.focus()}
       />
     </Card>
