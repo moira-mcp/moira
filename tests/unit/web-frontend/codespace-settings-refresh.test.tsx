@@ -10,10 +10,12 @@ import {
   evaluateCodespaceResourcePolicy,
   projectCodespaceLimits,
   type CodespaceConnectionView,
+  type LocalDeviceView,
 } from "@mcp-moira/shared";
 import i18n from "../../../packages/web-frontend/src/i18n";
 import { GitHubCodespacesProvider } from "../../../packages/web-frontend/src/pages/settings/GitHubCodespacesData";
 import { GitHubCodespaceManagement } from "../../../packages/web-frontend/src/pages/settings/GitHubCodespaceManagement";
+import { CodespaceManagement } from "../../../packages/web-frontend/src/pages/settings/CodespaceManagement";
 import { GitHubCodespaceSettings } from "../../../packages/web-frontend/src/pages/settings/GitHubCodespaceSettings";
 import { apiClient, MoiraApiClient } from "../../../packages/web-frontend/src/services/api-client";
 import type { CodespaceManagementView } from "../../../packages/web-frontend/src/types/api-types";
@@ -77,6 +79,8 @@ const management: CodespaceManagementView = {
       generation: 1,
       created_at: 1,
       updated_at: 1,
+      observed_at: 1,
+      lifecycle_error: null,
     },
   ],
   limits: projectCodespaceLimits({
@@ -121,7 +125,27 @@ function renderSettings(content: React.ReactNode) {
 }
 
 describe("GitHub Codespaces Settings", () => {
-  test("local provider creation remains available without GitHub and identifies two devices granting the same repository", async () => {
+  test("the GitHub list excludes local codespaces even when the management response contains both providers", async () => {
+    const localId = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
+    jest.mocked(apiClient.getGitHubCodespaces).mockResolvedValue({
+      ...management,
+      codespaces: [
+        ...management.codespaces,
+        {
+          ...management.codespaces[0],
+          codespace_id: localId,
+          provider: "local-sandboxes",
+          repository_id:
+            "local:11111111-1111-4111-8111-111111111111:44444444-4444-4444-8444-444444444444",
+        },
+      ],
+    });
+    renderSettings(<GitHubCodespaceManagement />);
+    expect(await screen.findByTestId(`github-codespace-${CODESPACE_ID}`)).toBeInTheDocument();
+    expect(screen.queryByTestId(`github-codespace-${localId}`)).toBeNull();
+    expect(screen.queryByTestId("codespace-provider")).toBeNull();
+  });
+  test("local creation targets its computer when another computer grants the same repository and GitHub is disconnected", async () => {
     const first = "local:11111111-1111-4111-8111-111111111111:33333333-3333-4333-8333-333333333333";
     const second =
       "local:22222222-2222-4222-8222-222222222222:33333333-3333-4333-8333-333333333333";
@@ -150,6 +174,8 @@ describe("GitHub Codespaces Settings", () => {
         {
           provider: "github-codespaces",
           readiness: management.readiness,
+          repositories_stale: false,
+          resources_stale: false,
           connection: disconnected,
           repositories: [],
           limits: management.limits,
@@ -157,6 +183,8 @@ describe("GitHub Codespaces Settings", () => {
         {
           provider: "local-sandboxes",
           readiness: { ...management.readiness, provider: "local-sandboxes" },
+          repositories_stale: false,
+          resources_stale: false,
           connection,
           repositories,
           limits: management.limits,
@@ -185,20 +213,28 @@ describe("GitHub Codespaces Settings", () => {
       .spyOn(apiClient, "createGitHubCodespace")
       .mockImplementation(client.createGitHubCodespace.bind(client));
     try {
-      renderSettings(<GitHubCodespaceManagement />);
-      const provider = await screen.findByTestId("codespace-provider");
-      fireEvent.keyDown(provider, { key: "ArrowDown" });
-      fireEvent.click(await screen.findByRole("option", { name: "Local Docker Sandboxes" }));
-      const repository = await screen.findByTestId("github-codespace-repository");
-      expect(repository).toHaveTextContent("First laptop");
-      fireEvent.keyDown(repository, { key: "ArrowDown" });
-      fireEvent.click(
-        await screen.findByRole("option", { name: "owner/repository · Second laptop" }),
+      const computerId = "22222222-2222-4222-8222-222222222222";
+      renderSettings(
+        <CodespaceManagement
+          scope={{
+            provider: "local-sandboxes",
+            computer: {
+              deviceId: computerId,
+              status: "active",
+              policy: { enabled: true, leaseUntil: Date.now() + 600_000 },
+            } as LocalDeviceView,
+          }}
+        />,
       );
-      fireEvent.change(screen.getByTestId("github-codespace-ref"), {
+      const repository = await screen.findByTestId(`local-codespace-${computerId}-repository`);
+      await waitFor(() => expect(repository).toHaveTextContent("owner/repository"));
+      fireEvent.keyDown(repository, { key: "ArrowDown" });
+      expect(await screen.findAllByRole("option")).toHaveLength(1);
+      fireEvent.click(screen.getByRole("option", { name: "owner/repository" }));
+      fireEvent.change(screen.getByTestId(`local-codespace-${computerId}-ref`), {
         target: { value: "feature/local" },
       });
-      fireEvent.click(screen.getByTestId("github-codespace-create-submit"));
+      fireEvent.click(screen.getByTestId(`local-codespace-${computerId}-create-submit`));
       await waitFor(() =>
         expect(bodies).toEqual([{ repository_id: second, ref: "feature/local" }]),
       );

@@ -69,6 +69,7 @@ function codespace(overrides: Partial<CodespaceResourceRecord> = {}): CodespaceR
     reconcileFailures: 0,
     lastActivityAt: null,
     providerLastUsedAt: null,
+    observedAt: null,
     lastOutcome: "verified_usable",
     createdAt: 10,
     updatedAt: 20,

@@ -1,5 +1,6 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import type Database from "better-sqlite3";
+import { CODESPACE_PROVIDER_LOCAL } from "./local-device-types.js";
 import type {
   CodespaceMachine,
   CodespaceResourcePolicy,
@@ -418,6 +419,8 @@ export class CodespaceResourceRepository {
     policy: CodespaceResourcePolicy,
     now: number,
   ): CodespaceCreateCapacityRefusal | null {
+    // Local VM capacity belongs to the computer owner, not the cloud cost budget.
+    if (provider === CODESPACE_PROVIDER_LOCAL) return null;
     const userHeld = this.countHeld(userId, provider);
     const globalActive = this.countActive(provider);
     if (userHeld >= policy.maxActivePerUser) {
@@ -1195,6 +1198,7 @@ export class CodespaceResourceRepository {
       const changed = this.sqlite
         .prepare(
           `UPDATE codespaceResource SET state = ?, observedState = ?, lastOutcome = ?,
+           observedAt = CASE WHEN ? = 'absent' THEN ? ELSE observedAt END,
            claimId = NULL, claimExpiresAt = NULL, reconcileFailures = 0,
            lastActivityAt = CASE WHEN ? = 'usable' THEN ? ELSE lastActivityAt END, updatedAt = ?
            WHERE id = ? AND generation = ? AND desiredState = ?`,
@@ -1203,6 +1207,8 @@ export class CodespaceResourceRepository {
           input.state,
           input.observedState,
           input.outcome,
+          input.observedState,
+          input.now,
           input.state,
           input.now,
           input.now,
@@ -1246,7 +1252,7 @@ export class CodespaceResourceRepository {
       const changed = this.sqlite
         .prepare(
           `UPDATE codespaceResource SET state = 'deleted', desiredState = 'deleted',
-           observedState = 'absent', lastOutcome = ?, claimId = NULL,
+           observedState = 'absent', lastOutcome = ?, observedAt = ?, claimId = NULL,
            claimExpiresAt = NULL, reconcileFailures = 0, updatedAt = ?
            WHERE id = ? AND generation = ? AND desiredState = ?
              AND retentionPolicy = 'persistent'
@@ -1255,6 +1261,7 @@ export class CodespaceResourceRepository {
         )
         .run(
           outcome,
+          now,
           now,
           resourceId,
           generation,
@@ -1340,6 +1347,7 @@ export class CodespaceResourceRepository {
       repositoryFullName: string;
       observedRef: string | null;
       lastUsedAt: number | null;
+      state: CodespaceResourceRecord["observedState"];
     },
     now: number,
   ): boolean {
@@ -1349,22 +1357,35 @@ export class CodespaceResourceRepository {
       this.sqlite
         .prepare(
           `UPDATE codespaceResource SET repositoryFullName = ?, observedRef = ?,
-           providerLastUsedAt = COALESCE(?, providerLastUsedAt), updatedAt = ?
-           WHERE id = ? AND generation = ? AND (repositoryFullName <> ? OR observedRef IS NOT ?
-             OR (? IS NOT NULL AND providerLastUsedAt IS NOT ?))`,
+           providerLastUsedAt = COALESCE(?, providerLastUsedAt), observedState = ?,
+           observedAt = ?, updatedAt = ? WHERE id = ? AND generation = ?`,
         )
         .run(
           observation.repositoryFullName,
           observation.observedRef,
           observation.lastUsedAt,
+          observation.state,
+          now,
           now,
           resourceId,
           generation,
-          observation.repositoryFullName,
-          observation.observedRef,
-          observation.lastUsedAt,
-          observation.lastUsedAt,
         ).changes === 1
+    );
+  }
+
+  /** A refused observation or effect changes diagnostic bookkeeping, never physical freshness. */
+  recordLifecycleFailure(
+    resourceId: string,
+    generation: number,
+    outcome: string,
+    now: number,
+  ): boolean {
+    return (
+      this.sqlite
+        .prepare(
+          `UPDATE codespaceResource SET lastOutcome = ?, updatedAt = ? WHERE id = ? AND generation = ?`,
+        )
+        .run(outcome, now, resourceId, generation).changes === 1
     );
   }
 
@@ -1642,10 +1663,10 @@ export class CodespaceResourceRepository {
         .prepare(
           `UPDATE codespaceResource SET state = 'deleted', desiredState = 'deleted',
          observedState = 'absent', generation = generation + 1,
-         lastOutcome = 'verified_absent', claimId = NULL, claimExpiresAt = NULL, updatedAt = ?
+         lastOutcome = 'verified_absent', observedAt = ?, claimId = NULL, claimExpiresAt = NULL, updatedAt = ?
          WHERE id = ? AND generation = ? AND claimId = ? AND providerResourceName IS NOT NULL`,
         )
-        .run(now, resourceId, generation, claimId).changes === 1
+        .run(now, now, resourceId, generation, claimId).changes === 1
     );
   }
 
@@ -1660,11 +1681,11 @@ export class CodespaceResourceRepository {
         .prepare(
           `UPDATE codespaceResource SET state = 'deleted', desiredState = 'deleted',
            observedState = 'absent', generation = generation + 1,
-           lastOutcome = 'verified_never_created', claimId = NULL, claimExpiresAt = NULL, updatedAt = ?
+           lastOutcome = 'verified_never_created', observedAt = ?, claimId = NULL, claimExpiresAt = NULL, updatedAt = ?
            WHERE id = ? AND generation = ? AND claimId = ? AND state = 'cleanup_pending'
              AND providerResourceName IS NULL`,
         )
-        .run(now, resourceId, generation, claimId).changes === 1
+        .run(now, now, resourceId, generation, claimId).changes === 1
     );
   }
 

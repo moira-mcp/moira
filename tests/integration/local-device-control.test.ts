@@ -13,7 +13,6 @@ import {
   type LocalDeviceSettingsValue,
   type LocalControlCeiling,
   type LocalPublicPolicy,
-  LOCAL_BROWSER_DEVELOPMENT_DOMAINS,
 } from "@mcp-moira/shared";
 import { createLocalDeviceManagementRoutes } from "../../packages/web-backend/src/routes/local-devices.js";
 import { LocalRepositoryAdmissionService } from "../../packages/web-backend/src/services/local-repository-admission.js";
@@ -29,12 +28,6 @@ const settings: LocalDeviceSettingsValue = {
   memoryBytes: 4 * GiB,
   storageBytes: 32 * GiB,
   dockerBytes: 4 * GiB,
-  maxSandboxes: 2,
-  maxOperationMs: 60000,
-  maxOutputBytes: 1024 * 1024,
-  maxConcurrent: 4,
-  maxNetworkBytes: GiB,
-  maxNetworkConnections: 4,
   repositories: [],
   gitAuthor: null,
   agentRepositoryManagement: null,
@@ -44,12 +37,6 @@ const ceiling: LocalControlCeiling = {
   memoryBytes: 8 * GiB,
   storageBytes: 64 * GiB,
   dockerBytes: 8 * GiB,
-  maxSandboxes: 4,
-  maxOperationMs: 120000,
-  maxOutputBytes: 2 * 1024 * 1024,
-  maxConcurrent: 8,
-  maxNetworkBytes: 2 * GiB,
-  maxNetworkConnections: 8,
   maxLeaseMs: MAX_LOCAL_WORK_LEASE_MS,
 };
 const policy = (deviceId: string, s = settings): LocalPublicPolicy => ({
@@ -59,7 +46,6 @@ const policy = (deviceId: string, s = settings): LocalPublicPolicy => ({
   enabled: s.enabled,
   leaseUntil: s.leaseUntil,
   repositories: s.repositories,
-  maxSandboxes: s.maxSandboxes,
   machine: {
     name: "local-approved",
     displayName: s.label,
@@ -106,8 +92,6 @@ describe("Owner settings are requested separately from locally applied authority
         allowExistingPrivate: true,
         allowNewPrivate: false,
         allowPush: true,
-        maxRepositories: 2,
-        networkProfile: "node-react-playwright" as const,
       },
     };
     service.heartbeat(auth, policy(deviceId), { ceiling, settings, appliedRevision: 0 });
@@ -143,7 +127,11 @@ describe("Owner settings are requested separately from locally applied authority
     ).rejects.toThrow("identity changed");
     const requested = service.getActiveDevice("owner", deviceId).control!.settings;
     expect(requested.repositories).toHaveLength(1);
-    expect(requested.repositories[0].domains).toEqual(LOCAL_BROWSER_DEVELOPMENT_DOMAINS);
+    expect(requested.repositories[0]).toMatchObject({
+      fullName: "owner/private-project",
+      private: true,
+      allowPush: true,
+    });
     service.heartbeat(auth, policy(deviceId, requested), {
       ceiling,
       settings: requested,
@@ -167,8 +155,6 @@ describe("Owner settings are requested separately from locally applied authority
           allowExistingPrivate: true,
           allowNewPrivate: false,
           allowPush: true,
-          maxRepositories: 1,
-          networkProfile: "node-react-playwright" as const,
         },
       };
       service.heartbeat(auth, policy(deviceId), {

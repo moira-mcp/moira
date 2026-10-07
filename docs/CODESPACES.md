@@ -1,4 +1,4 @@
-# Codespaces and Local Devices
+# Codespaces and Local Computers
 
 This reference describes Moira's provider-neutral codespace control plane and
 the GitHub Codespaces and Moira Local providers. A codespace is a persistent,
@@ -99,7 +99,11 @@ Private Git, push and pull-request creation use the connected GitHub App user au
 Agent work cannot choose host commands, VM templates, updates or broader local grants.
 Owner web settings require a separate explicit local approval and remain within its ceilings.
 Each codespace has its own persistent mountless microVM. One repository may have multiple codespaces,
-each with a separate VM, disk and lifecycle within the device and instance limits. Backend, frontend
+each with a separate VM and lifecycle. The computer's bounded backing image holds the local SDK
+storage; its configured capacity is shared across these codespaces, not assigned to each one.
+Local VMs and operations do not consume GitHub
+Codespaces count or concurrency slots and are not subject to its machine ceiling or creation throttle.
+CPU, RAM and disk allocations remain owner-controlled. Backend, frontend
 and browser jobs in one codespace share that VM. The companion requires Node.js 24,
 macOS on Apple silicon and Docker Sandboxes `sbx` 0.46.0. Linux execution is refused because
 the required runtime ownership contract is not supported there; a container or host-shell fallback
@@ -124,8 +128,8 @@ npm run local -- doctor
 `init` creates private state under `~/.moira-local` unless `--state PATH` is supplied, and starts
 disabled. Use the same `--state` on every command when overriding it. The default bounded disk
 image is stored in that state and mounted at a short device-owned `/private/tmp/ml-…` path, so
-SDK Unix sockets fit the native path bound. `--storage-gib`, `--cpus`, `--memory-gib` and
-`--max-sandboxes` set local defaults at initialization. `--storage-root` accepts an existing empty,
+SDK Unix sockets fit the native path bound. `--storage-gib`, `--cpus` and `--memory-gib`
+set local resource defaults at initialization. `--storage-root` accepts an existing empty,
 private, separately mounted bounded filesystem, not an ordinary directory. Preserve the image and
 ownership records; a missing mount is a refusal, not permission to create unbounded storage.
 
@@ -142,8 +146,7 @@ The machine-only store uses an owner-readable generated password file and disabl
 auto-lock only for that owned SDK store. It trusts the host user account; it is not protection
 against another process already acting as that same user. Personal Keychain lock policy is unchanged.
 
-`approve OWNER/REPO` grants read access and the built-in public package/Git domains.
-Use repeated `--domain HOST` to supply the complete allowed-domain list instead;
+`approve OWNER/REPO` grants repository read access;
 `--private`, `--push`, `--delete` and `--pull-requests` grant those capabilities explicitly.
 An enrolled private/write repository uses the server's GitHub connection and
 repository grant; the guest receives no OAuth token. Public read-only Git is direct
@@ -155,7 +158,7 @@ configured prefix), choose **Connect a device**, and copy the enrollment command
 separately. From this checkout, use `npm run local -- enroll` with the displayed `--server` and
 `--pairing-id` arguments. Enter the token on stdin and end input; do not append it to the command
 or put it in shell history. The trusted server URL must be HTTPS, without credentials, query or
-fragment. Refresh the browser, review the pending device's repositories, egress, push/delete
+fragment. Refresh the browser, review the pending computer's repositories, push/delete
 rights, machine ceilings and lease, then confirm. Only then run:
 
 ```bash
@@ -179,9 +182,9 @@ work. Local `disable` independently stops owned SDK/VM processes and preserves d
 credentials cannot be read. Neither closing an MCP client nor losing the relay deletes a codespace.
 
 Broker shutdown fences new admission and waits for owned HTTP/CONNECT tasks, accepted socket
-closure and serialized network-budget reservation/release writes. A CONNECT reservation finishing after
+closure and connection-capacity reservation/release. A CONNECT reservation finishing after
 shutdown is released without destination lookup or connection, so closed service ownership does
-not leave a ledger write running against its state directory.
+not leave an upstream connection running after shutdown.
 
 Local diagnostics use `status`, `create OWNER/REPO --ref REF`, `start SPACE_ID`, `stop SPACE_ID`
 and `exec SPACE_ID -- COMMAND ARG…`. Stop retains files; `remove SPACE_ID --confirm` deletes the
@@ -232,6 +235,22 @@ prerequisite is distinct from live repository append inside a coordinated runnin
 preserves existing VMs and grants. A device without the control capability must use the rebuilt
 companion before the website can apply owner settings.
 
+The strict persisted control schemas require an offline format conversion when their fields change.
+Back up the server database and the computer's complete private state and disk before conversion,
+and keep the matching server and companion bundles for rollback. After confirmed shutdown, remove
+only the unsupported quota and network-profile fields: repository `domains`; delegation
+`maxRepositories` and `networkProfile`; `maxSandboxes`, `maxOperationMs`, `maxOutputBytes`,
+`maxConcurrent`, `maxNetworkBytes` and `maxNetworkConnections` from saved settings and ceilings;
+and the local policy's `limits` object. Apply the same conversion to nested settings, applied
+delegation and retained control-intent policy copies, and to a retained repository-creation
+request's serialized delegation. Recompute the server public-policy digest from its canonical JSON.
+Validate the converted values against the matching strict schemas before restarting either side.
+Preserve repository grants and receipts, account/device/VM IDs, generations, request fingerprints,
+recovery markers, jobs, SDK credentials and disks. The new bundles do not automatically read an
+unsupported saved shape. Rollback restores the corresponding database, local state and matching
+bundles together; resetting the SDK, deleting journals or enrolling a replacement computer is not
+the conversion procedure.
+
 After pairing confirmation, grant web control once on the local machine:
 
 ```bash
@@ -241,14 +260,12 @@ npm run local -- run
 
 Use the same `--state` argument when configured. Omitted ceiling options use the
 current local policy. Choose larger approved bounds during this confirmation with
-`--cpus`, `--memory-gib`, `--storage-gib`, `--docker-gib`, `--max-sandboxes`,
-`--max-operation-ms`, `--max-output-bytes`, `--max-concurrent`,
-`--max-network-bytes` and `--max-network-connections`. The approval pins the server,
+`--cpus`, `--memory-gib`, `--storage-gib` and `--docker-gib`. The approval pins the server,
 user, device and connection; the command refuses an existing approval and does
 not replace it. Web or agent requests cannot change this envelope.
 
 The Local computers editor controls enablement, finite lease, defaults, storage,
-repository grants and permissions, egress domains and optional Git author identity.
+repository grants and permissions and optional Git author identity.
 Saving creates a requested revision. Applied means the companion confirmed that
 revision; pending or rejected settings are distinct from the applied device policy.
 Offline contact does not imply application. The companion continues management
@@ -262,7 +279,8 @@ existing VMs or changing their grants, generation, runtime, Git identity or leas
 that append preserves the effective policy; an uncertain transition retains its durable intent.
 CPU, RAM and Docker disk
 defaults apply to new VMs; existing VMs restart with their admitted machine and
-repository identity. The default owned APFS image can grow or shrink while stopped
+repository identity. The storage setting bounds the computer's SDK backing filesystem, while
+Docker disk capacity belongs to each admitted VM. The default owned APFS image can grow or shrink while stopped
 after native bounds and free-space checks, preserving data. Storage must be integral
 GiB, at least 8 GiB and at least Docker capacity plus 1 GiB; filesystem usable
 capacity includes native overhead. Unknown physical changes retain their journal
@@ -271,12 +289,13 @@ unrelated request cannot erase an uncertain resize.
 
 ### Delegated repository additions
 
-After local web-control opt-in, the owner can enable limited agent repository management in the
+After local web-control opt-in, the owner can enable agent repository management in the
 Local computers editor. It is off by default and binds the connected, verified personal GitHub
-account, separate permissions for existing and new private repositories, optional push, an admission ceiling and
-the fixed `node-react-playwright` network profile. Saving requests a revision; only the companion's
+account, separate permissions for existing and new private repositories and optional push.
+There is no repository-count quota or technology-specific network profile.
+Saving requests a revision; only the companion's
 acknowledgement makes its delegation effective. The MCP caller cannot enable that consent, change
-its account, supply domains or rights, or extend the device lease. New-private consent authorizes the
+its account, supply rights, or extend the computer's lease. New-private consent authorizes the
 separate `repository_create` action; it does not authorize adding unrelated existing repositories.
 
 `codespace({ action: "local_devices" })` discovers owned device IDs and their applied delegation,
@@ -289,14 +308,14 @@ private visibility and required read/push rights. It adds only a private reposit
 connected personal account. Its receipt is `pending`, `applied` or `rejected`; `local_repository_id`
 is null until the exact grant is acknowledged. Reuse the same request identity and payload to collect
 the result. An existing local grant is reused through discovery rather than added again. Requests
-exceeding the admission ceiling or racing unapplied owner settings are refused.
+racing unapplied owner settings are refused.
 
 `repository_create` takes `device_id`, a stable UUID `request_id`, `repository_name` and the personal
 `installation_id` from discovery. The name is 1–100 ASCII letters, digits, underscores, dots or
 hyphens, excluding `.`/`..` and a `.git` suffix. The server creates only an empty private repository
 in the connected user's personal account through fixed GitHub API endpoints; callers cannot select
 another owner or visibility. Current applied new-private consent, device/account identity, finite
-lease and admission capacity are checked before the durable submit fence permits an external create.
+lease are checked before the durable submit fence permits an external create.
 
 Resume using the same complete payload. `pending`, `unknown`, `setup_required` and `rejected` are
 not local authority. A confirmed `github_repository_id` and `full_name` may remain available while
@@ -309,20 +328,16 @@ A lost create response is inspected rather than blindly submitted again. Recover
 exact saved owner, name, private visibility and server-generated marker in the repository description;
 a same-name object or an absent inspection result does not authorize adoption or another create.
 The description marker is visible private-repository metadata, not a credential, and is not exported
-in MCP results. Preserve it while an unknown create is unresolved. Unknown requests retain an admission
-slot; confirmed rejected requests release their reservation and rejected history does not consume
-the owner's ceiling. Creation reservations and existing-repository admissions share both the
-delegated admission ceiling and the device's total repository-grant ceiling. A creation's own
-reservation becomes its admission receipt without taking a second slot; unrelated admission cannot
-consume that reserved place. Existing owner grants count toward the total ceiling.
+in MCP results. Preserve it while an unknown create is unresolved. Durable creation requests
+and admission receipts retain provenance without limiting the number of repositories.
 
-The fixed profile covers npm/Node, GitHub, Docker, official Playwright CDN and Debian/Ubuntu package
-mirrors; it is not arbitrary Internet access. The current approved domains are defined by
-`LOCAL_BROWSER_DEVELOPMENT_DOMAINS` in the shared local-management contract. Existing direct-egress,
-public-address, connection and byte-budget boundaries still apply. Browser binaries and guest system
-libraries are installed through ordinary guest commands; no browser is supplied or certified by the
-profile, and guest privileges, package routing and actual Chromium compatibility need separate
-verification. No host forwarding or replacement VM template is implied.
+The broker permits public DNS destinations independently of the chosen language, package registry
+or framework. Every resolution and connected peer must pass public-address and computer-network
+checks; private, host, LAN and service destinations remain denied. Network downloads have no cumulative
+traffic budget or per-download byte quota. Bounded socket capacity supplies backpressure and does
+not grant host forwarding. Browser binaries and system libraries are installed through ordinary
+guest commands with the required guest privileges; network access does not certify browser
+compatibility or execution.
 
 ### Local Git and pull requests
 
@@ -354,12 +369,11 @@ successful guest cancellation.
 
 Outside the VM, the dedicated profile denies direct egress, including host, LAN, VPN, metadata and
 other-sandbox destinations. Only the approved broker TCP path is allowed; UDP remains globally denied.
-The broker admits approved public DNS destinations and verifies connected addresses, with local
-connection/byte budgets. SDK network-user prompts are disabled rather than allowed to expand access.
-When the connection ceiling is busy, a bounded FIFO queue applies backpressure rather than an
+The broker admits public DNS destinations and verifies connected addresses.
+SDK network-user prompts are disabled rather than allowed to expand access.
+When internal socket capacity is busy, a bounded FIFO queue applies backpressure rather than an
 authorization refusal. Closed consumers and broker shutdown cancel their wait; admission refreshes
-the bound authority after waiting and before consuming credit. Revoked grants and exhausted byte
-budgets remain refusals; waiting never enlarges either budget.
+the bound authority after waiting. Revoked grants and expired leases remain refusals.
 The guest loopback proxy authenticates CONNECT and absolute-HTTP requests to the host broker with
 its installed per-space broker credential, so clients such as npm need not send a proxy-auth header.
 A client-supplied proxy credential cannot select another space. Repository Git authorization remains
@@ -447,7 +461,7 @@ back to the record, or no ref when the provider reports none.
 Lifecycle work observes the exact Codespace before it acts. A Codespace already
 in the desired state completes without a provider mutation: a stop of a Codespace
 the provider already shut down makes no stop call, a stop of a Codespace the
-provider reports as failed completes as stopped with the observed state `failed`,
+GitHub provider reports as failed completes as stopped with the observed state `failed`,
 and a start of an available one only probes the connector. While the provider
 reports the Codespace as
 provisioning, starting or stopping, a start or stop stays pending and issues
@@ -456,9 +470,27 @@ and for legacy cleanup. When the provider refuses a mutation, the Codespace is
 observed again: a record whose goal was reached anyway settles, and one the
 provider is still moving stays pending instead of reporting the refusal.
 
+The local provider reports `created` separately from provisioning. It is an actionable
+observation, so a stop can address the exact existing VM without starting it. It does not
+certify shutdown. A local created VM completes as stopped only when the independent native
+owner has confirmed its exact SDK UUID/name, Docker Engine container and worker settlement
+against the durable stop generation. A saved stopped phase without a current runtime
+observation is unknown. Unknown observation returns `CODESPACE_PROVIDER_UNAVAILABLE`;
+an explicit SDK error remains a failed observation and cannot itself complete a local stop.
+
+Resource summaries expose nullable `observed_at`, the time of a verified provider observation,
+and nullable `lifecycle_error`, a known `CodespaceResourceErrorCode`. They never expose raw
+provider diagnostics. Claims, retries and a later connector probe do not advance the observation
+time; `updated_at` remains bookkeeping time. A refused observation retains the last verified
+state and observation time until ordinary reconciliation succeeds.
+
 Repeating a pending lifecycle request does not advance its generation. A
 provider response lost during create, start, stop or delete is reconciled from
 the exact stored identity and intent; broad discovery or deletion is not used.
+The local relay retains authenticated create/start/stop/delete request and reply payloads until
+their existing private-transfer expiry. A retry reads the same mutation receipt even after the
+original delivery deadline, without dispatching the effect again. Snapshot and guest-operation
+payloads retain their ordinary cleanup behavior.
 Finishing a command, disconnecting an MCP client or ending a conversation never
 deletes a persistent codespace.
 
@@ -507,8 +539,8 @@ stop, cancellation and cleanup work remains eligible for reconciliation.
 ### Idle auto-pause
 
 Two built-in, non-administrative user settings in category `codespaces` control
-idle pausing. The Settings page edits them in the Automatic pause card of its GitHub &
-Codespaces section (not in the generic settings editor), and the settings API and the
+idle pausing. The Settings page edits them in the Automatic pause card of
+**Development → GitHub Codespaces** (not in the generic settings editor), and the settings API and the
 MCP `settings` tool read and write them:
 
 | Setting                           | Type    | Default | Meaning                                                 |
@@ -601,10 +633,11 @@ active work, cancellation and terminal cleanup. Each claim advances its attempt 
 failed cleanup cannot repeatedly take precedence over other due work.
 
 Before connector contact, SQLite reserves the authenticated tenant, codespace
-and authorization generations, per-user and global concurrency, input bytes,
+and authorization generations, input bytes,
 independent stdout/stderr bounds and deadline. SQLite stores only
 operation metadata. It does not store argv, cwd, stdin, stdout, stderr, provider
-tokens or SSH configuration.
+tokens or SSH configuration. Cloud concurrency reservations count only cloud operations;
+local operations use no owner-set concurrency quota and do not consume those cloud slots.
 
 For GitHub, cancellation targets the recorded foreground process group and validates the
 process start time before signalling. A lost worker, SSH connection or control
@@ -714,7 +747,8 @@ within its separate protocol safety range.
 
 Running commands or reads in the same codespace do not by themselves block write, upload or patch
 admission. Those file mutations remain serialized against one another for their staged commits.
-All operations still share per-user and instance concurrency ceilings. File existence,
+Cloud operations share per-user and instance concurrency ceilings; local operations do not
+consume those slots. File existence,
 size and digest preconditions are checked in the guest; another writer changing the expected
 version causes refusal rather than an overwrite. Patch staging and atomic journal recovery remain
 the mutation boundary.
@@ -802,7 +836,7 @@ reusable `codespace_id`.
 
 `limits` combines `CodespaceObservabilityService.limits()` from policy and the
 database with an optional personal GitHub monthly billing read. The website
-management list returns the same view. Every local limit in it is a value Moira
+management list returns the same view. Every non-null limit in it is a value Moira
 enforces, taken from the one definition every enforcement site reads
 (`effectiveCodespaceLimits` in
 `resource-policy.ts`), beside the user's current use:
@@ -818,6 +852,10 @@ enforces, taken from the one definition every enforcement site reads
 
 The `transfers` group counts native file transfers only, excluding internal companion relay
 messages. Its published ceilings remain the native file policy, not the relay control budget.
+For the local provider, codespace count ceilings, creation throttle, operation concurrency
+ceiling and `machine_ceiling` are `null`: no cloud quota is imposed there. Counts report
+the selected provider's resources and operations. Transport, native-transfer, output and
+operation deadline bounds remain explicit; CPU/RAM/disk settings belong to the computer owner.
 
 `instance_held` is the only instance-wide figure; no other user's codespaces or
 identifiers appear. Billing requires the GitHub App user permission `Plan: read`.
@@ -964,12 +1002,14 @@ patches, argv, text and native references do not enter request context.
 
 ## Website management
 
-The Settings page's **Development** category separates **Environments**, **GitHub**
+The Settings page's **Development** category separates **GitHub Codespaces**, **GitHub**
 and **Local computers**. The `#integrations-github` and `#integrations-local` links
-select their corresponding subsections. Environments holds development-environment
-management, Automatic pause and Your limits. The development-environment provider selector separates
-GitHub and local repository choices. Local choices include the device label and a qualified
-repository target, so the same repository on two devices remains distinct. Local
+select their corresponding subsections. GitHub Codespaces holds cloud codespace
+management, Automatic pause and Your limits. Local computers lists each connected computer
+with its own codespaces, creation form and collapsed owner settings. The common management
+component filters local repositories and codespaces by the stable computer UUID, not its label:
+computers with the same name and multiple VMs of one repository remain separate. The shared
+backing disk capacity is shown for the computer; CPU and RAM describe each VM. Local
 provider admission uses the selected device's current grants and lease. Public
 read-only local work needs no GitHub OAuth connection; enrolled private checkout
 and writes additionally require the connected GitHub account's App repository
@@ -982,20 +1022,28 @@ popover and a **Setup guide** tour, and the connection card shows a stepper (con
 GitHub, install the Moira App, grant repositories) marking each step
 done, current, not started or unavailable on this instance.
 
-The Development environments card shows the selected provider's readiness. With GitHub selected,
+The GitHub Codespaces card shows the cloud provider's readiness;
 it discloses that an authorized agent has the Codespace user's repository, network and configured-secret
 access, and lets the user create a codespace for an approved personal or organization repository
-and ref when GitHub bills the connected personal account. With Moira Local selected, it describes
-the device-owned VM and locally approved rights; the create hint
+and ref when GitHub bills the connected personal account. Each computer's codespace card describes
+the computer-owned VM and approved rights. For GitHub, the create hint
 states how many codespaces the user holds against the per-user ceiling and that
-stopped codespaces count. It lists the user's codespaces with repository, current
+stopped codespaces count; local creation has no count ceiling. It lists the user's codespaces with repository, current
 branch (the requested ref until a current one is observed), provider and machine
 context and a plain-language state badge; a collapsed **Technical details** block
 carries the requested and current ref, desired/observed state and generation, the
-last update and the codespace ID. Start and Stop are available for stopped and
+bookkeeping update and the codespace ID. Local cards separately show verified observation time
+or that no verified observation exists. Safe lifecycle diagnostic codes have localized
+explanations. Start and Stop are available for stopped and
 running codespaces; Delete requires a confirmation that names the repository and
 points to Stop for keeping data. Actions are disabled while a codespace is in a
-pending, cleanup or ambiguous state. The card keeps a saved repository list visible
+pending, cleanup or ambiguous state, while local cards offer **Check state again**. For an existing
+start/stop/delete intent with applied access, it retries that exact resource's existing endpoint;
+delete uses the displayed current generation. A pending create or unavailable access instead
+requests read-only refresh and never creates another VM. Action errors and loaders belong to
+the affected codespace. Refreshing a computer section silently updates the shared data source
+without making another computer's card busy. Entering Local computers and acknowledged policy
+changes refresh its management data. The card keeps a saved repository list visible
 with a stale warning when provider enumeration fails. Its Refresh button forces
 grant and managed-resource observation. If GitHub cannot confirm current resource
 state, the card shows a stale warning and retains the saved entries. It never
@@ -1009,9 +1057,10 @@ editor or over SSH is not seen, and that GitHub itself stops a codespace after 2
 minutes. A separate GitHub monthly usage card shows compute core-hours, storage
 GB-month including prebuilds, included Free/Pro allowances when known, net billable
 USD, the personal payer and retrieval time; it says unavailable when GitHub cannot
-provide a trustworthy summary. The Your limits card shows Moira's own `limits`:
-meters for codespaces held, commands running and file-transfer bytes, plus a
-collapsed list of the other local ceilings.
+provide a trustworthy summary. The Your limits card shows GitHub's `limits`:
+codespaces held, commands running and file-transfer bytes, plus the applicable finite ceilings.
+The local API limits projection has no cloud count/concurrency ceiling; local VM resources
+belong to the computer owner, and native-transfer and protocol bounds still apply.
 
 The routes retain `/api/integrations/github/codespaces` behind
 `requireAuth` and are a second presentation of the same services the MCP tools use,
@@ -1367,6 +1416,13 @@ use the `codespace` vocabulary. Credential tables
 contain versioned ciphertext; resource, operation and transfer tables contain
 authority and accounting metadata but no command, path, query, patch, file content,
 native source URL, result stream, provider token or SSH material.
+
+Migration `0057_codespace_observation.sql` adds nullable resource `observedAt`. Existing rows
+remain null until a verified observation; startup and retries do not invent physical freshness.
+Install matching server and companion builds: local snapshots require the derived
+`nativeStopConfirmed` observation field. Follow **Owner web control and bundle updates** for the
+coordinated backup, offline strict-field normalization and paired rollback; this contract does
+not automatically accept an earlier companion's snapshot.
 
 Migration `0056_repository_creation_requests.sql` adds the tenant-owned durable private-repository
 request journal. It stores request fingerprint, device/account/installation authority, name,

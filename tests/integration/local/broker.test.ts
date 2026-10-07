@@ -1,5 +1,5 @@
-import { afterEach, beforeEach, describe, expect, jest, test } from "@jest/globals";
-import { mkdtemp, rm, realpath, stat } from "node:fs/promises";
+import { afterEach, beforeEach, describe, expect, test } from "@jest/globals";
+import { mkdtemp, rm, realpath } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { connect, createServer, type Socket } from "node:net";
@@ -47,85 +47,57 @@ function exchange(port: number, bytes: string): Promise<string> {
 }
 
 describe("local broker authority and address boundary", () => {
-  test.each(["reservation", "release"] as const)(
-    "broker shutdown waits for the final %s ledger write",
-    async (phase) => {
-      const fixture = await localFixture(state);
-      const budget = new NetworkBudget(state);
-      let enterWrite!: () => void;
-      let releaseWrite!: () => void;
-      const entered = new Promise<void>((resolve) => {
-        enterWrite = resolve;
-      });
-      const gate = new Promise<void>((resolve) => {
-        releaseWrite = resolve;
-      });
-      const write = state.write.bind(state);
-      let ledgerWrites = 0;
-      const spy = jest.spyOn(state, "write").mockImplementation(async (key, value) => {
-        if (key === "network-budget.json") {
-          ledgerWrites++;
-          if (ledgerWrites === (phase === "reservation" ? 1 : 2)) {
-            enterWrite();
-            await gate;
-          }
-        }
-        await write(key, value);
-      });
-      let lookups = 0;
-      const faults: unknown[] = [];
-      const broker = await startBroker({
-        authorize: (header) => fixture.records.authorize(header),
-        budget,
-        resolve: async () => {
-          lookups++;
-          return [{ address: "127.0.0.1", family: 4 }];
-        },
-        git: async (_request, response) => {
-          response.end();
-        },
-        onFault: (error) => faults.push(error),
-      });
-      closers.push(broker.close);
-      const client = connect({ host: "127.0.0.1", port: broker.port });
-      client.on("error", () => undefined);
-      await new Promise<void>((resolve) => client.once("connect", resolve));
-      client.write(
-        `CONNECT packages.example.com:443 HTTP/1.1\r\nHost: packages.example.com\r\nProxy-Authorization: ${fixture.authorization}\r\n\r\n`,
-      );
-      await entered;
-      let closed = false;
-      const closing = broker.close().then(() => {
-        closed = true;
-      });
-      try {
-        // A complete event-loop turn lets listener/socket closure settle while the
-        // deliberately held filesystem operation remains unfinished.
-        await new Promise<void>((resolve) => setImmediate(resolve));
-        expect(closed).toBe(false);
-      } finally {
-        releaseWrite();
-        await closing;
-        client.destroy();
-        spy.mockRestore();
-      }
-      expect(ledgerWrites).toBe(2);
-      expect(lookups).toBe(phase === "reservation" ? 0 : 1);
-      expect(await state.read("network-budget.json", (value) => value)).toEqual({
-        leaseUntil: fixture.policy.leaseUntil,
-        spent: 0,
-      });
-      expect(faults).toEqual([]);
-      await rm(root, { recursive: true, force: true });
-      await expect(stat(root)).rejects.toMatchObject({ code: "ENOENT" });
-    },
-  );
+  test("broker shutdown waits for outstanding authority checks without traffic accounting", async () => {
+    const fixture = await localFixture(state);
+    let enterCheck!: () => void;
+    let finishCheck!: () => void;
+    const entered = new Promise<void>((resolve) => {
+      enterCheck = resolve;
+    });
+    const held = new Promise<void>((resolve) => {
+      finishCheck = resolve;
+    });
+    const budget = new NetworkBudget();
+    const broker = await startBroker({
+      authorize: async (header) => {
+        enterCheck();
+        await held;
+        return fixture.records.authorize(header);
+      },
+      budget,
+      git: async (_request, response) => {
+        response.end();
+      },
+      onFault: () => {},
+    });
+    closers.push(broker.close);
+    const client = connect({ host: "127.0.0.1", port: broker.port });
+    client.on("error", () => {});
+    await new Promise<void>((resolve) => client.once("connect", resolve));
+    client.write(
+      `CONNECT packages.example.com:443 HTTP/1.1\r\nHost: packages.example.com\r\nProxy-Authorization: ${fixture.authorization}\r\n\r\n`,
+    );
+    await entered;
+    let closed = false;
+    const closing = broker.close().then(() => {
+      closed = true;
+    });
+    try {
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(closed).toBe(false);
+    } finally {
+      finishCheck();
+      await closing;
+      client.destroy();
+    }
+    expect(await state.read("network-budget.json", (value) => value)).toBeNull();
+  });
 
   test("broker and fixed tunnel repeat and concurrent close settle the actual listeners", async () => {
     const fixture = await localFixture(state);
     const broker = await startBroker({
       authorize: (header) => fixture.records.authorize(header),
-      budget: new NetworkBudget(state),
+      budget: new NetworkBudget(),
       git: async (_request, response) => {
         response.end();
       },
@@ -194,7 +166,7 @@ describe("local broker authority and address boundary", () => {
     let authorized = 0;
     const broker = await startBroker({
       authorize: (header) => fixture.records.authorize(header),
-      budget: new NetworkBudget(state),
+      budget: new NetworkBudget(),
       git: async (_request, response, grant) => {
         authorized++;
         response.end(grant.repository.fullName);
@@ -233,7 +205,7 @@ describe("local broker authority and address boundary", () => {
     let addresses = [{ address: "127.0.0.1", family: 4 as const }];
     const broker = await startBroker({
       authorize: (header) => fixture.records.authorize(header),
-      budget: new NetworkBudget(state),
+      budget: new NetworkBudget(),
       resolve: async () => addresses,
       dial: () => {
         dials++;
@@ -280,7 +252,7 @@ describe("local broker authority and address boundary", () => {
     const destinations: string[] = [];
     const broker = await startBroker({
       authorize: (header) => fixture.records.authorize(header),
-      budget: new NetworkBudget(state),
+      budget: new NetworkBudget(),
       resolve: async () => {
         lookups++;
         return [{ address: "8.8.8.8", family: 4 }];

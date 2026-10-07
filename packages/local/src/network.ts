@@ -66,12 +66,11 @@ export function localNetworks(): BlockList {
 
 export async function resolvePublicTarget(
   host: string,
-  allowed: readonly string[],
   resolve: ResolveHost = resolveHost,
   networks: () => BlockList = localNetworks,
 ): Promise<ResolvedTarget> {
-  if (!domainName.safeParse(host).success || !allowed.includes(host)) {
-    throw new LocalRefusal("LOCAL_NETWORK_DENIED", "Destination is not locally approved.");
+  if (!domainName.safeParse(host).success) {
+    throw new LocalRefusal("LOCAL_NETWORK_DENIED", "Destination must be a public DNS name.");
   }
   const answers = await resolve(host);
   const local = networks();

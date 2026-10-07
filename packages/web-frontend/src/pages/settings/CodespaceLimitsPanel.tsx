@@ -33,33 +33,35 @@ function Meter({
 }: {
   label: string;
   used: number;
-  max: number;
+  max: number | null;
   display: string;
   testId: string;
 }) {
-  const ratio = max > 0 ? Math.min(used / max, 1) : 0;
+  const ratio = max !== null && max > 0 ? Math.min(used / max, 1) : 0;
   return (
     // Label, value and bar each on their own line, so every meter has the same height whatever
     // the length of its value ("2 of 4" beside "12 MB of 100 MB").
     <div className="flex flex-col gap-1 rounded-lg border bg-card p-3" data-testid={testId}>
       <span className="truncate text-sm text-muted-foreground">{label}</span>
       <span className="truncate text-base font-semibold tabular-nums">{display}</span>
-      <div
-        className="mt-1 h-1.5 overflow-hidden rounded-full bg-muted"
-        role="meter"
-        aria-label={label}
-        aria-valuemin={0}
-        aria-valuemax={max}
-        aria-valuenow={used}
-      >
+      {max !== null && (
         <div
-          className={cn(
-            "h-full rounded-full transition-[width]",
-            ratio >= 1 ? "bg-destructive" : ratio >= 0.75 ? "bg-amber-500" : "bg-primary",
-          )}
-          style={{ width: `${ratio * 100}%` }}
-        />
-      </div>
+          className="mt-1 h-1.5 overflow-hidden rounded-full bg-muted"
+          role="meter"
+          aria-label={label}
+          aria-valuemin={0}
+          aria-valuemax={max}
+          aria-valuenow={used}
+        >
+          <div
+            className={cn(
+              "h-full rounded-full transition-[width]",
+              ratio >= 1 ? "bg-destructive" : ratio >= 0.75 ? "bg-amber-500" : "bg-primary",
+            )}
+            style={{ width: `${ratio * 100}%` }}
+          />
+        </div>
+      )}
     </div>
   );
 }
@@ -75,14 +77,6 @@ export function CodespaceLimitsPanel({
   const bytes = (value: number) => formatBytes(value, i18n.language);
   const minutes = (seconds: number) => Math.round(seconds / 60);
   const facts: Array<[string, string]> = [
-    [
-      t("pages.settings.codespaces.limits.machine"),
-      t("pages.settings.codespaces.limits.machineValue", {
-        cpu: limits.machine_ceiling.cpu_cores,
-        memory: bytes(limits.machine_ceiling.memory_bytes),
-        storage: bytes(limits.machine_ceiling.storage_bytes),
-      }),
-    ],
     [
       t("pages.settings.codespaces.limits.commandDuration"),
       t("pages.settings.codespaces.limits.minutes", {
@@ -105,20 +99,34 @@ export function CodespaceLimitsPanel({
       t("pages.settings.codespaces.limits.retention"),
       t("pages.settings.codespaces.limits.days", { count: limits.lifecycle.retention_days }),
     ],
-    [
+  ];
+  if (limits.machine_ceiling !== null) {
+    facts.unshift([
+      t("pages.settings.codespaces.limits.machine"),
+      t("pages.settings.codespaces.limits.machineValue", {
+        cpu: limits.machine_ceiling.cpu_cores,
+        memory: bytes(limits.machine_ceiling.memory_bytes),
+        storage: bytes(limits.machine_ceiling.storage_bytes),
+      }),
+    ]);
+  }
+  if (limits.codespaces.create_throttle_seconds !== null) {
+    facts.push([
       t("pages.settings.codespaces.limits.createInterval"),
       t("pages.settings.codespaces.limits.seconds", {
         count: limits.codespaces.create_throttle_seconds,
       }),
-    ],
-    [
+    ]);
+  }
+  if (limits.codespaces.max_instance !== null) {
+    facts.push([
       t("pages.settings.codespaces.limits.instance"),
       t("pages.settings.codespaces.limits.ofMax", {
         used: limits.codespaces.instance_held,
         max: limits.codespaces.max_instance,
       }),
-    ],
-  ];
+    ]);
+  }
 
   const billing = limits.provider.billing;
   const number = (value: number) =>
@@ -251,20 +259,28 @@ export function CodespaceLimitsPanel({
                 label={t("pages.settings.codespaces.limits.held")}
                 used={limits.codespaces.held}
                 max={limits.codespaces.max_per_user}
-                display={t("pages.settings.codespaces.limits.ofMax", {
-                  used: limits.codespaces.held,
-                  max: limits.codespaces.max_per_user,
-                })}
+                display={
+                  limits.codespaces.max_per_user === null
+                    ? String(limits.codespaces.held)
+                    : t("pages.settings.codespaces.limits.ofMax", {
+                        used: limits.codespaces.held,
+                        max: limits.codespaces.max_per_user,
+                      })
+                }
                 testId="codespace-limit-held"
               />
               <Meter
                 label={t("pages.settings.codespaces.limits.commands")}
                 used={limits.operations.active}
                 max={limits.operations.max_concurrent_per_user}
-                display={t("pages.settings.codespaces.limits.ofMax", {
-                  used: limits.operations.active,
-                  max: limits.operations.max_concurrent_per_user,
-                })}
+                display={
+                  limits.operations.max_concurrent_per_user === null
+                    ? String(limits.operations.active)
+                    : t("pages.settings.codespaces.limits.ofMax", {
+                        used: limits.operations.active,
+                        max: limits.operations.max_concurrent_per_user,
+                      })
+                }
                 testId="codespace-limit-commands"
               />
               <Meter
@@ -313,10 +329,8 @@ export function CodespaceLimitsFromData({
 }: {
   section?: "all" | "billing" | "limits";
 }): React.JSX.Element | null {
-  const { management, provider } = useGitHubCodespaces();
-  const selected = management?.providers?.find(
-    (entry) => entry.provider === (section === "billing" ? "github-codespaces" : provider),
-  );
+  const { management } = useGitHubCodespaces();
+  const selected = management?.providers?.find((entry) => entry.provider === "github-codespaces");
   return management ? (
     <CodespaceLimitsPanel limits={selected?.limits ?? management.limits} section={section} />
   ) : null;

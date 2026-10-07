@@ -24,9 +24,8 @@ afterEach(async () => {
 });
 async function fixture() {
   const local = await localFixture(state);
-  local.policy.limits.maxNetworkConnections = 1;
   await state.write("policy.json", local.policy);
-  const budget = new NetworkBudget(state);
+  const budget = new NetworkBudget(1);
   budgets.push(budget);
   return { ...local, budget };
 }
@@ -47,16 +46,13 @@ describe("network scheduling independent of VM lifetime", () => {
     });
     await turn();
     expect(order).toEqual([]);
-    await held.release(0);
+    await held.release();
     const next = await second;
     expect(order).toEqual([2]);
-    await next.release(0);
-    await (await third).release(0);
+    await next.release();
+    await (await third).release();
     expect(order).toEqual([2, 3]);
-    expect(await state.read("network-budget.json", (value) => value)).toEqual({
-      leaseUntil: f.policy.leaseUntil,
-      spent: 0,
-    });
+    expect(await state.read("network-budget.json", (value) => value)).toBeNull();
   });
 
   test("a disconnected queued consumer does not hold credit or block the next connection", async () => {
@@ -69,9 +65,9 @@ describe("network scheduling independent of VM lifetime", () => {
     const next = f.budget.reserve(f.policy);
     controller.abort();
     await cancelled;
-    await held.release(0);
-    await (await next).release(0);
-    expect(await state.read("network-budget.json", (value) => value)).toMatchObject({ spent: 0 });
+    await held.release();
+    await (await next).release();
+    expect(await state.read("network-budget.json", (value) => value)).toBeNull();
   });
 
   test("authority is checked after waiting and revoked permission cannot consume credit", async () => {
@@ -82,9 +78,9 @@ describe("network scheduling independent of VM lifetime", () => {
     ).rejects.toMatchObject({ code: "LOCAL_NETWORK_DENIED" });
     f.policy.enabled = false;
     await state.write("policy.json", f.policy);
-    await held.release(0);
+    await held.release();
     await waiting;
-    expect(await state.read("network-budget.json", (value) => value)).toMatchObject({ spent: 0 });
+    expect(await state.read("network-budget.json", (value) => value)).toBeNull();
   });
 
   test("shutdown cancels waiting consumers and settles their accounting", async () => {
@@ -95,44 +91,47 @@ describe("network scheduling independent of VM lifetime", () => {
     });
     f.budget.closeAdmission();
     await waiting;
-    await held.release(0);
+    await held.release();
     await f.budget.settle();
     await expect(f.budget.reserve(f.policy)).rejects.toMatchObject({
       code: "LOCAL_NETWORK_CANCELLED",
     });
-    expect(await state.read("network-budget.json", (value) => value)).toMatchObject({ spent: 0 });
+    expect(await state.read("network-budget.json", (value) => value)).toBeNull();
   });
 
-  test("waiting does not grant additional bytes after an approved budget has been spent", async () => {
+  test("an exhausted old traffic ledger cannot block development downloads", async () => {
     const f = await fixture();
-    f.policy.limits.maxNetworkBytes = 128 * 1024 * 1024;
-    const reservation = await f.budget.reserve(f.policy);
-    await reservation.release(reservation.maximumBytes);
-    await expect(f.budget.reserve(f.policy)).rejects.toMatchObject({
-      code: "LOCAL_NETWORK_BUDGET",
+    await state.write("network-budget.json", {
+      leaseUntil: f.policy.leaseUntil,
+      spent: Number.MAX_SAFE_INTEGER,
     });
-    expect(await state.read("network-budget.json", (value) => value)).toMatchObject({
-      spent: f.policy.limits.maxNetworkBytes,
+    for (let index = 0; index < 3; index++) {
+      const reservation = await f.budget.reserve(f.policy);
+      await reservation.release();
+    }
+    expect(await state.read("network-budget.json", (value) => value)).toEqual({
+      leaseUntil: f.policy.leaseUntil,
+      spent: Number.MAX_SAFE_INTEGER,
     });
   });
 
-  test("held byte credit waits for refund and the next connection uses remaining actual credit", async () => {
+  test("releasing twice cannot admit more sockets than the broker can hold", async () => {
     const f = await fixture();
-    f.policy.limits.maxNetworkBytes = 128 * 1024 * 1024;
-    f.policy.limits.maxNetworkConnections = 2;
     const held = await f.budget.reserve(f.policy);
+    const next = f.budget.reserve(f.policy);
+    await held.release();
+    const second = await next;
+    await held.release();
     let admitted = false;
-    const waiting = f.budget.reserve(f.policy).then((reservation) => {
+    const third = f.budget.reserve(f.policy).then((reservation) => {
       admitted = true;
       return reservation;
     });
     await turn();
     expect(admitted).toBe(false);
-    await held.release(1);
-    const next = await waiting;
-    expect(next.maximumBytes).toBe(f.policy.limits.maxNetworkBytes - 1);
-    await next.release(0);
-    expect(await state.read("network-budget.json", (value) => value)).toMatchObject({ spent: 1 });
+    await second.release();
+    await (await third).release();
+    expect(admitted).toBe(true);
   });
 
   test("queued authenticated CONNECT cannot dial after its bound authority is revoked", async () => {
@@ -177,13 +176,13 @@ describe("network scheduling independent of VM lifetime", () => {
       expect(bytes).toBe("");
       f.policy.enabled = false;
       await state.write("policy.json", f.policy);
-      await held.release(0);
+      await held.release();
       await closed;
       expect(bytes).toContain("403 Forbidden");
       expect(lookups).toBe(0);
     } finally {
       client.destroy();
-      await held.release(0);
+      await held.release();
       await broker.close();
     }
   });

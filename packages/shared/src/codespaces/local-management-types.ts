@@ -23,26 +23,6 @@ export const localGitAuthorSchema = z
   })
   .strict();
 export type LocalGitAuthor = z.infer<typeof localGitAuthorSchema>;
-export const LOCAL_BROWSER_DEVELOPMENT_DOMAINS = [
-  "registry.npmjs.org",
-  "nodejs.org",
-  "github.com",
-  "codeload.github.com",
-  "objects.githubusercontent.com",
-  "release-assets.githubusercontent.com",
-  "raw.githubusercontent.com",
-  "registry-1.docker.io",
-  "auth.docker.io",
-  "production.cloudflare.docker.com",
-  "production.cloudfront.docker.com",
-  "cdn.playwright.dev",
-  "playwright.download.prss.microsoft.com",
-  "deb.debian.org",
-  "security.debian.org",
-  "archive.ubuntu.com",
-  "security.ubuntu.com",
-  "ports.ubuntu.com",
-] as const;
 export const agentRepositoryManagementSchema = z
   .object({
     githubUserId: z.string().regex(/^[1-9][0-9]*$/),
@@ -50,8 +30,6 @@ export const agentRepositoryManagementSchema = z
     allowExistingPrivate: z.boolean(),
     allowNewPrivate: z.boolean(),
     allowPush: z.boolean(),
-    maxRepositories: integer(1, 64),
-    networkProfile: z.literal("node-react-playwright"),
   })
   .strict();
 export type AgentRepositoryManagement = z.infer<typeof agentRepositoryManagementSchema>;
@@ -67,15 +45,6 @@ export const localManagementRepositorySchema = z
     allowPush: z.boolean(),
     allowDelete: z.boolean(),
     allowPullRequests: z.boolean().optional(),
-    domains: z
-      .array(
-        z
-          .string()
-          .max(253)
-          .regex(/^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/)
-          .refine((value) => !/\.(?:localhost|local|internal|test|invalid)$/.test(value)),
-      )
-      .max(64),
   })
   .strict();
 export const localDeviceSettingsSchema = z
@@ -87,13 +56,7 @@ export const localDeviceSettingsSchema = z
     memoryBytes: integer(GiB, 64 * GiB),
     storageBytes: integer(8 * GiB, 1024 * GiB),
     dockerBytes: integer(GiB, 128 * GiB),
-    maxSandboxes: integer(1, 8),
-    maxOperationMs: integer(1000, 4 * 60 * 60_000),
-    maxOutputBytes: integer(1024, 256 * 1024 * 1024),
-    maxConcurrent: integer(1, 16),
-    maxNetworkBytes: integer(1024, 16 * GiB),
-    maxNetworkConnections: integer(1, 64),
-    repositories: z.array(localManagementRepositorySchema).max(64),
+    repositories: z.array(localManagementRepositorySchema),
     gitAuthor: localGitAuthorSchema.nullable(),
     agentRepositoryManagement: agentRepositoryManagementSchema.nullable().default(null),
   })
@@ -121,12 +84,6 @@ export const localControlCeilingSchema = z
     memoryBytes: integer(GiB, 64 * GiB),
     storageBytes: integer(8 * GiB, 1024 * GiB),
     dockerBytes: integer(GiB, 128 * GiB),
-    maxSandboxes: integer(1, 8),
-    maxOperationMs: integer(1000, 4 * 60 * 60_000),
-    maxOutputBytes: integer(1024, 256 * 1024 * 1024),
-    maxConcurrent: integer(1, 16),
-    maxNetworkBytes: integer(1024, 16 * GiB),
-    maxNetworkConnections: integer(1, 64),
     maxLeaseMs: integer(1, MAX_LOCAL_WORK_LEASE_MS),
   })
   .strict();
@@ -156,7 +113,7 @@ export const localDeviceControlViewSchema = z
     settings: localDeviceSettingsSchema,
     ceiling: localControlCeilingSchema.nullable(),
     error: localControlErrorSchema.nullable(),
-    repositoryAdmissions: z.array(localRepositoryAdmissionReceiptSchema).max(64).optional(),
+    repositoryAdmissions: z.array(localRepositoryAdmissionReceiptSchema).optional(),
     appliedAgentRepositoryManagement: agentRepositoryManagementSchema.nullable().optional(),
   })
   .strict();
@@ -192,8 +149,7 @@ export function assertAgentRepositoryAdmission(
     repository.fullName.split("/")[0].toLowerCase() !== delegation.owner.toLowerCase() ||
     repository.allowPush !== delegation.allowPush ||
     repository.allowDelete ||
-    repository.allowPullRequests === true ||
-    JSON.stringify(repository.domains) !== JSON.stringify(LOCAL_BROWSER_DEVELOPMENT_DOMAINS)
+    repository.allowPullRequests === true
   )
     throw new Error("Repository addition exceeds the applied agent delegation.");
 }

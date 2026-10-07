@@ -49,12 +49,6 @@ function fixture() {
     memoryBytes: 4 * GiB,
     storageBytes: 32 * GiB,
     dockerBytes: 4 * GiB,
-    maxSandboxes: 2,
-    maxOperationMs: 60000,
-    maxOutputBytes: 1024 ** 2,
-    maxConcurrent: 4,
-    maxNetworkBytes: GiB,
-    maxNetworkConnections: 4,
     repositories: [],
     gitAuthor: null,
     agentRepositoryManagement: {
@@ -63,8 +57,6 @@ function fixture() {
       allowExistingPrivate: false,
       allowNewPrivate: true,
       allowPush: true,
-      maxRepositories: 2,
-      networkProfile: "node-react-playwright",
     },
   };
   const ceiling: LocalControlCeiling = {
@@ -72,12 +64,6 @@ function fixture() {
     memoryBytes: 4 * GiB,
     storageBytes: 32 * GiB,
     dockerBytes: 4 * GiB,
-    maxSandboxes: 2,
-    maxOperationMs: 60000,
-    maxOutputBytes: 1024 ** 2,
-    maxConcurrent: 4,
-    maxNetworkBytes: GiB,
-    maxNetworkConnections: 4,
     maxLeaseMs: 3600000,
   };
   const pair = devices.beginEnrollment("owner"),
@@ -90,7 +76,6 @@ function fixture() {
     enabled: value.enabled,
     leaseUntil: value.leaseUntil,
     repositories: value.repositories,
-    maxSandboxes: value.maxSandboxes,
     machine: {
       name: "local-approved",
       displayName: value.label,
@@ -412,7 +397,7 @@ describe("Private repository creation precedes local admission without repeating
       expectedGeneration: 1,
       settings: {
         ...f.settings,
-        agentRepositoryManagement: { ...f.settings.agentRepositoryManagement!, maxRepositories: 3 },
+        agentRepositoryManagement: { ...f.settings.agentRepositoryManagement!, allowPush: false },
       },
     });
     expect((await f.makeService().createRepository("owner", f.input)).status).toBe(
@@ -443,20 +428,20 @@ describe("Private repository creation precedes local admission without repeating
     expect(f.state.posts).toBe(0);
     expect(f.repository.getOwned("owner", f.input.requestId)).toBeNull();
   });
-  test("unknown reservations share the existing-repository admission ceiling", async () => {
+  test("multiple unknown private creations retain independent identities without a repository quota", async () => {
     const f = fixture();
     f.state.loseResponse = true;
     await f.makeService().createRepository("owner", f.input);
     await f
       .makeService()
       .createRepository("owner", { ...f.input, requestId: randomUUID(), repositoryName: "second" });
-    const blocked = await f
+    const third = await f
       .makeService()
       .createRepository("owner", { ...f.input, requestId: randomUUID(), repositoryName: "third" });
-    expect(blocked).toMatchObject({ status: "rejected", error: { code: "LOCAL_CAPACITY" } });
-    expect(f.state.posts).toBe(2);
+    expect(third).toMatchObject({ status: "unknown" });
+    expect(f.state.posts).toBe(3);
   });
-  test("a real existing admission and unknown creation reservation consume the same owner ceiling", async () => {
+  test("existing admissions remain available beside multiple unknown creation requests", async () => {
     const f = fixture();
     const both = {
       ...f.settings,
@@ -488,11 +473,11 @@ describe("Private repository creation precedes local admission without repeating
       ).status,
     ).toBe("pending");
     f.acknowledge();
-    const blocked = await f
+    const third = await f
       .makeService()
       .createRepository("owner", { ...f.input, requestId: randomUUID(), repositoryName: "third" });
-    expect(blocked).toMatchObject({ status: "rejected", error: { code: "LOCAL_CAPACITY" } });
-    expect(f.state.posts).toBe(1);
+    expect(third).toMatchObject({ status: "unknown" });
+    expect(f.state.posts).toBe(2);
     f.remote.set("another", { id: 91, full_name: "owner/another", private: true });
     await expect(
       f.admission.addExistingRepository("owner", {
@@ -500,7 +485,7 @@ describe("Private repository creation precedes local admission without repeating
         repositoryId: "91",
         requestId: randomUUID(),
       }),
-    ).rejects.toMatchObject({ code: "LOCAL_CAPACITY" });
+    ).resolves.toMatchObject({ status: "pending" });
   });
   test("more than 64 confirmed refusals do not consume future admission capacity", async () => {
     const f = fixture();
@@ -516,15 +501,14 @@ describe("Private repository creation precedes local admission without repeating
     f.state.rejectStatus = 0;
     expect((await f.makeService().createRepository("owner", f.input)).status).toBe("pending");
   });
-  test("an existing admission preserves the final grant slot reserved by an unknown creation", async () => {
+  test("more than 64 existing grants admit another repository and preserve unknown creation provenance", async () => {
     const f = fixture();
-    const oldGrants = Array.from({ length: 63 }, (_, index) => ({
+    const oldGrants = Array.from({ length: 65 }, (_, index) => ({
       id: randomUUID(),
       fullName: `owner/old-${index}`,
       private: true,
       allowPush: false,
       allowDelete: false,
-      domains: ["github.com"],
     }));
     const fullSettings = {
       ...f.settings,
@@ -554,18 +538,19 @@ describe("Private repository creation precedes local admission without repeating
         repositoryId: "90",
         requestId: randomUUID(),
       }),
-    ).rejects.toMatchObject({ code: "LOCAL_CAPACITY" });
+    ).resolves.toMatchObject({ status: "pending" });
     expect(f.devices.getActiveDevice("owner", f.deviceId).policy).toEqual(original);
     expect(f.repository.getOwned("owner", f.input.requestId)!.reservationHeld).toBe(1);
+    f.acknowledge();
     f.state.loseResponse = false;
     expect((await f.makeService().createRepository("owner", f.input)).status).toBe("pending");
     expect(f.repository.getOwned("owner", f.input.requestId)!.reservationHeld).toBe(0);
     f.acknowledge();
     expect((await f.makeService().createRepository("owner", f.input)).status).toBe("applied");
     const completed = f.devices.getActiveDevice("owner", f.deviceId).policy;
-    expect(completed.repositories).toHaveLength(64);
-    expect(completed.repositories.slice(0, 63)).toEqual(original.repositories);
-    expect(completed.repositories[63].fullName).toBe("owner/new-project");
+    expect(completed.repositories).toHaveLength(67);
+    expect(completed.repositories.slice(0, 65)).toEqual(original.repositories);
+    expect(completed.repositories[66].fullName).toBe("owner/new-project");
     expect(completed.machine).toEqual(original.machine);
     expect(completed.leaseUntil).toBe(original.leaseUntil);
     expect(f.state.posts).toBe(1);

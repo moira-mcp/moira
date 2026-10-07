@@ -17,7 +17,6 @@ import {
   MAX_LOCAL_WORK_LEASE_MS,
   type LocalControlCeiling,
   type LocalDeviceControlView,
-  LOCAL_BROWSER_DEVELOPMENT_DOMAINS,
 } from "../../../packages/shared/src/codespaces/local-management-types.js";
 let directory: string;
 beforeEach(async () => {
@@ -44,7 +43,6 @@ async function fixture() {
     memoryBytes: 8 * GiB,
     storageBytes: 64 * GiB,
     dockerBytes: 8 * GiB,
-    ...local.policy.limits,
     maxLeaseMs: MAX_LOCAL_WORK_LEASE_MS,
   };
   return { ...local, state, connection, ceiling };
@@ -65,8 +63,6 @@ describe("Locally pinned owner web control", () => {
         allowExistingPrivate: origin === "existing",
         allowNewPrivate: origin === "created",
         allowPush: true,
-        maxRepositories: 2,
-        networkProfile: "node-react-playwright" as const,
       };
       const base: LocalDeviceControlView = {
         optedIn: true,
@@ -86,7 +82,6 @@ describe("Locally pinned owner web control", () => {
           allowPush: true,
           allowDelete: false,
           allowPullRequests: false,
-          domains: [...LOCAL_BROWSER_DEVELOPMENT_DOMAINS],
         };
         const view = {
           ...base,
@@ -127,7 +122,7 @@ describe("Locally pinned owner web control", () => {
       }
     },
   );
-  test("invalid delegated network or changed old rights are refused without disabling existing work", async () => {
+  test("missing delegation or changed old rights are refused without disabling existing work", async () => {
     const f = await fixture();
     const manager = new LocalManager(f.records);
     const control = new LocalWebControl(f.records);
@@ -139,7 +134,6 @@ describe("Locally pinned owner web control", () => {
       private: true,
       allowPush: true,
       allowDelete: false,
-      domains: ["evil.example.com"],
     };
     const view: LocalDeviceControlView = {
       optedIn: true,

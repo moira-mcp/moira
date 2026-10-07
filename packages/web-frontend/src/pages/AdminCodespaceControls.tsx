@@ -137,11 +137,15 @@ export const AdminCodespaceControls: React.FC<{ active?: boolean }> = ({ active 
         ],
         [
           t("admin.codespaces.facts.activeResources"),
-          `${readiness.usage.active_resources} / ${readiness.usage.max_active_resources}`,
+          readiness.usage.max_active_resources === null
+            ? String(readiness.usage.active_resources)
+            : `${readiness.usage.active_resources} / ${readiness.usage.max_active_resources}`,
         ],
         [
           t("admin.codespaces.facts.activeOperations"),
-          `${readiness.usage.active_operations} / ${readiness.usage.max_active_operations}`,
+          readiness.usage.max_active_operations === null
+            ? String(readiness.usage.active_operations)
+            : `${readiness.usage.active_operations} / ${readiness.usage.max_active_operations}`,
         ],
         [
           t("admin.codespaces.facts.transferBytes"),

@@ -26,7 +26,7 @@ export const settingsGuide: GuideDefinition = {
   routes: SETTINGS_ROUTES,
   sections: SETTINGS_SECTIONS,
   steps: [
-    { id: "nav", anchor: "settings.nav", kind: "look", revision: 2 },
+    { id: "nav", anchor: "settings.nav", kind: "look", revision: 3 },
     {
       id: "account",
       anchor: "settings.account",
@@ -54,14 +54,14 @@ export const settingsGuide: GuideDefinition = {
       id: "github",
       anchor: "settings.integrations",
       kind: "look",
-      revision: 2,
+      revision: 3,
       prepare: { section: "development-environments" },
     },
     {
       id: "local-devices",
       anchor: "settings.local-devices",
       kind: "look",
-      revision: 4,
+      revision: 7,
       prepare: { section: "integrations-local" },
     },
     {
@@ -113,7 +113,7 @@ export const githubSetupGuide: GuideDefinition = {
       id: "codespaces",
       anchor: "settings.codespaces",
       kind: "look",
-      revision: 3,
+      revision: 4,
       prepare: { section: "development-environments" },
     },
     {

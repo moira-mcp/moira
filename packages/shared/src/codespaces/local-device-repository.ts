@@ -356,7 +356,6 @@ export class LocalDeviceRepository {
             report.settings.cpuCores !== policy.machine.cpuCores ||
             report.settings.memoryBytes !== policy.machine.memoryBytes ||
             report.settings.storageBytes !== policy.machine.storageBytes ||
-            report.settings.maxSandboxes !== policy.maxSandboxes ||
             canonicalJson(report.settings.repositories) !== canonicalJson(policy.repositories)
           )
             throw new LocalDeviceError(
@@ -554,23 +553,6 @@ export class LocalDeviceRepository {
             "Repository exceeds the applied owner delegation.",
           );
         }
-        const held = (
-          this.sqlite
-            .prepare(
-              "SELECT COUNT(*) count FROM codespaceRepositoryRequest WHERE deviceId=? AND reservationHeld=1 AND (? IS NULL OR requestId!=?)",
-            )
-            .get(deviceId, input.creationRequestId ?? null, input.creationRequestId ?? null) as {
-            count: number;
-          }
-        ).count;
-        if (
-          receipts.length + held >= control.settings.agentRepositoryManagement!.maxRepositories ||
-          control.settings.repositories.length + held >= 64
-        )
-          throw new LocalDeviceError(
-            "LOCAL_CAPACITY",
-            "The owner repository admission limit is reached.",
-          );
         if (
           control.settings.repositories.some(
             (repository) =>

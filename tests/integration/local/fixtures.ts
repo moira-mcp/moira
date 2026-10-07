@@ -20,14 +20,6 @@ export function localPolicy(root: string): LocalPolicy {
       memoryBytes: GiB,
       dockerBytes: 4 * GiB,
     },
-    limits: {
-      maxSandboxes: 2,
-      maxOperationMs: 60_000,
-      maxOutputBytes: 1024 * 1024,
-      maxConcurrent: 4,
-      maxNetworkBytes: GiB,
-      maxNetworkConnections: 4,
-    },
     repositories: [
       {
         id: randomUUID(),
@@ -35,7 +27,6 @@ export function localPolicy(root: string): LocalPolicy {
         private: false,
         allowPush: false,
         allowDelete: false,
-        domains: ["packages.example.com"],
       },
     ],
   });

@@ -976,7 +976,12 @@ describe("outbound companion authority and durable response replay", () => {
       runtime: (policy) => adaptSbxRuntime(new ExternalInventory(policy)),
     });
     expect((await manager.snapshot()).spaces).toEqual([
-      expect.objectContaining({ id: local.space.id, state: "unknown", phase: "creating" }),
+      expect.objectContaining({
+        id: local.space.id,
+        state: "unknown",
+        phase: "creating",
+        nativeStopConfirmed: false,
+      }),
     ]);
     expect((await local.records.get(local.space.id))?.runtimeId).toBeNull();
     await expect(

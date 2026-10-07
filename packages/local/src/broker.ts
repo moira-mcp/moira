@@ -76,8 +76,7 @@ export async function startBroker(options: BrokerOptions, port = 0) {
   const failureStatus = (error: unknown) =>
     error instanceof LocalRefusal && error.code === "LOCAL_NETWORK_CAPACITY"
       ? "429 Too Many Requests"
-      : error instanceof LocalRefusal &&
-          ["LOCAL_NETWORK_BUDGET", "LOCAL_NETWORK_DENIED"].includes(error.code)
+      : error instanceof LocalRefusal && error.code === "LOCAL_NETWORK_DENIED"
         ? "403 Forbidden"
         : "502 Bad Gateway";
   const server = createServer(
@@ -147,10 +146,18 @@ export async function startBroker(options: BrokerOptions, port = 0) {
   server.on("connect", (request, client, head) => {
     track(
       (async () => {
-        const match = /^([a-z0-9.-]+):443$/.exec(request.url ?? "");
+        const match = /^([a-z0-9.-]+):([0-9]{1,5})$/.exec(request.url ?? "");
+        const targetPort = match ? Number(match[2]) : 0;
         const grant = await authorize(request, true);
         if (shuttingDown || client.destroyed) return;
-        if (!match || !grant || request.headers.origin || head.length > 8192) {
+        if (
+          !match ||
+          targetPort < 1 ||
+          targetPort > 65535 ||
+          !grant ||
+          request.headers.origin ||
+          head.length > 8192
+        ) {
           deny(client);
           return;
         }
@@ -167,7 +174,6 @@ export async function startBroker(options: BrokerOptions, port = 0) {
           grant.policy,
           admission(credential, grant, controller.signal),
         );
-        let used = 0;
         let upstream: Socket | undefined;
         let released = false;
         const release = () => {
@@ -175,7 +181,7 @@ export async function startBroker(options: BrokerOptions, port = 0) {
           released = true;
           active.delete(client);
           upstream?.destroy();
-          void reservation.release(used).catch(options.onFault);
+          void reservation.release().catch(options.onFault);
         };
         if (shuttingDown || client.destroyed) {
           release();
@@ -185,19 +191,11 @@ export async function startBroker(options: BrokerOptions, port = 0) {
         client.once("error", release);
         const lifetime = setTimeout(
           () => client.destroy(),
-          Math.max(1, Math.min(120_000, grant.policy.leaseUntil - Date.now())),
+          Math.max(1, grant.policy.leaseUntil - Date.now()),
         );
         client.once("close", () => clearTimeout(lifetime));
-        const count = (chunk: Buffer) => {
-          used += chunk.length;
-          if (used > reservation.maximumBytes) client.destroy();
-        };
         try {
-          const target = await resolvePublicTarget(
-            match[1],
-            grant.repository.domains,
-            options.resolve,
-          );
+          const target = await resolvePublicTarget(match[1], options.resolve);
           if (client.destroyed) {
             release();
             return;
@@ -206,7 +204,7 @@ export async function startBroker(options: BrokerOptions, port = 0) {
             options.dial ??
             ((peer, targetPort) =>
               connect({ host: peer.address, port: targetPort, family: peer.family }))
-          )(target, 443);
+          )(target, targetPort);
           let established = false;
           upstream.setTimeout(15_000, () => client.destroy());
           upstream.once("connect", () => {
@@ -224,11 +222,8 @@ export async function startBroker(options: BrokerOptions, port = 0) {
             }
             established = true;
             client.write("HTTP/1.1 200 Connection Established\r\n\r\n");
-            count(head);
             if (client.destroyed) return;
             if (head.length) upstream.write(head);
-            client.on("data", count);
-            upstream.on("data", count);
             client.pipe(upstream);
             upstream.pipe(client);
           });

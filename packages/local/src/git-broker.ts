@@ -46,15 +46,14 @@ export function gitBroker(
     }
     const reservation = await budget.reserve(grant.policy, grant.admission);
     if (response.destroyed) {
-      await reservation.release(0).catch(onFault);
+      await reservation.release().catch(onFault);
       return;
     }
-    let bytes = 0;
     let released = false;
     const release = () => {
       if (released) return;
       released = true;
-      void reservation.release(bytes).catch(onFault);
+      void reservation.release().catch(onFault);
     };
     response.once("close", release);
     try {
@@ -66,7 +65,7 @@ export function gitBroker(
         release();
         return;
       }
-      const target = await resolvePublicTarget("github.com", ["github.com"], resolve);
+      const target = await resolvePublicTarget("github.com", resolve);
       if (response.destroyed) {
         release();
         return;
@@ -111,33 +110,19 @@ export function gitBroker(
             "cache-control": "no-store",
             connection: "close",
           });
-          reply.on("data", (chunk: Buffer) => {
-            bytes += chunk.length;
-            if (bytes > reservation.maximumBytes) {
-              reply.destroy();
-              response.destroy();
-            }
-          });
           reply.on("error", () => response.destroy());
           reply.pipe(response);
         },
       );
       const lifetime = setTimeout(
         () => upstream.destroy(),
-        Math.max(1, Math.min(120_000, grant.policy.leaseUntil - Date.now())),
+        Math.max(1, grant.policy.leaseUntil - Date.now()),
       );
       upstream.once("close", () => clearTimeout(lifetime));
       upstream.once("timeout", () => upstream.destroy());
       upstream.once("error", () => {
         if (!response.headersSent) response.writeHead(502, { connection: "close" });
         response.end();
-      });
-      request.on("data", (chunk: Buffer) => {
-        bytes += chunk.length;
-        if (bytes > reservation.maximumBytes) {
-          upstream.destroy();
-          response.destroy();
-        }
       });
       request.once("aborted", () => upstream.destroy());
       response.once("close", () => upstream.destroy());

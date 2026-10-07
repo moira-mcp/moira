@@ -28,6 +28,8 @@ export interface CodespaceManagementView {
     connection: CodespaceConnectionView;
     repositories: CodespaceManagementView["repositories"];
     limits: CodespaceLimitsView;
+    repositories_stale: boolean;
+    resources_stale: boolean;
   }>;
   repositories_stale: boolean;
   resources_stale: boolean;

@@ -59,7 +59,9 @@ export async function serveGuestProxy(hostPort: number, authorization: string, g
   );
   server.on("connect", (request, client, head) => {
     const target = request.url ?? "";
-    if (!/^[a-z0-9.-]+:443$/.test(target) || request.headers.origin) {
+    const destination = /^[a-z0-9.-]+:([0-9]{1,5})$/.exec(target);
+    const targetPort = destination ? Number(destination[1]) : 0;
+    if (!destination || targetPort < 1 || targetPort > 65535 || request.headers.origin) {
       client.end("HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n");
       return;
     }

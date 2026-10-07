@@ -40,6 +40,19 @@ function mutationId(resource: CodespaceResourceRecord, request: Record<string, u
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-4${hex.slice(13, 16)}-a${hex.slice(17, 20)}-${hex.slice(20)}`;
 }
 
+function refuseLocalReply(code: string): never {
+  throw new CodespaceResourceError(
+    /(?:LEASE|CAPACITY|LIMIT|TOO_LARGE)/.test(code)
+      ? "CODESPACE_POLICY_LIMIT"
+      : /(?:IDENTITY|GENERATION|REPLAY|SETTLEMENT)/.test(code)
+        ? "CODESPACE_GENERATION_CONFLICT"
+        : /(?:NOT_RUNNING)/.test(code)
+          ? "CODESPACE_NOT_RUNNING"
+          : "CODESPACE_RESOURCE_INVALID",
+    `Local companion refused the request (${code})`,
+  );
+}
+
 /** Durable metadata and private transfer objects own dispatch before any delivery can happen. */
 export class LocalCodespaceRelay {
   constructor(
@@ -89,7 +102,7 @@ export class LocalCodespaceRelay {
         "Local creation receipt digest changed",
       );
     }
-    if (result.status !== "completed" || !result.outcomeReference) return null;
+    if (!["completed", "refused"].includes(result.status) || !result.outcomeReference) return null;
     const active = this.devices.getActiveDevice(queued.userId, queued.deviceId);
     if (active.deviceGeneration !== queued.deviceGeneration) {
       throw new CodespaceResourceError(
@@ -105,11 +118,13 @@ export class LocalCodespaceRelay {
     const reply = replySchema.parse(
       JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes)),
     );
-    if (!reply.ok)
+    if (!reply.ok) refuseLocalReply(reply.error.code);
+    if (result.status !== "completed") {
       throw new CodespaceResourceError(
         "CODESPACE_RESOURCE_INVALID",
-        "Local creation receipt was refused",
+        "Local outcome status disagrees",
       );
+    }
     if (
       this.devices.getActiveDevice(queued.userId, queued.deviceId).deviceGeneration !==
       queued.deviceGeneration
@@ -204,6 +219,16 @@ export class LocalCodespaceRelay {
     options: { mutation?: boolean; waitMs?: number } = {},
   ): Promise<unknown> {
     try {
+      // A completed mutation no longer needs delivery authority. Its current authenticated
+      // identity and private receipt remain valid for the existing transfer TTL, even after the
+      // original delivery deadline; never enqueue it again merely to read that receipt.
+      if (
+        options.mutation &&
+        ["create", "start", "stop", "delete"].includes(String(request.action))
+      ) {
+        const receipt = await this.completedResult(resource, request);
+        if (receipt !== null) return receipt;
+      }
       const queued = await this.retain(resource, request, options);
       const { requestId, digest, deadlineAt } = queued;
       const waitUntil = Math.min(deadlineAt, this.now() + (options.waitMs ?? 120_000));
@@ -233,8 +258,9 @@ export class LocalCodespaceRelay {
           }
           // Core has already persisted dispatch intent. If it crashes after receiving this reply,
           // its normal reconciliation inspects the durable guest marker instead of executing again.
-          // Creation is retained until its authenticated receipt has supplied pre-adoption identity.
-          if (request.action !== "create") {
+          // Lifecycle retries address the same durable mutation identity. Retain its receipt until
+          // the existing transfer expiry, including when its first observation did not converge.
+          if (!["create", "start", "stop", "delete"].includes(String(request.action))) {
             await this.transfers.discardRelayPayload(
               resource.userId,
               "local_relay_input",
@@ -250,17 +276,7 @@ export class LocalCodespaceRelay {
             JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(payload)),
           );
           if (!reply.ok) {
-            const code = reply.error.code;
-            throw new CodespaceResourceError(
-              /(?:LEASE|CAPACITY|LIMIT|TOO_LARGE)/.test(code)
-                ? "CODESPACE_POLICY_LIMIT"
-                : /(?:IDENTITY|GENERATION|REPLAY|SETTLEMENT)/.test(code)
-                  ? "CODESPACE_GENERATION_CONFLICT"
-                  : /(?:NOT_RUNNING)/.test(code)
-                    ? "CODESPACE_NOT_RUNNING"
-                    : "CODESPACE_RESOURCE_INVALID",
-              `Local companion refused the request (${code})`,
-            );
+            refuseLocalReply(reply.error.code);
           }
           if (result.status !== "completed")
             throw new LocalDeviceError("LOCAL_INVALID", "Local outcome status disagrees.");

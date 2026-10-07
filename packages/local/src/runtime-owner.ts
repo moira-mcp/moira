@@ -15,6 +15,7 @@ import {
   LocalRefusal,
   MAX_MESSAGE_BYTES,
   requireOperationOutputBudget,
+  requireOperationExecutionBudget,
   type LocalPolicy,
 } from "./policy.js";
 
@@ -351,12 +352,11 @@ export class RuntimeOwner {
         if (space.phase !== "usable" || !space.runtimeId)
           throw new LocalRefusal("LOCAL_NOT_RUNNING", "This local sandbox is not initialized.");
         if (request.action === "execute") {
-          z.number()
-            .int()
-            .min(1)
-            .max(Math.min(policy.limits.maxOperationMs, policy.leaseUntil - Date.now()))
-            .parse(request.timeoutMs);
-          z.number().int().min(1).max(policy.limits.maxOutputBytes).parse(request.maxRetainedBytes);
+          request.timeoutMs = requireOperationExecutionBudget(
+            request.timeoutMs,
+            request.maxRetainedBytes,
+            policy.leaseUntil - Date.now(),
+          );
           requireOperationOutputBudget(request.maxStdoutBytes, request.maxStderrBytes);
         }
         const identity = { name: space.name, runtimeId: space.runtimeId };
@@ -604,6 +604,7 @@ export class RuntimeOwner {
         const current = await runtime.inspectExact(identity);
         if (current && current.status !== "stopped" && current.status !== "created")
           throw new LocalRefusal("LOCAL_STOP_PENDING", "The sandbox stop is not confirmed.");
+        await this.protectRuntime();
         await this.confirmStopped();
         if (!remove) return;
         if (this.cleanupController.signal.aborted)
@@ -640,6 +641,7 @@ export class RuntimeOwner {
         const current = await runtime.inspectExact(identity);
         if (current && current.status !== "stopped" && current.status !== "created")
           throw new LocalRefusal("LOCAL_STOP_PENDING", "Native sandbox shutdown has not settled.");
+        await this.protectRuntime();
         await this.confirmStopped();
       }
     })();

@@ -522,7 +522,9 @@ export const Settings: React.FC = () => {
                     >
                       {(["environments", "github", "local"] as const).map((value) => (
                         <TabsTrigger key={value} value={value} className="min-h-10 px-3">
-                          {t(`pages.settings.tabs.${value}`)}
+                          {t(
+                            `pages.settings.tabs.${value === "environments" ? "cloudCodespaces" : value}`,
+                          )}
                         </TabsTrigger>
                       ))}
                     </TabsList>

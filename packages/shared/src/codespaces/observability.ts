@@ -24,6 +24,7 @@ import type {
 import type { CodespaceTransferRepository } from "./transfer-repository.js";
 import { CODESPACE_IDLE_TIMEOUT_MINUTES } from "./resource-repository.js";
 import { effectiveCodespaceLimits } from "./resource-policy.js";
+import { CODESPACE_PROVIDER_LOCAL } from "./local-device-types.js";
 import {
   projectCodespaceLimits,
   type CodespaceLimitsView,
@@ -194,10 +195,11 @@ export class CodespaceObservabilityService {
   limits(userId: string): CodespaceLimitsView {
     const provider = this.dependencies.providerId;
     return projectCodespaceLimits({
+      provider,
       policy: this.dependencies.policy(),
       held: this.dependencies.resources.countHeld(userId, provider),
       instanceHeld: this.dependencies.resources.countActive(provider),
-      activeOperations: this.dependencies.operations.countActiveForUser(userId),
+      activeOperations: this.dependencies.operations.countActiveForUser(userId, provider),
       transfers: this.dependencies.transfers.usageForUser(userId),
       idle: this.dependencies.resources.idlePolicy(userId),
       providerIdleMaxMinutes: CODESPACE_IDLE_TIMEOUT_MINUTES.maximum,
@@ -288,10 +290,11 @@ export class CodespaceObservabilityService {
       },
       usage: {
         active_resources: this.dependencies.resources.countActive(provider),
-        max_active_resources: policy.maxActiveGlobal,
-        active_operations: this.dependencies.operations.countActive(),
+        max_active_resources: provider === CODESPACE_PROVIDER_LOCAL ? null : policy.maxActiveGlobal,
+        active_operations: this.dependencies.operations.countActive(provider),
         // The ceilings enforcement applies, from the one limits source, not the raw policy value.
-        max_active_operations: limits.operations.maxConcurrentGlobal,
+        max_active_operations:
+          provider === CODESPACE_PROVIDER_LOCAL ? null : limits.operations.maxConcurrentGlobal,
         transfer_live_bytes: transferLiveBytes,
         max_transfer_live_bytes:
           limits.transfers.maxBytesGlobal + limits.relayTransfers.maxBytesGlobal,

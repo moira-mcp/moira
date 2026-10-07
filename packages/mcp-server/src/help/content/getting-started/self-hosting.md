@@ -243,8 +243,8 @@ npm run local -- doctor
 
 `init` creates private state and a bounded disk image, with work disabled. The image uses a short
 device-owned mount path for the SDK sockets. `--state PATH` chooses another state directory;
-repeat it on every command. `--storage-gib`, `--cpus`, `--memory-gib` and `--max-sandboxes`
-choose local ceilings at initialization. `setup` requires an empty dedicated SDK profile.
+repeat it on every command. `--storage-gib`, `--cpus` and `--memory-gib`
+choose local resource allocations at initialization. `setup` requires an empty dedicated SDK profile.
 `doctor` checks prerequisites under an enabled, unexpired lease; its
 `liveVmIsolationVerified: false` is not a live microVM isolation result.
 
@@ -256,9 +256,8 @@ rotates a failed store or imports personal credentials.
 This machine-only store trusts the host account: its generated password is kept in an owner-only
 local file, and sleep/interval auto-lock is disabled only for that SDK store, not personal Keychain.
 
-Repository permissions are granted on the computer. `approve OWNER/REPO` allows read access
-and the built-in public Git/package domains; repeated `--domain HOST` supplies a replacement
-allowed-domain list. Add `--private`, `--push` or `--delete` only for those rights.
+Repository permissions are granted on the computer. `approve OWNER/REPO` allows read access.
+Add `--private`, `--push` or `--delete` only for those rights.
 For standalone work without enrollment, a private repository can use a GitHub token supplied on
 stdin to `npm run local -- git-token OWNER/REPO`; never put it in arguments or shell history.
 That repository token stays local and is separate from the device credential. An enrolled
@@ -273,8 +272,8 @@ separately. From the source checkout, run the command as
 `npm run local -- enroll --server <displayed HTTPS application URL> --pairing-id <displayed ID>`.
 Enter the token on stdin and end input; never append it to the command. The server URL includes
 the app prefix when configured and contains no credentials, query or fragment.
-Refresh the browser, review the pending device's repositories, egress, push/delete rights,
-limits and lease, then confirm.
+Refresh the browser, review the pending computer's repositories, push/delete rights,
+resource allocations and lease, then confirm.
 
 The server, companion and running owner guards need a matching control-contract edition.
 Strict heartbeat/approval schemas refuse mixed editions even with delegation off; rebuilding the
@@ -283,7 +282,19 @@ shutdown and confirm settlement of its owned work and guards. Update server and 
 together, run `npm ci` and `npm run local:build`, then restart normally. Preserve the same state,
 disks, SDK profile, credentials and connection. Management and running jobs may be interrupted;
 there is no uninterrupted mixed-edition rolling upgrade. Live repository append within the matched
-edition separately preserves existing VMs. After pairing is confirmed, approve the local ceilings:
+edition separately preserves existing VMs.
+
+When the saved control format contains unsupported fields, back up the server database and the
+computer's private state and disks, then convert only those fields while both sides are stopped.
+Remove obsolete repository domain lists, repository-count/network-profile delegation fields and
+technical quota fields from every saved policy, control and pending-intent copy, including retained
+creation-request delegation. Preserve grants, request receipts/markers, IDs, generations, jobs,
+credentials and disks; validate the matching strict format before starting matching bundles.
+Server public-policy digests must match the converted canonical policy. There is no automatic
+compatibility reader for an unsupported saved format. Rollback restores the paired snapshots and
+matching bundles; it does not reset the SDK or require replacement enrollment.
+
+After pairing is confirmed, approve local web control:
 
 ```bash
 npm run local -- web-control --confirm --max-lease-hours 168
@@ -291,8 +302,8 @@ npm run local -- web-control --confirm --max-lease-hours 168
 
 Use the same `--state PATH` as setup. Unspecified numeric ceilings keep the current local values;
 the command's lease ceiling defaults to seven days. To permit larger resource settings, supply
-the intended ceilings with `--cpus`, `--memory-gib`, `--storage-gib`, `--docker-gib` and
-`--max-sandboxes`. This approval does not itself renew the work lease.
+the intended ceilings with `--cpus`, `--memory-gib`, `--storage-gib` and `--docker-gib`.
+This approval does not itself renew the work lease.
 An existing web-control approval is not replaced by rerunning this command; browser requests must
 fit its saved ceilings.
 Start the foreground companion after confirmation and local approval:
@@ -302,17 +313,17 @@ npm run local -- run
 ```
 
 In **Local computers**, edit the device name, enabled state, expiry, CPU/RAM, bounded disk and
-guest Docker capacity, repository permissions/domains and commit author. **Allow seven days** sets
-a finite expiry within the locally approved ceiling; it does not renew automatically. Advanced
-limits bound command duration, retained output per operation, concurrent operations, network bytes
-shared across the work lease and simultaneous broker connections.
+guest Docker capacity, repository permissions and commit author. **Allow seven days** sets
+a finite expiry within the locally approved ceiling; it does not renew automatically.
+Commands carry bounded request timeouts and output sizes, without separate owner-set operation quotas.
 **Request settings change** records a request, not effective permission. Pending requests wait
 for the computer; applied and rejected revisions identify what the companion accepted. Read the
 effective permissions above the editor before starting work. Errors preserve the draft; updates
 adopt untouched fields without replacing independent edits. The control connection can receive a
 renewal while work is disabled or expired, but guest work remains off until it applies.
 CPU/RAM and guest Docker defaults apply to new environments; existing VMs retain their admitted
-profile. Bounded disk changes require stopped owned work and verified resizing; a refused change
+profile. The storage capacity is the computer's shared SDK backing image, not a separate allocation
+of that size to every codespace. Bounded disk changes require stopped owned work and verified resizing; a refused change
 does not authorize further work or erase data.
 For private repositories, push and PR creation through Moira, connect GitHub and grant the App
 access to the repository. Those operations also require the device's matching repository rights;
@@ -320,22 +331,22 @@ reading PR metadata uses repository read access. GitHub authorization remains on
 in the guest. Supply a commit author or leave both author fields empty to use your verified GitHub
 identity when available; the computer's Git configuration is not copied.
 
-With local web control approved, the owner can enable limited agent repository management here.
+With local web control approved, the owner can enable agent repository management here.
 It defaults off and binds the verified personal GitHub account, separate existing/new-private permissions,
-optional push, an admission ceiling and the fixed `node-react-playwright` network profile.
+and optional push. Repository additions have no count quota or fixed technology profile.
 Only companion acknowledgement makes it effective. `codespace({ action: "local_devices" })`
 shows applied consent and eligible personal App installations; `github_setup_required` asks for
 GitHub setup while retaining device discovery. `repository_add` takes `device_id`, the GitHub numeric `repository_id`
 and a stable UUID `request_id`. Reuse that request until `applied` returns `local_repository_id`;
 pending/rejected is not permission. The App must already expose the repository. Agent additions
-preserve existing grants, VMs and lease; agents cannot change consent or supply domains/rights.
+preserve existing grants, VMs and lease; agents cannot change consent or supply rights.
 For a new empty private repository, enable and apply new-private consent, then use `repository_create`
 with `device_id`, stable UUID `request_id`, `repository_name` and discovered `installation_id`.
 Only the connected personal account is supported. Resume the same complete payload: `unknown`
 does not retry creation blindly, and `setup_required` can retain the confirmed GitHub ID/name while
 permissions or installation access are repaired. Only `applied` returns usable `local_repository_id`.
 Selected installation access is checked after adding only the confirmed new repository.
-Unknown requests hold an admission slot; confirmed rejections release their reservation.
+Unknown requests retain their exact recovery identity without preventing other repository additions.
 The private repository description contains a recovery marker, not a credential. Keep it while
 an unknown outcome is unresolved; Moira never adopts an unrelated same-name repository.
 
@@ -346,22 +357,43 @@ and **GitHub App installation repository access: write** for a
 Approved push still needs Contents write. Use **Update GitHub permissions** after approval;
 OAuth stays on the server. Live App permissions and provider compatibility require separate verification.
 
-Each codespace has its own VM; a repository can have multiple codespaces within existing limits.
-Background `exec` runs development processes in that VM. The fixed profile includes package mirrors
-and official Playwright CDN; browser/system-library installation still uses guest commands and
-requires compatible guest privileges. It does not certify Chromium compatibility. `preview_image`
+Each codespace has its own VM; a repository can have multiple codespaces.
+Local VMs and operations do not consume cloud Codespaces slots or use its machine ceiling.
+Background `exec` runs development processes in that VM. Public package registries and other public
+DNS destinations are available independently of the language or framework, with public-address and
+computer-network checks on every connection. Network downloads have no cumulative traffic budget or
+per-download byte quota; bounded socket capacity provides backpressure. Host, LAN and service
+addresses remain denied. Browser/system-library installation uses guest commands and compatible
+guest privileges; network access does not certify browser compatibility. `preview_image`
 returns a repository PNG/JPEG as native MCP image content: pass `codespace_id`, `path` and optional
 `max_bytes` up to 4 MiB, or resume with only `codespace_id` and `operation_id`. Header/container
 checks cap dimensions at 8192 per edge and 16 million pixels; they do not fully decode pixels.
 Inspect the image before treating a screenshot as visual evidence.
 
-Choose **Local Docker Sandboxes** and the device's repository in **Settings → Development → Environments**, or discover
+In **Settings → Development → Local computers**, open the connected computer's codespaces and
+choose its approved repository to create a VM, or discover
 its qualified `repository_id` through `codespace({ action: "list" })`. Different computers
 offering the same repository are distinct choices. Further operations use the existing
 `codespace_id`, execution/session/file and native-transfer contracts. The GitHub provider remains
 independently available. Settings can revoke one device; **Refresh** rereads current state. Browser revocation
 denies new server work but cannot prove physical shutdown of an offline computer; local disable
 and lease expiry enforce shutdown independently.
+
+Each computer card contains its own creation form, codespaces and collapsed settings. Computers
+with the same name remain distinct, and one repository can have several separate VMs. Shared
+computer storage is shown at the computer level; CPU and RAM belong to each VM. GitHub Codespaces
+has a separate subsection. Refresh and action errors stay with the affected section or codespace.
+Local cards show the last verified observation, or that none exists, and a localized lifecycle
+refusal. **Check state again** retries the existing start/stop/delete intent for the exact
+codespace; a pending create is only refreshed. `created` does not certify shutdown: the native
+owner must confirm exact runtime and worker settlement. An unavailable observation preserves the
+last verified state and never becomes a successful stop.
+
+Install matching server and companion builds. Database migration `0057_codespace_observation.sql`
+adds nullable observation time, leaving existing records unobserved until a verified read. The
+companion snapshot includes the derived native stop confirmation; an earlier snapshot is not
+accepted by the matching strict contract. Follow the coordinated backup, offline conversion and
+paired rollback procedure above when updating saved policy/control formats.
 
 Manager-backed CLI create/start/exec commands are one-shot and stop owned VM processes on exit;
 persistent server work uses `run`. Stop it before another command needs the same runner lock.
@@ -468,7 +500,7 @@ starting any authorization flow. A codespace is
 personal rather than shared; collaboration happens through version-control branches.
 
 Users manage the same codespaces from the **Development environments** card in **Settings →
-Development → Environments**, with GitHub selected: create one for an approved repository, start or stop it (stop keeps the repository
+Development → GitHub Codespaces**: create one for an approved repository, start or stop it (stop keeps the repository
 data) and delete it after an explicit confirmation. Each user's idle codespaces pause on their own:
 the **Automatic pause** card in the same section sets `codespaces.auto_stop_enabled` (on by default)
 and `codespaces.idle_timeout_minutes` (30 by default, 5 to 240), which decide when Moira stops a

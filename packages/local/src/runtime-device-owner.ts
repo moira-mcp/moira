@@ -100,7 +100,7 @@ export class RuntimeDeviceOwner {
           (row) =>
             !z.string().uuid().safeParse(row.id).success ||
             !/^moira-[a-f0-9]{32}$/.test(row.name) ||
-            (row.status !== "running" && row.status !== "stopped"),
+            !["running", "stopped", "created"].includes(row.status),
         ) ||
         new Set(rows.map((row) => row.id)).size !== rows.length ||
         new Set(rows.map((row) => row.name)).size !== rows.length
@@ -116,7 +116,8 @@ export class RuntimeDeviceOwner {
         const container = await observer.containerIdentity(row.name);
         if (
           (row.status === "running" && container.state !== "running") ||
-          (row.status === "stopped" && container.state !== "exited")
+          (row.status === "stopped" && container.state !== "exited") ||
+          (row.status === "created" && !["created", "exited"].includes(container.state))
         )
           throw new LocalRefusal(
             "LOCAL_CONTROL_WORKER_UNVERIFIED",
@@ -135,7 +136,7 @@ export class RuntimeDeviceOwner {
           runtimeId: row.id,
           name: row.name,
           containerId: container.containerId,
-          state: row.status as "running" | "stopped",
+          state: row.status as RuntimeCoverage["state"],
           generation: record?.generation,
           expectedStopGeneration:
             record && (record.desiredState === "stopped" || record.desiredState === "deleted")

@@ -37,31 +37,21 @@ export const localPublicPolicySchema = z
     label: safeLabel,
     enabled: z.boolean(),
     leaseUntil: integer,
-    repositories: z
-      .array(
-        z
-          .object({
-            id: identifier,
-            fullName: z
-              .string()
-              .max(201)
-              .regex(/^[A-Za-z0-9][A-Za-z0-9_.-]{0,99}\/[A-Za-z0-9][A-Za-z0-9_.-]{0,99}$/),
-            private: z.boolean(),
-            allowPush: z.boolean(),
-            allowDelete: z.boolean(),
-            allowPullRequests: z.boolean().optional(),
-            domains: z
-              .array(
-                z
-                  .string()
-                  .max(253)
-                  .regex(/^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/),
-              )
-              .max(64),
-          })
-          .strict(),
-      )
-      .max(64),
+    repositories: z.array(
+      z
+        .object({
+          id: identifier,
+          fullName: z
+            .string()
+            .max(201)
+            .regex(/^[A-Za-z0-9][A-Za-z0-9_.-]{0,99}\/[A-Za-z0-9][A-Za-z0-9_.-]{0,99}$/),
+          private: z.boolean(),
+          allowPush: z.boolean(),
+          allowDelete: z.boolean(),
+          allowPullRequests: z.boolean().optional(),
+        })
+        .strict(),
+    ),
     machine: z
       .object({
         name: z.literal("local-approved"),
@@ -80,7 +70,6 @@ export const localPublicPolicySchema = z
           .max(1024 ** 4),
       })
       .strict(),
-    maxSandboxes: z.number().int().min(1).max(8),
   })
   .strict()
   .superRefine((policy, ctx) => {

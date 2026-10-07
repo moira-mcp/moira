@@ -1,22 +1,15 @@
-import { z } from "zod";
-import { PrivateState } from "./private-state.js";
 import { LocalRefusal, type LocalPolicy } from "./policy.js";
-
-const ledgerSchema = z
-  .object({ leaseUntil: z.number(), spent: z.number().int().nonnegative() })
-  .strict();
 
 export interface NetworkAdmission {
   signal?: AbortSignal;
-  /** Refresh the locally bound authority after waiting, before consuming credit. */
+  /** Revalidate VM-bound authority immediately before opening a connection. */
   refreshPolicy?: () => Promise<LocalPolicy>;
 }
 
+/** Bounds broker sockets and waiting memory, not downloaded data or development permissions. */
 export const MAX_BROKER_CONNECTIONS = 128;
-
 interface Reservation {
-  maximumBytes: number;
-  release: (used: number) => Promise<void>;
+  release: () => Promise<void>;
 }
 interface Waiter {
   policy: LocalPolicy;
@@ -27,32 +20,22 @@ interface Waiter {
   cancelled: boolean;
 }
 
-/** Reserve before opening a socket; an unclean shutdown loses credit rather than creating it. */
+/** Backpressure for the host broker. There is no traffic ledger or download byte ceiling. */
 export class NetworkBudget {
-  private tail: Promise<unknown> = Promise.resolve();
   private connections = 0;
   private readonly waiting: Waiter[] = [];
-  private pumping = false;
-  private wakePending = false;
+  private pumping?: Promise<void>;
   private closed = false;
-  constructor(private readonly state: PrivateState) {}
 
-  private serial<T>(operation: () => Promise<T>): Promise<T> {
-    const result = this.tail.then(operation);
-    this.tail = result.catch(() => undefined);
-    return result;
+  constructor(private readonly capacity = MAX_BROKER_CONNECTIONS) {
+    if (!Number.isSafeInteger(capacity) || capacity < 1 || capacity > MAX_BROKER_CONNECTIONS)
+      throw new Error("Invalid broker socket capacity");
   }
 
-  /** The broker fences admission before waiting for its final reservation releases. */
   async settle(): Promise<void> {
-    let pending: Promise<unknown>;
-    do {
-      pending = this.tail;
-      await pending;
-    } while (pending !== this.tail);
+    while (this.pumping) await this.pumping;
   }
 
-  /** Fence waiting consumers before the broker waits for its requests to finish. */
   closeAdmission(): void {
     this.closed = true;
     for (const waiter of [...this.waiting])
@@ -70,79 +53,41 @@ export class NetworkBudget {
     waiter.cancelled = true;
     this.remove(waiter);
     waiter.reject(error);
-    void this.pump();
   }
 
-  private async pump(): Promise<void> {
-    this.wakePending = true;
+  private pump(): void {
     if (this.pumping) return;
-    this.pumping = true;
-    this.wakePending = false;
-    try {
-      while (this.waiting.length) {
-        const waiter = this.waiting[0];
-        try {
-          const admitted = await this.serial(async () => {
-            const policy = await (waiter.admission.refreshPolicy?.() ??
-              Promise.resolve(waiter.policy));
-            if (waiter.cancelled || this.closed) return true;
-            if (!policy.enabled || policy.leaseUntil <= Date.now())
-              throw new LocalRefusal("LOCAL_NETWORK_DENIED", "Local network lease is unavailable.");
-            if (this.connections >= policy.limits.maxNetworkConnections) return false;
-            const previous = await this.state.read("network-budget.json", ledgerSchema.parse);
-            const current =
-              previous?.leaseUntil === policy.leaseUntil
-                ? previous
-                : { leaseUntil: policy.leaseUntil, spent: 0 };
-            const remaining = policy.limits.maxNetworkBytes - current.spent;
-            if (remaining <= 0 && this.connections > 0) return false;
-            if (remaining <= 0)
-              throw new LocalRefusal(
-                "LOCAL_NETWORK_BUDGET",
-                "The locally approved network budget is exhausted.",
-              );
-            const maximumBytes = Math.min(128 * 1024 * 1024, remaining);
-            current.spent += maximumBytes;
-            await this.state.write("network-budget.json", current);
-            if (waiter.cancelled || this.closed) {
-              current.spent -= maximumBytes;
-              await this.state.write("network-budget.json", current);
-              return true;
-            }
-            this.connections++;
-            this.remove(waiter);
-            let released = false;
-            waiter.resolve({
-              maximumBytes,
-              release: (used) =>
-                this.serial(async () => {
-                  if (released) return;
-                  released = true;
-                  this.connections--;
-                  try {
-                    const ledger = await this.state.read("network-budget.json", ledgerSchema.parse);
-                    if (ledger?.leaseUntil === policy.leaseUntil) {
-                      ledger.spent = Math.max(
-                        0,
-                        ledger.spent - Math.max(0, maximumBytes - Math.max(0, used)),
-                      );
-                      await this.state.write("network-budget.json", ledger);
-                    }
-                  } finally {
-                    void this.pump();
-                  }
-                }),
-            });
-            return true;
-          });
-          if (!admitted) break;
-        } catch (error) {
-          this.cancel(waiter, error);
-        }
+    this.pumping = this.admit().finally(() => {
+      this.pumping = undefined;
+      if (!this.closed && this.waiting.length && this.connections < this.capacity) this.pump();
+    });
+  }
+
+  private async admit(): Promise<void> {
+    while (!this.closed && this.waiting.length && this.connections < this.capacity) {
+      const waiter = this.waiting[0];
+      try {
+        const policy = await (waiter.admission.refreshPolicy?.() ?? Promise.resolve(waiter.policy));
+        if (waiter.cancelled || this.closed) continue;
+        if (!policy.enabled || policy.leaseUntil <= Date.now())
+          throw new LocalRefusal(
+            "LOCAL_NETWORK_DENIED",
+            "Local network permission is unavailable.",
+          );
+        this.remove(waiter);
+        this.connections++;
+        let released = false;
+        waiter.resolve({
+          release: async () => {
+            if (released) return;
+            released = true;
+            this.connections--;
+            this.pump();
+          },
+        });
+      } catch (error) {
+        this.cancel(waiter, error);
       }
-    } finally {
-      this.pumping = false;
-      if (this.wakePending) void this.pump();
     }
   }
 
@@ -161,7 +106,7 @@ export class NetworkBudget {
         () =>
           this.cancel(
             waiter,
-            new LocalRefusal("LOCAL_NETWORK_CAPACITY", "Local network admission timed out."),
+            new LocalRefusal("LOCAL_NETWORK_CAPACITY", "Network admission timed out."),
           ),
         Math.max(1, Math.min(120_000, policy.leaseUntil - Date.now())),
       );
@@ -178,7 +123,7 @@ export class NetworkBudget {
       };
       admission.signal?.addEventListener("abort", abort, { once: true });
       this.waiting.push(waiter);
-      void this.pump();
+      this.pump();
     });
   }
 }

@@ -2,7 +2,6 @@ import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import {
   LocalDeviceError,
-  LOCAL_BROWSER_DEVELOPMENT_DOMAINS,
   localRepositoryTargetId,
   type AgentRepositoryManagement,
   type LocalDeviceService,
@@ -172,7 +171,7 @@ export class LocalRepositoryAdmissionService {
     )
       throw new LocalDeviceError(
         "LOCAL_UNAUTHORIZED",
-        "Enable and apply limited agent repository management in Moira Settings first.",
+        "Enable and apply agent repository management in Moira Settings first.",
       );
     const verified = await this.dependencies.verifyRepository(userId, input.repositoryId);
     device = this.dependencies.devices.getActiveDevice(userId, input.deviceId);
@@ -211,7 +210,6 @@ export class LocalRepositoryAdmissionService {
         allowPush: delegation.allowPush,
         allowDelete: false,
         allowPullRequests: false,
-        domains: [...LOCAL_BROWSER_DEVELOPMENT_DOMAINS],
       },
     });
     return this.result(added, input.requestId);
