@@ -5,6 +5,8 @@ import {
   CodespaceResourceError,
   canonicalJson,
   localRepositoryTargetId,
+  localResourceSnapshotSchema,
+  LOCAL_WORKER_REQUEST_TIMEOUT_MS,
   parseLocalRepositoryTargetId,
   type CodespaceProviderAdapter,
   type CodespaceProviderResource,
@@ -16,33 +18,8 @@ import {
 import { CodespaceJobTransport } from "./codespace-job-transport.js";
 import { LocalCodespaceRelay } from "./local-codespace-relay.js";
 
-const spaceSchema = z
-  .object({
-    id: z.string().uuid(),
-    repositoryId: z.string().uuid(),
-    operationMarker: z.string().regex(/^moira-[a-f0-9]{24}$/),
-    generation: z.number().int().positive(),
-    createdAt: z.number().int().nonnegative(),
-    lastStartedAt: z.number().int().nonnegative().nullable(),
-    state: z.enum([
-      "running",
-      "stopped",
-      "starting",
-      "stopping",
-      "created",
-      "error",
-      "unknown",
-      "absent",
-    ]),
-    phase: z.string().max(80),
-    failure: z.string().max(160).nullable(),
-    nativeStopConfirmed: z.boolean(),
-  })
-  .passthrough();
-const snapshotSchema = z
-  .object({ deviceId: z.string().uuid(), spaces: z.array(spaceSchema) })
-  .passthrough();
 const RECOVERY_JOB_ACTIONS = new Set(["inspect", "cancel", "finalize", "output", "file-inspect"]);
+const LOCAL_JOB_DELIVERY_TIMEOUT_MS = LOCAL_WORKER_REQUEST_TIMEOUT_MS + 120_000;
 
 /** Internal credentials identify the already authenticated caller; they never leave this server. */
 export function localCodespaceCredential(userId: string): string {
@@ -157,7 +134,20 @@ export class LocalCodespaceProvider implements CodespaceProviderAdapter {
       },
       { mutation: true },
     );
-    const resource = await this.observe(record);
+    // A reconciler may have adopted the admitted VM while its original create receipt was in flight.
+    // The receipt settles that old claim; a new snapshot still needs current resource authority.
+    const current = this.resources.getOwned(target.userId, record.id);
+    if (
+      !current ||
+      current.operationMarker !== record.operationMarker ||
+      current.repositoryId !== record.repositoryId ||
+      current.connectionId !== record.connectionId
+    )
+      throw new CodespaceResourceError(
+        "CODESPACE_AUTHORIZATION_REQUIRED",
+        "Local creation authority changed",
+      );
+    const resource = await this.observe(current);
     return { outcome: "accepted" as const, resource };
   }
   async listOwned(credential: string): Promise<CodespaceProviderResource[]> {
@@ -175,30 +165,32 @@ export class LocalCodespaceProvider implements CodespaceProviderAdapter {
     }
     return found;
   }
+  async inspectCreation(
+    credential: string,
+    input: { resourceId: string; operationMarker: string; repositoryId: string },
+  ) {
+    const record = this.resources.getOwned(userFromCredential(credential), input.resourceId);
+    if (
+      !record ||
+      record.provider !== this.id ||
+      record.operationMarker !== input.operationMarker ||
+      record.repositoryId !== input.repositoryId
+    )
+      throw new CodespaceResourceError(
+        "CODESPACE_GENERATION_CONFLICT",
+        "Local creation reservation changed",
+      );
+    const resource = await this.observe(record);
+    return resource ? { outcome: "found" as const, resource } : { outcome: "absent" as const };
+  }
   private async exactRecord(credential: string, name: string) {
     const id = z.string().uuid().parse(name);
     const userId = userFromCredential(credential);
+    const reserved = this.resources.getOwned(userId, id);
+    if (reserved?.provider === this.id) return reserved;
     const records = this.resources.listOwned(userId, this.id);
     const record = records.find((row) => row.providerResourceName === id);
     if (record) return record;
-    // Core probes the returned identity before adoption. The saved authenticated create receipt
-    // supplies this identity; an SDK name, caller hint or another user's sandbox cannot do so.
-    for (const pending of records) {
-      if (pending.providerResourceName !== null || pending.state !== "create_submitted") continue;
-      const binding = this.relay.devices.getBinding(userId, pending.id);
-      if (!binding) continue;
-      const receipt = await this.relay.completedResult(pending, {
-        action: "create",
-        repositoryId: binding.repositoryId,
-        ref: pending.requestedRef,
-        operationMarker: pending.operationMarker,
-      });
-      if (
-        receipt !== null &&
-        z.object({ spaceId: z.string().uuid() }).strict().parse(receipt).spaceId === id
-      )
-        return pending;
-    }
     throw new CodespaceResourceError(
       "CODESPACE_NOT_FOUND",
       "Local codespace is not owned by this account",
@@ -216,7 +208,15 @@ export class LocalCodespaceProvider implements CodespaceProviderAdapter {
         "CODESPACE_AUTHORIZATION_REQUIRED",
         "Local resource binding is missing",
       );
-    const result = snapshotSchema.parse(await this.relay.send(record, { action: "snapshot" }));
+    const parsed = localResourceSnapshotSchema.safeParse(
+      await this.relay.send(record, { action: "snapshot" }),
+    );
+    if (!parsed.success)
+      throw new CodespaceResourceError(
+        "CODESPACE_LOCAL_PROTOCOL_ERROR",
+        "The local computer returned an incompatible resource snapshot; update the companion and server together",
+      );
+    const result = parsed.data;
     if (result.deviceId !== binding.deviceId)
       throw new CodespaceResourceError(
         "CODESPACE_GENERATION_CONFLICT",
@@ -231,44 +231,82 @@ export class LocalCodespaceProvider implements CodespaceProviderAdapter {
         "Local creation identity is ambiguous",
       );
     const space = matches[0];
-    if (!space || space.state === "absent") return null;
+    if (result.creation.state === "absent") {
+      if (result.spaces.length !== 0)
+        throw new CodespaceResourceError(
+          "CODESPACE_LOCAL_PROTOCOL_ERROR",
+          "Local absence disagrees with its resource snapshot",
+        );
+      return null;
+    }
+    if (!space || result.creation.spaceId !== space.id)
+      throw new CodespaceResourceError(
+        "CODESPACE_LOCAL_PROTOCOL_ERROR",
+        "The local creation manifest is missing from its scoped snapshot",
+      );
     if (
       space.repositoryId !== binding.repositoryId ||
-      (record.providerResourceName !== null && space.id !== record.providerResourceName)
+      (record.providerResourceName !== null &&
+        record.providerResourceName !== record.id &&
+        space.id !== record.providerResourceName)
     ) {
       throw new CodespaceResourceError(
         "CODESPACE_GENERATION_CONFLICT",
         "Local sandbox identity changed",
       );
     }
-    if (space.state === "unknown") {
-      throw new CodespaceResourceError(
-        "CODESPACE_PROVIDER_UNAVAILABLE",
-        "The local runtime cannot verify this codespace's state",
-      );
-    }
+    if (space.state === "absent") return null;
+    const setupIncomplete =
+      space.failure === "LOCAL_SETUP_INCOMPLETE" ||
+      ((space.phase === "stopped" || space.phase === "usable") &&
+        space.lastStartedAt === null &&
+        space.failure === null) ||
+      (space.phase === "failed" &&
+        space.lastStartedAt === null &&
+        space.failure === "LOCAL_GUEST_SETTLEMENT_UNKNOWN" &&
+        space.state !== "unknown");
     return {
-      name: space.id,
+      name: record.providerResourceName ?? record.id,
       displayName: record.operationMarker,
       ownerId: record.userId,
       billableOwnerId: record.userId,
       repositoryId: localRepositoryTargetId(binding.deviceId, binding.repositoryId),
       repositoryFullName: record.repositoryFullName,
       ref: null,
+      ...(setupIncomplete
+        ? { stateError: "CODESPACE_LOCAL_SETUP_INCOMPLETE" as const }
+        : space.state === "unknown" || space.failure !== null
+          ? {
+              stateError:
+                space.failure &&
+                space.failure !== "LOCAL_CREATE_UNKNOWN" &&
+                space.failure !== "LOCAL_SETUP_INCOMPLETE"
+                  ? ("CODESPACE_LOCAL_RUNTIME_ERROR" as const)
+                  : ("CODESPACE_LOCAL_CREATION_UNKNOWN" as const),
+            }
+          : {}),
       state:
-        space.state === "running"
-          ? "available"
-          : space.state === "stopped"
-            ? "shutdown"
-            : space.state === "starting"
-              ? "starting"
-              : space.state === "stopping"
-                ? "stopping"
-                : space.state === "created"
-                  ? space.nativeStopConfirmed
-                    ? "shutdown"
-                    : "created"
-                  : "failed",
+        space.state === "unknown"
+          ? "unknown"
+          : space.state === "running"
+            ? space.phase === "usable" && space.failure === null && !setupIncomplete
+              ? "available"
+              : !setupIncomplete &&
+                  space.failure === null &&
+                  (space.phase === "creating" || space.phase === "stopped")
+                ? "starting"
+                : "failed"
+            : space.state === "stopped"
+              ? "shutdown"
+              : space.state === "starting"
+                ? "starting"
+                : space.state === "stopping"
+                  ? "stopping"
+                  : space.state === "created"
+                    ? space.nativeStopConfirmed
+                      ? "shutdown"
+                      : "created"
+                    : "failed",
       lastUsedAt: space.lastStartedAt,
       machine: record.machine,
       createdAt: space.createdAt,
@@ -295,7 +333,10 @@ export class LocalCodespaceProvider implements CodespaceProviderAdapter {
   async probeConnector(credential: string, name: string) {
     const resource = await this.getExact(credential, name);
     if (resource?.state !== "available")
-      throw new CodespaceResourceError("CODESPACE_NOT_RUNNING", "Local sandbox is not running");
+      throw new CodespaceResourceError(
+        resource?.stateError ?? "CODESPACE_NOT_RUNNING",
+        "Local sandbox guest is not ready",
+      );
   }
   guidance() {
     return {
@@ -334,7 +375,7 @@ export class LocalCodespaceJobTransport extends CodespaceJobTransport {
         spaceId: codespace.providerResourceName,
         job: this.executeJob(codespace, operation, request),
       },
-      { mutation: true },
+      { mutation: true, waitMs: LOCAL_JOB_DELIVERY_TIMEOUT_MS },
     );
   }
   async retainFileInput(
@@ -351,7 +392,7 @@ export class LocalCodespaceJobTransport extends CodespaceJobTransport {
         spaceId: codespace.providerResourceName,
         job: this.fileExecuteJob(codespace, operation, request),
       },
-      { mutation: true },
+      { mutation: true, waitMs: LOCAL_JOB_DELIVERY_TIMEOUT_MS },
     );
   }
   private requireOperation(
@@ -397,7 +438,9 @@ export class LocalCodespaceJobTransport extends CodespaceJobTransport {
       {
         mutation:
           job.action === "execute" || job.action === "file-execute" || job.action === "finalize",
-        waitMs: timeoutMs,
+        // The guest supervisor detaches commands; this call waits for its bounded worker,
+        // not the command's separate retained execution deadline.
+        waitMs: Math.min(timeoutMs, LOCAL_JOB_DELIVERY_TIMEOUT_MS),
       },
     );
     if (!result || typeof result !== "object" || Array.isArray(result))

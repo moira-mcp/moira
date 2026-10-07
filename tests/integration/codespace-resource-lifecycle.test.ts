@@ -2198,7 +2198,7 @@ describe("re-authorization rebinds codespaces and fencing stays fair", () => {
       reauthorize(value, "connection-1");
       // Fenced until the reconciler re-verifies it: the look-alike that stays here is the defect.
       await expect(value.service.stopCodespace("user-1", id)).rejects.toMatchObject({
-        code: "CODESPACE_RESOURCE_INVALID",
+        code: "CODESPACE_AUTHORIZATION_REQUIRED",
         message: expect.stringContaining("Reconnect"),
       });
 
@@ -2236,7 +2236,7 @@ describe("re-authorization rebinds codespaces and fencing stays fair", () => {
       expect(value.repository.hasCurrentAuthorization("user-1", created.resource.id)).toBe(false);
       await expect(
         value.service.startCodespace("user-1", created.resource.id),
-      ).rejects.toMatchObject({ code: "CODESPACE_RESOURCE_INVALID" });
+      ).rejects.toMatchObject({ code: "CODESPACE_AUTHORIZATION_REQUIRED" });
     } finally {
       value.sqlite.close();
     }

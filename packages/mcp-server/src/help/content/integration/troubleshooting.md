@@ -328,6 +328,12 @@ description marker instead of repeating POST. Another same-name repository or no
 cannot settle that ambiguity. Keep the marker while unresolved; other repository requests are
 not blocked by a repository-count quota.
 Only `applied` after actual installation grant and companion ACK authorizes codespace creation.
+Inspect `error.stage` for the failing setup step and `error.provider_status` for a reported GitHub
+HTTP status; follow `instruction` and resume the same complete creation request. If
+`stage: "local_admission"` returns `rejected`, the repository can already exist. Restore its
+original grant in Settings, or use `repository_add` with the retained `github_repository_id`
+and a fresh `request_id` if existing-private consent permits it. An unchanged rejected admission
+receipt stays rejected; it does not authorize another GitHub create.
 
 `preview_image` needs a complete bounded PNG/JPEG download. Resume a pending image with only
 its `codespace_id` and `operation_id`, not another file dispatch. SVG, animated PNG, malformed,
@@ -344,16 +350,33 @@ Open that computer's codespace card and use **Check state again** for a pending 
 delete. This retries the saved intent for its exact codespace ID; deletion keeps the current
 generation check. It does not create a replacement VM. Pending creation or unavailable applied
 access instead uses read-only refresh. Errors and loaders stay on the affected card.
+**Delete** is available with confirmation even during pending creation, cleanup or uncertain
+local state. It addresses only the same owned codespace and finishes after confirmed absence.
+Do not clear journals, edit database state or create a replacement to bypass an unresolved removal.
 
 `observed_at` in a codespace summary is the last verified provider observation, nullable until
 one succeeds. `updated_at` may change because of a claim or retry and does not prove runtime
-freshness. `lifecycle_error` is a safe known refusal code, not raw provider output. Unknown runtime
-state returns `CODESPACE_PROVIDER_UNAVAILABLE` without certifying shutdown. A local `created`
-VM remains actionable but needs independent native settlement before stop completion; an SDK
-error is distinct from unknown and does not itself complete a local stop. Recovery uses the same
+freshness. `lifecycle_error` is a safe diagnostic code, not raw provider output. A failed scoped
+observation preserves the verified state/time and does not prove absence. Healthy sibling VMs
+still refresh and run. Physical startup alone does not mean guest preparation completed. A local
+`created` VM remains actionable but needs independent native settlement before stop completion;
+an SDK error does not itself complete a local stop. Recovery uses the same
 mutation receipt within its private-transfer TTL, even after the delivery deadline, without a
 second start/stop/delete effect. If that receipt has expired, inspect the existing codespace and
 its verified observation instead of repeating creation or editing the database state.
+
+| Diagnostic                                 | Owner action                                                                                                                                                                                                       |
+| ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `CODESPACE_LOCAL_CREATION_UNKNOWN`         | Check the same codespace again. Its physical outcome is unconfirmed; do not create a replacement.                                                                                                                  |
+| `CODESPACE_LOCAL_SETUP_INCOMPLETE`         | Guest preparation did not complete. Delete the codespace and confirm removal before recreating it; start or `recover` cannot finish initial setup. The cause remains visible even after a confirmed physical stop. |
+| `CODESPACE_LOCAL_PROTOCOL_ERROR`           | Coordinate matching server/companion builds and inspect saved-state compatibility. Preserve identity and journals.                                                                                                 |
+| `CODESPACE_LOCAL_RUNTIME_ERROR`            | Inspect the local runtime's diagnostics, repair that runtime and check the same codespace again. Shutdown is not implied.                                                                                          |
+| `CODESPACE_LOCAL_DELETE_APPROVAL_REQUIRED` | Allow deletion for this repository in the computer's settings, wait for application, then confirm deletion of the same codespace.                                                                                  |
+
+After a confirmed refusal and repair, an explicit lifecycle action can create a fresh guarded
+attempt. A repeated active request or an unknown outcome still uses its retained intent;
+it does not dispatch a duplicate effect. Read-only inspection can recover exact creation identity
+from the owned durable manifest after a reply expires; an unavailable inventory is never absence.
 With locally approved `web-control`, request a finite renewal in the device editor within its
 ceiling, up to seven days. Pending means the computer has not applied the request; rejected shows
 the refusal and retains the last successfully acknowledged revision. A failed application can
@@ -362,8 +385,12 @@ An offline computer keeps requests pending. Inspect the effective policy and com
 and applied revisions before retrying work.
 
 The daemon reports `connected`, `offline`, `faulted` or `disabled` in its structured stderr status.
-Network/5xx failures mean `offline`; malformed protocol or a refused individual claim means `faulted`
-and a 30-second confirmation retry. Both suspend new claims without stopping admitted VM work.
+Network/5xx failures mean `offline`; malformed control-plane protocol means `faulted`
+and a 30-second confirmation retry. Those connection failures suspend new claims without stopping
+admitted VM work. An addressed resource refusal returns a bounded error for that request. A refused
+delivery claim ends only its request scope: background delivery confirms the same current
+device/account/connection and generation, then continues independent claims without a daemon-wide
+fault or retry delay. Failed confirmation follows the actual connection or device-authority failure.
 Device-endpoint unauthorized responses or confirmed device identity/revocation failures stop work;
 local disable, lease expiry and explicit shutdown do so independently. Current grants and finite
 deadlines remain unchanged. Cached results can return without repeating effects; an offline row
@@ -389,7 +416,10 @@ existing stores are preserved.
 After an update, a strict heartbeat or `web-control.json` rejection can mean the server, companion
 and owner guard use different control-contract editions, even with delegation disabled. Rebuilding
 the CLI alone does not replace a running guard. Arrange ordinary owner-managed shutdown and confirmed
-settlement, coordinate matching server/companion editions, then restart with the same state and disks.
+settlement. With both sides stopped, back up the server database, the complete private companion
+state and SDK backing storage, including VM disks. Keep matching bundles, coordinate server/companion
+editions, then restart with the same state and disks. Rollback restores that complete paired backup
+and matching bundles together.
 Do not erase approval/journals, create replacement state or kill arbitrary guard processes. Management
 can be interrupted; mixed-edition rolling upgrade is unsupported. Live append in a matched edition
 does not make the upgrade itself uninterrupted.

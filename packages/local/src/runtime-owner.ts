@@ -7,6 +7,10 @@ import {
   type LocalSpace,
 } from "./space-record.js";
 import { LocalRelay } from "./relay.js";
+import {
+  localManagementOutcomeSchema,
+  LOCAL_WORKER_REQUEST_TIMEOUT_MS,
+} from "../../shared/src/codespaces/local-protocol.js";
 import type { LocalVmRuntime } from "./local-vm-runtime.js";
 import { createLocalVmRuntime } from "./local-vm-runtime-factory.js";
 import { runProcess, type RunProcess } from "./process.js";
@@ -52,6 +56,7 @@ export class RuntimeOwner {
   private runtime?: LocalVmRuntime;
   private cleanupRuntime?: LocalVmRuntime;
   private admission?: Promise<void>;
+  private admissionComplete = false;
   private admittedGenerationValue = 0;
   private createdRuntimeId?: string;
   private managementTail: Promise<unknown> = Promise.resolve();
@@ -59,7 +64,7 @@ export class RuntimeOwner {
   constructor(
     readonly records: LocalRecords,
     readonly id: string,
-    private readonly protectRuntime: () => Promise<void>,
+    private readonly protectRuntime: (closure?: boolean) => Promise<void>,
     private readonly prepareCredentials: () => Promise<void>,
     private readonly loadAssets: typeof guestAssets = guestAssets,
   ) {}
@@ -75,6 +80,9 @@ export class RuntimeOwner {
   }
   get admittedGeneration(): number {
     return this.admittedGenerationValue;
+  }
+  get admitted(): boolean {
+    return this.admissionComplete;
   }
 
   private readonly run: RunProcess = (request) => {
@@ -102,7 +110,7 @@ export class RuntimeOwner {
         request.binary === this.policy?.runtime.binary ||
         (request.binary === process.execPath && request.argv[0] === runtimeApiAsset())
       )
-        await this.protectRuntime();
+        await this.protectRuntime(true);
       return runProcess({ ...request, signal: this.cleanupController.signal });
     })();
     this.children.add(child);
@@ -128,6 +136,15 @@ export class RuntimeOwner {
       throw new LocalRefusal(
         "LOCAL_GUEST_SETTLEMENT_UNKNOWN",
         "Acknowledge the retained unknown outcome locally before admitting new work.",
+      );
+    if (
+      this.space.failure === "LOCAL_SETUP_INCOMPLETE" ||
+      ((this.space.phase === "usable" || this.space.phase === "stopped") &&
+        this.space.lastStartedAt === null)
+    )
+      throw new LocalRefusal(
+        "LOCAL_SETUP_INCOMPLETE",
+        "Guest preparation did not finish. Delete this codespace after confirmed cleanup, then create a new one.",
       );
     requireSpaceGrant(this.policy, this.space, Date.now());
     if (activate) {
@@ -156,6 +173,7 @@ export class RuntimeOwner {
       prepareCredentials: this.prepareCredentials,
     });
     await this.prepareCredentials();
+    this.admissionComplete = true;
   }
 
   private async current(): Promise<{
@@ -371,7 +389,7 @@ export class RuntimeOwner {
           identity,
           "worker",
           Buffer.from(JSON.stringify({ kind: "operation", request })),
-          Math.min(30_000, latest.policy.leaseUntil - Date.now()),
+          Math.min(LOCAL_WORKER_REQUEST_TIMEOUT_MS, latest.policy.leaseUntil - Date.now()),
           this.controller.signal,
           {
             expectedNetworkDigest: space.networkPolicy,
@@ -459,8 +477,14 @@ export class RuntimeOwner {
           "LOCAL_GENERATION_CONFLICT",
           "The local stop receipt changed before confirmation.",
         );
-      this.space.phase = "stopped";
       const before = this.stopOrigin;
+      const incomplete =
+        before?.phase === "creating" ||
+        (before?.phase === "failed" && before.lastStartedAt === null);
+      this.space.phase = incomplete ? "failed" : "stopped";
+      // Physical closure is not guest readiness. A failed bootstrap keeps its provenance
+      // in the existing failure field, so a later start cannot resume it as initialized.
+      if (incomplete && this.space.failure === null) this.space.failure = "LOCAL_SETUP_INCOMPLETE";
       if (
         (before?.phase === "usable" || before?.phase === "stopped") &&
         before.desiredState === "running" &&
@@ -563,10 +587,11 @@ export class RuntimeOwner {
   }
 
   manage(generation: number, remove: boolean, localApproval = false): Promise<void> {
+    let admitted = false;
     const work = this.managementTail
       .catch(() => undefined)
       .then(async () => {
-        const space = await this.records.get(this.id);
+        let space = await this.records.get(this.id);
         const configured = await this.records.policy();
         const policy = space ? policyForSpace(configured, space) : configured;
         if (!space || space.generation !== generation)
@@ -582,28 +607,64 @@ export class RuntimeOwner {
               "Approve this sandbox deletion locally.",
             );
         }
-        await this.protectRuntime();
-        this.space = space;
+        await this.protectRuntime(true);
+        // Preserve the active owner's captured create result until its calls have drained.
+        this.space ??= space;
         this.policy = policy;
         this.cleanupRuntime ??= createLocalVmRuntime(policy, {
           run: this.cleanupRun,
           prepareCredentials: this.prepareCredentials,
         });
+        if (space.phase === "deleted") {
+          const deletedName = space.name;
+          const present = space.runtimeId
+            ? await this.cleanupRuntime.inspectExact({
+                name: space.name,
+                runtimeId: space.runtimeId,
+              })
+            : (await this.cleanupRuntime.list()).find((item) => item.name === deletedName);
+          if (present)
+            throw new LocalRefusal(
+              "LOCAL_IDENTITY_CHANGED",
+              "A deleted local sandbox has a surviving runtime identity.",
+            );
+          return;
+        }
+        admitted = true;
         if (space.desiredState !== "running") {
           // An explicit management request is a new local stop intent even when an
           // older record already requested stop. Never authorize retirement from that old generation.
           space.generation++;
           await this.records.put(space);
+          this.space = space;
         }
         await this.quiesce();
+        space = await this.records.get(this.id);
+        if (!space || !this.space || JSON.stringify(space) !== JSON.stringify(this.space))
+          throw new LocalRefusal(
+            "LOCAL_GENERATION_CONFLICT",
+            "The local management target changed during settlement.",
+          );
         const runtime = this.cleanupRuntime;
-        if (!space.runtimeId)
-          throw new LocalRefusal("LOCAL_CREATE_UNKNOWN", "Inspect the pending local creation.");
-        const identity = { name: space.name, runtimeId: space.runtimeId };
-        await runtime.stop(identity);
-        const current = await runtime.inspectExact(identity);
-        if (current && current.status !== "stopped" && current.status !== "created")
-          throw new LocalRefusal("LOCAL_STOP_PENDING", "The sandbox stop is not confirmed.");
+        const identity = space.runtimeId ? { name: space.name, runtimeId: space.runtimeId } : null;
+        if (identity) {
+          await runtime.stop(identity);
+          const current = await runtime.inspectExact(identity);
+          if (current && current.status !== "stopped" && current.status !== "created")
+            throw new LocalRefusal("LOCAL_STOP_PENDING", "The sandbox stop is not confirmed.");
+        } else if ((await runtime.list()).some((item) => item.name === space!.name)) {
+          // A same-name VM without our captured UUID cannot be adopted, stopped, or removed.
+          throw new LocalRefusal(
+            "LOCAL_CREATE_UNKNOWN",
+            "Creation settled without a captured VM identity; the saved name is occupied. Inspect this computer's pending creation.",
+          );
+        } else {
+          space.desiredState = "stopped";
+          space.phase = "stopped";
+          space.failure = null;
+          await this.records.put(space);
+          this.space = space;
+        }
         await this.protectRuntime();
         await this.confirmStopped();
         if (!remove) return;
@@ -612,12 +673,48 @@ export class RuntimeOwner {
         space.desiredState = "deleted";
         space.phase = "deleting";
         await this.records.put(space);
-        await runtime.remove(identity);
+        this.space = space;
+        if (identity) await runtime.remove(identity);
+        const remaining = identity
+          ? await runtime.inspectExact(identity)
+          : (await runtime.list()).find((item) => item.name === space!.name);
+        if (remaining)
+          throw new LocalRefusal(
+            "LOCAL_STOP_PENDING",
+            "The exact local sandbox deletion is not confirmed.",
+          );
         if (this.cleanupController.signal.aborted)
           throw new LocalRefusal("LOCAL_CANCELLED", "Deletion outcome is unknown.");
         space.phase = "deleted";
         space.generation++;
         await this.records.put(space);
+        this.space = space;
+      })
+      .catch(async (error: unknown) => {
+        const current = await this.records.get(this.id);
+        if (
+          admitted &&
+          error instanceof LocalRefusal &&
+          current &&
+          this.space &&
+          current.generation > generation &&
+          current.desiredState !== "running" &&
+          JSON.stringify(current) === JSON.stringify(this.space)
+        ) {
+          throw new LocalRefusal(
+            error.code,
+            error.message,
+            localManagementOutcomeSchema.parse({
+              spaceId: this.id,
+              repositoryId: current.repositoryId,
+              operationMarker: current.operationMarker,
+              originGeneration: generation,
+              generation: current.generation,
+              action: remove ? "delete" : "stop",
+            }),
+          );
+        }
+        throw error;
       });
     this.managementTail = work;
     return work;

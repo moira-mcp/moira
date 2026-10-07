@@ -42,6 +42,7 @@ async function fixture(now: () => number = Date.now) {
   await local.records.put(local.space);
   const requests: Array<Record<string, unknown>> = [];
   let status: SandboxObservation["status"] = "running";
+  let guestContact: Promise<Buffer> | undefined;
   let checkBoundary = async () => {};
   let respond: (request: Record<string, unknown>) => Promise<unknown> = async () => ({
     state: "running",
@@ -93,13 +94,18 @@ async function fixture(now: () => number = Date.now) {
         active: true,
         prepare: async () => {},
         validate: async () => {},
-        operation: (request) =>
-          runtime.guest(
+        operation: (request) => {
+          guestContact = runtime.guest(
             { name: local.space.name, runtimeId: local.space.runtimeId! },
             ["node", "/tmp/moira-local-runtime/worker.mjs"],
             Buffer.from(JSON.stringify({ kind: "operation", request })),
-          ),
+          );
+          return guestContact;
+        },
         stop: async () => {
+          // The substituted owner has the same child-settlement obligation as RuntimeOwner:
+          // no guest contact may restart the VM after its physical stop receipt.
+          await guestContact?.catch(() => undefined);
           await runtime.stop();
           const current = await local.records.get(local.space.id);
           if (current)

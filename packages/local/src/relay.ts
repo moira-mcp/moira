@@ -7,8 +7,8 @@ import {
   type LocalRelayPayloadReference,
 } from "../../shared/src/codespaces/local-device-types.js";
 import { LocalRecords } from "./space-record.js";
-import { LocalRefusal, MAX_MESSAGE_BYTES, publicPolicy } from "./policy.js";
-import { LocalRpc, localEnvelopeSchema } from "./rpc.js";
+import { LocalRefusal, MAX_MESSAGE_BYTES, publicPolicy, requireLocalGrant } from "./policy.js";
+import { LocalRpc, localEnvelopeSchema, type LocalReply } from "./rpc.js";
 import {
   localDeviceControlViewSchema,
   type LocalDeviceControlView,
@@ -16,6 +16,10 @@ import {
 import { LocalWebControl } from "./web-control.js";
 import { RequestJournal } from "./journal.js";
 import { canonicalJson } from "../../shared/src/utils/canonical-json.js";
+import {
+  localManagementOutcomeSchema,
+  localResourceSnapshotSchema,
+} from "../../shared/src/codespaces/local-protocol.js";
 
 const uuid = z.string().uuid();
 const deviceSecret = z.string().regex(/^[A-Za-z0-9_-]{43}$/);
@@ -60,6 +64,20 @@ const claimSchema = z
   })
   .strict();
 const hash = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex");
+const resourceSnapshot = (value: unknown, spaceId: string | null) => {
+  const snapshot = z
+    .object({ spaces: z.array(z.object({ id: uuid }).passthrough()) })
+    .passthrough()
+    .parse(value);
+  return localResourceSnapshotSchema.parse({
+    ...snapshot,
+    spaces: snapshot.spaces.filter((space) => space.id === spaceId),
+    creation: { state: "manifest", spaceId },
+  });
+};
+// Reconnect instances share the same admitted records. A binding observation cannot
+// overtake a creation between its durable intent and the manager's native admission.
+const resourceGates = new WeakMap<LocalRecords, Map<string, Promise<unknown>>>();
 const bindingSchema = z
   .object({
     resourceId: uuid,
@@ -74,6 +92,7 @@ const bindingSchema = z
     repositoryId: uuid,
     createRequestId: uuid,
     createDigest: z.string().regex(/^[a-f0-9]{64}$/),
+    creationClosed: z.boolean().optional(),
   })
   .strict();
 const intentSchema = z
@@ -84,6 +103,7 @@ const intentSchema = z
     connectionId: uuid,
     serverGeneration: z.number().int().positive(),
     message: localEnvelopeSchema,
+    sourceMessage: localEnvelopeSchema.optional(),
   })
   .strict();
 
@@ -105,8 +125,14 @@ export class LocalDeviceAuthorityFailure extends LocalRefusal {
   }
 }
 
+/** A known HTTP refusal of one addressed delivery, not device ownership or native work. */
+class LocalClaimRefusal extends LocalRefusal {}
+
 export class LocalRelay {
   private established?: Connection;
+  private readonly deliveries = new Map<string, Promise<void>>();
+  private readonly deliveryFailures: unknown[] = [];
+  private polling?: AbortController;
   private readonly transportFailures = new WeakSet<object>();
   isUnavailable(error: unknown): boolean {
     return (
@@ -119,6 +145,24 @@ export class LocalRelay {
     readonly records: LocalRecords,
     private readonly fetch: typeof globalThis.fetch = globalThis.fetch,
   ) {}
+
+  /** Manager holds the short marker admission boundary before any SDK effect. */
+  async assertCreationOpen(repositoryId: string, operationMarker: string): Promise<void> {
+    for (const key of await this.records.state.keys("relay-space-")) {
+      const binding = await this.records.state.read(key, bindingSchema.parse);
+      if (binding?.createMarker !== operationMarker) continue;
+      if (binding.repositoryId !== repositoryId)
+        throw new LocalRefusal(
+          "LOCAL_IDENTITY_CHANGED",
+          "Creation marker belongs to another repository.",
+        );
+      if (binding.creationClosed)
+        throw new LocalRefusal(
+          "LOCAL_CREATE_UNKNOWN",
+          "This never-created intent is closed; create a new codespace instead of replaying it.",
+        );
+    }
+  }
 
   async gitAuthority(
     spaceId: string,
@@ -155,6 +199,45 @@ export class LocalRelay {
         binding.connectionId !== connection.connectionId
       )
         throw new LocalRefusal("LOCAL_IDENTITY_CHANGED", "Git resource authority changed.");
+      if (space.phase === "creating") {
+        const intent = await this.records.state.read(
+          `relay-request-${binding.createRequestId}.json`,
+          intentSchema.parse,
+        );
+        const request = intent?.message.request;
+        if (
+          binding.creationClosed ||
+          (binding.localSpaceId !== null && binding.localSpaceId !== spaceId) ||
+          (binding.localGeneration !== null && binding.localGeneration !== generation) ||
+          !intent ||
+          intent.message.id !== binding.createRequestId ||
+          intent.digest !== binding.createDigest ||
+          hash(Buffer.from(canonicalJson(intent.sourceMessage ?? intent.message))) !==
+            intent.digest ||
+          intent.resourceId !== binding.resourceId ||
+          intent.deviceGeneration !== binding.deviceGeneration ||
+          intent.connectionId !== binding.connectionId ||
+          intent.serverGeneration > binding.serverGeneration ||
+          intent.message.expiresAt <= Date.now() ||
+          request?.action !== "create" ||
+          request.repositoryId !== repositoryId ||
+          request.operationMarker !== space.operationMarker ||
+          request.ref !== space.ref ||
+          !(await new RequestJournal(this.records.state).isAccepted(
+            intent.message.id,
+            intent.message.expiresAt,
+            intent.message.request,
+          ))
+        )
+          throw new LocalRefusal(
+            "LOCAL_CREATE_UNKNOWN",
+            "Initial Git requires the exact retained accepted creation intent.",
+          );
+        // Scoped observation can adopt the manifest while the same create is still bootstrapping.
+        // It changes routing, not the accepted native work's authority or local generation.
+        candidates.push(binding);
+        continue;
+      }
       if (binding.localSpaceId !== null) {
         if (binding.localSpaceId !== spaceId)
           throw new LocalRefusal("LOCAL_GENERATION_CONFLICT", "Git local generation changed.");
@@ -173,7 +256,8 @@ export class LocalRelay {
             intent.message.expiresAt > Date.now() &&
             intent.message.request.action === "start" &&
             intent.message.request.spaceId === spaceId &&
-            hash(Buffer.from(canonicalJson(intent.message))) === intent.digest &&
+            hash(Buffer.from(canonicalJson(intent.sourceMessage ?? intent.message))) ===
+              intent.digest &&
             (await new RequestJournal(this.records.state).isAccepted(
               intent.message.id,
               intent.message.expiresAt,
@@ -199,28 +283,10 @@ export class LocalRelay {
         )
           throw new LocalRefusal("LOCAL_GENERATION_CONFLICT", "Git local generation changed.");
       } else {
-        const intent = await this.records.state.read(
-          `relay-request-${binding.createRequestId}.json`,
-          intentSchema.parse,
+        throw new LocalRefusal(
+          "LOCAL_CREATE_UNKNOWN",
+          "Git has no confirmed usable local creation identity.",
         );
-        const request = intent?.message.request;
-        if (
-          space.phase !== "creating" ||
-          !intent ||
-          intent.digest !== binding.createDigest ||
-          intent.resourceId !== binding.resourceId ||
-          intent.deviceGeneration !== binding.deviceGeneration ||
-          intent.connectionId !== binding.connectionId ||
-          intent.serverGeneration !== binding.serverGeneration ||
-          intent.message.expiresAt <= Date.now() ||
-          request?.action !== "create" ||
-          request.repositoryId !== repositoryId ||
-          request.operationMarker !== space.operationMarker
-        )
-          throw new LocalRefusal(
-            "LOCAL_CREATE_UNKNOWN",
-            "Initial Git requires our retained live creation intent.",
-          );
       }
       candidates.push(binding);
     }
@@ -346,7 +412,12 @@ export class LocalRelay {
           }
       }
       await response.body?.cancel().catch(() => undefined);
-      throw new LocalRefusal(
+      const Refusal =
+        response.status < 500 &&
+        /^\/relay\/(?:[a-f0-9-]{36}\/(?:renew|result-part|payload\/\d+)(?:\?|$)|ack$)/.test(path)
+          ? LocalClaimRefusal
+          : LocalRefusal;
+      throw new Refusal(
         response.status === 401
           ? "LOCAL_UNAUTHORIZED"
           : response.status >= 500
@@ -589,15 +660,178 @@ export class LocalRelay {
     return bytes;
   }
 
+  private async retainedOutcome(rpc: LocalRpc, claim: LocalRelayClaim) {
+    const binding = await this.records.state.read(
+      `relay-space-${claim.resourceId}.json`,
+      bindingSchema.parse,
+    );
+    const intent = await this.records.state.read(
+      `relay-request-${claim.requestId}.json`,
+      intentSchema.parse,
+    );
+    if (!binding || !intent) return undefined;
+    if (
+      binding.userId !== claim.userId ||
+      binding.deviceId !== claim.deviceId ||
+      binding.connectionId !== claim.connectionId ||
+      binding.deviceGeneration !== claim.deviceGeneration
+    )
+      throw new LocalRefusal(
+        "LOCAL_IDENTITY_CHANGED",
+        "The retained outcome belongs to another device authority.",
+      );
+    if (
+      intent.digest !== claim.digest ||
+      intent.resourceId !== claim.resourceId ||
+      intent.deviceGeneration !== claim.deviceGeneration ||
+      intent.connectionId !== claim.connectionId ||
+      intent.serverGeneration !== claim.resourceGeneration ||
+      intent.message.id !== claim.requestId ||
+      intent.message.expiresAt !== claim.deadlineAt ||
+      hash(Buffer.from(canonicalJson(intent.sourceMessage ?? intent.message))) !== claim.digest
+    )
+      throw new LocalRefusal(
+        "LOCAL_REPLAY_CONFLICT",
+        "The retained outcome cannot change its accepted payload or authority.",
+      );
+    requireLocalGrant(await this.records.policy(), binding.repositoryId, Date.now());
+    const message =
+      intent.message.request.action === "snapshot" && binding.localSpaceId
+        ? {
+            ...intent.message,
+            request: { ...intent.message.request, spaceId: binding.localSpaceId },
+          }
+        : intent.message;
+    if (!(await rpc.journal.isAccepted(message.id, message.expiresAt, message.request, true)))
+      return undefined;
+    const result = await rpc.replay(message);
+    await this.restoreManagementBinding(claim, intent, result);
+    return result.ok && message.request.action === "snapshot"
+      ? { ...result, result: resourceSnapshot(result.result, binding.localSpaceId) }
+      : result;
+  }
+
+  private async restoreManagementBinding(
+    claim: LocalRelayClaim,
+    intent: z.infer<typeof intentSchema>,
+    result: LocalReply,
+  ): Promise<void> {
+    const parsed = localManagementOutcomeSchema.safeParse(
+      result.ok
+        ? typeof result.result === "object" &&
+          result.result !== null &&
+          "management" in result.result
+          ? result.result.management
+          : undefined
+        : result.error.management,
+    );
+    if (!parsed.success) return;
+    const receipt = parsed.data;
+    if (receipt.action !== intent.message.request.action) return;
+    let gates = resourceGates.get(this.records);
+    if (!gates) {
+      gates = new Map();
+      resourceGates.set(this.records, gates);
+    }
+    const gate = gates;
+    const key = `relay-space-${claim.resourceId}.json`;
+    const work = (gate.get(claim.resourceId) ?? Promise.resolve())
+      .catch(() => undefined)
+      .then(async () => {
+        const binding = await this.records.state.read(key, bindingSchema.parse);
+        if (
+          !binding ||
+          binding.serverGeneration >= intent.serverGeneration ||
+          binding.deviceId !== claim.deviceId ||
+          binding.userId !== claim.userId ||
+          binding.connectionId !== claim.connectionId ||
+          binding.deviceGeneration !== claim.deviceGeneration ||
+          receipt.spaceId !== binding.localSpaceId ||
+          receipt.repositoryId !== binding.repositoryId ||
+          receipt.operationMarker !== binding.createMarker ||
+          receipt.originGeneration !==
+            (intent.message.request.action === "stop" || intent.message.request.action === "delete"
+              ? (intent.message.request.generation ?? binding.localGeneration)
+              : binding.localGeneration)
+        )
+          return;
+        requireLocalGrant(await this.records.policy(), binding.repositoryId, Date.now());
+        const space = await this.records.get(receipt.spaceId);
+        if (
+          !space ||
+          space.id !== receipt.spaceId ||
+          space.repositoryId !== receipt.repositoryId ||
+          space.operationMarker !== receipt.operationMarker ||
+          space.generation !== receipt.generation ||
+          (result.ok
+            ? space.desiredState !== (receipt.action === "stop" ? "stopped" : "deleted")
+            : space.desiredState === "running") ||
+          (result.ok &&
+            (receipt.action === "stop"
+              ? !["stopped", "failed"].includes(space.phase)
+              : space.phase !== "deleted")) ||
+          (!result.ok && !["failed", "stopped", "deleting"].includes(space.phase))
+        )
+          return;
+        binding.localGeneration = receipt.generation;
+        binding.serverGeneration = intent.serverGeneration;
+        await this.records.state.write(key, binding);
+      });
+    gate.set(claim.resourceId, work);
+    try {
+      await work;
+    } finally {
+      if (gate.get(claim.resourceId) === work) gate.delete(claim.resourceId);
+    }
+  }
+
   private async dispatch(
     rpc: LocalRpc,
     claim: LocalRelayClaim,
     message: z.infer<typeof localEnvelopeSchema>,
   ) {
+    let gates = resourceGates.get(this.records);
+    if (!gates) {
+      gates = new Map();
+      resourceGates.set(this.records, gates);
+    }
+    const gate = gates;
+    let admit!: () => void;
+    const admitted = new Promise<void>((done) => {
+      admit = done;
+    });
+    const work = (gate.get(claim.resourceId) ?? Promise.resolve())
+      .catch(() => undefined)
+      .then(() => this.dispatchResource(rpc, claim, message, admit));
+    // The gate covers durable admission, not native execution. Stop can quiesce admitted work.
+    const admission = Promise.race([
+      admitted,
+      work.then(
+        () => undefined,
+        () => undefined,
+      ),
+    ]);
+    gate.set(claim.resourceId, admission);
+    try {
+      return await work;
+    } finally {
+      if (gate.get(claim.resourceId) === admission) gate.delete(claim.resourceId);
+    }
+  }
+
+  private async dispatchResource(
+    rpc: LocalRpc,
+    claim: LocalRelayClaim,
+    message: z.infer<typeof localEnvelopeSchema>,
+    onAdmitted: () => void,
+  ) {
+    const sourceMessage = message;
     const key = `relay-space-${claim.resourceId}.json`;
     let binding = await this.records.state.read(key, bindingSchema.parse);
     const intentKey = `relay-request-${claim.requestId}.json`;
     let intent = await this.records.state.read(intentKey, intentSchema.parse);
+    let cleanupGeneration: number | undefined;
+    let readonlyIncompleteSnapshot = false;
     if (
       binding &&
       (binding.userId !== claim.userId ||
@@ -609,6 +843,52 @@ export class LocalRelay {
         "LOCAL_IDENTITY_CHANGED",
         "This server resource belongs to another device authority.",
       );
+    if (binding && claim.resourceGeneration < binding.serverGeneration)
+      throw new LocalRefusal(
+        "LOCAL_GENERATION_CONFLICT",
+        "The retained request predates the current resource generation.",
+      );
+    if (binding && !binding.localSpaceId && message.request.action !== "create") {
+      const manifest = await rpc.manager.inspectCreation(
+        binding.repositoryId,
+        binding.createMarker,
+        async () => {
+          binding!.creationClosed = true;
+          binding!.serverGeneration = claim.resourceGeneration;
+          await this.records.state.write(key, binding);
+        },
+      );
+      if (manifest) {
+        for (const previousKey of await this.records.state.keys("relay-space-")) {
+          const previous = await this.records.state.read(previousKey, bindingSchema.parse);
+          if (
+            previous &&
+            previous.resourceId !== binding.resourceId &&
+            (previous.localSpaceId === manifest.id ||
+              previous.createMarker === binding.createMarker)
+          )
+            throw new LocalRefusal(
+              "LOCAL_IDENTITY_CHANGED",
+              "The local manifest belongs to another server resource.",
+            );
+        }
+        binding.localSpaceId = manifest.id;
+        binding.localGeneration = manifest.generation;
+        await this.records.state.write(key, binding);
+      } else if (message.request.action === "snapshot") {
+        // The manager's lifecycle gate settled accepted create before checking its pre-SDK manifest.
+        binding.serverGeneration = claim.resourceGeneration;
+        await this.records.state.write(key, binding);
+        return {
+          ok: true as const,
+          result: localResourceSnapshotSchema.parse({
+            ...publicPolicy(await this.records.policy()),
+            spaces: [],
+            creation: { state: "absent" },
+          }),
+        };
+      }
+    }
     if (binding?.localSpaceId && binding.localGeneration !== null) {
       const space = await this.records.get(binding.localSpaceId);
       if (
@@ -621,24 +901,37 @@ export class LocalRelay {
           "The retained local resource identity changed.",
         );
       if (space.generation !== binding.localGeneration) {
-        if (
-          intent ||
-          claim.resourceGeneration < binding.serverGeneration ||
-          (claim.resourceGeneration === binding.serverGeneration &&
-            message.request.action !== "snapshot") ||
-          space.recoveryGeneration !== space.generation ||
-          space.failure !== null ||
-          space.phase !== "stopped" ||
-          space.desiredState !== "stopped" ||
-          !space.runtimeId
-        )
-          throw new LocalRefusal(
-            "LOCAL_GENERATION_CONFLICT",
-            "A changed local generation requires a fresh server request after confirmed local stop or recovery.",
-          );
-        binding.localGeneration = space.generation;
-        binding.serverGeneration = claim.resourceGeneration;
-        await this.records.state.write(key, binding);
+        const freshIncomplete =
+          !intent &&
+          claim.resourceGeneration > binding.serverGeneration &&
+          space.generation > binding.localGeneration &&
+          (space.failure === "LOCAL_SETUP_INCOMPLETE" || space.lastStartedAt === null) &&
+          ["stopped", "failed"].includes(space.phase) &&
+          space.desiredState === "stopped" &&
+          space.runtimeId;
+        if (freshIncomplete && ["stop", "delete", "snapshot"].includes(message.request.action)) {
+          cleanupGeneration = space.generation;
+          readonlyIncompleteSnapshot = message.request.action === "snapshot";
+        } else {
+          if (
+            intent ||
+            claim.resourceGeneration < binding.serverGeneration ||
+            (claim.resourceGeneration === binding.serverGeneration &&
+              message.request.action !== "snapshot") ||
+            space.recoveryGeneration !== space.generation ||
+            space.failure !== null ||
+            space.phase !== "stopped" ||
+            space.desiredState !== "stopped" ||
+            !space.runtimeId
+          )
+            throw new LocalRefusal(
+              "LOCAL_GENERATION_CONFLICT",
+              "A changed local generation requires a fresh server request after confirmed local stop or recovery.",
+            );
+          binding.localGeneration = space.generation;
+          binding.serverGeneration = claim.resourceGeneration;
+          await this.records.state.write(key, binding);
+        }
       }
       if (claim.resourceGeneration < binding.serverGeneration)
         throw new LocalRefusal(
@@ -717,7 +1010,7 @@ export class LocalRelay {
         const space = await this.records.get(binding.localSpaceId);
         if (
           !space ||
-          space.generation !== binding.localGeneration ||
+          space.generation !== (cleanupGeneration ?? binding.localGeneration) ||
           space.repositoryId !== binding.repositoryId ||
           space.operationMarker !== binding.createMarker
         )
@@ -725,19 +1018,41 @@ export class LocalRelay {
             "LOCAL_GENERATION_CONFLICT",
             "The locally owned resource changed outside its retained relay receipt.",
           );
-        if (request.action !== "snapshot" && request.spaceId !== binding.localSpaceId)
+        if (
+          request.action !== "snapshot" &&
+          request.spaceId !== binding.localSpaceId &&
+          request.spaceId !== claim.resourceId
+        )
           throw new LocalRefusal(
             "LOCAL_IDENTITY_CHANGED",
             "The request targets another local sandbox.",
           );
+        if (request.action !== "snapshot")
+          message = { ...message, request: { ...request, spaceId: binding.localSpaceId } };
         if (request.action === "delete") {
           if (request.generation !== claim.resourceGeneration)
             throw new LocalRefusal(
               "LOCAL_GENERATION_CONFLICT",
               "Deletion does not name the current server generation.",
             );
-          message = { ...message, request: { ...request, generation: binding.localGeneration } };
+          message = {
+            ...message,
+            request: {
+              ...request,
+              spaceId: binding.localSpaceId,
+              generation: cleanupGeneration ?? binding.localGeneration,
+            },
+          };
         }
+        if (request.action === "stop")
+          message = {
+            ...message,
+            request: {
+              ...request,
+              spaceId: binding.localSpaceId,
+              generation: cleanupGeneration ?? binding.localGeneration,
+            },
+          };
       }
       if ((await this.records.state.keys("relay-request-")).length >= 1024)
         throw new LocalRefusal(
@@ -751,6 +1066,7 @@ export class LocalRelay {
         connectionId: claim.connectionId,
         serverGeneration: claim.resourceGeneration,
         message,
+        ...(sourceMessage !== message ? { sourceMessage } : {}),
       });
       await this.records.state.write(intentKey, intent);
     }
@@ -759,7 +1075,26 @@ export class LocalRelay {
         "LOCAL_CREATE_UNKNOWN",
         "The retained relay resource binding disappeared.",
       );
-    const result = await rpc.handle(message);
+    if (message.request.action === "operation") {
+      // Publish only the authenticated server clock before guest contact. This does not
+      // rebind the local generation or admit a changed/incomplete native resource.
+      binding.serverGeneration = claim.resourceGeneration;
+      await this.records.state.write(key, binding);
+    }
+    if (message.request.action !== "create" && message.request.action !== "start") onAdmitted();
+    const result = await rpc.handle(
+      message.request.action === "snapshot"
+        ? { ...message, request: { ...message.request, spaceId: binding.localSpaceId! } }
+        : message,
+      onAdmitted,
+    );
+    // A later stop/delete may already own a newer binding after this request's admission.
+    binding = await this.records.state.read(key, bindingSchema.parse);
+    if (!binding)
+      throw new LocalRefusal(
+        "LOCAL_IDENTITY_CHANGED",
+        "The admitted resource binding disappeared.",
+      );
     if (!binding.localSpaceId) {
       if (result.ok && message.request.action === "create")
         binding.localSpaceId = z.object({ spaceId: uuid }).strict().parse(result.result).spaceId;
@@ -773,7 +1108,11 @@ export class LocalRelay {
         if (candidates.length === 1) binding.localSpaceId = candidates[0].id;
       }
     }
-    if (binding.localSpaceId && intent.serverGeneration >= binding.serverGeneration) {
+    if (
+      binding.localSpaceId &&
+      intent.serverGeneration >= binding.serverGeneration &&
+      !readonlyIncompleteSnapshot
+    ) {
       const space = await this.records.get(binding.localSpaceId);
       if (
         !space ||
@@ -791,11 +1130,55 @@ export class LocalRelay {
         result.error.code === "LOCAL_GUEST_SETTLEMENT_UNKNOWN" &&
         space.phase === "stopped" &&
         space.failure === "LOCAL_GUEST_SETTLEMENT_UNKNOWN";
+      const managementValue = result.ok
+        ? typeof result.result === "object" &&
+          result.result !== null &&
+          "management" in result.result
+          ? result.result.management
+          : undefined
+        : result.error.management;
+      const managementReceipt = managementValue
+        ? localManagementOutcomeSchema.parse(managementValue)
+        : null;
+      const failedManagementReceipt =
+        !result.ok &&
+        managementReceipt !== null &&
+        managementReceipt.originGeneration ===
+          (message.request.action === "stop" || message.request.action === "delete"
+            ? (message.request.generation ?? binding.localGeneration)
+            : binding.localGeneration) &&
+        managementReceipt.generation === space.generation &&
+        managementReceipt.action === message.request.action &&
+        managementReceipt.spaceId === space.id &&
+        managementReceipt.repositoryId === space.repositoryId &&
+        managementReceipt.operationMarker === space.operationMarker &&
+        (message.request.action === "stop" || message.request.action === "delete") &&
+        message.request.spaceId === space.id &&
+        binding.localGeneration !== null &&
+        space.generation > binding.localGeneration &&
+        space.desiredState !== "running" &&
+        (space.phase === "failed" || space.phase === "stopped" || space.phase === "deleting");
+      if (
+        cleanupGeneration !== undefined &&
+        result.ok &&
+        (!managementReceipt ||
+          managementReceipt.originGeneration !== cleanupGeneration ||
+          managementReceipt.generation !== space.generation ||
+          managementReceipt.spaceId !== space.id ||
+          managementReceipt.repositoryId !== space.repositoryId ||
+          managementReceipt.operationMarker !== space.operationMarker ||
+          managementReceipt.action !== message.request.action)
+      )
+        throw new LocalRefusal(
+          "LOCAL_GENERATION_CONFLICT",
+          "Exact cleanup has no matching native completion receipt.",
+        );
       if (
         binding.localGeneration !== null &&
         binding.localGeneration !== space.generation &&
         !lifecycleReceipt &&
-        !unknownStopReceipt
+        !unknownStopReceipt &&
+        !failedManagementReceipt
       )
         throw new LocalRefusal(
           "LOCAL_GENERATION_CONFLICT",
@@ -806,14 +1189,7 @@ export class LocalRelay {
       await this.records.state.write(key, binding);
     }
     if (result.ok && message.request.action === "snapshot") {
-      const snapshot = z
-        .object({ spaces: z.array(z.object({ id: uuid }).passthrough()) })
-        .passthrough()
-        .parse(result.result);
-      result.result = {
-        ...snapshot,
-        spaces: snapshot.spaces.filter((space) => space.id === binding!.localSpaceId),
-      };
+      result.result = resourceSnapshot(result.result, binding.localSpaceId);
     }
     return result;
   }
@@ -873,7 +1249,7 @@ export class LocalRelay {
       controller.abort();
       // Delivery owns this request scope, never the VM or its generation clock.
       // The daemon handles device revocation; the journal prevents redispatch.
-      if (error instanceof LocalDeviceAuthorityFailure) {
+      if (error instanceof LocalDeviceAuthorityFailure || error instanceof LocalClaimRefusal) {
         // Report device revocation promptly so its owner can settle admitted hardware work.
         void executing.catch(() => undefined);
         throw error;
@@ -886,12 +1262,20 @@ export class LocalRelay {
     }
   }
 
-  async poll(rpc: LocalRpc, signal?: AbortSignal): Promise<number> {
+  async drain(): Promise<void> {
+    await Promise.allSettled([...this.deliveries.values()]);
+  }
+
+  async poll(rpc: LocalRpc, signal?: AbortSignal, background = false): Promise<number> {
+    if (this.deliveryFailures.length) throw this.deliveryFailures.shift();
     const connection = await this.confirmed(signal);
     for (const key of await this.records.state.keys("relay-request-")) {
       const entry = await this.records.state.read(key, intentSchema.parse);
       if (entry && entry.message.expiresAt <= Date.now()) await this.records.state.remove(key);
     }
+    const wake = new AbortController();
+    this.polling = wake;
+    const pollingSignal = signal ? AbortSignal.any([signal, wake.signal]) : wake.signal;
     const data = z
       .object({
         requests: z.array(claimSchema).max(8),
@@ -902,7 +1286,17 @@ export class LocalRelay {
           .max(4 * 1024 * 1024),
       })
       .strict()
-      .parse(await this.json(connection, "/relay/claim", { limit: 1, waitMs: 25_000 }, signal));
+      .parse(
+        await this.json(connection, "/relay/claim", { limit: 1, waitMs: 25_000 }, pollingSignal)
+          .catch((error: unknown) => {
+            if (wake.signal.aborted && !signal?.aborted && this.deliveryFailures.length)
+              throw this.deliveryFailures.shift();
+            throw error;
+          })
+          .finally(() => {
+            if (this.polling === wake) this.polling = undefined;
+          }),
+      );
     for (const claim of data.requests) {
       if (
         claim.deviceId !== connection.deviceId ||
@@ -916,20 +1310,24 @@ export class LocalRelay {
           "LOCAL_IDENTITY_CHANGED",
           "A relay claim differs from this device's authority.",
         );
-      await this.holdClaim(
+      if (this.deliveries.has(claim.requestId)) continue;
+      const delivery = this.holdClaim(
         connection,
         claim,
         async (scope) => {
-          const payload = await this.payload(connection, claim, scope);
           let result;
           try {
-            const message = localEnvelopeSchema.parse(JSON.parse(payload.toString("utf8")));
-            if (message.id !== claim.requestId || message.expiresAt !== claim.deadlineAt)
-              throw new LocalRefusal(
-                "LOCAL_PAYLOAD_CHANGED",
-                "The relay request identity or deadline changed.",
-              );
-            result = await this.dispatch(rpc, claim, message);
+            result = await this.retainedOutcome(rpc, claim);
+            if (result === undefined) {
+              const payload = await this.payload(connection, claim, scope);
+              const message = localEnvelopeSchema.parse(JSON.parse(payload.toString("utf8")));
+              if (message.id !== claim.requestId || message.expiresAt !== claim.deadlineAt)
+                throw new LocalRefusal(
+                  "LOCAL_PAYLOAD_CHANGED",
+                  "The relay request identity or deadline changed.",
+                );
+              result = await this.dispatch(rpc, claim, message);
+            }
           } catch (error) {
             if (
               !(error instanceof LocalRefusal) &&
@@ -985,6 +1383,34 @@ export class LocalRelay {
         },
         signal,
       );
+      if (background) {
+        const tracked = delivery
+          .catch(async (error: unknown) => {
+            if (error instanceof LocalClaimRefusal && !signal?.aborted) {
+              try {
+                const current = await this.confirmed(signal);
+                if (
+                  current.deviceId === claim.deviceId &&
+                  current.userId === claim.userId &&
+                  current.connectionId === claim.connectionId &&
+                  current.deviceGeneration === claim.deviceGeneration
+                )
+                  return;
+              } catch (failure) {
+                error = failure;
+              }
+            }
+            if (!signal?.aborted) {
+              this.deliveryFailures.push(error);
+              this.polling?.abort();
+            }
+          })
+          .finally(() => {
+            if (this.deliveries.get(claim.requestId) === tracked)
+              this.deliveries.delete(claim.requestId);
+          });
+        this.deliveries.set(claim.requestId, tracked);
+      } else await delivery;
     }
     return data.requests.length;
   }

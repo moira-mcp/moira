@@ -123,6 +123,7 @@ function fixture() {
     puts: 0,
     loseResponse: false,
     rejectStatus: 0,
+    lookupRejectStatus: 0,
     installationDenied: false,
     grantVisible: true,
     installed: false,
@@ -156,6 +157,8 @@ function fixture() {
       return Response.json(created, { status: 201 });
     }
     if (path.startsWith("/repos/owner/")) {
+      if (state.lookupRejectStatus)
+        return Response.json({ message: "fixture refusal" }, { status: state.lookupRejectStatus });
       if (state.changedDuringInspection) authority.credentialGeneration++;
       const value = remote.get(decodeURIComponent(path.slice("/repos/owner/".length)));
       return value
@@ -244,6 +247,84 @@ function fixture() {
 }
 
 describe("Private repository creation precedes local admission without repeating unknown effects", () => {
+  test("rejected local admission names retained-repository recovery without repeating GitHub creation", async () => {
+    const f = fixture();
+    await f.makeService().createRepository("owner", f.input);
+    f.acknowledge();
+    const admitted = f.devices.getActiveDevice("owner", f.deviceId).control!;
+    const receipt = admitted.repositoryAdmissions![0];
+    f.devices.requestSettings("owner", f.deviceId, {
+      expectedRevision: admitted.revision,
+      expectedGeneration: 1,
+      settings: f.settings,
+    });
+    f.acknowledge();
+    const rejected = await f.makeService().createRepository("owner", f.input);
+    expect(rejected).toMatchObject({
+      status: "rejected",
+      request_id: f.input.requestId,
+      github_repository_id: "77",
+      full_name: "owner/new-project",
+      local_repository_id: null,
+      error: { stage: "local_admission" },
+    });
+    expect(rejected.instruction).toContain("already-created repository");
+    expect(rejected.instruction).toContain("repository_add");
+    expect(rejected.instruction).toContain("Moira Settings");
+    expect(rejected.instruction).toContain("Do not create another repository");
+    expect(f.repository.getOwned("owner", f.input.requestId)?.state).toBe("created");
+    const current = f.devices.getActiveDevice("owner", f.deviceId).control!;
+    f.devices.requestSettings("owner", f.deviceId, {
+      expectedRevision: current.revision,
+      expectedGeneration: 1,
+      settings: { ...f.settings, repositories: [receipt.repository] },
+    });
+    f.acknowledge();
+    expect(await f.makeService().createRepository("owner", f.input)).toMatchObject({
+      status: "applied",
+      request_id: f.input.requestId,
+      github_repository_id: "77",
+      local_repository_id: expect.stringContaining(receipt.localRepositoryId),
+    });
+    expect(f.state.posts).toBe(1);
+    expect(f.remote.size).toBe(1);
+  });
+
+  test("missing applied computer delegation names the owner action before any GitHub mutation", async () => {
+    const f = fixture();
+    f.devices.requestSettings("owner", f.deviceId, {
+      expectedRevision: 1,
+      expectedGeneration: 1,
+      settings: { ...f.settings, agentRepositoryManagement: null },
+    });
+    const result = await f.makeService().createRepository("owner", f.input);
+    expect(result).toMatchObject({
+      status: "setup_required",
+      error: { stage: "device_delegation" },
+    });
+    expect(result.instruction).toContain("Apply permission to create new private repositories");
+    expect(f.state.posts).toBe(0);
+    expect(result.error).not.toHaveProperty("provider_status");
+  });
+
+  test("GitHub creation refusal identifies its exact stage and preserves retry identity", async () => {
+    const f = fixture();
+    f.state.rejectStatus = 403;
+    const refused = await f.makeService().createRepository("owner", f.input);
+    expect(refused).toMatchObject({
+      status: "setup_required",
+      request_id: f.input.requestId,
+      error: { stage: "repository_create", provider_status: 403 },
+    });
+    expect(refused.instruction).toContain("Repository creation (write) or Administration (write)");
+    expect(JSON.stringify(refused)).not.toContain("fixture-token");
+    expect(JSON.stringify(refused)).not.toContain("fixture refusal");
+    expect(f.repository.getOwned("owner", f.input.requestId)?.state).toBe("prepared");
+    f.state.rejectStatus = 0;
+    expect((await f.makeService().createRepository("owner", f.input)).status).toBe("pending");
+    expect(f.state.posts).toBe(2);
+    expect(f.remote.size).toBe(1);
+  });
   test.each(["tenant", "device", "revoked", "account"])(
     "%s authority denial cannot reach repository POST",
     async (failure) => {
@@ -342,6 +423,35 @@ describe("Private repository creation precedes local admission without repeating
     expect(f.state.posts).toBe(1);
     expect(f.state.puts).toBe(1);
   });
+  test.each([401, 403, 429])(
+    "unknown creation retains the lookup refusal HTTP%s without another create",
+    async (status) => {
+      const f = fixture();
+      f.state.loseResponse = true;
+      await f.makeService().createRepository("owner", f.input);
+      f.state.loseResponse = false;
+      f.state.lookupRejectStatus = status;
+      const blocked = await f.makeService().createRepository("owner", f.input);
+      expect(blocked).toMatchObject({
+        status: "unknown",
+        request_id: f.input.requestId,
+        error: { stage: "repository_lookup", provider_status: status },
+      });
+      expect(blocked.instruction).toContain("without repeating creation");
+      expect(blocked.instruction).toContain(
+        status === 401
+          ? "Refresh GitHub permissions"
+          : status === 429
+            ? "rate limiting"
+            : "repository lookup",
+      );
+      expect(f.repository.getOwned("owner", f.input.requestId)?.state).toBe("unknown");
+      expect(f.state.posts).toBe(1);
+      f.state.lookupRejectStatus = 0;
+      expect((await f.makeService().createRepository("owner", f.input)).status).toBe("pending");
+      expect(f.state.posts).toBe(1);
+    },
+  );
   test("same-name object without the persisted marker cannot resolve unknown or release its reservation", async () => {
     const f = fixture();
     f.state.loseResponse = true;
@@ -372,6 +482,7 @@ describe("Private repository creation precedes local admission without repeating
       status: "setup_required",
       github_repository_id: "77",
       local_repository_id: null,
+      error: { stage: "installation_access", provider_status: 403 },
     });
     f.state.installationDenied = false;
     expect((await f.makeService().createRepository("owner", f.input)).status).toBe("pending");

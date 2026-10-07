@@ -66,6 +66,7 @@ export class LocalCompanion {
   }
   async pause(): Promise<void> {
     await this.manager.stopWork();
+    await this.relay.drain();
     this.opened = false;
   }
   async cycle(signal?: AbortSignal): Promise<boolean> {
@@ -87,7 +88,7 @@ export class LocalCompanion {
       await this.manager.open();
       this.opened = true;
     }
-    await this.relay.poll(this.rpc, signal);
+    await this.relay.poll(this.rpc, signal, true);
     return true;
   }
 }

@@ -8,7 +8,8 @@ export interface LocalVmIdentity {
 export interface LocalVmObservation {
   id: string;
   name: string;
-  status: "running" | "stopped" | "starting" | "stopping" | "created" | "error";
+  status: "running" | "stopped" | "starting" | "stopping" | "created" | "error" | "unknown";
+  failure?: string;
 }
 export type FixedGuestEntrypoint = "installer" | "worker";
 export interface LocalVmDispatchAdmission {

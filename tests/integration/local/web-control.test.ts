@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "@jest/globals";
 import { mkdtemp, realpath, rm, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { randomBytes, randomUUID } from "node:crypto";
+import { randomBytes, randomUUID, createHash } from "node:crypto";
 import {
   LocalWebControl,
   LocalCompanion,
@@ -11,6 +11,9 @@ import {
 import { LocalManager } from "../../../packages/local/src/manager.js";
 import { PrivateState } from "../../../packages/local/src/private-state.js";
 import { LocalRelay } from "../../../packages/local/src/relay.js";
+import { RequestJournal } from "../../../packages/local/src/journal.js";
+import { localEnvelopeSchema } from "../../../packages/local/src/rpc.js";
+import { canonicalJson } from "../../../packages/shared/src/utils/canonical-json.js";
 import { GiB, LocalRefusal, publicPolicy } from "../../../packages/local/src/policy.js";
 import { localFixture } from "./fixtures.js";
 import {
@@ -353,8 +356,37 @@ describe("Locally pinned owner web control", () => {
     f.space.phase = "creating";
     await f.records.put(f.space);
     const resourceId = randomUUID(),
-      requestId = randomUUID(),
-      digest = "a".repeat(64);
+      requestId = randomUUID();
+    const message = localEnvelopeSchema.parse({
+      version: 1,
+      id: requestId,
+      expiresAt: Date.now() + 60000,
+      request: {
+        action: "create",
+        repositoryId: f.space.repositoryId,
+        operationMarker: f.space.operationMarker,
+        ref: f.space.ref,
+      },
+    });
+    const digest = createHash("sha256").update(canonicalJson(message)).digest("hex");
+    let admitted!: () => void, release!: () => void;
+    const entered = new Promise<void>((done) => {
+      admitted = done;
+    });
+    const held = new Promise<void>((done) => {
+      release = done;
+    });
+    const accepted = new RequestJournal(f.state).run(
+      requestId,
+      message.expiresAt,
+      message.request,
+      async () => {
+        admitted();
+        await held;
+        return { ok: true, result: { spaceId: f.space.id } };
+      },
+    );
+    await entered;
     await f.state.write(`relay-space-${resourceId}.json`, {
       resourceId,
       deviceId: f.connection.deviceId,
@@ -375,17 +407,7 @@ describe("Locally pinned owner web control", () => {
       deviceGeneration: 1,
       connectionId: f.connection.connectionId,
       serverGeneration: 4,
-      message: {
-        version: 1,
-        id: requestId,
-        expiresAt: Date.now() + 60000,
-        request: {
-          action: "create",
-          repositoryId: f.space.repositoryId,
-          operationMarker: f.space.operationMarker,
-          ref: f.space.ref,
-        },
-      },
+      message,
     });
     const transport: typeof fetch = async () =>
       Response.json({
@@ -393,15 +415,20 @@ describe("Locally pinned owner web control", () => {
         data: { ...f.connection, status: "active", policy: publicPolicy(await f.records.policy()) },
       });
     const relay = new LocalRelay(f.records, transport);
-    expect(await relay.gitAuthority(f.space.id, 1, f.space.repositoryId)).toMatchObject({
-      resourceId,
-      resourceGeneration: 4,
-    });
-    f.space.runtimeId = null;
-    await f.records.put(f.space);
-    await expect(relay.gitAuthority(f.space.id, 1, f.space.repositoryId)).rejects.toMatchObject({
-      code: "LOCAL_CREATE_UNKNOWN",
-    });
+    try {
+      expect(await relay.gitAuthority(f.space.id, 1, f.space.repositoryId)).toMatchObject({
+        resourceId,
+        resourceGeneration: 4,
+      });
+      f.space.runtimeId = null;
+      await f.records.put(f.space);
+      await expect(relay.gitAuthority(f.space.id, 1, f.space.repositoryId)).rejects.toMatchObject({
+        code: "LOCAL_CREATE_UNKNOWN",
+      });
+    } finally {
+      release();
+      await accepted;
+    }
     f.space.runtimeId = "known-fixture-runtime";
     await f.records.put(f.space);
     await f.state.remove(`relay-request-${requestId}.json`);

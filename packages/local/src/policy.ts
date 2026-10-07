@@ -2,6 +2,7 @@ import { isAbsolute } from "node:path";
 import { z } from "zod";
 import { gitFetchRefSchema } from "../../shared/src/codespaces/git-ref.js";
 import { CODESPACE_CONNECTOR_LIMITS } from "../../shared/src/codespaces/resource-policy.js";
+import type { LocalManagementOutcome } from "../../shared/src/codespaces/local-protocol.js";
 import {
   MAX_LOCAL_WORK_LEASE_MS,
   localGitAuthorSchema,
@@ -100,6 +101,7 @@ export class LocalRefusal extends Error {
   constructor(
     readonly code: string,
     message: string,
+    readonly management?: LocalManagementOutcome,
   ) {
     super(message);
     this.name = "LocalRefusal";

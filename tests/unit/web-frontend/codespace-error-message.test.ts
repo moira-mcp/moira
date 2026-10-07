@@ -41,6 +41,27 @@ describe("codespaceErrorMessage", () => {
   });
 
   test.each([
+    [
+      "en",
+      "Environment preparation did not finish. Delete this codespace; after deletion is confirmed, you can create a new one.",
+    ],
+    [
+      "ru",
+      "Подготовка среды не завершена. Удалите этот кодспейс; после подтверждения удаления можно создать новый.",
+    ],
+  ])(
+    "incomplete local preparation directs %s readers to confirmed deletion before replacement",
+    async (language, expected) => {
+      await i18n.changeLanguage(language);
+      const error = serverError(
+        "CODESPACE_LOCAL_SETUP_INCOMPLETE",
+        "Native runtime initialization did not complete; start is refused",
+      );
+      expect(codespaceErrorMessage(error, i18n.t, FALLBACK)).toBe(expected);
+    },
+  );
+
+  test.each([
     ["an unknown code", serverError("SOMETHING_NEW", "Brand new English failure")],
     ["a failure without a code", new Error("socket hang up")],
     ["a value that is not an error", "boom"],

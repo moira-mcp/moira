@@ -1,5 +1,9 @@
 import { describe, expect, it, jest } from "@jest/globals";
-import { LocalDeviceError, type CodespaceOperationRecord } from "@mcp-moira/shared";
+import {
+  LocalDeviceError,
+  CodespaceResourceError,
+  type CodespaceOperationRecord,
+} from "@mcp-moira/shared";
 import {
   executeCodespaceTool,
   parseCodespaceToolParams,
@@ -38,6 +42,34 @@ function services(): CodespaceToolServices {
 }
 
 describe("local repository MCP admission", () => {
+  it.each([
+    ["CODESPACE_LOCAL_CREATION_UNKNOWN", "do not create a replacement"],
+    ["CODESPACE_LOCAL_PROTOCOL_ERROR", "matching server and companion"],
+    ["CODESPACE_LOCAL_RUNTIME_ERROR", "runtime diagnostics"],
+    ["CODESPACE_LOCAL_DELETE_APPROVAL_REQUIRED", "Allow deletion"],
+  ] as const)(
+    "preserves actionable local diagnostic %s without private runtime output",
+    async (code, instruction) => {
+      const dependencies = services();
+      dependencies.select = () => {
+        throw new CodespaceResourceError(code, "private-runtime-path credential-not-for-agent");
+      };
+      const response = await executeCodespaceTool(
+        parseCodespaceToolParams({ action: "get", codespace_id: DEVICE_ID }),
+        "owner",
+        dependencies,
+      );
+      expect(response.isError).toBe(true);
+      expect(response.structuredContent).toMatchObject({ error: { code, retryable: false } });
+      expect(JSON.stringify(response.structuredContent)).toContain(instruction);
+      expect(JSON.stringify(response)).not.toContain("private-runtime-path");
+      expect(JSON.stringify(response)).not.toContain("credential-not-for-agent");
+      expect(JSON.stringify(response)).not.toContain("data are preserved");
+      expect(JSON.stringify(response)).not.toContain("data is preserved");
+      if (code !== "CODESPACE_LOCAL_DELETE_APPROVAL_REQUIRED")
+        expect(JSON.stringify(response)).toContain("physical outcome is not confirmed");
+    },
+  );
   it("preserves creation recovery state before repository-provider selection", async () => {
     const dependencies = services();
     let status = "unknown";

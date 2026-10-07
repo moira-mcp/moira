@@ -3,7 +3,16 @@ import { execFile, spawn, type ChildProcess } from "node:child_process";
 import { once } from "node:events";
 import { watch } from "node:fs";
 import { promisify } from "node:util";
-import { mkdtemp, mkdir, readFile, realpath, rm, writeFile, copyFile } from "node:fs/promises";
+import {
+  mkdtemp,
+  mkdir,
+  readFile,
+  realpath,
+  rm,
+  writeFile,
+  copyFile,
+  lstat,
+} from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { build } from "esbuild";
 import { createHash, randomUUID } from "node:crypto";
@@ -68,7 +77,13 @@ f.appendFileSync(path+'.calls',JSON.stringify(args)+'\\n');
 const peersPath=path+'.peers';const peers=()=>f.existsSync(peersPath)?JSON.parse(f.readFileSync(peersPath)):[];
 const sdkRows=()=>[...(current().status==='absent'?[]:[{id:${JSON.stringify(sdkId)},name:${JSON.stringify(local.space.name)},agent:'shell',status:current().status}]),...peers()];
 const cid=name=>require('node:crypto').createHash('sha256').update(name).digest('hex');
-process.on('exit',()=>f.writeFileSync(path+'.running-cids',sdkRows().filter(row=>row.status==='running'||(row.status==='created'&&current().keepWorker===true)).map(row=>cid(row.name)).join('')));
+process.on('exit',()=>{
+  const running=sdkRows().filter(row=>row.engineState!=='exited'&&(row.name!==${JSON.stringify(local.space.name)}||current().engineState!=='exited')&&(row.engineState==='running'||['running','starting','stopping'].includes(row.status)||(row.status==='created'&&current().keepWorker===true))).map(row=>cid(row.name)).join('');
+  // The native reader treats missing CIDs as a physical stop. Publish a whole snapshot,
+  // never a transient truncation that would retire an unrelated fixture worker.
+  const temporary=path+'.running-cids.'+process.pid;
+  f.writeFileSync(temporary,running);f.renameSync(temporary,path+'.running-cids');
+});
 const pending=${JSON.stringify(pending)};const release=${JSON.stringify(release)};const sentinel=${JSON.stringify(sentinel)};
 const settings={'env.rememberHostCommands':false,'ssh.autoCreate':false,'ssh.workspaceRoot':'','clipboard.imagePaste':false,'ssh.agentForwardingEnabled':false,'ssh.agentSocketPath':'','skills.defaultMode':'off','diagnostics.autoUpload':'no','proxy.integratedAuth':false,'proxy.sandbox':'direct','no_proxy.sandbox':''};
 if(args[0]==='version')process.stdout.write('sbx version: v0.46.0 verified ');
@@ -86,7 +101,9 @@ else if(args[0]==='ls') {
 }
 else if(args[0]==='docker-identity'){
   const filter=JSON.parse(decodeURIComponent(args[1].split('filters=')[1]));const name=filter.label[0].split('=')[1];
-  const row=sdkRows().find(row=>row.name===name);const data=row?[{Id:cid(name),Names:['/'+name],State:current().engineState||(row.status==='running'?'running':row.status==='created'?'created':'exited'),Labels:{'com.docker.sandbox.name':name,'com.docker.sdk':'true','docker/sandbox':'true'}}]:[];
+  if(f.existsSync(path+'.container-error-name')&&f.readFileSync(path+'.container-error-name','utf8')===name)process.exit(1);
+  const row=sdkRows().find(row=>row.name===name);const engineState=row?.name===${JSON.stringify(local.space.name)}?current().engineState:row?.engineState;const data=row?[{Id:cid(name),Names:['/'+name],State:engineState||(row.status==='running'?'running':row.status==='created'?'created':'exited'),Labels:{'com.docker.sandbox.name':name,'com.docker.sdk':'true','docker/sandbox':'true'}}]:[];
+  if(f.existsSync(path+'.container-id-name')&&f.readFileSync(path+'.container-id-name','utf8')===name&&data[0])data[0].Id=data[0].Id.slice(0,63)+(data[0].Id.at(-1)==='a'?'b':'a');
   f.writeFileSync(path+'.container-response',JSON.stringify(data));
 }
 else if(args[0]==='worker-id')f.writeFileSync(path+'.worker-id',cid(args[1]));
@@ -97,7 +114,13 @@ else if(args[0]==='api-guest'){
   if(args[2]==='installer')finish();
   else {
     const body=JSON.parse(bytes.toString());
-    if(body.kind==='bootstrap')finish({});
+    if(body.kind==='bootstrap'){
+      if(f.existsSync(path+'.bootstrap-wait')){
+        f.writeFileSync(path,JSON.stringify({status:'starting',engineState:'running'}));
+        f.writeFileSync(pending,JSON.stringify({pid:process.pid}));
+        const timer=setInterval(()=>{if(f.existsSync(release)){clearInterval(timer);f.writeFileSync(path,JSON.stringify({status:'running'}));finish({});}},10);
+      }else finish({});
+    }
     else {
       f.writeFileSync(pending,JSON.stringify({pid:process.pid}));f.writeFileSync(pending+'.'+name,JSON.stringify({pid:process.pid}));
       if(f.existsSync(path+'.guest-unknown'))process.exit(1);
@@ -114,7 +137,8 @@ else if(args[0]==='api-create'){
   const complete=()=>{f.writeFileSync(path,JSON.stringify({status:'running'}));f.writeFileSync(path+'.create-response',JSON.stringify({name:body.name,agent:'shell',workspace:'',status:'created'}));};
   ${pendingCreation ? `f.writeFileSync(path,JSON.stringify({status:'starting'}));f.writeFileSync(pending,JSON.stringify({pid:process.pid}));f.writeFileSync(pending+'.'+body.name,JSON.stringify({pid:process.pid}));const timer=setInterval(()=>{if(f.existsSync(release)){clearInterval(timer);complete();f.writeFileSync(sentinel,'late side effect');}},10);` : `complete();`}
 }
-else if(args[0]==='stop'){if(args[1]===${JSON.stringify(local.space.name)})f.writeFileSync(path,JSON.stringify({status:current().stopKeepsCreated?'created':'stopped'}));f.writeFileSync(peersPath,JSON.stringify(peers().map(peer=>peer.name===args[1]?{...peer,status:'stopped'}:peer)));}
+else if(args[0]==='stop'){const lag=f.existsSync(path+'.stop-sdk-lag');if(args[1]===${JSON.stringify(local.space.name)})f.writeFileSync(path,JSON.stringify(lag?{status:'running',engineState:'exited'}:{status:current().stopKeepsCreated?'created':'stopped'}));f.writeFileSync(peersPath,JSON.stringify(peers().map(peer=>peer.name===args[1]?{...peer,status:lag?'running':'stopped',engineState:'exited'}:peer)));}
+else if(args[0]==='rm'){const name=args.at(-1);if(name===${JSON.stringify(local.space.name)})f.writeFileSync(path,JSON.stringify({status:'absent'}));f.writeFileSync(peersPath,JSON.stringify(peers().filter(peer=>peer.name!==name)));}
 else if(args[0]==='daemon'&&args[1]==='status')process.stdout.write(JSON.stringify({status:f.existsSync(path+'.daemon-stopped')?'stopped':'running',socket:process.env.HOME+'/.sbx/run_'+process.env.DOCKER_SANDBOXES_APP_NAME+'/d/sandboxd.sock'}));
 else if(args[0]==='daemon'&&args[1]==='stop'){if(current().status!=='absent')f.writeFileSync(path,JSON.stringify({status:'stopped'}));f.writeFileSync(path+'.daemon-stopped','stopped');f.writeFileSync(peersPath,JSON.stringify(peers().map(peer=>({...peer,status:'stopped'}))));}
 else if(args[0]==='exec'||args[0]==='create'){
@@ -224,6 +248,7 @@ int main(int argc,char **argv){
   if (pendingCreation) {
     local.space.runtimeId = null;
     local.space.phase = "creating";
+    local.space.lastStartedAt = null;
     local.space.desiredState = "stopped";
   }
   await local.records.put(local.space);
@@ -371,9 +396,13 @@ function driver(local: Awaited<ReturnType<typeof fixture>>) {
     import {startGuard} from ${JSON.stringify(`file://${join(root, "guard.js")}`)};
     import f from 'node:fs/promises';
     import {watch} from 'node:fs';
-    const device=await startGuard(${JSON.stringify(local.state.root)});
+    import {PrivateState as DriverPrivateState} from ${JSON.stringify(`file://${join(root, "private-state.js")}`)};
+    import {LocalRecords as DriverLocalRecords} from ${JSON.stringify(`file://${join(root, "space-record.js")}`)};
     const spacePath=${JSON.stringify(join(local.state.root, `space-${local.space.id}.json`))};
-    const space=JSON.parse(await f.readFile(spacePath,'utf8'));space.desiredState='running';await f.writeFile(spacePath,JSON.stringify(space));
+    const driverRecords=new DriverLocalRecords(await DriverPrivateState.open(${JSON.stringify(local.state.root)}));
+    const space=await driverRecords.get(${JSON.stringify(local.space.id)});
+    if(space.desiredState!=='running')await driverRecords.put({...space,desiredState:'running'});
+    const device=await startGuard(${JSON.stringify(local.state.root)});
     const guard=await device.space(${JSON.stringify(local.space.id)});
     const wait=()=>new Promise((resolve,reject)=>{
       const changed=()=>{void f.readFile(${JSON.stringify(local.pending)}).then(()=>{observer.close();resolve();},error=>{if(error.code!=='ENOENT'){observer.close();reject(error);}});};
@@ -401,7 +430,10 @@ async function addPeer(local: Awaited<ReturnType<typeof fixture>>) {
     name: `moira-${id.replaceAll("-", "")}`,
     runtimeId: randomUUID(),
     phase: "usable" as const,
+    lastStartedAt: Date.now(),
     desiredState: "running" as const,
+    // The independent peer uses the fixture SDK's actual per-VM policy, not a creating target's unset receipt.
+    networkPolicy: createHash("sha256").update("[]").digest("hex"),
   };
   await local.records.put(peer);
   await writeFile(
@@ -455,6 +487,323 @@ const vmTest = process.platform === "darwin" ? test : test.skip;
 const supportedGuard = process.platform === "darwin" ? describe : describe.skip;
 
 supportedGuard("independent guard with a real subprocess SDK substitute", () => {
+  vmTest(
+    "scoped observation confirms own deletion while an independently bound peer remains held",
+    async () => {
+      const local = await fixture();
+      const peer = await addPeer(local);
+      await execute(process.execPath, [
+        "--input-type=module",
+        "-e",
+        `
+      import {startGuard} from ${JSON.stringify(`file://${join(root, "guard.js")}`)};
+      import f from 'node:fs/promises';
+      const device=await startGuard(${JSON.stringify(local.state.root)});
+      try {
+        await (await device.space(${JSON.stringify(local.space.id)})).validate();
+        const healthy=await device.space(${JSON.stringify(peer.id)});await healthy.validate();
+        await f.writeFile(${JSON.stringify(local.observation + ".inventory")},JSON.stringify({sandboxes:[]}));
+        const missing=await device.observe(${JSON.stringify(local.space.id)});
+        if(missing.length!==1||missing[0].status!=='unknown')throw new Error('Missing own held worker was pretended absent');
+        await f.rm(${JSON.stringify(local.observation + ".inventory")});
+        await device.remove(${JSON.stringify(local.space.id)},1,true);
+        const absent=await device.observe(${JSON.stringify(local.space.id)});
+        if(absent.length)throw new Error('An independently bound peer contaminated own confirmed absence');
+        const rows=await device.observe(${JSON.stringify(peer.id)});
+        if(rows.length!==1||rows[0].id!==${JSON.stringify(peer.runtimeId)}||rows[0].status!=='running')throw new Error('Deleted peer changed healthy scope');
+        await healthy.validate();
+      } finally {await device.stop();}
+    `,
+      ]);
+      expect(await local.records.get(local.space.id)).toMatchObject({
+        phase: "deleted",
+        desiredState: "deleted",
+        generation: 3,
+      });
+      expect(await local.records.get(peer.id)).toMatchObject({
+        runtimeId: peer.runtimeId,
+        phase: "stopped",
+        generation: 2,
+      });
+    },
+  );
+
+  vmTest(
+    "an SDK container CID mismatch retains the attested worker and healthy peer custody",
+    async () => {
+      const local = await fixture();
+      const peer = await addPeer(local);
+      await execute(process.execPath, [
+        "--input-type=module",
+        "-e",
+        `
+      import {startGuard} from ${JSON.stringify(`file://${join(root, "guard.js")}`)};
+      import f from 'node:fs/promises';
+      const device=await startGuard(${JSON.stringify(local.state.root)});
+      try {
+        const healthy=await device.space(${JSON.stringify(local.space.id)});
+        await f.writeFile(${JSON.stringify(local.observation + ".container-id-name")},${JSON.stringify(peer.name)});
+        const rows=await device.observe();
+        if(rows.find(row=>row.name===${JSON.stringify(peer.name)})?.status!=='unknown')throw new Error('CID mismatch admitted an SDK resource');
+        await healthy.validate();
+        const calls=(await f.readFile(${JSON.stringify(local.observation + ".calls")},'utf8')).trim().split(String.fromCharCode(10)).map(line=>JSON.parse(line));
+        if(calls.some(argv=>argv[0]==='stop'))throw new Error('SDK metadata stopped a captured physical worker');
+        // Exact closure may proceed, but an SDK CID mismatch alone cannot prove physical stop.
+        await device.retire(${JSON.stringify(peer.id)},1);
+        const stopped=await device.observe();
+        if(stopped.find(row=>row.name===${JSON.stringify(peer.name)})?.status!=='stopped')throw new Error('Exact closure was not confirmed after native settlement');
+        await healthy.validate();
+        await f.rm(${JSON.stringify(local.observation + ".container-id-name")});
+      } finally {await device.stop();}
+    `,
+      ]);
+      expect(await local.records.get(peer.id)).toMatchObject({
+        runtimeId: peer.runtimeId,
+        generation: 2,
+        phase: "stopped",
+      });
+    },
+  );
+
+  vmTest(
+    "exact known VM stop closes an SDK error state without requiring usable guest admission",
+    async () => {
+      const local = await fixture();
+      const peer = await addPeer(local);
+      await execute(process.execPath, [
+        "--input-type=module",
+        "-e",
+        `
+      import {startGuard} from ${JSON.stringify(`file://${join(root, "guard.js")}`)};
+      import f from 'node:fs/promises';
+      const device=await startGuard(${JSON.stringify(local.state.root)});
+      try {
+        const healthy=await device.space(${JSON.stringify(local.space.id)});
+        const peers=JSON.parse(await f.readFile(${JSON.stringify(local.observation + ".peers")},'utf8'));
+        await f.writeFile(${JSON.stringify(local.observation + ".peers")},JSON.stringify(peers.map(row=>({...row,status:'error',engineState:'running'}))));
+        const rows=await device.observe();if(rows.find(row=>row.name===${JSON.stringify(peer.name)})?.status!=='unknown')throw new Error('Error VM was pretended usable');
+        await device.retire(${JSON.stringify(peer.id)},1);
+        await healthy.validate();
+        const after=await device.observe();if(after.find(row=>row.name===${JSON.stringify(peer.name)})?.status!=='stopped'||after.find(row=>row.name===${JSON.stringify(local.space.name)})?.status!=='running')throw new Error('Own closure did not isolate healthy peer');
+        const calls=(await f.readFile(${JSON.stringify(local.observation + ".calls")},'utf8')).trim().split(String.fromCharCode(10)).map(line=>JSON.parse(line));
+        const stopped=calls.filter(argv=>argv[0]==='stop');if(stopped.length!==1||stopped[0][1]!==${JSON.stringify(peer.name)})throw new Error('Closure targeted a different native VM');
+      } finally {await device.stop();}
+    `,
+      ]);
+      expect(await local.records.get(peer.id)).toMatchObject({
+        runtimeId: peer.runtimeId,
+        generation: 2,
+        phase: "stopped",
+        desiredState: "stopped",
+      });
+    },
+  );
+
+  vmTest.each(["sdk-error", "engine-error"] as const)(
+    "one peer's %s preserves healthy observation and admission",
+    async (kind) => {
+      const local = await fixture();
+      const peer = await addPeer(local);
+      await execute(process.execPath, [
+        "--input-type=module",
+        "-e",
+        `
+      import {startGuard} from ${JSON.stringify(`file://${join(root, "guard.js")}`)};
+      import f from 'node:fs/promises';
+      const device=await startGuard(${JSON.stringify(local.state.root)});
+      try {
+        const stage=async(label,work)=>{try{return await work();}catch(error){throw new Error(label,{cause:error});}};
+        const healthy=await stage('initial healthy admission',()=>device.space(${JSON.stringify(local.space.id)}));
+        if(${JSON.stringify(kind)}==='sdk-error') {
+          const peers=JSON.parse(await f.readFile(${JSON.stringify(local.observation + ".peers")},'utf8'));
+          await f.writeFile(${JSON.stringify(local.observation + ".peers")},JSON.stringify(peers.map(row=>({...row,status:'error',engineState:'running'}))));
+        } else await f.writeFile(${JSON.stringify(local.observation + ".container-error-name")},${JSON.stringify(peer.name)});
+        const rows=await device.observe();
+        if(rows.find(row=>row.name===${JSON.stringify(peer.name)})?.status!=='unknown'||rows.find(row=>row.name===${JSON.stringify(local.space.name)})?.status!=='running')throw new Error('Bad peer observation contaminated healthy state');
+        await stage('held healthy validation during peer error',()=>healthy.validate());
+        const fresh=await stage('fresh healthy admission during peer error',()=>device.space(${JSON.stringify(local.space.id)}));await stage('fresh healthy validation during peer error',()=>fresh.validate());
+        await device.space(${JSON.stringify(peer.id)}).then(space=>space.validate()).then(()=>{throw new Error('Bad peer admitted work');},error=>{if(error.code!=='LOCAL_OBSERVATION_UNKNOWN')throw error;});
+        const peers=JSON.parse(await f.readFile(${JSON.stringify(local.observation + ".peers")},'utf8'));
+        await f.writeFile(${JSON.stringify(local.observation + ".peers")},JSON.stringify(peers.map(row=>({...row,status:'running',engineState:'running'}))));
+        await f.rm(${JSON.stringify(local.observation + ".container-error-name")},{force:true});
+        await stage('restored peer admission and validation',async()=>{await (await device.space(${JSON.stringify(peer.id)})).validate();});
+      } finally {await device.stop();}
+    `,
+      ]);
+      await expect(readFile(local.observation + ".launches")).rejects.toMatchObject({
+        code: "ENOENT",
+      });
+    },
+  );
+  vmTest(
+    "SDK metadata refusal preserves native peers and does not cache failed space admission",
+    async () => {
+      const local = await fixture();
+      const peer = await addPeer(local);
+      await writeFile(local.observation + ".inventory", "not-json");
+      await execute(process.execPath, [
+        "--input-type=module",
+        "-e",
+        `
+      import {startGuard} from ${JSON.stringify(`file://${join(root, "guard.js")}`)};
+      import f from 'node:fs/promises';
+      const device=await startGuard(${JSON.stringify(local.state.root)});
+      const marker=${JSON.stringify(local.observation + ".daemon-stopped")};
+      try {
+        await device.observe().then(()=>{throw new Error('Bad SDK metadata became known state');},error=>{if(error.code!=='LOCAL_OBSERVATION_UNKNOWN')throw error;});
+        await device.space(${JSON.stringify(peer.id)}).then(()=>{throw new Error('Unknown SDK identity admitted guest work');},error=>{if(error.code!=='LOCAL_OBSERVATION_UNKNOWN')throw error;});
+        await f.stat(marker).then(()=>{throw new Error('SDK observation retired healthy daemon');},error=>{if(error.code!=='ENOENT')throw error;});
+        await f.rm(${JSON.stringify(local.observation + ".inventory")});
+        const other=await device.space(${JSON.stringify(peer.id)});
+        await other.validate();
+        const own=await device.space(${JSON.stringify(local.space.id)});await own.validate();
+        const rows=await device.observe();if(rows.length!==2||rows.some(row=>row.status!=='running'))throw new Error('Restored SDK metadata did not retain original workers');
+      } finally {await device.stop();}
+    `,
+      ]);
+      expect(await local.records.get(peer.id)).toMatchObject({
+        runtimeId: peer.runtimeId,
+        generation: 2,
+        phase: "stopped",
+      });
+      await expect(readFile(local.observation + ".launches")).rejects.toMatchObject({
+        code: "ENOENT",
+      });
+    },
+  );
+
+  vmTest(
+    "SDK stop lag preserves healthy peers and leaves exact stop unknown until metadata settles",
+    async () => {
+      const local = await fixture();
+      const peer = await addPeer(local);
+      await execute(process.execPath, [
+        "--input-type=module",
+        "-e",
+        `
+      import {startGuard} from ${JSON.stringify(`file://${join(root, "guard.js")}`)};
+      import f from 'node:fs/promises';
+      const device=await startGuard(${JSON.stringify(local.state.root)});
+      try {
+        const healthy=await device.space(${JSON.stringify(local.space.id)});
+        await device.space(${JSON.stringify(peer.id)});
+        await f.writeFile(${JSON.stringify(local.observation + ".stop-sdk-lag")},'lag');
+        await device.retire(${JSON.stringify(peer.id)},1).then(()=>{throw new Error('Lagging SDK falsely confirmed stopped state');},error=>{if(error.code!=='LOCAL_STOP_PENDING')throw error;});
+        await healthy.validate();
+        const rows=await device.observe();if(rows.find(row=>row.name===${JSON.stringify(peer.name)})?.status!=='unknown')throw new Error('Lagging stop was not scoped unknown');
+        const peers=JSON.parse(await f.readFile(${JSON.stringify(local.observation + ".peers")},'utf8'));
+        await f.writeFile(${JSON.stringify(local.observation + ".peers")},JSON.stringify(peers.map(row=>({...row,status:'stopped',engineState:'exited'}))));
+        await f.rm(${JSON.stringify(local.observation + ".stop-sdk-lag")});
+        await device.retire(${JSON.stringify(peer.id)},2);
+        await healthy.validate();
+      } finally {await device.stop();}
+    `,
+      ]);
+      expect(await local.records.get(peer.id)).toMatchObject({
+        runtimeId: peer.runtimeId,
+        generation: 3,
+        phase: "stopped",
+        desiredState: "stopped",
+      });
+      await expect(readFile(local.observation + ".launches")).rejects.toMatchObject({
+        code: "ENOENT",
+      });
+    },
+  );
+
+  vmTest.each(["complete", "interrupt"] as const)(
+    "an admitted create's transient starting worker preserves peer control and exact own shutdown (%s)",
+    async (outcome) => {
+      const local = await fixture();
+      Object.assign(local.space, {
+        runtimeId: null,
+        phase: "creating",
+        lastStartedAt: null,
+        desiredState: "running",
+        networkPolicy: null,
+      });
+      await local.records.put(local.space);
+      await writeFile(local.observation, JSON.stringify({ status: "absent" }));
+      const peer = await addPeer(local);
+      const priorSocket = join(
+        local.policy.runtime.storageRoot,
+        "runtime",
+        ".sbx",
+        `run_moira-${local.policy.deviceId.replaceAll("-", "").slice(0, 14)}`,
+        `${createHash("sha256").update(local.space.name).digest("hex").slice(0, 12)}-vm.sock`,
+      );
+      await waitFor(() =>
+        lstat(priorSocket).then(
+          () => false,
+          (error: NodeJS.ErrnoException) => {
+            if (error.code === "ENOENT") return true;
+            throw error;
+          },
+        ),
+      );
+      await writeFile(local.observation + ".bootstrap-wait", "wait");
+      await execute(process.execPath, [
+        "--input-type=module",
+        "-e",
+        driver(local) +
+          `
+        const other=await device.space(${JSON.stringify(peer.id)});
+        const preparing=guard.prepare();const prepared=preparing.then(()=>({ok:true}),error=>({ok:false,code:error.code}));
+        try {
+          await Promise.race([wait(),preparing.then(()=>{throw new Error('Preparation completed before native starting barrier');})]);
+          const calls=(await f.readFile(${JSON.stringify(local.observation + ".calls")},'utf8')).trim().split(String.fromCharCode(10)).map(line=>JSON.parse(line));
+          if(!calls.some(argv=>argv[0]==='api-guest'&&argv[1]===${JSON.stringify(local.space.name)}&&argv[2]==='worker'))throw new Error('Live bootstrap exec was not invoked');
+          const pending=JSON.parse(await f.readFile(${JSON.stringify(local.pending)},'utf8'));process.kill(pending.pid,0);
+          const rows=await device.observe();
+          if(!rows.some(row=>row.name===${JSON.stringify(local.space.name)}&&row.status==='starting'))throw new Error('Transient native state was not observed');
+          await other.validate();
+          if(${JSON.stringify(outcome)}==='complete'){
+            await device.retire(${JSON.stringify(peer.id)},1);
+            const peers=JSON.parse(await f.readFile(${JSON.stringify(local.observation + ".peers")},'utf8'));
+            if(peers[0].status!=='stopped')throw new Error('Peer exact stop did not complete during own creation');
+            const before=JSON.parse(await f.readFile(spacePath,'utf8'));
+            if(before.desiredState!=='running'||before.phase!=='creating'||!before.runtimeId)throw new Error('Peer management changed or adopted own creation');
+            await f.writeFile(${JSON.stringify(local.release)},'finish');
+            if(!(await prepared).ok)throw new Error('Owned creation failed after independent peer stop');
+          }else{
+            await guard.stop();
+            if((await prepared).ok)throw new Error('Interrupted native bootstrap incorrectly completed');
+            await other.validate();
+            const peers=JSON.parse(await f.readFile(${JSON.stringify(local.observation + ".peers")},'utf8'));
+            if(peers[0].status!=='running')throw new Error('Own interrupted creation stopped a peer worker');
+          }
+          const own=JSON.parse(await f.readFile(spacePath,'utf8'));
+          if(!own.runtimeId)throw new Error('Confirmed SDK create lost its exact runtime identity');
+        }finally{await device.stop();await prepared;}
+      `,
+      ]);
+      expect(await local.records.get(local.space.id)).toMatchObject({
+        desiredState: "stopped",
+        phase: outcome === "complete" ? "stopped" : "failed",
+        failure: outcome === "complete" ? null : "LOCAL_GUEST_SETTLEMENT_UNKNOWN",
+        generation: 2,
+      });
+      expect((await local.records.get(local.space.id))?.runtimeId).not.toBeNull();
+      expect(await local.records.get(peer.id)).toMatchObject({
+        runtimeId: peer.runtimeId,
+        desiredState: "stopped",
+        phase: "stopped",
+        generation: 2,
+      });
+      const calls = (await readFile(local.observation + ".calls", "utf8"))
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line) as string[]);
+      expect(calls.filter((argv) => argv[0] === "api-create")).toHaveLength(1);
+      await expect(readFile(local.observation + ".launches")).rejects.toMatchObject({
+        code: "ENOENT",
+      });
+      await expect(
+        readFile(join(local.policy.runtime.storageRoot, "runtime", "keychain-current.json")),
+      ).rejects.toMatchObject({ code: "ENOENT" });
+    },
+  );
+
   vmTest.each([false, true])(
     "created inventory is actionable until exact native stop without startup (held worker: %s)",
     async (heldWorker) => {
@@ -506,7 +855,7 @@ supportedGuard("independent guard with a real subprocess SDK substitute", () => 
     },
   );
   vmTest(
-    "created inventory with contradictory running Engine is refused before lifecycle admission",
+    "contradictory SDK and Engine observation preserves custody without admitting guest work",
     async () => {
       const local = await fixture(false, false, true);
       await writeFile(
@@ -518,9 +867,12 @@ supportedGuard("independent guard with a real subprocess SDK substitute", () => 
         "-e",
         `
       import {startGuard} from ${JSON.stringify(`file://${join(root, "guard.js")}`)};
-      await startGuard(${JSON.stringify(local.state.root)}).then(async device=>{
-        await device.stop(); throw new Error('Contradictory Engine was admitted');
-      }, error=>{if(error.code!=='LOCAL_CONTROL_WORKER_UNVERIFIED')throw error;});
+      const device=await startGuard(${JSON.stringify(local.state.root)});
+      try {
+        const rows=await device.observe();
+        if(rows.length!==1||rows[0].status!=='unknown')throw new Error('Contradictory Engine was pretended usable');
+        await device.space(${JSON.stringify(local.space.id)}).then(()=>{throw new Error('Contradictory VM admitted guest work');},error=>{if(error.code!=='LOCAL_OBSERVATION_UNKNOWN')throw error;});
+      } finally {await device.stop();}
     `,
       ]);
       expect(await local.records.get(local.space.id)).toEqual(local.space);
@@ -688,6 +1040,9 @@ supportedGuard("independent guard with a real subprocess SDK substitute", () => 
     "a controlled stopped inventory read refuses %s before accepting its result",
     async (reason) => {
       const local = await fixture(false, true);
+      local.space.desiredState = "stopped";
+      local.space.phase = "stopped";
+      await local.records.put(local.space);
       await addStaleVmSocket(local);
       await writeFile(local.observation, JSON.stringify({ status: "stopped" }));
       await writeFile(local.observation + ".inventory-wait", "wait");
@@ -700,12 +1055,25 @@ supportedGuard("independent guard with a real subprocess SDK substitute", () => 
           `
         import {pathToFileURL} from 'node:url';
         const {startGuard} = await import(pathToFileURL(process.argv[2]).href);
-        await startGuard(process.argv[3]).then(device=>device.stop().then(()=>{throw new Error('Retired inventory accepted');}),error=>{if(error.code!==process.argv[4])throw error;});
+        const device = await startGuard(process.argv[3]);
+        try {
+          await device.observe(process.argv[5]).then(()=>{throw new Error('Retired inventory accepted');},error=>{if(!JSON.parse(process.argv[4]).includes(error.code))throw error;});
+        } finally {await device.stop();}
       `,
           "inventory-driver",
           join(root, "guard.js"),
           local.state.root,
-          reason === "daemon-retired" ? "LOCAL_CONTROL_RETIRED" : "LOCAL_NOT_RUNNING",
+          JSON.stringify(
+            reason === "daemon-retired"
+              ? [
+                  "LOCAL_CONTROL_RETIRED",
+                  "LOCAL_CANCELLED",
+                  "LOCAL_GUARD_UNAVAILABLE",
+                  "LOCAL_NOT_RUNNING",
+                ]
+              : ["LOCAL_NOT_RUNNING"],
+          ),
+          local.space.id,
         ],
         { env: {}, stdio: ["ignore", "pipe", "pipe"] },
       );
@@ -798,8 +1166,10 @@ supportedGuard("independent guard with a real subprocess SDK substitute", () => 
       const rows=await device.observe();
       if(rows.length!==1||rows[0].status!=='stopped')throw new Error('Stopped inventory changed');
       await fs.writeFile(${JSON.stringify(local.observation)},JSON.stringify({status:'running'}));
-      await device.observe().then(()=>{throw new Error('Cached stopped inventory admitted running VM');},error=>{if(error.code!=='LOCAL_CONTROL_WORKER_UNVERIFIED')throw error;});
-      await device.stop().catch(()=>{});
+      const fresh=await device.observe();
+      if(fresh.length!==1||fresh[0].status!=='unknown')throw new Error('Missing worker was admitted through cached inventory');
+      await device.space(${JSON.stringify(local.space.id)}).then(space=>space.validate()).then(()=>{throw new Error('Uncaptured VM admitted');},error=>{if(error.code!=='LOCAL_OBSERVATION_UNKNOWN')throw error;});
+      await device.stop();
     `,
       ]);
       expect(await readFile(local.observation + ".daemon-stopped", "utf8")).toBe("stopped");
@@ -840,7 +1210,11 @@ supportedGuard("independent guard with a real subprocess SDK substitute", () => 
         "-e",
         `
         import {startGuard} from ${JSON.stringify(`file://${join(root, "guard.js")}`)};
-        await startGuard(${JSON.stringify(local.state.root)}).then(device=>device.stop().then(()=>{throw new Error('Unverified inventory admitted');}),error=>{if(error.code!=='LOCAL_CONTROL_WORKER_UNVERIFIED')throw error;});
+        const device=await startGuard(${JSON.stringify(local.state.root)});
+        try {
+          ${variant === "empty" ? `const rows=await device.observe();if(rows.length!==1||rows[0].id!==${JSON.stringify(local.space.runtimeId)}||rows[0].status!=='unknown')throw new Error('Omitted held worker was pretended absent');` : `await device.observe().then(()=>{throw new Error('Unverified inventory reported known');},error=>{if(error.code!=='LOCAL_OBSERVATION_UNKNOWN')throw error;});`}
+          await device.space(${JSON.stringify(local.space.id)}).then(()=>{throw new Error('Unverified VM admitted work');},error=>{if(error.code!=='LOCAL_OBSERVATION_UNKNOWN')throw error;});
+        } finally {await device.stop();}
       `,
       ]);
       expect(await readFile(local.observation + ".daemon-stopped", "utf8")).toBe("stopped");

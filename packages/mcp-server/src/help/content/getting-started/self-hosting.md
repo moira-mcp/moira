@@ -278,7 +278,9 @@ resource allocations and lease, then confirm.
 The server, companion and running owner guards need a matching control-contract edition.
 Strict heartbeat/approval schemas refuse mixed editions even with delegation off; rebuilding the
 CLI does not update a live guard. Before updating, use the companion's ordinary owner-managed
-shutdown and confirm settlement of its owned work and guards. Update server and local checkout
+shutdown and confirm settlement of its owned work and guards. While both sides are stopped,
+back up the server database, the complete private companion state and its SDK backing storage,
+including VM disks. Keep the matching server and companion bundles with that backup. Update server and local checkout
 together, run `npm ci` and `npm run local:build`, then restart normally. Preserve the same state,
 disks, SDK profile, credentials and connection. Management and running jobs may be interrupted;
 there is no uninterrupted mixed-edition rolling upgrade. Live repository append within the matched
@@ -346,6 +348,11 @@ Only the connected personal account is supported. Resume the same complete paylo
 does not retry creation blindly, and `setup_required` can retain the confirmed GitHub ID/name while
 permissions or installation access are repaired. Only `applied` returns usable `local_repository_id`.
 Selected installation access is checked after adding only the confirmed new repository.
+When present, `error.stage` identifies the failed setup step and `error.provider_status` is the
+GitHub HTTP status. Follow the returned `instruction`. A rejected local admission can retain an
+already-created repository: restore its original grant in Settings, or use `repository_add` with
+the retained GitHub ID and a fresh `request_id` when existing-private consent permits it. Repeating
+the rejected admission alone does not restore access; do not create another repository.
 Unknown requests retain their exact recovery identity without preventing other repository additions.
 The private repository description contains a recovery marker, not a credential. Keep it while
 an unknown outcome is unresolved; Moira never adopts an unrelated same-name repository.
@@ -389,17 +396,28 @@ codespace; a pending create is only refreshed. `created` does not certify shutdo
 owner must confirm exact runtime and worker settlement. An unavailable observation preserves the
 last verified state and never becomes a successful stop.
 
-Install matching server and companion builds. Database migration `0057_codespace_observation.sql`
-adds nullable observation time, leaving existing records unobserved until a verified read. The
-companion snapshot includes the derived native stop confirmation; an earlier snapshot is not
-accepted by the matching strict contract. Follow the coordinated backup, offline conversion and
-paired rollback procedure above when updating saved policy/control formats.
+**Delete** remains available for pending creation, cleanup and uncertain local state, with explicit
+confirmation and the current generation. It targets the same owned VM and waits for confirmed
+removal; a failed observation cannot remove the card as if the VM were absent. A failed card does
+not prevent healthy sibling codespaces from refreshing or running.
+Physical VM startup is distinct from guest readiness: commands become available only after guest
+preparation completes. `CODESPACE_LOCAL_SETUP_INCOMPLETE` means that preparation failed, even if
+the VM is confirmed stopped. Delete it and confirm removal before creating a replacement;
+restarting or `recover` does not complete initial setup.
+
+Install matching server and companion builds. Their strict snapshot and management-result contract
+includes exact creation identity, guest readiness and native stop confirmation. Records remain
+unobserved until a verified read. Follow the coordinated shutdown and backup procedure above;
+rollback restores the matching server database, complete local state, SDK storage and bundles
+together. Convert unsupported saved policy/control formats only while both sides are stopped.
 
 Manager-backed CLI create/start/exec commands are one-shot and stop owned VM processes on exit;
 persistent server work uses `run`. Stop it before another command needs the same runner lock.
 The local daemon separates server contact from VM lifetime. Network/5xx failures reconnect;
-malformed responses or refused claims suspend new claims and retry confirmation without stopping
-already-admitted work. Confirmed device revocation/identity failure, local disable and lease expiry
+malformed control-plane responses suspend new claims until confirmation succeeds, without stopping
+already-admitted work. An addressed resource or delivery-claim refusal stays with that request;
+background delivery confirms the same current device authority and continues independent claims
+without a daemon-wide fault or retry delay. Confirmed device revocation/identity failure, local disable and lease expiry
 stop work. Existing grants and finite deadlines are never extended; cached results do not repeat effects.
 Ctrl+C closes the foreground companion; `npm run local -- disable` stops owned work independently
 and keeps VM data. Stop keeps files, while `remove SPACE_ID --confirm` deletes the exact owned VM.

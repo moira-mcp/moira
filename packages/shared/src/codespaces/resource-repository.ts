@@ -1054,7 +1054,8 @@ export class CodespaceResourceRepository {
       }
       if (
         current.desiredState === "running" &&
-        ["create_pending", "create_submitted", "usable", "start_pending"].includes(current.state)
+        ["create_pending", "create_submitted", "usable", "start_pending"].includes(current.state) &&
+        !(current.state === "start_pending" && current.lastOutcome?.startsWith("refused:"))
       ) {
         return current;
       }
@@ -1094,7 +1095,8 @@ export class CodespaceResourceRepository {
       }
       if (
         current.desiredState === "stopped" &&
-        ["stop_pending", "stopped"].includes(current.state)
+        ["stop_pending", "stopped"].includes(current.state) &&
+        !(current.state === "stop_pending" && current.lastOutcome?.startsWith("refused:"))
       ) {
         return current;
       }
@@ -1154,9 +1156,14 @@ export class CodespaceResourceRepository {
   ): CodespaceResourceRecord | "conflict" | null {
     const transaction = this.sqlite.transaction(() => {
       const current = this.getOwned(userId, resourceId);
-      if (!current || ["deleted", "rejected"].includes(current.state)) return null;
+      if (!current || current.state === "deleted") return null;
       if (current.generation !== expectedGeneration) return "conflict";
-      if (current.desiredState === "deleted" && current.state === "delete_pending") return current;
+      if (
+        current.desiredState === "deleted" &&
+        current.state === "delete_pending" &&
+        !current.lastOutcome?.startsWith("refused:")
+      )
+        return current;
       const changed = this.sqlite
         .prepare(
           `UPDATE codespaceResource SET desiredState = 'deleted', state = 'delete_pending',

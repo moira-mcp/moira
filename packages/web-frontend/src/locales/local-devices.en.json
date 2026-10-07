@@ -57,6 +57,9 @@
     "resourcesStale": "The computer could not confirm every codespace. The last confirmed states are kept; check again.",
     "reconcile": "Check state again",
     "observationFailed": "State could not be confirmed",
+    "needsAttention": "{{state}} · Needs attention",
+    "requestAccepted": "Request accepted. Completion has not been confirmed yet.",
+    "refPlaceholder": "Enter an existing branch, tag or commit",
     "errors": {
       "CODESPACE_PROVIDER_UNAVAILABLE": "The computer could not confirm the codespace state. Check its connection and try again.",
       "CODESPACE_PROVIDER_DISABLED": "Codespace work is disabled. Check the computer's access settings.",

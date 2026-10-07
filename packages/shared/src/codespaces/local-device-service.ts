@@ -211,6 +211,14 @@ export class LocalDeviceService {
       this.now(),
     );
   }
+  authorizeResult(auth: LocalDeviceAuth, requestId: string, claimId: string) {
+    return this.repository.authorizeResult(
+      auth,
+      id.parse(requestId),
+      id.parse(claimId),
+      this.now(),
+    );
+  }
   registerOutputPart(
     auth: LocalDeviceAuth,
     requestId: string,

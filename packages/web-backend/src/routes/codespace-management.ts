@@ -5,6 +5,7 @@ import {
   projectCodespaceOperationSummary,
   projectCodespaceSummary,
   recordCodespaceRejection,
+  localCodespaceFailureGuidance,
   parseLocalRepositoryTargetId,
   type CodespaceConnectionService,
   type CodespaceObservabilityService,
@@ -123,15 +124,21 @@ export function createCodespaceManagementRoutes(
   const handleError = (userId: string, error: unknown, res: import("express").Response) => {
     if (error instanceof CodespaceResourceError) {
       recordCodespaceRejection(error.code);
-      res.status(RESOURCE_ERROR_STATUS[error.code] ?? 500).json({
-        success: false,
-        error: {
-          code: error.code,
-          message: error.detail
-            ? `${publicMessage(error.code)}. ${error.detail}`
-            : publicMessage(error.code),
-        },
-      });
+      res
+        .status(
+          localCodespaceFailureGuidance(error.code)?.status ??
+            RESOURCE_ERROR_STATUS[error.code] ??
+            500,
+        )
+        .json({
+          success: false,
+          error: {
+            code: error.code,
+            message: error.detail
+              ? `${publicMessage(error.code).replace(/\.$/, "")}. ${error.detail}`
+              : publicMessage(error.code),
+          },
+        });
       return true;
     }
     if (error instanceof CodespaceConnectionError) {
@@ -403,6 +410,8 @@ export function createCodespaceManagementRoutes(
 }
 
 function publicMessage(code: string): string {
+  const local = localCodespaceFailureGuidance(code);
+  if (local) return local.message;
   switch (code) {
     case "CODESPACE_NOT_FOUND":
       return "Codespace was not found";

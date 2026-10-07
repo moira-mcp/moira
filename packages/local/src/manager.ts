@@ -36,7 +36,8 @@ export class LocalManager {
   private broker?: Awaited<ReturnType<typeof startBroker>>;
   private tunnel?: Awaited<ReturnType<typeof startBrokerTunnel>>;
   private releaseLock?: () => Promise<void>;
-  private lifecycleTail: Promise<unknown> = Promise.resolve();
+  private readonly lanes = new Map<string, Promise<unknown>>();
+  private openingOwner?: Promise<DeviceGuard>;
   readonly now: () => number;
   constructor(
     readonly records: LocalRecords,
@@ -55,16 +56,26 @@ export class LocalManager {
       );
     return { name: space.name, runtimeId: space.runtimeId };
   }
-  private serial<T>(action: () => Promise<T>): Promise<T> {
-    const result = this.lifecycleTail.then(action);
-    this.lifecycleTail = result.catch(() => undefined);
-    return result;
+  private async serial<T>(key: string, action: () => Promise<T>): Promise<T> {
+    const result = (this.lanes.get(key) ?? Promise.resolve()).catch(() => undefined).then(action);
+    this.lanes.set(key, result);
+    try {
+      return await result;
+    } finally {
+      if (this.lanes.get(key) === result) this.lanes.delete(key);
+    }
   }
 
   private async owner(): Promise<DeviceGuard> {
     if (!this.device?.active) {
-      await this.device?.stop();
-      this.device = await (this.dependencies.guard ?? startGuard)(this.records.state.root);
+      this.openingOwner ??= (async () => {
+        await this.device?.stop();
+        this.device = await (this.dependencies.guard ?? startGuard)(this.records.state.root);
+        return this.device;
+      })().finally(() => {
+        this.openingOwner = undefined;
+      });
+      return this.openingOwner;
     }
     return this.device;
   }
@@ -131,7 +142,7 @@ export class LocalManager {
   }
   /** The same runner/lifecycle gate admits an exact repository-only expansion. */
   async appendRepositoryPolicy(previous: LocalPolicy, next: LocalPolicy): Promise<void> {
-    await this.serial(async () => {
+    await this.serial("policy", async () => {
       await this.holdRunnerLock();
       next = localPolicySchema.parse(next);
       const stable = (policy: LocalPolicy) => JSON.stringify({ ...policy, repositories: [] });
@@ -209,8 +220,13 @@ export class LocalManager {
     return space;
   }
 
-  async create(repositoryId: string, ref: string, operationMarker: string): Promise<LocalSpace> {
-    return this.serial(async () => {
+  async create(
+    repositoryId: string,
+    ref: string,
+    operationMarker: string,
+    onAdmitted?: () => void,
+  ): Promise<LocalSpace> {
+    const admitted = await this.serial(`create:${operationMarker}`, async () => {
       const policy = await this.records.policy();
       requireLocalGrant(policy, repositoryId, this.now());
       requireRef(ref);
@@ -225,8 +241,9 @@ export class LocalManager {
             "LOCAL_REPLAY_CONFLICT",
             "Creation marker belongs to another repository or revision.",
           );
-        return duplicate;
+        return { space: duplicate, created: false };
       }
+      await new LocalRelay(this.records).assertCreationOpen(repositoryId, operationMarker);
       await (this.dependencies.storage ?? admitStorage)(policy);
       const id = randomUUID();
       const space: LocalSpace = {
@@ -255,17 +272,25 @@ export class LocalManager {
       await this.records.put(space);
       // Keep the pending intent if independent ownership cannot be established; no SDK
       // creation occurs before that owner, and the parent never overwrites its outcome.
-      return this.prepare(space, true);
+      return { space, created: true };
     });
+    onAdmitted?.();
+    return admitted.created ? this.prepare(admitted.space, true) : admitted.space;
   }
 
-  private async prepare(space: LocalSpace, clone: boolean, activate = false): Promise<LocalSpace> {
+  private async prepare(
+    space: LocalSpace,
+    clone: boolean,
+    activate = false,
+    onAdmitted?: () => void,
+  ): Promise<LocalSpace> {
     if (!this.tunnel)
       throw new LocalRefusal("LOCAL_NOT_RUNNING", "Start the local companion first.");
     if (clone !== (space.phase === "creating"))
       throw new LocalRefusal("LOCAL_SETUP_INCOMPLETE", "The local setup phase changed.");
     const guard = await (await this.owner()).space(space.id, activate);
     this.guards.set(space.id, guard);
+    onAdmitted?.();
     try {
       await guard.prepare();
       return await this.require(space.id);
@@ -300,7 +325,7 @@ export class LocalManager {
     id: string,
     dispatch: (space: LocalSpace, policy: LocalPolicy) => Promise<T>,
   ): Promise<T> {
-    return this.serial(async () => {
+    return this.serial(`space:${id}`, async () => {
       const space = await this.require(id);
       const policy = await this.records.policy();
       requireLocalGrant(policy, space.repositoryId, this.now());
@@ -340,18 +365,23 @@ export class LocalManager {
     });
   }
 
-  async start(id: string): Promise<LocalSpace> {
-    return this.serial(async () => {
+  async start(id: string, onAdmitted?: () => void): Promise<LocalSpace> {
+    return this.serial(`space:${id}`, async () => {
       const space = await this.require(id);
       const policy = await this.records.policy();
       requireLocalGrant(policy, space.repositoryId, this.now());
-      await (this.dependencies.storage ?? admitStorage)(policy);
+      if (space.failure === "LOCAL_SETUP_INCOMPLETE" || space.lastStartedAt === null)
+        throw new LocalRefusal(
+          "LOCAL_SETUP_INCOMPLETE",
+          "Guest preparation did not finish. Delete this codespace after confirmed cleanup, then create a new one.",
+        );
       if (space.phase !== "usable" && space.phase !== "stopped") {
         throw new LocalRefusal(
           "LOCAL_SETUP_INCOMPLETE",
-          "This sandbox was not fully initialized; inspect it locally.",
+          "Guest preparation did not finish. Delete this codespace after confirmed cleanup, then create a new one.",
         );
       }
+      await (this.dependencies.storage ?? admitStorage)(policy);
       const guard = this.guards.get(id);
       if (guard?.active) {
         if (space.desiredState !== "running")
@@ -369,41 +399,59 @@ export class LocalManager {
         }
       }
       this.guards.delete(id);
-      return this.prepare(space, false, true);
+      return this.prepare(space, false, true, onAdmitted);
     });
   }
 
-  async stop(id: string): Promise<LocalSpace> {
-    return this.serial(async () => {
+  async stop(id: string, expectedGeneration?: number): Promise<LocalSpace> {
+    return (async () => {
       const space = await this.require(id);
-      const guard =
-        this.guards.get(id) ??
-        (space.desiredState === "running" ? await (await this.owner()).space(id) : undefined);
+      const generation = expectedGeneration ?? space.generation;
+      if (space.generation !== generation)
+        throw new LocalRefusal(
+          "LOCAL_GENERATION_CONFLICT",
+          "Refresh this codespace before stopping its exact generation.",
+        );
+      if (!this.dependencies.runtime) {
+        await (await this.owner()).retire(space.id, generation);
+        this.guards.delete(id);
+        return this.require(id);
+      }
+      const guard = this.guards.get(id);
       if (guard) {
         await guard.stop();
         this.guards.delete(id);
         return await this.require(id);
       }
-      if (!this.dependencies.runtime) {
-        await (await this.owner()).retire(space.id, space.generation);
-        return this.require(id);
-      }
+      const incomplete =
+        space.phase === "creating" || (space.phase === "failed" && space.lastStartedAt === null);
       space.desiredState = "stopped";
       await this.records.put(space);
       this.guards.delete(id);
-      if (space.runtimeId)
-        await this.runtime(policyForSpace(await this.records.policy(), space)).stop(
-          this.identity(space),
+      const runtime = this.runtime(policyForSpace(await this.records.policy(), space));
+      if (space.runtimeId) {
+        await runtime.stop(this.identity(space));
+        const observed = await runtime.inspectExact(this.identity(space));
+        if (observed && observed.status !== "stopped" && observed.status !== "created")
+          throw new LocalRefusal(
+            "LOCAL_STOP_PENDING",
+            "The exact local sandbox stop is not confirmed.",
+          );
+      } else if ((await runtime.list()).some((item) => item.name === space.name))
+        throw new LocalRefusal(
+          "LOCAL_CREATE_UNKNOWN",
+          "The saved name is occupied without a captured VM identity; inspect pending creation locally.",
         );
-      space.phase = "stopped";
+      space.phase = incomplete ? "failed" : "stopped";
+      if (incomplete && space.failure === null) space.failure = "LOCAL_SETUP_INCOMPLETE";
       space.generation++;
       await this.records.put(space);
       return space;
-    });
+    })();
   }
 
   async recover(id: string, localApproval: boolean): Promise<LocalSpace> {
-    return this.serial(async () => {
+    return this.serial(`space:${id}`, async () => {
       if (!localApproval)
         throw new LocalRefusal(
           "LOCAL_RECOVERY_CONFIRM",
@@ -423,8 +471,13 @@ export class LocalManager {
   }
 
   async remove(id: string, generation: number, localApproval = false): Promise<void> {
-    return this.serial(async () => {
-      const space = await this.require(id);
+    return (async () => {
+      const space = await this.records.get(id);
+      if (!space)
+        throw new LocalRefusal(
+          "LOCAL_SANDBOX_ABSENT",
+          "This device has no retained sandbox with that ID.",
+        );
       const policy = await this.records.policy();
       const repository = policy.repositories.find((item) => item.id === space.repositoryId);
       if (!localApproval && !repository?.allowDelete) {
@@ -443,9 +496,19 @@ export class LocalManager {
         this.guards.delete(space.id);
         return;
       }
-      const guard =
-        this.guards.get(id) ??
-        (space.desiredState === "running" ? await (await this.owner()).space(id) : undefined);
+      const runtime = this.runtime(policyForSpace(policy, space));
+      if (space.phase === "deleted") {
+        const present = space.runtimeId
+          ? await runtime.inspectExact(this.identity(space))
+          : (await runtime.list()).find((item) => item.name === space.name);
+        if (present)
+          throw new LocalRefusal(
+            "LOCAL_IDENTITY_CHANGED",
+            "A deleted sandbox has a surviving runtime identity.",
+          );
+        return;
+      }
+      const guard = this.guards.get(id);
       await guard?.stop();
       this.guards.delete(id);
       const stopped = await this.require(id);
@@ -453,34 +516,83 @@ export class LocalManager {
       space.desiredState = "deleted";
       space.phase = "deleting";
       await this.records.put(space);
-      if (!space.runtimeId)
-        throw new LocalRefusal(
-          "LOCAL_CREATE_UNKNOWN",
-          "Inspect the pending creation locally before removing its record.",
-        );
-      await this.runtime(policyForSpace(policy, space)).remove(this.identity(space));
+      if (!space.runtimeId) {
+        if ((await runtime.list()).some((item) => item.name === space.name))
+          throw new LocalRefusal(
+            "LOCAL_CREATE_UNKNOWN",
+            "The saved name is occupied without a captured VM identity; inspect pending creation locally.",
+          );
+      } else {
+        await runtime.remove(this.identity(space));
+        if (await runtime.inspectExact(this.identity(space)))
+          throw new LocalRefusal(
+            "LOCAL_STOP_PENDING",
+            "The exact local sandbox deletion is not confirmed.",
+          );
+      }
       space.phase = "deleted";
       space.generation++;
       await this.records.put(space);
+    })();
+  }
+
+  /** The durable manifest is written before SDK creation. The lifecycle gate drains admitted create. */
+  async inspectCreation(
+    repositoryId: string,
+    operationMarker: string,
+    close?: () => Promise<void>,
+  ) {
+    return this.serial(`create:${operationMarker}`, async () => {
+      const candidates = (await this.records.list()).filter(
+        (space) => space.repositoryId === repositoryId && space.operationMarker === operationMarker,
+      );
+      if (candidates.length > 1)
+        throw new LocalRefusal(
+          "LOCAL_IDENTITY_CHANGED",
+          "The creation marker has ambiguous local manifests.",
+        );
+      if (!candidates.length && close) await close();
+      return candidates[0] ?? null;
     });
   }
 
-  async snapshot() {
+  async snapshot(spaceId?: string) {
     const policy = await this.records.policy();
     const admitted = policy.enabled && policy.leaseUntil > this.now();
-    const observed = this.dependencies.runtime
-      ? await this.runtime(policy).list()
-      : admitted
-        ? await (await this.owner()).observe()
-        : [];
+    let observationFailure: string | null = null;
+    const observed = await (async () => {
+      try {
+        return this.dependencies.runtime
+          ? await this.runtime(policy).list()
+          : admitted
+            ? await (await this.owner()).observe(spaceId)
+            : [];
+      } catch (error) {
+        if (!spaceId) throw error;
+        observationFailure = error instanceof LocalRefusal ? error.code : "LOCAL_INTERNAL_ERROR";
+        return [];
+      }
+    })();
     const spaces = [];
-    for (const space of await this.records.list()) {
-      if (space.phase === "deleted") continue;
+    const records = spaceId
+      ? [await this.records.get(spaceId)].filter((space): space is LocalSpace => space !== null)
+      : await this.records.list();
+    for (const space of records) {
+      if (space.phase === "deleted" && !spaceId) continue;
       // A creation manifest without an observed UUID is still unknown, even if the
       // SDK now happens to contain the same name. Read-only status cannot adopt it.
       const actual = space.runtimeId
         ? observed.find((item) => item.name === space.name)
         : undefined;
+      const pendingAbsent =
+        !space.runtimeId &&
+        admitted &&
+        !observationFailure &&
+        (space.phase === "deleted" ||
+          (space.phase === "stopped" &&
+            space.desiredState === "stopped" &&
+            space.failure === null)) &&
+        !observed.some((item) => item.name === space.name);
       if (actual && space.runtimeId !== actual.id)
         throw new LocalRefusal("LOCAL_IDENTITY_CHANGED", "A local sandbox identity changed.");
       spaces.push({
@@ -491,9 +603,15 @@ export class LocalManager {
         createdAt: space.createdAt,
         lastStartedAt: space.lastStartedAt,
         generation: space.generation,
-        state: actual?.status ?? (!admitted ? "unknown" : space.runtimeId ? "absent" : "unknown"),
+        state:
+          actual?.status ??
+          (!admitted || observationFailure
+            ? "unknown"
+            : space.runtimeId || pendingAbsent
+              ? "absent"
+              : "unknown"),
         phase: space.phase,
-        failure: space.failure,
+        failure: observationFailure ?? actual?.failure ?? space.failure,
         // Only the independent native owner can attest physical settlement. The persisted
         // phase alone is historical; an injected runtime or unavailable observation cannot.
         nativeStopConfirmed:
@@ -503,7 +621,7 @@ export class LocalManager {
           actual.id === space.runtimeId &&
           (actual.status === "stopped" || actual.status === "created") &&
           space.desiredState === "stopped" &&
-          space.phase === "stopped",
+          (space.phase === "stopped" || space.phase === "failed"),
       });
     }
     return { ...publicPolicy(policy), spaces };

@@ -30,6 +30,15 @@ export const localPrivateRepositoryCreationInputSchema = z
     installationId: z.string().regex(/^[1-9][0-9]{0,39}$/),
   })
   .strict();
+type RepositorySetupStage =
+  | "github_connection"
+  | "device_delegation"
+  | "authority_validation"
+  | "repository_lookup"
+  | "repository_create"
+  | "installation_access"
+  | "local_admission";
+
 export interface LocalPrivateRepositoryCreationResult {
   status: "pending" | "applied" | "unknown" | "setup_required" | "rejected";
   device_id: string;
@@ -37,7 +46,12 @@ export interface LocalPrivateRepositoryCreationResult {
   github_repository_id: string | null;
   full_name: string | null;
   local_repository_id: string | null;
-  error: { code: string; message: string } | null;
+  error: {
+    code: string;
+    message: string;
+    stage?: RepositorySetupStage;
+    provider_status?: number;
+  } | null;
   instruction: string;
   links: { settings: string; installation: string | null };
 }
@@ -95,16 +109,45 @@ export class LocalPrivateRepositoryCreationService {
     status: LocalPrivateRepositoryCreationResult["status"],
     code: string | null = null,
     admission?: LocalRepositoryAdmissionResult,
+    setup?: { stage: RepositorySetupStage; providerStatus?: number },
   ): LocalPrivateRepositoryCreationResult {
+    const setupInstructions: Record<RepositorySetupStage, string> = {
+      github_connection:
+        "Refresh the GitHub connection and selected personal App installation in Moira Settings, then resume this same request.",
+      device_delegation:
+        "Apply permission to create new private repositories on this local computer for the connected GitHub account and a valid work lease, then resume this same request.",
+      authority_validation:
+        "The saved repository request no longer matches the connected account or applied computer permission. Restore its original authority and resume this same request; do not create a replacement request.",
+      repository_lookup:
+        "GitHub refused the repository lookup. Check access for the selected App installation and resume this same request.",
+      repository_create:
+        "GitHub refused creation of the private repository. Check the App's Repository creation (write) or Administration (write) permission, accept updated permissions and refresh GitHub permissions in Moira Settings; resume this same request.",
+      installation_access:
+        "The repository has been retained, but App installation access is not confirmed. Add it to the selected installation; for selected repositories check GitHub App installation repository access (write). Refresh GitHub permissions and resume this same request without creating another repository.",
+      local_admission:
+        "The repository is retained, but its local access is not applied. Check the computer's permission request and companion acknowledgement, then resume this same request.",
+    };
+    const setupInstruction =
+      setup?.providerStatus === 401
+        ? "GitHub refused the stored authorization. Refresh GitHub permissions in Moira Settings, then resume this same request."
+        : setup?.providerStatus === 429
+          ? "GitHub is rate limiting this request. Wait for GitHub access to recover, then resume this same request without starting another creation."
+          : setup
+            ? setupInstructions[setup.stage]
+            : null;
     const instruction =
       status === "applied"
         ? "Use local_repository_id with codespace create; each codespace receives its own VM."
         : status === "unknown"
-          ? "The GitHub create outcome is unknown. Resume this exact request; Moira will inspect its recovery marker without repeating creation."
+          ? `${setupInstruction ? `${setupInstruction} ` : ""}The GitHub create outcome is unknown. Resume this exact request; Moira will inspect its recovery marker without repeating creation.${setup?.providerStatus === undefined ? "" : ` GitHub response: HTTP ${setup.providerStatus}.`}`
           : status === "setup_required"
-            ? "Check the connected GitHub account, selected App installation, required permissions, and applied device delegation in Moira Settings; resume the same request."
+            ? setup
+              ? `${setupInstruction}${setup.providerStatus === undefined ? "" : ` GitHub response: HTTP ${setup.providerStatus}.`}`
+              : "Check the connected GitHub account, selected App installation, required permissions, and applied device delegation in Moira Settings; resume the same request."
             : status === "rejected"
-              ? "The request was refused; inspect its identity and owner delegation before starting another request."
+              ? setup?.stage === "local_admission"
+                ? "The private repository is already created, but this computer's admission was rejected or superseded. Restore access to the already-created repository in Moira Settings, or use repository_add with its retained github_repository_id and a fresh request_id if the applied delegation permits existing repositories. Do not create another repository. After restoring the original grant, resume this same creation request."
+                : "The request was refused; inspect its identity and owner delegation before starting another request."
               : "Resume the same request to inspect completion; companion acknowledgement is required before local access is available.";
     return {
       status,
@@ -113,7 +156,16 @@ export class LocalPrivateRepositoryCreationService {
       github_repository_id: record?.repositoryId ?? null,
       full_name: record?.fullName ?? null,
       local_repository_id: status === "applied" ? (admission?.local_repository_id ?? null) : null,
-      error: code ? { code, message: instruction } : null,
+      error: code
+        ? {
+            code,
+            message: instruction,
+            ...(setup ? { stage: setup.stage } : {}),
+            ...(setup?.providerStatus === undefined
+              ? {}
+              : { provider_status: setup.providerStatus }),
+          }
+        : null,
       instruction,
       links: this.dependencies.links(),
     };
@@ -143,16 +195,29 @@ export class LocalPrivateRepositoryCreationService {
     if (record?.state === "rejected")
       return this.result(input, record, "rejected", record.errorCode);
     let context: Awaited<ReturnType<LocalPrivateRepositoryCreationDependencies["authorize"]>>;
+    let stage: RepositorySetupStage = "github_connection";
     try {
       context = await this.dependencies.authorize(userId, input.installationId);
+      stage = "device_delegation";
       record = record ?? ledger.reserve(userId, input, context.authority, this.now());
+      stage = "authority_validation";
       this.current(record, context.authority);
     } catch (error) {
       if (!(error instanceof LocalDeviceError) && !(error instanceof GitHubCodespaceClientError))
         throw error;
       if (error instanceof LocalDeviceError && error.code === "LOCAL_CAPACITY")
         return this.result(input, record, "rejected", "LOCAL_CAPACITY");
-      return this.result(input, record, "setup_required", "LOCAL_GITHUB_SETUP_REQUIRED");
+      return this.result(
+        input,
+        record,
+        "setup_required",
+        "LOCAL_GITHUB_SETUP_REQUIRED",
+        undefined,
+        {
+          stage,
+          ...(error instanceof GitHubCodespaceClientError ? { providerStatus: error.status } : {}),
+        },
+      );
     }
     const claimed = ledger.claim(userId, input.requestId, this.now());
     if (!claimed) return this.result(input, ledger.getOwned(userId, input.requestId), "pending");
@@ -160,11 +225,13 @@ export class LocalPrivateRepositoryCreationService {
     try {
       const provider = this.dependencies.provider();
       if (record.state === "prepared") {
+        stage = "repository_lookup";
         const present = await provider.inspectRepositoryByName(
           context.accessToken,
           record.owner,
           record.repositoryName,
         );
+        stage = "authority_validation";
         this.current(record, context.authority);
         if (present) {
           ledger.mark(record, "rejected", "LOCAL_REPOSITORY_NAME_EXISTS", this.now());
@@ -179,6 +246,7 @@ export class LocalPrivateRepositoryCreationService {
         record = ledger.getOwned(userId, input.requestId)!;
         let created: GitHubPrivateRepositoryIdentity;
         try {
+          stage = "repository_create";
           created = await provider.createPrivateRepository(context.accessToken, {
             name: record.repositoryName,
             description: this.markerDescription(record),
@@ -200,6 +268,8 @@ export class LocalPrivateRepositoryCreationService {
               ledger.getOwned(userId, input.requestId),
               setup ? "setup_required" : "rejected",
               setup ? "LOCAL_GITHUB_SETUP_REQUIRED" : "LOCAL_REPOSITORY_CREATE_REJECTED",
+              undefined,
+              { stage, providerStatus: error.status },
             );
           }
           ledger.mark(record, "unknown", "LOCAL_REPOSITORY_CREATE_UNKNOWN", this.now());
@@ -222,11 +292,13 @@ export class LocalPrivateRepositoryCreationService {
         ledger.recordCreated(record, created.id, created.fullName, this.now());
         record = ledger.getOwned(userId, input.requestId)!;
       } else if (record.state === "unknown" || record.state === "submitted") {
+        stage = "repository_lookup";
         const observed = await provider.inspectRepositoryByName(
           context.accessToken,
           record.owner,
           record.repositoryName,
         );
+        stage = "authority_validation";
         this.current(record, context.authority);
         if (!observed || !this.matches(record, observed)) {
           ledger.mark(record, "unknown", "LOCAL_REPOSITORY_CREATE_UNKNOWN", this.now());
@@ -242,6 +314,7 @@ export class LocalPrivateRepositoryCreationService {
       }
       this.current(record, context.authority);
       if (!record.installationVerified) {
+        stage = "installation_access";
         if (context.repositorySelection === "selected")
           await provider.addRepositoryToInstallation(
             context.accessToken,
@@ -259,6 +332,7 @@ export class LocalPrivateRepositoryCreationService {
         ledger.confirmInstallation(record, this.now());
         record = ledger.getOwned(userId, input.requestId)!;
       }
+      stage = "local_admission";
       const admission = await this.dependencies.admission.addCreatedRepository(
         userId,
         {
@@ -274,6 +348,7 @@ export class LocalPrivateRepositoryCreationService {
         admission.status,
         admission.error?.code ?? null,
         admission,
+        { stage: "local_admission" },
       );
     } catch (error) {
       if (!(error instanceof LocalDeviceError) && !(error instanceof GitHubCodespaceClientError))
@@ -281,10 +356,32 @@ export class LocalPrivateRepositoryCreationService {
       const retained = ledger.getOwned(userId, input.requestId)!;
       if (retained.state === "submitted" || retained.state === "unknown") {
         ledger.mark(record, "unknown", "LOCAL_REPOSITORY_CREATE_UNKNOWN", this.now());
-        return this.result(input, retained, "unknown", "LOCAL_REPOSITORY_CREATE_UNKNOWN");
+        return this.result(
+          input,
+          retained,
+          "unknown",
+          "LOCAL_REPOSITORY_CREATE_UNKNOWN",
+          undefined,
+          {
+            stage,
+            ...(error instanceof GitHubCodespaceClientError
+              ? { providerStatus: error.status }
+              : {}),
+          },
+        );
       }
       ledger.mark(record, retained.state, "LOCAL_GITHUB_SETUP_REQUIRED", this.now());
-      return this.result(input, retained, "setup_required", "LOCAL_GITHUB_SETUP_REQUIRED");
+      return this.result(
+        input,
+        retained,
+        "setup_required",
+        "LOCAL_GITHUB_SETUP_REQUIRED",
+        undefined,
+        {
+          stage,
+          ...(error instanceof GitHubCodespaceClientError ? { providerStatus: error.status } : {}),
+        },
+      );
     } finally {
       ledger.releaseClaim(record, this.now());
     }

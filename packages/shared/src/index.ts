@@ -120,6 +120,8 @@ export * from "./codespaces/github-app-config.js";
 export * from "./codespaces/credential-vault.js";
 export * from "./codespaces/connection-service.js";
 export * from "./codespaces/resource-types.js";
+export * from "./codespaces/local-failure-guidance.js";
+export * from "./codespaces/local-protocol.js";
 export * from "./codespaces/provider-registry.js";
 export * from "./codespaces/resource-repository.js";
 export * from "./codespaces/resource-service.js";
