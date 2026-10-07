@@ -55,6 +55,8 @@ function expectedRowsAfterRename(table: string, storedRows: StoredRow[]): Stored
       // Added by the later activity migration.
       expected.lastActivityAt = null;
       expected.providerLastUsedAt = null;
+      // Existing rows have no verified observation timestamp after the observation migration.
+      expected.observedAt = null;
     }
     if (table === "workspaceOperation") {
       expected.lastOutcome = String(expected.lastOutcome).replace("workspace_", "codespace_");

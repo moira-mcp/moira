@@ -14,11 +14,8 @@ import {
   Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
-import {
-  parseLocalRepositoryTargetId,
-  type CodespaceSummaryView,
-  type LocalDeviceView,
-} from "@mcp-moira/shared";
+import type { CodespaceSummaryView, LocalDeviceView } from "@mcp-moira/shared";
+import { parseLocalRepositoryTargetId } from "@mcp-moira/shared/local-device-types";
 import { apiClient } from "@/services/api-client";
 import { cn } from "@/lib/utils";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
