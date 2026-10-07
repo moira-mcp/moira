@@ -176,6 +176,16 @@ function services(overrides: Partial<CodespaceToolServices> = {}): CodespaceTool
       listResources: jest.fn(() => [codespace()]),
       refreshProviderState: jest.fn(async () => ({ stale: false })),
       getCodespace: jest.fn(() => codespace()),
+      waitForState: jest.fn(
+        async (_userId: string, _id: string, state: CodespaceResourceRecord["state"]) =>
+          codespace({
+            state,
+            desiredState:
+              state === "usable" ? "running" : state === "deleted" ? "deleted" : "stopped",
+            observedState:
+              state === "usable" ? "running" : state === "deleted" ? "absent" : "stopped",
+          }),
+      ),
       create: jest.fn(async () => ({
         resource: codespace(),
         lifecycleCapability: "secret-capability",
@@ -201,6 +211,9 @@ function services(overrides: Partial<CodespaceToolServices> = {}): CodespaceTool
     operation: {
       get: jest.fn(() => null),
       reconcile: jest.fn(async () => null),
+      waitForResult: jest.fn(async () => {
+        throw new Error("Unexpected command recovery");
+      }),
       readOutput: jest.fn(async () => ({
         stream: "stdout" as const,
         offset: 4,
@@ -229,6 +242,12 @@ function services(overrides: Partial<CodespaceToolServices> = {}): CodespaceTool
     file: {
       reconcile: jest.fn(async () => {
         throw new Error("unexpected reconciliation");
+      }),
+      waitForResult: jest.fn(async () => {
+        throw new Error("Unexpected file recovery");
+      }),
+      waitForDownloadReference: jest.fn(async () => {
+        throw new Error("Unexpected download recovery");
       }),
       execute: jest.fn(async () => ({
         operation: operation("stat"),
@@ -288,6 +307,87 @@ function data(result: Awaited<ReturnType<typeof executeCodespaceTool>>) {
 }
 
 describe("codespace MCP adapter", () => {
+  it("returns ordinary command output without an internal operation envelope", async () => {
+    const response = await executeCodespaceTool(
+      parseCodespaceToolParams({ action: "exec", codespace_id: CODESPACE_ID, argv: ["pwd"] }),
+      USER_ID,
+      services(),
+    );
+    expect(response.isError).toBeUndefined();
+    expect(data(response)).toEqual({ stdout: "ok\n", stderr: "", exit_code: 0 });
+  });
+
+  it("keeps the ordinary command call open until the accepted command returns its terminal output", async () => {
+    const base = services();
+    let release!: () => void;
+    let entered!: () => void;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const waiting = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    const execute = jest.fn(async () => ({
+      operation: { ...operation("exec"), state: "running" as const },
+      result: null,
+    }));
+    const dependencies = services({
+      operation: {
+        ...base.operation!,
+        execute,
+        waitForResult: jest.fn(async () => {
+          entered();
+          await held;
+          return {
+            operation: operation("exec"),
+            result: execResult({
+              state: "succeeded",
+              stdout: "build complete\n",
+              stderr: "",
+              exitCode: 0,
+            }),
+          };
+        }),
+      },
+    });
+    let completed = false;
+    const pending = executeCodespaceTool(
+      parseCodespaceToolParams({ action: "exec", codespace_id: CODESPACE_ID, argv: ["build"] }),
+      USER_ID,
+      dependencies,
+    ).then((response) => {
+      completed = true;
+      return response;
+    });
+    try {
+      await waiting;
+      expect(completed).toBe(false);
+    } finally {
+      release();
+    }
+    const result = await pending;
+    expect(data(result)).toEqual({ stdout: "build complete\n", stderr: "", exit_code: 0 });
+    expect(execute).toHaveBeenCalledTimes(1);
+  });
+
+  it("lists each environment once without attaching provider settings or repository inventories", async () => {
+    const response = await executeCodespaceTool(
+      parseCodespaceToolParams({ action: "list" }),
+      USER_ID,
+      services(),
+    );
+    expect(data(response)).toEqual({
+      codespaces: [
+        {
+          codespace_id: CODESPACE_ID,
+          repository: "owner/repository",
+          ref: "feature/current",
+          state: "usable",
+        },
+      ],
+    });
+  });
+
   it("publishes and accepts the same Unicode PR branches as Git", () => {
     const input = {
       action: "pull_request_create",
@@ -477,24 +577,22 @@ describe("codespace MCP adapter", () => {
       dependencies,
     );
 
-    expect(data(listed)).toMatchObject({
-      readiness: { state: "connected" },
-      instance: { state: "ready", provider: "github-codespaces", connector: "available" },
+    const brief = {
+      codespace_id: CODESPACE_ID,
+      repository: "owner/repository",
+      ref: "feature/current",
+      state: "usable",
+    };
+    expect(data(listed)).toEqual({ codespaces: [brief] });
+    expect(dependencies.observability.limitsWithBilling).not.toHaveBeenCalled();
+    expect(data(fetched)).toEqual(brief);
+    const repositories = await executeCodespaceTool(
+      parseCodespaceToolParams({ action: "repositories" }),
+      USER_ID,
+      dependencies,
+    );
+    expect(data(repositories)).toEqual({
       repositories: [{ repository_id: "42", name: "owner/repository", private: true }],
-      codespaces: [{ codespace_id: CODESPACE_ID, generation: 3 }],
-      // The caller's own limits, as the domain computed them for this caller.
-      limits: LIMITS,
-    });
-    expect(dependencies.observability.limitsWithBilling).toHaveBeenCalledWith(USER_ID, {
-      force: false,
-    });
-    // The branch an agent switched to is reported next to, not instead of, the one it asked for.
-    expect(data(fetched)).toMatchObject({
-      codespace: {
-        codespace_id: CODESPACE_ID,
-        requested_ref: "main",
-        current_ref: "feature/current",
-      },
     });
     const serialized = JSON.stringify([listed, fetched]);
     for (const secret of [
@@ -548,9 +646,8 @@ describe("codespace MCP adapter", () => {
     );
     expect(dependencies.connection.refreshGrants).toHaveBeenCalledWith(USER_ID, { force: true });
     expect(data(listed)).toMatchObject({
-      readiness: { state: "connected", reason: null },
-      repositories_stale: true,
-      resources_stale: true,
+      warning: "The provider could not refresh this view; the last confirmed entries are shown.",
+      codespaces: [expect.objectContaining({ codespace_id: CODESPACE_ID })],
     });
     expect(dependencies.resource!.refreshProviderState).not.toHaveBeenCalled();
     expect(getStatus).toHaveBeenCalledTimes(2);
@@ -563,13 +660,12 @@ describe("codespace MCP adapter", () => {
       USER_ID,
       dependencies,
     );
-    expect(data(listed)).toMatchObject({ resources_stale: false });
+    expect(data(listed)).toHaveProperty("codespaces");
+    expect(data(listed)).not.toHaveProperty("warning");
     expect(dependencies.resource!.refreshProviderState).toHaveBeenCalledWith(USER_ID, {
       authorizationFresh: true,
     });
-    expect(dependencies.observability.limitsWithBilling).toHaveBeenCalledWith(USER_ID, {
-      force: true,
-    });
+    expect(dependencies.observability.limitsWithBilling).not.toHaveBeenCalled();
   });
 
   it("returns provider-owned setup instructions and exact links for the current missing condition", async () => {
@@ -640,7 +736,6 @@ describe("codespace MCP adapter", () => {
       parseCodespaceToolParams({
         action: "delete",
         codespace_id: CODESPACE_ID,
-        expected_generation: 4,
         confirm_delete: true,
       }),
       USER_ID,
@@ -649,9 +744,10 @@ describe("codespace MCP adapter", () => {
 
     expect(JSON.stringify(created)).not.toContain("secret-capability");
     expect(dependencies.connection.refreshGrants).toHaveBeenCalledWith(USER_ID);
-    expect(data(stopped)).toMatchObject({ data_preserved: true });
-    expect(data(deleted)).toMatchObject({ data_preserved: false });
-    expect(dependencies.resource?.deleteCodespace).toHaveBeenCalledWith(USER_ID, CODESPACE_ID, 4);
+    expect(data(created)).toMatchObject({ codespace_id: CODESPACE_ID, state: "usable" });
+    expect(data(stopped)).toMatchObject({ codespace_id: CODESPACE_ID, state: "stopped" });
+    expect(data(deleted)).toMatchObject({ codespace_id: CODESPACE_ID, state: "deleted" });
+    expect(dependencies.resource?.deleteCodespace).toHaveBeenCalledWith(USER_ID, CODESPACE_ID, 3);
   });
 
   it("uses exactly one inline or native stdin path without returning the native reference", async () => {
@@ -713,15 +809,18 @@ describe("codespace MCP adapter", () => {
   it("reconciles a returned operation ID without dispatching a duplicate command", async () => {
     let current: CodespaceOperationRecord = { ...operation("exec"), state: "reconcile_pending" };
     const execute = jest.fn<NonNullable<CodespaceToolServices["operation"]>["execute"]>();
-    const reconcile = jest.fn<NonNullable<CodespaceToolServices["operation"]>["reconcile"]>(
+    const waitForResult = jest.fn<NonNullable<CodespaceToolServices["operation"]>["waitForResult"]>(
       async () => {
         current = { ...operation("exec"), state: "succeeded" as const };
-        return execResult({
-          state: "succeeded" as const,
-          stdout: "recovered\n",
-          stderr: "",
-          exitCode: 0,
-        });
+        return {
+          operation: current,
+          result: execResult({
+            state: "succeeded" as const,
+            stdout: "recovered\n",
+            stderr: "",
+            exitCode: 0,
+          }),
+        };
       },
     );
     const base = services();
@@ -729,7 +828,7 @@ describe("codespace MCP adapter", () => {
       operation: {
         ...base.operation!,
         get: jest.fn<NonNullable<CodespaceToolServices["operation"]>["get"]>(() => current),
-        reconcile,
+        waitForResult,
         execute,
       },
     });
@@ -745,11 +844,8 @@ describe("codespace MCP adapter", () => {
     );
 
     expect(execute).not.toHaveBeenCalled();
-    expect(reconcile).toHaveBeenCalledWith(USER_ID, OPERATION_ID);
-    expect(data(resumed)).toMatchObject({
-      operation: { operation_id: OPERATION_ID, state: "succeeded" },
-      result: { stdout: "recovered\n", exit_code: 0 },
-    });
+    expect(waitForResult).toHaveBeenCalledWith(USER_ID, OPERATION_ID);
+    expect(data(resumed)).toEqual({ stdout: "recovered\n", stderr: "", exit_code: 0 });
   });
 
   it.each([
@@ -782,9 +878,10 @@ describe("codespace MCP adapter", () => {
       expect(response).toMatchObject({
         isError: true,
         structuredContent: {
-          operation: { operation_id: OPERATION_ID, state },
+          operation_id: OPERATION_ID,
           error: { code, retryable: false },
-          result: { stderr: "test failed", exit_code: 1 },
+          stderr: "test failed",
+          exit_code: 1,
         },
       });
     },
@@ -804,14 +901,17 @@ describe("codespace MCP adapter", () => {
         operation: {
           ...base.operation!,
           get: jest.fn<NonNullable<CodespaceToolServices["operation"]>["get"]>(() => current),
-          reconcile: jest.fn(async () => {
+          waitForResult: jest.fn(async () => {
             current = {
               ...operation("exec"),
               state: "failed" as const,
               exitCode: null,
               lastOutcome: "codespace_restarted",
             };
-            return execResult({ state: "failed", stdout: "", stderr: "", exitCode: null });
+            return {
+              operation: current,
+              result: execResult({ state: "failed", stdout: "", stderr: "", exitCode: null }),
+            };
           }),
         },
       }),
@@ -823,7 +923,7 @@ describe("codespace MCP adapter", () => {
     expect(response).toMatchObject({
       isError: true,
       structuredContent: {
-        operation: { operation_id: OPERATION_ID, state: "failed", interrupted_by_restart: true },
+        operation_id: OPERATION_ID,
         error: { code: "CODESPACE_OPERATION_INTERRUPTED", retryable: false },
       },
     });
@@ -858,7 +958,7 @@ describe("codespace MCP adapter", () => {
     expect(response).toMatchObject({
       isError: true,
       structuredContent: {
-        operation: { operation_id: OPERATION_ID, state: "failed" },
+        operation_id: OPERATION_ID,
         error: { code: "CODESPACE_FILE_REJECTED" },
       },
     });
@@ -870,7 +970,7 @@ describe("codespace MCP adapter", () => {
       operation: { ...base.operation!, get: jest.fn(() => operation("download")) },
       file: {
         ...base.file!,
-        reconcileDownloadReference: jest.fn(async () => ({
+        waitForDownloadReference: jest.fn(async () => ({
           operation: operation("download"),
           transfer: {
             referenceId: `codespace-file://${"x".repeat(43)}`,
@@ -901,7 +1001,8 @@ describe("codespace MCP adapter", () => {
         size: 12,
       }),
     ]);
-    expect(data(resumed)).toMatchObject({ operation: { operation_id: OPERATION_ID } });
+    expect(data(resumed)).toMatchObject({ file: { name: "result.bin", size_bytes: 12 } });
+    expect(data(resumed)).not.toHaveProperty("operation");
     expect(dependencies.file!.downloadReference).not.toHaveBeenCalled();
   });
 
@@ -1005,9 +1106,9 @@ describe("codespace MCP adapter", () => {
       dependencies,
     );
 
-    expect(data(read)).toMatchObject({ result: { text: "hello", offset: 0, total_size: 5 } });
+    expect(data(read)).toMatchObject({ text: "hello", offset: 0, total_size: 5 });
     expect(data(patched)).toMatchObject({
-      result: { summary: { files_changed: 1, edits_applied: 1, truncated: false } },
+      summary: { files_changed: 1, edits_applied: 1, truncated: false },
     });
     expect(JSON.stringify(uploaded)).not.toContain("private-token");
     expect(downloaded.content).toEqual([
@@ -1112,13 +1213,11 @@ describe("codespace MCP adapter", () => {
       noisy,
     );
     // The command's own exit code and standard error survive; the payload says what it omitted.
-    expect(data(executed).result).toMatchObject({
+    expect(data(executed)).toMatchObject({
       exit_code: 7,
       stderr: "real failure",
       stdout_total_bytes: 900_000,
       stdout_truncated: true,
-      stderr_truncated: false,
-      output_limit_exceeded: false,
     });
 
     const owning = services({
@@ -1465,7 +1564,7 @@ describe("codespace MCP adapter", () => {
     expect(unreadable).toMatchObject({
       isError: true,
       structuredContent: {
-        operation: { operation_id: OPERATION_ID, state: "succeeded" },
+        operation_id: OPERATION_ID,
         error: { code: "CODESPACE_BINARY_READ_REQUIRES_DOWNLOAD" },
       },
     });
@@ -1505,7 +1604,6 @@ describe("codespace MCP adapter", () => {
       request: {
         codespace_id: CODESPACE_ID,
         argv: ["ls"],
-        background: false,
         session_start: false,
         session_end: false,
       },
@@ -1578,7 +1676,6 @@ describe("codespace MCP adapter", () => {
       "delete",
       {
         codespace_id: CODESPACE_ID,
-        expected_generation: 3,
         confirm_delete: true,
         query: "TODO",
       },
@@ -1646,7 +1743,7 @@ describe("codespace MCP adapter", () => {
     ["get", { codespace_id: CODESPACE_ID }],
     ["start", { codespace_id: CODESPACE_ID }],
     ["stop", { codespace_id: CODESPACE_ID }],
-    ["delete", { codespace_id: CODESPACE_ID, expected_generation: 3, confirm_delete: true }],
+    ["delete", { codespace_id: CODESPACE_ID, confirm_delete: true }],
     [
       "exec",
       {
@@ -1657,7 +1754,6 @@ describe("codespace MCP adapter", () => {
         session: "build",
         session_start: true,
         session_end: false,
-        background: true,
         timeout_seconds: 24 * 60 * 60,
         max_stdout_bytes: 8 * 1024 * 1024,
         max_stderr_bytes: 8 * 1024 * 1024,

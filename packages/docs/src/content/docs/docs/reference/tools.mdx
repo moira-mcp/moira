@@ -173,12 +173,13 @@ For an upload grant returned by `token`, submit the selected file to its `upload
 curl -X POST "${uploadUrl}" -F "workflow=@your-workflow.json"
 ```
 
-### Cloud codespaces
+### Development codespaces
 
 The `codespace` tool gives an agent without a filesystem a persistent, personal instrument for
-executing a flow (currently a GitHub Codespace). A codespace is not shared; collaboration happens
-through version-control branches. One tool serves the whole surface: `action` selects the operation —
-`list`, `setup_help`, `create`, `get`, `start`, `stop`, `delete`, `exec`,
+executing a flow in GitHub or on an approved local computer. Each local codespace has its own VM;
+one repository may have several independent codespaces. A codespace is not shared; collaboration happens
+through version-control branches. Ordinary work uses `codespace`: `action` selects the operation —
+`list`, `repositories`, `setup_help`, `create`, `get`, `start`, `stop`, `delete`, `exec`,
 `stat`, `search`, `read`, `write`, `apply_patch`, `upload` or `download` — and the other fields are
 those the chosen action declares. GitHub is connected only on the Moira website; no action starts,
 resumes or polls an authorization. When the connection, installation or server configuration is
@@ -195,22 +196,23 @@ can appear among approved targets, but `create` checks GitHub's billing owner be
 anything. It returns `CODESPACE_BILLING_UNSUPPORTED` if GitHub would bill an organization; Moira
 supports only Codespaces billed to your connected personal account.
 
-Every call but `list`, `setup_help` and `create` names a `codespace_id`; `list` and `create` return
-that reusable ID, while `setup_help` needs none. Ownership is checked server-side, so an unknown or
+Lifecycle, execution and file calls address a `codespace_id`; `list` and `create` return
+that reusable ID, while `repositories` discovers approved repository targets. Local discovery and
+repository admission use the owned device. Ownership is checked server-side, so an unknown or
 foreign ID returns the generic `CODESPACE_NOT_FOUND` result. A codespace is not tied to a chat or session: reuse the same `codespace_id` from any
 client. `list` offers only codespaces that can still be used; a deleted or rejected one
-is absent from it while `get` still answers for its `codespace_id`. `stop` preserves the repository data (`data_preserved: true`);
-`delete` is destructive and requires `confirm_delete: true` with the codespace's current
-`generation`, so a stale call cannot delete a changed codespace.
+is absent from it while `get` still answers for its `codespace_id`. Create/start wait for usable
+guest readiness, stop for confirmed shutdown while preserving files, and delete for confirmed absence.
+Delete requires `confirm_delete: true`; the server applies its current owned generation guard internally.
+List/get/lifecycle return compact codespace ID, repository, ref and state, with a safe cause when known.
 
 `list` refreshes the approved installation and repository snapshot after its TTL and accepts
 `refresh: true` for an immediate refresh. A forced refresh also checks the current GitHub state of
-stored codespaces and re-reads monthly billing. `repositories_stale` and `resources_stale` identify
-the respective checks that could not complete; the saved repositories and codespaces remain visible.
+stored codespaces. A warning identifies an incomplete refresh; saved entries remain visible.
 A repository newly granted to the App therefore appears without reconnecting once refresh succeeds.
 The Cloud codespaces **Refresh** button in Moira Settings performs the same forced reconciliation.
 
-`list` also returns `limits`: the limits Moira enforces for you, next to your current use. It covers
+Moira Settings separately displays `limits`: the limits Moira enforces for you, next to your current use. Compact MCP discovery omits this view. It covers
 the codespaces you hold against your own ceiling and the instance-wide one, plus the interval between
 creations; the largest machine you may select; your active operations against the concurrency limit,
 with the input, output, retained-output, duration and background limits; your transfer bytes and
@@ -232,7 +234,8 @@ still refused.
 The branch checked out in a codespace is not part of its identity. You may switch branches inside a
 codespace, or leave it on a detached HEAD, and `start`, `stop`, `delete`, `exec` and the file actions
 keep working on the same `codespace_id`; after you reconnect GitHub with the same account, the
-codespace is rebound automatically on whatever branch it is on. The codespace summary reports
+codespace is rebound automatically on whatever branch it is on. MCP reports `ref` from the last
+observed ref or its requested fallback. Website summaries separately report
 `requested_ref`, the ref it was created on, and `current_ref`, the ref GitHub last reported checked
 out, which is `null` until Moira has observed one and while the codespace is on a detached HEAD.
 `create` still takes the input `ref`. Starting a codespace whose GitHub resource Moira is still
@@ -256,12 +259,13 @@ running, keeps its own exit code and keeps its own `stderr`, and the result repo
 complete size and whether the payload was truncated. The whole output stays in the codespace until
 the operation is cleaned up, and any range of it is read with `read`. A command is stopped
 for its volume only if its retained output reaches the codespace ceiling, which is reported as that
-rather than as the command's own failure. For work that outlives one request, such as a full build or
-test suite, pass `background: true`: the call returns a running operation at once, the command keeps
-running in the codespace under a much larger ceiling, its output is readable by range while it runs,
-and its result is collected later with the same `operation_id`, which stays collectible for at least
-as long as the command was allowed to run. Omitting `timeout_seconds` gives a bounded command 300
-seconds and a background command its whole ceiling.
+rather than as the command's own failure. Ordinary exec waits for its terminal result;
+`timeout_seconds` defaults to 300. Long-lived development processes use the separate
+`codespace_process` tool: start accepts the same command/session/stdin fields and returns
+`process_id` and state after admission. Get collects that process's state and available output;
+read returns a bounded retained stream range; stop cancels only that process. A pending stop is
+not confirmed cancellation. The omitted duration uses the existing background lifetime ceiling,
+and retained output remains collectible for at least the permitted command duration.
 
 Consecutive commands can share a working context. Open a session with `session` and
 `session_start: true`, then name the same `session` on later commands: it remembers the `cwd` a call
@@ -279,8 +283,9 @@ succeeded or failed, while one whose end state would not fit, one that ends its 
 and one that was stopped report `session_capture_dropped` instead of leaving a session you cannot use. A session belongs to the
 codespace's current life: after the codespace stops and starts again, naming it returns
 `CODESPACE_SESSION_UNAVAILABLE` and a new session must be opened, as it does for a session that was
-never opened. What a session stores stays in the codespace and is never returned. Stop either kind by calling the same action
-with only `codespace_id`, `operation_id` and `cancel: true`. A command stops with its codespace, so a
+never opened. What a session stores stays in the codespace and is never returned.
+Ordinary exec has neither `background` nor `cancel`; background cancellation uses
+`codespace_process({ action: "stop", codespace_id, process_id })`. A command stops with its codespace, so a
 long one needs a codespace whose idle lifetime outlasts it. A codespace that went to sleep does not
 have to be started first: the call that needs it starts it and then runs, within a bounded wait. If it
 does not finish starting in time the call returns `CODESPACE_START_TIMEOUT`, which names that wait and
@@ -290,10 +295,12 @@ codespace restarted under it is reported as `CODESPACE_OPERATION_INTERRUPTED`, w
 already written are still there, it produced no result, and running it again is the remedy. Supply at most one stdin form: `stdin_text` for UTF-8 text or `stdin_file` for a native
 ChatGPT file reference; the file's bytes reach the process without base64 in the conversation.
 Failed, timed-out and cancelled commands and rejected file edits are returned as tool errors that
-keep `operation_id` and the available output. A command that finishes quickly returns its terminal
-result from the same call that started it; one that is still running returns a non-terminal
-`state`, which is not a success. Call the same action again with only `codespace_id` and
-`operation_id` to obtain the stored outcome without running the command or mutation twice.
+keep any useful bounded output and the recovery identity. Successful ordinary calls return the
+action result without operation metadata; `operation_id` remains only for truncated retained output
+or exceptional recovery. An unconfirmed outcome is an error, not a running success. Use its same
+`codespace_id` and `operation_id` to collect the accepted effect without executing it again.
+Server waiting does not extend a client's transport timeout. After interrupted delivery, inspect
+the accepted identity instead of submitting another mutation.
 
 `read` returns UTF-8 text with `offset` and `total_size`, plus `sha256` for a repository
 file; give `path` for a file, or `operation_id` and `stream` for a command's retained `stdout` or

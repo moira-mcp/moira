@@ -1,4 +1,4 @@
-import { describe, expect, it, jest } from "@jest/globals";
+import { afterEach, describe, expect, it, jest } from "@jest/globals";
 import {
   LocalDeviceError,
   CodespaceResourceError,
@@ -13,6 +13,9 @@ import { codespaceSchema } from "../../../packages/mcp-server/src/tools/tool-sch
 
 const DEVICE_ID = "00000000-0000-4000-8000-000000000001";
 const REQUEST_ID = "00000000-0000-4000-8000-000000000002";
+afterEach(() => {
+  jest.useRealTimers();
+});
 
 /** Admission must work before a repository becomes available to provider selection. */
 function services(): CodespaceToolServices {
@@ -30,11 +33,11 @@ function services(): CodespaceToolServices {
     localRepositories: {
       listDevices: jest.fn(() => ({ devices: [{ device_id: DEVICE_ID, delegation: null }] })),
       addExistingRepository: jest.fn(async () => ({
-        status: "pending",
+        status: "applied",
         device_id: DEVICE_ID,
         request_id: REQUEST_ID,
         revision: 4,
-        local_repository_id: null,
+        local_repository_id: "approved-local-repository",
         error: null,
       })),
     },
@@ -92,21 +95,18 @@ describe("local repository MCP admission", () => {
       installation_id: "41",
     };
     expect(codespaceSchema.safeParse(input).success).toBe(true);
-    for (status of ["unknown", "setup_required", "pending"]) {
+    for (status of ["unknown", "setup_required"]) {
       const result = await executeCodespaceTool(
         parseCodespaceToolParams(input),
         "owner",
         dependencies,
       );
+      expect(result.isError).toBe(true);
       expect(result.structuredContent).toEqual({
-        repository: {
-          status,
-          device_id: DEVICE_ID,
-          request_id: REQUEST_ID,
-          github_repository_id: null,
-          full_name: null,
-          local_repository_id: null,
-          instruction: "Resume owner's same creation request",
+        request_id: REQUEST_ID,
+        error: {
+          code: "LOCAL_ADMISSION_UNCONFIRMED",
+          message: "Resume owner's same creation request",
         },
       });
     }
@@ -136,10 +136,69 @@ describe("local repository MCP admission", () => {
     }
   });
 
+  it("waits for private repository acknowledgement while preserving the original creation identity", async () => {
+    const dependencies = services();
+    jest.useFakeTimers();
+    const create = jest
+      .fn<NonNullable<CodespaceToolServices["localRepositoryCreation"]>["createRepository"]>()
+      .mockResolvedValueOnce({
+        status: "pending",
+        request_id: REQUEST_ID,
+        local_repository_id: null,
+      })
+      .mockResolvedValue({
+        status: "applied",
+        request_id: REQUEST_ID,
+        local_repository_id: "approved-private-repository",
+        full_name: "owner/private-app",
+      });
+    dependencies.localRepositoryCreation = { createRepository: create };
+    const pending = executeCodespaceTool(
+      parseCodespaceToolParams({
+        action: "repository_create",
+        device_id: DEVICE_ID,
+        request_id: REQUEST_ID,
+        repository_name: "private-app",
+        installation_id: "41",
+      }),
+      "owner",
+      dependencies,
+    );
+    await jest.advanceTimersByTimeAsync(500);
+    const result = await pending;
+    expect(result.isError).toBeUndefined();
+    expect(result.structuredContent).toEqual({
+      repository_id: "approved-private-repository",
+      name: "owner/private-app",
+    });
+    expect(create).toHaveBeenCalledTimes(2);
+    expect(create.mock.calls[0]).toEqual([
+      "owner",
+      {
+        deviceId: DEVICE_ID,
+        requestId: REQUEST_ID,
+        repositoryName: "private-app",
+        installationId: "41",
+      },
+    ]);
+    expect(create.mock.calls[1]).toEqual(create.mock.calls[0]);
+    expect(dependencies.select).not.toHaveBeenCalled();
+  });
+
   it("discovers devices without treating disconnected cloud readiness as local authority", async () => {
     const dependencies = services();
     dependencies.localRepositories!.listDevices = async () => ({
-      devices: [{ device_id: DEVICE_ID, delegation: null }],
+      devices: [
+        {
+          device_id: DEVICE_ID,
+          delegation: null,
+          label: "My computer",
+          status: "active",
+          enabled: true,
+          lease_until: 123,
+          revision: 4,
+        },
+      ],
       installations: [
         { installation_id: "41", owner: "personal", repository_selection: "selected" },
       ],
@@ -150,16 +209,28 @@ describe("local repository MCP admission", () => {
       dependencies,
     );
     expect(result.structuredContent).toEqual({
-      devices: [{ device_id: DEVICE_ID, delegation: null }],
-      installations: [
-        { installation_id: "41", owner: "personal", repository_selection: "selected" },
-      ],
+      devices: [{ device_id: DEVICE_ID, label: "My computer", status: "active", enabled: true }],
+      installations: [{ installation_id: "41", owner: "personal" }],
     });
     expect(dependencies.select).not.toHaveBeenCalled();
   });
 
-  it("preserves pending identity and forwards the authenticated owner to verified admission", async () => {
+  it("waits for pending admission using the same request and returns only the approved repository", async () => {
     const dependencies = services();
+    jest.useFakeTimers();
+    const add = jest
+      .fn<NonNullable<CodespaceToolServices["localRepositories"]>["addExistingRepository"]>()
+      .mockResolvedValueOnce({
+        status: "pending",
+        request_id: REQUEST_ID,
+        local_repository_id: null,
+      })
+      .mockResolvedValue({
+        status: "applied",
+        request_id: REQUEST_ID,
+        local_repository_id: "approved-local-repository",
+      });
+    dependencies.localRepositories!.addExistingRepository = add;
     const request = {
       action: "repository_add",
       device_id: DEVICE_ID,
@@ -167,23 +238,17 @@ describe("local repository MCP admission", () => {
       request_id: REQUEST_ID,
     };
     expect(codespaceSchema.safeParse(request).success).toBe(true);
-    const result = await executeCodespaceTool(
-      parseCodespaceToolParams(request),
-      "owner",
-      dependencies,
-    );
+    const pending = executeCodespaceTool(parseCodespaceToolParams(request), "owner", dependencies);
+    await jest.advanceTimersByTimeAsync(500);
+    const result = await pending;
     expect(dependencies.localRepositories!.addExistingRepository).toHaveBeenCalledWith("owner", {
       deviceId: DEVICE_ID,
       repositoryId: "42",
       requestId: REQUEST_ID,
     });
-    expect(result.structuredContent).toMatchObject({
-      admission: {
-        status: "pending",
-        request_id: REQUEST_ID,
-        local_repository_id: null,
-      },
-    });
+    expect(add).toHaveBeenCalledTimes(2);
+    expect(add.mock.calls[1]).toEqual(add.mock.calls[0]);
+    expect(result.structuredContent).toEqual({ repository_id: "approved-local-repository" });
     expect(dependencies.select).not.toHaveBeenCalled();
   });
 
@@ -302,6 +367,7 @@ describe("local repository MCP admission", () => {
       startCodespace: unexpected,
       stopCodespace: unexpected,
       deleteCodespace: unexpected,
+      waitForState: unexpected,
     };
     let owned: CodespaceOperationRecord | null = {
       id: REQUEST_ID,
@@ -335,13 +401,16 @@ describe("local repository MCP admission", () => {
       reconcile: unexpected,
       readOutput: unexpected,
       cancel: unexpected,
+      waitForResult: unexpected,
     };
     dependencies.file = {
       execute: jest.fn(unexpected),
       uploadReference: unexpected,
       downloadReference: unexpected,
       reconcileDownloadReference: unexpected,
-      reconcile: jest.fn(async () => {
+      waitForDownloadReference: unexpected,
+      reconcile: unexpected,
+      waitForResult: jest.fn(async () => {
         if (!owned) throw new Error("Missing owned operation");
         return { operation: owned, result: null };
       }),
@@ -351,8 +420,13 @@ describe("local repository MCP admission", () => {
       codespace_id: DEVICE_ID,
       operation_id: REQUEST_ID,
     });
-    expect((await executeCodespaceTool(call, "owner", dependencies)).isError).toBeUndefined();
-    expect(dependencies.file.reconcile).toHaveBeenCalledWith("owner", REQUEST_ID);
+    const unknown = await executeCodespaceTool(call, "owner", dependencies);
+    expect(unknown.isError).toBe(true);
+    expect(unknown.structuredContent).toMatchObject({
+      operation_id: REQUEST_ID,
+      error: { code: "CODESPACE_PROVIDER_UNAVAILABLE" },
+    });
+    expect(dependencies.file.waitForResult).toHaveBeenCalledWith("owner", REQUEST_ID);
     expect(dependencies.file.execute).not.toHaveBeenCalled();
     for (const changed of [{ resourceId: REQUEST_ID }, { kind: "read" as const }]) {
       owned = { ...owned!, ...changed };
@@ -360,6 +434,6 @@ describe("local repository MCP admission", () => {
     }
     owned = null;
     expect((await executeCodespaceTool(call, "other-owner", dependencies)).isError).toBe(true);
-    expect(dependencies.file.reconcile).toHaveBeenCalledTimes(1);
+    expect(dependencies.file.waitForResult).toHaveBeenCalledTimes(1);
   });
 });

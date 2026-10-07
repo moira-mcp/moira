@@ -75,6 +75,7 @@ import { mcpLimiter } from "./middleware/rate-limit-middleware.js";
 import { buildReconciliationAwareInstructions } from "./reconciliation-aware-server.js";
 import { registerTools } from "./tools/register-tools.js";
 import { codespaceToolLogContext } from "./tools/manage-codespaces.js";
+import { codespaceProcessLogContext } from "./tools/codespace-process.js";
 import {
   getCatalogInitializeRequest,
   requireRevisionStampBeforeInitializeResult,
@@ -84,6 +85,7 @@ import {
   MCP_TOOLS_REVISION,
   TOOL_DEFINITIONS,
   CODESPACE_TOOL_NAME,
+  CODESPACE_PROCESS_TOOL_NAME,
 } from "./tools/tool-definitions.js";
 import { CommunicationAttachmentInflightLimiter } from "./communication-attachment-inflight.js";
 import { createCommunicationAttachmentHandler } from "./communication-attachment-route.js";
@@ -449,7 +451,9 @@ async function handleAuthenticatedMcpRequest(
       const { inputData, resourceIds } =
         toolName === CODESPACE_TOOL_NAME
           ? codespaceToolLogContext(toolArgs)
-          : sanitizeInput(toolArgs);
+          : toolName === CODESPACE_PROCESS_TOOL_NAME
+            ? codespaceProcessLogContext(toolArgs)
+            : sanitizeInput(toolArgs);
       updateContext({ operation: `mcp:${toolName}`, inputData, resourceIds });
     }
     await transport.handleRequest(req, res, req.body);

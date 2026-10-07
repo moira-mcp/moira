@@ -165,8 +165,11 @@ describe("MCP tool definitions", () => {
       "artifacts",
       "lock",
       "codespace",
+      "codespace_process",
     ]);
-    expect(MCP_TOOL_NAMES.filter((name) => name.startsWith("codespace_"))).toEqual([]);
+    expect(MCP_TOOL_NAMES.filter((name) => name.startsWith("codespace_"))).toEqual([
+      "codespace_process",
+    ]);
     expect(TOOL_DEFINITIONS.find((tool) => tool.name === CODESPACE_TOOL_NAME)?.name).toBe(
       CODESPACE_TOOL_NAME,
     );
@@ -197,7 +200,6 @@ describe("MCP tool definitions", () => {
       definition("codespace").schema.safeParse({
         action: "delete",
         codespace_id: "00000000-0000-4000-8000-000000000000",
-        expected_generation: 2,
       }).success,
     ).toBe(true);
     expect(definition("codespace").schema.safeParse({ action: "teleport" }).success).toBe(false);
@@ -213,10 +215,8 @@ describe("MCP tool definitions", () => {
     expect(Object.keys(published.properties).sort()).toEqual([
       "action",
       "argv",
-      "background",
       "base",
       "body",
-      "cancel",
       "codespace_id",
       "confirm_delete",
       "cwd",
@@ -224,7 +224,6 @@ describe("MCP tool definitions", () => {
       "draft",
       "env",
       "expected",
-      "expected_generation",
       "file",
       "file_name",
       "files",
@@ -276,6 +275,7 @@ describe("MCP tool definitions", () => {
       "pull_request_find",
       "pull_request_get",
       "read",
+      "repositories",
       "repository_add",
       "repository_create",
       "search",

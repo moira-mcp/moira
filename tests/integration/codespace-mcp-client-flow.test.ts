@@ -156,6 +156,7 @@ class DomainFixture {
   readonly jobs: Array<{ action: string; remoteMarker: string }> = [];
   readonly fetchedReferences: CodespaceNativeFileReference[] = [];
   loseNextResponse: "execute" | "file-execute" | null = null;
+  unavailableMarker: string | null = null;
   sqlite!: Database.Database;
   transfers!: CodespaceTransferService;
   services!: CodespaceToolServices;
@@ -324,9 +325,15 @@ class DomainFixture {
           let value: unknown = { state: "available", reason: null };
           if (options.path === "/job") {
             this.jobs.push({ action: body.job.action, remoteMarker: body.job.remoteMarker });
+            if (
+              body.job.remoteMarker === this.unavailableMarker &&
+              ["inspect", "file-inspect"].includes(body.job.action)
+            )
+              throw new Error("Exact accepted outcome is temporarily unavailable");
             const result = await this.runSupervisor(body.job);
             if (this.loseNextResponse === body.job.action) {
               this.loseNextResponse = null;
+              this.unavailableMarker = body.job.remoteMarker;
               throw new Error("SSH response lost after remote submission");
             }
             value = { value: JSON.stringify(result) };
@@ -390,7 +397,15 @@ async function client() {
   await server.connect(serverTransport);
   await mcp.connect(clientTransport);
   return {
-    // One published tool: the action is the first argument, the rest of the request follows it.
+    process: (action: string, args: Record<string, unknown>, userId = USER_ID) =>
+      runWithMCPContext(
+        { userId, agent: "chatgpt" },
+        () =>
+          mcp.callTool({
+            name: "codespace_process",
+            arguments: { action, ...args },
+          }) as Promise<CallToolResult>,
+      ),
     call: (action: string, args: Record<string, unknown>, userId = USER_ID) =>
       runWithMCPContext(
         { userId, agent: "chatgpt" },
@@ -407,31 +422,23 @@ async function client() {
   };
 }
 
-function operation(result: CallToolResult): { operation_id: string; state: string } {
-  if (!result.structuredContent?.operation)
-    throw new Error(`Missing operation: ${JSON.stringify(result)}`);
-  return result.structuredContent!.operation as { operation_id: string; state: string };
+function recoveryId(result: CallToolResult): string {
+  const id = result.structuredContent?.operation_id;
+  if (typeof id !== "string")
+    throw new Error(`Missing exceptional recovery identity: ${JSON.stringify(result)}`);
+  return id;
 }
 
 async function finish(
-  mcp: Awaited<ReturnType<typeof client>>,
-  name: string,
-  codespaceId: string,
+  _mcp: Awaited<ReturnType<typeof client>>,
+  _name: string,
+  _codespaceId: string,
   first: CallToolResult,
 ): Promise<CallToolResult> {
-  let result = first;
-  // Polling observes the production detached runner; it never resubmits argv or bytes.
-  const deadline = Date.now() + 10_000;
-  while (["reserved", "running", "reconcile_pending"].includes(operation(result).state)) {
-    if (Date.now() >= deadline)
-      throw new Error(`Operation did not finish: ${JSON.stringify(result)}`);
-    await new Promise((resolveWait) => setTimeout(resolveWait, 25));
-    result = await mcp.call(name, {
-      codespace_id: codespaceId,
-      operation_id: operation(result).operation_id,
-    });
-  }
-  return result;
+  // The ordinary first call itself must be complete, not made to look synchronous by test polling.
+  expect(first.structuredContent).not.toHaveProperty("operation");
+  if (!first.isError) expect(first.structuredContent).not.toHaveProperty("operation_id");
+  return first;
 }
 
 const cleanups: Array<() => Promise<void> | void> = [];
@@ -453,9 +460,9 @@ async function setup() {
 async function createCodespace(mcp: Awaited<ReturnType<typeof client>>) {
   const created = await mcp.call("create", { repository_id: "301", ref: "main" });
   expect(created).toEqual(expect.not.objectContaining({ isError: true }));
-  expect(created.structuredContent).toMatchObject({ codespace: { state: "usable" } });
+  expect(created.structuredContent).toMatchObject({ state: "usable" });
   expect(JSON.stringify(created)).not.toContain("ghu_fixture_secret");
-  return (created.structuredContent!.codespace as { codespace_id: string }).codespace_id;
+  return created.structuredContent!.codespace_id as string;
 }
 
 function fileReference() {
@@ -485,8 +492,10 @@ describe("ChatGPT-compatible codespace MCP with real domain services", () => {
   it("edits and tests actual code, transfers actual binary bytes, and reuses a codespace after restart", async () => {
     const { fixture, mcp } = await setup();
     expect((await mcp.call("list", {})).structuredContent).toMatchObject({
-      repositories: [{ repository_id: "301" }],
       codespaces: [],
+    });
+    expect((await mcp.call("repositories", {})).structuredContent).toMatchObject({
+      repositories: [{ repository_id: "301" }],
     });
     const codespaceId = await createCodespace(mcp);
     const args = { codespace_id: codespaceId };
@@ -496,7 +505,7 @@ describe("ChatGPT-compatible codespace MCP with real domain services", () => {
       text: initialSource,
       expected: { exists: false },
     });
-    expect(written.structuredContent).toMatchObject({ operation: { state: "succeeded" } });
+    expect(written.structuredContent).not.toHaveProperty("operation");
     expect(written.isError).not.toBe(true);
     expect(readFileSync(join(fixture.repositoryPath, "app.mjs"), "utf8")).toBe(initialSource);
     fixture.git(["-C", fixture.repositoryPath, "add", "app.mjs"]);
@@ -515,12 +524,12 @@ describe("ChatGPT-compatible codespace MCP with real domain services", () => {
     ]);
     const stat = await mcp.call("stat", { ...args, path: "app.mjs" });
     expect(stat.structuredContent).toMatchObject({
-      result: { stat: { version: { sha256: digest(Buffer.from(initialSource)) } } },
+      stat: { version: { sha256: digest(Buffer.from(initialSource)) } },
     });
     expect(
       (await mcp.call("read", { ...args, path: "app.mjs", offset: 0, length: 1024 }))
         .structuredContent,
-    ).toMatchObject({ result: { text: initialSource } });
+    ).toMatchObject({ text: initialSource });
     expect(
       (
         await mcp.call("search", {
@@ -532,7 +541,7 @@ describe("ChatGPT-compatible codespace MCP with real domain services", () => {
           max_bytes: 4096,
         })
       ).structuredContent,
-    ).toMatchObject({ result: { matches: [expect.objectContaining({ path: "app.mjs" })] } });
+    ).toMatchObject({ matches: [expect.objectContaining({ path: "app.mjs" })] });
     const patched = await mcp.call("apply_patch", {
       ...args,
       files: [
@@ -548,7 +557,7 @@ describe("ChatGPT-compatible codespace MCP with real domain services", () => {
       ],
     });
     expect(patched.structuredContent).toMatchObject({
-      result: { summary: { files_changed: 1, edits_applied: 1 } },
+      summary: { files_changed: 1, edits_applied: 1 },
     });
     expect(readFileSync(join(fixture.repositoryPath, "app.mjs"), "utf8")).toBe(
       "export const value = 2;\n",
@@ -567,7 +576,8 @@ describe("ChatGPT-compatible codespace MCP with real domain services", () => {
       "import { value } from './app.mjs'; if (value !== 2) process.exit(23); console.log('tests pass');",
     ]);
     expect(tests.structuredContent).toMatchObject({
-      result: { stdout: "tests pass\n", exit_code: 0 },
+      stdout: "tests pass\n",
+      exit_code: 0,
     });
     const failed = await run([
       process.execPath,
@@ -575,11 +585,12 @@ describe("ChatGPT-compatible codespace MCP with real domain services", () => {
       "-e",
       "import { value } from './app.mjs'; if (value !== 1) process.exit(23);",
     ]);
-    expect(failed.structuredContent).toMatchObject({ result: { state: "failed", exit_code: 23 } });
+    expect(failed.structuredContent).toMatchObject({ exit_code: 23 });
     expect(failed.isError).toBe(true);
     const diff = await run(["git", "diff", "--", "app.mjs"]);
     expect(diff.structuredContent).toMatchObject({
-      result: { stdout: expect.stringContaining("+export const value = 2;"), exit_code: 0 },
+      stdout: expect.stringContaining("+export const value = 2;"),
+      exit_code: 0,
     });
     const upload = await mcp.call("upload", {
       ...args,
@@ -609,7 +620,8 @@ describe("ChatGPT-compatible codespace MCP with real domain services", () => {
       }),
     );
     expect(nativeExec.structuredContent).toMatchObject({
-      result: { stdout: digest(nativeBytes), exit_code: 0 },
+      stdout: digest(nativeBytes),
+      exit_code: 0,
     });
     expect(fixture.fetchedReferences).toHaveLength(2);
     expect(fixture.fetchedReferences[0]).toEqual({
@@ -635,7 +647,8 @@ describe("ChatGPT-compatible codespace MCP with real domain services", () => {
       }),
     );
     expect(textStdin.structuredContent).toMatchObject({
-      result: { stdout: "literal stdin text\n", exit_code: 0 },
+      stdout: "literal stdin text\n",
+      exit_code: 0,
     });
     const download = await mcp.call("download", {
       ...args,
@@ -657,37 +670,33 @@ describe("ChatGPT-compatible codespace MCP with real domain services", () => {
     const second = await client();
     cleanups.push(second.close);
     expect((await second.call("get", args)).structuredContent).toMatchObject({
-      codespace: { codespace_id: codespaceId },
+      codespace_id: codespaceId,
     });
     expect((await second.call("stop", args)).structuredContent).toMatchObject({
-      data_preserved: true,
-      codespace: { state: "stopped" },
+      state: "stopped",
     });
     expect(readFileSync(join(fixture.repositoryPath, "input.bin"))).toEqual(nativeBytes);
     const started = await second.call("start", args);
-    expect(started.structuredContent).toMatchObject({ codespace: { state: "usable" } });
+    expect(started.structuredContent).toMatchObject({ state: "usable" });
     expect(
       (await second.call("read", { ...args, path: "app.mjs", offset: 0, length: 1024 }))
         .structuredContent,
-    ).toMatchObject({ result: { text: "export const value = 2;\n" } });
-    const generation = (started.structuredContent!.codespace as { generation: number }).generation;
+    ).toMatchObject({ text: "export const value = 2;\n" });
+    expect(started.structuredContent).not.toHaveProperty("generation");
     expect(
       (
         await second.call("delete", {
           ...args,
-          expected_generation: generation - 1,
-          confirm_delete: true,
+          confirm_delete: false,
         })
       ).isError,
     ).toBe(true);
     const deleted = await second.call("delete", {
       ...args,
-      expected_generation: generation,
       confirm_delete: true,
     });
     expect(deleted.structuredContent).toMatchObject({
-      data_preserved: false,
-      codespace: { state: "deleted" },
+      state: "deleted",
     });
     expect(fixture.provider.current).toBeNull();
     // A deleted codespace is unusable, so discovery stops offering it while a direct
@@ -700,7 +709,7 @@ describe("ChatGPT-compatible codespace MCP with real domain services", () => {
       ).codespaces,
     ).toEqual([]);
     expect((await second.call("get", args)).structuredContent).toMatchObject({
-      codespace: { state: "deleted" },
+      state: "deleted",
     });
   });
 
@@ -710,7 +719,7 @@ describe("ChatGPT-compatible codespace MCP with real domain services", () => {
     const args = { codespace_id: codespaceId };
     const markerPath = join(fixture.repositoryPath, "background-done.txt");
 
-    const started = await mcp.call("exec", {
+    const started = await mcp.process("start", {
       ...args,
       argv: [
         process.execPath,
@@ -720,57 +729,74 @@ describe("ChatGPT-compatible codespace MCP with real domain services", () => {
       cwd: ".",
       // Far past anything a single call could wait for; the command is short so the test is fast.
       timeout_seconds: 3 * 60 * 60,
-      background: true,
     });
     // The call returns while the command is still running, with no result and no waiting.
-    expect(operation(started).state).toBe("running");
-    expect(started.structuredContent).toMatchObject({ result: null });
-    const operationId = operation(started).operation_id;
+    expect(started.structuredContent).toMatchObject({
+      state: "running",
+      process_id: expect.any(String),
+    });
+    expect(started.structuredContent).not.toHaveProperty("operation");
+    expect(started.structuredContent).not.toHaveProperty("result");
+    const operationId = started.structuredContent!.process_id as string;
+    const beforeForeign = fixture.jobs.length;
+    for (const action of ["get", "stop"])
+      expect(
+        (await mcp.process(action, { ...args, process_id: operationId }, OTHER_USER_ID)).isError,
+      ).toBe(true);
+    expect(fixture.jobs).toHaveLength(beforeForeign);
 
     // Its output is readable while it runs, by the command's own identity.
     let progress = "";
     for (let attempt = 0; attempt < 80 && !progress.includes("progress"); attempt++) {
-      const range = await mcp.call("read", {
+      const range = await mcp.process("read", {
         ...args,
-        operation_id: operationId,
+        process_id: operationId,
         stream: "stdout",
         offset: 0,
         length: 1024,
       });
-      progress = (range.structuredContent as { output: { text: string } }).output.text;
+      progress = range.structuredContent!.text as string;
       if (!progress.includes("progress")) {
         await new Promise((resolveWait) => setTimeout(resolveWait, 25));
       }
     }
     expect(progress).toContain("progress");
 
-    const collected = await finish(
-      mcp,
-      "exec",
-      codespaceId,
-      await mcp.call("exec", { ...args, operation_id: operationId }),
-    );
+    let collected = await mcp.process("get", { ...args, process_id: operationId });
+    const deadline = Date.now() + 10_000;
+    while (
+      ["starting", "running", "unknown"].includes(collected.structuredContent!.state as string)
+    ) {
+      if (Date.now() > deadline)
+        throw new Error(`Background process did not finish: ${JSON.stringify(collected)}`);
+      await new Promise((resolveWait) => setTimeout(resolveWait, 25));
+      collected = await mcp.process("get", { ...args, process_id: operationId });
+    }
     expect(collected.structuredContent).toMatchObject({
-      result: { state: "succeeded", stdout: "progress\nfinished\n", exit_code: 0 },
+      process_id: operationId,
+      state: "succeeded",
+      stdout: "progress\nfinished\n",
+      exit_code: 0,
     });
     expect(readFileSync(markerPath, "utf8")).toBe("done");
     // One dispatch, however many times it was collected.
     expect(fixture.jobs.filter((job) => job.action === "execute")).toHaveLength(1);
 
-    const running = await mcp.call("exec", {
+    const running = await mcp.process("start", {
       ...args,
       argv: [process.execPath, "-e", "setInterval(()=>{},1000)"],
       cwd: ".",
       timeout_seconds: 3 * 60 * 60,
-      background: true,
     });
-    expect(operation(running).state).toBe("running");
-    const stopped = await mcp.call("exec", {
+    expect(running.structuredContent).toMatchObject({ state: "running" });
+    const stopped = await mcp.process("stop", {
       ...args,
-      operation_id: operation(running).operation_id,
-      cancel: true,
+      process_id: running.structuredContent!.process_id,
     });
-    expect(operation(stopped).state).toBe("cancelled");
+    expect(stopped.structuredContent).toMatchObject({
+      state: "cancelled",
+      process_id: running.structuredContent!.process_id,
+    });
   });
 
   it("carries a working directory and variables between commands in one session", async () => {
@@ -799,7 +825,8 @@ describe("ChatGPT-compatible codespace MCP with real domain services", () => {
       }),
     );
     expect(opened.structuredContent).toMatchObject({
-      result: { stdout: "service|release", exit_code: 0 },
+      stdout: "service|release",
+      exit_code: 0,
     });
 
     // The next command names neither and observes both; a command outside the session observes
@@ -816,7 +843,8 @@ describe("ChatGPT-compatible codespace MCP with real domain services", () => {
       }),
     );
     expect(continued.structuredContent).toMatchObject({
-      result: { stdout: "service|release", exit_code: 0 },
+      stdout: "service|release",
+      exit_code: 0,
     });
     const outside = await finish(
       mcp,
@@ -825,7 +853,8 @@ describe("ChatGPT-compatible codespace MCP with real domain services", () => {
       await mcp.call("exec", { ...args, argv: observe, timeout_seconds: 10 }),
     );
     expect(outside.structuredContent).toMatchObject({
-      result: { stdout: "repository|none", exit_code: 0 },
+      stdout: "repository|none",
+      exit_code: 0,
     });
 
     // Nothing the session stores is echoed back to the agent, and no stored row carries it.
@@ -847,7 +876,7 @@ describe("ChatGPT-compatible codespace MCP with real domain services", () => {
       }),
     );
     expect(activated.structuredContent).toMatchObject({
-      result: { state: "succeeded", session_capture_dropped: false },
+      exit_code: 0,
     });
     const afterScript = await finish(
       mcp,
@@ -865,7 +894,8 @@ describe("ChatGPT-compatible codespace MCP with real domain services", () => {
       }),
     );
     expect(afterScript.structuredContent).toMatchObject({
-      result: { stdout: "service|debug|/opt/toolchain", exit_code: 0 },
+      stdout: "service|debug|/opt/toolchain",
+      exit_code: 0,
     });
 
     // Ending the session removes what it stored, so naming it afterwards is refused.
@@ -874,7 +904,7 @@ describe("ChatGPT-compatible codespace MCP with real domain services", () => {
       session: "build",
       session_end: true,
     });
-    expect(operation(ended).state).toBe("succeeded");
+    expect(ended.structuredContent).toMatchObject({ exit_code: 0 });
     const afterEnd = await mcp.call("exec", {
       ...args,
       argv: observe,
@@ -919,8 +949,9 @@ describe("ChatGPT-compatible codespace MCP with real domain services", () => {
               timeout_seconds: 10,
             },
       );
-      expect(operation(first).state).toBe("reconcile_pending");
-      const operationId = operation(first).operation_id;
+      expect(first.isError).toBe(true);
+      const operationId = recoveryId(first);
+      fixture.unavailableMarker = null;
       fixture.reopen();
       const second = await client();
       cleanups.push(second.close);
@@ -938,7 +969,7 @@ describe("ChatGPT-compatible codespace MCP with real domain services", () => {
         codespaceId,
         await second.call(kind, { codespace_id: codespaceId, operation_id: operationId }),
       );
-      expect(operation(recovered).state).toBe("succeeded");
+      expect(recovered.isError).not.toBe(true);
       const row = fixture.sqlite
         .prepare("SELECT state, kind FROM codespaceOperation WHERE id = ?")
         .get(operationId);
@@ -973,7 +1004,7 @@ describe("ChatGPT-compatible codespace MCP with real domain services", () => {
       text: bytes.toString("utf8"),
       expected: { exists: false },
     });
-    expect(operation(written).state).toBe("succeeded");
+    expect(written.isError).not.toBe(true);
     fixture.loseNextResponse = "file-execute";
     const first = await mcp.call("download", {
       codespace_id: codespaceId,
@@ -982,9 +1013,10 @@ describe("ChatGPT-compatible codespace MCP with real domain services", () => {
       file_name: "output.txt",
       mime_type: "text/plain",
     });
-    expect(operation(first).state).toBe("reconcile_pending");
-    const operationId = operation(first).operation_id;
+    expect(first.isError).toBe(true);
+    const operationId = recoveryId(first);
     const marker = fixture.jobs.at(-1)!.remoteMarker;
+    fixture.unavailableMarker = null;
     fixture.reopen();
     const second = await client();
     cleanups.push(second.close);
@@ -994,13 +1026,14 @@ describe("ChatGPT-compatible codespace MCP with real domain services", () => {
       file_name: "output.txt",
       mime_type: "text/plain",
     });
-    expect(operation(resumed)).toMatchObject({ operation_id: operationId, state: "succeeded" });
+    expect(resumed.isError).not.toBe(true);
+    expect(resumed.structuredContent).not.toHaveProperty("operation");
     await expectDownloadBytes(fixture, resumed, bytes);
     expect(
       fixture.jobs.filter((job) => job.remoteMarker === marker && job.action === "file-execute"),
     ).toHaveLength(1);
     expect(
       fixture.jobs.filter((job) => job.remoteMarker === marker && job.action === "file-inspect"),
-    ).toHaveLength(1);
+    ).toHaveLength(2);
   });
 });

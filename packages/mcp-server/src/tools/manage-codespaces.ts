@@ -8,6 +8,7 @@ import {
   projectCodespaceSummary,
   recordCodespaceRejection,
   localCodespaceFailureGuidance,
+  LOCAL_WORKER_REQUEST_TIMEOUT_MS,
   type CodespaceObservabilityService,
   type CodespaceConnectionService,
   type CodespaceFileOperationResponse,
@@ -184,14 +185,27 @@ export interface CodespaceToolServices {
     | "startCodespace"
     | "stopCodespace"
     | "deleteCodespace"
+    | "waitForState"
   > | null;
   operation: Pick<
     CodespaceOperationService,
-    "execute" | "executeNativeReference" | "get" | "reconcile" | "readOutput" | "cancel"
+    | "execute"
+    | "executeNativeReference"
+    | "get"
+    | "reconcile"
+    | "readOutput"
+    | "cancel"
+    | "waitForResult"
   > | null;
   file: Pick<
     CodespaceFileService,
-    "execute" | "uploadReference" | "downloadReference" | "reconcile" | "reconcileDownloadReference"
+    | "execute"
+    | "uploadReference"
+    | "downloadReference"
+    | "reconcile"
+    | "reconcileDownloadReference"
+    | "waitForResult"
+    | "waitForDownloadReference"
   > | null;
 }
 
@@ -229,8 +243,7 @@ const SAFE_ERROR_MESSAGES: Record<string, string> = {
   CODESPACE_NOT_RUNNING: "The codespace is not ready and running.",
   CODESPACE_START_TIMEOUT:
     "The codespace was started for this call but is still starting; retry the same call shortly.",
-  CODESPACE_GENERATION_CONFLICT:
-    "The codespace or its authorization changed; refresh codespace state before continuing.",
+  CODESPACE_GENERATION_CONFLICT: "Codespace access or state changed while this call was running.",
   CODESPACE_RESOURCE_INVALID: "The codespace input or current authorization is invalid.",
   CODESPACE_REQUEST_INVALID: "The request does not match the tool's input schema.",
   CODESPACE_NOT_FOUND: "Codespace was not found.",
@@ -271,6 +284,66 @@ function jsonResult(data: Record<string, unknown>): CallToolResult {
   };
 }
 
+function retainedOutcomeError(
+  response: CallToolResult,
+  operationId?: string,
+  codespaceId?: string,
+): CallToolResult {
+  if (!operationId && !codespaceId) return response;
+  return {
+    ...jsonResult({
+      ...(response.structuredContent as Record<string, unknown>),
+      ...(operationId ? { operation_id: operationId } : {}),
+      ...(codespaceId ? { codespace_id: codespaceId } : {}),
+    }),
+    isError: true,
+  };
+}
+
+const repositoryAdmissionResultSchema = z.object({
+  status: z.enum(["pending", "applied", "unknown", "setup_required", "rejected"]),
+  request_id: z.string().uuid(),
+  local_repository_id: z.string().nullable(),
+  full_name: z.string().nullable().optional(),
+  error: z.object({ code: z.string(), message: z.string() }).nullable().optional(),
+  instruction: z.string().optional(),
+  links: z.object({ settings: z.string(), installation: z.string().nullable() }).optional(),
+});
+
+/** Repeat only the same durable admission request; its service never repeats GitHub creation. */
+async function completedRepositoryAdmission(read: () => Promise<unknown>): Promise<CallToolResult> {
+  const deadline = Date.now() + LOCAL_WORKER_REQUEST_TIMEOUT_MS + 120_000;
+  for (;;) {
+    const result = repositoryAdmissionResultSchema.parse(await read());
+    if (result.status === "applied" && result.local_repository_id) {
+      return jsonResult({
+        repository_id: result.local_repository_id,
+        ...(result.full_name ? { name: result.full_name } : {}),
+      });
+    }
+    if (result.status !== "pending" || Date.now() >= deadline) {
+      const error = result.error ?? {
+        code: "LOCAL_ADMISSION_UNCONFIRMED",
+        message:
+          result.instruction ??
+          "The computer has not confirmed repository access. Recover this same request without creating another repository.",
+      };
+      return {
+        ...jsonResult({
+          error: {
+            code: error.code,
+            message: error.message,
+            ...(result.links?.settings ? { settings_url: result.links.settings } : {}),
+          },
+          request_id: result.request_id,
+        }),
+        isError: true,
+      };
+    }
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+}
+
 /** Codes whose refusal a user can act on, and which therefore carry the provider's links. */
 const GUIDED_ERROR_CODES: ReadonlySet<string> = new Set([
   ...SETUP_ERROR_CODES,
@@ -278,7 +351,7 @@ const GUIDED_ERROR_CODES: ReadonlySet<string> = new Set([
   "CODESPACE_POLICY_LIMIT",
 ]);
 
-function errorResult(
+export function errorResult(
   code: string,
   settingsUrl?: string,
   retryable = false,
@@ -309,7 +382,25 @@ function errorResult(
 }
 
 function projectCodespace(codespace: CodespaceResourceRecord): Record<string, unknown> {
-  return { ...projectCodespaceSummary(codespace) };
+  const summary = projectCodespaceSummary(codespace);
+  const failure = summary.lifecycle_error;
+  return {
+    codespace_id: codespace.id,
+    repository: codespace.repositoryFullName,
+    ref: codespace.observedRef ?? codespace.requestedRef,
+    state: codespace.state,
+    ...(failure
+      ? {
+          error: {
+            code: failure,
+            message:
+              localCodespaceFailureGuidance(failure)?.message ??
+              SAFE_ERROR_MESSAGES[failure] ??
+              SAFE_ERROR_MESSAGES.INTERNAL_ERROR,
+          },
+        }
+      : {}),
+  };
 }
 
 /** An operation whose life ended with the codespace it ran in, rather than with its own command. */
@@ -324,33 +415,28 @@ function projectOperation(response: CodespaceOperationResponse | CodespaceFileOp
     // has to be able to tell them apart to decide whether running it again is safe.
     ...(interruptedByRestart(operation) ? { interrupted_by_restart: true } : {}),
     operation_id: operation.id,
-    codespace_id: operation.resourceId,
     kind: operation.kind,
     state: operation.state,
-    input_bytes: operation.inputBytes,
-    output_bytes: operation.outputBytes,
-    exit_code: operation.exitCode,
-    deadline_at: operation.deadlineAt,
-    result_expires_at: operation.resultExpiresAt,
   };
 }
 
-function projectExecResult(result: NonNullable<CodespaceOperationResponse["result"]>) {
+export function projectExecResult(result: NonNullable<CodespaceOperationResponse["result"]>) {
   return {
-    state: result.state,
     stdout: result.stdout,
     stderr: result.stderr,
     exit_code: result.exitCode,
     // A script's end state is carried into its session unless it would not fit the ceiling, which
     // the caller is told rather than left to discover.
-    session_capture_dropped: result.sessionCaptureDropped,
+    ...(result.sessionCaptureDropped ? { session_capture_dropped: true } : {}),
     // The payload above is the beginning of each stream; the complete streams stay in the
     // codespace and are read by range with the read action and this operation's identifier.
-    stdout_total_bytes: result.stdoutTotalBytes,
-    stderr_total_bytes: result.stderrTotalBytes,
-    stdout_truncated: Buffer.byteLength(result.stdout) < result.stdoutTotalBytes,
-    stderr_truncated: Buffer.byteLength(result.stderr) < result.stderrTotalBytes,
-    output_limit_exceeded: result.outputLimitExceeded,
+    ...(Buffer.byteLength(result.stdout) < result.stdoutTotalBytes
+      ? { stdout_truncated: true, stdout_total_bytes: result.stdoutTotalBytes }
+      : {}),
+    ...(Buffer.byteLength(result.stderr) < result.stderrTotalBytes
+      ? { stderr_truncated: true, stderr_total_bytes: result.stderrTotalBytes }
+      : {}),
+    ...(result.outputLimitExceeded ? { output_limit_exceeded: true } : {}),
   };
 }
 
@@ -373,10 +459,20 @@ function operationResult(
           ? "CODESPACE_OPERATION_TIMED_OUT"
           : undefined);
   const response = jsonResult({
-    operation,
-    result,
+    ...(result ?? {}),
+    ...(code || !result || result.stdout_truncated || result.stderr_truncated
+      ? { operation_id: operation.operation_id }
+      : {}),
     ...(code ? { error: { code, message: SAFE_ERROR_MESSAGES[code], retryable: false } } : {}),
   });
+  if (!code && !result) {
+    const error = {
+      code: "CODESPACE_PROVIDER_UNAVAILABLE",
+      message:
+        "The operation result could not be confirmed; recover this operation without repeating it.",
+    };
+    return { ...jsonResult({ error, operation_id: operation.operation_id }), isError: true };
+  }
   return code ? { ...response, isError: true } : response;
 }
 
@@ -510,6 +606,10 @@ async function loadServices(): Promise<CodespaceToolServices> {
 type CodespaceToolServicesLoader = () => Promise<CodespaceToolServices>;
 let codespaceToolServicesLoader: CodespaceToolServicesLoader = loadServices;
 
+export function getCodespaceToolServices(): Promise<CodespaceToolServices> {
+  return codespaceToolServicesLoader();
+}
+
 export function setCodespaceToolServicesLoaderForTests(
   loader: CodespaceToolServicesLoader,
 ): () => void {
@@ -571,17 +671,14 @@ function isErrorResult(value: { settingsUrl: string } | CallToolResult): value i
   return "content" in value;
 }
 
-function resourceLinkResult(
-  operation: ReturnType<typeof projectOperation>,
-  transfer: {
-    referenceId: string;
-    fileName: string;
-    mimeType: string;
-    size: number;
-    sha256: string;
-    expiresAt: number;
-  },
-): CallToolResult {
+function resourceLinkResult(transfer: {
+  referenceId: string;
+  fileName: string;
+  mimeType: string;
+  size: number;
+  sha256: string;
+  expiresAt: number;
+}): CallToolResult {
   const prefix = "codespace-file://";
   if (!transfer.referenceId.startsWith(prefix)) throw new Error("Invalid transfer handle");
   const token = transfer.referenceId.slice(prefix.length);
@@ -595,7 +692,6 @@ function resourceLinkResult(
     size: transfer.size,
   };
   const structuredContent = {
-    operation,
     file: {
       name: transfer.fileName,
       mime_type: transfer.mimeType,
@@ -626,29 +722,50 @@ export async function executeCodespaceTool(
       if (action === "repository_create") {
         if (!services.localRepositoryCreation) return errorResult("CODESPACE_NOT_CONFIGURED");
         const input = params as CodespaceToolParams["repository_create"];
-        return jsonResult({
-          repository: await services.localRepositoryCreation.createRepository(userId, {
+        return await completedRepositoryAdmission(() =>
+          services.localRepositoryCreation!.createRepository(userId, {
             deviceId: input.device_id,
             requestId: input.request_id,
             repositoryName: input.repository_name,
             installationId: input.installation_id,
           }),
-        });
+        );
       }
       if (!services.localRepositories) return errorResult("CODESPACE_NOT_CONFIGURED");
       if (action === "local_devices") {
-        return jsonResult(
-          (await services.localRepositories.listDevices(userId)) as Record<string, unknown>,
-        );
+        const discovery = (await services.localRepositories.listDevices(userId)) as {
+          devices: Array<{ device_id: string; label?: string; status?: string; enabled?: boolean }>;
+          installations?: Array<{ installation_id: string; owner: string }>;
+          github_setup_required?: boolean;
+        };
+        return jsonResult({
+          devices: discovery.devices.map((device) => ({
+            device_id: device.device_id,
+            ...(device.label !== undefined ? { label: device.label } : {}),
+            ...(device.status !== undefined ? { status: device.status } : {}),
+            ...(device.enabled !== undefined ? { enabled: device.enabled } : {}),
+          })),
+          ...(discovery.installations
+            ? {
+                installations: discovery.installations.map(({ installation_id, owner }) => ({
+                  installation_id,
+                  owner,
+                })),
+              }
+            : {}),
+          ...(discovery.github_setup_required
+            ? { warning: "Connect GitHub in Moira Settings before managing repositories." }
+            : {}),
+        });
       }
       const input = params as CodespaceToolParams["repository_add"];
-      return jsonResult({
-        admission: await services.localRepositories.addExistingRepository(userId, {
+      return await completedRepositoryAdmission(() =>
+        services.localRepositories!.addExistingRepository(userId, {
           deviceId: input.device_id,
           repositoryId: input.repository_id,
           requestId: input.request_id,
         }),
-      });
+      );
     } catch (error) {
       if (error instanceof LocalDeviceError) {
         return {
@@ -678,7 +795,7 @@ export async function executeCodespaceTool(
       return errorResult("INTERNAL_ERROR");
     }
   }
-  if (action === "list" && services.providers) {
+  if ((action === "list" || action === "repositories") && services.providers) {
     const results = await Promise.all(
       services.providers.map(async (provider) => ({
         provider: provider.provider,
@@ -694,22 +811,15 @@ export async function executeCodespaceTool(
         ...(entry.result.structuredContent as Record<string, unknown>),
         provider: entry.provider,
       }));
-    const preferred =
-      projections.find(
-        (entry) => (entry.readiness as { state?: string } | undefined)?.state === "connected",
-      ) ?? projections[0];
+    const key = action === "list" ? "codespaces" : "repositories";
     return jsonResult({
-      ...preferred,
-      providers: projections,
-      repositories: projections.flatMap((entry) =>
-        ((entry.repositories ?? []) as Record<string, unknown>[]).map((repository) => ({
-          ...repository,
-          provider: entry.provider,
-        })),
-      ),
-      codespaces: projections.flatMap((entry) => (entry.codespaces ?? []) as unknown[]),
-      repositories_stale: projections.some((entry) => entry.repositories_stale === true),
-      resources_stale: projections.some((entry) => entry.resources_stale === true),
+      [key]: projections.flatMap((entry) => (entry[key] ?? []) as unknown[]),
+      ...(projections.some((entry) => entry.warning)
+        ? {
+            warning:
+              "Some provider data could not be refreshed; the last confirmed entries are shown.",
+          }
+        : {}),
     });
   }
   if (services.select && ("repository_id" in params || "codespace_id" in params)) {
@@ -736,12 +846,13 @@ export async function executeCodespaceTool(
     return errorResult("INTERNAL_ERROR");
   }
   let guidanceLinks: CodespaceProviderGuidance["links"] = [];
+  let acceptedOperationId: string | undefined;
+  let acceptedCodespaceId: string | undefined;
   try {
     // The provider's destinations, read once: a refusal the user can act on carries the same set the
     // guidance action returns, so the two can never disagree.
     guidanceLinks = services.guidance("ready").links;
-    if (action === "list") {
-      const instance = await services.observability.readiness();
+    if (action === "list" || action === "repositories") {
       // The stored grants are a snapshot. Refresh it before answering, bounded by age, so a repository
       // the user added after connecting is not invisible until they reconnect; when the provider
       // cannot be reached the stored list is still the answer, and it says so rather than failing.
@@ -750,34 +861,27 @@ export async function executeCodespaceTool(
         force: listInput.refresh === true,
       });
       const resources =
-        listInput.refresh === true && !grants.stale && services.resource
+        action === "list" && listInput.refresh === true && !grants.stale && services.resource
           ? await services.resource.refreshProviderState(userId, { authorizationFresh: true })
           : { stale: listInput.refresh === true && grants.stale };
       status = services.connection.getStatus(userId);
       return jsonResult({
-        readiness: {
-          state: status.state,
-          reason: status.reason,
-          settings_url: status.settingsUrl,
-        },
-        instance: {
-          state: instance.state,
-          reason: instance.reason,
-          provider: instance.provider,
-          connector: instance.connector.state,
-        },
-        repositories:
-          services.resource?.listRepositories(userId).map((repository) => ({
-            repository_id: repository.id,
-            name: repository.fullName,
-            private: repository.private,
-          })) ?? [],
-        repositories_stale: grants.stale,
-        resources_stale: resources.stale,
-        codespaces: services.resource?.listResources(userId).map(projectCodespace) ?? [],
-        limits: await services.observability.limitsWithBilling(userId, {
-          force: listInput.refresh === true,
-        }),
+        ...(action === "repositories"
+          ? {
+              repositories:
+                services.resource?.listRepositories(userId).map((repository) => ({
+                  repository_id: repository.id,
+                  name: repository.fullName,
+                  private: repository.private,
+                })) ?? [],
+            }
+          : { codespaces: services.resource?.listResources(userId).map(projectCodespace) ?? [] }),
+        ...(grants.stale || resources.stale
+          ? {
+              warning:
+                "The provider could not refresh this view; the last confirmed entries are shown.",
+            }
+          : {}),
       });
     }
 
@@ -820,9 +924,9 @@ export async function executeCodespaceTool(
           guidanceLinks,
         );
       const input = params as CodespaceToolParams["get"];
-      return jsonResult({
-        codespace: projectCodespace(services.resource.getCodespace(userId, input.codespace_id)),
-      });
+      return jsonResult(
+        projectCodespace(services.resource.getCodespace(userId, input.codespace_id)),
+      );
     }
 
     if (action === "create") {
@@ -889,40 +993,30 @@ export async function executeCodespaceTool(
       ) {
         return errorResult("CODESPACE_NOT_FOUND");
       }
+      acceptedOperationId = existing.id;
       if (action === "download") {
         const input = params as Extract<CodespaceToolParams["download"], { operation_id: string }>;
-        const response = await services.file.reconcileDownloadReference(
-          userId,
-          input.operation_id,
-          {
-            fileName: input.file_name,
-            mimeType: input.mime_type,
-          },
-        );
-        const operation = projectOperation({ operation: response.operation, result: null });
+        const response = await services.file.waitForDownloadReference(userId, input.operation_id, {
+          fileName: input.file_name,
+          mimeType: input.mime_type,
+        });
         return response.transfer
-          ? resourceLinkResult(operation, response.transfer)
-          : operationResult(operation, null);
+          ? resourceLinkResult(response.transfer)
+          : operationResult(
+              projectOperation({ operation: response.operation, result: null }),
+              null,
+            );
       }
       if (action === "exec") {
-        const input = params as Extract<CodespaceToolParams["exec"], { operation_id: string }>;
-        if (input.cancel) {
-          const cancelled = await services.operation.cancel(userId, input.operation_id);
-          return operationResult(
-            projectOperation(cancelled),
-            cancelled.result ? projectExecResult(cancelled.result) : null,
-          );
-        }
-        const result = await services.operation.reconcile(userId, params.operation_id);
-        const operation = services.operation.get(userId, params.operation_id);
-        if (!operation) return errorResult("CODESPACE_NOT_FOUND");
+        const response = await services.operation.waitForResult(userId, params.operation_id);
+        const { operation, result } = response;
         return operationResult(
           projectOperation({ operation, result }),
           result ? projectExecResult(result) : null,
           result?.outputLimitExceeded ? "CODESPACE_OPERATION_OUTPUT_LIMIT" : undefined,
         );
       }
-      const response = await services.file.reconcile(userId, params.operation_id);
+      const response = await services.file.waitForResult(userId, params.operation_id);
       if (action === "preview_image") return previewImageResult(response);
       return fileOperationResult(response);
     }
@@ -930,12 +1024,16 @@ export async function executeCodespaceTool(
     switch (action) {
       case "preview_image": {
         const input = params as CodespaceNewToolParams<"preview_image">;
+        const accepted = await services.file.execute(userId, input.codespace_id, {
+          action: "download",
+          path: input.path,
+          maxBytes: input.max_bytes,
+        });
+        acceptedOperationId = accepted.operation.id;
         return previewImageResult(
-          await services.file.execute(userId, input.codespace_id, {
-            action: "download",
-            path: input.path,
-            maxBytes: input.max_bytes,
-          }),
+          accepted.result
+            ? accepted
+            : await services.file.waitForResult(userId, accepted.operation.id),
         );
       }
       case "pull_request_create": {
@@ -966,37 +1064,43 @@ export async function executeCodespaceTool(
       case "create": {
         const input = params as CodespaceToolParams["create"];
         const created = await services.resource.create(userId, input.repository_id, input.ref);
-        return jsonResult({ codespace: projectCodespace(created.resource) });
+        acceptedCodespaceId = created.resource.id;
+        return jsonResult(
+          projectCodespace(
+            await services.resource.waitForState(userId, created.resource.id, "usable"),
+          ),
+        );
       }
       case "start": {
         const input = params as CodespaceToolParams["start"];
-        return jsonResult({
-          codespace: projectCodespace(
-            await services.resource.startCodespace(userId, input.codespace_id),
+        await services.resource.startCodespace(userId, input.codespace_id);
+        acceptedCodespaceId = input.codespace_id;
+        return jsonResult(
+          projectCodespace(
+            await services.resource.waitForState(userId, input.codespace_id, "usable"),
           ),
-        });
+        );
       }
       case "stop": {
         const input = params as CodespaceToolParams["stop"];
-        return jsonResult({
-          codespace: projectCodespace(
-            await services.resource.stopCodespace(userId, input.codespace_id),
+        await services.resource.stopCodespace(userId, input.codespace_id);
+        acceptedCodespaceId = input.codespace_id;
+        return jsonResult(
+          projectCodespace(
+            await services.resource.waitForState(userId, input.codespace_id, "stopped"),
           ),
-          data_preserved: true,
-        });
+        );
       }
       case "delete": {
         const input = params as CodespaceToolParams["delete"];
-        return jsonResult({
-          codespace: projectCodespace(
-            await services.resource.deleteCodespace(
-              userId,
-              input.codespace_id,
-              input.expected_generation,
-            ),
+        const current = services.resource.getCodespace(userId, input.codespace_id);
+        await services.resource.deleteCodespace(userId, input.codespace_id, current.generation);
+        acceptedCodespaceId = input.codespace_id;
+        return jsonResult(
+          projectCodespace(
+            await services.resource.waitForState(userId, input.codespace_id, "deleted"),
           ),
-          data_preserved: false,
-        });
+        );
       }
       case "exec": {
         const input = params as CodespaceNewToolParams<"exec">;
@@ -1022,9 +1126,9 @@ export async function executeCodespaceTool(
           ...(input.max_stderr_bytes !== undefined
             ? { maxStderrBytes: input.max_stderr_bytes }
             : {}),
-          background: input.background,
+          background: false,
         };
-        const response =
+        const accepted =
           "stdin_file" in input
             ? await services.operation.executeNativeReference(
                 userId,
@@ -1039,6 +1143,10 @@ export async function executeCodespaceTool(
                   bytes: Buffer.from(input.stdin_text ?? "", "utf8"),
                 },
               });
+        acceptedOperationId = accepted.operation.id;
+        const response = accepted.result
+          ? accepted
+          : await services.operation.waitForResult(userId, accepted.operation.id);
         return operationResult(
           projectOperation(response),
           response.result ? projectExecResult(response.result) : null,
@@ -1096,29 +1204,45 @@ export async function executeCodespaceTool(
                       ),
                     };
         const codespaceId = (params as { codespace_id: string }).codespace_id;
-        const response = await services.file.execute(userId, codespaceId, request);
+        const accepted = await services.file.execute(userId, codespaceId, request);
+        acceptedOperationId = accepted.operation.id;
+        const response = accepted.result
+          ? accepted
+          : await services.file.waitForResult(userId, accepted.operation.id);
         return fileOperationResult(response);
       }
       case "upload": {
         const input = params as CodespaceNewToolParams<"upload">;
-        const response = await services.file.uploadReference(userId, input.codespace_id, {
+        const accepted = await services.file.uploadReference(userId, input.codespace_id, {
           path: input.path,
           reference: publicNativeReference(input.file),
           expected: publicExpected(input.expected),
         });
-        return fileOperationResult(response);
+        acceptedOperationId = accepted.operation.id;
+        return fileOperationResult(
+          accepted.result
+            ? accepted
+            : await services.file.waitForResult(userId, accepted.operation.id),
+        );
       }
       case "download": {
         const input = params as CodespaceNewToolParams<"download">;
-        const response = await services.file.downloadReference(userId, input.codespace_id, {
+        const accepted = await services.file.downloadReference(userId, input.codespace_id, {
           path: input.path,
           maxBytes: input.max_bytes,
           fileName: input.file_name,
           mimeType: input.mime_type,
         });
+        acceptedOperationId = accepted.operation.id;
+        const response = accepted.transfer
+          ? accepted
+          : await services.file.waitForDownloadReference(userId, accepted.operation.id, {
+              fileName: input.file_name,
+              mimeType: input.mime_type,
+            });
         const operation = projectOperation({ operation: response.operation, result: null });
         return response.transfer
-          ? resourceLinkResult(operation, response.transfer)
+          ? resourceLinkResult(response.transfer)
           : operationResult(operation, null);
       }
     }
@@ -1126,12 +1250,16 @@ export async function executeCodespaceTool(
     // reach this switch, which is why they are not cases of it.
   } catch (error) {
     if (error instanceof LocalDeviceError)
-      return {
-        ...jsonResult({
-          error: { code: error.code, message: error.message, settings_url: status.settingsUrl },
-        }),
-        isError: true,
-      };
+      return retainedOutcomeError(
+        {
+          ...jsonResult({
+            error: { code: error.code, message: error.message, settings_url: status.settingsUrl },
+          }),
+          isError: true,
+        },
+        acceptedOperationId,
+        acceptedCodespaceId,
+      );
     if (error instanceof CodespaceConnectionError || error instanceof CodespaceResourceError) {
       recordCodespaceRejection(error.code);
       if (PROVIDER_REFUSAL_CODES.has(error.code)) {
@@ -1143,24 +1271,32 @@ export async function executeCodespaceTool(
           detail: error.message,
         });
       }
-      return errorResult(
-        error.code,
-        SETUP_ERROR_CODES.has(error.code) ? status.settingsUrl : undefined,
-        [
-          "CODESPACE_PROVIDER_UNAVAILABLE",
-          "CODESPACE_POLICY_LIMIT",
-          "CODESPACE_OPERATION_BUSY",
-          "CODESPACE_CREATE_PENDING",
-          "CODESPACE_NOT_RUNNING",
-        ].includes(error.code),
-        // Only the refusing code decides what the caller may be told; the boundary forwards the
-        // bounded detail it already declared safe and never derives one from the error code.
-        error instanceof CodespaceResourceError ? error.detail : undefined,
-        guidanceLinks,
+      return retainedOutcomeError(
+        errorResult(
+          error.code,
+          SETUP_ERROR_CODES.has(error.code) ? status.settingsUrl : undefined,
+          [
+            "CODESPACE_PROVIDER_UNAVAILABLE",
+            "CODESPACE_POLICY_LIMIT",
+            "CODESPACE_OPERATION_BUSY",
+            "CODESPACE_CREATE_PENDING",
+            "CODESPACE_NOT_RUNNING",
+          ].includes(error.code),
+          // Only the refusing code decides what the caller may be told; the boundary forwards the
+          // bounded detail it already declared safe and never derives one from the error code.
+          error instanceof CodespaceResourceError ? error.detail : undefined,
+          guidanceLinks,
+        ),
+        acceptedOperationId,
+        acceptedCodespaceId,
       );
     }
     reportUnexpectedFailure(action, error);
-    return errorResult("INTERNAL_ERROR");
+    return retainedOutcomeError(
+      errorResult("INTERNAL_ERROR"),
+      acceptedOperationId,
+      acceptedCodespaceId,
+    );
   }
 }
 

@@ -67,11 +67,18 @@ function changedPngDimensions(width: number, height: number): Buffer {
 
 describe("codespace image preview projection", () => {
   test.each(["reserved", "running", "cancel_pending", "reconcile_pending"] as const)(
-    "%s download remains resumable JSON without an image or internal authority",
+    "%s download reports an unconfirmed outcome with recovery identity and no image",
     (state) => {
       const projected = previewImageResult({ operation: operation(state), result: null });
-      expect(projected.isError).toBeUndefined();
-      expect(projected.structuredContent).toMatchObject({ operation: { state }, result: null });
+      expect(projected.isError).toBe(true);
+      expect(projected.structuredContent).toEqual({
+        operation_id: operation(state).id,
+        error: {
+          code: "CODESPACE_PROVIDER_UNAVAILABLE",
+          message:
+            "The image download could not be confirmed; recover this operation without repeating it.",
+        },
+      });
       expect(projected.content).toHaveLength(1);
       expect(JSON.stringify(projected)).not.toContain("secret-");
     },
@@ -83,15 +90,11 @@ describe("codespace image preview projection", () => {
       const bytes = format === "png" ? png : jpeg;
       const projected = previewImageResult(response(bytes));
       expect(projected.isError).toBeUndefined();
-      expect(projected.structuredContent).toMatchObject({
-        result: {
-          action: "preview_image",
-          mime_type: `image/${format}`,
-          width: 3,
-          height: 2,
-          size_bytes: bytes.length,
-          sha256: createHash("sha256").update(bytes).digest("hex"),
-        },
+      expect(projected.structuredContent).toEqual({
+        mime_type: `image/${format}`,
+        width: 3,
+        height: 2,
+        size_bytes: bytes.length,
       });
       const block = projected.content[1];
       expect(block.type).toBe("image");
@@ -111,8 +114,15 @@ describe("codespace image preview projection", () => {
       expect(projected.isError).toBe(true);
       expect(projected.content.every((block) => block.type === "text")).toBe(true);
       expect(projected.structuredContent).toMatchObject({
-        result: null,
-        error: { retryable: false },
+        operation_id: operation(state).id,
+        error: {
+          code:
+            state === "failed"
+              ? "CODESPACE_FILE_REJECTED"
+              : state === "cancelled"
+                ? "CODESPACE_OPERATION_CANCELLED"
+                : "CODESPACE_OPERATION_TIMED_OUT",
+        },
       });
     },
   );

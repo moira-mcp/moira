@@ -1518,6 +1518,7 @@ export class CodespaceResourceRepository {
     leaseExpiresAt: number,
     userId?: string,
     providerId?: string,
+    resourceId?: string,
   ): CodespaceResourceRecord | null {
     const transaction = this.sqlite.transaction(() => {
       const row = this.sqlite
@@ -1527,6 +1528,7 @@ export class CodespaceResourceRepository {
                            'usable', 'start_pending', 'stop_pending', 'delete_pending')
              AND (? IS NULL OR userId = ?)
              AND (? IS NULL OR provider = ?)
+             AND (? IS NULL OR id = ?)
              AND (claimExpiresAt IS NULL OR claimExpiresAt <= ?)
              AND (state != 'usable' OR retentionPolicy != 'persistent' AND remoteExpiresAt <= ?)
            ORDER BY CASE state
@@ -1534,8 +1536,16 @@ export class CodespaceResourceRepository {
              WHEN 'start_pending' THEN 3 WHEN 'ambiguous' THEN 4 ELSE 5 END,
                     updatedAt LIMIT 1`,
         )
-        .get(userId ?? null, userId ?? null, providerId ?? null, providerId ?? null, now, now) as
-        { id: string; generation: number } | undefined;
+        .get(
+          userId ?? null,
+          userId ?? null,
+          providerId ?? null,
+          providerId ?? null,
+          resourceId ?? null,
+          resourceId ?? null,
+          now,
+          now,
+        ) as { id: string; generation: number } | undefined;
       if (!row) return null;
       const changed = this.sqlite
         .prepare(

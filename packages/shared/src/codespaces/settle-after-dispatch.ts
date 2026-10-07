@@ -7,6 +7,8 @@
  * run twice. An operation that has not finished when the window closes keeps its running envelope
  * and its identity, exactly as before.
  */
+import { CodespaceResourceError } from "./resource-types.js";
+
 const SETTLE_DELAYS_MS = [150, 350, 750] as const;
 
 async function sleep(milliseconds: number): Promise<void> {
@@ -29,4 +31,24 @@ export async function settleAfterDispatch<Result>(
     }
   }
   return null;
+}
+
+/** Explicit caller waiting uses the accepted operation deadline, not the short HTTP settle window. */
+export async function waitForAcceptedCodespaceResult<Result>(input: {
+  deadlineAt: number;
+  now: () => number;
+  delay?: (milliseconds: number) => Promise<void>;
+  inspect: () => Promise<Result | null>;
+}): Promise<Result> {
+  for (;;) {
+    const result = await input.inspect();
+    if (result !== null) return result;
+    const remaining = input.deadlineAt - input.now();
+    if (remaining <= 0)
+      throw new CodespaceResourceError(
+        "CODESPACE_PROVIDER_UNAVAILABLE",
+        "The accepted operation deadline ended without a confirmed result",
+      );
+    await (input.delay ?? sleep)(Math.min(1000, remaining));
+  }
 }

@@ -163,7 +163,7 @@ export function previewImageResult(response: CodespaceFileOperationResponse): Ca
   });
   const reject = (code: string, message: string): CallToolResult => ({
     isError: true,
-    ...json({ operation, result: null, error: { code, message, retryable: false } }),
+    ...json({ operation_id: response.operation.id, error: { code, message } }),
   });
   if (response.operation.kind !== "download")
     return reject("CODESPACE_IMAGE_REJECTED", "Image preview requires a file download operation.");
@@ -176,7 +176,11 @@ export function previewImageResult(response: CodespaceFileOperationResponse): Ca
           : "CODESPACE_OPERATION_TIMED_OUT",
       "The image file operation did not succeed.",
     );
-  if (!response.result && operation.state !== "succeeded") return json({ operation, result: null });
+  if (!response.result && operation.state !== "succeeded")
+    return reject(
+      "CODESPACE_PROVIDER_UNAVAILABLE",
+      "The image download could not be confirmed; recover this operation without repeating it.",
+    );
   const result = response.result;
   if (
     !result ||
@@ -205,8 +209,8 @@ export function previewImageResult(response: CodespaceFileOperationResponse): Ca
       "Image preview requires valid bounded PNG or JPEG framing and dimensions.",
     );
   const metadata = {
-    operation,
-    result: { action: "preview_image", ...header, size_bytes: bytes.length, sha256 },
+    ...header,
+    size_bytes: bytes.length,
   };
   return {
     structuredContent: metadata,

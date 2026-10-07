@@ -10,6 +10,7 @@ const operationId = "00000000-0000-4000-8000-000000000163";
 const actions = [
   "create",
   "list",
+  "repositories",
   "local_devices",
   "repository_add",
   "repository_create",
@@ -109,9 +110,17 @@ describe("Codespace MCP HTTP contract on a default-disabled installation", () =>
     await cleanup?.();
   });
 
-  test("should publish one codespace tool carrying every action and its file schemas", async () => {
+  test("should publish ordinary codespace and separate background process tools", async () => {
     const catalog = await client.listTools();
-    expect(catalog.tools.filter((tool) => tool.name.startsWith("codespace_"))).toEqual([]);
+    expect(
+      catalog.tools.filter((tool) => tool.name.startsWith("codespace_")).map((tool) => tool.name),
+    ).toEqual(["codespace_process"]);
+    const process = catalog.tools.find((tool) => tool.name === "codespace_process")!;
+    expect(process.inputSchema.required).toEqual(["action", "codespace_id"]);
+    expect(process.inputSchema.properties?.action).toMatchObject({
+      enum: ["start", "get", "read", "stop"],
+    });
+    expect(process._meta).toEqual({ "openai/fileParams": ["stdin_file"] });
     const codespace = catalog.tools.find((tool) => tool.name === "codespace")!;
     expect(codespace.description?.length).toBeGreaterThan(20);
     expect(JSON.stringify(codespace.inputSchema)).not.toMatch(
@@ -178,32 +187,12 @@ describe("Codespace MCP HTTP contract on a default-disabled installation", () =>
     expect(codespace.inputSchema).not.toHaveProperty("anyOf");
   });
 
-  test("should list safe setup status without provisioning or exposing credentials", async () => {
+  test("should list only compact codespaces without provisioning or exposing credentials", async () => {
     const result = CallToolResultSchema.parse(
       await client.callTool({ name: "codespace", arguments: { action: "list" } }),
     );
     expect(result.isError).not.toBe(true);
-    expect(result.structuredContent).toMatchObject({
-      readiness: { state: "disabled", reason: "NOT_CONFIGURED" },
-      instance: {
-        state: "disabled",
-        reason: "NOT_CONFIGURED",
-        provider: "github-codespaces",
-        connector: "not_applicable",
-      },
-      repositories: [],
-      codespaces: [],
-      // The user's limits are present even while the feature is off: nothing held, and provider
-      // billing reported as unavailable rather than as a number.
-      limits: {
-        codespaces: { held: 0 },
-        lifecycle: { idle: { provider_max_minutes: 240 } },
-        provider: { billing: "unavailable" },
-      },
-    });
-    expectSettingsLink(
-      (result.structuredContent?.readiness as Record<string, unknown>).settings_url,
-    );
+    expect(result.structuredContent).toEqual({ codespaces: [] });
     expect(JSON.stringify(result)).not.toMatch(
       /accessToken|refreshToken|clientSecret|vaultKey|BEGIN .*PRIVATE KEY/,
     );
@@ -220,11 +209,36 @@ describe("Codespace MCP HTTP contract on a default-disabled installation", () =>
     expect(result.structuredContent).toEqual({
       devices: [],
       installations: [],
-      github_setup_required: true,
+      warning: "Connect GitHub in Moira Settings before managing repositories.",
     });
     expect(JSON.stringify(result)).not.toMatch(
       /accessToken|refreshToken|clientSecret|vaultKey|credential/,
     );
+  });
+
+  test("should discover repositories separately from codespaces", async () => {
+    const result = CallToolResultSchema.parse(
+      await client.callTool({ name: "codespace", arguments: { action: "repositories" } }),
+    );
+    expect(result.isError).not.toBe(true);
+    expect(result.structuredContent).toEqual({ repositories: [] });
+  });
+
+  test.each([
+    ["start", { argv: ["pwd"] }],
+    ["get", { process_id: operationId }],
+    ["read", { process_id: operationId, stream: "stdout", offset: 0, length: 1024 }],
+    ["stop", { process_id: operationId }],
+  ])("should refuse process %s for a missing owned codespace", async (action, input) => {
+    const result = CallToolResultSchema.parse(
+      await client.callTool({
+        name: "codespace_process",
+        arguments: { action, codespace_id: codespaceId, ...input },
+      }),
+    );
+    expect(result.isError).toBe(true);
+    expect(result.structuredContent).toMatchObject({ error: { code: "CODESPACE_NOT_FOUND" } });
+    expect(JSON.stringify(result)).not.toMatch(/accessToken|refreshToken|clientSecret|vaultKey/);
   });
 
   test("should return provider-owned setup guidance without provisioning", async () => {
@@ -272,19 +286,15 @@ describe("Codespace MCP HTTP contract on a default-disabled installation", () =>
     expect(JSON.stringify(result)).not.toMatch(/accessToken|refreshToken|clientSecret|vaultKey/);
   });
 
-  test("should report the same readiness decision through MCP health as through the list action", async () => {
-    const listed = CallToolResultSchema.parse(
-      await client.callTool({ name: "codespace", arguments: { action: "list" } }),
-    );
-    const instance = listed.structuredContent?.instance as { state: string; provider: string };
+  test("should retain disabled provider liveness without exposing it in normal discovery", async () => {
     const health = JSON.parse(dockerExecSync(["curl", "-s", "http://localhost:3000/health"])) as {
       status: string;
       codespaces: Record<string, unknown>;
     };
     // The public liveness surface carries only the decision, never operator detail.
     expect(health.codespaces).toEqual({
-      state: instance.state,
-      provider: instance.provider,
+      state: "disabled",
+      provider: "github-codespaces",
       degraded: false,
     });
     // A disabled feature must not degrade the MCP process.
@@ -379,7 +389,7 @@ describe("Codespace MCP HTTP contract on a default-disabled installation", () =>
     ["pull_request_find", { codespace_id: codespaceId, head: "feat/игра", base: "main" }],
     ["start", { codespace_id: codespaceId }],
     ["stop", { codespace_id: codespaceId }],
-    ["delete", { codespace_id: codespaceId, expected_generation: 1, confirm_delete: true }],
+    ["delete", { codespace_id: codespaceId, confirm_delete: true }],
     ["stat", { codespace_id: codespaceId, path: "package.json" }],
     ["search", { codespace_id: codespaceId, path: ".", query: "TODO" }],
     ["read", { codespace_id: codespaceId, path: "package.json" }],

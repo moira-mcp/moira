@@ -77,6 +77,7 @@ async function fixture() {
   let brokenHeartbeatStatus: number | undefined;
   let brokenRenewStatus: number | undefined;
   let brokenIdentityStatus: number | undefined;
+  let identityRefusal: { status: number; body: unknown } | undefined;
   let renewals = 0;
   let renewed!: () => void;
   const renewal = new Promise<void>((done) => {
@@ -104,6 +105,8 @@ async function fixture() {
     if (url.pathname.endsWith("/identity")) {
       gitIdentityRequests.push(url.pathname);
       if (brokenIdentityStatus) return brokenResponse(brokenIdentityStatus);
+      if (identityRefusal)
+        return Response.json(identityRefusal.body, { status: identityRefusal.status });
       return json({ name: "Fixture Owner", email: "owner@example.test" });
     }
     if (url.pathname.endsWith("/relay/claim")) {
@@ -266,6 +269,9 @@ async function fixture() {
     breakIdentityBody: (status: number) => {
       brokenIdentityStatus = status;
     },
+    refuseIdentity: (status: number, body: unknown) => {
+      identityRefusal = { status, body };
+    },
     renewals: () => renewals,
     renewal,
     partLimit: (value: number) => {
@@ -287,6 +293,152 @@ async function fixture() {
 }
 
 describe("outbound companion authority and durable response replay", () => {
+  test.each([2, 3])(
+    "incomplete bootstrap snapshot at server intent %s reports its own failure without rebinding or admitting work",
+    async (generation) => {
+      const local = await fixture();
+      await local.relay.poll(local.rpc);
+      const key = `relay-space-${local.resourceId}.json`;
+      const binding = await local.state.read(key, (value) => value as Record<string, unknown>);
+      await local.state.write(key, { ...binding, serverGeneration: 2 });
+      const before = await local.state.read(key, (value) => value);
+      Object.assign(local.space, {
+        generation: 2,
+        phase: "failed",
+        desiredState: "stopped",
+        failure: "LOCAL_UNAUTHORIZED",
+        lastStartedAt: null,
+      });
+      await local.records.put(local.space);
+      const snapshot = jest.spyOn(local.manager, "snapshot").mockResolvedValue({
+        ...publicPolicy(local.policy),
+        spaces: [{ ...local.space, state: "stopped", nativeStopConfirmed: true }],
+      });
+      const start = jest.spyOn(local.manager, "start");
+      const dispatch = jest.spyOn(local.rpc.jobs, "dispatch");
+      local.setRequest({ action: "snapshot" }, generation);
+      await local.relay.poll(local.rpc);
+      expect(local.receipts.at(-1)).toMatchObject({
+        ok: true,
+        result: {
+          spaces: [
+            {
+              id: local.space.id,
+              generation: 2,
+              failure: "LOCAL_UNAUTHORIZED",
+              lastStartedAt: null,
+            },
+          ],
+        },
+      });
+      expect(snapshot).toHaveBeenCalledWith(local.space.id);
+      expect(await local.state.read(key, (value) => value)).toEqual(before);
+      for (const request of [
+        { action: "start", spaceId: local.space.id },
+        { action: "operation", spaceId: local.space.id, job: {} },
+      ]) {
+        local.setRequest(request, generation);
+        await local.relay.poll(local.rpc);
+        expect(local.receipts.at(-1)).toMatchObject({
+          ok: false,
+          error: { code: "LOCAL_GENERATION_CONFLICT" },
+        });
+      }
+      expect(start).not.toHaveBeenCalled();
+      expect(dispatch).not.toHaveBeenCalled();
+      expect(await local.state.read(key, (value) => value)).toEqual(before);
+    },
+  );
+
+  test.each(["stale", "foreign-manifest", "foreign-authority", "running", "initialized"] as const)(
+    "same-intent incomplete observation refuses %s without changing its retained binding",
+    async (variant) => {
+      const local = await fixture();
+      await local.relay.poll(local.rpc);
+      const key = `relay-space-${local.resourceId}.json`;
+      const binding = await local.state.read(key, (value) => value as Record<string, unknown>);
+      await local.state.write(key, { ...binding, serverGeneration: 2 });
+      const before = await local.state.read(key, (value) => value);
+      Object.assign(local.space, {
+        generation: 2,
+        phase: variant === "running" ? "usable" : "failed",
+        desiredState: variant === "running" ? "running" : "stopped",
+        failure: "LOCAL_UNAUTHORIZED",
+        lastStartedAt: variant === "initialized" ? Date.now() : null,
+      });
+      if (variant === "foreign-manifest") local.space.operationMarker = `moira-${"f".repeat(24)}`;
+      await local.records.put(local.space);
+      const snapshot = jest.spyOn(local.manager, "snapshot");
+      local.setRequest({ action: "snapshot" }, variant === "stale" ? 1 : 2);
+      if (variant === "foreign-authority") local.claim().connectionId = randomUUID();
+      if (variant === "foreign-authority")
+        await expect(local.relay.poll(local.rpc)).rejects.toMatchObject({
+          code: "LOCAL_IDENTITY_CHANGED",
+        });
+      else {
+        await local.relay.poll(local.rpc);
+        expect(local.receipts.at(-1)).toMatchObject({
+          ok: false,
+          error: {
+            code:
+              variant === "foreign-manifest"
+                ? "LOCAL_IDENTITY_CHANGED"
+                : "LOCAL_GENERATION_CONFLICT",
+          },
+        });
+      }
+      expect(snapshot).not.toHaveBeenCalled();
+      expect(await local.state.read(key, (value) => value)).toEqual(before);
+    },
+  );
+
+  test.each([401, 403])(
+    "Git identity HTTP %s preserves only allowlisted owner advice",
+    async (status) => {
+      const local = await fixture();
+      await local.relay.poll(local.rpc);
+      for (const message of [
+        "Refresh GitHub repository access in Settings.",
+        "Add this repository to the Moira GitHub App installation in Settings.",
+        "Reconnect GitHub to restore the verified commit identity.",
+      ]) {
+        local.refuseIdentity(status, {
+          success: false,
+          error: { code: "LOCAL_UNAUTHORIZED", message },
+        });
+        await expect(
+          local.relay.gitIdentity(local.space.id, 1, local.space.repositoryId),
+        ).rejects.toMatchObject({ code: "LOCAL_UNAUTHORIZED", message });
+      }
+      for (const body of [
+        {
+          success: false,
+          error: { code: "LOCAL_UNAUTHORIZED", message: "Private token and host path" },
+        },
+        {
+          success: false,
+          error: { code: "UNRELATED", message: "Refresh GitHub repository access in Settings." },
+        },
+        {
+          success: false,
+          error: {
+            code: "LOCAL_UNAUTHORIZED",
+            message: "Refresh GitHub repository access in Settings.",
+            private: "secret",
+          },
+        },
+      ]) {
+        local.refuseIdentity(status, body);
+        await expect(
+          local.relay.gitIdentity(local.space.id, 1, local.space.repositoryId),
+        ).rejects.toMatchObject({
+          code: status === 401 ? "LOCAL_UNAUTHORIZED" : "LOCAL_RELAY_REFUSED",
+          message: "Moira refused the current local connection or relay claim.",
+        });
+      }
+    },
+  );
+
   test("legacy stopped record without first usability timestamp refuses work but retains exact cleanup", async () => {
     const local = await fixture();
     await local.relay.poll(local.rpc);

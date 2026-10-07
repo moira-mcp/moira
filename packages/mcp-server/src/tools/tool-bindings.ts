@@ -81,6 +81,8 @@ export const TOOL_BINDINGS = {
   lock: async (params) => (await import("./manage-locks.js")).manageLocks(params),
 
   codespace: async (params) => (await import("./manage-codespaces.js")).manageCodespaceTool(params),
+  codespace_process: async (params) =>
+    (await import("./codespace-process.js")).manageCodespaceProcess(params),
 } satisfies ToolBindings;
 
 export async function invokeToolDefinition(
