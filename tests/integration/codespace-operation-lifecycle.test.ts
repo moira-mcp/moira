@@ -170,7 +170,7 @@ class FakeTransport implements CodespaceOperationTransport {
   }
 }
 
-function fixture() {
+function fixture(advanceOnDelay = false) {
   const sqlite = new Database(":memory:");
   sqlite.pragma("foreign_keys = ON");
   migrate(drizzle(sqlite), { migrationsFolder: migrations });
@@ -232,6 +232,7 @@ function fixture() {
     now: () => currentNow,
     delay: async (milliseconds) => {
       settleDelays.push(milliseconds);
+      if (advanceOnDelay) currentNow += milliseconds;
     },
     audit: (event) => {
       audits.push(event);
@@ -793,6 +794,123 @@ describe("durable direct codespace operations", () => {
       value.sqlite.close();
     }
   });
+
+  test("synchronous command waiting returns a proven deadline cancellation and never retries execution", async () => {
+    const value = fixture(true);
+    try {
+      value.transport.executeResult = { state: "running" };
+      value.transport.inspectResult = { state: "running" };
+      value.transport.cancelResult = execResult({
+        state: "cancelled",
+        stdout: "partial",
+        stderr: "",
+        exitCode: null,
+      });
+      const accepted = await value.service.execute("user-1", "codespace-1", {
+        argv: ["long-command"],
+        timeoutMs: 5000,
+        stdin: { kind: "inline", bytes: new Uint8Array() },
+      });
+      const completed = await value.service.waitForResult("user-1", accepted.operation.id);
+      expect(completed).toMatchObject({
+        operation: { state: "cancelled", id: accepted.operation.id },
+        result: { state: "cancelled", stdout: "partial" },
+      });
+      expect(value.transport.cancelCalls).toHaveBeenCalledTimes(1);
+      expect(value.transport.executeCalls).toHaveBeenCalledTimes(1);
+    } finally {
+      value.sqlite.close();
+    }
+  });
+
+  test("synchronous command waiting rechecks revoked authority after an awaited terminal inspection", async () => {
+    const value = fixture(true);
+    try {
+      value.transport.executeResult = { state: "running" };
+      const accepted = await value.service.execute("user-1", "codespace-1", {
+        argv: ["command"],
+        timeoutMs: 5000,
+        stdin: { kind: "inline", bytes: new Uint8Array() },
+      });
+      value.transport.inspectResult = execResult({
+        state: "succeeded",
+        stdout: "private",
+        stderr: "",
+        exitCode: 0,
+      });
+      value.transport.inspectObservation = async () => {
+        await Promise.resolve();
+        value.sqlite.prepare("DELETE FROM codespaceConnectionRepository").run();
+      };
+      await expect(
+        value.service.waitForResult("user-1", accepted.operation.id),
+      ).rejects.toMatchObject({ code: "CODESPACE_AUTHORIZATION_REQUIRED" });
+      expect(value.transport.executeCalls).toHaveBeenCalledTimes(1);
+    } finally {
+      value.sqlite.close();
+    }
+  });
+
+  test("opt-in synchronous waiting collects a command beyond the short HTTP settle window without another execution", async () => {
+    const value = fixture(true);
+    try {
+      value.transport.executeResult = { state: "running" };
+      value.transport.inspectObservation = async () => {
+        if (value.settleDelays.reduce((sum, delay) => sum + delay, 0) >= 3000)
+          value.transport.inspectResult = execResult({
+            state: "succeeded",
+            stdout: "late terminal result",
+            stderr: "",
+            exitCode: 0,
+          });
+      };
+      const accepted = await value.service.execute("user-1", "codespace-1", {
+        argv: ["build"],
+        stdin: { kind: "inline", bytes: new Uint8Array() },
+        timeoutMs: 5000,
+      });
+      expect(accepted).toMatchObject({ operation: { state: "running" }, result: null });
+      const result = await value.service.waitForResult("user-1", accepted.operation.id);
+      expect(result).toMatchObject({
+        operation: { id: accepted.operation.id, state: "succeeded" },
+        result: { stdout: "late terminal result", exitCode: 0 },
+      });
+      expect(value.transport.executeCalls).toHaveBeenCalledTimes(1);
+      expect(value.repository.listOwned("user-1", "codespace-1")).toHaveLength(1);
+    } finally {
+      value.sqlite.close();
+    }
+  });
+
+  test.each(["unknown", "revoked", "expired"] as const)(
+    "synchronous command waiting reports %s without returning a running success or repeating execution",
+    async (failure) => {
+      const value = fixture(true);
+      try {
+        value.transport.executeResult = { state: "running" };
+        const accepted = await value.service.execute("user-1", "codespace-1", {
+          argv: ["build"],
+          stdin: { kind: "inline", bytes: new Uint8Array() },
+          timeoutMs: 5000,
+        });
+        if (failure === "unknown") value.transport.throwInspect = true;
+        if (failure === "revoked") value.sqlite.exec("DELETE FROM codespaceConnectionRepository");
+        if (failure === "expired") value.advance(5000);
+        await expect(
+          value.service.waitForResult("user-1", accepted.operation.id),
+        ).rejects.toMatchObject({
+          code:
+            failure === "revoked"
+              ? "CODESPACE_AUTHORIZATION_REQUIRED"
+              : "CODESPACE_PROVIDER_UNAVAILABLE",
+        });
+        expect(value.transport.executeCalls).toHaveBeenCalledTimes(1);
+        expect(value.repository.listOwned("user-1", "codespace-1")).toHaveLength(1);
+      } finally {
+        value.sqlite.close();
+      }
+    },
+  );
 
   test("falls back to the running envelope when the settle window itself fails", async () => {
     const value = fixture();

@@ -8,6 +8,7 @@ import * as os from "node:os";
 import {
   CODESPACE_PROVIDER_CONTRACT_VERSION,
   CODESPACE_PROVIDER_GITHUB,
+  CODESPACE_PROVIDER_LOCAL,
   CodespaceObservabilityService,
   CodespaceOperationRepository,
   CodespaceProviderRegistry,
@@ -264,6 +265,7 @@ class FakeProvider implements CodespaceProviderAdapter {
 function fixture(
   policyOverrides: Partial<CodespaceResourcePolicy> = {},
   refreshAuthorization?: (userId: string) => Promise<boolean>,
+  providerId: string = CODESPACE_PROVIDER_GITHUB,
 ) {
   const sqlite = new Database(":memory:");
   sqlite.pragma("foreign_keys = ON");
@@ -282,7 +284,7 @@ function fixture(
       credentialGeneration, createdAt, updatedAt)
      VALUES ('connection-1', 'user-1', ?, '101', 'owner', 'connected', 1, ?, ?)`,
     )
-    .run(CODESPACE_PROVIDER_GITHUB, now, now);
+    .run(providerId, now, now);
   sqlite
     .prepare(
       `INSERT INTO codespaceConnectionRepository
@@ -297,7 +299,7 @@ function fixture(
         credentialGeneration, createdAt, updatedAt)
        VALUES ('connection-2', 'user-2', ?, '101', 'owner', 'connected', 1, ?, ?)`,
     )
-    .run(CODESPACE_PROVIDER_GITHUB, now, now);
+    .run(providerId, now, now);
   sqlite
     .prepare(
       `INSERT INTO codespaceConnectionRepository
@@ -306,7 +308,7 @@ function fixture(
     )
     .run(now);
   const repository = new CodespaceResourceRepository(sqlite);
-  const provider = new FakeProvider();
+  const provider = new FakeProvider(providerId);
   const registry = new CodespaceProviderRegistry();
   registry.register(provider);
   const tokenCalls = jest.fn<() => Promise<string>>().mockResolvedValue("ghu_access");
@@ -320,7 +322,7 @@ function fixture(
       repositories: repository,
       registry,
       credentials: { getCredential: tokenCalls },
-      providerId: CODESPACE_PROVIDER_GITHUB,
+      providerId,
       requiredCapabilities: {
         exactLifecycle: true,
         personalBillingOnly: true,
@@ -357,6 +359,145 @@ function fixture(
 }
 
 describe("durable persistent codespace lifecycle", () => {
+  test("synchronous local creation preserves confirmed setup failure discovered after acceptance instead of a false generation conflict", async () => {
+    const value = fixture({}, undefined, CODESPACE_PROVIDER_LOCAL);
+    try {
+      value.provider.returnedState = "provisioning";
+      const accepted = await value.service.create("user-1", "301", "refs/heads/main");
+      expect(accepted.resource).toMatchObject({
+        state: "create_submitted",
+        desiredState: "running",
+      });
+      value.provider.resource = {
+        ...value.provider.resource!,
+        state: "failed",
+        stateError: "CODESPACE_LOCAL_SETUP_INCOMPLETE",
+      };
+      await expect(
+        value.service.waitForState("user-1", accepted.resource.id, "usable"),
+      ).rejects.toMatchObject({ code: "CODESPACE_LOCAL_SETUP_INCOMPLETE" });
+      expect(value.repository.getOwned("user-1", accepted.resource.id)).toMatchObject({
+        state: "create_submitted",
+        generation: accepted.resource.generation,
+        desiredState: "running",
+        observedState: "failed",
+        lastOutcome: "CODESPACE_LOCAL_SETUP_INCOMPLETE",
+      });
+      expect(value.provider.createCalls).toHaveBeenCalledTimes(1);
+      expect(value.provider.connectorCalls).not.toHaveBeenCalled();
+      expect(value.provider.startCalls).not.toHaveBeenCalled();
+      expect(value.provider.stopCalls).not.toHaveBeenCalled();
+      expect(value.provider.deleteCalls).not.toHaveBeenCalled();
+    } finally {
+      value.sqlite.close();
+    }
+  });
+  test("synchronous lifecycle waiting reconciles only its accepted create despite an older higher-priority peer", async () => {
+    const value = fixture({ maxActivePerUser: 2, maxActiveGlobal: 3 });
+    try {
+      const peer = await value.service.create("user-1", "301", "refs/heads/peer");
+      value.repository.requestStop("user-1", peer.resource.id, value.clock());
+      const peerBefore = value.repository.getOwned("user-1", peer.resource.id);
+      value.provider.park("target-space");
+      value.provider.returnedState = "provisioning";
+      const accepted = await value.service.create("user-1", "301", "refs/heads/main");
+      expect(accepted.resource.state).toBe("create_submitted");
+      value.provider.resource = { ...value.provider.resource!, state: "available" };
+      const completed = await value.service.waitForState("user-1", accepted.resource.id, "usable");
+      expect(completed).toMatchObject({
+        id: accepted.resource.id,
+        state: "usable",
+        generation: accepted.resource.generation + 1,
+      });
+      expect(value.repository.getOwned("user-1", peer.resource.id)).toEqual(peerBefore);
+      expect(value.provider.createCalls).toHaveBeenCalledTimes(2);
+      expect(value.provider.stopCalls).not.toHaveBeenCalled();
+      expect(value.provider.startCalls).not.toHaveBeenCalled();
+    } finally {
+      value.sqlite.close();
+    }
+  });
+
+  test.each(["stopped", "deleted"] as const)(
+    "synchronous lifecycle waiting confirms %s through exact observation without another mutation",
+    async (target) => {
+      const value = fixture({ reconcileIntervalMs: 1000 });
+      try {
+        const created = await value.service.create("user-1", "301", "refs/heads/main");
+        value.provider.resource = { ...value.provider.resource!, state: "stopping" };
+        if (target === "deleted") {
+          value.provider.deleteExact = async (_token, name) => {
+            value.provider.deleteCalls(name);
+            value.provider.resource = { ...value.provider.resource!, state: "deleting" };
+            return "accepted";
+          };
+        }
+        const accepted =
+          target === "stopped"
+            ? await value.service.stopCodespace("user-1", created.resource.id)
+            : await value.service.deleteCodespace(
+                "user-1",
+                created.resource.id,
+                created.resource.generation,
+              );
+        expect(accepted.state).toBe(target === "stopped" ? "stop_pending" : "delete_pending");
+        value.provider.exactObservation = () => {
+          if (value.clock() >= now + 2000)
+            value.provider.resource =
+              target === "deleted" ? null : { ...value.provider.resource!, state: "shutdown" };
+        };
+        const completed = await value.service.waitForState("user-1", created.resource.id, target);
+        expect(completed).toMatchObject({
+          state: target,
+          generation: accepted.generation,
+          observedState: target === "deleted" ? "absent" : "stopped",
+        });
+        expect(value.provider.stopCalls).not.toHaveBeenCalled();
+        expect(value.provider.deleteCalls).toHaveBeenCalledTimes(target === "deleted" ? 1 : 0);
+        expect(value.provider.createCalls).toHaveBeenCalledTimes(1);
+      } finally {
+        value.sqlite.close();
+      }
+    },
+  );
+
+  test.each(["revoked", "superseded", "deadline"] as const)(
+    "synchronous lifecycle waiting refuses %s without repeating creation or trusting an obsolete result",
+    async (failure) => {
+      const value = fixture();
+      try {
+        value.provider.returnedState = "provisioning";
+        const accepted = await value.service.create("user-1", "301", "refs/heads/main");
+        if (failure === "revoked") {
+          value.provider.exactObservation = () => {
+            value.sqlite
+              .prepare(
+                "DELETE FROM codespaceConnectionRepository WHERE connectionId = 'connection-1'",
+              )
+              .run();
+          };
+        } else if (failure === "superseded") {
+          value.repository.requestStop("user-1", accepted.resource.id, value.clock());
+        }
+        await expect(
+          value.service.waitForState("user-1", accepted.resource.id, "usable"),
+        ).rejects.toMatchObject({
+          code:
+            failure === "revoked"
+              ? "CODESPACE_AUTHORIZATION_REQUIRED"
+              : failure === "superseded"
+                ? "CODESPACE_GENERATION_CONFLICT"
+                : "CODESPACE_START_TIMEOUT",
+        });
+        expect(value.provider.createCalls).toHaveBeenCalledTimes(1);
+        expect(value.provider.startCalls).not.toHaveBeenCalled();
+        expect(value.provider.stopCalls).not.toHaveBeenCalled();
+      } finally {
+        value.sqlite.close();
+      }
+    },
+  );
+
   test("forwards the requested ref when selecting a provider machine", async () => {
     const value = fixture();
     try {

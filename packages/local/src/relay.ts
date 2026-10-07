@@ -365,7 +365,10 @@ export class LocalRelay {
       },
     ).catch(transportFailure);
     if (!response.ok) {
-      if (response.status === 401 && /^\/github\/[a-f0-9-]{36}\/\d+\/identity$/.test(path)) {
+      if (
+        [401, 403].includes(response.status) &&
+        /^\/github\/[a-f0-9-]{36}\/\d+\/identity$/.test(path)
+      ) {
         const reader = response.body?.getReader();
         const chunks: Uint8Array[] = [];
         let size = 0;
@@ -903,7 +906,9 @@ export class LocalRelay {
       if (space.generation !== binding.localGeneration) {
         const freshIncomplete =
           !intent &&
-          claim.resourceGeneration > binding.serverGeneration &&
+          (claim.resourceGeneration > binding.serverGeneration ||
+            (claim.resourceGeneration === binding.serverGeneration &&
+              message.request.action === "snapshot")) &&
           space.generation > binding.localGeneration &&
           (space.failure === "LOCAL_SETUP_INCOMPLETE" || space.lastStartedAt === null) &&
           ["stopped", "failed"].includes(space.phase) &&

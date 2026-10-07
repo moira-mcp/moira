@@ -215,7 +215,8 @@ Sign in with `ADMIN_EMAIL` (default `admin@moira.local`) and the printed passwor
 ### Connect local codespaces
 
 **Settings → Development → Local computers** connects a computer running Moira Local to this
-account. Local and GitHub development environments share the `codespace` tool. Enrollment,
+account. Local and GitHub development environments share `codespace` for ordinary work and
+`codespace_process` for background processes. Enrollment,
 public repository reads and basic local work do not require the GitHub App or server credential
 vault. Enrolled private-repository access, push and PR operations require the server's GitHub App
 OAuth connection and vault configuration. Local work does not require the GitHub connector
@@ -337,19 +338,22 @@ With local web control approved, the owner can enable agent repository managemen
 It defaults off and binds the verified personal GitHub account, separate existing/new-private permissions,
 and optional push. Repository additions have no count quota or fixed technology profile.
 Only companion acknowledgement makes it effective. `codespace({ action: "local_devices" })`
-shows applied consent and eligible personal App installations; `github_setup_required` asks for
-GitHub setup while retaining device discovery. `repository_add` takes `device_id`, the GitHub numeric `repository_id`
-and a stable UUID `request_id`. Reuse that request until `applied` returns `local_repository_id`;
-pending/rejected is not permission. The App must already expose the repository. Agent additions
+shows owned computer IDs, labels, contact status and enablement, plus eligible personal App
+installations. A warning asks for GitHub setup while retaining device discovery; inspect applied
+consent in Settings. `repository_add` takes `device_id`, the GitHub numeric `repository_id`
+and a stable UUID `request_id`. MCP waits for companion acknowledgement and returns `repository_id`
+only after access is applied. An unconfirmed or rejected request is not permission; resume its same
+identity after the applicable repair. The App must already expose the repository. Agent additions
 preserve existing grants, VMs and lease; agents cannot change consent or supply rights.
 For a new empty private repository, enable and apply new-private consent, then use `repository_create`
 with `device_id`, stable UUID `request_id`, `repository_name` and discovered `installation_id`.
 Only the connected personal account is supported. Resume the same complete payload: `unknown`
 does not retry creation blindly, and `setup_required` can retain the confirmed GitHub ID/name while
-permissions or installation access are repaired. Only `applied` returns usable `local_repository_id`.
+permissions or installation access are repaired. Only acknowledged admission returns usable `repository_id`.
 Selected installation access is checked after adding only the confirmed new repository.
-When present, `error.stage` identifies the failed setup step and `error.provider_status` is the
-GitHub HTTP status. Follow the returned `instruction`. A rejected local admission can retain an
+The owner admission API retains `error.stage` for the failed setup step and `error.provider_status`
+for the reported GitHub HTTP status when present. MCP errors carry safe repair guidance and the
+original `request_id`. Follow that guidance. A rejected local admission can retain an
 already-created repository: restore its original grant in Settings, or use `repository_add` with
 the retained GitHub ID and a fresh `request_id` when existing-private consent permits it. Repeating
 the rejected admission alone does not restore access; do not create another repository.
@@ -366,7 +370,10 @@ OAuth stays on the server. Live App permissions and provider compatibility requi
 
 Each codespace has its own VM; a repository can have multiple codespaces.
 Local VMs and operations do not consume cloud Codespaces slots or use its machine ceiling.
-Background `exec` runs development processes in that VM. Public package registries and other public
+Use `codespace_process` for background start/get/read/stop in that VM. Ordinary `codespace` commands
+and files wait for their result, without normal polling. Backend, frontend and browser checks share
+guest localhost. A client's transport timeout remains independent; after interrupted or unknown
+delivery, recover the accepted identity instead of starting another effect. Public package registries and other public
 DNS destinations are available independently of the language or framework, with public-address and
 computer-network checks on every connection. Network downloads have no cumulative traffic budget or
 per-download byte quota; bounded socket capacity provides backpressure. Host, LAN and service
@@ -379,7 +386,7 @@ Inspect the image before treating a screenshot as visual evidence.
 
 In **Settings → Development → Local computers**, open the connected computer's codespaces and
 choose its approved repository to create a VM, or discover
-its qualified `repository_id` through `codespace({ action: "list" })`. Different computers
+its qualified `repository_id` through `codespace({ action: "repositories" })`. Different computers
 offering the same repository are distinct choices. Further operations use the existing
 `codespace_id`, execution/session/file and native-transfer contracts. The GitHub provider remains
 independently available. Settings can revoke one device; **Refresh** rereads current state. Browser revocation
@@ -500,13 +507,15 @@ and the connector pair from the disabled-by-default Compose profile:
 docker compose --profile codespaces up -d
 ```
 
-With the connection and connector in place, an authenticated MCP client uses the one `codespace`
-tool, choosing the operation with `action`: `list` shows approved repositories and existing
-codespaces and refreshes stale grants, `setup_help` returns the current user-owned setup step and
+With the connection and connector in place, an authenticated MCP client uses `codespace`,
+choosing the operation with `action`: `list` shows compact existing codespaces, `repositories`
+shows approved targets and refreshes stale grants, `setup_help` returns the current user-owned setup step and
 the provider's exact links, `create` provisions a persistent personal-billed Codespace for an approved repository,
 and `exec`, `stat`, `search`, `read`, `write`, `apply_patch`, `upload` and `download` work inside it
-by `codespace_id`. `stop` keeps the repository data; `delete` removes the
-Codespace and requires explicit confirmation. Different chats and clients may reuse the same
+by `codespace_id`. Create/start wait for a usable environment, stop for confirmed shutdown while
+keeping data, and delete for confirmed absence with explicit confirmation. Ordinary successful
+calls return useful results without operation journals or quota envelopes. Use `codespace_process`
+with `process_id` for background start/get/read/stop. Different chats and clients may reuse the same
 codespace; nothing is deleted when a command finishes or a client disconnects.
 
 An agent working in a codespace acts as the ordinary Codespace user: it can read the repository,

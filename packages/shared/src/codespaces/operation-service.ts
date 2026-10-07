@@ -1,6 +1,6 @@
 import { CodespaceOperationRepository } from "./operation-repository.js";
 import { effectiveCodespaceLimits } from "./resource-policy.js";
-import { settleAfterDispatch } from "./settle-after-dispatch.js";
+import { settleAfterDispatch, waitForAcceptedCodespaceResult } from "./settle-after-dispatch.js";
 import { requireCodespaceTransportAvailable } from "./transport-availability.js";
 import type {
   CodespaceExecRequest,
@@ -668,6 +668,48 @@ export class CodespaceOperationService {
       operation: this.dependencies.repository.getOwned(userId, operation.id)!,
       result,
     };
+  }
+
+  /** Wait for one already accepted command; never reserve or dispatch it again. */
+  async waitForResult(userId: string, operationId: string): Promise<CodespaceOperationResponse> {
+    const context = this.dependencies.repository.requireResultContext(
+      userId,
+      operationId,
+      this.dependencies.policy(),
+      this.now(),
+    );
+    if (context.operation.kind !== "exec")
+      throw new CodespaceResourceError("CODESPACE_NOT_FOUND", "Codespace command was not found");
+    return waitForAcceptedCodespaceResult({
+      deadlineAt: context.operation.deadlineAt,
+      now: () => this.now(),
+      delay: this.dependencies.delay,
+      inspect: async () => {
+        const result = await this.reconcile(
+          userId,
+          operationId,
+          this.now() >= context.operation.deadlineAt,
+        );
+        const { operation } = this.dependencies.repository.requireResultContext(
+          userId,
+          operationId,
+          this.dependencies.policy(),
+          this.now(),
+        );
+        if (result) return { operation, result };
+        if (isTerminalOperationState(operation.state))
+          throw new CodespaceResourceError(
+            "CODESPACE_RESULT_EXPIRED",
+            "The command's terminal output is unavailable",
+          );
+        if (operation.state === "reconcile_pending" || operation.state === "reserved")
+          throw new CodespaceResourceError(
+            "CODESPACE_PROVIDER_UNAVAILABLE",
+            "The accepted command outcome is not confirmed",
+          );
+        return null;
+      },
+    });
   }
 
   async reconcile(

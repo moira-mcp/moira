@@ -831,12 +831,14 @@ export class CodespaceResourceService {
       (isTransitional(actual.state) ||
         actual.state === "created" ||
         actual.state === "unknown" ||
-        (record.provider === CODESPACE_PROVIDER_LOCAL && actual.state === "shutdown"))
+        (record.provider === CODESPACE_PROVIDER_LOCAL &&
+          (actual.state === "shutdown" ||
+            (actual.state === "failed" && actual.stateError !== undefined))))
     ) {
       const outcome =
         actual.state === "unknown"
           ? (actual.stateError ?? "CODESPACE_LOCAL_CREATION_UNKNOWN")
-          : actual.state === "shutdown"
+          : actual.state === "shutdown" || actual.state === "failed"
             ? (actual.stateError ?? "CODESPACE_NOT_RUNNING")
             : actual.state === "created"
               ? "provider_created"
@@ -999,6 +1001,95 @@ export class CodespaceResourceService {
   private async delay(milliseconds: number): Promise<void> {
     if (this.dependencies.delay) return this.dependencies.delay(milliseconds);
     await new Promise((resolveValue) => setTimeout(resolveValue, milliseconds));
+  }
+
+  /** Wait for the accepted exact lifecycle intent; ordinary Web callers remain asynchronous. */
+  async waitForState(
+    userId: string,
+    resourceId: string,
+    target: "usable" | "stopped" | "deleted",
+  ): Promise<CodespaceResourceRecord> {
+    this.requireCurrentLifecycleAuthority(userId, resourceId);
+    const initial = this.getCodespace(userId, resourceId);
+    const policy = this.dependencies.policy();
+    const creating = initial.state === "create_pending" || initial.state === "create_submitted";
+    const deadline =
+      creating && target === "usable"
+        ? initial.createDeadlineAt
+        : (initial.cleanupDeadlineAt ??
+          this.now() + (target === "usable" ? policy.startWaitMs : policy.cleanupDeadlineMs));
+    const expectedDesired = target === "usable" ? "running" : target;
+    const current = () => {
+      this.requireCurrentLifecycleAuthority(userId, resourceId);
+      const record = this.getCodespace(userId, resourceId);
+      const settled =
+        record.state === target ||
+        (target === "stopped" && record.state === "deleted" && record.observedState === "absent");
+      if (creating && record.state === "rejected")
+        throw new CodespaceResourceError(
+          "CODESPACE_CREATE_REJECTED",
+          "The accepted creation was rejected",
+        );
+      const sameGeneration =
+        record.generation === initial.generation ||
+        (creating &&
+          target === "usable" &&
+          record.state === "usable" &&
+          record.generation === initial.generation + 1);
+      if (
+        record.provider !== initial.provider ||
+        record.repositoryId !== initial.repositoryId ||
+        record.operationMarker !== initial.operationMarker ||
+        record.connectionId !== initial.connectionId ||
+        !sameGeneration ||
+        (record.desiredState !== expectedDesired && !(target === "stopped" && settled))
+      )
+        throw new CodespaceResourceError(
+          "CODESPACE_GENERATION_CONFLICT",
+          "The accepted lifecycle intent changed while waiting",
+        );
+      return record;
+    };
+    for (;;) {
+      let record = current();
+      const failure = codespaceLifecycleErrorCode(record.lastOutcome);
+      if (
+        record.state === target ||
+        (target === "stopped" && record.state === "deleted" && record.observedState === "absent")
+      ) {
+        if (target === "usable" && failure)
+          throw new CodespaceResourceError(
+            failure,
+            "The codespace is not confirmed ready for work",
+          );
+        return record;
+      }
+      if (["rejected", "ambiguous"].includes(record.state))
+        throw new CodespaceResourceError(
+          record.state === "rejected" ? "CODESPACE_CREATE_REJECTED" : "CODESPACE_RESOURCE_INVALID",
+          "The accepted codespace lifecycle cannot complete",
+        );
+      await this.reconcileNextDue(userId, resourceId);
+      record = current();
+      const observedFailure = codespaceLifecycleErrorCode(record.lastOutcome);
+      if (
+        record.state === target ||
+        (target === "stopped" && record.state === "deleted" && record.observedState === "absent")
+      )
+        continue;
+      if (observedFailure)
+        throw new CodespaceResourceError(
+          observedFailure,
+          "The accepted codespace lifecycle was refused or could not be confirmed",
+        );
+      const remaining = deadline - this.now();
+      if (remaining <= 0)
+        throw new CodespaceResourceError(
+          target === "usable" ? "CODESPACE_START_TIMEOUT" : "CODESPACE_PROVIDER_UNAVAILABLE",
+          "The accepted lifecycle deadline ended without confirming its target state",
+        );
+      await this.delay(Math.min(1000, remaining));
+    }
   }
 
   async startCodespace(userId: string, resourceId: string): Promise<CodespaceResourceRecord> {
@@ -1217,7 +1308,7 @@ export class CodespaceResourceService {
     if (!alreadyDeferred) this.deferReconcile(record, claimId, null);
   }
 
-  private async reconcileNextDue(userId?: string): Promise<boolean> {
+  private async reconcileNextDue(userId?: string, resourceId?: string): Promise<boolean> {
     const policy = this.dependencies.policy();
     const claimId = randomUUID();
     const record = this.dependencies.repository.claimDue(
@@ -1226,6 +1317,7 @@ export class CodespaceResourceService {
       this.now() + policy.claimLeaseMs,
       userId,
       this.dependencies.providerId,
+      resourceId,
     );
     if (!record) return false;
     if (record.state === "create_pending") {

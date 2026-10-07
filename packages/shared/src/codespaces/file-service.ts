@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { settleAfterDispatch } from "./settle-after-dispatch.js";
+import { settleAfterDispatch, waitForAcceptedCodespaceResult } from "./settle-after-dispatch.js";
 import { effectiveCodespaceLimits } from "./resource-policy.js";
 import { requireCodespaceTransportAvailable } from "./transport-availability.js";
 import type {
@@ -401,6 +401,114 @@ export class CodespaceFileService {
       const transfer = await this.dependencies.transfers.publishDownload(
         reservation,
         response.result.bytes,
+      );
+      return { operation: response.operation, transfer };
+    } catch (error) {
+      await this.dependencies.transfers.discard(reservation.record);
+      throw error;
+    }
+  }
+
+  /** Wait for the existing file intent. Web HTTP callers keep their short asynchronous response. */
+  async waitForResult(
+    userId: string,
+    operationId: string,
+  ): Promise<CodespaceFileOperationResponse> {
+    const context = this.dependencies.repository.requireResultContext(
+      userId,
+      operationId,
+      this.dependencies.policy(),
+      this.now(),
+    );
+    if (context.operation.kind === "exec")
+      throw new CodespaceResourceError(
+        "CODESPACE_NOT_FOUND",
+        "Codespace file operation was not found",
+      );
+    return waitForAcceptedCodespaceResult({
+      deadlineAt: context.operation.deadlineAt,
+      now: () => this.now(),
+      delay: this.dependencies.delay,
+      inspect: async () => {
+        let response = await this.reconcile(userId, operationId);
+        const { operation } = this.dependencies.repository.requireResultContext(
+          userId,
+          operationId,
+          this.dependencies.policy(),
+          this.now(),
+        );
+        if (response.result !== null) return { operation, result: response.result };
+        if (["failed", "cancelled", "timed_out"].includes(operation.state))
+          return { operation, result: null };
+        if (operation.state === "succeeded") {
+          // A concurrent reconciler may have stored the result before this observer's CAS.
+          response = await this.reconcile(userId, operationId);
+          this.dependencies.repository.requireResultContext(
+            userId,
+            operationId,
+            this.dependencies.policy(),
+            this.now(),
+          );
+          if (response.result !== null) return response;
+          throw new CodespaceResourceError(
+            "CODESPACE_RESULT_EXPIRED",
+            "The file's terminal result is unavailable",
+          );
+        }
+        if (operation.state === "reconcile_pending" || operation.state === "reserved")
+          throw new CodespaceResourceError(
+            "CODESPACE_PROVIDER_UNAVAILABLE",
+            "The accepted file outcome is not confirmed",
+          );
+        return null;
+      },
+    });
+  }
+
+  /** Publish the retained exact download after waiting; no second guest file dispatch. */
+  async waitForDownloadReference(
+    userId: string,
+    operationId: string,
+    input: { fileName: string; mimeType: string },
+  ): Promise<{ operation: CodespaceOperationRecord; transfer: CodespaceTransferHandle | null }> {
+    const context = this.dependencies.repository.requireResultContext(
+      userId,
+      operationId,
+      this.dependencies.policy(),
+      this.now(),
+    );
+    if (context.operation.kind !== "download")
+      throw new CodespaceResourceError("CODESPACE_NOT_FOUND", "Codespace download was not found");
+    if (!this.dependencies.transfers)
+      throw new CodespaceResourceError(
+        "CODESPACE_PROVIDER_UNAVAILABLE",
+        "Native transfer is unavailable",
+      );
+    const reservation = this.dependencies.transfers.reserveDownload(userId, {
+      ...input,
+      maxBytes: context.operation.stdoutLimitBytes,
+    });
+    try {
+      const response = await this.waitForResult(userId, operationId);
+      if (!response.result || "state" in response.result || response.result.action !== "download") {
+        await this.dependencies.transfers.discard(reservation.record);
+        return { operation: response.operation, transfer: null };
+      }
+      this.dependencies.repository.requireResultContext(
+        userId,
+        operationId,
+        this.dependencies.policy(),
+        this.now(),
+      );
+      const transfer = await this.dependencies.transfers.publishDownload(
+        reservation,
+        response.result.bytes,
+      );
+      this.dependencies.repository.requireResultContext(
+        userId,
+        operationId,
+        this.dependencies.policy(),
+        this.now(),
       );
       return { operation: response.operation, transfer };
     } catch (error) {

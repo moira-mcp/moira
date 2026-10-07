@@ -696,6 +696,8 @@ export const codespaceListSchema = z
   })
   .strict();
 
+export const codespaceRepositoriesSchema = codespaceListSchema;
+
 export const codespaceSetupHelpSchema = z
   .object({
     repository_id: z
@@ -758,7 +760,6 @@ export const codespaceStopSchema = codespaceGetSchema;
 export const codespaceDeleteSchema = z
   .object({
     codespace_id: codespaceIdSchema,
-    expected_generation: z.number().int().min(1),
     confirm_delete: z.literal(true).describe("Required explicit destructive confirmation"),
   })
   .strict();
@@ -817,10 +818,6 @@ const codespaceExecStartSchema = z
       .min(1)
       .max(24 * 60 * 60)
       .optional(),
-    background: z
-      .boolean()
-      .default(false)
-      .describe("Keep the command running past this request; collect it later by operation_id"),
     max_stdout_bytes: z
       .number()
       .int()
@@ -839,9 +836,8 @@ const codespaceExecStartSchema = z
 export const codespaceExecRequestSchema = z.union([
   codespaceExecStartSchema.extend({ stdin_text: z.string().optional() }),
   codespaceExecStartSchema.extend({ stdin_file: codespaceNativeFileSchema }),
-  // Resuming a command also stops one: the same operation identity, asked to end instead of to
-  // report. A background command is stopped this way.
-  codespaceOperationResumeSchema.extend({ cancel: z.boolean().default(false) }),
+  // Only exceptional recovery after an unknown outcome uses this saved identity.
+  codespaceOperationResumeSchema,
 ]);
 
 export const codespaceStatRequestSchema = z.union([
@@ -1011,6 +1007,7 @@ export const CODESPACE_ACTION_REQUEST_SCHEMAS = {
   pull_request_get: codespacePullRequestGetSchema,
   pull_request_find: codespacePullRequestFindSchema,
   list: codespaceListSchema,
+  repositories: codespaceRepositoriesSchema,
   setup_help: codespaceSetupHelpSchema,
   create: codespaceCreateSchema,
   get: codespaceGetSchema,
@@ -1067,9 +1064,12 @@ function sameShape(left: z.ZodTypeAny, right: z.ZodTypeAny): boolean {
   return serialize(left) === serialize(right);
 }
 
-export const codespaceSchema = (() => {
+function flatActionSchema<Requests extends Record<string, z.ZodTypeAny>>(
+  requests: Requests,
+  description: string,
+) {
   const declarations = new Map<string, z.ZodTypeAny[]>();
-  const forms = Object.values(CODESPACE_ACTION_REQUEST_SCHEMAS).flatMap((request) =>
+  const forms = Object.values(requests).flatMap((request) =>
     request instanceof z.ZodUnion
       ? (request.options as z.AnyZodObject[])
       : [request as z.AnyZodObject],
@@ -1096,7 +1096,9 @@ export const codespaceSchema = (() => {
     }
   }
   const shape: Record<string, z.ZodTypeAny> = {
-    action: z.enum(CODESPACE_ACTIONS).describe("Codespace operation to perform"),
+    action: z
+      .enum(Object.keys(requests) as [keyof Requests & string, ...(keyof Requests & string)[]])
+      .describe(description),
   };
   for (const [key, fields] of declarations) {
     const published =
@@ -1104,4 +1106,35 @@ export const codespaceSchema = (() => {
     shape[key] = published.isOptional() ? published : published.optional();
   }
   return z.object(shape).strict();
-})();
+}
+
+export const codespaceSchema = flatActionSchema(
+  CODESPACE_ACTION_REQUEST_SCHEMAS,
+  "Codespace operation to perform",
+);
+
+const codespaceProcessIdentitySchema = z
+  .object({
+    codespace_id: codespaceIdSchema,
+    process_id: z.string().uuid().describe("Background process ID returned by start"),
+  })
+  .strict();
+
+export const CODESPACE_PROCESS_ACTION_REQUEST_SCHEMAS = {
+  start: z.union([
+    codespaceExecStartSchema.extend({ stdin_text: z.string().optional() }),
+    codespaceExecStartSchema.extend({ stdin_file: codespaceNativeFileSchema }),
+  ]),
+  get: codespaceProcessIdentitySchema,
+  read: codespaceProcessIdentitySchema.extend({
+    stream: z.enum(["stdout", "stderr"]),
+    ...codespaceReadRangeSchema.shape,
+  }),
+  stop: codespaceProcessIdentitySchema,
+} as const;
+
+export type CodespaceProcessAction = keyof typeof CODESPACE_PROCESS_ACTION_REQUEST_SCHEMAS;
+export const codespaceProcessSchema = flatActionSchema(
+  CODESPACE_PROCESS_ACTION_REQUEST_SCHEMAS,
+  "Start, inspect, read or stop one background command",
+).extend({ codespace_id: codespaceIdSchema });

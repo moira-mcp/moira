@@ -13,7 +13,7 @@ collaboration happens through version-control branches in the repository.
 GitHub authorization belongs to the authenticated website. Agents do not
 receive provider credentials, OAuth operations, SSH configuration or lifecycle
 capabilities. Agents reach codespaces only through the authenticated MCP
-`codespace` tool described below; the website owns the GitHub connection and
+`codespace` and `codespace_process` tools described below; the website owns the GitHub connection and
 offers the same basic codespace management (list, create, start, stop, confirmed
 delete) over the same services. Administrators own the instance-wide kill switches.
 
@@ -305,16 +305,17 @@ acknowledgement makes its delegation effective. The MCP caller cannot enable tha
 its account, supply rights, or extend the computer's lease. New-private consent authorizes the
 separate `repository_create` action; it does not authorize adding unrelated existing repositories.
 
-`codespace({ action: "local_devices" })` discovers owned device IDs and their applied delegation,
-plus eligible personal GitHub App `installations` with `installation_id`, owner and repository
-selection. `github_setup_required` indicates missing or unavailable GitHub installation setup;
-the caller's local devices remain discoverable.
+`codespace({ action: "local_devices" })` returns owned device IDs, labels, contact status and
+enablement, plus eligible personal GitHub App installations with `installation_id` and owner.
+A warning asks for missing GitHub setup while devices remain discoverable. Applied delegation
+and detailed owner permissions are inspected in Settings, not returned in this compact discovery.
 `repository_add` takes that `device_id`, the existing GitHub numeric `repository_id` and a caller-chosen
 UUID `request_id`. It verifies the current GitHub App installation grant, repository ID, owner,
 private visibility and required read/push rights. It adds only a private repository owned by the
 connected personal account. Its receipt is `pending`, `applied` or `rejected`; `local_repository_id`
-is null until the exact grant is acknowledged. Reuse the same request identity and payload to collect
-the result. An existing local grant is reused through discovery rather than added again. Requests
+is null until the exact grant is acknowledged internally. MCP waits for that acknowledgement and
+returns the usable ID as `repository_id`. Reuse the same request identity and payload after an
+unconfirmed outcome. An existing local grant is reused through discovery rather than added again. Requests
 racing unapplied owner settings are refused.
 
 `repository_create` takes `device_id`, a stable UUID `request_id`, `repository_name` and the personal
@@ -326,13 +327,14 @@ lease are checked before the durable submit fence permits an external create.
 
 Resume using the same complete payload. `pending`, `unknown`, `setup_required` and `rejected` are
 not local authority. A confirmed `github_repository_id` and `full_name` may remain available while
-installation setup is incomplete; only `applied` returns `local_repository_id` after companion ACK.
+installation setup is incomplete internally; MCP returns `repository_id` only after applied companion ACK.
 A selected installation receives only that confirmed new repository, then the refreshed actual App
 grant is checked; a successful installation PUT alone does not grant access. Missing permissions
 return Settings/install guidance and preserve the confirmed result for continuation.
-When present, `error.stage` names the failed setup step (`github_connection`, `device_delegation`,
+In the owner admission API, `error.stage` names the failed setup step when present (`github_connection`, `device_delegation`,
 `authority_validation`, `repository_lookup`, `repository_create`, `installation_access` or
-`local_admission`); `error.provider_status` carries the GitHub HTTP status. The returned
+`local_admission`); `error.provider_status` carries the GitHub HTTP status. Compact MCP errors carry
+the safe cause and `request_id` for continuation. The returned
 `instruction` describes the applicable repair. A returned rejected local admission preserves
 the already-created repository identity. An unchanged rejected receipt remains rejected: restore
 its original grant in Settings, or use `repository_add` with the retained GitHub ID and a fresh
@@ -505,7 +507,8 @@ stop never completes a failed initial preparation.
 Local status inspection is scoped to the retained resource and its exact owned creation marker.
 It can recover the owned durable manifest after the create reply expires, without adopting an
 unrelated SDK VM. Only settled authenticated absence proves removal; failed or partial inventory
-is not an empty successful list. Each failing resource retains its diagnostic and verified state,
+is not an empty successful list. The same current intent can inspect an owned incomplete setup at a newer
+native generation without advancing its binding or authorizing guest work. Each failing resource retains its diagnostic and verified state,
 while healthy peers refresh and run; the aggregate refresh reports stale data when any observation
 could not be confirmed.
 
@@ -658,13 +661,13 @@ The GitHub adapter mounts its provider-owned operation root from
 runtime convention used by the remote supervisor, not a public alias for the
 renamed Moira domain.
 
-A dispatched command is durable and resumable as soon as the connector accepts it,
-and the dispatch call then waits briefly for the outcome: a command that finishes
-inside that bounded window returns its terminal result from the same call, and one
-that does not returns the running envelope whose operation ID resumes it. The wait
-only inspects, so a command still reaches the connector exactly once however its
-result is collected, and it does not change the operation deadline or any bound.
-File operations share this dispatch and behave the same way.
+A dispatched command is durable and resumable as soon as the connector accepts it.
+Web HTTP callers retain a short post-dispatch observation window and can receive a running
+operation. Ordinary MCP command and file calls opt into waiting for the accepted operation's
+terminal result, using its existing deadline and current authority. Waiting never dispatches
+another command or file mutation. An unconfirmed outcome returns an error and its existing
+operation ID rather than a running success. This does not extend an MCP client's transport timeout;
+after interrupted delivery, inspect the accepted identity instead of submitting new work.
 
 Background reconciliation selects the oldest attempted due operation across reservation expiry,
 active work, cancellation and terminal cleanup. Each claim advances its attempt timestamp, so a
@@ -714,7 +717,7 @@ operation, requires the named codespace to own that command, and returns
 A read that starts at or past the end of a stream returns no bytes and the
 stream's current size, which is how a caller finds where a stream ends.
 
-A command may also be started in the background. It is the same operation, the
+A command may also be started with `codespace_process({ action: "start", ... })`. It is the same operation, the
 same single dispatch and the same resume path; only its ceiling and its deadline
 differ. It is admitted against `CODESPACE_MAX_BACKGROUND_OPERATION_HOURS` instead
 of `CODESPACE_MAX_OPERATION_SECONDS`, its deadline is that lifetime so background
@@ -724,7 +727,8 @@ bounded command uses. A caller that names no duration receives the one its mode
 implies: 300 seconds for a bounded command, the whole ceiling for a background
 one. The lifetime is granted when the command starts running, so a reservation
 that never dispatches is reaped within fifteen minutes whatever it asked for. Its output is readable by range while it runs, and it is
-stopped by resuming it with a cancellation request. A command that outlives the
+stopped with `codespace_process({ action: "stop", codespace_id, process_id })`. A pending stop
+does not certify cancellation. A command that outlives the
 codespace's idle lifetime stops with the codespace, so the two values belong
 together.
 
@@ -844,12 +848,13 @@ digest and expiry but not the URL.
 
 ## MCP tools
 
-The authenticated MCP catalog exposes the whole codespace surface as one tool,
-`codespace`, whose required `action` selects the operation: `list`, `setup_help`, `create`, `get`,
+The authenticated MCP catalog exposes ordinary development through `codespace`, whose required
+`action` selects the operation: `list`, `repositories`, `setup_help`, `create`, `get`,
 `start`, `stop`, `delete`, `exec`, `stat`, `search`, `read`, `write`, `apply_patch`,
 `upload`, `download`, `local_devices`, `repository_add`, `repository_create`, `preview_image`, `pull_request_create`, `pull_request_get` and
 `pull_request_find`. The public tools reference renders its schema from the typed
-registry. Changing it changes `MCP_TOOLS_REVISION`, so a client holding an older catalog
+registry. `codespace_process` separately exposes background `start`, `get`, `read` and `stop`.
+Changing the catalog changes `MCP_TOOLS_REVISION`, so a client holding an older catalog
 receives the ordinary HTTP 426 reconnect contract.
 
 Every action derives the user from the MCP request context. Lifecycle, execution, file and PR
@@ -867,14 +872,13 @@ contract and is deliberately absent from the published object, which would other
 inject every action's defaults into every request; the field keeps its description. A field two
 actions declare differently — `max_bytes`, which `search` bounds at 1 MiB and `download` at 4 MiB —
 is published as both forms under one key, so the projection narrows neither. `operation_id`, whose
-declarations differ only in description, is published once. The `list` action returns the sanitized connection readiness (with the
-same-origin Settings URL), approved repository targets, the user's codespace
-summaries and the user's `limits`; it is the discovery path for `repository_id` and
-reusable `codespace_id`.
+declarations differ only in description, is published once. `list` returns compact owned
+codespaces (`codespace_id`, repository, ref and state); `repositories` returns approved targets
+with `repository_id`, name and visibility. Neither includes an operation journal, connection,
+billing or limits envelope. `setup_help` owns actionable setup guidance.
 
-`limits` combines `CodespaceObservabilityService.limits()` from policy and the
-database with an optional personal GitHub monthly billing read. The website
-management list returns the same view. Every non-null limit in it is a value Moira
+The website management list's `limits` combines `CodespaceObservabilityService.limits()` from policy
+and the database with an optional personal GitHub monthly billing read. Every non-null limit in it is a value Moira
 enforces, taken from the one definition every enforcement site reads
 (`effectiveCodespaceLimits` in
 `resource-policy.ts`), beside the user's current use:
@@ -901,13 +905,12 @@ If permission is absent, the API format is unsupported, or GitHub fails, billing
 is `"unavailable"` while local limits and management remain usable. Successful
 billing reads are cached briefly; an explicit refresh asks GitHub again.
 
-For GitHub, every grant-dependent discovery or creation action — `list`, `setup_help` and
+For GitHub, every grant-dependent discovery or creation action — `list`, `repositories`, `setup_help` and
 `create` — refreshes the stored installation and repository snapshot after a
 bounded TTL before using it. `list` also accepts `refresh: true` to force that
 attempt and reconcile managed Codespaces with GitHub. A provider failure returns
-the previous snapshot with `repositories_stale: true` from `list` and
-`setup_help`; `list` also returns `resources_stale: true` when its requested
-resource observation could not finish. A successful grant refresh updates
+the previous snapshot with a warning from compact discovery and `repositories_stale: true` from
+`setup_help`. Website lists retain separate repository/resource stale flags. A successful grant refresh updates
 personal and organization installation selections and repositories without
 reconnecting.
 
@@ -916,25 +919,37 @@ and the monotonic `grantsVersion`, so a slower process cannot overwrite a newer 
 Deleted and rejected codespaces are finished and accept no operation, so they are
 absent from that listing and from the website's, which reads the same service method.
 The `get` action returns one owned summary; an unknown or foreign ID returns the
-generic `CODESPACE_NOT_FOUND` result. A summary reports `requested_ref`, the ref the
+generic `CODESPACE_NOT_FOUND` result. Website summaries report `requested_ref`, the ref the
 codespace was created on, and `current_ref`, the ref the provider last reported
 checked out, which is `null` until Moira has observed one and while the codespace is
 on a detached HEAD; `create` still takes the input `ref`. Summaries omit connection and authorization
 generations, external owner/billing IDs, operation markers, provider resource names,
-claims and capabilities.
+claims and capabilities. MCP `get` uses the same compact codespace projection as `list`, with a
+safe `error` when a lifecycle cause exists; its `ref` is the observed ref or the requested fallback.
 
-The `stop` action returns `data_preserved: true`. `delete` requires
-`confirm_delete: true` and the caller's current `expected_generation`, so a stale call
-cannot remove a changed codespace, and returns `data_preserved: false`.
+MCP create/start wait for usable guest readiness, stop for confirmed non-running state while
+preserving files, and delete for confirmed absence. `delete` requires `confirm_delete: true`;
+the adapter reads the current owned generation and applies the domain deletion guard internally.
+Website deletion still requires its displayed `expected_generation`. Successful MCP lifecycle
+responses are compact codespace records; an unconfirmed result carries a bounded error and the
+existing codespace ID, without authorizing another creation.
 
-The execution and file actions return a sanitized operation envelope (`operation_id`,
-`kind`, `state`, bounded byte counts, `exit_code`, deadline and result expiry) plus the
-action result. Failed, cancelled and timed-out commands and rejected file edits are
-returned as tool errors (`isError: true`) that keep the operation identity and any
-bounded output. A pending or `reconcile_pending` envelope is not a success: calling
-the same action again with only `codespace_id` and `operation_id` reconciles that
-operation without dispatching a second command, write, upload or download. The
-same resume call with `cancel: true` stops a command instead of reporting it.
+Ordinary execution and file actions wait for a terminal result and return the action's useful
+output, not a metadata envelope. Exec returns stdout, stderr and exit code. Failed, cancelled
+and timed-out commands and rejected file edits are tool errors (`isError: true`) retaining useful
+bounded output. `operation_id` appears when retained output is truncated or exceptional recovery
+needs it. Calling the same action with only `codespace_id` and that ID observes the accepted
+operation without dispatching another effect. Ordinary exec accepts neither `background` nor
+`cancel`; use `codespace_process` for independently managed processes.
+
+`codespace_process` start accepts the same command/session/stdin inputs and returns `process_id`
+and state after admission, without waiting for completion. Get collects state and available output;
+read returns a bounded UTF-8 stream range; stop cancels that exact process. Ranges use byte offsets:
+a split multibyte character or invalid UTF-8 is shown with replacement
+characters, matching ordinary retained command-output reads. Repository-file reads keep their
+separate strict UTF-8 and binary-download contract. The process ID addresses the
+existing command operation, not a new job queue. Unknown state, retained-output expiry and
+interruption remain explicit; inspect the same ID instead of starting a duplicate process.
 
 Consecutive commands share a working context through a named session. A caller
 opens one with `session` and `session_start: true` and continues it by naming
@@ -982,7 +997,7 @@ accepted, and a session's stored working directory is resolved by the same rule 
 refuses any escape from the repository.
 
 The `exec` action accepts argv as data, an optional repository-relative `cwd`,
-`timeout_seconds`, `background`, `session`, `session_start`, `session_end`, `env`, `script`, optional per-stream output limits and exactly one optional stdin
+`timeout_seconds`, `session`, `session_start`, `session_end`, `env`, `script`, optional per-stream output limits and exactly one optional stdin
 form: `stdin_text` (UTF-8) or `stdin_file`, a native ChatGPT file reference. The
 registry publishes `_meta["openai/fileParams"]` on the tool for both `stdin_file` and
 `file`; inside a reference only `file_id` and `download_url` are
@@ -1001,10 +1016,11 @@ the content-free summary. The `download` action returns the private transfer as 
 `resource_link` (see the previous section).
 
 `preview_image` instead returns a complete repository-relative PNG/JPEG as standard MCP
-`ImageContent`, with safe operation and image metadata. Pass `codespace_id`, `path` and optional
+`ImageContent`, with safe image format, dimensions and byte-size metadata. Pass `codespace_id`, `path` and optional
 `max_bytes` (default and maximum 4 MiB). It uses the existing download operation and its authorization
 and generation checks. Resume with only `codespace_id` and `operation_id`; the owned operation must
-have download kind. Pending remains a JSON operation envelope with no image. Successful projection
+have download kind. The ordinary call waits for complete bytes; an unconfirmed result is an error
+with its accepted operation ID, never a successful pending image. Successful projection
 checks complete bytes, digest, container/header framing, dimensions up to 8192 per edge and 16 million
 pixels; SVG, other formats, animated PNG, truncated and over-limit containers are refused. These
 checks are not full pixel decoding. Binary data appears only in the native image block, never in
@@ -1153,9 +1169,9 @@ independent byte ceilings; the user's transfer usage remains native-only.
 It contains no user, codespace or operation identifier, and the
 connector is never probed while the feature is disabled.
 
-The complete view is served to authenticated callers: the website management list,
-`GET /api/admin/system-status` (`systemHealth.codespaces`) and the agent's
-`instance` summary the `list` action returns. The unauthenticated liveness surfaces
+The complete view is served to authenticated website management and
+`GET /api/admin/system-status` (`systemHealth.codespaces`); compact MCP discovery omits it.
+The unauthenticated liveness surfaces
 `GET /api/health` and MCP `GET /health` receive only the public projection
 `{ state, provider, degraded }`, served from `snapshot()`: the last computed decision
 while it is younger than twice `CODESPACE_RECONCILE_INTERVAL_SECONDS`, otherwise one

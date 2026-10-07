@@ -309,10 +309,18 @@ commands and reads do not impose that serialization. A failed edit does not requ
 
 ## Local codespaces
 
+Ordinary `codespace` commands and files wait for the accepted result; create/start wait for usable
+guest readiness, stop for confirmed shutdown and delete for confirmed absence. Successful results
+omit operation journals. Long-lived servers use `codespace_process` with start/get/read/stop and its
+retained `process_id`; a pending process stop is not confirmed cancellation. Unconfirmed delivery
+returns an error and the existing recovery identity. Inspect that identity instead of submitting
+new work. Server waiting does not extend an MCP client's transport timeout. Use `repositories`
+to discover approved targets separately from `list`.
+
 Internal companion messages have a separate bounded transfer budget; they do not consume the
 native file-upload/download slots or their displayed usage. Native file limits still apply.
 
-For `repository_add`, inspect applied consent with `local_devices` and reuse the original
+For `repository_add`, inspect applied consent in Settings, discover the device with `local_devices` and reuse the original
 `request_id` with the same device/repository. Pending returns no usable local repository identity;
 rejected or changed account/grants require owner action. The repository must be private, owned by
 the connected personal GitHub account and exposed by the App installation. Another pending owner
@@ -320,16 +328,18 @@ revision must settle before admission. An admission refusal does not permit the 
 consent or the lease. An existing local grant is discovered, not added twice.
 
 For `repository_create`, choose a personal `installation_id` from `local_devices`; organization
-installations and public creation are unsupported. `github_setup_required` directs the owner to
+installations and public creation are unsupported. A discovery warning directs the owner to
 GitHub connection/installation settings. Repeat the same device/request/name/installation payload.
 `setup_required` preserves any confirmed repository ID while permissions/access are repaired;
 it does not mean creation failed or authorize another create. `unknown` inspects the retained
 description marker instead of repeating POST. Another same-name repository or no observed repository
 cannot settle that ambiguity. Keep the marker while unresolved; other repository requests are
 not blocked by a repository-count quota.
-Only `applied` after actual installation grant and companion ACK authorizes codespace creation.
-Inspect `error.stage` for the failing setup step and `error.provider_status` for a reported GitHub
-HTTP status; follow `instruction` and resume the same complete creation request. If
+Only actual installation grant and companion ACK authorize codespace creation. MCP admission waits
+for that ACK and returns `repository_id`; exceptional recovery preserves the original `request_id`.
+The owner admission API retains `error.stage` and a reported `error.provider_status`; compact MCP
+errors carry safe repair guidance and the original `request_id`. Follow that guidance and resume
+the same complete creation request. If
 `stage: "local_admission"` returns `rejected`, the repository can already exist. Restore its
 original grant in Settings, or use `repository_add` with the retained `github_repository_id`
 and a fresh `request_id` if existing-private consent permits it. An unchanged rejected admission
@@ -340,6 +350,8 @@ its `codespace_id` and `operation_id`, not another file dispatch. SVG, animated 
 truncated or oversized framing is refused. Use `download` for other binary files. Browser installation
 and actual browser compatibility remain guest-runtime questions; network availability and
 successful image projection do not establish that a browser ran or that its screenshot is correct.
+The ordinary call waits for complete bytes and returns native image content; an unconfirmed outcome
+returns an error, never successful pending image content.
 
 Use **Settings → Development → Local computers** and the companion's `status` to distinguish pending
 browser approval, revocation, an offline computer and an expired local lease. An offline row is
@@ -396,7 +408,10 @@ local disable, lease expiry and explicit shutdown do so independently. Current g
 deadlines remain unchanged. Cached results can return without repeating effects; an offline row
 cannot promise immediate delivery of a remote revocation.
 
-The local guest proxy authenticates package requests with its installed per-space broker
+A Git identity HTTP 401/403 can safely direct the owner to refresh repository access,
+add this repository to the App installation, or reconnect the verified GitHub identity in Settings.
+Other response text remains private; a refusal never permits using a host token or widening rights.
+The proxy authenticates package requests with its installed per-space broker
 permission; package clients need not send a proxy-auth header. The host still enforces the computer's
 lease, repository authority and public-address/computer-network checks. A proxy refusal is not permission to broaden them
 or use a host/GitHub token.

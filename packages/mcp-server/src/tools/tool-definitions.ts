@@ -19,6 +19,7 @@ import {
   tokenSchema,
   communicationSchema,
   codespaceSchema,
+  codespaceProcessSchema,
 } from "./tool-schemas.js";
 
 /**
@@ -26,6 +27,7 @@ import {
  * log-context selector both read it, so neither can be renamed without the other.
  */
 export const CODESPACE_TOOL_NAME = "codespace" as const;
+export const CODESPACE_PROCESS_TOOL_NAME = "codespace_process" as const;
 
 export type ToolResponsePolicy = "json" | "text" | "json-or-text" | "formatted-text" | "native";
 
@@ -370,6 +372,7 @@ export const TOOL_DEFINITIONS = [
     responsePolicy: "native",
     examples: [
       { action: "list" },
+      { action: "repositories" },
       { action: "setup_help" },
       { action: "local_devices" },
       {
@@ -414,7 +417,6 @@ export const TOOL_DEFINITIONS = [
       {
         action: "delete",
         codespace_id: "00000000-0000-4000-8000-000000000000",
-        expected_generation: 3,
         confirm_delete: true,
       },
       {
@@ -453,13 +455,56 @@ export const TOOL_DEFINITIONS = [
         summary:
           "Work in a persistent GitHub or local Docker Sandboxes codespace: lifecycle, commands and files, by action.",
         result:
-          "Sanitized device/delegation, repository admission or private creation state (pending, applied, unknown, setup_required, rejected), codespace state, durable operation output, file versions, a one-use native download link, or bounded PNG/JPEG ImageContent. Resume creation with the same request identity and payload; local repository access requires applied companion acknowledgement. Each local codespace has its own VM; one repository may have multiple codespaces.",
+          "Compact codespace or repository discovery, confirmed lifecycle state, stdout/stderr/exit_code, file results, a native download link or PNG/JPEG ImageContent. Recovery identities appear only for unknown outcomes or retained large output. Background commands use codespace_process.",
       },
       ru: {
         summary:
           "Работа в постоянном codespace GitHub или локальной Docker Sandboxes VM: жизненный цикл, команды и файлы, по action.",
         result:
-          "Безопасное состояние устройства/делегирования, допуска или создания приватного репозитория (pending, applied, unknown, setup_required, rejected), состояние codespace и операции, версии файлов, одноразовая нативная ссылка или ограниченный PNG/JPEG ImageContent. Создание продолжают с прежними идентичностью и данными запроса; локальный доступ требует применённого подтверждения companion. У каждого локального codespace своя VM; один репозиторий может иметь несколько codespaces.",
+          "Краткий список кодспейсов или репозиториев, подтверждённое состояние, stdout/stderr/exit_code, результаты работы с файлами, нативная ссылка или PNG/JPEG ImageContent. Идентификаторы восстановления появляются только при неизвестном результате или большом сохранённом выводе. Фоновые команды используют codespace_process.",
+      },
+    },
+  }),
+  defineTool({
+    name: CODESPACE_PROCESS_TOOL_NAME,
+    schema: codespaceProcessSchema,
+    _meta: { "openai/fileParams": ["stdin_file"] },
+    responsePolicy: "native",
+    examples: [
+      {
+        action: "start",
+        codespace_id: "00000000-0000-4000-8000-000000000000",
+        argv: ["npm", "run", "dev"],
+      },
+      {
+        action: "get",
+        codespace_id: "00000000-0000-4000-8000-000000000000",
+        process_id: "11111111-1111-4111-8111-111111111111",
+      },
+      {
+        action: "read",
+        codespace_id: "00000000-0000-4000-8000-000000000000",
+        process_id: "11111111-1111-4111-8111-111111111111",
+        stream: "stdout",
+        offset: 0,
+        length: 65536,
+      },
+      {
+        action: "stop",
+        codespace_id: "00000000-0000-4000-8000-000000000000",
+        process_id: "11111111-1111-4111-8111-111111111111",
+      },
+    ],
+    documentation: {
+      en: {
+        summary: "Start, inspect, read and stop a background command in an owned codespace.",
+        result:
+          "A process_id, its state and available command output or a bounded output range; no lifecycle generations or journals.",
+      },
+      ru: {
+        summary: "Запускает, проверяет, читает и останавливает фоновую команду в своём кодспейсе.",
+        result:
+          "process_id, состояние и доступный результат команды либо диапазон вывода; без поколений и журналов.",
       },
     },
   }),

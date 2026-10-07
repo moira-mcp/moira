@@ -74,7 +74,7 @@ class FakeFileTransport implements CodespaceFileTransport {
   };
 }
 
-function fixture() {
+function fixture(advanceOnDelay = false) {
   const sqlite = new Database(":memory:");
   sqlite.pragma("foreign_keys = ON");
   migrate(drizzle(sqlite), { migrationsFolder: migrations });
@@ -108,17 +108,29 @@ function fixture() {
   const credentials = { getCredential: jest.fn(async () => "ghu_access") };
   // The settle window is exercised for its attempts, not for real elapsed time.
   const settleDelays: number[] = [];
+  let currentNow = now;
+  const delay = async (milliseconds: number) => {
+    settleDelays.push(milliseconds);
+    if (advanceOnDelay) currentNow += milliseconds;
+  };
   const service = new CodespaceFileService({
     repository,
     transport,
     credentials,
     policy: () => policy,
-    now: () => now,
-    delay: async (milliseconds) => {
-      settleDelays.push(milliseconds);
-    },
+    now: () => currentNow,
+    delay,
   });
-  return { sqlite, repository, settleDelays, transport, credentials, service };
+  return {
+    sqlite,
+    repository,
+    settleDelays,
+    transport,
+    credentials,
+    service,
+    delay,
+    now: () => currentNow,
+  };
 }
 
 describe("observed local file-operation completion", () => {
@@ -313,6 +325,139 @@ describe("observed local file-operation completion", () => {
 });
 
 describe("durable codespace file operations", () => {
+  test("synchronous file waiting rechecks authority after an awaited terminal file result", async () => {
+    const value = fixture(true);
+    try {
+      const terminal = value.transport.result;
+      value.transport.result = { state: "running" } as unknown as typeof terminal;
+      const accepted = await value.service.execute("user-1", "codespace-1", {
+        action: "stat",
+        path: "private.txt",
+      });
+      value.transport.inspectFile = async () => {
+        await Promise.resolve();
+        value.sqlite.prepare("DELETE FROM codespaceConnectionRepository").run();
+        return terminal;
+      };
+      await expect(
+        value.service.waitForResult("user-1", accepted.operation.id),
+      ).rejects.toMatchObject({ code: "CODESPACE_AUTHORIZATION_REQUIRED" });
+      expect(value.transport.executeCalls).toHaveBeenCalledTimes(1);
+    } finally {
+      value.sqlite.close();
+    }
+  });
+
+  test("synchronous file waiting refuses an unconfirmed deadline without redispatch or false completion", async () => {
+    const value = fixture(true);
+    try {
+      value.transport.result = { state: "running" } as unknown as CodespaceFileResult;
+      const accepted = await value.service.execute("user-1", "codespace-1", {
+        action: "stat",
+        path: "file.txt",
+      });
+      await expect(
+        value.service.waitForResult("user-1", accepted.operation.id),
+      ).rejects.toMatchObject({ code: "CODESPACE_PROVIDER_UNAVAILABLE" });
+      expect(value.repository.getOwned("user-1", accepted.operation.id)).toMatchObject({
+        state: "running",
+      });
+      expect(value.transport.executeCalls).toHaveBeenCalledTimes(1);
+    } finally {
+      value.sqlite.close();
+    }
+  });
+
+  test("opt-in synchronous file waiting retains the short Web response and returns the eventual exact file version", async () => {
+    const value = fixture(true);
+    try {
+      const terminal = value.transport.result;
+      value.transport.result = { state: "running" } as unknown as typeof terminal;
+      value.transport.inspectFile = async () => {
+        value.transport.inspectCalls();
+        return value.now() - now >= 3000 ? terminal : { state: "running" };
+      };
+      const accepted = await value.service.execute("user-1", "codespace-1", {
+        action: "write",
+        path: "src/file.bin",
+        bytes: Buffer.from("abc"),
+        expected: { exists: false },
+      });
+      expect(accepted).toMatchObject({ operation: { state: "running" }, result: null });
+      const completed = await value.service.waitForResult("user-1", accepted.operation.id);
+      expect(completed).toMatchObject({
+        operation: { id: accepted.operation.id, state: "succeeded" },
+        result: terminal,
+      });
+      expect(value.transport.executeCalls).toHaveBeenCalledTimes(1);
+      expect(value.repository.listOwned("user-1", "codespace-1")).toHaveLength(1);
+    } finally {
+      value.sqlite.close();
+    }
+  });
+
+  test("synchronous native download waits for retained bytes with quota reserved before inspection and no redispatch", async () => {
+    const value = fixture(true);
+    const root = mkdtempSync(join(tmpdir(), "moira-wait-download-"));
+    const transfers = new CodespaceTransferService({
+      repository: new CodespaceTransferRepository(value.sqlite),
+      root,
+      policy: () => policy,
+      now: value.now,
+    });
+    const service = new CodespaceFileService({
+      repository: value.repository,
+      transport: value.transport,
+      credentials: value.credentials,
+      policy: () => policy,
+      now: value.now,
+      delay: value.delay,
+      transfers,
+    });
+    const bytes = Buffer.from([0, 255, 1, 128]);
+    try {
+      value.transport.result = { state: "running" } as unknown as CodespaceFileResult;
+      value.transport.inspectFile = async () => {
+        expect(
+          value.sqlite.prepare("SELECT state,declaredSize FROM codespaceTransfer").all(),
+        ).toEqual([{ state: "reserved", declaredSize: 16 }]);
+        return value.now() - now >= 3000
+          ? {
+              action: "download",
+              path: "result.bin",
+              offset: 0,
+              totalSize: bytes.length,
+              bytes,
+              sha256: "a".repeat(64),
+            }
+          : { state: "running" };
+      };
+      const accepted = await service.downloadReference("user-1", "codespace-1", {
+        path: "result.bin",
+        maxBytes: 16,
+        fileName: "result.bin",
+        mimeType: "application/octet-stream",
+      });
+      expect(accepted).toMatchObject({ operation: { state: "running" }, transfer: null });
+      const completed = await service.waitForDownloadReference("user-1", accepted.operation.id, {
+        fileName: "result.bin",
+        mimeType: "application/octet-stream",
+      });
+      const claimed = await transfers.claimDownload(completed.transfer!.referenceId);
+      const chunks: Buffer[] = [];
+      for await (const chunk of claimed.stream) chunks.push(Buffer.from(chunk));
+      expect(Buffer.concat(chunks)).toEqual(bytes);
+      await transfers.consume(claimed.record);
+      expect(completed.operation).toMatchObject({ id: accepted.operation.id, state: "succeeded" });
+      expect(value.transport.executeCalls).toHaveBeenCalledTimes(1);
+      expect(value.sqlite.prepare("SELECT COUNT(*) count FROM codespaceTransfer").get()).toEqual({
+        count: 0,
+      });
+    } finally {
+      value.sqlite.close();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
   test("returns a file result that lands during the settle window", async () => {
     const value = fixture();
     try {
