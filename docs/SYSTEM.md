@@ -657,6 +657,14 @@ machine and repository identity. Storage resizing uses only the exact owned disk
 image and APFS container, checks native bounds and capacity, and preserves data;
 uncertain native settlement retains its journal and disables work.
 
+Manager startup holds the runner gate while `ensureStorageMounted` checks storage.
+On macOS it may attach only the existing `storage.sparsebundle` in the same private
+state to that device's default mount. Fresh native image/mount binding and ordinary
+volume ownership, finite capacity and free-space admission are required, including
+after a lost attach reply. Custom mounts remain manually managed. Missing images,
+unsafe mount points and conflicting bindings refuse startup without creating or
+resetting storage.
+
 `packages/local` owns the host policy and SDK profile. A local
 finite lease, repository grants, machine/storage ceilings and explicit permissions
 bound remote work. Each codespace has a persistent mountless VM. The shared guest
