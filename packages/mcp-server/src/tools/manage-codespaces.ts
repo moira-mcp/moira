@@ -252,7 +252,7 @@ const SAFE_ERROR_MESSAGES: Record<string, string> = {
   CODESPACE_OPERATION_PENDING: "The codespace operation has not reached a terminal result.",
   CODESPACE_OPERATION_FAILED: "The codespace command failed; inspect its output and exit code.",
   CODESPACE_OPERATION_INTERRUPTED:
-    "The codespace restarted while this command was running, so its process did not survive and it produced no result. The files it had already written are still there; run the command again.",
+    "The operation was interrupted before completion. Inspect the affected files before repeating or replacing that change; independent work can continue. This operation will not be replayed automatically.",
   CODESPACE_OPERATION_OUTPUT_LIMIT:
     "The command was stopped because its retained output reached the codespace ceiling; its output up to that point remains readable.",
   CODESPACE_OPERATION_CANCELLED: "The codespace operation was cancelled.",
@@ -479,7 +479,11 @@ function operationResult(
 function fileOperationResult(response: CodespaceFileOperationResponse): CallToolResult {
   const operation = projectOperation(response);
   try {
-    return operationResult(operation, response.result ? projectFileResult(response.result) : null);
+    return operationResult(
+      operation,
+      response.result ? projectFileResult(response.result) : null,
+      response.result && "state" in response.result ? response.result.code : undefined,
+    );
   } catch (error) {
     if (error instanceof BinaryCodespaceReadError) {
       return operationResult(operation, null, "CODESPACE_BINARY_READ_REQUIRES_DOWNLOAD");
@@ -1262,6 +1266,7 @@ export async function executeCodespaceTool(
       );
     if (error instanceof CodespaceConnectionError || error instanceof CodespaceResourceError) {
       recordCodespaceRejection(error.code);
+      if (error instanceof CodespaceResourceError) acceptedOperationId ??= error.operationId;
       if (PROVIDER_REFUSAL_CODES.has(error.code)) {
         // The bounded internal message names only the provider's HTTP status; operators need
         // it to tell a permission gap from an outage, while the agent sees the safe code.

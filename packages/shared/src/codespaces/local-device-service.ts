@@ -185,11 +185,11 @@ export class LocalDeviceService {
   getBinding(userId: string, resourceId: string) {
     return this.repository.getBinding(userId, resourceId);
   }
-  enqueue(request: LocalRelayRequest) {
+  enqueue(request: LocalRelayRequest, operationMarker?: string) {
     const input = relayRequestSchema.parse(request) as LocalRelayRequest;
     if (input.digest !== input.payloadReference.sha256)
       throw new LocalDeviceError("LOCAL_INVALID", "Payload digest differs from relay identity.");
-    return this.repository.enqueue(input, this.now());
+    return this.repository.enqueue(input, this.now(), operationMarker);
   }
   claim(auth: LocalDeviceAuth, limit = 1) {
     return this.repository.claim(auth, z.number().int().min(1).max(8).parse(limit), this.now());

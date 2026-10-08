@@ -254,6 +254,165 @@ function fixture(advanceOnDelay = false) {
 }
 
 describe("durable direct codespace operations", () => {
+  test("an uncertain typed command failure exposes its accepted operation and recovers without execution replay", async () => {
+    const value = fixture();
+    let executions = 0;
+    try {
+      value.transport.execute = async () => {
+        executions++;
+        throw new CodespaceResourceError(
+          "CODESPACE_PROVIDER_UNAVAILABLE",
+          "Controlled lost response after admission",
+        );
+      };
+      const failure = await value.service
+        .execute("user-1", "codespace-1", {
+          argv: ["command"],
+          stdin: { kind: "inline", bytes: new Uint8Array() },
+          timeoutMs: 1000,
+        })
+        .then(
+          () => null,
+          (error: unknown) => error as CodespaceResourceError,
+        );
+      expect(failure).toBeInstanceOf(CodespaceResourceError);
+      expect(failure).toMatchObject({
+        code: "CODESPACE_PROVIDER_UNAVAILABLE",
+        operationId: expect.any(String),
+      });
+      expect(value.repository.getOwned("user-1", failure!.operationId!)).toMatchObject({
+        state: "reconcile_pending",
+      });
+      await expect(value.service.reconcile("user-1", failure!.operationId!)).resolves.toMatchObject(
+        { state: "succeeded", stdout: "ok" },
+      );
+      expect(executions).toBe(1);
+      expect(value.repository.listOwned("user-1", "codespace-1")).toHaveLength(1);
+    } finally {
+      value.sqlite.close();
+    }
+  });
+
+  test.each(["CODESPACE_NOT_RUNNING", "CODESPACE_AUTHORIZATION_REQUIRED"] as const)(
+    "returns proven pre-dispatch refusal %s without an ambiguous pending operation or retry",
+    async (code) => {
+      const value = fixture();
+      let attempts = 0;
+      try {
+        value.transport.execute = async () => {
+          attempts++;
+          throw new CodespaceResourceError(
+            code,
+            "Controlled refusal before guest execution",
+            undefined,
+            true,
+          );
+        };
+        await expect(
+          value.service.execute("user-1", "codespace-1", {
+            argv: ["command"],
+            stdin: { kind: "inline", bytes: new Uint8Array() },
+            timeoutMs: 1000,
+          }),
+        ).rejects.toMatchObject({ code });
+        expect(value.repository.listOwned("user-1", "codespace-1")).toEqual([
+          expect.objectContaining({
+            state: "failed",
+            remoteCleanupPending: 0,
+            resultExpiresAt: null,
+          }),
+        ]);
+        expect(attempts).toBe(1);
+        expect(value.transport.inspectCalls).not.toHaveBeenCalled();
+      } finally {
+        value.sqlite.close();
+      }
+    },
+  );
+
+  test.each([
+    "reservation",
+    "credential refresh",
+    "execution",
+    "inspection",
+    "retained output",
+  ] as const)(
+    "ordinary commands preserve their exact result after lifecycle changes during %s",
+    async (boundary) => {
+      const value = fixture();
+      const advanceLifecycle = () =>
+        value.sqlite.exec("UPDATE codespaceResource SET generation=generation+1");
+      try {
+        const service = new CodespaceOperationService({
+          repository: value.repository,
+          transport: value.transport,
+          credentials: value.credentials,
+          policy: () => policy,
+          now: () => now,
+          delay: async () => {},
+          audit: (event) => {
+            if (boundary === "reservation" && event.action === "reserve") advanceLifecycle();
+          },
+        });
+        if (boundary === "credential refresh")
+          value.credentials.getCredential.mockImplementationOnce(async () => {
+            advanceLifecycle();
+            return "ghu_access";
+          });
+        if (boundary === "execution") value.transport.executeObservation = advanceLifecycle;
+        if (boundary === "inspection") {
+          value.transport.executeResult = { state: "running" };
+          value.transport.inspectResult = execResult({
+            state: "succeeded",
+            stdout: "exact result",
+            stderr: "",
+            exitCode: 0,
+          });
+          value.transport.inspectObservation = async () => {
+            advanceLifecycle();
+          };
+        } else
+          value.transport.executeResult = execResult({
+            state: "succeeded",
+            stdout: "exact result",
+            stderr: "",
+            exitCode: 0,
+          });
+        const completed = await service.execute("user-1", "codespace-1", {
+          argv: ["command"],
+          timeoutMs: 1000,
+          stdin: { kind: "inline", bytes: new Uint8Array() },
+        });
+        expect(completed).toMatchObject({
+          operation: { state: "succeeded" },
+          result: { stdout: "exact result", exitCode: 0 },
+        });
+        if (boundary === "retained output") {
+          value.sqlite.exec(
+            "UPDATE codespaceResource SET generation=generation+1,state='stopped',desiredState='stopped'",
+          );
+          value.transport.outputResult = {
+            stream: "stdout",
+            offset: 0,
+            totalBytes: 12,
+            bytes: Buffer.from("exact result"),
+          };
+          await expect(
+            service.readOutput("user-1", completed.operation.id, {
+              stream: "stdout",
+              offset: 0,
+              length: 32,
+            }),
+          ).resolves.toMatchObject({ bytes: Buffer.from("exact result") });
+        }
+        expect(value.transport.executeCalls).toHaveBeenCalledTimes(1);
+        expect(value.repository.listOwned("user-1", "codespace-1")).toHaveLength(1);
+      } finally {
+        value.sqlite.close();
+      }
+    },
+  );
+
   test("rejects unavailable connector before credentials on dispatch and result recovery", async () => {
     const value = fixture();
     const request = {
@@ -290,11 +449,10 @@ describe("durable direct codespace operations", () => {
     }
   });
   test.each([
-    ["generation", "UPDATE codespaceResource SET generation = 2", "CODESPACE_GENERATION_CONFLICT"],
     [
       "authorization generation",
       "UPDATE codespaceConnection SET credentialGeneration = 2",
-      "CODESPACE_GENERATION_CONFLICT",
+      "CODESPACE_AUTHORIZATION_REQUIRED",
     ],
     [
       "revoked grant",
@@ -306,7 +464,6 @@ describe("durable direct codespace operations", () => {
       "UPDATE codespaceConnection SET status = 'disconnected'",
       "CODESPACE_AUTHORIZATION_REQUIRED",
     ],
-    ["stopped", "UPDATE codespaceResource SET desiredState = 'stopped'", "CODESPACE_NOT_RUNNING"],
     [
       "disabled",
       "INSERT INTO codespaceProviderControl (scope,disabled,reason,updatedAt) VALUES ('global',1,'test',0)",
@@ -332,7 +489,6 @@ describe("durable direct codespace operations", () => {
           value.repository.beginDispatch(
             "user-1",
             reservation.operation!.id,
-            1,
             "dispatch",
             now + 1000,
             now,
@@ -471,7 +627,6 @@ describe("durable direct codespace operations", () => {
         value.repository.beginDispatch(
           "user-1",
           reservedId,
-          reservation.operation!.resourceGeneration,
           "claim-1",
           now + 60_000,
           now,
@@ -982,7 +1137,7 @@ describe("durable direct codespace operations", () => {
     }
   });
 
-  test("rechecks result authority after asynchronous credential refresh", async () => {
+  test("rechecks revoked result authority after asynchronous credential refresh", async () => {
     const value = fixture();
     try {
       const started = await value.service.execute("user-1", "codespace-1", {
@@ -992,11 +1147,11 @@ describe("durable direct codespace operations", () => {
         timeoutMs: 1000,
       });
       value.credentials.getCredential.mockImplementationOnce(async () => {
-        value.sqlite.exec("UPDATE codespaceResource SET generation = 2");
+        value.sqlite.exec("DELETE FROM codespaceConnectionRepository");
         return "ghu_access";
       });
       await expect(value.service.reconcile("user-1", started.operation.id)).rejects.toMatchObject({
-        code: "CODESPACE_GENERATION_CONFLICT",
+        code: "CODESPACE_AUTHORIZATION_REQUIRED",
       });
       expect(value.transport.inspectCalls).not.toHaveBeenCalled();
     } finally {
@@ -1368,44 +1523,41 @@ describe("durable direct codespace operations", () => {
         policy: () => policy,
         now: () => now,
       });
-      const mismatch = await mismatchService.execute("user-1", "codespace-1", {
-        argv: ["cat"],
-        cwd: ".",
-        stdin: {
-          kind: "reference",
-          referenceId: "codespace-file://size-mismatch",
-          declaredBytes: 3,
-          declaredMimeType: "application/octet-stream",
-        },
-        timeoutMs: 5_000,
-      });
-      expect(mismatch).toMatchObject({
-        operation: {
-          state: "cancelled",
-          lastOutcome: "native_input_unavailable_before_dispatch",
-          remoteCleanupPending: 0,
-        },
-        result: null,
-      });
-      const mimeMismatch = await mismatchService.execute("user-1", "codespace-1", {
-        argv: ["cat"],
-        cwd: ".",
-        stdin: {
-          kind: "reference",
-          referenceId: "codespace-file://mime-mismatch",
-          declaredBytes: 4,
-          declaredMimeType: "text/plain",
-        },
-        timeoutMs: 5_000,
-      });
-      expect(mimeMismatch).toMatchObject({
-        operation: {
-          state: "cancelled",
-          lastOutcome: "native_input_unavailable_before_dispatch",
-          remoteCleanupPending: 0,
-        },
-        result: null,
-      });
+      await expect(
+        mismatchService.execute("user-1", "codespace-1", {
+          argv: ["cat"],
+          cwd: ".",
+          stdin: {
+            kind: "reference",
+            referenceId: "codespace-file://size-mismatch",
+            declaredBytes: 3,
+            declaredMimeType: "application/octet-stream",
+          },
+          timeoutMs: 5_000,
+        }),
+      ).rejects.toMatchObject({ code: "CODESPACE_RESOURCE_INVALID" });
+      await expect(
+        mismatchService.execute("user-1", "codespace-1", {
+          argv: ["cat"],
+          cwd: ".",
+          stdin: {
+            kind: "reference",
+            referenceId: "codespace-file://mime-mismatch",
+            declaredBytes: 4,
+            declaredMimeType: "text/plain",
+          },
+          timeoutMs: 5_000,
+        }),
+      ).rejects.toMatchObject({ code: "CODESPACE_RESOURCE_INVALID" });
+      expect(value.repository.listOwned("user-1", "codespace-1")).toEqual(
+        Array.from({ length: 3 }, () =>
+          expect.objectContaining({
+            state: "cancelled",
+            lastOutcome: "native_input_unavailable_before_dispatch",
+            remoteCleanupPending: 0,
+          }),
+        ),
+      );
       expect(mismatchTransfers.release).toHaveBeenCalledWith(record);
       expect(value.credentials.getCredential).not.toHaveBeenCalled();
       expect(value.transport.executeCalls).not.toHaveBeenCalled();
@@ -1840,7 +1992,6 @@ describe("durable direct codespace operations", () => {
         value.repository.beginDispatch(
           "user-1",
           reserved.operation!.id,
-          reserved.operation!.resourceGeneration,
           "crashed-process-claim",
           now + 5_000,
           now,
@@ -1999,7 +2150,10 @@ describe("durable direct codespace operations", () => {
           stdin: { kind: "inline", bytes: new Uint8Array() },
           timeoutMs: 1_000,
         }),
-      ).resolves.toMatchObject({ operation: { state: "cancel_pending" }, result: null });
+      ).rejects.toMatchObject({ code: "CODESPACE_PROVIDER_DISABLED" });
+      expect(value.repository.listOwned("user-1", "codespace-1")).toEqual([
+        expect.objectContaining({ state: "cancelled", remoteCleanupPending: 0 }),
+      ]);
       expect(value.credentials.getCredential).not.toHaveBeenCalled();
       expect(value.transport.executeCalls).not.toHaveBeenCalled();
     } finally {
@@ -2036,7 +2190,7 @@ describe("durable direct codespace operations", () => {
     }
   });
 
-  test("fences a successful result when a concurrent stop advances the codespace generation", async () => {
+  test("preserves a proven successful result when a concurrent stop advances lifecycle state", async () => {
     const value = fixture();
     try {
       let releaseExecute!: () => void;
@@ -2058,8 +2212,8 @@ describe("durable direct codespace operations", () => {
       new CodespaceResourceRepository(value.sqlite).requestStop("user-1", "codespace-1", now + 1);
       releaseExecute();
       await expect(executing).resolves.toMatchObject({
-        operation: { state: "cancelled", remoteCleanupPending: 1 },
-        result: { state: "cancelled" },
+        operation: { state: "succeeded", remoteCleanupPending: 1 },
+        result: { state: "succeeded", stdout: "ok", exitCode: 0 },
       });
       expect(value.transport.finalizeCalls).not.toHaveBeenCalled();
       await expect(
@@ -2067,8 +2221,8 @@ describe("durable direct codespace operations", () => {
           "user-1",
           value.repository.listOwned("user-1", "codespace-1")[0]!.id,
         ),
-      ).rejects.toMatchObject({ code: "CODESPACE_GENERATION_CONFLICT" });
-      expect(value.transport.inspectCalls).not.toHaveBeenCalled();
+      ).resolves.toMatchObject({ state: "succeeded", stdout: "ok", exitCode: 0 });
+      expect(value.transport.executeCalls).toHaveBeenCalledTimes(1);
     } finally {
       value.sqlite.close();
     }

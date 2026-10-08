@@ -1,7 +1,7 @@
 import { afterEach, expect, test } from "@jest/globals";
 import { spawn, spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { mkdtempSync, mkdirSync, realpathSync, rmSync, statSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, realpathSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -169,7 +169,7 @@ test("GitHub defaults reject a broker origin even when a request claims another 
   ).rejects.toThrow("repository identity mismatch");
 });
 
-test("file inspection resumes a persisted intent using the locally bound repository", async () => {
+test("file inspection does not replay a persisted intent and a fresh write uses the locally bound repository", async () => {
   const local = fixture();
   const remoteMarker = marker();
   const write = {
@@ -184,10 +184,16 @@ test("file inspection resumes a persisted intent using the locally bound reposit
       bytesBase64: Buffer.from("recovered").toString("base64"),
     },
   };
-  // A refused origin leaves the durable intent before any mutation; the next call inspects it.
+  // Inspecting an old intent settles its outcome; only a new request may initiate the write.
   await expect(call(local, write, null)).rejects.toThrow("repository identity mismatch");
   const result = await call(local, { version: 1, action: "file-inspect", remoteMarker });
-  expect(result.state).toBe("succeeded");
+  expect(result).toMatchObject({
+    state: "failed",
+    value: { action: "write", code: "CODESPACE_OPERATION_INTERRUPTED" },
+  });
+  expect(existsSync(join(local.binding.root, "resumed.dat"))).toBe(false);
+  const fresh = await call(local, { ...write, remoteMarker: marker() });
+  expect(fresh.state).toBe("succeeded");
   const read = await call(local, {
     version: 1,
     action: "file-execute",

@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "@jest/globals";
-import { mkdtemp, rm, realpath } from "node:fs/promises";
+import { mkdtemp, rm, realpath, writeFile, readFile } from "node:fs/promises";
+import { spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { connect, createServer, type Socket } from "node:net";
@@ -46,7 +48,116 @@ function exchange(port: number, bytes: string): Promise<string> {
   });
 }
 
+async function exitedPid(): Promise<number> {
+  const child = spawn(process.execPath, ["-e", ""], { stdio: "ignore" });
+  await new Promise<void>((resolve, reject) => {
+    child.once("error", reject);
+    child.once("exit", (code) => (code === 0 ? resolve() : reject(new Error("Child failed"))));
+  });
+  return child.pid!;
+}
+
 describe("local broker authority and address boundary", () => {
+  test("automatic startup reclaims a dead runner and dead guard without replaying retained work", async () => {
+    const fixture = await localFixture(state);
+    const deadPid = await exitedPid();
+    await writeFile(join(root, "runner.lock"), String(deadPid), { mode: 0o600 });
+    await state.write("runtime-owner.json", {
+      owner: randomUUID(),
+      ownerPID: deadPid,
+      profile: "a".repeat(64),
+      settled: false,
+    });
+    const retained = { state: "running", remoteMarker: "retained-unknown-operation" };
+    await state.write("job-retained.json", retained);
+    let ownerStarts = 0;
+    const manager = new LocalManager(fixture.records, {
+      storage: async () => {},
+      guard: async () => {
+        ownerStarts++;
+        return {
+          active: true,
+          stop: async () => {},
+          observe: async () => [],
+          retire: async () => {},
+          remove: async () => {},
+          space: async () => {
+            throw Error("Startup must not replay guest work");
+          },
+        };
+      },
+    });
+    closers.push(() => manager.close());
+    await Promise.all([manager.holdRunnerLock(), manager.holdRunnerLock()]);
+    await manager.open();
+    expect(ownerStarts).toBe(1);
+    expect(await readFile(join(root, "runner.lock"), "utf8")).toBe(String(process.pid));
+    expect(await state.read("job-retained.json", (value) => value)).toEqual(retained);
+    expect(await fixture.records.get(fixture.space.id)).toEqual(fixture.space);
+    expect(await fixture.records.policy()).toEqual(fixture.policy);
+    await expect(state.lock()).rejects.toMatchObject({ code: "LOCAL_ALREADY_RUNNING" });
+    await manager.close();
+    const release = await state.lock();
+    await release();
+  });
+
+  test.each(["live-runner", "live-guard", "unknown-guard", "invalid-receipt", "invalid-marker"])(
+    "automatic startup refuses %s without admitting an owner or changing saved work",
+    async (reason) => {
+      const fixture = await localFixture(state);
+      const deadPid = await exitedPid();
+      const marker =
+        reason === "live-runner"
+          ? String(process.pid)
+          : reason === "invalid-marker"
+            ? "unknown"
+            : String(deadPid);
+      await writeFile(join(root, "runner.lock"), marker, { mode: 0o600 });
+      const receipt =
+        reason === "invalid-receipt"
+          ? { malformed: true }
+          : {
+              owner: randomUUID(),
+              ...(reason === "unknown-guard"
+                ? {}
+                : { ownerPID: reason === "live-guard" ? process.pid : deadPid }),
+              profile: "a".repeat(64),
+              settled: false,
+            };
+      await state.write("runtime-owner.json", receipt);
+      let ownerStarts = 0;
+      const manager = new LocalManager(fixture.records, {
+        storage: async () => {},
+        guard: async () => {
+          ownerStarts++;
+          throw Error("Unsafe startup reached owner admission");
+        },
+      });
+      closers.push(() => manager.close());
+      await expect(manager.open()).rejects.toMatchObject({
+        code:
+          reason === "live-runner"
+            ? "LOCAL_ALREADY_RUNNING"
+            : reason.startsWith("invalid-")
+              ? "LOCAL_STATE_UNSAFE"
+              : "LOCAL_OWNER_ACTIVE",
+      });
+      expect(ownerStarts).toBe(0);
+      expect(await state.read("runtime-owner.json", (value) => value)).toEqual(receipt);
+      expect(await fixture.records.get(fixture.space.id)).toEqual(fixture.space);
+      expect(await fixture.records.policy()).toEqual(fixture.policy);
+      const remainingMarker = await readFile(join(root, "runner.lock"), "utf8").catch(
+        (error: NodeJS.ErrnoException) => {
+          if (error.code === "ENOENT") return null;
+          throw error;
+        },
+      );
+      expect(remainingMarker).toBe(
+        reason === "live-runner" || reason === "invalid-marker" ? marker : null,
+      );
+    },
+  );
+
   test("broker shutdown waits for outstanding authority checks without traffic accounting", async () => {
     const fixture = await localFixture(state);
     let enterCheck!: () => void;

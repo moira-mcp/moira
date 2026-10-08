@@ -29,13 +29,11 @@ const ledgerSchema = z
   .object({
     marker: z.string(),
     digest: z.string(),
-    generation: z.number().int(),
     deadlineAt: z.number().int(),
     terminal: z.boolean(),
     kind: z.enum(["exec", "file"]),
-    unknown: z.boolean().default(false),
   })
-  .strict();
+  .strip();
 
 /** The shared guest protocol is data. Local authority bounds it before it reaches sbx. */
 export class LocalJobs {
@@ -49,7 +47,8 @@ export class LocalJobs {
     return result;
   }
 
-  async dispatch(spaceId: string, value: unknown): Promise<unknown> {
+  async dispatch(spaceId: string, value: unknown, signal?: AbortSignal): Promise<unknown> {
+    signal?.throwIfAborted();
     const serialized = JSON.stringify(value);
     if (
       typeof serialized !== "string" ||
@@ -78,11 +77,6 @@ export class LocalJobs {
     const creates = request.action === "execute" || request.action === "file-execute";
     let ownsDispatch = false;
     let job = await this.manager.records.state.read(key, ledgerSchema.parse);
-    if (job?.unknown)
-      throw new LocalRefusal(
-        "LOCAL_GUEST_SETTLEMENT_UNKNOWN",
-        "The retained guest outcome is unknown; inspect its local fence.",
-      );
     if (creates) {
       if (request.action === "execute") {
         request.timeoutMs = requireOperationExecutionBudget(
@@ -95,11 +89,6 @@ export class LocalJobs {
       const digest = createHash("sha256").update(serialized).digest("hex");
       await this.serial(async () => {
         job = await this.manager.records.state.read(key, ledgerSchema.parse);
-        if (job?.unknown)
-          throw new LocalRefusal(
-            "LOCAL_GUEST_SETTLEMENT_UNKNOWN",
-            "The retained guest outcome is unknown; inspect its local fence.",
-          );
         if (job) {
           if (job.digest !== digest)
             throw new LocalRefusal(
@@ -109,23 +98,15 @@ export class LocalJobs {
           request.action = job.kind === "exec" ? "inspect" : "file-inspect";
           return;
         }
-        const keys = await this.manager.records.state.keys("job-");
-        if (keys.length >= 4096)
-          throw new LocalRefusal(
-            "LOCAL_JOB_CAPACITY",
-            "Local retained operation capacity is exhausted.",
-          );
         job = {
           marker: request.remoteMarker,
           digest,
-          generation: space.generation,
           deadlineAt: Math.min(
             policy.leaseUntil,
             this.manager.now() +
               (typeof request.timeoutMs === "number" ? request.timeoutMs : 60_000),
           ),
           terminal: false,
-          unknown: false,
           kind: request.action === "execute" ? "exec" : "file",
         };
         await this.manager.records.state.write(key, job);
@@ -137,35 +118,32 @@ export class LocalJobs {
     if (!job) return { state: "absent" };
     try {
       const accepted = job;
-      const output = await this.manager.dispatchGuest(spaceId, async (current, latest) => {
-        const repository = requireLocalGrant(latest, current.repositoryId, this.manager.now());
-        if (request.repositoryFullName !== repository.fullName)
-          throw new LocalRefusal("LOCAL_REPOSITORY_DENIED", "The approved repository changed.");
-        if (
-          accepted.generation !== current.generation &&
-          accepted.kind === "exec" &&
-          !accepted.terminal
-        )
-          return null;
-        if (ownsDispatch) {
-          const remaining = Math.min(
-            accepted.deadlineAt - this.manager.now(),
-            latest.leaseUntil - this.manager.now(),
-          );
-          if (remaining <= 0)
-            throw new LocalRefusal("LOCAL_LEASE_EXPIRED", "The accepted work deadline expired.");
-          if (request.action === "execute") {
-            request.timeoutMs = requireOperationExecutionBudget(
-              request.timeoutMs,
-              request.maxRetainedBytes,
-              remaining,
+      const output = await this.manager.dispatchGuest(
+        spaceId,
+        async (current, latest) => {
+          const repository = requireLocalGrant(latest, current.repositoryId, this.manager.now());
+          if (request.repositoryFullName !== repository.fullName)
+            throw new LocalRefusal("LOCAL_REPOSITORY_DENIED", "The approved repository changed.");
+          if (ownsDispatch) {
+            const remaining = Math.min(
+              accepted.deadlineAt - this.manager.now(),
+              latest.leaseUntil - this.manager.now(),
             );
+            if (remaining <= 0)
+              throw new LocalRefusal("LOCAL_LEASE_EXPIRED", "The accepted work deadline expired.");
+            if (request.action === "execute") {
+              request.timeoutMs = requireOperationExecutionBudget(
+                request.timeoutMs,
+                request.maxRetainedBytes,
+                remaining,
+              );
+            }
+            accepted.deadlineAt = this.manager.now() + remaining;
           }
-          accepted.deadlineAt = this.manager.now() + remaining;
-        }
-        return this.manager.operation(spaceId, request);
-      });
-      if (output === null) return { state: "interrupted" };
+          return this.manager.operation(spaceId, request, signal);
+        },
+        signal,
+      );
       const response = z
         .object({ ok: z.literal(true), result: z.unknown() })
         .strict()
@@ -176,24 +154,15 @@ export class LocalJobs {
         "state" in response.result
           ? response.result.state
           : null;
-      if (
-        request.action === "finalize" ||
-        (resultState !== "running" && resultState !== "session_limit")
-      ) {
+      if (request.action === "finalize" && resultState === "absent") {
+        await this.manager.records.state.remove(key);
+        return response.result;
+      }
+      if (resultState !== "running" && resultState !== "session_limit") {
         job.terminal = true;
       }
       await this.manager.records.state.write(key, job);
       return response.result;
-    } catch (error) {
-      if (
-        error instanceof LocalRefusal &&
-        (error.code === "LOCAL_GUEST_SETTLEMENT_UNKNOWN" || error.code === "LOCAL_STOP_PENDING")
-      ) {
-        job.unknown = true;
-        // Unknown is deliberately not terminal: a transport EOF cannot certify guest exit.
-        await this.manager.records.state.write(key, job);
-      }
-      throw error;
     } finally {
       if (ownsDispatch) this.preparing.delete(key);
     }

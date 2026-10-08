@@ -11,11 +11,7 @@ export interface CloudGitAuthority {
 }
 /** Stream only fixed smart Git operations to the locally pinned server; OAuth stays there. */
 export function cloudGitBroker(
-  authority: (
-    spaceId: string,
-    generation: number,
-    repositoryId: string,
-  ) => Promise<CloudGitAuthority>,
+  authority: (spaceId: string, repositoryId: string) => Promise<CloudGitAuthority>,
   budget: NetworkBudget,
   onFault: (error: unknown) => void,
   fallback: BrokerOptions["git"],
@@ -23,7 +19,7 @@ export function cloudGitBroker(
 ): BrokerOptions["git"] {
   return async (request, response, grant) => {
     if (response.destroyed) return;
-    if (!grant.spaceId || !grant.generation) {
+    if (!grant.spaceId) {
       await fallback(request, response, grant);
       return;
     }
@@ -57,7 +53,7 @@ export function cloudGitBroker(
         response.writeHead(403, { connection: "close" }).end();
         return;
       }
-      const binding = await authority(grant.spaceId, grant.generation, grant.repository.id);
+      const binding = await authority(grant.spaceId, grant.repository.id);
       if (response.destroyed) return;
       const target = new URL(
         `${relayOrigin(binding.origin)}/api/local-devices/github/${binding.resourceId}/${binding.resourceGeneration}/git/${action}`,
@@ -108,7 +104,7 @@ export function cloudGitBroker(
       const recheck = setInterval(() => {
         if (checking) return;
         checking = true;
-        void authority(grant.spaceId!, grant.generation!, grant.repository.id)
+        void authority(grant.spaceId!, grant.repository.id)
           .catch(() => {
             upstream.destroy();
             response.destroy();

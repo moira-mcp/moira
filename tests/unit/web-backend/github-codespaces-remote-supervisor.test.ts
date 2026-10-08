@@ -699,6 +699,66 @@ if (process.env.MOIRA_TEST_HOLD_FILE_RUNNER === "1") {
     expect(existsSync(join(operationDirectory, "file-runner-pid"))).toBe(true);
   });
 
+  test("a dead commit holder releases the OS lock while reads and a conflicting new write remain safe", async () => {
+    const value = fixture();
+    const firstMarker = `moira-op-${"4a".repeat(16)}`;
+    const target = join(value.repository, "concurrent.txt");
+    writeFileSync(target, "original");
+    const held = join(value.stateRoot, "commit-held");
+    const write = (remoteMarker: string, content: string) => ({
+      action: "file-execute",
+      version: 1,
+      remoteMarker,
+      repositoryFullName: "owner/repository",
+      request: {
+        action: "write",
+        path: "concurrent.txt",
+        bytesBase64: Buffer.from(content).toString("base64"),
+        expected: { exists: true, sha256: createHash("sha256").update("original").digest("hex") },
+      },
+    });
+    const first = request(value.environment, write(firstMarker, "first"), (source) =>
+      source.replace(
+        'await writeDurableJson(directory, "file-transaction.json", entries);',
+        'await writeDurableJson(directory, "file-transaction.json", entries);\nawait writeFile(join(STATE_ROOT, "commit-held"), "1");\nawait new Promise(() => {});',
+      ),
+    ).then(
+      () => {
+        throw new Error("Held commit unexpectedly completed");
+      },
+      () => undefined,
+    );
+    for (let attempt = 0; attempt < 1000 && !existsSync(held); attempt++)
+      await new Promise((done) => setTimeout(done, 5));
+    expect(existsSync(held)).toBe(true);
+    const runner = JSON.parse(
+      readFileSync(join(value.stateRoot, firstMarker, "file-runner-pid"), "utf8"),
+    ) as { pid: number };
+    const second = request(value.environment, write(`moira-op-${"4b".repeat(16)}`, "second"));
+    try {
+      const read = (await request(value.environment, {
+        action: "file-execute",
+        version: 1,
+        remoteMarker: `moira-op-${"4c".repeat(16)}`,
+        repositoryFullName: "owner/repository",
+        request: { action: "read", path: "concurrent.txt", offset: 0, length: 20 },
+      })) as { value: { bytesBase64: string } };
+      expect(Buffer.from(read.value.bytesBase64, "base64").toString()).toBe("original");
+    } finally {
+      process.kill(runner.pid, "SIGKILL");
+      await first;
+    }
+    await expect(second).resolves.toMatchObject({ state: "succeeded" });
+    expect(readFileSync(target, "utf8")).toBe("second");
+    await expect(
+      request(value.environment, { action: "file-inspect", version: 1, remoteMarker: firstMarker }),
+    ).resolves.toMatchObject({
+      state: "failed",
+      value: { code: "CODESPACE_OPERATION_INTERRUPTED" },
+    });
+    expect(readFileSync(target, "utf8")).toBe("second");
+  });
+
   test("preflights every structured patch target before committing any file", async () => {
     const value = fixture();
     writeFileSync(join(value.repository, "one.txt"), "one");
@@ -875,63 +935,104 @@ if (process.env.MOIRA_TEST_HOLD_FILE_RUNNER === "1") {
       expect(readFileSync(join(value.repository, file.path), "utf8")).toBe("b");
   });
 
-  test("recovers a crashed file commit from its exact marker journal before replay", async () => {
-    const value = fixture();
-    const remoteMarker = `moira-op-${"2a".repeat(16)}`;
-    const operationDirectory = join(value.stateRoot, remoteMarker);
-    mkdirSync(operationDirectory, { recursive: true });
-    const target = join(value.repository, "recover.txt");
-    const backup = join(value.repository, `.moira-${remoteMarker}-backup.bak`);
-    const temporary = join(value.repository, `.moira-${remoteMarker}-staged.tmp`);
-    const original = Buffer.from("original");
-    const desired = Buffer.from("desired");
-    writeFileSync(target, desired);
-    writeFileSync(backup, original);
-    const requestValue = {
-      action: "write",
-      path: "recover.txt",
-      bytesBase64: desired.toString("base64"),
-      expected: {
-        exists: true,
-        size: original.length,
-        sha256: createHash("sha256").update(original).digest("hex"),
-      },
-    };
-    writeFileSync(
-      join(operationDirectory, "file-intent.json"),
-      JSON.stringify({
-        action: "file-execute",
+  test.each(["recoverable", "externally changed"] as const)(
+    "new work proceeds after an abandoned %s commit without replaying or overwriting later edits",
+    async (condition) => {
+      const value = fixture();
+      const remoteMarker = `moira-op-${"2a".repeat(16)}`;
+      const operationDirectory = join(value.stateRoot, remoteMarker);
+      mkdirSync(operationDirectory, { recursive: true });
+      const target = join(value.repository, "recover.txt");
+      const backup = join(value.repository, `.moira-${remoteMarker}-backup.bak`);
+      const temporary = join(value.repository, `.moira-${remoteMarker}-staged.tmp`);
+      const original = Buffer.from("original");
+      const desired = Buffer.from("desired");
+      writeFileSync(target, desired);
+      if (condition === "externally changed") writeFileSync(target, "external edit");
+      writeFileSync(backup, original);
+      const requestValue = {
+        action: "write",
+        path: "recover.txt",
+        bytesBase64: desired.toString("base64"),
+        expected: {
+          exists: true,
+          size: original.length,
+          sha256: createHash("sha256").update(original).digest("hex"),
+        },
+      };
+      writeFileSync(
+        join(operationDirectory, "file-intent.json"),
+        JSON.stringify({
+          action: "file-execute",
+          version: 1,
+          remoteMarker,
+          repositoryFullName: "owner/repository",
+          request: requestValue,
+        }),
+      );
+      writeFileSync(
+        join(operationDirectory, "file-transaction.json"),
+        JSON.stringify([
+          {
+            target: "recover.txt",
+            ...parentIdentity(value.repository),
+            temporaryName: temporary.split("/").at(-1),
+            backup: backup.split("/").at(-1),
+            hadOriginal: true,
+            originalSha256: createHash("sha256").update(original).digest("hex"),
+            desiredSha256: createHash("sha256").update(desired).digest("hex"),
+          },
+        ]),
+      );
+
+      const newer = Buffer.from("newer content");
+      await expect(
+        request(value.environment, {
+          action: "file-execute",
+          version: 1,
+          remoteMarker: `moira-op-${"5a".repeat(16)}`,
+          repositoryFullName: "owner/repository",
+          request: {
+            action: "write",
+            path: condition === "recoverable" ? "recover.txt" : "unrelated.txt",
+            bytesBase64: newer.toString("base64"),
+            expected: condition === "recoverable" ? requestValue.expected : { exists: false },
+          },
+        }),
+      ).resolves.toMatchObject({ state: "succeeded" });
+      const result = (await request(value.environment, {
+        action: "file-inspect",
         version: 1,
         remoteMarker,
-        repositoryFullName: "owner/repository",
-        request: requestValue,
-      }),
-    );
-    writeFileSync(
-      join(operationDirectory, "file-transaction.json"),
-      JSON.stringify([
-        {
-          target: "recover.txt",
-          ...parentIdentity(value.repository),
-          temporaryName: temporary.split("/").at(-1),
-          backup: backup.split("/").at(-1),
-          hadOriginal: true,
-          originalSha256: createHash("sha256").update(original).digest("hex"),
-          desiredSha256: createHash("sha256").update(desired).digest("hex"),
-        },
-      ]),
-    );
-
-    const result = (await request(value.environment, {
-      action: "file-inspect",
-      version: 1,
-      remoteMarker,
-    })) as { state: string; value: { action: string } };
-    expect(result).toMatchObject({ state: "succeeded", value: { action: "write" } });
-    expect(readFileSync(target)).toEqual(desired);
-    expect(existsSync(backup)).toBe(false);
-    expect(existsSync(join(operationDirectory, "file-transaction.json"))).toBe(false);
-  });
+      })) as { state: string; value: { action: string } };
+      expect(result).toMatchObject({
+        state: "failed",
+        value: { action: "write", code: "CODESPACE_OPERATION_INTERRUPTED" },
+      });
+      expect(
+        readFileSync(
+          join(value.repository, condition === "recoverable" ? "recover.txt" : "unrelated.txt"),
+        ),
+      ).toEqual(newer);
+      expect(readFileSync(target)).toEqual(
+        condition === "recoverable" ? newer : Buffer.from("external edit"),
+      );
+      expect(existsSync(backup)).toBe(condition === "externally changed");
+      expect(existsSync(join(operationDirectory, "file-transaction.conflicted.json"))).toBe(
+        condition === "externally changed",
+      );
+      expect(existsSync(join(operationDirectory, "file-transaction.json"))).toBe(false);
+      await expect(
+        request(value.environment, { action: "finalize", version: 1, remoteMarker }),
+      ).resolves.toEqual({ state: "absent" });
+      expect(existsSync(join(operationDirectory, "file-transaction.conflicted.json"))).toBe(
+        condition === "externally changed",
+      );
+      expect(condition === "externally changed" ? readFileSync(backup) : null).toEqual(
+        condition === "externally changed" ? original : null,
+      );
+    },
+  );
 
   test("fails crash recovery closed when an absent target parent was substituted", async () => {
     const value = fixture();
@@ -980,13 +1081,16 @@ if (process.env.MOIRA_TEST_HOLD_FILE_RUNNER === "1") {
 
     await expect(
       request(value.environment, { action: "file-inspect", version: 1, remoteMarker }),
-    ).rejects.toThrow();
+    ).resolves.toMatchObject({
+      state: "failed",
+      value: { code: "CODESPACE_OPERATION_INTERRUPTED" },
+    });
     expect(existsSync(join(parent, "new.txt"))).toBe(false);
     expect(existsSync(join(movedParent, "new.txt"))).toBe(false);
     expect(readFileSync(join(movedParent, temporaryName))).toEqual(desired);
   });
 
-  test("rolls a partially committed multi-file journal back before coherent replay", async () => {
+  test("rolls a partially committed multi-file journal back without replaying the mutation", async () => {
     const value = fixture();
     const remoteMarker = `moira-op-${"2b".repeat(16)}`;
     const operationDirectory = join(value.stateRoot, remoteMarker);
@@ -1062,11 +1166,11 @@ if (process.env.MOIRA_TEST_HOLD_FILE_RUNNER === "1") {
       remoteMarker,
     })) as { state: string; value: { action: string; files: unknown[] } };
     expect(result).toMatchObject({
-      state: "succeeded",
-      value: { action: "apply_patch", files: expect.arrayContaining([expect.any(Object)]) },
+      state: "failed",
+      value: { action: "apply_patch", code: "CODESPACE_OPERATION_INTERRUPTED" },
     });
-    expect(readFileSync(targetOne)).toEqual(desiredOne);
-    expect(readFileSync(targetTwo)).toEqual(desiredTwo);
+    expect(readFileSync(targetOne)).toEqual(originalOne);
+    expect(readFileSync(targetTwo)).toEqual(originalTwo);
     for (const path of [backupOne, backupTwo, temporaryOne, temporaryTwo]) {
       expect(existsSync(path)).toBe(false);
     }

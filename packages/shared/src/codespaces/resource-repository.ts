@@ -681,8 +681,8 @@ export class CodespaceResourceRepository {
   /**
    * Records that the provider already stopped a codespace Moira held as running — GitHub's own idle
    * timeout, or a user stopping it outside Moira. No provider call is involved: the codespace is
-   * already where a stop would take it. The new generation fences operations reserved against the
-   * running codespace, and the desired state follows, so the next use starts it again.
+   * already where a stop would take it. The desired state follows so the next use starts it again;
+   * accepted operations are inspected by their markers to establish their real outcomes.
    */
   markObservedStopped(resourceId: string, generation: number, now: number): boolean {
     const transaction = this.sqlite.transaction(() => {
@@ -697,12 +697,7 @@ export class CodespaceResourceRepository {
         )
         .run(now, resourceId, generation).changes;
       if (changed !== 1) return false;
-      this.cancelOperationsForGeneration(
-        resourceId,
-        generation + 1,
-        now,
-        "provider_observed_stopped",
-      );
+      this.requestOperationCancellation(resourceId, now, "provider_observed_stopped");
       return true;
     });
     return transaction.immediate();
@@ -1144,12 +1139,7 @@ export class CodespaceResourceRepository {
         )
         .run(now, resourceId, userId, current.generation).changes;
       if (changed !== 1) return null;
-      this.cancelOperationsForGeneration(
-        resourceId,
-        current.generation + 1,
-        now,
-        "codespace_stop_requested",
-      );
+      this.requestOperationCancellation(resourceId, now, "codespace_stop_requested");
       this.recordLifecycleMutation(
         resourceId,
         userId,
@@ -1251,12 +1241,7 @@ export class CodespaceResourceRepository {
         )
         .run(now, resourceId, userId, current.generation).changes;
       if (changed !== 1) return null;
-      this.cancelOperationsForGeneration(
-        resourceId,
-        current.generation + 1,
-        now,
-        "codespace_delete_requested",
-      );
+      this.requestOperationCancellation(resourceId, now, "codespace_delete_requested");
       this.recordLifecycleMutation(
         resourceId,
         userId,
@@ -1308,9 +1293,10 @@ export class CodespaceResourceRepository {
             `UPDATE codespaceOperation SET state = 'cancelled',
              lastOutcome = 'exact_codespace_stopped', claimId = NULL,
              claimExpiresAt = NULL, updatedAt = ? WHERE resourceId = ?
-             AND state IN ('reserved', 'running', 'cancel_pending', 'reconcile_pending')`,
+             AND (? = 'deleted' AND state IN ('reserved', 'running', 'cancel_pending', 'reconcile_pending')
+               OR state = 'reserved')`,
           )
-          .run(input.now, input.resourceId);
+          .run(input.now, input.resourceId, input.desiredState);
         if (input.desiredState === "deleted") {
           this.sqlite
             .prepare(
@@ -1495,12 +1481,7 @@ export class CodespaceResourceRepository {
           .run(now, row.id, row.generation);
         if (result.changes === 1) {
           changed++;
-          this.cancelOperationsForGeneration(
-            row.id,
-            row.generation + 1,
-            now,
-            "disconnect_stop_requested",
-          );
+          this.requestOperationCancellation(row.id, now, "disconnect_stop_requested");
           this.recordLifecycleMutation(
             row.id,
             userId,
@@ -1544,19 +1525,45 @@ export class CodespaceResourceRepository {
       .run(userId, provider, utcDay(now), required ? 1 : 0, now);
   }
 
-  private cancelOperationsForGeneration(
-    resourceId: string,
-    newGeneration: number,
-    now: number,
-    outcome: string,
-  ): void {
+  private requestOperationCancellation(resourceId: string, now: number, outcome: string): void {
+    const resource = this.requireById(resourceId);
+    if (resource.provider === CODESPACE_PROVIDER_LOCAL) {
+      const pending = this.sqlite
+        .prepare(
+          `SELECT kind, remoteMarker, providerResourceName FROM codespaceOperation
+           WHERE resourceId = ? AND state IN (${ACTIVE_OPERATION_STATES})`,
+        )
+        .all(resourceId) as Array<{
+        kind: string;
+        remoteMarker: string;
+        providerResourceName: string;
+      }>;
+      const revoke = this.sqlite.prepare(
+        `UPDATE codespaceLocalRelay SET status = 'revoked', claimExpiresAt = NULL, updatedAt = ?
+         WHERE resourceId = ? AND requestId = ? AND status IN ('queued', 'claimed')`,
+      );
+      for (const operation of pending) {
+        // Cancel only new work, not its result inspection or the lifecycle's own receipts.
+        const requestId = localRelayMutationId(resource, {
+          action: "operation",
+          spaceId: operation.providerResourceName,
+          job: {
+            action: operation.kind === "exec" ? "execute" : "file-execute",
+            remoteMarker: operation.remoteMarker,
+          },
+        });
+        revoke.run(now, resourceId, requestId);
+      }
+    }
     this.sqlite
       .prepare(
-        `UPDATE codespaceOperation SET state = 'cancel_pending', lastOutcome = ?, updatedAt = ?
-         WHERE resourceId = ? AND resourceGeneration < ?
+        `UPDATE codespaceOperation SET state = CASE WHEN state = 'reserved' THEN 'cancelled' ELSE 'cancel_pending' END,
+         remoteCleanupPending = CASE WHEN state = 'reserved' THEN 0 ELSE remoteCleanupPending END,
+         lastOutcome = ?, updatedAt = ?
+         WHERE resourceId = ?
            AND state IN ('reserved', 'running', 'reconcile_pending')`,
       )
-      .run(outcome, now, resourceId, newGeneration);
+      .run(outcome, now, resourceId);
   }
 
   requestAllCleanupForUser(
@@ -1862,12 +1869,7 @@ export class CodespaceResourceRepository {
           .run(input.now, row.id, row.generation);
         if (stopped.changes === 1) {
           persistentChanged++;
-          this.cancelOperationsForGeneration(
-            row.id,
-            row.generation + 1,
-            input.now,
-            "provider_disabled_stop_requested",
-          );
+          this.requestOperationCancellation(row.id, input.now, "provider_disabled_stop_requested");
           this.recordLifecycleMutation(
             row.id,
             row.userId,

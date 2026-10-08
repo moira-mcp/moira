@@ -1981,7 +1981,7 @@ export class CodespaceResourceService {
   /** Explicit Settings refresh uses the same bounded, read-only observation as the scheduler. */
   async refreshProviderState(
     userId: string,
-    options: { authorizationFresh?: boolean } = {},
+    options: { authorizationFresh?: boolean; codespaceId?: string } = {},
   ): Promise<{ stale: boolean }> {
     if (!this.dependencies.policy().enabled) return { stale: false };
     try {
@@ -1989,6 +1989,7 @@ export class CodespaceResourceService {
         userId,
         this.provider(),
         options.authorizationFresh === true,
+        options.codespaceId,
       );
       return { stale: result.stale };
     } catch {
@@ -2001,9 +2002,12 @@ export class CodespaceResourceService {
     userId: string,
     provider: CodespaceProviderAdapter,
     authorizationFresh = false,
+    codespaceId?: string,
   ): Promise<{ observed: Set<string>; stale: boolean }> {
     const observed = new Set<string>();
-    const records = this.dependencies.repository.listObservablePersistent(userId, provider.id);
+    const records = this.dependencies.repository
+      .listObservablePersistent(userId, provider.id)
+      .filter((record) => codespaceId === undefined || record.id === codespaceId);
     if (records.length === 0) return { observed, stale: false };
     if (
       !authorizationFresh &&
@@ -2015,11 +2019,12 @@ export class CodespaceResourceService {
     const credential = await this.dependencies.credentials.getCredential(userId, provider.id);
     const identity = await provider.getIdentity(credential);
     // A scoped provider never needs a sibling's successful inventory to observe this resource.
-    const listed = provider.inspectCreation
-      ? null
-      : new Map(
-          (await provider.listOwned(credential)).map((resource) => [resource.name, resource]),
-        );
+    const listed =
+      codespaceId !== undefined || provider.inspectCreation
+        ? null
+        : new Map(
+            (await provider.listOwned(credential)).map((resource) => [resource.name, resource]),
+          );
     let stale = false;
     for (const record of records) {
       if (

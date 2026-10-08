@@ -270,6 +270,7 @@ export type CodespaceResourceErrorCode =
   | "CODESPACE_POLICY_LIMIT"
   | "CODESPACE_SESSION_UNAVAILABLE"
   | "CODESPACE_OPERATION_BUSY"
+  | "CODESPACE_OPERATION_CANCELLED"
   | "CODESPACE_AUTHORIZATION_REQUIRED"
   | "CODESPACE_RESULT_EXPIRED"
   | "CODESPACE_CREATE_REJECTED"
@@ -557,7 +558,7 @@ export type CodespaceFileResult =
   | {
       action: Exclude<CodespaceOperationKind, "exec">;
       state: "failed";
-      code: "CODESPACE_FILE_REJECTED";
+      code: "CODESPACE_FILE_REJECTED" | "CODESPACE_OPERATION_INTERRUPTED";
     }
   | { action: "stat"; stat: CodespaceFileStat }
   | { action: "search"; matches: CodespaceSearchMatch[]; truncated: boolean }
@@ -652,6 +653,8 @@ export class CodespaceResourceError extends Error {
     public readonly detail?: string,
     /** Internal provenance: an authenticated provider reply explicitly refused this intent. */
     public readonly confirmedRefusal = false,
+    /** Exact accepted operation to inspect after an uncertain transport outcome. */
+    public readonly operationId?: string,
   ) {
     super(message);
     this.name = "CodespaceResourceError";

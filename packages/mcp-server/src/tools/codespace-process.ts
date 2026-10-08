@@ -158,13 +158,20 @@ export async function executeCodespaceProcess(
     const current = requireOwnedProcess(services, userId, call.request);
     return project({ operation: current, result: completed });
   } catch (error) {
-    if (error instanceof CodespaceResourceError || error instanceof CodespaceConnectionError)
-      return errorResult(
+    if (error instanceof CodespaceResourceError || error instanceof CodespaceConnectionError) {
+      const failure = errorResult(
         error.code,
         undefined,
         false,
         error instanceof CodespaceResourceError ? error.detail : undefined,
       );
+      return error instanceof CodespaceResourceError && error.operationId
+        ? {
+            ...result({ ...failure.structuredContent, process_id: error.operationId }),
+            isError: true,
+          }
+        : failure;
+    }
     logger.error("Codespace process failed unexpectedly", error, { codespace_action: call.action });
     return errorResult("INTERNAL_ERROR");
   }

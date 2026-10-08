@@ -63,6 +63,7 @@ export class LocalRpc {
     value: unknown,
     onAdmitted?: () => void,
     authority?: "owner-delete",
+    signal?: AbortSignal,
   ): Promise<LocalReply> {
     try {
       const message = localEnvelopeSchema.parse(value);
@@ -74,9 +75,10 @@ export class LocalRpc {
         this.intent(message),
         async () => {
           try {
+            signal?.throwIfAborted();
             return {
               ok: true,
-              result: await this.dispatch(message.request, onAdmitted, authority),
+              result: await this.dispatch(message.request, onAdmitted, authority, signal),
             };
           } catch (error) {
             return this.failure(error);
@@ -145,6 +147,7 @@ export class LocalRpc {
     request: LocalRequest,
     onAdmitted?: () => void,
     authority?: "owner-delete",
+    signal?: AbortSignal,
   ): Promise<unknown> {
     switch (request.action) {
       case "snapshot":
@@ -211,7 +214,7 @@ export class LocalRpc {
         return { accepted: true, ...(management ? { management } : {}) };
       }
       case "operation":
-        return this.jobs.dispatch(request.spaceId, request.job);
+        return this.jobs.dispatch(request.spaceId, request.job, signal);
     }
   }
 }

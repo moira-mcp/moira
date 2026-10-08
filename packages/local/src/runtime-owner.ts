@@ -44,6 +44,7 @@ export class RuntimeOwner {
   private readonly controller = new AbortController();
   private readonly cleanupController = new AbortController();
   private readonly children = new Set<Promise<unknown>>();
+  private readonly guestContacts = new Set<Promise<unknown>>();
   private tail: Promise<unknown> = Promise.resolve();
   private closing?: Promise<void>;
   private drained?: Promise<void>;
@@ -189,8 +190,9 @@ export class RuntimeOwner {
     const policy = space ? policyForSpace(configured, space) : configured;
     if (
       !space ||
-      space.generation !== this.space.generation ||
       space.runtimeId !== this.space.runtimeId ||
+      space.repositoryId !== this.space.repositoryId ||
+      space.operationMarker !== this.space.operationMarker ||
       space.desiredState !== "running"
     )
       throw new LocalRefusal("LOCAL_NOT_RUNNING", "The locally owned sandbox changed.");
@@ -202,6 +204,9 @@ export class RuntimeOwner {
       throw new LocalRefusal("LOCAL_RUNTIME_CHANGED", "The locally approved runtime changed.");
     if (!this.runtime)
       throw new LocalRefusal("LOCAL_GUARD_UNAVAILABLE", "The local runtime is not prepared.");
+    if (this.stopping)
+      throw new LocalRefusal("LOCAL_NOT_RUNNING", "The independent work guard is stopping.");
+    this.space = space;
     return { space, policy, runtime: this.runtime };
   }
 
@@ -304,7 +309,6 @@ export class RuntimeOwner {
         )
           gitAuthor = await new LocalRelay(this.records).gitIdentity(
             space.id,
-            space.generation,
             space.repositoryId,
             this.controller.signal,
           );
@@ -351,63 +355,67 @@ export class RuntimeOwner {
   }
 
   operation(value: unknown): Promise<Buffer> {
-    return this.settleGuestResult(
-      this.serial(async () => {
-        const bytes = Buffer.from(JSON.stringify(value));
-        if (bytes.length > MAX_MESSAGE_BYTES - 1024)
-          throw new LocalRefusal(
-            "LOCAL_REQUEST_TOO_LARGE",
-            "Guest operation input exceeds its bound.",
-          );
-        const request = operation.parse(value);
-        const { space, policy, runtime } = await this.current();
-        const repository = requireSpaceGrant(policy, space, Date.now());
-        if (request.repositoryFullName !== repository.fullName)
-          throw new LocalRefusal(
-            "LOCAL_REPOSITORY_DENIED",
-            "Operation repository differs from local admission.",
-          );
-        if (space.phase !== "usable" || !space.runtimeId)
-          throw new LocalRefusal("LOCAL_NOT_RUNNING", "This local sandbox is not initialized.");
-        if (request.action === "execute") {
-          request.timeoutMs = requireOperationExecutionBudget(
-            request.timeoutMs,
-            request.maxRetainedBytes,
-            policy.leaseUntil - Date.now(),
-          );
-          requireOperationOutputBudget(request.maxStdoutBytes, request.maxStderrBytes);
-        }
-        const identity = { name: space.name, runtimeId: space.runtimeId };
-        await this.protectRuntime();
-        if (!space.networkPolicy)
-          throw new LocalRefusal(
-            "LOCAL_NETWORK_CHANGED",
-            "The sandbox network policy is unconfirmed.",
-          );
-        const latest = await this.current();
-        return runtime.runFixedGuest(
-          identity,
-          "worker",
-          Buffer.from(JSON.stringify({ kind: "operation", request })),
-          Math.min(LOCAL_WORKER_REQUEST_TIMEOUT_MS, latest.policy.leaseUntil - Date.now()),
-          this.controller.signal,
-          {
-            expectedNetworkDigest: space.networkPolicy,
-            confirm: async () => {
-              const admitted = await this.current();
-              if (
-                admitted.space.phase !== "usable" ||
-                admitted.space.networkPolicy !== space.networkPolicy
-              )
-                throw new LocalRefusal(
-                  "LOCAL_NETWORK_CHANGED",
-                  "The local dispatch receipt changed during verification.",
-                );
-            },
-          },
+    const contact = (async () => {
+      const bytes = Buffer.from(JSON.stringify(value));
+      if (bytes.length > MAX_MESSAGE_BYTES - 1024)
+        throw new LocalRefusal(
+          "LOCAL_REQUEST_TOO_LARGE",
+          "Guest operation input exceeds its bound.",
         );
-      }),
+      const request = operation.parse(value);
+      const { space, policy, runtime } = await this.current();
+      const repository = requireSpaceGrant(policy, space, Date.now());
+      if (request.repositoryFullName !== repository.fullName)
+        throw new LocalRefusal(
+          "LOCAL_REPOSITORY_DENIED",
+          "Operation repository differs from local admission.",
+        );
+      if (space.phase !== "usable" || !space.runtimeId)
+        throw new LocalRefusal("LOCAL_NOT_RUNNING", "This local sandbox is not initialized.");
+      if (request.action === "execute") {
+        request.timeoutMs = requireOperationExecutionBudget(
+          request.timeoutMs,
+          request.maxRetainedBytes,
+          policy.leaseUntil - Date.now(),
+        );
+        requireOperationOutputBudget(request.maxStdoutBytes, request.maxStderrBytes);
+      }
+      const identity = { name: space.name, runtimeId: space.runtimeId };
+      await this.protectRuntime();
+      if (!space.networkPolicy)
+        throw new LocalRefusal(
+          "LOCAL_NETWORK_CHANGED",
+          "The sandbox network policy is unconfirmed.",
+        );
+      const latest = await this.current();
+      return runtime.runFixedGuest(
+        identity,
+        "worker",
+        Buffer.from(JSON.stringify({ kind: "operation", request })),
+        Math.min(LOCAL_WORKER_REQUEST_TIMEOUT_MS, latest.policy.leaseUntil - Date.now()),
+        this.controller.signal,
+        {
+          expectedNetworkDigest: space.networkPolicy,
+          confirm: async () => {
+            const admitted = await this.current();
+            if (
+              admitted.space.phase !== "usable" ||
+              admitted.space.networkPolicy !== space.networkPolicy
+            )
+              throw new LocalRefusal(
+                "LOCAL_NETWORK_CHANGED",
+                "The local dispatch receipt changed during verification.",
+              );
+          },
+        },
+      );
+    })();
+    this.guestContacts.add(contact);
+    void contact.then(
+      () => this.guestContacts.delete(contact),
+      () => this.guestContacts.delete(contact),
     );
+    return contact;
   }
 
   validate(): Promise<void> {
@@ -431,6 +439,7 @@ export class RuntimeOwner {
     if (emergency) this.cleanupController.abort();
     this.drained ??= (async () => {
       await Promise.allSettled([...this.children]);
+      await Promise.allSettled([...this.guestContacts]);
       await this.admission?.catch(() => undefined);
       await this.tail;
       const space = this.space;

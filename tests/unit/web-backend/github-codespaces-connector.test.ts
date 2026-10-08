@@ -463,11 +463,15 @@ describe("GitHub Codespaces connector boundary", () => {
     ).rejects.toThrow(/invalid|inconsistent/);
   });
 
-  test("normalizes a persisted version-1 file rejection to the codespace contract", async () => {
+  test.each([
+    ["WORKSPACE_FILE_REJECTED", "CODESPACE_FILE_REJECTED"],
+    ["CODESPACE_FILE_REJECTED", "CODESPACE_FILE_REJECTED"],
+    ["CODESPACE_OPERATION_INTERRUPTED", "CODESPACE_OPERATION_INTERRUPTED"],
+  ] as const)("preserves the file failure contract for %s", async (remoteCode, expectedCode) => {
     const harness = requestHarness(() => ({
       value: JSON.stringify({
         state: "failed",
-        value: { action: "write", state: "failed", code: "WORKSPACE_FILE_REJECTED" },
+        value: { action: "write", state: "failed", code: remoteCode },
       }),
     }));
     const connector = new GitHubCodespacesConnector(harness.requestImpl);
@@ -477,7 +481,7 @@ describe("GitHub Codespaces connector boundary", () => {
     ).resolves.toEqual({
       action: "write",
       state: "failed",
-      code: "CODESPACE_FILE_REJECTED",
+      code: expectedCode,
     });
   });
 

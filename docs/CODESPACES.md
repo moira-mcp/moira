@@ -27,7 +27,8 @@ delete) over the same services. Administrators own the instance-wide kill switch
   lifecycle generations, desired and observed state, quotas and reconciliation.
 - `packages/shared/src/codespaces/operation-service.ts` and
   `operation-repository.ts` own one durable record per direct operation,
-  concurrency reservations, cancellation and terminal cleanup.
+  cloud concurrency reservations, cancellation and terminal cleanup. Local operation
+  records track accepted work and results without locking other operations.
 - `packages/shared/src/codespaces/file-service.ts`, `transfer-service.ts` and
   `transfer-repository.ts` own provider-neutral file operations, native byte
   authority, quotas and private object lifecycle.
@@ -90,7 +91,7 @@ owns exact VM lifecycle and its isolation boundary; the installed guest supervis
 sessions, output and version-checked file operations. The CLI delegates persistent `run` to the
 daemon. The runtime factory currently selects only the supported SBX backend; no Lima backend
 is implemented. Before each fixed guest attachment, that backend verifies configuration, exact
-identity, mounts and network receipt once, then rechecks the current local grant and generation
+identity, mounts and network receipt once, then rechecks the current local grant and runtime state
 after those asynchronous proofs and before dispatch.
 
 Moira Local uses outbound authenticated HTTPS to a locally selected Moira application URL.
@@ -196,29 +197,30 @@ owned VM through that explicit local confirmation. Manager-backed CLI commands a
 their final cleanup stops owned VM processes on exit. Persistent server/MCP work uses the long-lived
 paired `run`; stop it before another command needs the same runner lock. Browser revocation denies
 new server work, but physical shutdown of an offline computer cannot be asserted by the browser;
-local disable and the independent lease guard remain authoritative. An unknown guest outcome remains
-fenced until physical stop is confirmed. `recover SPACE_ID --confirm` acknowledges either that
-outcome or a clean, initialized stopped VM whose generation no longer matches the server binding.
-It verifies the exact stopped VM, current grant and network boundary, then records a new generation
-receipt without retrying prior jobs. Missing identity, incomplete initialization and other failures
+local disable and the independent lease guard remain authoritative. A lost ordinary guest response
+leaves that operation's outcome unconfirmed; inspect the same operation ID without repeating its
+command or file edit. It does not retire the VM or block independent work. `recover SPACE_ID --confirm`
+is an explicit stopped-runtime recovery action that verifies the exact VM, current grant and network
+boundary without retrying prior jobs. Missing identity, incomplete initialization and other failures
 remain refused. Device-level `recover --confirm` requires disabled work and
 acknowledges an orphan shutdown after proving owned processes stopped; it preserves jobs and data.
-After abrupt companion termination, do not manually unlink `runner.lock`. Disable local work,
-then use `recover --confirm`; it reclaims the marker only when its owner is proven absent and
-refuses a live or unknown owner. After a confirmed ordinary stop, including idle disconnection,
-restart `run` under an enabled, unexpired local lease: a verified clean stop retains a generation
-receipt for the same server binding. If an older stopped record has no receipt and restart reports
-`LOCAL_GENERATION_CONFLICT`, stop the companion, use `recover SPACE_ID --confirm` with the same
-state directory, then restart `run`. Recovery preserves retained jobs and their unknown outcomes;
-it authorizes subsequent work, not replay. Do not clear journals or adopt a VM by name to bypass recovery.
+After abrupt companion termination or a computer reboot, restart `run` with the same state.
+Startup reclaims a stale `runner.lock` under the existing kernel gate only after proving the
+former runner and guard absent. It preserves policy, VM records and unknown jobs; the new owner
+verifies native identity before work. Live, unknown or malformed ownership remains refused.
+Do not manually unlink the marker or discard receipts. Explicit disabled-device recovery remains
+available for an orphan shutdown that requires physical settlement. After a confirmed ordinary stop, including idle disconnection,
+restart `run` under an enabled, unexpired local lease. Ordinary work uses the same stable VM binding
+and current native state; it does not require synchronizing lifecycle counters. Recovery preserves
+retained jobs and their unknown outcomes; it authorizes subsequent work, not replay. Do not clear
+journals or adopt a VM by name to bypass ownership recovery.
 
 Background reconciliation can inspect, cancel, finalize or read retained output and file outcomes
-from an earlier lifecycle generation of the same local VM. It uses current relay authority and
-requires unchanged ownership, provider identity and authorization; a future generation is refused.
-An observed file outcome releases operation capacity only while the observed resource generation,
-identity, connection and repository grant still match. Disabled instance controls do not block
-this settlement, but still deny new work. Recovery does not redispatch an old execute or file edit,
-and ordinary caller result reads retain their exact-generation fence.
+from the same local VM across stop/start. It verifies current ownership, exact provider identity,
+device and connection authority and repository grants. Lifecycle counters do not authorize execution
+or result collection. Disabled instance controls do not block required settlement, but still deny
+new work. The operation journal records uncertainty and cleanup obligations without locking unrelated
+commands or files. Recovery does not redispatch an old execute or file edit.
 
 ### Owner web control and bundle updates
 
@@ -387,8 +389,9 @@ The guest root and cloud requests are untrusted. Host mounts, shared skills, MCP
 credentials and agent sockets are not forwarded. Fixed SDK API operations avoid CLI lifecycle hooks
 that can attach host integrations. Fresh SDK identity and container mapping are checked against
 kernel-held process ownership before effects; malformed or missing mandatory observations refuse work.
-Unknown dispatch settlement requires stopping the exact owned VM, not treating a closed socket as
-successful guest cancellation.
+A closed ordinary-operation socket does not prove cancellation or require stopping the VM.
+Inspect the accepted marker; exact native ownership and current grants still govern new work.
+Lifecycle shutdown remains responsible for proving that the exact owned VM has stopped.
 
 Outside the VM, the dedicated profile denies direct egress, including host, LAN, VPN, metadata and
 other-sandbox destinations. Only the approved broker TCP path is allowed; UDP remains globally denied.
@@ -472,11 +475,15 @@ back to the record, or no ref when the provider reports none.
   retry once the codespace has finished starting. A codespace that cannot start —
   deleted, rejected or being deleted — is refused by that condition without the
   provider being asked to start it, and a start never bypasses a concurrency,
-  kind or generation check: the reservation that follows is the same one as
+  kind or current-authorization check: the reservation that follows is the same one as
   before. Explicitly starting a codespace remains available and unchanged.
 - Stop records desired stopped state, advances the generation, cancels or
   reconciles older operations and stops the exact Codespace. It preserves the
-  codespace and repository data.
+  codespace and repository data. Local stop also revokes queued execution deliveries and
+  aborts their request scopes, so an undelivered old command cannot first execute after restart.
+  First execution delivery also checks the exact operation's cancellation state atomically with
+  queue insertion, including when stop occurs while its payload is being retained. Confirmed
+  cancellation before delivery returns `CODESPACE_OPERATION_CANCELLED` without a guest effect.
 - Delete is a separate destructive operation. It requires the caller's current
   observed generation, checks local deletion permission before recording a new intent, persists
   delete intent before provider contact and
@@ -520,8 +527,8 @@ stop never completes a failed initial preparation.
 Local status inspection is scoped to the retained resource and its exact owned creation marker.
 It can recover the owned durable manifest after the create reply expires, without adopting an
 unrelated SDK VM. Only settled authenticated absence proves removal; failed or partial inventory
-is not an empty successful list. The same current intent can inspect an owned incomplete setup at a newer
-native generation without advancing its binding or authorizing guest work. Each failing resource retains its diagnostic and verified state,
+is not an empty successful list. Read-only inspection uses stable owned identity and current native
+state without synchronizing lifecycle counters or authorizing guest work. Each failing resource retains its diagnostic and verified state,
 while healthy peers refresh and run; the aggregate refresh reports stale data when any observation
 could not be confirmed.
 
@@ -664,7 +671,7 @@ codespace. A request contains an argv array, a codespace-relative working
 directory, bounded stdin and a timeout. Arguments are data and are never
 interpolated into a shell program. Stdin is either inline bytes or a tenant-bound
 private transfer reference with an exact declared size and MIME type. A native
-reference request reserves the authenticated running codespace and an operation slot
+reference request records an authenticated operation against the running codespace
 before source fetch. The resulting private object is claimed before credential lookup,
 consumed immediately after durable dispatch intent and materialized as exact binary
 connector input without model-context base64. `CodespaceOperationService.executeNativeReference()`
@@ -687,18 +694,27 @@ operation. Ordinary MCP command and file calls opt into waiting for the accepted
 terminal result, using its existing deadline and current authority. Waiting never dispatches
 another command or file mutation. An unconfirmed outcome returns an error and its existing
 operation ID rather than a running success. This does not extend an MCP client's transport timeout;
-after interrupted delivery, inspect the accepted identity instead of submitting new work.
+after interrupted delivery, inspect the accepted identity before repeating the same effect or
+editing the affected files. Independent work can continue without resolving that operation first.
+An authenticated refusal before guest admission ends that operation and preserves the actual
+reason. If the local runtime confirms that it is stopped while the server still records usable,
+Moira refreshes that exact VM's observed state and returns `CODESPACE_NOT_RUNNING` without replay.
+A subsequent new call can use the ordinary start-on-use path. A generic transport failure is not
+evidence of a stopped VM and does not change its readiness to stopped.
 
 Background reconciliation selects the oldest attempted due operation across reservation expiry,
 active work, cancellation and terminal cleanup. Each claim advances its attempt timestamp, so a
 failed cleanup cannot repeatedly take precedence over other due work.
 
-Before connector contact, SQLite reserves the authenticated tenant, codespace
-and authorization generations, input bytes,
+Before connector contact, SQLite records the authenticated tenant, stable codespace
+and provider identity, credential authority, input bytes,
 independent stdout/stderr bounds and deadline. SQLite stores only
 operation metadata. It does not store argv, cwd, stdin, stdout, stderr, provider
 tokens or SSH configuration. Cloud concurrency reservations count only cloud operations;
 local operations use no owner-set concurrency quota and do not consume those cloud slots.
+An unfinished local record or historical job ledger does not prevent another operation.
+Local commands and reads contact the guest independently; lifecycle stop closes new admission
+and drains the contacts already admitted. A lost response affects only its accepted operation.
 
 For GitHub, cancellation targets the recorded foreground process group and validates the
 process start time before signalling. A lost worker, SSH connection or control
@@ -730,8 +746,8 @@ A terminal result reports the complete size of each stream next to its bounded
 payload, so a caller knows what the answer omitted. Any range of a retained
 stream is read with the `read` action by naming the command's `operation_id` and
 `stream` instead of a path. That read is a bounded control request rather than a
-new operation: it creates no operation record, is fenced by the same ownership,
-resource-generation and authorization rules as every other call against that
+new operation: it creates no operation record, checks the same current ownership,
+stable provider identity and authorization as every other call against that
 operation, requires the named codespace to own that command, and returns
 `CODESPACE_RESULT_EXPIRED` once cleanup has removed the streams with the result.
 A read that starts at or past the end of a stream returns no bytes and the
@@ -760,8 +776,9 @@ terminal with `codespace_restarted` recorded as why it ended, which is distinct
 both from a cancellation the caller asked for and from a command that failed on
 its own. The caller sees that distinction: the operation carries
 `interrupted_by_restart` and the answer is `CODESPACE_OPERATION_INTERRUPTED`
-rather than the generic command failure. A file operation is not reported this way: it is replayed from its
-journal instead, which is what keeps an interrupted write recoverable.
+rather than the generic command failure. An interrupted file mutation is inspected and its
+existing transaction is recovered where safe; its original write or patch is never automatically
+executed again. An unresolved interrupted mutation reports `CODESPACE_OPERATION_INTERRUPTED`.
 
 The fixed connector ceilings are 4 MiB of raw input, 8 MiB for each output
 stream and 15 minutes for a bounded command; a background command is bounded by
@@ -775,8 +792,8 @@ at most 16 KiB, and the relative cwd is at most 4096 bytes.
 The provider-neutral file service addresses the same persistent `codespace_id` as
 command execution. It supports stat, bounded literal or regular-expression search,
 byte-range read, atomic write, structured multi-file patch, native-reference upload
-and private download. Each request reserves a durable operation kind, codespace and
-authorization generation, deadline and byte budget before credential or connector
+and private download. Each request records a durable operation kind, stable codespace and
+provider identity, credential authority, deadline and byte budget before credential or connector
 contact. SQLite stores no path, query, patch or file content.
 
 Paths are repository-relative data. Empty components, `.`/`..`, absolute and drive
@@ -808,7 +825,9 @@ than can be listed. The remote supervisor applies the supplied internal budget o
 within its separate protocol safety range.
 
 Running commands or reads in the same codespace do not by themselves block write, upload or patch
-admission. Those file mutations remain serialized against one another for their staged commits.
+admission. An active server operation record does not serialize file mutations. The guest uses
+an operating-system lock only for the filesystem transaction and recovery; staging, version checks,
+replacement and rollback happen under that lock. Kernel ownership releases it when its worker dies.
 Cloud operations share per-user and instance concurrency ceilings; local operations do not
 consume those slots. File existence,
 size and digest preconditions are checked in the guest; another writer changing the expected
@@ -816,8 +835,14 @@ version causes refusal rather than an overwrite. Patch staging and atomic journa
 the mutation boundary.
 
 All patch targets are staged before mutation; a repository-relative transaction journal,
-backups and ordered file/directory sync produce one original or one replacement set after
-interruption. Exact-marker ownership is published atomically from a complete process
+backups and ordered file/directory sync support commit or rollback after interruption.
+Before another mutation, the guest recovers an abandoned transaction under the same lock.
+If another writer changed a target or its parent and rollback would overwrite that change,
+the guest preserves the current files, backups and `file-transaction.conflicted.json` for inspection,
+marks the old operation interrupted and permits unrelated new work. Ordinary result finalization
+preserves those conflict artifacts; repair them explicitly or remove the workspace when no longer needed.
+Inspect the affected files before submitting a fresh edit with current version preconditions.
+Exact-marker ownership is published atomically from a complete process
 identity, so overlapping execute and reconciliation calls do not run the same mutation
 twice. Each journal entry also binds the opened parent device and inode. Commit and
 recovery re-resolve that repository-relative parent and fail before mutation if the
@@ -853,7 +878,7 @@ state becomes ready. Expired physical objects remain quota-bound until cleanup r
 their bytes and metadata together. Startup and periodic cleanup preserve reservations
 owned by either live Moira process, verify each ready/claimed object's type, link count,
 size and digest, and remove dead, expired, consumed, partial, missing or invalid objects.
-If an upload becomes invalid after ingestion because its codespace generation, operation
+If an upload becomes invalid after ingestion because its current codespace authority, operation
 deadline, dispatch fence or credential lookup changed, the now-unreachable private object
 is discarded immediately.
 
@@ -1038,7 +1063,7 @@ the content-free summary. The `download` action returns the private transfer as 
 `preview_image` instead returns a complete repository-relative PNG/JPEG as standard MCP
 `ImageContent`, with safe image format, dimensions and byte-size metadata. Pass `codespace_id`, `path` and optional
 `max_bytes` (default and maximum 4 MiB). It uses the existing download operation and its authorization
-and generation checks. Resume with only `codespace_id` and `operation_id`; the owned operation must
+and stable-identity checks. Resume with only `codespace_id` and `operation_id`; the owned operation must
 have download kind. The ordinary call waits for complete bytes; an unconfirmed result is an error
 with its accepted operation ID, never a successful pending image. Successful projection
 checks complete bytes, digest, container/header framing, dimensions up to 8192 per edge and 16 million
@@ -1144,7 +1169,8 @@ belong to the computer owner, and native-transfer and protocol bounds still appl
 
 The routes retain `/api/integrations/github/codespaces` behind
 `requireAuth` and are a second presentation of the same services the MCP tools use,
-with the same tenant and generation guards. Explicit browser confirmation additionally authorizes
+with the same tenant and current-authority guards; lifecycle deletion additionally checks its
+current generation. Explicit browser confirmation additionally authorizes
 exact local owner cleanup; MCP confirmation does not grant that authority. The list combines repositories
 and codespaces from both providers and includes `providers` with their separate connection,
 readiness and limits. A local `repository_id` is the qualified target returned by discovery;

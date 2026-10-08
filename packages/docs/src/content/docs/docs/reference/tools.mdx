@@ -272,6 +272,17 @@ read returns a bounded retained stream range; stop cancels only that process. A 
 not confirmed cancellation. The omitted duration uses the existing background lifetime ceiling,
 and retained output remains collectible for at least the permitted command duration.
 
+Commands and reads can run independently in the same local codespace. A pending operation record,
+lost reply or retained result does not lock new commands or file edits, and local operations do not
+consume cloud concurrency slots. Atomic file mutations coordinate inside the guest; their
+`expected` guards still reject an edit whose input version changed. Current account, device and
+repository permissions and the exact owned VM identity are checked independently of lifecycle
+counters. A confirmed stopped-guest refusal refreshes that codespace's saved state without
+repeating the refused command; a subsequent new call can start the same environment on use.
+Explicit stop cancels undelivered work even while its delivery payload is being saved;
+confirmed cancellation before delivery returns `CODESPACE_OPERATION_CANCELLED` with detail that no work started. Companion startup after a
+crash or reboot reclaims only proven abandoned host ownership, preserving saved work without replay.
+
 Consecutive commands can share a working context. Open a session with `session` and
 `session_start: true`, then name the same `session` on later commands: it remembers the `cwd` a call
 names and the variables a call passes in `env`, and applies both to every command that continues it.
@@ -295,9 +306,12 @@ long one needs a codespace whose idle lifetime outlasts it. A codespace that wen
 have to be started first: the call that needs it starts it and then runs, within a bounded wait. If it
 does not finish starting in time the call returns `CODESPACE_START_TIMEOUT`, which names that wait and
 asks you to retry; a codespace that cannot start at all is refused by what it is. A command whose
-codespace restarted under it is reported as `CODESPACE_OPERATION_INTERRUPTED`, with
-`interrupted_by_restart` on the operation, rather than as a failure of its own: the files it had
-already written are still there, it produced no result, and running it again is the remedy. Supply at most one stdin form: `stdin_text` for UTF-8 text or `stdin_file` for a native
+codespace restarted under it, or an interrupted file mutation without a saved result, is reported as
+`CODESPACE_OPERATION_INTERRUPTED`. Inspect the affected files before deciding what work remains;
+interruption does not prove that no changes were applied, and the accepted mutation is not replayed
+automatically. The guest recovers an abandoned file transaction without overwriting a later
+conflicting edit and retains its recovery journal and backups when rollback cannot safely finish.
+Supply at most one stdin form: `stdin_text` for UTF-8 text or `stdin_file` for a native
 ChatGPT file reference; the file's bytes reach the process without base64 in the conversation.
 Failed, timed-out and cancelled commands and rejected file edits are returned as tool errors that
 keep any useful bounded output and the recovery identity. Successful ordinary calls return the
@@ -305,7 +319,13 @@ action result without operation metadata; `operation_id` remains only for trunca
 or exceptional recovery. An unconfirmed outcome is an error, not a running success. Use its same
 `codespace_id` and `operation_id` to collect the accepted effect without executing it again.
 Server waiting does not extend a client's transport timeout. After interrupted delivery, inspect
-the accepted identity instead of submitting another mutation.
+the accepted identity before repeating that effect or modifying the affected files. Independent
+work can continue without resolving that operation first.
+Retained results remain readable after an ordinary restart while the same codespace and current
+access remain valid and the result is still stored. Restart does not preserve a live process.
+`CODESPACE_RESULT_EXPIRED` means the stored result is no longer available; it is not a reason to
+repeat the same write without inspecting the affected files. A typed transport failure after acceptance retains
+`operation_id`, or `process_id` for a background start, so it can be inspected without another launch.
 
 `read` returns UTF-8 text with `offset` and `total_size`, plus `sha256` for a repository
 file; give `path` for a file, or `operation_id` and `stream` for a command's retained `stdout` or
@@ -324,7 +344,7 @@ reference to a path; `download` returns the file as an MCP `resource_link` whose
 HTTPS link expires automatically and is never repeated in the JSON result.
 
 The agent runs as the ordinary Codespace user with that environment's repository, network and
-configured secrets. Moira bounds its own concurrency, input/output size, time and quotas and
+configured secrets. Moira bounds cloud concurrency, input/output size, time and transfer quotas and
 protects the Moira server and other users; it does not sandbox the codespace from the agent its
 owner authorized. A user may hold several codespaces at once, and a creation refused by a ceiling
 says which one refused it: your own ceiling on the codespaces you hold, the instance-wide one, or the

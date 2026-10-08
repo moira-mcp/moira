@@ -2822,6 +2822,38 @@ describe("idle codespaces pause on their own", () => {
 });
 
 describe("the provider's own view of running codespaces is observed periodically", () => {
+  test("an exact owned refresh observes only that codespace without listing its peers", async () => {
+    const value = fixture({ maxActivePerUser: 2 });
+    try {
+      const first = await value.service.create("user-1", "301", "main");
+      value.provider.park("second-space");
+      const second = await value.service.create("user-1", "301", "main");
+      value.provider.others[0] = { ...value.provider.others[0], state: "shutdown" };
+      value.advance(1000);
+      value.provider.listCalls.mockClear();
+      value.provider.exactCalls.mockClear();
+
+      expect(
+        await value.service.refreshProviderState("user-1", { codespaceId: first.resource.id }),
+      ).toEqual({ stale: false });
+      expect(value.provider.listCalls).not.toHaveBeenCalled();
+      expect(value.provider.exactCalls.mock.calls).toEqual([[first.resource.providerResourceName]]);
+      expect(value.service.getCodespace("user-1", first.resource.id).state).toBe("stopped");
+      expect(value.service.getCodespace("user-1", second.resource.id)).toEqual(second.resource);
+
+      value.provider.identityCalls.mockClear();
+      value.provider.exactCalls.mockClear();
+      expect(
+        await value.service.refreshProviderState("user-2", { codespaceId: second.resource.id }),
+      ).toEqual({ stale: false });
+      expect(value.provider.identityCalls).not.toHaveBeenCalled();
+      expect(value.provider.exactCalls).not.toHaveBeenCalled();
+      expect(value.service.getCodespace("user-1", second.resource.id)).toEqual(second.resource);
+    } finally {
+      value.sqlite.close();
+    }
+  });
+
   test("a codespace the provider stopped on its own is recorded stopped with its last start time, listing once per interval", async () => {
     const value = fixture();
     try {

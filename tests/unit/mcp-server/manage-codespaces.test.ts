@@ -317,6 +317,60 @@ describe("codespace MCP adapter", () => {
     expect(data(response)).toEqual({ stdout: "ok\n", stderr: "", exit_code: 0 });
   });
 
+  it.each(["exec", "write"] as const)(
+    "keeps the accepted identity when %s throws a typed uncertain transport failure",
+    async (action) => {
+      const base = services();
+      const failure = new CodespaceResourceError(
+        "CODESPACE_PROVIDER_UNAVAILABLE",
+        "private-runtime-generation-99",
+        "The connection was interrupted; inspect the accepted operation.",
+        false,
+        OPERATION_ID,
+      );
+      const execute = jest.fn(async () => {
+        throw failure;
+      });
+      const dependencies = services({
+        operation: { ...base.operation!, execute },
+        file: { ...base.file!, execute },
+      });
+      const request =
+        action === "exec"
+          ? { action, codespace_id: CODESPACE_ID, argv: ["build"] }
+          : {
+              action,
+              codespace_id: CODESPACE_ID,
+              path: "source.txt",
+              text: "new",
+              expected: { exists: false },
+            };
+      const response = await executeCodespaceTool(
+        parseCodespaceToolParams(request),
+        USER_ID,
+        dependencies,
+      );
+      expect(response).toMatchObject({
+        isError: true,
+        structuredContent: {
+          operation_id: OPERATION_ID,
+          error: {
+            code: "CODESPACE_PROVIDER_UNAVAILABLE",
+            message:
+              "The codespace provider is unavailable. The connection was interrupted; inspect the accepted operation.",
+          },
+        },
+      });
+      expect(execute).toHaveBeenCalledTimes(1);
+      expect(dependencies.operation!.waitForResult).not.toHaveBeenCalled();
+      expect(dependencies.file!.waitForResult).not.toHaveBeenCalled();
+      expect(data(response)).not.toHaveProperty("operation");
+      expect(JSON.stringify(response)).not.toMatch(
+        /private-runtime|resourceGeneration|remoteMarker/,
+      );
+    },
+  );
+
   it("keeps the ordinary command call open until the accepted command returns its terminal output", async () => {
     const base = services();
     let release!: () => void;
@@ -927,42 +981,50 @@ describe("codespace MCP adapter", () => {
         error: { code: "CODESPACE_OPERATION_INTERRUPTED", retryable: false },
       },
     });
-    expect(JSON.stringify(data(response))).toContain("restarted");
+    expect(JSON.stringify(data(response))).toContain("interrupted before completion");
+    expect(JSON.stringify(data(response))).toContain("will not be replayed automatically");
   });
 
-  it("reports a rejected file edit as an error, retaining the durable operation", async () => {
-    const base = services();
-    const response = await executeCodespaceTool(
-      parseCodespaceToolParams({
-        action: "write",
-        codespace_id: CODESPACE_ID,
-        path: "source.txt",
-        text: "new",
-        expected: { exists: false },
-      }),
-      USER_ID,
-      services({
-        file: {
-          ...base.file!,
-          execute: jest.fn<NonNullable<CodespaceToolServices["file"]>["execute"]>(async () => ({
-            operation: { ...operation("write"), state: "failed" as const },
-            result: {
-              action: "write" as const,
-              state: "failed" as const,
-              code: "CODESPACE_FILE_REJECTED",
-            },
-          })),
+  it.each(["CODESPACE_FILE_REJECTED", "CODESPACE_OPERATION_INTERRUPTED"] as const)(
+    "reports file failure %s precisely, retaining the durable operation without replay",
+    async (code) => {
+      const base = services();
+      const execute = jest.fn<NonNullable<CodespaceToolServices["file"]>["execute"]>(async () => ({
+        operation: { ...operation("write"), state: "failed" as const },
+        result: { action: "write" as const, state: "failed" as const, code },
+      }));
+      const response = await executeCodespaceTool(
+        parseCodespaceToolParams({
+          action: "write",
+          codespace_id: CODESPACE_ID,
+          path: "source.txt",
+          text: "new",
+          expected: { exists: false },
+        }),
+        USER_ID,
+        services({
+          file: {
+            ...base.file!,
+            execute,
+          },
+        }),
+      );
+      expect(response).toMatchObject({
+        isError: true,
+        structuredContent: {
+          operation_id: OPERATION_ID,
+          error: { code, retryable: false },
         },
-      }),
-    );
-    expect(response).toMatchObject({
-      isError: true,
-      structuredContent: {
-        operation_id: OPERATION_ID,
-        error: { code: "CODESPACE_FILE_REJECTED" },
-      },
-    });
-  });
+      });
+      expect(execute).toHaveBeenCalledTimes(1);
+      if (code === "CODESPACE_OPERATION_INTERRUPTED") {
+        const message = (data(response) as { error: { message: string } }).error.message;
+        expect(message).toContain("Inspect the affected files");
+        expect(message).toContain("will not be replayed automatically");
+        expect(message).not.toMatch(/retry|rerun/i);
+      }
+    },
+  );
 
   it("resumes a download as a native link without requesting the source file again", async () => {
     const base = services();

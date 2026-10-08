@@ -315,9 +315,8 @@ describe("cloud Git broker", () => {
       }),
     } as unknown as NetworkBudget;
     const broker = cloudGitBroker(
-      async (spaceId, generation, repositoryId) => {
-        if (spaceId !== "owned-space" || generation !== 3 || repositoryId !== "repository")
-          throw Error("Denied");
+      async (spaceId, repositoryId) => {
+        if (spaceId !== "owned-space" || repositoryId !== "repository") throw Error("Denied");
         return {
           origin: "https://moira.example",
           credential: "device-secret",

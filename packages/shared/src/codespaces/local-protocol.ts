@@ -8,12 +8,23 @@ export function localRelayMutationId(
   request: Record<string, unknown>,
   authority?: "owner-delete",
 ): string {
+  const job =
+    request.action === "operation" && typeof request.job === "object" && request.job !== null
+      ? (request.job as Record<string, unknown>)
+      : null;
+  const identity = job
+    ? {
+        action: "operation",
+        spaceId: request.spaceId,
+        job: { action: job.action, remoteMarker: job.remoteMarker },
+      }
+    : request;
   const hex = createHash("sha256")
     .update(
       canonicalJson({
         resourceId: resource.id,
-        generation: resource.generation,
-        request,
+        ...(request.action === "operation" ? {} : { generation: resource.generation }),
+        request: identity,
         ...(authority ? { authority } : {}),
       }),
     )

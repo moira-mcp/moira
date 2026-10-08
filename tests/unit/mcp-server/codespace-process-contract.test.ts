@@ -1,4 +1,5 @@
 import { describe, expect, it, jest } from "@jest/globals";
+import { CodespaceResourceError } from "@mcp-moira/shared";
 import {
   TOOL_DEFINITIONS,
   getToolJsonSchema,
@@ -15,8 +16,50 @@ import {
 import type { CodespaceToolServices } from "../../../packages/mcp-server/src/tools/manage-codespaces.js";
 
 const codespaceId = "00000000-0000-4000-8000-000000000001";
+const processId = "00000000-0000-4000-8000-000000000002";
 
 describe("ordinary codespace and background process contracts", () => {
+  it("keeps the accepted process identity after a typed uncertain start failure", async () => {
+    const execute = jest.fn(async () => {
+      throw new CodespaceResourceError(
+        "CODESPACE_PROVIDER_UNAVAILABLE",
+        "private-runtime-generation-99",
+        "The connection was interrupted; inspect the accepted process.",
+        false,
+        processId,
+      );
+    });
+    const services = { operation: { execute } } as unknown as CodespaceToolServices;
+    const response = await executeCodespaceProcess(
+      {
+        action: "start",
+        request: {
+          codespace_id: codespaceId,
+          argv: ["serve"],
+          session_start: false,
+          session_end: false,
+        },
+      },
+      "owned-user",
+      services,
+    );
+    expect(response).toMatchObject({
+      isError: true,
+      structuredContent: {
+        process_id: processId,
+        error: {
+          code: "CODESPACE_PROVIDER_UNAVAILABLE",
+          message:
+            "The codespace provider is unavailable. The connection was interrupted; inspect the accepted process.",
+        },
+      },
+    });
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(response.structuredContent).not.toHaveProperty("operation_id");
+    expect(response.structuredContent).not.toHaveProperty("operation");
+    expect(JSON.stringify(response)).not.toMatch(/private-runtime|resourceGeneration|remoteMarker/);
+  });
+
   it.each([
     ["leading byte of Russian stdout", Buffer.from("я"), 0, 1, "�"],
     ["trailing byte of Russian stdout", Buffer.from("я"), 1, 1, "�"],

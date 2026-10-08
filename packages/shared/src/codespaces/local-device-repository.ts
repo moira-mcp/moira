@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import type Database from "better-sqlite3";
 import { CodespaceResourceRepository } from "./resource-repository.js";
+import { CodespaceResourceError } from "./resource-types.js";
 import { canonicalJson } from "../utils/canonical-json.js";
 import { getAccountAccessDenial } from "../auth/account-admission.js";
 import {
@@ -778,7 +779,7 @@ export class LocalDeviceRepository {
     );
   }
 
-  enqueue(input: LocalRelayRequest, now: number): LocalRelayResult {
+  enqueue(input: LocalRelayRequest, now: number, operationMarker?: string): LocalRelayResult {
     return this.sqlite
       .transaction(() => {
         if ((input.authority === "owner-delete") !== this.ownerDeleteAuthority(input))
@@ -796,7 +797,6 @@ export class LocalDeviceRepository {
             previous.deviceGeneration !== input.deviceGeneration ||
             previous.connectionId !== input.connectionId ||
             previous.resourceId !== input.resourceId ||
-            previous.resourceGeneration !== input.resourceGeneration ||
             previous.digest !== input.digest ||
             previous.deadlineAt !== input.deadlineAt ||
             previous.inputReference !== canonicalJson(input.payloadReference)
@@ -804,6 +804,24 @@ export class LocalDeviceRepository {
             throw new LocalDeviceError("LOCAL_CONFLICT", "Relay request identity changed.");
           return result(previous);
         }
+        // Stop and first delivery share this transaction boundary. Payload retention can
+        // finish after stop/start; a cancelled operation must never first enqueue then.
+        if (
+          operationMarker !== undefined &&
+          !this.sqlite
+            .prepare(
+              `SELECT 1 FROM codespaceOperation WHERE userId = ? AND resourceId = ?
+               AND remoteMarker = ? AND state = 'reconcile_pending'
+               AND lastOutcome = 'dispatch_submitted'`,
+            )
+            .get(input.userId, input.resourceId, operationMarker)
+        )
+          throw new CodespaceResourceError(
+            "CODESPACE_OPERATION_CANCELLED",
+            "The operation was cancelled before delivery",
+            "No command or file change was started. Submit a new request if still needed.",
+            true,
+          );
         const retained = this.sqlite
           .prepare(
             "SELECT COUNT(*) count,SUM(CASE WHEN deviceId=? THEN 1 ELSE 0 END) deviceCount FROM codespaceLocalRelay WHERE userId=?",
@@ -1053,7 +1071,7 @@ export class LocalDeviceRepository {
       .immediate();
   }
 
-  /** Input bytes authorize work only for the current resource generation. */
+  /** Input bytes require the currently approved resource, device and repository authority. */
   authorizePayload(
     auth: LocalDeviceAuth,
     requestId: string,
@@ -1182,12 +1200,11 @@ export class LocalDeviceRepository {
     const binding = this.getBinding(input.userId, input.resourceId);
     const resource = this.sqlite
       .prepare(
-        `SELECT r.generation,r.state,r.repositoryId,r.repositoryFullName,r.machineName,r.authorizationGeneration,c.credentialGeneration,c.status FROM codespaceResource r
+        `SELECT r.state,r.repositoryId,r.repositoryFullName,r.machineName,r.authorizationGeneration,c.credentialGeneration,c.status FROM codespaceResource r
       JOIN codespaceConnection c ON c.id=r.connectionId WHERE r.id=? AND r.userId=? AND r.connectionId=? AND r.provider=?`,
       )
       .get(input.resourceId, input.userId, input.connectionId, CODESPACE_PROVIDER_LOCAL) as
       | {
-          generation: number;
           state: string;
           repositoryId: string;
           repositoryFullName: string;
@@ -1204,9 +1221,6 @@ export class LocalDeviceRepository {
       !resource ||
       resource.repositoryId !== localRepositoryTargetId(input.deviceId, binding.repositoryId) ||
       resource.machineName !== binding.profileId ||
-      (acceptedResult
-        ? resource.generation < input.resourceGeneration
-        : resource.generation !== input.resourceGeneration) ||
       resource.authorizationGeneration !== resource.credentialGeneration ||
       resource.status !== "connected" ||
       (!acceptedResult && (resource.state === "deleted" || resource.state === "rejected")) ||

@@ -459,6 +459,7 @@ export class CodespaceFileService {
           throw new CodespaceResourceError(
             "CODESPACE_PROVIDER_UNAVAILABLE",
             "The accepted file outcome is not confirmed",
+            "Check this same operation again using operation_id; do not repeat a file mutation while its outcome is unknown. Other files and commands remain available.",
           );
         return null;
       },
@@ -586,7 +587,7 @@ export class CodespaceFileService {
         this.dependencies.repository.cancelBeforeDispatch(userId, operation.id, this.now());
         const current = this.dependencies.repository.getOwned(userId, operation.id)!;
         await this.emit("terminal", current);
-        return { operation: current, result: null };
+        this.refuseBeforeDispatch(userId, operation, policy);
       }
       const credential = await this.dependencies.credentials.getCredential(
         userId,
@@ -597,7 +598,6 @@ export class CodespaceFileService {
         !this.dependencies.repository.beginDispatch(
           userId,
           operation.id,
-          operation.resourceGeneration,
           randomUUID(),
           dispatchNow + Math.max(policy.claimLeaseMs, 60_000),
           dispatchNow,
@@ -607,7 +607,7 @@ export class CodespaceFileService {
         this.dependencies.repository.cancelBeforeDispatch(userId, operation.id, this.now());
         const current = this.dependencies.repository.getOwned(userId, operation.id)!;
         await this.emit("terminal", current);
-        return { operation: current, result: null };
+        this.refuseBeforeDispatch(userId, operation, policy);
       }
       remoteContacted = true;
       if (claimedInput) {
@@ -626,19 +626,10 @@ export class CodespaceFileService {
         operation,
         request,
       );
-      this.dependencies.repository.recordConnectorRunning(
-        userId,
-        codespace.id,
-        operation.resourceGeneration,
-        this.now(),
-      );
+      this.dependencies.repository.requireAuthority(userId, operation.id, policy);
+      this.dependencies.repository.recordConnectorRunning(userId, codespace.id, this.now());
       if ("state" in result && result.state === "running") {
-        this.dependencies.repository.markRunning(
-          userId,
-          operation.id,
-          operation.resourceGeneration,
-          this.now(),
-        );
+        this.dependencies.repository.markRunning(userId, operation.id, this.now());
         const settled = await settleAfterDispatch(this.dependencies.delay, async () => {
           const response = await this.reconcile(userId, operation.id);
           return response.result === null ? null : response;
@@ -653,10 +644,15 @@ export class CodespaceFileService {
       if (result.action !== request.action) {
         throw new Error("Codespace file transport returned a mismatched result");
       }
-      return this.complete(userId, operation, result);
-    } catch {
+      const completed = await this.complete(userId, operation, result);
+      this.dependencies.repository.requireAuthority(userId, operation.id, policy);
+      return completed;
+    } catch (error) {
       if (claimedInput) this.dependencies.transfers?.release(claimedInput);
-      if (remoteContacted) {
+      if (remoteContacted && error instanceof CodespaceResourceError && error.confirmedRefusal) {
+        this.dependencies.repository.rejectDispatch(userId, operation.id, error.code, this.now());
+        await this.emit("terminal", this.dependencies.repository.getOwned(userId, operation.id)!);
+      } else if (remoteContacted) {
         this.dependencies.repository.markReconcilePending(
           userId,
           operation.id,
@@ -673,11 +669,38 @@ export class CodespaceFileService {
         );
         await this.emit("terminal", this.dependencies.repository.getOwned(userId, operation.id)!);
       }
+      if (error instanceof CodespaceResourceError)
+        throw new CodespaceResourceError(
+          error.code,
+          error.message,
+          error.detail,
+          error.confirmedRefusal,
+          operation.id,
+        );
       return {
         operation: this.dependencies.repository.getOwned(userId, operation.id)!,
         result: null,
       };
     }
+  }
+
+  private refuseBeforeDispatch(
+    userId: string,
+    operation: CodespaceOperationRecord,
+    policy: CodespaceResourcePolicy,
+  ): never {
+    this.dependencies.repository.requireAuthority(userId, operation.id, policy);
+    if (this.now() >= operation.deadlineAt)
+      throw new CodespaceResourceError(
+        "CODESPACE_PROVIDER_UNAVAILABLE",
+        "The file request expired before execution",
+        "No file change was started. Submit a new request.",
+      );
+    throw new CodespaceResourceError(
+      "CODESPACE_NOT_RUNNING",
+      "Codespace stopped before the file operation started",
+      "No file change was started. Start the codespace and submit the request again.",
+    );
   }
 
   async reconcile(userId: string, operationId: string): Promise<CodespaceFileOperationResponse> {
@@ -720,8 +743,8 @@ export class CodespaceFileService {
         context.operation,
       );
     } catch (error) {
-      // A connector failure during inspection is not a result: the operation stays
-      // reconcile-pending with capacity reserved, exactly like an exec inspection.
+      // A connector failure is not a result. Retain this marker for inspection without
+      // locking independent work behind the journal entry.
       if (error instanceof CodespaceResourceError) throw error;
       this.dependencies.repository.markReconcilePending(
         userId,
@@ -777,7 +800,6 @@ export class CodespaceFileService {
     const completed = this.dependencies.repository.completeMetadata(
       userId,
       operation.id,
-      operation.resourceGeneration,
       0,
       this.now() + this.dependencies.policy().cleanupDeadlineMs,
       this.now(),
@@ -809,7 +831,6 @@ export class CodespaceFileService {
     const completed = this.dependencies.repository.completeMetadata(
       userId,
       operation.id,
-      operation.resourceGeneration,
       bytes,
       this.now() + this.dependencies.policy().cleanupDeadlineMs,
       this.now(),

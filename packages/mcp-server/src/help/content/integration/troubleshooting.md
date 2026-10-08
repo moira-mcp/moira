@@ -304,8 +304,11 @@ A running command, including a background development server, does not itself bl
 `write`, `upload` or `apply_patch`. Cloud concurrency ceilings apply to cloud operations;
 local operations do not consume them. Keep the expected file
 existence, size and digest guards; if another writer changes that version, reread and reconcile
-the edit before retrying. Another active file mutation can return `CODESPACE_OPERATION_BUSY`;
-commands and reads do not impose that serialization. A failed edit does not require stopping the development server.
+the edit before retrying. Pending file-operation journal entries do not serialize new work. Only
+the guest's file commit and recovery are serialized, with the lock released when its owning
+process dies. A failed edit does not require stopping the development server. If recovery conflicts
+with a later edit, preserve the current files and retained recovery data rather than overwriting
+the later edit or deleting its journal.
 
 ## Local codespaces
 
@@ -313,9 +316,25 @@ Ordinary `codespace` commands and files wait for the accepted result; create/sta
 guest readiness, stop for confirmed shutdown and delete for confirmed absence. Successful results
 omit operation journals. Long-lived servers use `codespace_process` with start/get/read/stop and its
 retained `process_id`; a pending process stop is not confirmed cancellation. Unconfirmed delivery
-returns an error and the existing recovery identity. Inspect that identity instead of submitting
-new work. Server waiting does not extend an MCP client's transport timeout. Use `repositories`
+returns an error with the accepted `operation_id` or `process_id` when available. Inspect that
+identity instead of repeating the same effect; independent work can continue. Server waiting does
+not extend an MCP client's transport timeout. Use `repositories`
 to discover approved targets separately from `list`.
+
+Restarting a codespace does not invalidate a retained result or require manual counter
+synchronization. A saved result remains available until its retention expires, subject to current
+repository, device and account authority. Reading it may require the runtime to be reachable.
+`CODESPACE_RESULT_EXPIRED` means retained bytes are unavailable; it does not prove that the command
+or edit never ran. A process lost to a VM restart reports interruption rather than executing again.
+After an explicit stop, undelivered commands and edits remain cancelled when the VM starts again.
+Submit fresh work only when intended; inspecting a previous operation never executes it again.
+
+`CODESPACE_NOT_RUNNING` means Local refused work because the guest was not ready. Moira refreshes
+that codespace's observed state; the next ordinary call uses start-on-use when appropriate.
+`CODESPACE_AUTHORIZATION_REQUIRED` requires restoring the actual account, device or repository
+access in Settings. A disconnected computer requires restoring the companion connection.
+An expired request reports that it expired before execution when no work was dispatched; it does
+not leave a file-operation lock behind. Keep the recovery identity when the outcome is unknown.
 
 Internal companion messages have a separate bounded transfer budget; they do not consume the
 native file-upload/download slots or their displayed usage. Native file limits still apply.
@@ -433,6 +452,11 @@ Public destinations are independent of technology; network downloads have no cum
 per-response byte quota. Native MCP file-transfer limits still apply. Host, LAN and service destinations remain denied.
 
 `doctor` requires an enabled, unexpired lease and checks prerequisites, not live VM isolation.
+Device `active`/`enabled` and setup `ready` describe authorization and configuration, not a
+successful guest connection. Check the companion's current diagnostic when guest calls time out.
+After a crash or reboot, `run` safely reclaims a stale runner marker when its runner and guard are
+proven absent under the system lock. It preserves saved work and never replays unknown operations.
+Live or unverifiable owners remain refused; do not clear their lock or receipt to bypass the check.
 Stop the foreground companion before commands that require its runner lock. Unsupported SDK
 versions, Linux runtime ownership, unsafe mounts/settings or unknown identity refuse work;
 do not reset the personal Docker profile, substitute an ordinary directory for bounded storage,
@@ -459,12 +483,14 @@ canonical public-policy digest. Preserve grants, receipts, IDs, generations, mar
 credentials and disks. Restart matching bundles; rollback restores paired snapshots and bundles.
 Do not replace enrollment, reset the SDK or discard journals to resolve a schema refusal.
 
-`LOCAL_GUEST_SETTLEMENT_UNKNOWN` means the previous guest effect cannot be safely retried.
-After confirmed physical stop, `npm run local -- recover SPACE_ID --confirm` acknowledges that
-outcome without replaying prior jobs. For `LOCAL_GENERATION_CONFLICT` on an initialized, clean
-stopped VM, the same command verifies its exact identity and boundary and records a generation
-receipt; use the same `--state PATH`, then restart `run`. Ordinary confirmed clean stops retain this
-receipt automatically. Retained jobs and unknown outcomes are preserved, never replayed.
+An unknown command or file outcome belongs to its accepted operation; it does not itself require
+stopping or recovering the entire VM. Inspect its result and the affected files before repeating
+that effect or modifying those files. Independent work does not need to resolve that unknown
+outcome. Do not automatically replay an unknown edit or clear its journal to admit new work.
+For a runtime-owner refusal such as `LOCAL_GUEST_SETTLEMENT_UNKNOWN`, confirm physical stop before
+`npm run local -- recover SPACE_ID --confirm`. This checks exact native identity and the network
+boundary while preserving jobs and unknown outcomes without replay. Use the same `--state PATH`
+and restart `run`. Ordinary stop/start requires no separate counter-recovery step.
 `npm run local -- recover --confirm` is the separate
 disabled-device orphan-shutdown acknowledgement. Neither deletes codespace data or authorizes
 adoption by SDK name. If shutdown remains pending or identity is unknown, retain the records

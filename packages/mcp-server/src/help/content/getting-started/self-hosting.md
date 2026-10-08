@@ -373,7 +373,12 @@ Local VMs and operations do not consume cloud Codespaces slots or use its machin
 Use `codespace_process` for background start/get/read/stop in that VM. Ordinary `codespace` commands
 and files wait for their result, without normal polling. Backend, frontend and browser checks share
 guest localhost. A client's transport timeout remains independent; after interrupted or unknown
-delivery, recover the accepted identity instead of starting another effect. Public package registries and other public
+delivery, inspect the returned `operation_id` instead of repeating the command or edit. Commands,
+reads and writes are independent; a pending journal entry does not lock new work. File edits retain
+their expected-content checks and serialize only the guest file commit and recovery. Ordinary
+execution and retained results do not depend on lifecycle counters; current repository/device
+rights and the exact VM identity still apply. A restart can interrupt a process without discarding
+an already saved result, which remains readable within its retention period. Public package registries and other public
 DNS destinations are available independently of the language or framework, with public-address and
 computer-network checks on every connection. Network downloads have no cumulative traffic budget or
 per-download byte quota; bounded socket capacity provides backpressure. Host, LAN and service
@@ -433,6 +438,10 @@ together. Convert unsupported saved policy/control formats only while both sides
 
 Manager-backed CLI create/start/exec commands are one-shot and stop owned VM processes on exit;
 persistent server work uses `run`. Stop it before another command needs the same runner lock.
+After a crash or computer reboot, start `run` with the same state directory. It automatically
+reclaims a stale runner marker only under the system lock and after proving both previous host
+owners absent. Saved policy, VM records and unknown operations are retained without replay.
+Live, unknown or malformed ownership stays refused; do not delete its marker manually.
 The local daemon separates server contact from VM lifetime. Network/5xx failures reconnect;
 malformed control-plane responses suspend new claims until confirmation succeeds, without stopping
 already-admitted work. An addressed resource or delivery-claim refusal stays with that request;
@@ -441,11 +450,13 @@ without a daemon-wide fault or retry delay. Confirmed device revocation/identity
 stop work. Existing grants and finite deadlines are never extended; cached results do not repeat effects.
 Ctrl+C closes the foreground companion; `npm run local -- disable` stops owned work independently
 and keeps VM data. Stop keeps files, while `remove SPACE_ID --confirm` deletes the exact owned VM.
-An uncertain guest outcome is fenced, not retried automatically. Once that VM is confirmed stopped,
-`recover SPACE_ID --confirm` acknowledges the outcome without replaying jobs. It also acknowledges
-an initialized clean stopped VM whose generation conflicts with its server binding, after checking
-exact identity and network policy. Use the same state directory and restart `run`; retained jobs
-and unknown outcomes remain unchanged. Confirmed ordinary clean stops retain that receipt automatically.
+An uncertain command or edit is retained by its own operation identity and is not retried
+automatically. It does not block independent work. Inspect the saved result before repeating the
+same edit or modifying affected files; a failed delivery is not proof that an edit was not applied. Ordinary
+stop/start requires no manual synchronization. If runtime ownership itself needs recovery, first
+confirm that the VM is physically stopped, then use `recover SPACE_ID --confirm` with the same
+state directory. It checks exact identity and network policy without replaying jobs; retained jobs
+and unknown outcomes remain unchanged.
 For an orphan device
 shutdown, `recover --confirm` requires disabled work, proves physical stop and retains jobs/data.
 See [Troubleshooting](/docs/integration/troubleshooting/#local-codespaces) for refusal recovery.

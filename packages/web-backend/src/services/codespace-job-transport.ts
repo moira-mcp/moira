@@ -384,14 +384,22 @@ export abstract class CodespaceJobTransport
     if (value.state === "failed") {
       if (
         !hasExactKeys(value, ["action", "state", "code"]) ||
-        !["CODESPACE_FILE_REJECTED", "WORKSPACE_FILE_REJECTED"].includes(String(value.code))
+        ![
+          "CODESPACE_FILE_REJECTED",
+          "WORKSPACE_FILE_REJECTED",
+          "CODESPACE_OPERATION_INTERRUPTED",
+        ].includes(String(value.code))
       ) {
         throw new Error("Codespace file transport returned an invalid failure");
       }
       // A failed file operation can remain collectible in the remote supervisor after a server
       // upgrade. Accept its version-1 stored code at this private transport boundary, but expose
       // only the renamed code to the service and published MCP contract.
-      return { ...value, code: "CODESPACE_FILE_REJECTED" } as CodespaceFileResult;
+      return {
+        ...value,
+        code:
+          value.code === "CODESPACE_OPERATION_INTERRUPTED" ? value.code : "CODESPACE_FILE_REJECTED",
+      } as CodespaceFileResult;
     }
     if (value.action === "stat") {
       const stat = value.stat as Record<string, unknown> | undefined;

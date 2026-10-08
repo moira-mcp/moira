@@ -30,7 +30,24 @@ const replySchema = z.discriminatedUnion("ok", [
     .strict(),
 ]);
 
-function refuseLocalReply(code: string): never {
+function refuseLocalReply(code: string, ordinaryOperation = false): never {
+  if (code === "LOCAL_GUEST_SETTLEMENT_UNKNOWN" || code === "LOCAL_OUTCOME_UNKNOWN")
+    throw new CodespaceResourceError(
+      "CODESPACE_PROVIDER_UNAVAILABLE",
+      "The connection ended before the operation result was confirmed",
+      "Check the result of this operation; do not repeat a write until its outcome is known.",
+    );
+  if (ordinaryOperation && /(?:IDENTITY|GENERATION|REPLAY)/.test(code))
+    throw new CodespaceResourceError(
+      code === "LOCAL_REPLAY_CONFLICT"
+        ? "CODESPACE_RESOURCE_INVALID"
+        : "CODESPACE_LOCAL_RUNTIME_ERROR",
+      `The codespace refused the operation (${code})`,
+      code === "LOCAL_REPLAY_CONFLICT"
+        ? "An accepted operation cannot change its request."
+        : "The codespace identity changed; check its current state.",
+      true,
+    );
   throw new CodespaceResourceError(
     code === "LOCAL_DELETE_APPROVAL_REQUIRED"
       ? "CODESPACE_LOCAL_DELETE_APPROVAL_REQUIRED"
@@ -233,13 +250,22 @@ export class LocalCodespaceRelay {
           connectionId: binding.connectionId,
           resourceId: resource.id,
           requestId,
-          resourceGeneration: resource.generation,
+          resourceGeneration: previous?.resourceGeneration ?? resource.generation,
           digest,
           payloadReference: reference,
           deadlineAt,
           ...(authority ? { authority } : {}),
         };
-        this.devices.enqueue(envelope);
+        const job =
+          request.action === "operation" && typeof request.job === "object" && request.job !== null
+            ? (request.job as Record<string, unknown>)
+            : null;
+        this.devices.enqueue(
+          envelope,
+          job?.action === "execute" || job?.action === "file-execute"
+            ? String(job.remoteMarker)
+            : undefined,
+        );
         return envelope;
       } catch (error) {
         if (!previous)
@@ -314,7 +340,7 @@ export class LocalCodespaceRelay {
             JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(payload)),
           );
           if (!reply.ok) {
-            refuseLocalReply(reply.error.code);
+            refuseLocalReply(reply.error.code, request.action === "operation");
           }
           if (result.status !== "completed")
             throw new LocalDeviceError("LOCAL_INVALID", "Local outcome status disagrees.");
