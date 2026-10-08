@@ -47,6 +47,7 @@ const relayRequestSchema = z
     requestId: id,
     resourceId: id,
     resourceGeneration: generation,
+    authority: z.literal("owner-delete").optional(),
     digest: z.string().regex(/^[a-f0-9]{64}$/),
     payloadReference: localRelayPayloadReferenceSchema,
     deadlineAt: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
@@ -59,6 +60,9 @@ export class LocalDeviceService {
     readonly repository: LocalDeviceRepository,
     private readonly now: () => number = Date.now,
   ) {}
+  isOwnerDeleteIntent(userId: string, resourceId: string, generation: number): boolean {
+    return this.repository.isOwnerDeleteIntent(userId, resourceId, generation);
+  }
   listOwned(userId: string) {
     return this.repository.listOwned(userId, this.now());
   }

@@ -17,6 +17,16 @@ import { publicPolicy, LocalRefusal } from "../../../packages/local/src/policy.j
 import { setEnabled } from "../../../packages/local/src/config.js";
 import { localFixture } from "./fixtures.js";
 import { canonicalJson } from "../../../packages/shared/src/utils/canonical-json.js";
+import {
+  LocalCompanion,
+  LocalWebControl,
+  controlSettings,
+} from "../../../packages/local/src/web-control.js";
+import { GiB } from "../../../packages/local/src/policy.js";
+import {
+  MAX_LOCAL_WORK_LEASE_MS,
+  type LocalDeviceControlView,
+} from "../../../packages/shared/src/codespaces/local-management-types.js";
 
 let directory: string;
 beforeEach(async () => {
@@ -52,7 +62,11 @@ async function fixture() {
     pairingId: randomUUID(),
   };
   await state.write("connection.json", connection);
-  const device = { ...connection, status: "active", policy: publicPolicy(local.policy) };
+  const device: typeof connection & {
+    status: string;
+    policy: ReturnType<typeof publicPolicy>;
+    control?: LocalDeviceControlView;
+  } = { ...connection, status: "active", policy: publicPolicy(local.policy) };
   const resourceId = randomUUID();
   let message: unknown;
   let claim: Record<string, unknown>;
@@ -199,8 +213,14 @@ async function fixture() {
   };
   const rpc = new LocalRpc(manager);
   const relay = new LocalRelay(local.records, transport);
-  const setRequest = (request: unknown, generation = 1) => {
-    message = { version: 1, id: randomUUID(), expiresAt: Date.now() + 60_000, request };
+  const setRequest = (request: unknown, generation = 1, authority?: "owner-delete") => {
+    message = {
+      version: 1,
+      id: randomUUID(),
+      expiresAt: Date.now() + 60_000,
+      request,
+      ...(authority ? { authority } : {}),
+    };
     bytes = Buffer.from(canonicalJson(message));
     const envelope = message as { id: string; expiresAt: number };
     claim = {
@@ -208,6 +228,7 @@ async function fixture() {
       requestId: envelope.id,
       resourceId,
       resourceGeneration: generation,
+      ...(authority ? { authority } : {}),
       digest: hash(bytes),
       payloadReference: {
         parts: [{ transferId: randomUUID(), sha256: hash(bytes), size: bytes.length }],
@@ -239,6 +260,27 @@ async function fixture() {
     rpc,
     relay,
     receipts,
+    device,
+    message: () => message,
+    optIn: async () => {
+      const ceiling = {
+        cpuCores: 4,
+        memoryBytes: 8 * GiB,
+        storageBytes: 64 * GiB,
+        dockerBytes: 8 * GiB,
+        maxLeaseMs: MAX_LOCAL_WORK_LEASE_MS,
+      };
+      await new LocalWebControl(local.records).optIn(connection, ceiling, true);
+      device.control = {
+        optedIn: true,
+        revision: 0,
+        appliedRevision: 0,
+        status: "applied",
+        settings: controlSettings(local.policy),
+        ceiling,
+        error: null,
+      };
+    },
     setRequest,
     claim: () => claim,
     creates: () => creates,
@@ -293,6 +335,343 @@ async function fixture() {
 }
 
 describe("outbound companion authority and durable response replay", () => {
+  async function ownerCleanupFixture() {
+    const local = await fixture();
+    await local.relay.poll(local.rpc);
+    await local.optIn();
+    const peer = {
+      ...local.space,
+      id: randomUUID(),
+      name: `moira-${randomUUID().replaceAll("-", "")}`,
+      runtimeId: "peer-runtime",
+      operationMarker: `moira-${"c".repeat(24)}`,
+    };
+    await local.records.put(peer);
+    const inventory = new Map(
+      [local.space, peer].map((space) => [
+        space.runtimeId!,
+        {
+          id: space.runtimeId!,
+          name: space.name,
+          status: "stopped" as const,
+          agent: "shell" as const,
+        },
+      ]),
+    );
+    let removals = 0;
+    class ExternalInventory extends SbxRuntime {
+      override async list() {
+        return [...inventory.values()];
+      }
+      override async exact(identity: { name: string; runtimeId: string }) {
+        const item = inventory.get(identity.runtimeId);
+        if (item && item.name !== identity.name) throw new Error("Fixture identity mismatch");
+        return item ?? null;
+      }
+      override async remove(identity: { name: string; runtimeId: string }) {
+        await this.exact(identity);
+        removals++;
+        inventory.delete(identity.runtimeId);
+      }
+    }
+    local.manager.dependencies.runtime = (policy) => adaptSbxRuntime(new ExternalInventory(policy));
+    return { ...local, peer, inventory, removals: () => removals };
+  }
+
+  test("owner cleanup deletes only its bound VM and replays a lost ACK without a second physical removal or grant change", async () => {
+    const local = await ownerCleanupFixture();
+    const policy = await readFile(join(directory, "policy.json"));
+    const peer = await local.records.get(local.peer.id);
+    local.setRequest(
+      { action: "delete", spaceId: local.resourceId, generation: 2 },
+      2,
+      "owner-delete",
+    );
+    local.loseAck();
+    await expect(local.relay.poll(local.rpc)).rejects.toThrow("Controlled response loss");
+    expect(local.receipts.at(-1)).toMatchObject({ ok: true, result: { accepted: true } });
+    expect(local.inventory.has(local.space.runtimeId!)).toBe(false);
+    expect(local.removals()).toBe(1);
+    const requestId = local.claim().requestId;
+    expect(
+      await local.state.read(`relay-request-${requestId}.json`, (value) => value),
+    ).toMatchObject({
+      authority: "owner-delete",
+      message: { authority: "owner-delete", request: { generation: 1, spaceId: local.space.id } },
+      sourceMessage: {
+        authority: "owner-delete",
+        request: { generation: 2, spaceId: local.resourceId },
+      },
+    });
+    local.claim().claimId = randomUUID();
+    await new LocalRelay(local.records, local.transport).poll(new LocalRpc(local.manager));
+    expect(local.removals()).toBe(1);
+    expect(local.receipts.at(-1)).toEqual(local.receipts.at(-2));
+    expect(await local.records.get(local.space.id)).toMatchObject({
+      phase: "deleted",
+      desiredState: "deleted",
+    });
+    expect(await local.records.get(local.peer.id)).toEqual(peer);
+    expect(local.inventory.has(local.peer.runtimeId!)).toBe(true);
+    expect(await readFile(join(directory, "policy.json"))).toEqual(policy);
+    const retained = await local.state.read(
+      `relay-request-${requestId}.json`,
+      (value) => value as { message: Record<string, unknown> },
+    );
+    const changedAuthority = { ...retained!.message };
+    delete changedAuthority.authority;
+    expect(await new LocalRpc(local.manager).replay(changedAuthority)).toMatchObject({
+      ok: false,
+      error: { code: "LOCAL_REPLAY_CONFLICT" },
+    });
+    delete local.claim().authority;
+    await local.relay.poll(new LocalRpc(local.manager));
+    expect(local.receipts.at(-1)).toMatchObject({
+      ok: false,
+      error: { code: "LOCAL_REPLAY_CONFLICT" },
+    });
+    expect(local.removals()).toBe(1);
+    await local.manager.close();
+  });
+
+  test.each([
+    "missing-local",
+    "revoked-server",
+    "wrong-owner",
+    "wrong-device",
+    "wrong-connection",
+    "wrong-origin",
+    "wrong-generation",
+    "wrong-target",
+    "changed-local-generation",
+    "mismatched-authority",
+  ] as const)(
+    "owner cleanup refuses %s without deleting either VM or changing its binding",
+    async (invalid) => {
+      const local = await ownerCleanupFixture();
+      const key = `relay-space-${local.resourceId}.json`;
+      const binding = await local.state.read(key, (value) => value);
+      local.setRequest(
+        {
+          action: "delete",
+          spaceId: invalid === "wrong-target" ? local.peer.id : local.resourceId,
+          generation: 2,
+        },
+        2,
+        "owner-delete",
+      );
+      if (invalid === "missing-local") await local.state.remove("web-control.json");
+      if (invalid === "revoked-server") local.device.control!.optedIn = false;
+      if (
+        [
+          "wrong-owner",
+          "wrong-device",
+          "wrong-connection",
+          "wrong-origin",
+          "wrong-generation",
+        ].includes(invalid)
+      ) {
+        const approval = await local.state.read(
+          "web-control.json",
+          (value) => value as Record<string, unknown>,
+        );
+        const fields: Record<string, string> = {
+          "wrong-owner": "userId",
+          "wrong-device": "deviceId",
+          "wrong-connection": "connectionId",
+          "wrong-origin": "origin",
+          "wrong-generation": "deviceGeneration",
+        };
+        const field = fields[invalid];
+        await local.state.write("web-control.json", {
+          ...approval,
+          [field]:
+            field === "deviceGeneration"
+              ? 8
+              : field === "origin"
+                ? "https://another.example"
+                : randomUUID(),
+        });
+      }
+      if (invalid === "changed-local-generation")
+        await local.records.put({ ...local.space, generation: 2 });
+      if (invalid === "mismatched-authority") delete local.claim().authority;
+      const outcome = await local.relay.poll(local.rpc).catch((error: unknown) => error);
+      if (invalid.startsWith("wrong-") && invalid !== "wrong-target")
+        expect(outcome).toMatchObject({ code: "LOCAL_IDENTITY_CHANGED" });
+      else
+        expect(local.receipts.at(-1)).toMatchObject({
+          ok: false,
+          error: {
+            code:
+              invalid === "wrong-target"
+                ? "LOCAL_IDENTITY_CHANGED"
+                : invalid === "changed-local-generation"
+                  ? "LOCAL_GENERATION_CONFLICT"
+                  : invalid === "mismatched-authority"
+                    ? "LOCAL_PAYLOAD_CHANGED"
+                    : "LOCAL_UNAUTHORIZED",
+          },
+        });
+      expect(local.removals()).toBe(0);
+      expect(local.inventory.size).toBe(2);
+      expect(await local.state.read(key, (value) => value)).toEqual(binding);
+      await local.manager.close();
+    },
+  );
+
+  test.each(["local", "server"] as const)(
+    "cached owner cleanup outcome still requires current %s web-control approval",
+    async (side) => {
+      const local = await ownerCleanupFixture();
+      local.setRequest(
+        { action: "delete", spaceId: local.resourceId, generation: 2 },
+        2,
+        "owner-delete",
+      );
+      await local.relay.poll(local.rpc);
+      expect(local.receipts.at(-1)).toMatchObject({ ok: true });
+      if (side === "local") await local.state.remove("web-control.json");
+      else local.device.control!.optedIn = false;
+      local.claim().claimId = randomUUID();
+      await new LocalRelay(local.records, local.transport).poll(new LocalRpc(local.manager));
+      expect(local.receipts.at(-1)).toMatchObject({
+        ok: false,
+        error: { code: "LOCAL_UNAUTHORIZED" },
+      });
+      expect(local.removals()).toBe(1);
+      expect(local.inventory.has(local.peer.runtimeId!)).toBe(true);
+      await local.manager.close();
+    },
+  );
+
+  test("bare RPC owner flag cannot grant deletion and an ordinary agent refusal leaves no deletion phase", async () => {
+    const local = await ownerCleanupFixture();
+    local.setRequest(
+      { action: "delete", spaceId: local.space.id, generation: 1 },
+      2,
+      "owner-delete",
+    );
+    expect(await local.rpc.handle(local.message())).toMatchObject({
+      ok: false,
+      error: { code: "LOCAL_UNAUTHORIZED" },
+    });
+    local.setRequest({ action: "delete", spaceId: local.resourceId, generation: 2 }, 2);
+    await local.relay.poll(local.rpc);
+    expect(local.receipts.at(-1)).toMatchObject({
+      ok: false,
+      error: { code: "LOCAL_DELETE_APPROVAL_REQUIRED" },
+    });
+    expect(await local.records.get(local.space.id)).toMatchObject({
+      phase: "usable",
+      desiredState: "running",
+      generation: 1,
+    });
+    expect(local.removals()).toBe(0);
+    await local.manager.close();
+  });
+
+  test.each(["create", "start", "stop", "operation"] as const)(
+    "owner deletion authority cannot admit %s",
+    async (action) => {
+      const local = await ownerCleanupFixture();
+      const request =
+        action === "create"
+          ? {
+              action,
+              repositoryId: local.space.repositoryId,
+              ref: "main",
+              operationMarker: `moira-${"d".repeat(24)}`,
+            }
+          : {
+              action,
+              spaceId: local.resourceId,
+              ...(action === "operation"
+                ? {
+                    job: {
+                      version: 1,
+                      action: "execute",
+                      remoteMarker: `moira-op-${"e".repeat(32)}`,
+                      argv: ["node", "-e", "process.stdout.write('guest-only-value')"],
+                      stdin: "",
+                      timeoutMs: 1000,
+                      maxStdoutBytes: 1024,
+                      maxStderrBytes: 1024,
+                      maxRetainedBytes: 1024,
+                    },
+                  }
+                : {}),
+            };
+      local.setRequest(request, 2, "owner-delete");
+      await local.relay.poll(local.rpc);
+      expect(local.receipts.at(-1)).toMatchObject({
+        ok: false,
+        error: { code: "LOCAL_REQUEST_INVALID" },
+      });
+      expect(local.creates()).toBe(1);
+      expect(local.removals()).toBe(0);
+      expect(await local.records.get(local.space.id)).toMatchObject({
+        generation: 1,
+        desiredState: "running",
+        phase: "usable",
+      });
+      await local.manager.close();
+    },
+  );
+
+  test.each(["disabled", "expired"] as const)(
+    "%s companion performs exact owner observation and cleanup without opening work",
+    async (mode) => {
+      const local = await ownerCleanupFixture();
+      await local.state.write("policy.json", {
+        ...local.policy,
+        ...(mode === "disabled" ? { enabled: false } : { leaseUntil: Date.now() - 1 }),
+      });
+      const policy = await readFile(join(directory, "policy.json"));
+      const open = jest.spyOn(local.manager, "open").mockImplementation(async () => {
+        throw new Error("Management must not open brokers");
+      });
+      const companion = new LocalCompanion(local.manager, local.relay);
+      local.setRequest({ action: "snapshot" }, 2, "owner-delete");
+      try {
+        expect(await companion.cycle()).toBe(false);
+        expect(local.receipts.at(-1)).toMatchObject({
+          ok: true,
+          result: { spaces: [{ id: local.space.id, state: "stopped" }] },
+        });
+        for (const request of [
+          { action: "start", spaceId: local.resourceId },
+          {
+            action: "operation",
+            spaceId: local.resourceId,
+            job: { version: 1, action: "execute", remoteMarker: `moira-op-${"e".repeat(32)}` },
+          },
+        ]) {
+          local.setRequest(request, 3);
+          expect(await companion.cycle()).toBe(false);
+          expect(local.receipts.at(-1)).toMatchObject({
+            ok: false,
+            error: { code: mode === "disabled" ? "LOCAL_DISABLED" : "LOCAL_LEASE_EXPIRED" },
+          });
+        }
+        local.setRequest(
+          { action: "delete", spaceId: local.resourceId, generation: 3 },
+          3,
+          "owner-delete",
+        );
+        expect(await companion.cycle()).toBe(false);
+        expect(local.receipts.at(-1)).toMatchObject({ ok: true, result: { accepted: true } });
+        expect(local.removals()).toBe(1);
+        expect(local.inventory.has(local.peer.runtimeId!)).toBe(true);
+        expect(open).not.toHaveBeenCalled();
+        expect(await readFile(join(directory, "policy.json"))).toEqual(policy);
+        await expect(local.state.read("broker.json", (value) => value)).resolves.toBeNull();
+      } finally {
+        await local.manager.close();
+      }
+    },
+  );
+
   test.each([2, 3])(
     "incomplete bootstrap snapshot at server intent %s reports its own failure without rebinding or admitting work",
     async (generation) => {

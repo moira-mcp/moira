@@ -37,9 +37,15 @@ export const localEnvelopeSchema = z
     version: z.literal(LOCAL_PROTOCOL_VERSION),
     id: z.string().uuid(),
     expiresAt: z.number().int().positive(),
+    authority: z.literal("owner-delete").optional(),
     request: localRequestSchema,
   })
-  .strict();
+  .strict()
+  .refine(
+    (value) =>
+      !value.authority || value.request.action === "snapshot" || value.request.action === "delete",
+    "Owner deletion authority cannot admit work",
+  );
 export type LocalRequest = z.infer<typeof localRequestSchema>;
 export type LocalReply =
   | { ok: true; result: unknown }
@@ -53,31 +59,66 @@ export class LocalRpc {
     this.jobs = new LocalJobs(manager);
   }
 
-  async handle(value: unknown, onAdmitted?: () => void): Promise<LocalReply> {
+  async handle(
+    value: unknown,
+    onAdmitted?: () => void,
+    authority?: "owner-delete",
+  ): Promise<LocalReply> {
     try {
       const message = localEnvelopeSchema.parse(value);
-      return (await this.journal.run(message.id, message.expiresAt, message.request, async () => {
-        try {
-          return { ok: true, result: await this.dispatch(message.request, onAdmitted) };
-        } catch (error) {
-          return this.failure(error);
-        }
-      })) as LocalReply;
+      if (message.authority !== authority)
+        throw new LocalRefusal("LOCAL_UNAUTHORIZED", "Deletion has no admitted owner authority.");
+      return (await this.journal.run(
+        message.id,
+        message.expiresAt,
+        this.intent(message),
+        async () => {
+          try {
+            return {
+              ok: true,
+              result: await this.dispatch(message.request, onAdmitted, authority),
+            };
+          } catch (error) {
+            return this.failure(error);
+          }
+        },
+      )) as LocalReply;
     } catch (error) {
       return this.failure(error);
     }
+  }
+
+  private intent(message: z.infer<typeof localEnvelopeSchema>) {
+    return message.authority
+      ? { ...message.request, authority: message.authority }
+      : message.request;
+  }
+
+  isAccepted(value: unknown, allowExpired = false): Promise<boolean> {
+    const message = localEnvelopeSchema.parse(value);
+    return this.journal.isAccepted(
+      message.id,
+      message.expiresAt,
+      this.intent(message),
+      allowExpired,
+    );
   }
 
   /** Only a retained journal outcome can answer this path; it never dispatches an effect. */
   async replay(value: unknown): Promise<LocalReply> {
     try {
       const message = localEnvelopeSchema.parse(value);
-      return (await this.journal.run(message.id, message.expiresAt, message.request, async () => {
-        throw new LocalRefusal(
-          "LOCAL_OUTCOME_UNKNOWN",
-          "The retained request cannot dispatch new work.",
-        );
-      })) as LocalReply;
+      return (await this.journal.run(
+        message.id,
+        message.expiresAt,
+        this.intent(message),
+        async () => {
+          throw new LocalRefusal(
+            "LOCAL_OUTCOME_UNKNOWN",
+            "The retained request cannot dispatch new work.",
+          );
+        },
+      )) as LocalReply;
     } catch (error) {
       return this.failure(error);
     }
@@ -100,10 +141,16 @@ export class LocalRpc {
     };
   }
 
-  private async dispatch(request: LocalRequest, onAdmitted?: () => void): Promise<unknown> {
+  private async dispatch(
+    request: LocalRequest,
+    onAdmitted?: () => void,
+    authority?: "owner-delete",
+  ): Promise<unknown> {
     switch (request.action) {
       case "snapshot":
-        return this.manager.snapshot(request.spaceId);
+        return authority === "owner-delete"
+          ? this.manager.snapshot(request.spaceId, true)
+          : this.manager.snapshot(request.spaceId);
       case "create": {
         const space = await this.manager.create(
           request.repositoryId,
@@ -132,7 +179,11 @@ export class LocalRpc {
         if (request.action === "stop")
           stopped = await this.manager.stop(request.spaceId, request.generation);
         else {
-          await this.manager.remove(request.spaceId, request.generation);
+          await this.manager.remove(
+            request.spaceId,
+            request.generation,
+            authority === "owner-delete",
+          );
           stopped = await this.manager.records.get(request.spaceId);
         }
         const management =

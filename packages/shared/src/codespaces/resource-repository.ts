@@ -1,6 +1,10 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import type Database from "better-sqlite3";
+import { getAccountAccessDenial } from "../auth/account-admission.js";
 import { CODESPACE_PROVIDER_LOCAL } from "./local-device-types.js";
+import { localRelayMutationId } from "./local-protocol.js";
+import { CODESPACE_IDLE_TIMEOUT_MINUTES } from "./resource-types.js";
+export { CODESPACE_IDLE_TIMEOUT_MINUTES } from "./resource-types.js";
 import type {
   CodespaceMachine,
   CodespaceResourcePolicy,
@@ -25,8 +29,6 @@ const ACTIVE_STATES = [
 export const CODESPACE_AUTO_STOP_SETTING = "codespaces.auto_stop_enabled";
 /** The per-user idle timeout in minutes. */
 export const CODESPACE_IDLE_TIMEOUT_SETTING = "codespaces.idle_timeout_minutes";
-/** Idle timeout bounds and default, in minutes: GitHub's own idle-timeout range. */
-export const CODESPACE_IDLE_TIMEOUT_MINUTES = { minimum: 5, maximum: 240, default: 30 } as const;
 
 /** Operation states that mean something is still running in, or about to reach, the codespace. */
 const ACTIVE_OPERATION_STATES = "'reserved', 'running', 'cancel_pending', 'reconcile_pending'";
@@ -475,6 +477,19 @@ export class CodespaceResourceRepository {
            WHERE id = ? AND userId = ? AND ${CURRENT_AUTHORIZATION_PREDICATE}`,
         )
         .get(resourceId, userId),
+    );
+  }
+
+  isOwnerDeleteIntent(userId: string, resourceId: string, generation: number): boolean {
+    return Boolean(
+      this.sqlite
+        .prepare(
+          `SELECT 1 FROM codespaceProviderMutation m
+      JOIN codespaceResource r ON r.id=m.resourceId AND r.userId=m.userId AND r.provider=m.provider
+      WHERE m.userId=? AND m.resourceId=? AND m.generation=? AND m.kind='owner-delete'
+        AND r.provider=? AND r.desiredState='deleted' AND r.generation>=m.generation`,
+        )
+        .get(userId, resourceId, generation, CODESPACE_PROVIDER_LOCAL),
     );
   }
 
@@ -1153,15 +1168,78 @@ export class CodespaceResourceRepository {
     resourceId: string,
     expectedGeneration: number,
     now: number,
-  ): CodespaceResourceRecord | "conflict" | null {
+    ownerConfirmed = false,
+  ): CodespaceResourceRecord | "conflict" | "unauthorized" | null {
     const transaction = this.sqlite.transaction(() => {
       const current = this.getOwned(userId, resourceId);
       if (!current || current.state === "deleted") return null;
       if (current.generation !== expectedGeneration) return "conflict";
+      if (ownerConfirmed) {
+        const device = this.sqlite
+          .prepare(
+            `SELECT d.control,u.blocked,u.approvedAt,u.emailVerified FROM codespaceLocalResourceBinding b
+          JOIN codespaceLocalDevice d ON d.id=b.deviceId
+          JOIN user u ON u.id=b.userId
+          JOIN codespaceConnection c ON c.id=d.connectionId AND c.userId=b.userId
+          WHERE b.resourceId=? AND b.userId=? AND d.userId=b.userId
+            AND d.status='active' AND d.generation=b.deviceGeneration AND d.connectionId=?
+            AND ? = 'local:' || d.id || ':' || b.repositoryId AND b.profileId=?
+            AND c.status='connected' AND c.provider=? AND c.credentialGeneration=?`,
+          )
+          .get(
+            resourceId,
+            userId,
+            current.connectionId,
+            current.repositoryId,
+            current.machine.name,
+            CODESPACE_PROVIDER_LOCAL,
+            current.authorizationGeneration,
+          ) as
+          | {
+              control: string | null;
+              blocked: number;
+              approvedAt: string | null;
+              emailVerified: number;
+            }
+          | undefined;
+        if (
+          !device?.control ||
+          JSON.parse(device.control).optedIn !== true ||
+          getAccountAccessDenial(
+            {
+              userId,
+              blocked: !!device.blocked,
+              approvedAt: device.approvedAt,
+              emailVerified: !!device.emailVerified,
+            },
+            { requireEmailVerified: true },
+          )
+        )
+          return "unauthorized";
+      }
       if (
         current.desiredState === "deleted" &&
         current.state === "delete_pending" &&
-        !current.lastOutcome?.startsWith("refused:")
+        !current.lastOutcome?.startsWith("refused:") &&
+        (!ownerConfirmed ||
+          this.isOwnerDeleteIntent(userId, resourceId, current.generation) ||
+          Boolean(
+            this.sqlite
+              .prepare(
+                `SELECT 1 FROM codespaceLocalRelay WHERE requestId=? AND resourceId=?
+            AND userId=? AND resourceGeneration=? LIMIT 1`,
+              )
+              .get(
+                localRelayMutationId(current, {
+                  action: "delete",
+                  spaceId: current.providerResourceName ?? current.id,
+                  generation: current.generation,
+                }),
+                resourceId,
+                userId,
+                current.generation,
+              ),
+          ))
       )
         return current;
       const changed = this.sqlite
@@ -1184,7 +1262,7 @@ export class CodespaceResourceRepository {
         userId,
         current.provider,
         current.generation + 1,
-        "delete",
+        ownerConfirmed ? "owner-delete" : "delete",
         now,
       );
       return this.requireById(resourceId);
@@ -1444,7 +1522,7 @@ export class CodespaceResourceRepository {
     userId: string,
     provider: string,
     generation: number,
-    kind: "start" | "stop" | "delete",
+    kind: "start" | "stop" | "delete" | "owner-delete",
     now: number,
     required = false,
   ): void {

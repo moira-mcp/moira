@@ -395,7 +395,9 @@ export function createCodespaceManagementRoutes(
           res.status(failure.status).json(failure.body);
           return;
         }
-        const codespace = await selected.resource.deleteCodespace(userId, id, expectedGeneration);
+        const codespace = await selected.resource.deleteCodespace(userId, id, expectedGeneration, {
+          ownerConfirmed: true,
+        });
         res.json({
           success: true,
           data: { codespace: projectCodespaceSummary(codespace), data_preserved: false },

@@ -33,7 +33,7 @@ export const LOCAL_CODESPACE_FAILURE_GUIDANCE: Readonly<
   CODESPACE_LOCAL_DELETE_APPROVAL_REQUIRED: {
     status: 403,
     message:
-      "Deletion is not approved for this repository on the local computer. Allow deletion in that computer's repository settings, wait for application, then confirm deletion of this same codespace.",
+      "Ask the owner to confirm deletion of this same codespace in Moira Settings > Local computers.",
   },
 });
 

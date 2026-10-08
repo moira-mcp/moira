@@ -288,6 +288,14 @@ const PUBLIC_AUTH_ENDPOINTS = [
   "/auth/get-session",
 ];
 
+// These account-level refusals come from the shared authentication middleware.
+// Other 403 responses deny an operation without invalidating the browser session.
+const AUTH_FORBIDDEN_CODES: ReadonlySet<string> = new Set([
+  "ACCOUNT_BLOCKED",
+  "ACCOUNT_APPROVAL_REQUIRED",
+  "EMAIL_NOT_VERIFIED",
+]);
+
 // Auth error handler callback type
 type AuthErrorHandler = (status: number, message: string) => void;
 
@@ -506,10 +514,16 @@ export class MoiraApiClient {
 
         const status = error.response.status;
         const requestUrl = error.config?.url;
+        const responseError = error.response.data?.error;
+        const authForbidden =
+          status === 403 &&
+          typeof responseError === "object" &&
+          responseError !== null &&
+          AUTH_FORBIDDEN_CODES.has(responseError.code);
 
         // Handle 401/403 for non-public auth endpoints
         if (
-          (status === 401 || status === 403) &&
+          (status === 401 || authForbidden) &&
           !isPublicAuthEndpoint(requestUrl) &&
           this.isCurrentAuthority(error.config, true)
         ) {

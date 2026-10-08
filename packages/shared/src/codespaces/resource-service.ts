@@ -1164,21 +1164,39 @@ export class CodespaceResourceService {
     userId: string,
     resourceId: string,
     expectedGeneration: number,
+    options: { ownerConfirmed?: boolean } = {},
   ): Promise<CodespaceResourceRecord> {
-    this.requireCurrentLifecycleAuthority(userId, resourceId);
     const before = this.getCodespace(userId, resourceId);
+    const ownerCleanup =
+      options.ownerConfirmed === true && before.provider === CODESPACE_PROVIDER_LOCAL;
+    if (!ownerCleanup) this.requireCurrentLifecycleAuthority(userId, resourceId);
     if (before.generation !== expectedGeneration)
       throw new CodespaceResourceError(
         "CODESPACE_GENERATION_CONFLICT",
         "Codespace generation changed; refresh it before deleting",
       );
     if (before.state === "deleted") return before;
+    const provider = this.dependencies.registry.require(before.provider);
+    if (provider.preflightDelete) {
+      const credential = await this.dependencies.credentials.getCredential(userId, before.provider);
+      await provider.preflightDelete(credential, {
+        resourceId,
+        ownerConfirmed: options.ownerConfirmed === true,
+      });
+      if (!ownerCleanup) this.requireCurrentLifecycleAuthority(userId, resourceId);
+    }
     const requested = this.dependencies.repository.requestDelete(
       userId,
       resourceId,
       expectedGeneration,
       this.now(),
+      ownerCleanup,
     );
+    if (requested === "unauthorized")
+      throw new CodespaceResourceError(
+        "CODESPACE_AUTHORIZATION_REQUIRED",
+        "Owner cleanup consent changed; reconnect or approve this computer before deleting",
+      );
     if (requested === "conflict") {
       throw new CodespaceResourceError(
         "CODESPACE_GENERATION_CONFLICT",

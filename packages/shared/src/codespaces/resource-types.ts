@@ -1,4 +1,6 @@
 export const CODESPACE_PROVIDER_CONTRACT_VERSION = 6 as const;
+/** Idle timeout bounds and default, in minutes: GitHub's own idle-timeout range. */
+export const CODESPACE_IDLE_TIMEOUT_MINUTES = { minimum: 5, maximum: 240, default: 30 } as const;
 
 export interface CodespaceRepositoryTarget {
   id: string;
@@ -162,6 +164,10 @@ export interface CodespaceProviderAdapter {
   startExact(credential: string, resourceName: string): Promise<"accepted" | "absent">;
   stopExact(credential: string, resourceName: string): Promise<"accepted" | "absent">;
   deleteExact(credential: string, resourceName: string): Promise<"accepted" | "absent">;
+  preflightDelete?(
+    credential: string,
+    input: { resourceId: string; ownerConfirmed: boolean },
+  ): Promise<void>;
   probeConnector(credential: string, resourceName: string): Promise<void>;
   /** The provider's own links and sentences for a user who must act outside Moira. */
   guidance(): CodespaceProviderGuidance;

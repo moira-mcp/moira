@@ -286,7 +286,7 @@ export interface DeviceGuard {
   recover?(id: string, generation: number): Promise<number>;
   stop(): Promise<void>;
 }
-export type StartGuard = (root: string) => Promise<DeviceGuard>;
+export type StartGuard = (root: string, mode?: "work" | "cleanup") => Promise<DeviceGuard>;
 const scope = { id: z.number().int().positive(), spaceId: z.string().uuid() };
 const admittedScope = { ...scope, generation: z.number().int().positive() };
 const callSchema = z.discriminatedUnion("action", [
@@ -311,14 +311,18 @@ const callSchema = z.discriminatedUnion("action", [
 ]);
 
 /** One independent process owns all spaces of this private device, not a cloud RPC surface. */
-export const startGuard: StartGuard = (root) =>
+export const startGuard: StartGuard = (root, mode = "work") =>
   new Promise((resolve, reject) => {
-    const child = fork(fileURLToPath(new URL("./guard.js", import.meta.url)), [root], {
-      execArgv: [],
-      env: { PATH: "/usr/bin:/bin:/usr/sbin:/sbin" },
-      stdio: ["ignore", "ignore", "ignore", "ipc"],
-      serialization: "advanced",
-    });
+    const child = fork(
+      fileURLToPath(new URL("./guard.js", import.meta.url)),
+      mode === "cleanup" ? [root, "cleanup"] : [root],
+      {
+        execArgv: [],
+        env: { PATH: "/usr/bin:/bin:/usr/sbin:/sbin" },
+        stdio: ["ignore", "ignore", "ignore", "ipc"],
+        serialization: "advanced",
+      },
+    );
     let ready = false,
       closed = false,
       sequence = 0;
@@ -612,10 +616,17 @@ export async function withLocalRuntimeOwner(
   }
 }
 
-async function runGuard(root: string, action: "work" | "doctor" | "setup" = "work"): Promise<void> {
+async function runGuard(
+  root: string,
+  action: "work" | "doctor" | "setup" | "cleanup" = "work",
+): Promise<void> {
   const records = new LocalRecords(await PrivateState.open(root));
   const initial = await records.policy();
-  const control = new RuntimeDeviceOwner(records, initial, action === "setup");
+  const control = new RuntimeDeviceOwner(
+    records,
+    initial,
+    action === "setup" ? "setup" : action === "cleanup" ? "cleanup" : "work",
+  );
   const receipt = {
     owner: randomUUID(),
     ownerPID: process.pid,
@@ -644,7 +655,7 @@ async function runGuard(root: string, action: "work" | "doctor" | "setup" = "wor
     await settle().catch(() => undefined);
     throw error;
   }
-  if (action !== "work") {
+  if (action === "doctor" || action === "setup") {
     const deadline = setTimeout(earlyStop, 300_000);
     try {
       if (action === "setup") await control.runtime.initialize();
@@ -745,6 +756,17 @@ async function runGuard(root: string, action: "work" | "doctor" | "setup" = "wor
     }
     const call = parsed.data;
     void (async () => {
+      if (
+        action === "cleanup" &&
+        !(
+          (call.action === "observe" && call.spaceId) ||
+          (call.action === "remove-space" && call.localApproval)
+        )
+      )
+        throw new LocalRefusal(
+          "LOCAL_UNAUTHORIZED",
+          "The cleanup owner admits only exact observation and confirmed removal.",
+        );
       if (call.action === "observe") return control.observe(call.spaceId);
       if (
         call.action === "retire-space" ||
@@ -863,6 +885,7 @@ async function runGuard(root: string, action: "work" | "doctor" | "setup" = "wor
   });
   // Recovered running records are observed by the same owner; unknown pending creation is not adopted.
   for (const space of await records.list()) {
+    if (action === "cleanup") break;
     if (space.desiredState !== "running") continue;
     // Pending manifests are retained for addressed management, not re-admitted as SDK create.
     // Their unknown VM identity is not a revocation of independent, initialized peers.
@@ -885,18 +908,18 @@ async function runGuard(root: string, action: "work" | "doctor" | "setup" = "wor
     try {
       const policy = await records.policy();
       if (leaseTimer) clearTimeout(leaseTimer);
-      leaseTimer = setTimeout(emergency, Math.max(1, policy.leaseUntil - Date.now()));
+      if (action !== "cleanup")
+        leaseTimer = setTimeout(emergency, Math.max(1, policy.leaseUntil - Date.now()));
       if (
         !process.connected ||
-        !policy.enabled ||
-        policy.leaseUntil <= Date.now() ||
+        (action !== "cleanup" && (!policy.enabled || policy.leaseUntil <= Date.now())) ||
         policy.deviceId !== initial.deviceId ||
         JSON.stringify(policy.runtime) !== JSON.stringify(initial.runtime)
       ) {
         emergency();
         return;
       }
-      for (const owner of owners.values())
+      for (const owner of action === "cleanup" ? [] : owners.values())
         if (owner.active) {
           try {
             await owner.check();
@@ -933,7 +956,7 @@ async function runGuard(root: string, action: "work" | "doctor" | "setup" = "wor
           () => {
             void check();
           },
-          Math.max(1, Math.min(1000, policy.leaseUntil - Date.now())),
+          action === "cleanup" ? 1000 : Math.max(1, Math.min(1000, policy.leaseUntil - Date.now())),
         );
     } catch (error) {
       emergency(error);
@@ -948,7 +971,8 @@ if (
   import.meta.url === pathToFileURL(process.argv[1]).href
 ) {
   const action = process.argv[3];
-  if (action !== undefined && action !== "doctor" && action !== "setup") process.exit(1);
+  if (action !== undefined && action !== "doctor" && action !== "setup" && action !== "cleanup")
+    process.exit(1);
   void runGuard(process.argv[2], action).catch((error) => {
     if (process.connected)
       process.send?.(

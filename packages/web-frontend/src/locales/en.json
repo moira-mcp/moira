@@ -3293,7 +3293,7 @@
       "CODESPACE_LOCAL_SETUP_INCOMPLETE": "Environment preparation did not finish. Delete this codespace; after deletion is confirmed, you can create a new one.",
       "CODESPACE_LOCAL_PROTOCOL_ERROR": "Moira and the local companion could not exchange a valid response. Update them together and check this codespace again.",
       "CODESPACE_LOCAL_RUNTIME_ERROR": "The computer's VM runtime could not complete the operation. Check the local companion diagnostics, then retry this codespace.",
-      "CODESPACE_LOCAL_DELETE_APPROVAL_REQUIRED": "Deletion is not permitted for this repository. Enable deletion in the computer settings and wait for the computer to apply it.",
+      "CODESPACE_LOCAL_DELETE_APPROVAL_REQUIRED": "Confirm deletion of this same codespace in Moira Settings → Development → Local computers.",
       "CODESPACE_NOT_FOUND": "The codespace was not found. It may already have been deleted.",
       "CODESPACE_NOT_CONFIGURED": "Cloud codespaces are not configured on this instance.",
       "CODESPACE_DELETE_CONFIRMATION_REQUIRED": "Deleting a codespace needs confirmation. Try again from the list.",
@@ -3731,7 +3731,7 @@
         },
         "local-devices": {
           "title": "Connect your computer",
-          "body": "Connect your computer once. Its card lists only its own codespaces, with repository, branch, state, CPU and memory. Several codespaces may use the same repository. Create, start, stop or delete them here; Check state again retries the requested start, stop or deletion and checks its state. While creation is pending, it checks the existing request without creating another codespace. Computer settings control agent access and its expiry, CPU, memory and Docker storage defaults for new codespaces, and shared storage for all local codespaces on this computer. Separately allow adding existing private repositories, creating new ones and pushing commits in your connected personal GitHub account. Access may last up to seven days. Public services for different technologies are available; agents cannot change computer settings or access the private network. Settings take effect after the computer confirms them; pending or rejected changes keep the applied permissions. Disconnecting the computer blocks further agent work and preserves local files."
+          "body": "Connect your computer once. Its card lists only its own codespaces, with repository, branch, state, CPU and memory. Several codespaces may use the same repository. Create, start, stop or delete them here. Check state again retries the requested start or stop; for a pending deletion, it opens owner confirmation again. While creation is pending, it checks the existing request without creating another codespace. Computer settings control agent access and its expiry, CPU, memory and Docker storage defaults for new codespaces, and shared storage for all local codespaces on this computer. Separately allow adding existing private repositories, creating new ones and pushing commits in your connected personal GitHub account. Access may last up to seven days. Public services for different technologies are available; agents cannot change computer settings or access the private network. Settings take effect after the computer confirms them; pending or rejected changes keep the applied permissions. Disconnecting the computer blocks further agent work and preserves local files."
         },
         "apps": {
           "title": "Connected apps",

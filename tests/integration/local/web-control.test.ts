@@ -303,8 +303,8 @@ describe("Locally pinned owner web control", () => {
       await f.state.write("policy.json", expired);
       expect(await companion.cycle()).toBe(false);
       expect(opened).toBe(1);
-      expect(claims).toBe(1);
-      expect(heartbeats).toBe(5);
+      expect(claims).toBe(2);
+      expect(heartbeats).toBe(6);
       expect((await f.records.get(f.space.id))?.desiredState).toBe("stopped");
     } finally {
       await manager.close();

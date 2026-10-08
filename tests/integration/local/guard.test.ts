@@ -487,6 +487,80 @@ const vmTest = process.platform === "darwin" ? test : test.skip;
 const supportedGuard = process.platform === "darwin" ? describe : describe.skip;
 
 supportedGuard("independent guard with a real subprocess SDK substitute", () => {
+  vmTest.each(["disabled", "expired"] as const)(
+    "cleanup-only guard removes the exact confirmed VM with %s work permission and preserves its peer",
+    async (permission) => {
+      const local = await fixture();
+      const peer = await addPeer(local);
+      if (permission === "disabled") local.policy.enabled = false;
+      else local.policy.leaseUntil = Date.now() - 1;
+      await local.state.write("policy.json", local.policy);
+      const policyBytes = await readFile(join(local.state.root, "policy.json"));
+      const peerBytes = await readFile(join(local.state.root, `space-${peer.id}.json`));
+      const fixtureCallCount = (await readFile(local.observation + ".calls", "utf8"))
+        .trim()
+        .split("\n").length;
+      await execute(process.execPath, [
+        "--input-type=module",
+        "-e",
+        `
+      import {startGuard} from ${JSON.stringify(`file://${join(root, "guard.js")}`)};
+      import f from 'node:fs/promises';
+      const device=await startGuard(${JSON.stringify(local.state.root)},'cleanup');
+      const refuse=async(work)=>{await work.then(()=>{throw new Error('Cleanup admitted work or unconfirmed deletion');},error=>{if(error.code!=='LOCAL_UNAUTHORIZED')throw error;});};
+      try {
+        const own=await device.observe(${JSON.stringify(local.space.id)});
+        if(own.length!==1||own[0].id!==${JSON.stringify(local.space.runtimeId)}||own[0].status!=='running')throw new Error('Cleanup did not observe the exact owned VM');
+        await refuse(device.space(${JSON.stringify(local.space.id)}));
+        await refuse(device.space(${JSON.stringify(local.space.id)},true));
+        await refuse(device.observe());
+        await refuse(device.retire(${JSON.stringify(local.space.id)},1));
+        await refuse(device.recover(${JSON.stringify(local.space.id)},1));
+        await refuse(device.remove(${JSON.stringify(local.space.id)},1,false));
+        const before=JSON.parse(await f.readFile(${JSON.stringify(join(local.state.root, `space-${local.space.id}.json`))},'utf8'));
+        if(before.generation!==1||before.desiredState!=='running'||before.phase!=='usable')throw new Error('Rejected cleanup changed the target');
+        await device.remove(${JSON.stringify(local.space.id)},1,true);
+        const absent=await device.observe(${JSON.stringify(local.space.id)});
+        if(absent.length)throw new Error('Cleanup did not verify exact absence');
+        const other=await device.observe(${JSON.stringify(peer.id)});
+        if(other.length!==1||other[0].id!==${JSON.stringify(peer.runtimeId)}||other[0].status!=='running')throw new Error('Scoped cleanup changed peer runtime');
+      }finally{await device.stop();}
+    `,
+      ]);
+      expect(await local.records.get(local.space.id)).toMatchObject({
+        phase: "deleted",
+        desiredState: "deleted",
+        runtimeId: local.space.runtimeId,
+        generation: 3,
+      });
+      expect(await readFile(join(local.state.root, "policy.json"))).toEqual(policyBytes);
+      expect(await readFile(join(local.state.root, `space-${peer.id}.json`))).toEqual(peerBytes);
+      expect(JSON.parse(await readFile(local.observation, "utf8"))).toEqual({ status: "absent" });
+      const peers = JSON.parse(await readFile(local.observation + ".peers", "utf8"));
+      expect(peers).toEqual([expect.objectContaining({ id: peer.runtimeId, name: peer.name })]);
+      const calls = (await readFile(local.observation + ".calls", "utf8"))
+        .trim()
+        .split("\n")
+        .slice(fixtureCallCount)
+        .map((line) => JSON.parse(line) as string[]);
+      expect(calls.filter((argv) => argv[0] === "rm")).toEqual([
+        ["rm", "--force", local.space.name],
+      ]);
+      expect(calls.filter((argv) => argv[0] === "stop")).toEqual([["stop", local.space.name]]);
+      expect(
+        calls.some((argv) =>
+          ["api-start", "api-create", "api-guest", "run", "exec", "create"].includes(argv[0]),
+        ),
+      ).toBe(false);
+      await expect(readFile(local.observation + ".launches")).rejects.toMatchObject({
+        code: "ENOENT",
+      });
+      await expect(
+        readFile(join(local.policy.runtime.storageRoot, "runtime", "keychain-current.json")),
+      ).rejects.toMatchObject({ code: "ENOENT" });
+    },
+  );
+
   vmTest(
     "scoped observation confirms own deletion while an independently bound peer remains held",
     async () => {
