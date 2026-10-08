@@ -256,20 +256,18 @@ describe("Durable local device enrollment and relay", () => {
           gitAuthor: null,
           agentRepositoryManagement: null,
         };
-        sqlite
-          .prepare("UPDATE codespaceLocalDevice SET control=? WHERE id=?")
-          .run(
-            canonicalJson({
-              optedIn: true,
-              revision: 1,
-              appliedRevision: 1,
-              status: "applied",
-              settings,
-              ceiling: null,
-              error: null,
-            }),
-            device.deviceId,
-          );
+        sqlite.prepare("UPDATE codespaceLocalDevice SET control=? WHERE id=?").run(
+          canonicalJson({
+            optedIn: true,
+            revision: 1,
+            appliedRevision: 1,
+            status: "applied",
+            settings,
+            ceiling: null,
+            error: null,
+          }),
+          device.deviceId,
+        );
         const recovered = repository.requestDelete(
           "user-a",
           resourceId,
