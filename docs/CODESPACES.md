@@ -133,7 +133,12 @@ image is stored in that state and mounted at a short device-owned `/private/tmp/
 SDK Unix sockets fit the native path bound. `--storage-gib`, `--cpus` and `--memory-gib`
 set local resource defaults at initialization. `--storage-root` accepts an existing empty,
 private, separately mounted bounded filesystem, not an ordinary directory. Preserve the image and
-ownership records; a missing mount is a refusal, not permission to create unbounded storage.
+ownership records. On macOS, manager startup restores an unmounted default image from the same
+state directory under the runner gate. It verifies the native image/mount binding, then repeats
+the volume's device ownership, capacity and free-space checks before work. A lost attach reply
+is resolved from the observed binding rather than another attach. Custom storage mounts require
+manual mounting; a missing image or unsafe binding remains a refusal. Startup never creates a
+replacement image, resets storage or substitutes an unbounded directory.
 
 `setup` initializes only an empty dedicated SDK profile. `doctor` checks storage, supported SDK,
 settings, global network policy and owned inventory under an enabled, unexpired lease. Its

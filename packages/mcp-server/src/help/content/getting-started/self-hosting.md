@@ -442,6 +442,11 @@ After a crash or computer reboot, start `run` with the same state directory. It 
 reclaims a stale runner marker only under the system lock and after proving both previous host
 owners absent. Saved policy, VM records and unknown operations are retained without replay.
 Live, unknown or malformed ownership stays refused; do not delete its marker manually.
+On macOS, startup also remounts the existing default disk image from that same state directory
+when needed. It verifies the native image/mount binding and the volume's ownership, capacity and
+free space before work; a lost attach reply is checked against the observed binding. Custom
+storage mounts must be mounted manually. Missing images or conflicting bindings remain refused;
+startup does not create a replacement disk or reset its data.
 The local daemon separates server contact from VM lifetime. Network/5xx failures reconnect;
 malformed control-plane responses suspend new claims until confirmation succeeds, without stopping
 already-admitted work. An addressed resource or delivery-claim refusal stays with that request;

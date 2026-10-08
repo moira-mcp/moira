@@ -11,7 +11,7 @@ import {
 } from "./policy.js";
 import type { LocalVmRuntime, LocalVmIdentity, LocalVmRuntimeFactory } from "./local-vm-runtime.js";
 import { createLocalVmRuntime } from "./local-vm-runtime-factory.js";
-import { admitStorage } from "./storage.js";
+import { admitStorage, ensureStorageMounted } from "./storage.js";
 import {
   startGuard,
   requireRuntimeOwnerAbsent,
@@ -110,7 +110,8 @@ export class LocalManager {
     await this.holdRunnerLock();
     try {
       const policy = await this.records.policy();
-      await (this.dependencies.storage ?? admitStorage)(policy);
+      if (this.dependencies.storage) await this.dependencies.storage(policy);
+      else await ensureStorageMounted(this.records.state, policy);
       await this.owner();
       if (this.dependencies.runtime) await this.runtime(policy).boundary.verifyConfiguration();
       const onFault = this.dependencies.onFault ?? (() => undefined);

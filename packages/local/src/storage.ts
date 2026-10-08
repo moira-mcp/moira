@@ -1,4 +1,4 @@
-import { chmod, lstat, mkdir, realpath, stat, statfs } from "node:fs/promises";
+import { chmod, lstat, mkdir, readdir, realpath, stat, statfs } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { z } from "zod";
 import { GiB, LocalRefusal, type LocalPolicy } from "./policy.js";
@@ -23,7 +23,14 @@ export function defaultStorageMount(
 /** A runtime filesystem must have its own finite capacity, not merely an application counter. */
 export async function admitStorage(policy: LocalPolicy): Promise<void> {
   const root = policy.runtime.storageRoot;
-  const metadata = await lstat(root);
+  const metadata = await lstat(root).catch((error: NodeJS.ErrnoException) => {
+    if (error.code === "ENOENT")
+      throw new LocalRefusal(
+        "LOCAL_STORAGE_NOT_MOUNTED",
+        "The saved local storage volume is not mounted.",
+      );
+    throw error;
+  });
   if (
     !metadata.isDirectory() ||
     metadata.isSymbolicLink() ||
@@ -67,6 +74,153 @@ export async function admitStorage(policy: LocalPolicy): Promise<void> {
       "Local storage needs at least one GiB of free space before new work.",
     );
   }
+}
+
+/** Restore only this device's existing image; the caller holds the private runner gate. */
+export async function ensureStorageMounted(
+  state: PrivateState,
+  policy: LocalPolicy,
+  dependencies: {
+    run?: RunProcess;
+    admit?: typeof admitStorage;
+    platform?: NodeJS.Platform;
+    defaultMount?: typeof defaultStorageMount;
+  } = {},
+): Promise<void> {
+  const admit = dependencies.admit ?? admitStorage;
+  try {
+    await admit(policy);
+    return;
+  } catch (error) {
+    if (!(error instanceof LocalRefusal) || error.code !== "LOCAL_STORAGE_NOT_MOUNTED") throw error;
+  }
+  const root = policy.runtime.storageRoot;
+  if (
+    (dependencies.platform ?? process.platform) !== "darwin" ||
+    root !==
+      (dependencies.defaultMount ?? defaultStorageMount)(state.root, policy.deviceId, "darwin")
+  )
+    throw new LocalRefusal(
+      "LOCAL_STORAGE_NOT_MOUNTED",
+      "Mount the locally selected storage volume before starting work.",
+    );
+  const image = join(state.root, "storage.sparsebundle");
+  const metadata = await lstat(image).catch((error: NodeJS.ErrnoException) => {
+    if (error.code === "ENOENT")
+      throw new LocalRefusal(
+        "LOCAL_STORAGE_NOT_MOUNTED",
+        "The saved local storage image is missing; no new image was created.",
+      );
+    throw error;
+  });
+  // hdiutil creates 0755 bundles inside the private 0700 state directory.
+  if (
+    !metadata.isDirectory() ||
+    metadata.isSymbolicLink() ||
+    (await realpath(image)) !== image ||
+    (metadata.mode & 0o022) !== 0 ||
+    (process.getuid && metadata.uid !== process.getuid())
+  )
+    throw new LocalRefusal("LOCAL_STORAGE_OWNER", "The saved disk image identity is invalid.");
+  const run = dependencies.run ?? runProcess;
+  const command = (binary: string, argv: string[], stdin?: Uint8Array) =>
+    run({
+      binary,
+      argv,
+      stdin,
+      cwd: state.root,
+      env: { PATH: "/usr/bin:/bin:/usr/sbin:/sbin" },
+      timeoutMs: 120_000,
+      maxBytes: 1024 * 1024,
+    });
+  const binding = async (): Promise<boolean> => {
+    const info = await command("/usr/bin/hdiutil", ["info", "-plist"]);
+    if (info.exitCode !== 0)
+      throw new LocalRefusal(
+        "LOCAL_STORAGE_NOT_MOUNTED",
+        "The saved disk binding could not be inspected.",
+      );
+    const decoded = await command(
+      "/usr/bin/plutil",
+      ["-convert", "json", "-o", "-", "-"],
+      info.stdout,
+    );
+    if (decoded.exitCode !== 0)
+      throw new LocalRefusal("LOCAL_STORAGE_OWNER", "The saved disk binding is invalid.");
+    let images;
+    try {
+      images = z
+        .object({
+          images: z.array(
+            z
+              .object({
+                "image-path": z.string(),
+                "system-entities": z.array(
+                  z.object({ "mount-point": z.string().optional() }).passthrough(),
+                ),
+              })
+              .passthrough(),
+          ),
+        })
+        .passthrough()
+        .parse(JSON.parse(decoded.stdout.toString("utf8"))).images;
+    } catch {
+      throw new LocalRefusal("LOCAL_STORAGE_OWNER", "The native disk binding is invalid.");
+    }
+    const own = images.filter((entry) => entry["image-path"] === image);
+    const mounted = images.filter((entry) =>
+      entry["system-entities"].some((entity) => entity["mount-point"] === root),
+    );
+    const mountCount = images.reduce(
+      (count, entry) =>
+        count + entry["system-entities"].filter((entity) => entity["mount-point"] === root).length,
+      0,
+    );
+    if (own.length > 1 || mountCount > 1 || mounted.some((entry) => entry["image-path"] !== image))
+      throw new LocalRefusal(
+        "LOCAL_STORAGE_OWNER",
+        "The approved mount has an ambiguous or different disk image.",
+      );
+    if (own.length && (mounted.length !== 1 || own[0] !== mounted[0]))
+      throw new LocalRefusal(
+        "LOCAL_STORAGE_OWNER",
+        "The saved image is already attached at another location.",
+      );
+    return own.length === 1;
+  };
+  if (await binding()) {
+    await admit(policy);
+    return;
+  }
+  const mount = await lstat(root).catch((error: NodeJS.ErrnoException) => {
+    if (error.code === "ENOENT") return null;
+    throw error;
+  });
+  if (!mount) await mkdir(root, { mode: 0o700 });
+  else if (
+    !mount.isDirectory() ||
+    mount.isSymbolicLink() ||
+    (await realpath(root)) !== root ||
+    mount.dev !== (await stat(dirname(root))).dev ||
+    (mount.mode & 0o077) !== 0 ||
+    (process.getuid && mount.uid !== process.getuid()) ||
+    (await readdir(root)).length !== 0
+  )
+    throw new LocalRefusal(
+      "LOCAL_STORAGE_OWNER",
+      "The approved mount point is not an empty private directory.",
+    );
+  // A lost attach response is resolved from fresh native binding and ordinary admission.
+  // Never detach, recreate the image or replay guest operations to recover that response.
+  await command("/usr/bin/hdiutil", ["attach", "-nobrowse", "-mountpoint", root, image]).catch(
+    () => undefined,
+  );
+  if (!(await binding()))
+    throw new LocalRefusal(
+      "LOCAL_STORAGE_NOT_MOUNTED",
+      "The saved local disk image did not mount; retry startup after checking the disk.",
+    );
+  await admit(policy);
 }
 
 export async function initializeStorage(

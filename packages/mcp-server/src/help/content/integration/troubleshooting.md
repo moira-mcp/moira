@@ -457,6 +457,13 @@ successful guest connection. Check the companion's current diagnostic when guest
 After a crash or reboot, `run` safely reclaims a stale runner marker when its runner and guard are
 proven absent under the system lock. It preserves saved work and never replays unknown operations.
 Live or unverifiable owners remain refused; do not clear their lock or receipt to bypass the check.
+If the default macOS storage mount is absent after reboot, restart `run` with the same state.
+Startup attaches only its existing owned `storage.sparsebundle`, verifies the native mount binding
+and repeats volume ownership, capacity and free-space admission. A lost attach reply is resolved
+by observing that binding. `LOCAL_STORAGE_NOT_MOUNTED` means storage remains unavailable: mount a
+custom volume manually, or check that the saved default image is present and can be mounted.
+`LOCAL_STORAGE_OWNER` requires resolving an unsafe image/mount or conflicting binding. Preserve
+the image and state; startup never creates a replacement disk or resets data to bypass a refusal.
 Stop the foreground companion before commands that require its runner lock. Unsupported SDK
 versions, Linux runtime ownership, unsafe mounts/settings or unknown identity refuse work;
 do not reset the personal Docker profile, substitute an ordinary directory for bounded storage,

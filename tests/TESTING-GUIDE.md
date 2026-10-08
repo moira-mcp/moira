@@ -180,6 +180,12 @@ unknown jobs, and refusal of live or unverifiable ownership. Provider fixtures s
 payload retention before the first queue insertion, complete stop/start, and prove that cancelled
 exec/write never reaches the guest while fresh work and prior-result inspection succeed.
 
+Storage startup fixtures substitute native disk-tool responses and final volume admission.
+They distinguish restoring the existing default image, including a lost attach reply, from
+creating a replacement. Retained image bytes and policy stay unchanged; custom mounts, missing
+or unsafe images, nonempty mount points, conflicting native bindings and failed owner/capacity/free-space
+admission remain refused. These fixtures invoke no native disk tools or VM.
+
 The provider and device/relay integration suites use real SQLite migrations, private
 transfer files and authenticated HTTP. The provider suite also uses the production
 companion relay and LocalRpc, with the external runtime substituted. They check device
