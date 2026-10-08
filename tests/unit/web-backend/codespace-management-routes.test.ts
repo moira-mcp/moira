@@ -155,7 +155,7 @@ describe("website codespace management routes", () => {
     ["CODESPACE_LOCAL_CREATION_UNKNOWN", 409, "do not create a replacement"],
     ["CODESPACE_LOCAL_PROTOCOL_ERROR", 409, "matching server and companion"],
     ["CODESPACE_LOCAL_RUNTIME_ERROR", 503, "runtime diagnostics"],
-    ["CODESPACE_LOCAL_DELETE_APPROVAL_REQUIRED", 403, "Allow deletion"],
+    ["CODESPACE_LOCAL_DELETE_APPROVAL_REQUIRED", 403, "Moira Settings > Local computers"],
   ] as const)(
     "local diagnostic %s reaches the website with an actionable safe message",
     async (code, status, instruction) => {
@@ -533,7 +533,9 @@ describe("website codespace management routes", () => {
       .send({ confirm_delete: true, expected_generation: 3 });
     expect(deleted.status).toBe(200);
     expect(deleted.body.data).toMatchObject({ data_preserved: false });
-    expect(dependencies.resource!.deleteCodespace).toHaveBeenCalledWith("user-a", CODESPACE_ID, 3);
+    expect(dependencies.resource!.deleteCodespace).toHaveBeenCalledWith("user-a", CODESPACE_ID, 3, {
+      ownerConfirmed: true,
+    });
   });
 
   test("maps bounded domain failures to status codes without provider detail", async () => {

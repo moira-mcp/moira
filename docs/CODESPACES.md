@@ -280,6 +280,13 @@ polling while disabled or expired without dispatching work, so web renewal can
 restore work within the approved ceiling. Offline revocation still cannot promise
 instant physical shutdown.
 
+An admitted owner can confirm deletion of one owned local codespace in Settings while the
+paired computer remains active and local web control is approved. This cleanup does not require
+enabled agent work, an unexpired work lease or the repository's agent `allowDelete` permission.
+It authorizes only observation and deletion of that exact codespace at its current generation;
+it does not extend the lease, change grants or permit creation, start or guest commands. The
+companion must be running and reachable to complete the removal.
+
 Ordinary settings changes settle owned work before changing policy. A consent-only revision or
 verified delegated repository append that preserves all other settings applies live without stopping
 existing VMs or changing their grants, generation, runtime, Git identity or lease. A refusal before
@@ -471,8 +478,14 @@ back to the record, or no ref when the provider reports none.
   reconciles older operations and stops the exact Codespace. It preserves the
   codespace and repository data.
 - Delete is a separate destructive operation. It requires the caller's current
-  observed generation, persists delete intent before provider contact and
+  observed generation, checks local deletion permission before recording a new intent, persists
+  delete intent before provider contact and
   becomes terminal only after the exact Codespace is confirmed absent.
+
+For local browser deletion, the owner confirmation and its device/resource binding are recorded
+atomically as `owner-delete` in the existing provider mutation journal. Relay derives cleanup
+authority from that intent, not from a caller-supplied flag. MCP deletion retains the agent's
+repository permission and work-lease requirements; a preflight refusal records no new delete intent.
 
 Lifecycle work observes the exact Codespace before it acts. A Codespace already
 in the desired state completes without a provider mutation: a stop of a Codespace
@@ -524,6 +537,10 @@ permission/runtime repair. Unknown outcomes continue inspection of the retained 
 redispatch. A
 provider response lost during create, start, stop or delete is reconciled from
 the exact stored identity and intent; broad discovery or deletion is not used.
+An owner confirmation can replace an old refused local delete intent, or one with only snapshot
+requests, with a fresh guarded owner intent. A retained destructive delete request with an unknown
+outcome keeps its existing generation and identity; a snapshot receipt alone is not evidence that
+deletion was dispatched.
 The local relay retains authenticated create/start/stop/delete request and reply payloads until
 their existing private-transfer expiry. A retry reads the same mutation receipt even after the
 original delivery deadline, without dispatching the effect again. Snapshot and guest-operation
@@ -531,7 +548,10 @@ payloads retain their ordinary cleanup behavior.
 Input and new dispatch require current resource authority. Already accepted output/ACK settlement
 can complete an older exact claim after reconciliation advances the resource, without rewriting
 the newer generation. Identical terminal ACK and terminal renewal are read-only receipts: they do
-not extend expiry, revive dispatch or bypass current account/device/connection/repository/lease checks.
+not extend expiry or revive dispatch. Ordinary work retains current
+account/device/connection/repository/lease checks. Owner cleanup instead requires the current
+admitted account, active device, exact connection/resource binding and web-control approval,
+without extending repository grants or the work lease.
 Finishing a command, disconnecting an MCP client or ending a conversation never
 deletes a persistent codespace.
 
@@ -1094,10 +1114,14 @@ points to Stop for keeping data. Local Delete remains available with confirmatio
 pending, cleanup, ambiguous and rejected states; an already-confirmed never-created refusal can
 retire its card without a runtime effect. Start is withheld for incomplete guest preparation.
 Local cards offer **Check state again**. For an existing
-start/stop/delete intent with applied access, it retries that exact resource's existing endpoint;
-delete uses the displayed current generation. A pending create or unavailable access instead
+start/stop intent with applied access, it retries that exact resource's existing endpoint.
+A local delete intent opens the destructive confirmation again and uses the displayed current
+generation only after the owner confirms. A pending create or unavailable work access instead
 requests read-only refresh and never creates another VM. Action errors and loaders belong to
-the affected codespace. Refreshing a computer section silently updates the shared data source
+the affected codespace. A refused deletion shows its error in the dialog and ends the action's
+spinner immediately; Cancel remains available while a separate read obtains the current generation
+for another confirmation. Domain refusals do not sign out the owner.
+Refreshing a computer section silently updates the shared data source
 without making another computer's card busy. Entering Local computers and acknowledged policy
 changes refresh its management data. The card keeps a saved repository list visible
 with a stale warning when provider enumeration fails. Its Refresh button forces
@@ -1120,7 +1144,8 @@ belong to the computer owner, and native-transfer and protocol bounds still appl
 
 The routes retain `/api/integrations/github/codespaces` behind
 `requireAuth` and are a second presentation of the same services the MCP tools use,
-with identical tenant, generation and confirmation authority. The list combines repositories
+with the same tenant and generation guards. Explicit browser confirmation additionally authorizes
+exact local owner cleanup; MCP confirmation does not grant that authority. The list combines repositories
 and codespaces from both providers and includes `providers` with their separate connection,
 readiness and limits. A local `repository_id` is the qualified target returned by discovery;
 callers do not manufacture it. Creation routes by that target, and later actions route by the
@@ -1143,13 +1168,14 @@ missing feature configuration 503 with the
 same-origin Settings link. Responses never carry provider resource names, markers,
 claims, capabilities or credentials.
 
-Local lifecycle errors share the bounded guidance in
+Local lifecycle errors use bounded diagnostic codes from
 `packages/shared/src/codespaces/local-failure-guidance.ts`: `CODESPACE_LOCAL_CREATION_UNKNOWN`
 (409) asks for exact inspection without replacement; `CODESPACE_LOCAL_SETUP_INCOMPLETE` (409)
 asks for confirmed cleanup before recreation; `CODESPACE_LOCAL_PROTOCOL_ERROR` (409) asks for
 matching bundles and saved-state checks; `CODESPACE_LOCAL_RUNTIME_ERROR` (503) asks for runtime
-repair and exact inspection; `CODESPACE_LOCAL_DELETE_APPROVAL_REQUIRED` (403) asks for applied
-repository delete permission before confirming the same deletion. Public troubleshooting owns
+repair and exact inspection; `CODESPACE_LOCAL_DELETE_APPROVAL_REQUIRED` (403) means agent deletion
+is not approved. The owner can instead confirm deletion of the same codespace in Settings with
+active local web control, without granting permanent agent deletion permission. Public troubleshooting owns
 the [owner recovery steps](../packages/mcp-server/src/help/content/integration/troubleshooting.md#local-codespaces).
 
 ## Readiness, metrics and controls

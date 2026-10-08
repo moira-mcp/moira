@@ -204,6 +204,11 @@ client. `list` offers only codespaces that can still be used; a deleted or rejec
 is absent from it while `get` still answers for its `codespace_id`. Create/start wait for usable
 guest readiness, stop for confirmed shutdown while preserving files, and delete for confirmed absence.
 Delete requires `confirm_delete: true`; the server applies its current owned generation guard internally.
+For a local codespace, MCP deletion also requires the agent's repository deletion permission and
+enabled, unexpired work authority. A refusal directs the owner to **Settings → Development →
+Local computers** to confirm removal of that exact codespace. Browser owner cleanup requires an
+active paired computer and local web-control approval; it works with agent deletion denied or
+agent work disabled or expired, without changing those permissions or renewing the lease.
 List/get/lifecycle return compact codespace ID, repository, ref and state, with a safe cause when known.
 
 `list` refreshes the approved installation and repository snapshot after its TTL and accepts

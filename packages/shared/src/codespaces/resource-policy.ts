@@ -1,4 +1,4 @@
-import { CODESPACE_IDLE_TIMEOUT_MINUTES } from "./resource-repository.js";
+import { CODESPACE_IDLE_TIMEOUT_MINUTES } from "./resource-types.js";
 import type { CodespaceResourcePolicy } from "./resource-types.js";
 import { LOCAL_RELAY_MAX_PARTS } from "./local-device-types.js";
 

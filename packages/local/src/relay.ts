@@ -56,6 +56,7 @@ const claimSchema = z
     connectionId: uuid,
     resourceId: uuid,
     resourceGeneration: z.number().int().positive(),
+    authority: z.literal("owner-delete").optional(),
     digest: z.string().regex(/^[a-f0-9]{64}$/),
     payloadReference: localRelayPayloadReferenceSchema,
     deadlineAt: z.number().int().positive(),
@@ -103,6 +104,7 @@ const intentSchema = z
     connectionId: uuid,
     serverGeneration: z.number().int().positive(),
     message: localEnvelopeSchema,
+    authority: z.literal("owner-delete").optional(),
     sourceMessage: localEnvelopeSchema.optional(),
   })
   .strict();
@@ -689,6 +691,8 @@ export class LocalRelay {
       intent.deviceGeneration !== claim.deviceGeneration ||
       intent.connectionId !== claim.connectionId ||
       intent.serverGeneration !== claim.resourceGeneration ||
+      intent.authority !== claim.authority ||
+      intent.message.authority !== claim.authority ||
       intent.message.id !== claim.requestId ||
       intent.message.expiresAt !== claim.deadlineAt ||
       hash(Buffer.from(canonicalJson(intent.sourceMessage ?? intent.message))) !== claim.digest
@@ -697,7 +701,7 @@ export class LocalRelay {
         "LOCAL_REPLAY_CONFLICT",
         "The retained outcome cannot change its accepted payload or authority.",
       );
-    requireLocalGrant(await this.records.policy(), binding.repositoryId, Date.now());
+    await this.requireRequestAuthority(claim, binding, intent.message);
     const message =
       intent.message.request.action === "snapshot" && binding.localSpaceId
         ? {
@@ -705,13 +709,45 @@ export class LocalRelay {
             request: { ...intent.message.request, spaceId: binding.localSpaceId },
           }
         : intent.message;
-    if (!(await rpc.journal.isAccepted(message.id, message.expiresAt, message.request, true)))
-      return undefined;
+    if (!(await rpc.isAccepted(message, true))) return undefined;
     const result = await rpc.replay(message);
     await this.restoreManagementBinding(claim, intent, result);
     return result.ok && message.request.action === "snapshot"
       ? { ...result, result: resourceSnapshot(result.result, binding.localSpaceId) }
       : result;
+  }
+
+  private async requireRequestAuthority(
+    claim: LocalRelayClaim,
+    binding: z.infer<typeof bindingSchema>,
+    message: z.infer<typeof localEnvelopeSchema>,
+  ): Promise<void> {
+    if (claim.authority !== message.authority)
+      throw new LocalRefusal("LOCAL_UNAUTHORIZED", "The relay request authority changed.");
+    if (!claim.authority) {
+      requireLocalGrant(await this.records.policy(), binding.repositoryId, Date.now());
+      return;
+    }
+    const connection = await this.records.state.read("connection.json", connectionSchema.parse);
+    if (
+      !connection ||
+      !this.control?.optedIn ||
+      connection.deviceId !== claim.deviceId ||
+      connection.userId !== claim.userId ||
+      connection.deviceGeneration !== claim.deviceGeneration ||
+      connection.connectionId !== claim.connectionId ||
+      binding.resourceId !== claim.resourceId ||
+      binding.deviceId !== claim.deviceId ||
+      binding.userId !== claim.userId ||
+      binding.connectionId !== claim.connectionId ||
+      binding.deviceGeneration !== claim.deviceGeneration ||
+      (message.request.action !== "snapshot" && message.request.action !== "delete") ||
+      !(await new LocalWebControl(this.records).report(connection))
+    )
+      throw new LocalRefusal(
+        "LOCAL_UNAUTHORIZED",
+        "This exact owner cleanup has no local web-control approval.",
+      );
   }
 
   private async restoreManagementBinding(
@@ -758,7 +794,7 @@ export class LocalRelay {
               : binding.localGeneration)
         )
           return;
-        requireLocalGrant(await this.records.policy(), binding.repositoryId, Date.now());
+        await this.requireRequestAuthority(claim, binding, intent.message);
         const space = await this.records.get(receipt.spaceId);
         if (
           !space ||
@@ -851,6 +887,14 @@ export class LocalRelay {
         "LOCAL_GENERATION_CONFLICT",
         "The retained request predates the current resource generation.",
       );
+    if (claim.authority) {
+      if (!binding)
+        throw new LocalRefusal(
+          "LOCAL_UNAUTHORIZED",
+          "Owner cleanup has no retained resource binding.",
+        );
+      await this.requireRequestAuthority(claim, binding, message);
+    }
     if (binding && !binding.localSpaceId && message.request.action !== "create") {
       const manifest = await rpc.manager.inspectCreation(
         binding.repositoryId,
@@ -950,7 +994,9 @@ export class LocalRelay {
         intent.resourceId !== claim.resourceId ||
         intent.deviceGeneration !== claim.deviceGeneration ||
         intent.connectionId !== claim.connectionId ||
-        intent.serverGeneration !== claim.resourceGeneration
+        intent.serverGeneration !== claim.resourceGeneration ||
+        intent.authority !== claim.authority ||
+        intent.message.authority !== claim.authority
       )
         throw new LocalRefusal(
           "LOCAL_REPLAY_CONFLICT",
@@ -1070,6 +1116,7 @@ export class LocalRelay {
         deviceGeneration: claim.deviceGeneration,
         connectionId: claim.connectionId,
         serverGeneration: claim.resourceGeneration,
+        ...(claim.authority ? { authority: claim.authority } : {}),
         message,
         ...(sourceMessage !== message ? { sourceMessage } : {}),
       });
@@ -1087,11 +1134,13 @@ export class LocalRelay {
       await this.records.state.write(key, binding);
     }
     if (message.request.action !== "create" && message.request.action !== "start") onAdmitted();
+    if (claim.authority) await this.requireRequestAuthority(claim, binding, message);
     const result = await rpc.handle(
       message.request.action === "snapshot"
         ? { ...message, request: { ...message.request, spaceId: binding.localSpaceId! } }
         : message,
       onAdmitted,
+      claim.authority,
     );
     // A later stop/delete may already own a newer binding after this request's admission.
     binding = await this.records.state.read(key, bindingSchema.parse);
@@ -1229,6 +1278,7 @@ export class LocalRelay {
           next.deviceId !== claim.deviceId ||
           next.userId !== claim.userId ||
           next.deadlineAt !== claim.deadlineAt ||
+          next.authority !== claim.authority ||
           JSON.stringify(next.payloadReference) !== JSON.stringify(claim.payloadReference) ||
           next.claimExpiresAt <= Date.now()
         )
@@ -1326,7 +1376,11 @@ export class LocalRelay {
             if (result === undefined) {
               const payload = await this.payload(connection, claim, scope);
               const message = localEnvelopeSchema.parse(JSON.parse(payload.toString("utf8")));
-              if (message.id !== claim.requestId || message.expiresAt !== claim.deadlineAt)
+              if (
+                message.id !== claim.requestId ||
+                message.expiresAt !== claim.deadlineAt ||
+                message.authority !== claim.authority
+              )
                 throw new LocalRefusal(
                   "LOCAL_PAYLOAD_CHANGED",
                   "The relay request identity or deadline changed.",

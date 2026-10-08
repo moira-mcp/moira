@@ -1671,13 +1671,20 @@ The optional heartbeat control report contains `ceiling`, applied `settings`,
 `appliedRevision` and optional `rejectedRevision`/`error`. Acknowledgements cannot
 advance beyond the requested revision or report different settings as applied.
 Management polling remains authenticated while work is disabled or expired;
-relay dispatch and Git operations still require enabled, unexpired work authority.
+ordinary relay work and Git operations require enabled, unexpired work authority.
+An owner-confirmed local deletion permits only its exact snapshot and delete requests while
+the account, active device, connection/resource binding and local web-control approval remain
+valid. This cleanup does not change work policy or agent repository grants.
 
 Request, claim and transfer IDs are UUIDs. A claim carries `userId`, `deviceId`,
 `deviceGeneration`, `connectionId`, `resourceId`, `resourceGeneration`, `requestId`,
 payload `digest`, `payloadReference`, `deadlineAt`, `claimId` and `claimExpiresAt`.
-Its lease lasts at most thirty seconds and cannot exceed the request deadline or
-local work lease. Renewal extends the same current claim within those bounds.
+Owner cleanup additionally carries optional `authority: "owner-delete"` in the claim and request
+envelope. The server derives it from the existing durable owner-delete mutation; it must match
+the retained payload and local journal. It is internal relay authority, not a public caller option.
+The claim lease lasts at most thirty seconds and cannot exceed the request deadline; ordinary
+work is also capped by the local work lease. Owner cleanup retains a bounded request deadline
+without that work-lease cap. Renewal extends the same current claim within those bounds.
 Reclaiming an expired claim changes the claim ID, not the request identity.
 
 Payload references contain `parts:[{transferId,sha256,size}]` and the complete
@@ -1906,8 +1913,17 @@ ambiguous returns `409 CODESPACE_NOT_RUNNING`.
 
 Body: `{ "confirm_delete": true, "expected_generation": number }`. Without both the
 route returns `400 CODESPACE_DELETE_CONFIRMATION_REQUIRED` and calls no service. A
-stale generation returns `409 CODESPACE_GENERATION_CONFLICT`. Success returns the
-codespace in its delete-pending state with `data_preserved: false`.
+stale generation returns `409 CODESPACE_GENERATION_CONFLICT`. The response returns the
+codespace with `data_preserved: false`; deletion is terminal only after verified absence of the
+exact provider resource, and an unresolved outcome remains delete-pending.
+
+For a local codespace, the admitted owner's browser confirmation atomically records an
+owner-delete intent for the current generation and exact active device/connection binding.
+Local web-control opt-in is required; agent `allowDelete`, enabled work and an unexpired work
+lease are not. The companion authorizes only exact observation and deletion. MCP deletion
+retains ordinary agent permissions, with preflight refusals occurring before a new intent is
+recorded. An old refused or snapshot-only delete intent can receive a fresh owner confirmation;
+an existing destructive dispatch with an unknown outcome keeps its original identity and generation.
 
 Domain errors handled by these routes map as follows: `CODESPACE_NOT_FOUND` → 404;
 `CODESPACE_GENERATION_CONFLICT`, `CODESPACE_NOT_RUNNING`,

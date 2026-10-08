@@ -6,6 +6,7 @@ import {
   LocalDeviceError,
   canonicalJson,
   localManagementOutcomeSchema,
+  localRelayMutationId as mutationId,
   LOCAL_REQUEST_MAX_WINDOW_MS,
   type CodespaceResourceRecord,
   type CodespaceTransferService,
@@ -28,20 +29,6 @@ const replySchema = z.discriminatedUnion("ok", [
     })
     .strict(),
 ]);
-
-function mutationId(resource: CodespaceResourceRecord, request: Record<string, unknown>): string {
-  const hex = createHash("sha256")
-    .update(
-      canonicalJson({
-        resourceId: resource.id,
-        generation: resource.generation,
-        request,
-      }),
-    )
-    .digest("hex")
-    .slice(0, 32);
-  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-4${hex.slice(13, 16)}-a${hex.slice(17, 20)}-${hex.slice(20)}`;
-}
 
 function refuseLocalReply(code: string): never {
   throw new CodespaceResourceError(
@@ -79,6 +66,19 @@ export class LocalCodespaceRelay {
   ) {}
 
   private readonly pending = new Map<string, Promise<LocalRelayRequest>>();
+  private authority(
+    resource: CodespaceResourceRecord,
+    request: Record<string, unknown>,
+  ): "owner-delete" | undefined {
+    if (!this.devices.isOwnerDeleteIntent(resource.userId, resource.id, resource.generation))
+      return undefined;
+    if (request.action !== "snapshot" && request.action !== "delete")
+      throw new CodespaceResourceError(
+        "CODESPACE_AUTHORIZATION_REQUIRED",
+        "Owner cleanup cannot authorize work",
+      );
+    return "owner-delete";
+  }
 
   /** Read an already authenticated durable receipt; never dispatch merely to resolve identity. */
   async completedResult(
@@ -86,7 +86,11 @@ export class LocalCodespaceRelay {
     request: Record<string, unknown>,
   ): Promise<unknown | null> {
     request = JSON.parse(JSON.stringify(request)) as Record<string, unknown>;
-    const queued = this.devices.getRequest(resource.userId, mutationId(resource, request));
+    const authority = this.authority(resource, request);
+    const queued = this.devices.getRequest(
+      resource.userId,
+      mutationId(resource, request, authority),
+    );
     if (!queued) return null;
     const binding = this.devices.getBinding(resource.userId, resource.id);
     if (
@@ -109,6 +113,7 @@ export class LocalCodespaceRelay {
           id: queued.requestId,
           expiresAt: queued.deadlineAt,
           request,
+          ...(authority ? { authority } : {}),
         }),
       )
       .digest("hex");
@@ -161,7 +166,7 @@ export class LocalCodespaceRelay {
   ): Promise<LocalRelayRequest> {
     request = JSON.parse(JSON.stringify(request)) as Record<string, unknown>;
     if (!options.mutation) return this.prepare(resource, request, options);
-    const key = mutationId(resource, request);
+    const key = mutationId(resource, request, this.authority(resource, request));
     const previous = this.pending.get(key);
     if (previous) return previous;
     const pending = this.prepare(resource, request, options).finally(() =>
@@ -185,7 +190,8 @@ export class LocalCodespaceRelay {
       if (device.deviceGeneration !== binding.deviceGeneration) {
         throw new LocalDeviceError("LOCAL_UNAUTHORIZED", "Local device generation changed.");
       }
-      const requestId = options.mutation ? mutationId(resource, request) : randomUUID();
+      const authority = this.authority(resource, request);
+      const requestId = options.mutation ? mutationId(resource, request, authority) : randomUUID();
       const previous = this.devices.getRequest(resource.userId, requestId);
       const deadlineAt =
         previous?.deadlineAt ??
@@ -195,10 +201,16 @@ export class LocalCodespaceRelay {
               ? LOCAL_REQUEST_MAX_WINDOW_MS
               : Math.min(options.waitMs ?? 120_000, LOCAL_REQUEST_MAX_WINDOW_MS)),
           request.action === "create" ? resource.createDeadlineAt : Number.MAX_SAFE_INTEGER,
-          device.policy.leaseUntil,
+          authority ? Number.MAX_SAFE_INTEGER : device.policy.leaseUntil,
         );
       const bytes = Buffer.from(
-        canonicalJson({ version: 1, id: requestId, expiresAt: deadlineAt, request }),
+        canonicalJson({
+          version: 1,
+          id: requestId,
+          expiresAt: deadlineAt,
+          request,
+          ...(authority ? { authority } : {}),
+        }),
       );
       if (bytes.length > 8 * 1024 * 1024) {
         throw new CodespaceResourceError(
@@ -225,6 +237,7 @@ export class LocalCodespaceRelay {
           digest,
           payloadReference: reference,
           deadlineAt,
+          ...(authority ? { authority } : {}),
         };
         this.devices.enqueue(envelope);
         return envelope;

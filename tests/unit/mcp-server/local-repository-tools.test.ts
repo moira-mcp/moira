@@ -49,7 +49,7 @@ describe("local repository MCP admission", () => {
     ["CODESPACE_LOCAL_CREATION_UNKNOWN", "do not create a replacement"],
     ["CODESPACE_LOCAL_PROTOCOL_ERROR", "matching server and companion"],
     ["CODESPACE_LOCAL_RUNTIME_ERROR", "runtime diagnostics"],
-    ["CODESPACE_LOCAL_DELETE_APPROVAL_REQUIRED", "Allow deletion"],
+    ["CODESPACE_LOCAL_DELETE_APPROVAL_REQUIRED", "Moira Settings > Local computers"],
   ] as const)(
     "preserves actionable local diagnostic %s without private runtime output",
     async (code, instruction) => {

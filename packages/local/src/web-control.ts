@@ -82,6 +82,15 @@ export class LocalCompanion {
     const policy = await this.manager.records.policy();
     if (!policy.enabled || policy.leaseUntil <= Date.now()) {
       if (this.opened) await this.pause();
+      // The same relay admits only authenticated owner cleanup while ordinary work is closed.
+      // Wait for its addressed management outcome before retiring its cleanup-only native owner.
+      if (this.relay.control?.optedIn) {
+        try {
+          await this.relay.poll(this.rpc, signal);
+        } finally {
+          await this.manager.stopWork();
+        }
+      }
       return false;
     }
     if (!this.opened) {

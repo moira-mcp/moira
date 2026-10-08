@@ -14,8 +14,15 @@ import {
   type CodespaceSummaryView,
 } from "@mcp-moira/shared";
 import i18n from "../../../packages/web-frontend/src/i18n";
-import { apiClient, MoiraApiClient } from "../../../packages/web-frontend/src/services/api-client";
-import { observeReadSession } from "../../../packages/web-frontend/src/services/read-scope";
+import {
+  apiClient,
+  MoiraApiClient,
+  setAuthErrorHandler,
+} from "../../../packages/web-frontend/src/services/api-client";
+import {
+  getReadIdentity,
+  observeReadSession,
+} from "../../../packages/web-frontend/src/services/read-scope";
 import { authClient } from "../../../packages/web-frontend/src/auth/better-auth-client";
 import { LocalDeviceSettings } from "../../../packages/web-frontend/src/pages/settings/LocalDeviceSettings";
 import { GitHubCodespacesProvider } from "../../../packages/web-frontend/src/pages/settings/GitHubCodespacesData";
@@ -176,6 +183,7 @@ beforeEach(async () => {
   } as never);
 });
 afterEach(() => {
+  setAuthErrorHandler(null);
   cleanup();
   jest.restoreAllMocks();
   axios.defaults.adapter = originalAdapter;
@@ -364,10 +372,17 @@ test("computers with equal labels contain only their codespaces and separate VM 
   ).toBeNull();
 });
 
-test.each(["create_pending", "create_submitted", "stop_pending", "ambiguous", "rejected"] as const)(
+test.each([
+  "create_pending",
+  "create_submitted",
+  "stop_pending",
+  "delete_pending",
+  "ambiguous",
+  "rejected",
+] as const)(
   "%s permits owner-confirmed deletion and keeps a concrete refusal in its dialog",
   async (state) => {
-    devices = [{ ...device, status: "active" }];
+    devices = [editableDevice()];
     const row = {
       ...localCodespace(deviceId, "66666666-6666-4666-8666-666666666666", state),
       desired_state: "running" as const,
@@ -409,7 +424,7 @@ test.each(["create_pending", "create_submitted", "stop_pending", "ambiguous", "r
     expect(remove).not.toHaveBeenCalled();
     fireEvent.click(within(dialog).getByRole("button", { name: "Delete" }));
     expect(await within(dialog).findByRole("alert")).toHaveTextContent(
-      "Deletion is not permitted for this repository",
+      "Confirm deletion of this same codespace in Moira Settings → Development → Local computers.",
     );
     expect(remove).toHaveBeenCalledWith(row.codespace_id, row.generation);
     expect(card).toBeInTheDocument();
@@ -432,6 +447,169 @@ test.each(["create_pending", "create_submitted", "stop_pending", "ambiguous", "r
     expect(remove).toHaveBeenLastCalledWith(row.codespace_id, row.generation + 1);
   },
 );
+
+test("an adapter domain403 keeps the session and unlocks cancellation while generation refresh is still pending", async () => {
+  devices = [editableDevice()];
+  const row = localCodespace(deviceId, "66666666-6666-4666-8666-666666666666");
+  const fixture = {
+    readiness: { state: "ready" },
+    connection: { state: "connected" },
+    repositories: [],
+    codespaces: [row],
+    limits: { codespaces: { held: 1, max_per_user: null } },
+  };
+  jest.mocked(apiClient.getGitHubCodespaces).mockResolvedValue(fixture as never);
+  axios.defaults.adapter = async (config) => {
+    requests.push({ method: config.method!, url: config.url!, body: JSON.parse(config.data) });
+    throw new AxiosError("Forbidden", "ERR_BAD_REQUEST", config, undefined, {
+      config,
+      status: 403,
+      statusText: "Forbidden",
+      headers: {},
+      data: {
+        success: false,
+        error: {
+          code: "CODESPACE_LOCAL_DELETE_APPROVAL_REQUIRED",
+          message: "Delete permission refused",
+        },
+      },
+    });
+  };
+  const client = new MoiraApiClient();
+  jest
+    .spyOn(apiClient, "deleteGitHubCodespace")
+    .mockImplementation(client.deleteGitHubCodespace.bind(client));
+  setAuthErrorHandler(() => observeReadSession(null, null));
+  await show({ openSettings: false });
+  const identity = getReadIdentity();
+  const card = await screen.findByTestId(`github-codespace-${row.codespace_id}`);
+  fireEvent.click(within(card).getByRole("button", { name: "Delete" }));
+  let finish!: (value: Awaited<ReturnType<typeof apiClient.getGitHubCodespaces>>) => void;
+  jest.mocked(apiClient.getGitHubCodespaces).mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  const dialog = screen.getByRole("alertdialog");
+  fireEvent.click(within(dialog).getByRole("button", { name: "Delete" }));
+  expect(await within(dialog).findByRole("alert")).toHaveTextContent(
+    "Confirm deletion of this same codespace in Moira Settings → Development → Local computers.",
+  );
+  await waitFor(() => expect(within(dialog).getByRole("button", { name: "Cancel" })).toBeEnabled());
+  expect(getReadIdentity()).toBe(identity);
+  expect(within(dialog).getByRole("button", { name: "Delete" })).toBeDisabled();
+  expect(
+    within(dialog).getByRole("button", { name: "Delete" }).querySelector(".animate-spin"),
+  ).toBeNull();
+  expect(requests.filter((entry) => entry.method === "delete")).toEqual([
+    {
+      method: "delete",
+      url: `/integrations/github/codespaces/${row.codespace_id}`,
+      body: { confirm_delete: true, expected_generation: row.generation },
+    },
+  ]);
+  fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+  await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+  fireEvent.click(within(card).getByRole("button", { name: "Delete" }));
+  const reopened = screen.getByRole("alertdialog");
+  await act(async () =>
+    finish({ ...fixture, codespaces: [{ ...row, generation: row.generation + 10 }] } as never),
+  );
+  fireEvent.click(within(reopened).getByRole("button", { name: "Delete" }));
+  await waitFor(() =>
+    expect(requests.filter((entry) => entry.method === "delete")).toHaveLength(2),
+  );
+  expect(requests.filter((entry) => entry.method === "delete")[1].body).toEqual({
+    confirm_delete: true,
+    expected_generation: row.generation,
+  });
+  await waitFor(() =>
+    expect(within(reopened).getByRole("button", { name: "Cancel" })).toBeEnabled(),
+  );
+  expect(card).toBeInTheDocument();
+});
+
+test.each(["disabled", "expired"] as const)(
+  "owner deletion remains available with %s agent work permission",
+  async (policy) => {
+    const computer = editableDevice();
+    computer.policy = {
+      ...computer.policy,
+      ...(policy === "disabled" ? { enabled: false } : { leaseUntil: 0 }),
+    };
+    devices = [computer];
+    const row = localCodespace(deviceId, "66666666-6666-4666-8666-666666666666");
+    jest.mocked(apiClient.getGitHubCodespaces).mockResolvedValue({
+      readiness: { state: "ready" },
+      connection: { state: "connected" },
+      repositories: [],
+      codespaces: [row],
+      limits: { codespaces: { held: 1, max_per_user: null } },
+    } as never);
+    const remove = jest
+      .spyOn(apiClient, "deleteGitHubCodespace")
+      .mockResolvedValue({ ...row, state: "deleted" });
+    await show({ openSettings: false });
+    const card = await screen.findByTestId(`github-codespace-${row.codespace_id}`);
+    expect(within(card).getByRole("button", { name: "Stop" })).toBeDisabled();
+    expect(within(card).getByRole("button", { name: "Delete" })).toBeEnabled();
+    fireEvent.click(within(card).getByRole("button", { name: "Delete" }));
+    const dialog = screen.getByRole("alertdialog");
+    expect(remove).not.toHaveBeenCalled();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Delete" }));
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+    expect(remove).toHaveBeenCalledWith(row.codespace_id, row.generation);
+    expect(computer.policy.repositories[0].allowDelete).toBe(false);
+  },
+);
+
+test.each(["revoked", "pending", "no-control", "control-disabled"] as const)(
+  "%s computer does not offer owner deletion",
+  async (condition) => {
+    const computer = editableDevice();
+    if (condition === "revoked" || condition === "pending") computer.status = condition;
+    else if (condition === "no-control") delete computer.control;
+    else computer.control!.optedIn = false;
+    devices = [computer];
+    const row = localCodespace(deviceId, "66666666-6666-4666-8666-666666666666");
+    jest.mocked(apiClient.getGitHubCodespaces).mockResolvedValue({
+      readiness: { state: "ready" },
+      connection: { state: "connected" },
+      repositories: [],
+      codespaces: [row],
+      limits: { codespaces: { held: 1, max_per_user: null } },
+    } as never);
+    await show({ openSettings: false });
+    const card = await screen.findByTestId(`github-codespace-${row.codespace_id}`);
+    expect(within(card).getByRole("button", { name: "Delete" })).toBeDisabled();
+  },
+);
+
+test("checking an old delete intent requires a new destructive confirmation", async () => {
+  devices = [editableDevice()];
+  const row = {
+    ...localCodespace(deviceId, "66666666-6666-4666-8666-666666666666", "delete_pending"),
+    desired_state: "deleted" as const,
+  };
+  jest.mocked(apiClient.getGitHubCodespaces).mockResolvedValue({
+    readiness: { state: "ready" },
+    connection: { state: "connected" },
+    repositories: [],
+    codespaces: [row],
+    limits: { codespaces: { held: 1, max_per_user: null } },
+  } as never);
+  const remove = jest
+    .spyOn(apiClient, "deleteGitHubCodespace")
+    .mockResolvedValue({ ...row, state: "deleted" });
+  await show({ openSettings: false });
+  fireEvent.click(await screen.findByTestId(`codespace-reconcile-${row.codespace_id}`));
+  const dialog = screen.getByRole("alertdialog");
+  expect(remove).not.toHaveBeenCalled();
+  fireEvent.click(within(dialog).getByRole("button", { name: "Delete" }));
+  await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+  expect(remove).toHaveBeenCalledWith(row.codespace_id, row.generation);
+});
 
 test.each(["generation", "observation", "outcome"] as const)(
   "a newer %s from list refresh retires the old request failure",
@@ -478,7 +656,7 @@ test.each(["generation", "observation", "outcome"] as const)(
 );
 
 test("failed delete generation refresh blocks confirmation until a read-only retry obtains the current target", async () => {
-  devices = [{ ...device, status: "active" }];
+  devices = [editableDevice()];
   const row = localCodespace(deviceId, "66666666-6666-4666-8666-666666666666", "stop_pending");
   const fixture = {
     readiness: { state: "ready" },
@@ -516,7 +694,7 @@ test("failed delete generation refresh blocks confirmation until a read-only ret
 });
 
 test("a failed state check renders one concrete error and retry while keeping deletion available", async () => {
-  devices = [{ ...device, status: "active" }];
+  devices = [editableDevice()];
   const row = {
     ...localCodespace(deviceId, "66666666-6666-4666-8666-666666666666", "stop_pending"),
     lifecycle_error: "CODESPACE_LOCAL_RUNTIME_ERROR" as const,
@@ -548,7 +726,7 @@ test("a failed state check renders one concrete error and retry while keeping de
 });
 
 test("incomplete preparation blocks Start while permitting confirmed deletion of the stopped codespace", async () => {
-  devices = [{ ...device, status: "active" }];
+  devices = [editableDevice()];
   const row = {
     ...localCodespace(deviceId, "66666666-6666-4666-8666-666666666666", "stopped"),
     lifecycle_error: "CODESPACE_LOCAL_SETUP_INCOMPLETE" as const,
@@ -585,7 +763,7 @@ test("incomplete preparation blocks Start while permitting confirmed deletion of
 test.each(["running", "stopped"] as const)(
   "checking incomplete preparation with desired %s refreshes observation without starting or stopping",
   async (desired_state) => {
-    devices = [{ ...device, status: "active" }];
+    devices = [editableDevice()];
     const row = {
       ...localCodespace(deviceId, "66666666-6666-4666-8666-666666666666", "stopped"),
       desired_state,

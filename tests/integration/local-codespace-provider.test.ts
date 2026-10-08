@@ -30,6 +30,7 @@ import { PrivateState } from "../../packages/local/src/private-state.js";
 import { LocalManager } from "../../packages/local/src/manager.js";
 import { LocalRelay } from "../../packages/local/src/relay.js";
 import { LocalRpc } from "../../packages/local/src/rpc.js";
+import { LocalWebControl } from "../../packages/local/src/web-control.js";
 import { SbxRuntime, type SandboxObservation } from "../../packages/local/src/sbx-runtime.js";
 import type { LocalVmIdentity as SandboxIdentity } from "../../packages/local/src/local-vm-runtime.js";
 import { adaptSbxRuntime } from "../../packages/local/src/local-vm-runtime-factory.js";
@@ -542,8 +543,8 @@ async function fixture(partLimit = 4 * 1024 * 1024, maxObjects = 512, nativeSize
     return space;
   };
   const snapshot = manager.snapshot.bind(manager);
-  manager.snapshot = async (spaceId?: string) => {
-    const result = await snapshot(spaceId);
+  manager.snapshot = async (spaceId?: string, ownerCleanup = false) => {
+    const result = await snapshot(spaceId, ownerCleanup);
     return {
       ...result,
       spaces: result.spaces.map((space) => ({
@@ -669,6 +670,81 @@ async function fixture(partLimit = 4 * 1024 * 1024, maxObjects = 512, nativeSize
 }
 
 describe("actual local-only service composition and outbound relay", () => {
+  test.each([false, true])(
+    "an owner deletes an exact VM with agent deletion denied and work disabled (old refused intent=%s), without changing grants",
+    async (oldRefusal) => {
+      const actual = await fixture();
+      const created = await actual.drive(
+        actual.services.resource.create("user-a", actual.target, "main"),
+      );
+      const peer = await actual.drive(
+        actual.services.resource.create("user-a", actual.target, "main"),
+      );
+      actual.local.policy.repositories[0].allowDelete = false;
+      await actual.state.write("policy.json", actual.local.policy);
+      if (!oldRefusal) await actual.relay.confirmed();
+      let before = actual.services.resource.getCodespace("user-a", created.resource.id);
+      await expect(
+        oldRefusal
+          ? actual.drive(
+              actual.services.resource.deleteCodespace("user-a", before.id, before.generation),
+            )
+          : actual.services.resource.deleteCodespace("user-a", before.id, before.generation),
+      ).rejects.toMatchObject({ code: "CODESPACE_LOCAL_DELETE_APPROVAL_REQUIRED" });
+      if (oldRefusal) {
+        before = actual.services.resource.getCodespace("user-a", before.id);
+        expect(before).toMatchObject({
+          state: "delete_pending",
+          lastOutcome: "refused:CODESPACE_LOCAL_DELETE_APPROVAL_REQUIRED",
+        });
+      } else expect(actual.services.resource.getCodespace("user-a", before.id)).toEqual(before);
+      const connection = (await actual.state.read("connection.json", (value) => value)) as {
+        origin: string;
+        userId: string;
+        deviceId: string;
+        deviceGeneration: number;
+        connectionId: string;
+      };
+      await new LocalWebControl(actual.local.records).optIn(
+        connection,
+        {
+          cpuCores: 32,
+          memoryBytes: 64 * 1024 ** 3,
+          storageBytes: 1024 * 1024 ** 3,
+          dockerBytes: 128 * 1024 ** 3,
+          maxLeaseMs: 7 * 24 * 3600_000,
+        },
+        true,
+      );
+      actual.local.policy.enabled = false;
+      actual.local.policy.leaseUntil = Date.now() - 1;
+      await actual.state.write("policy.json", actual.local.policy);
+      await actual.relay.confirmed();
+      const storedPolicy = await actual.state.read("policy.json", (value) => value);
+      if (oldRefusal)
+        sqlite
+          .prepare(
+            "DELETE FROM codespaceConnectionRepository WHERE connectionId=? AND externalRepositoryId=?",
+          )
+          .run(before.connectionId, actual.target);
+      const removed = await actual.drive(
+        actual.services.resource.deleteCodespace("user-a", before.id, before.generation, {
+          ownerConfirmed: true,
+        }),
+      );
+      expect(removed).toMatchObject({ state: "deleted", observedState: "absent" });
+      expect(actual.removal.completed).toBe(1);
+      expect(await actual.state.read("policy.json", (value) => value)).toEqual(storedPolicy);
+      expect(actual.physical.get(await actual.localSpaceId(peer.resource))).toBe("running");
+      expect(actual.services.resource.getCodespace("user-a", peer.resource.id)).toEqual(
+        peer.resource,
+      );
+      const mutation = sqlite
+        .prepare("SELECT kind FROM codespaceProviderMutation WHERE resourceId=? AND generation=?")
+        .get(before.id, removed.generation);
+      expect(mutation).toEqual({ kind: "owner-delete" });
+    },
+  );
   test.each([
     ["stop", "LOCAL_SETUP_INCOMPLETE"],
     ["reconcile", "LOCAL_SETUP_INCOMPLETE"],
@@ -1296,6 +1372,7 @@ describe("actual local-only service composition and outbound relay", () => {
       expect(actual.removal.completed).toBe(0);
       actual.local.policy.repositories[0].allowDelete = true;
       await actual.state.write("policy.json", actual.local.policy);
+      await actual.relay.confirmed();
       actual.faults.removeRefusal = null;
       const removed = await actual.drive(
         actual.services.resource.deleteCodespace("user-a", refused.id, refused.generation),

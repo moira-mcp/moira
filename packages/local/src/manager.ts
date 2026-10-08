@@ -33,6 +33,7 @@ const brokerState = z.object({ port: z.number().int().min(1024).max(65535) }).st
 export class LocalManager {
   private readonly guards = new Map<string, SpaceGuard>();
   private device?: DeviceGuard;
+  private cleanupOnlyOwner = false;
   private broker?: Awaited<ReturnType<typeof startBroker>>;
   private tunnel?: Awaited<ReturnType<typeof startBrokerTunnel>>;
   private releaseLock?: () => Promise<void>;
@@ -66,11 +67,17 @@ export class LocalManager {
     }
   }
 
-  private async owner(): Promise<DeviceGuard> {
-    if (!this.device?.active) {
+  private async owner(cleanupOnly = false): Promise<DeviceGuard> {
+    const policy = await this.records.policy();
+    const managementOnly = cleanupOnly && (!policy.enabled || policy.leaseUntil <= this.now());
+    if (!this.device?.active || this.cleanupOnlyOwner !== managementOnly) {
       this.openingOwner ??= (async () => {
         await this.device?.stop();
-        this.device = await (this.dependencies.guard ?? startGuard)(this.records.state.root);
+        this.device = await (this.dependencies.guard ?? startGuard)(
+          this.records.state.root,
+          managementOnly ? "cleanup" : "work",
+        );
+        this.cleanupOnlyOwner = managementOnly;
         return this.device;
       })().finally(() => {
         this.openingOwner = undefined;
@@ -492,7 +499,7 @@ export class LocalManager {
           "Refresh the local sandbox before deleting it.",
         );
       if (!this.dependencies.runtime) {
-        await (await this.owner()).remove(space.id, generation, localApproval);
+        await (await this.owner(localApproval)).remove(space.id, generation, localApproval);
         this.guards.delete(space.id);
         return;
       }
@@ -556,16 +563,18 @@ export class LocalManager {
     });
   }
 
-  async snapshot(spaceId?: string) {
+  async snapshot(spaceId?: string, ownerCleanup = false) {
     const policy = await this.records.policy();
-    const admitted = policy.enabled && policy.leaseUntil > this.now();
+    if (ownerCleanup && !spaceId)
+      throw new LocalRefusal("LOCAL_UNAUTHORIZED", "Owner cleanup requires one exact sandbox.");
+    const admitted = ownerCleanup || (policy.enabled && policy.leaseUntil > this.now());
     let observationFailure: string | null = null;
     const observed = await (async () => {
       try {
         return this.dependencies.runtime
           ? await this.runtime(policy).list()
           : admitted
-            ? await (await this.owner()).observe(spaceId)
+            ? await (await this.owner(ownerCleanup)).observe(spaceId)
             : [];
       } catch (error) {
         if (!spaceId) throw error;

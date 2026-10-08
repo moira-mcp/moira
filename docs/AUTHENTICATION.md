@@ -413,6 +413,14 @@ Bearer credentials, API tokens and MCP calls cannot write those settings. Compan
 heartbeats may report and receive management settings while work is disabled or
 expired; that authentication does not authorize jobs or Git operations.
 
+An admitted browser session can confirm deletion of one owned local codespace at its current
+generation while the paired device and web-control approval remain active. The existing durable
+mutation records this owner confirmation. Relay binds its cleanup authority to the exact user,
+device, connection, resource and generation, and the companion rechecks local approval. Only exact
+observation and deletion are authorized; enabled agent work, its lease and agent deletion grants
+are not prerequisites for this cleanup and are not changed by it. MCP callers and a bare request
+flag cannot grant owner cleanup authority.
+
 For enrolled private Git, push and pull-request creation, the server uses the
 connected user's expiring GitHub App OAuth credential from its vault and rechecks
 the exact approved repository and resource generation. Neither that credential
@@ -683,8 +691,10 @@ Frontend API client (packages/web-frontend/src/services/api-client.ts) intercept
 
 - 401 Unauthorized: Shows "Session Expired" for the current request's authority,
   cleans up its observed session, and redirects to login when that operation still owns the result
-- 403 Forbidden: Uses the same authority check and cleanup, with an "Access Denied"
-  toast and the server error message
+- 403 Forbidden with `ACCOUNT_BLOCKED`, `ACCOUNT_APPROVAL_REQUIRED` or `EMAIL_NOT_VERIFIED`:
+  uses the same authority check and cleanup, with an "Access Denied" toast and the server error message
+- Other 403 responses are operation refusals. They reach the calling interface without global
+  session cleanup or login redirection, preserving the current session, private content and drafts
 - A response belonging to retired account, credential, or capability state cannot
   start the current account's cleanup or redirect
 - Public auth endpoints excluded from interception (login, register, forgot-password, etc.)

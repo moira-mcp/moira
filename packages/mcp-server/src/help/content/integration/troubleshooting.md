@@ -359,12 +359,21 @@ not proof that the computer or its VM has physically stopped. Renew a lease on t
 `npm run local -- enable --hours 8`, then run the confirmed companion in the foreground with
 `npm run local -- run`. A revoked device requires a new pairing and browser confirmation.
 Open that computer's codespace card and use **Check state again** for a pending start, stop or
-delete. This retries the saved intent for its exact codespace ID; deletion keeps the current
-generation check. It does not create a replacement VM. Pending creation or unavailable applied
+delete. Start/stop retries the saved intent for its exact codespace ID; local deletion opens
+confirmation again and checks the current generation after the owner confirms. It does not
+create a replacement VM. Pending creation or unavailable applied work
 access instead uses read-only refresh. Errors and loaders stay on the affected card.
 **Delete** is available with confirmation even during pending creation, cleanup or uncertain
 local state. It addresses only the same owned codespace and finishes after confirmed absence.
-Do not clear journals, edit database state or create a replacement to bypass an unresolved removal.
+
+Owner cleanup requires the active paired computer, current local web-control approval and a
+running, reachable companion. It does not require agent deletion permission, enabled work or
+lease renewal, and changes none of those permissions. MCP deletion retains its agent grant and
+work-lease checks. A deletion refusal remains visible inside the confirmation dialog and ends
+the spinner; **Cancel** is available while a separate read refreshes the current generation.
+An operation's 403 refusal does not sign out the owner; session expiry and account admission
+errors retain their authentication handling. Do not clear journals, edit database state or create
+a replacement to bypass an unresolved removal.
 
 `observed_at` in a codespace summary is the last verified provider observation, nullable until
 one succeeds. `updated_at` may change because of a claim or retry and does not prove runtime
@@ -383,10 +392,13 @@ its verified observation instead of repeating creation or editing the database s
 | `CODESPACE_LOCAL_SETUP_INCOMPLETE`         | Guest preparation did not complete. Delete the codespace and confirm removal before recreating it; start or `recover` cannot finish initial setup. The cause remains visible even after a confirmed physical stop. |
 | `CODESPACE_LOCAL_PROTOCOL_ERROR`           | Coordinate matching server/companion builds and inspect saved-state compatibility. Preserve identity and journals.                                                                                                 |
 | `CODESPACE_LOCAL_RUNTIME_ERROR`            | Inspect the local runtime's diagnostics, repair that runtime and check the same codespace again. Shutdown is not implied.                                                                                          |
-| `CODESPACE_LOCAL_DELETE_APPROVAL_REQUIRED` | Allow deletion for this repository in the computer's settings, wait for application, then confirm deletion of the same codespace.                                                                                  |
+| `CODESPACE_LOCAL_DELETE_APPROVAL_REQUIRED` | Confirm deletion of the same codespace in Settings → Development → Local computers with active local web control. Permanent agent deletion permission is not required for owner cleanup.                           |
 
 After a confirmed refusal and repair, an explicit lifecycle action can create a fresh guarded
-attempt. A repeated active request or an unknown outcome still uses its retained intent;
+attempt. Owner confirmation can also replace a local delete intent that retained only state
+checks, with no destructive dispatch. An accepted delete with an unknown outcome keeps its
+original generation and identity. A repeated active request or an unknown outcome still uses its
+retained intent;
 it does not dispatch a duplicate effect. Read-only inspection can recover exact creation identity
 from the owned durable manifest after a reply expires; an unavailable inventory is never absence.
 With locally approved `web-control`, request a finite renewal in the device editor within its

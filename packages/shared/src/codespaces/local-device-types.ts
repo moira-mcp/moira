@@ -127,6 +127,7 @@ export type LocalRelayPayloadReference = z.infer<typeof localRelayPayloadReferen
 export type LocalRelayStatus =
   "queued" | "claimed" | "completed" | "refused" | "expired" | "revoked";
 export interface LocalRelayRequest extends LocalDeviceAuth {
+  authority?: "owner-delete";
   requestId: string;
   resourceId: string;
   resourceGeneration: number;

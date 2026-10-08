@@ -21,6 +21,9 @@ import {
   CodespaceTransferRepository,
   CodespaceTransferService,
   canonicalJson,
+  getFeatureResolver,
+  setFeatureResolver,
+  ModeFeatureResolver,
   type LocalPublicPolicy,
   type LocalDeviceView,
   type LocalRelayPayloadReference,
@@ -36,6 +39,7 @@ import {
   createLocalDeviceRoutes,
   createLocalDeviceBinaryRoutes,
 } from "../../packages/web-backend/src/routes/local-devices.js";
+import { LocalCodespaceRelay } from "../../packages/web-backend/src/services/local-codespace-relay.js";
 
 let sqlite: Database.Database, service: LocalDeviceService, now: number;
 const repositoryId = "b4ba0360-a0bf-4b80-a739-8a62671c403a";
@@ -189,6 +193,250 @@ afterEach(() => {
 });
 
 describe("Durable local device enrollment and relay", () => {
+  test.each(["snapshot-only", "accepted-delete"] as const)(
+    "owner recovery distinguishes %s from an unknown destructive dispatch",
+    async (scope) => {
+      const { device, credential } = enroll(),
+        resourceId = bind(device);
+      const repository = new CodespaceResourceRepository(sqlite);
+      const pending = repository.requestDelete("user-a", resourceId, 1, now);
+      if (!pending || typeof pending === "string") throw new Error("Expected pending deletion");
+      repository.recordLifecycleFailure(
+        resourceId,
+        pending.generation,
+        "CODESPACE_RESOURCE_INVALID",
+        now,
+      );
+      const directory = fs.mkdtempSync(path.join(os.tmpdir(), "moira-owner-recovery-"));
+      const transfers = new CodespaceTransferService({
+        repository: new CodespaceTransferRepository(sqlite),
+        root: directory,
+        policy: () => serverPolicy,
+        now: () => now,
+      });
+      try {
+        const relay = new LocalCodespaceRelay(service, transfers, () => now);
+        const queued = await relay.retain(
+          pending,
+          scope === "snapshot-only"
+            ? { action: "snapshot" }
+            : { action: "delete", spaceId: pending.id, generation: pending.generation },
+          { mutation: scope === "accepted-delete" },
+        );
+        if (scope === "snapshot-only") {
+          const output = await transfers.retainRelayPayload(
+            "user-a",
+            "local_relay_output",
+            Buffer.from("saved scoped observation"),
+          );
+          sqlite
+            .prepare(
+              "UPDATE codespaceLocalRelay SET status='completed',outputReference=? WHERE requestId=?",
+            )
+            .run(canonicalJson(output), queued.requestId);
+          await transfers.discardRelayPayload(
+            "user-a",
+            "local_relay_input",
+            queued.payloadReference,
+          );
+          await transfers.discardRelayPayload("user-a", "local_relay_output", output);
+        } else
+          expect(service.claim(service.authenticateDevice(credential))[0].requestId).toBe(
+            queued.requestId,
+          );
+        const settings = {
+          label: device.label,
+          enabled: true,
+          leaseUntil: device.policy.leaseUntil,
+          cpuCores: 2,
+          memoryBytes: 4 * 1024 ** 3,
+          storageBytes: 8 * 1024 ** 3,
+          dockerBytes: 2 * 1024 ** 3,
+          repositories: device.policy.repositories,
+          gitAuthor: null,
+          agentRepositoryManagement: null,
+        };
+        sqlite.prepare("UPDATE codespaceLocalDevice SET control=? WHERE id=?").run(
+          canonicalJson({
+            optedIn: true,
+            revision: 1,
+            appliedRevision: 1,
+            status: "applied",
+            settings,
+            ceiling: null,
+            error: null,
+          }),
+          device.deviceId,
+        );
+        const recovered = repository.requestDelete(
+          "user-a",
+          resourceId,
+          pending.generation,
+          now,
+          true,
+        );
+        expect(recovered).toMatchObject({
+          generation: pending.generation + (scope === "snapshot-only" ? 1 : 0),
+          state: "delete_pending",
+        });
+        if (!recovered || typeof recovered === "string")
+          throw new Error("Expected retained resource");
+        expect(repository.isOwnerDeleteIntent("user-a", resourceId, recovered.generation)).toBe(
+          scope === "snapshot-only",
+        );
+      } finally {
+        fs.rmSync(directory, { recursive: true, force: true });
+      }
+    },
+  );
+  test.each([
+    ["self-host", "approved", 0, 0, true],
+    ["saas", null, 1, 0, true],
+    ["saas", null, 0, 0, false],
+    ["self-host", "approved", 1, 1, false],
+  ] as const)(
+    "atomic owner cleanup respects %s account admission with approved=%s email=%s blocked=%s",
+    (mode, approvedAt, emailVerified, blocked, admitted) => {
+      const { device } = enroll(),
+        resourceId = bind(device);
+      const settings = {
+        label: device.label,
+        enabled: true,
+        leaseUntil: device.policy.leaseUntil,
+        cpuCores: 2,
+        memoryBytes: 4 * 1024 ** 3,
+        storageBytes: 8 * 1024 ** 3,
+        dockerBytes: 2 * 1024 ** 3,
+        repositories: device.policy.repositories,
+        gitAuthor: null,
+        agentRepositoryManagement: null,
+      };
+      sqlite.prepare("UPDATE codespaceLocalDevice SET control=? WHERE id=?").run(
+        JSON.stringify({
+          optedIn: true,
+          revision: 1,
+          appliedRevision: 1,
+          status: "applied",
+          settings,
+          ceiling: null,
+          error: null,
+        }),
+        device.deviceId,
+      );
+      sqlite
+        .prepare("UPDATE user SET approvedAt=?,emailVerified=?,blocked=? WHERE id='user-a'")
+        .run(approvedAt, emailVerified, blocked);
+      const previousMode = process.env.DEPLOYMENT_MODE,
+        resolver = getFeatureResolver();
+      try {
+        process.env.DEPLOYMENT_MODE = mode;
+        setFeatureResolver(new ModeFeatureResolver());
+        const result = new CodespaceResourceRepository(sqlite).requestDelete(
+          "user-a",
+          resourceId,
+          1,
+          now,
+          true,
+        );
+        if (admitted) expect(result).toMatchObject({ generation: 2, state: "delete_pending" });
+        else expect(result).toBe("unauthorized");
+      } finally {
+        if (previousMode === undefined) delete process.env.DEPLOYMENT_MODE;
+        else process.env.DEPLOYMENT_MODE = previousMode;
+        setFeatureResolver(resolver);
+      }
+    },
+  );
+  test("owner deletion authority survives an expired work lease without widening agent grants", () => {
+    const { device, credential } = enroll(),
+      resourceId = bind(device);
+    const originalPolicy = JSON.stringify(device.policy);
+    const repository = new CodespaceResourceRepository(sqlite);
+    expect(repository.requestDelete("user-a", resourceId, 1, now, true)).toBe("unauthorized");
+    expect(repository.getOwned("user-a", resourceId)).toMatchObject({
+      generation: 1,
+      state: "usable",
+    });
+    const ordinary = queue(device, resourceId);
+    expect(() =>
+      service.enqueue({ ...ordinary, requestId: randomUUID(), authority: "owner-delete" }),
+    ).toThrow("Relay authority does not match its mutation");
+    expect(service.getRequest("user-a", ordinary.requestId)).not.toHaveProperty("authority");
+    const settings = {
+      label: device.label,
+      enabled: false,
+      leaseUntil: now - 1,
+      cpuCores: 2,
+      memoryBytes: 4 * 1024 ** 3,
+      storageBytes: 8 * 1024 ** 3,
+      dockerBytes: 2 * 1024 ** 3,
+      repositories: device.policy.repositories,
+      gitAuthor: null,
+      agentRepositoryManagement: null,
+    };
+    sqlite.prepare("UPDATE codespaceLocalDevice SET control=? WHERE id=?").run(
+      JSON.stringify({
+        optedIn: true,
+        revision: 1,
+        appliedRevision: 1,
+        status: "applied",
+        settings,
+        ceiling: null,
+        error: null,
+      }),
+      device.deviceId,
+    );
+    const requested = repository.requestDelete("user-a", resourceId, 1, now, true);
+    expect(requested).toMatchObject({ generation: 2, state: "delete_pending" });
+    now = device.policy.leaseUntil + 1;
+    expect(service.claim(service.authenticateDevice(credential))).toEqual([]);
+    const reference = payload();
+    const request = {
+      userId: device.userId,
+      deviceId: device.deviceId,
+      deviceGeneration: device.deviceGeneration,
+      connectionId: device.connectionId,
+      requestId: randomUUID(),
+      resourceId,
+      resourceGeneration: 2,
+      authority: "owner-delete" as const,
+      digest,
+      payloadReference: reference,
+      deadlineAt: now + 120_000,
+    };
+    service.enqueue(request);
+    service = new LocalDeviceService(new LocalDeviceRepository(sqlite), () => now);
+    expect(service.getRequest("user-a", request.requestId)?.authority).toBe("owner-delete");
+    const auth = service.authenticateDevice(credential);
+    const claim = service.claim(auth)[0];
+    expect(claim.authority).toBe("owner-delete");
+    expect(service.authorizePayload(auth, request.requestId, claim.claimId).authority).toBe(
+      "owner-delete",
+    );
+    expect(service.renewClaim(auth, request.requestId, claim.claimId).claimExpiresAt).toBe(
+      now + 30_000,
+    );
+    const output = payload("user-a", "local_relay_output");
+    service.registerOutputPart(auth, request.requestId, claim.claimId, output.parts[0]);
+    const ack = {
+      requestId: request.requestId,
+      digest,
+      claimId: claim.claimId,
+      status: "completed" as const,
+      outcomeReference: output,
+    };
+    expect(service.acknowledge(auth, ack).status).toBe("completed");
+    now = request.deadlineAt + 1;
+    expect(service.acknowledge(auth, ack).status).toBe("completed");
+    expect(JSON.stringify(service.getActiveDevice("user-a", device.deviceId).policy)).toBe(
+      originalPolicy,
+    );
+    expect(() =>
+      service.enqueue({ ...request, requestId: randomUUID(), authority: undefined }),
+    ).toThrow();
+    sqlite.prepare("UPDATE codespaceLocalDevice SET control=NULL WHERE id=?").run(device.deviceId);
+    expect(() => service.acknowledge(auth, ack)).toThrow();
+  });
   test("requires local approval and a fresh owner confirmation; persists only credential digests", () => {
     const pair = service.beginEnrollment("user-a"),
       credential = randomBytes(32).toString("base64url");

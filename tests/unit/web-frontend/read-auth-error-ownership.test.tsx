@@ -57,7 +57,7 @@ function sessionFor(id: string, credential: string) {
 let session: ReturnType<typeof sessionFor> | null;
 let client: InstanceType<typeof MoiraApiClient>;
 let holdNext = false;
-let denied: ((status: number) => void) | undefined;
+let denied: ((status: number, code?: string) => void) | undefined;
 let heldSignOut: Promise<Response> | undefined;
 let renewalMode: "direct" | "deferred" | null;
 let renewalDue = false;
@@ -137,14 +137,14 @@ beforeEach(async () => {
     if (holdNext) {
       holdNext = false;
       return new Promise<never>((_, reject) => {
-        denied = (status) =>
+        denied = (status, code = status === 403 ? "ACCOUNT_BLOCKED" : "AUTHENTICATION_REQUIRED") =>
           reject(
             new AxiosError("refused", "ERR_BAD_REQUEST", config, undefined, {
               config,
               status,
               statusText: "Forbidden",
               headers: {},
-              data: { success: false, error: { code: "FORBIDDEN", message: "Permission revoked" } },
+              data: { success: false, error: { code, message: "Permission revoked" } },
             }),
           );
       });
@@ -217,24 +217,52 @@ async function startHeldRead() {
   await waitFor(() => expect(denied).toBeDefined());
 }
 
-test("a current forbidden read immediately hides held private content while sign-out is pending", async () => {
-  await mount();
-  const privateRegion = screen.getByTestId("private-region");
-  let finish!: (response: Response) => void;
-  heldSignOut = new Promise((resolve) => {
-    finish = resolve;
-  });
-  await startHeldRead();
-  await act(async () => denied!(403));
-  expect(privateRegion).not.toBeVisible();
-  expect(screen.queryByText("Notes of credential-a")).toBeNull();
-  session = null;
-  await act(async () => {
-    finish(Response.json({ success: true }));
-  });
-  await waitFor(() => expect(screen.getByTestId("location").textContent).toBe("/login"));
-  expect(screen.queryByTestId("private-region")).toBeNull();
-});
+test.each(["FORBIDDEN", "CODESPACE_LOCAL_DELETE_APPROVAL_REQUIRED"])(
+  "a current domain403 %s preserves admitted content, session and focused draft",
+  async (code) => {
+    await mount();
+    const draft = screen.getByRole("textbox", { name: "Private draft" });
+    fireEvent.change(draft, { target: { value: "Keep my draft" } });
+    draft.focus();
+    await startHeldRead();
+    const owner = getReadOwner();
+    await act(async () => denied!(403, code));
+    expect(screen.getByTestId("location")).toHaveTextContent("/private");
+    expect(screen.getByTestId("private-region")).toBeVisible();
+    expect(screen.getByRole("textbox", { name: "Private draft" })).toBe(draft);
+    expect(draft).toHaveValue("Keep my draft");
+    expect(draft).toHaveFocus();
+    expect(getReadOwner()).toBe(owner);
+    expect(authClient.$store.atoms.session.get().data?.session.id).toBe("credential-a");
+  },
+);
+
+test.each([
+  [401, "AUTHENTICATION_REQUIRED"],
+  [403, "ACCOUNT_BLOCKED"],
+  [403, "ACCOUNT_APPROVAL_REQUIRED"],
+  [403, "EMAIL_NOT_VERIFIED"],
+] as const)(
+  "a current auth%i %s immediately hides held private content while sign-out is pending",
+  async (status, code) => {
+    await mount();
+    const privateRegion = screen.getByTestId("private-region");
+    let finish!: (response: Response) => void;
+    heldSignOut = new Promise((resolve) => {
+      finish = resolve;
+    });
+    await startHeldRead();
+    await act(async () => denied!(status, code));
+    expect(privateRegion).not.toBeVisible();
+    expect(screen.queryByText("Notes of credential-a")).toBeNull();
+    session = null;
+    await act(async () => {
+      finish(Response.json({ success: true }));
+    });
+    await waitFor(() => expect(screen.getByTestId("location").textContent).toBe("/login"));
+    expect(screen.queryByTestId("private-region")).toBeNull();
+  },
+);
 
 test("a late forbidden read from a previous capability context cannot log out the same current session", async () => {
   observeReadCapabilities("previous permission context", "user");

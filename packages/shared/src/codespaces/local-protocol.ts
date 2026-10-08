@@ -1,4 +1,26 @@
 import { z } from "zod";
+import { createHash } from "node:crypto";
+import { canonicalJson } from "../utils/canonical-json.js";
+
+/** The existing durable dispatch identity, shared by enqueue and pending-intent recovery. */
+export function localRelayMutationId(
+  resource: { id: string; generation: number },
+  request: Record<string, unknown>,
+  authority?: "owner-delete",
+): string {
+  const hex = createHash("sha256")
+    .update(
+      canonicalJson({
+        resourceId: resource.id,
+        generation: resource.generation,
+        request,
+        ...(authority ? { authority } : {}),
+      }),
+    )
+    .digest("hex")
+    .slice(0, 32);
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-4${hex.slice(13, 16)}-a${hex.slice(17, 20)}-${hex.slice(20)}`;
+}
 
 export const LOCAL_WORKER_REQUEST_TIMEOUT_MS = 30_000;
 export const LOCAL_REQUEST_MAX_WINDOW_MS = 15 * 60_000;

@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import type Database from "better-sqlite3";
+import { CodespaceResourceRepository } from "./resource-repository.js";
 import { canonicalJson } from "../utils/canonical-json.js";
 import { getAccountAccessDenial } from "../auth/account-admission.js";
 import {
@@ -769,9 +770,22 @@ export class LocalDeviceRepository {
     );
   }
 
+  isOwnerDeleteIntent(userId: string, resourceId: string, generation: number): boolean {
+    return new CodespaceResourceRepository(this.sqlite).isOwnerDeleteIntent(
+      userId,
+      resourceId,
+      generation,
+    );
+  }
+
   enqueue(input: LocalRelayRequest, now: number): LocalRelayResult {
     return this.sqlite
       .transaction(() => {
+        if ((input.authority === "owner-delete") !== this.ownerDeleteAuthority(input))
+          throw new LocalDeviceError(
+            "LOCAL_UNAUTHORIZED",
+            "Relay authority does not match its mutation.",
+          );
         this.requireDispatch(input, now);
         this.pruneRelayMetadata(input.userId, now);
         const previous = this.relay(input.requestId);
@@ -837,7 +851,6 @@ export class LocalDeviceRepository {
       .transaction(() => {
         const device = this.requireDevice(auth),
           policy = localPublicPolicySchema.parse(JSON.parse(device.policy));
-        this.requireLease(policy, now);
         this.pruneRelayMetadata(auth.userId, now);
         const rows = this.sqlite
           .prepare(
@@ -845,6 +858,10 @@ export class LocalDeviceRepository {
         AND (status='queued' OR (status='claimed' AND claimExpiresAt<=?)) ORDER BY createdAt,requestId LIMIT ?`,
           )
           .all(auth.deviceId, auth.deviceGeneration, now, now, limit) as RelayRow[];
+        const optedIn =
+          device.control && localDeviceControlViewSchema.parse(JSON.parse(device.control)).optedIn;
+        if (!rows.some((row) => this.ownerDeleteAuthority(row)) && !optedIn)
+          this.requireLease(policy, now);
         const claims: LocalRelayClaim[] = [];
         for (const row of rows) {
           try {
@@ -865,7 +882,11 @@ export class LocalDeviceRepository {
             continue;
           }
           const claimId = randomUUID(),
-            claimExpiresAt = Math.min(row.deadlineAt, policy.leaseUntil, now + 30_000);
+            claimExpiresAt = Math.min(
+              row.deadlineAt,
+              this.ownerDeleteAuthority(row) ? Number.MAX_SAFE_INTEGER : policy.leaseUntil,
+              now + 30_000,
+            );
           this.sqlite
             .prepare(
               "UPDATE codespaceLocalRelay SET status='claimed',claimId=?,claimExpiresAt=?,updatedAt=? WHERE requestId=?",
@@ -873,6 +894,7 @@ export class LocalDeviceRepository {
             .run(claimId, claimExpiresAt, now, row.requestId);
           claims.push({
             ...auth,
+            ...(this.ownerDeleteAuthority(row) ? { authority: "owner-delete" as const } : {}),
             requestId: row.requestId,
             resourceId: row.resourceId,
             resourceGeneration: row.resourceGeneration,
@@ -938,6 +960,7 @@ export class LocalDeviceRepository {
       requestId: row.requestId,
       resourceId: row.resourceId,
       resourceGeneration: row.resourceGeneration,
+      ...(this.ownerDeleteAuthority(row) ? { authority: "owner-delete" as const } : {}),
       digest: row.digest,
       payloadReference: localRelayPayloadReferenceSchema.parse(JSON.parse(row.inputReference)),
       deadlineAt: row.deadlineAt,
@@ -1016,7 +1039,11 @@ export class LocalDeviceRepository {
             "UPDATE codespaceLocalRelay SET claimExpiresAt=?,updatedAt=? WHERE requestId=? AND claimId=?",
           )
           .run(
-            Math.min(claim.deadlineAt, policy.leaseUntil, now + 30_000),
+            Math.min(
+              claim.deadlineAt,
+              this.ownerDeleteAuthority(row) ? Number.MAX_SAFE_INTEGER : policy.leaseUntil,
+              now + 30_000,
+            ),
             now,
             requestId,
             claimId,
@@ -1072,6 +1099,7 @@ export class LocalDeviceRepository {
       throw new LocalDeviceError("LOCAL_CONFLICT", "Relay acknowledgement changed.");
     return {
       ...auth,
+      ...(this.ownerDeleteAuthority(row) ? { authority: "owner-delete" as const } : {}),
       requestId: row.requestId,
       resourceId: row.resourceId,
       resourceGeneration: row.resourceGeneration,
@@ -1140,11 +1168,21 @@ export class LocalDeviceRepository {
   ): LocalPublicPolicy {
     const row = this.requireDevice(input),
       policy = localPublicPolicySchema.parse(JSON.parse(row.policy));
-    this.requireLease(policy, now);
+    const ownerDelete = this.ownerDeleteAuthority(input);
+    if (ownerDelete) {
+      const control = row.control
+        ? localDeviceControlViewSchema.parse(JSON.parse(row.control))
+        : null;
+      if (!control?.optedIn)
+        throw new LocalDeviceError(
+          "LOCAL_UNAUTHORIZED",
+          "Owner cleanup consent is no longer active.",
+        );
+    } else this.requireLease(policy, now);
     const binding = this.getBinding(input.userId, input.resourceId);
     const resource = this.sqlite
       .prepare(
-        `SELECT r.generation,r.state,r.repositoryId,r.repositoryFullName,r.authorizationGeneration,c.credentialGeneration,c.status FROM codespaceResource r
+        `SELECT r.generation,r.state,r.repositoryId,r.repositoryFullName,r.machineName,r.authorizationGeneration,c.credentialGeneration,c.status FROM codespaceResource r
       JOIN codespaceConnection c ON c.id=r.connectionId WHERE r.id=? AND r.userId=? AND r.connectionId=? AND r.provider=?`,
       )
       .get(input.resourceId, input.userId, input.connectionId, CODESPACE_PROVIDER_LOCAL) as
@@ -1153,6 +1191,7 @@ export class LocalDeviceRepository {
           state: string;
           repositoryId: string;
           repositoryFullName: string;
+          machineName: string;
           authorizationGeneration: number;
           credentialGeneration: number;
           status: string;
@@ -1163,34 +1202,46 @@ export class LocalDeviceRepository {
       binding.deviceId !== input.deviceId ||
       binding.deviceGeneration !== input.deviceGeneration ||
       !resource ||
+      resource.repositoryId !== localRepositoryTargetId(input.deviceId, binding.repositoryId) ||
+      resource.machineName !== binding.profileId ||
       (acceptedResult
         ? resource.generation < input.resourceGeneration
         : resource.generation !== input.resourceGeneration) ||
       resource.authorizationGeneration !== resource.credentialGeneration ||
       resource.status !== "connected" ||
       (!acceptedResult && (resource.state === "deleted" || resource.state === "rejected")) ||
-      !this.sqlite
-        .prepare(
-          "SELECT 1 FROM codespaceConnectionRepository WHERE connectionId=? AND externalRepositoryId=? AND lower(fullName)=lower(?)",
-        )
-        .get(input.connectionId, resource.repositoryId, resource.repositoryFullName) ||
-      !policy.repositories.some(
-        (repo) =>
-          repo.id === binding.repositoryId &&
-          resource.repositoryId === localRepositoryTargetId(input.deviceId, repo.id) &&
-          resource.repositoryFullName.toLowerCase() === repo.fullName.toLowerCase(),
-      ) ||
-      policy.machine.name !== binding.profileId
+      (!ownerDelete &&
+        !this.sqlite
+          .prepare(
+            "SELECT 1 FROM codespaceConnectionRepository WHERE connectionId=? AND externalRepositoryId=? AND lower(fullName)=lower(?)",
+          )
+          .get(input.connectionId, resource.repositoryId, resource.repositoryFullName)) ||
+      (!ownerDelete &&
+        !policy.repositories.some(
+          (repo) =>
+            repo.id === binding.repositoryId &&
+            resource.repositoryId === localRepositoryTargetId(input.deviceId, repo.id) &&
+            resource.repositoryFullName.toLowerCase() === repo.fullName.toLowerCase(),
+        )) ||
+      (!ownerDelete && policy.machine.name !== binding.profileId)
     )
       throw new LocalDeviceError("LOCAL_UNAUTHORIZED", "Relay resource authority changed.");
     return policy;
   }
   private requireDeliveryDeadline(
-    input: { deadlineAt: number },
+    input: {
+      deadlineAt: number;
+      userId?: string;
+      resourceId?: string;
+      resourceGeneration?: number;
+    },
     policy: LocalPublicPolicy,
     now: number,
   ): void {
-    if (input.deadlineAt <= now || input.deadlineAt > policy.leaseUntil)
+    if (
+      input.deadlineAt <= now ||
+      (!this.ownerDeleteAuthority(input) && input.deadlineAt > policy.leaseUntil)
+    )
       throw new LocalDeviceError("LOCAL_EXPIRED", "Relay work lease expired.");
   }
   private requireLease(policy: LocalPublicPolicy, now: number): void {
@@ -1200,6 +1251,22 @@ export class LocalDeviceRepository {
       policy.leaseUntil > now + MAX_LOCAL_WORK_LEASE_MS
     )
       throw new LocalDeviceError("LOCAL_EXPIRED", "Renew the device work lease locally.");
+  }
+  private ownerDeleteAuthority(input: {
+    userId?: string;
+    resourceId?: string;
+    resourceGeneration?: number;
+  }): boolean {
+    return (
+      !!input.userId &&
+      !!input.resourceId &&
+      input.resourceGeneration !== undefined &&
+      new CodespaceResourceRepository(this.sqlite).isOwnerDeleteIntent(
+        input.userId,
+        input.resourceId,
+        input.resourceGeneration,
+      )
+    );
   }
   private requireDevice(auth: LocalDeviceAuth): DeviceRow {
     this.assertAdmitted(auth.userId);

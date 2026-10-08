@@ -398,8 +398,9 @@ with the same name remain distinct, and one repository can have several separate
 computer storage is shown at the computer level; CPU and RAM belong to each VM. GitHub Codespaces
 has a separate subsection. Refresh and action errors stay with the affected section or codespace.
 Local cards show the last verified observation, or that none exists, and a localized lifecycle
-refusal. **Check state again** retries the existing start/stop/delete intent for the exact
-codespace; a pending create is only refreshed. `created` does not certify shutdown: the native
+refusal. **Check state again** retries an existing start/stop intent for the exact codespace;
+a local delete intent opens the destructive confirmation again. A pending create is only
+refreshed. `created` does not certify shutdown: the native
 owner must confirm exact runtime and worker settlement. An unavailable observation preserves the
 last verified state and never becomes a successful stop.
 
@@ -407,6 +408,18 @@ last verified state and never becomes a successful stop.
 confirmation and the current generation. It targets the same owned VM and waits for confirmed
 removal; a failed observation cannot remove the card as if the VM were absent. A failed card does
 not prevent healthy sibling codespaces from refreshing or running.
+
+Owner deletion requires an active paired computer with local web-control approval and a running,
+reachable companion. It remains available with agent deletion permission denied, work disabled
+or its lease expired. Confirmation authorizes only exact observation and removal; it does not
+change repository grants or renew work permission. MCP deletion still requires the agent's
+deletion grant and enabled, unexpired work authority.
+
+A refused deletion shows its error in the dialog and ends the spinner. **Cancel** stays available
+while a separate read obtains the current generation for another confirmation. An operation's
+403 refusal preserves the browser session; account admission or expired-session errors retain
+their sign-in handling.
+
 Physical VM startup is distinct from guest readiness: commands become available only after guest
 preparation completes. `CODESPACE_LOCAL_SETUP_INCOMPLETE` means that preparation failed, even if
 the VM is confirmed stopped. Delete it and confirm removal before creating a replacement;

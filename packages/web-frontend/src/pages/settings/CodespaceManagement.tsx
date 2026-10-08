@@ -117,6 +117,8 @@ export function CodespaceManagement({ scope }: { scope: CodespaceManagementScope
     (computer.status === "active" &&
       computer.policy.enabled &&
       computer.policy.leaseUntil > Date.now());
+  const ownerDeleteEnabled =
+    !computer || (computer.status === "active" && computer.control?.optedIn === true);
   const {
     management: view,
     managementLoading: loading,
@@ -137,7 +139,11 @@ export function CodespaceManagement({ scope }: { scope: CodespaceManagementScope
   const [checkErrors, setCheckErrors] = useState<Record<string, ResourceRequestError>>({});
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [deleteNeedsRefresh, setDeleteNeedsRefresh] = useState(false);
-  const checkState = async (codespace: CodespaceSummaryView) => {
+  const checkState = async (codespace: CodespaceSummaryView, trigger?: HTMLButtonElement) => {
+    if (computer && codespace.desired_state === "deleted") {
+      if (ownerDeleteEnabled) openDeleteDialog(codespace, trigger);
+      return;
+    }
     const id = codespace.codespace_id;
     const owned = guard(false);
     setCheckingCodespaces((previous) => new Set(previous).add(id));
@@ -194,8 +200,16 @@ export function CodespaceManagement({ scope }: { scope: CodespaceManagementScope
       return next;
     });
   const [pendingDelete, setPendingDelete] = useState<CodespaceSummaryView | null>(null);
+  const deleteDecision = useRef(0);
   // The element that opened the destructive dialog; focus returns to it after closing.
   const deleteTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const openDeleteDialog = (codespace: CodespaceSummaryView, trigger?: HTMLButtonElement) => {
+    deleteDecision.current++;
+    deleteTriggerRef.current = trigger ?? null;
+    setDeleteError(null);
+    setDeleteNeedsRefresh(false);
+    setPendingDelete(codespace);
+  };
 
   const load = reloadManagement;
   const [refreshing, setRefreshing] = useState(false);
@@ -353,12 +367,13 @@ export function CodespaceManagement({ scope }: { scope: CodespaceManagementScope
 
   const refreshDeleteTarget = async (target: CodespaceSummaryView): Promise<void> => {
     const owned = guard(false);
+    const decision = deleteDecision.current;
     setDeleteNeedsRefresh(true);
     try {
       // Read server bookkeeping only. A refused delete may already have advanced its intent
       // generation; observing that result never authorizes another destructive request.
       const next = await apiClient.getGitHubCodespaces();
-      if (!owned()) return;
+      if (!owned() || deleteDecision.current !== decision) return;
       const current = next.codespaces.find(
         (row) =>
           row.codespace_id === target.codespace_id &&
@@ -379,7 +394,7 @@ export function CodespaceManagement({ scope }: { scope: CodespaceManagementScope
   };
 
   const remove = async () => {
-    if (!pendingDelete || deleteNeedsRefresh) return;
+    if (!pendingDelete || deleteNeedsRefresh || !ownerDeleteEnabled) return;
     const owned = guard(false);
     try {
       markBusy(pendingDelete.codespace_id, true);
@@ -395,7 +410,8 @@ export function CodespaceManagement({ scope }: { scope: CodespaceManagementScope
     } catch (error) {
       if (owned()) {
         setDeleteError(failureMessage(error));
-        await refreshDeleteTarget(pendingDelete);
+        // The refusal settles confirmation immediately; a read for a safe retry is independent.
+        void refreshDeleteTarget(pendingDelete);
       }
       throw error;
     } finally {
@@ -766,10 +782,10 @@ export function CodespaceManagement({ scope }: { scope: CodespaceManagementScope
                           size="sm"
                           variant="outline"
                           disabled={requestBusy}
-                          onClick={() =>
+                          onClick={(event) =>
                             actionError && !setupIncomplete
                               ? void lifecycle(codespace, actionError.action)
-                              : void checkState(codespace)
+                              : void checkState(codespace, event.currentTarget)
                           }
                           data-testid={`codespace-reconcile-${codespace.codespace_id}`}
                         >
@@ -806,12 +822,9 @@ export function CodespaceManagement({ scope }: { scope: CodespaceManagementScope
                       <Button
                         size="sm"
                         variant="destructive"
-                        disabled={requestBusy || !accessEnabled}
+                        disabled={requestBusy || !ownerDeleteEnabled}
                         onClick={(event) => {
-                          deleteTriggerRef.current = event.currentTarget;
-                          setDeleteError(null);
-                          setDeleteNeedsRefresh(false);
-                          setPendingDelete(codespace);
+                          openDeleteDialog(codespace, event.currentTarget);
                         }}
                         data-testid={`github-codespace-delete-${codespace.codespace_id}`}
                       >
@@ -882,7 +895,10 @@ export function CodespaceManagement({ scope }: { scope: CodespaceManagementScope
       <ConfirmDialog
         open={pendingDelete !== null}
         onOpenChange={(open) => {
-          if (!open) setPendingDelete(null);
+          if (!open) {
+            deleteDecision.current++;
+            setPendingDelete(null);
+          }
         }}
         title={t("pages.settings.codespaces.confirmDeleteTitle")}
         description={t("pages.settings.codespaces.confirmDeleteDescription", {
@@ -892,7 +908,7 @@ export function CodespaceManagement({ scope }: { scope: CodespaceManagementScope
         cancelLabel={t("common.cancel")}
         variant="destructive"
         onConfirm={remove}
-        confirmDisabled={deleteNeedsRefresh || !accessEnabled}
+        confirmDisabled={deleteNeedsRefresh || !ownerDeleteEnabled}
         content={
           deleteError ? (
             <>

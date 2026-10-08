@@ -26,10 +26,14 @@ export class RuntimeDeviceOwner {
   constructor(
     private readonly records: LocalRecords,
     private readonly initial: LocalPolicy,
-    private readonly bootstrap = false,
+    private readonly mode: "work" | "setup" | "cleanup" = "work",
   ) {
     this.control = this.createControl();
     this.runtime = new SbxRuntime(initial, this.run);
+  }
+
+  private get bootstrap(): boolean {
+    return this.mode === "setup";
   }
 
   private createControl(): DeviceRuntimeControl {
@@ -38,6 +42,8 @@ export class RuntimeDeviceOwner {
 
   /** The native owner admits this prepare; a retained unknown create is never re-dispatched. */
   async prepareSpace<T>(spaceId: string, generation: number, work: () => Promise<T>): Promise<T> {
+    if (this.mode === "cleanup")
+      throw new LocalRefusal("LOCAL_UNAUTHORIZED", "The cleanup owner cannot prepare guest work.");
     await this.current();
     const space = await this.records.get(spaceId);
     if (!space || space.generation !== generation || space.desiredState !== "running")
@@ -222,7 +228,7 @@ export class RuntimeDeviceOwner {
       JSON.stringify(policy.runtime) !== JSON.stringify(this.initial.runtime)
     )
       throw new LocalRefusal("LOCAL_RUNTIME_CHANGED", "The local runtime profile changed.");
-    if (!this.bootstrap && (!policy.enabled || policy.leaseUntil <= Date.now()))
+    if (this.mode === "work" && (!policy.enabled || policy.leaseUntil <= Date.now()))
       throw new LocalRefusal("LOCAL_NOT_RUNNING", "Local work is disabled or its lease expired.");
     if (this.stopping || this.controller.signal.aborted)
       throw new LocalRefusal("LOCAL_NOT_RUNNING", "The local device is stopping.");
@@ -411,7 +417,9 @@ export class RuntimeDeviceOwner {
     await this.runtime.verifyGlobalNetworkPolicy();
     let rows: RuntimeCoverage[];
     try {
-      rows = await this.coverage(this.control, spaceId);
+      // A management-only owner has no work admissions to index surviving peer workers.
+      // Read their fixed SDK identities for custody, then project only the addressed VM.
+      rows = await this.coverage(this.control, this.mode === "cleanup" ? undefined : spaceId);
       await this.control.protect(rows);
     } catch {
       await this.current();
@@ -422,6 +430,10 @@ export class RuntimeDeviceOwner {
       );
     }
     const records = await this.records.list();
+    if (this.mode === "cleanup" && spaceId) {
+      const target = records.find((record) => record.id === spaceId);
+      rows = rows.filter((row) => row.name === target?.name);
+    }
     if (
       this.control.hasUnindexedWorkers(
         new Set(rows.flatMap((row) => (row.containerId ? [row.containerId] : []))),

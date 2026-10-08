@@ -3,6 +3,7 @@ import {
   CODESPACE_PROVIDER_CONTRACT_VERSION,
   CODESPACE_PROVIDER_LOCAL,
   CodespaceResourceError,
+  LocalDeviceError,
   canonicalJson,
   localRepositoryTargetId,
   localResourceSnapshotSchema,
@@ -329,6 +330,58 @@ export class LocalCodespaceProvider implements CodespaceProviderAdapter {
   }
   deleteExact(credential: string, name: string) {
     return this.lifecycle(credential, name, "delete");
+  }
+  async preflightDelete(
+    credential: string,
+    input: { resourceId: string; ownerConfirmed: boolean },
+  ) {
+    const record = await this.exactRecord(credential, input.resourceId);
+    const binding = this.relay.devices.getBinding(record.userId, record.id);
+    if (!binding)
+      throw new CodespaceResourceError(
+        "CODESPACE_AUTHORIZATION_REQUIRED",
+        "Local resource is not bound",
+      );
+    let device;
+    try {
+      device = this.relay.devices.getActiveDevice(record.userId, binding.deviceId);
+    } catch (error) {
+      if (error instanceof LocalDeviceError)
+        throw new CodespaceResourceError(
+          "CODESPACE_AUTHORIZATION_REQUIRED",
+          "Local device access is no longer active",
+        );
+      throw error;
+    }
+    if (
+      device.deviceGeneration !== binding.deviceGeneration ||
+      device.connectionId !== record.connectionId
+    )
+      throw new CodespaceResourceError(
+        "CODESPACE_AUTHORIZATION_REQUIRED",
+        "Local device authority changed",
+      );
+    if (input.ownerConfirmed) {
+      if (!device.control?.optedIn)
+        throw new CodespaceResourceError(
+          "CODESPACE_AUTHORIZATION_REQUIRED",
+          "Approve web control on this computer first",
+        );
+    } else if (
+      !device.policy.repositories.find((repo) => repo.id === binding.repositoryId)?.allowDelete
+    ) {
+      throw new CodespaceResourceError(
+        "CODESPACE_LOCAL_DELETE_APPROVAL_REQUIRED",
+        "The owner must confirm deletion in Settings",
+        undefined,
+        true,
+      );
+    }
+    if (!input.ownerConfirmed && (!device.policy.enabled || device.policy.leaseUntil <= this.now()))
+      throw new CodespaceResourceError(
+        "CODESPACE_POLICY_LIMIT",
+        "Renew the device work lease before agent work",
+      );
   }
   async probeConnector(credential: string, name: string) {
     const resource = await this.getExact(credential, name);
