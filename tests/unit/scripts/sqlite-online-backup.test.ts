@@ -121,6 +121,32 @@ process.exit(result.status ?? 1);
     }
   });
 
+  test("refuses a successful CLI exit that did not create a backup", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "moira-backup-missing-copy-"));
+    const source = path.join(dir, "source.db");
+    const backup = path.join(dir, "backup.db");
+    const sqlite = execFileSync("sh", ["-c", "command -v sqlite3"], { encoding: "utf8" }).trim();
+    const bin = path.join(dir, "bin");
+    try {
+      execFileSync(sqlite, [source, "CREATE TABLE marker(value); INSERT INTO marker VALUES(7);"]);
+      fs.mkdirSync(bin);
+      fs.writeFileSync(
+        path.join(bin, "sqlite3"),
+        `#!/bin/sh\ncase "$*" in *'.backup '*) exit 0 ;; esac\nexec '${sqlite}' "$@"\n`,
+        { mode: 0o700 },
+      );
+      expect(() =>
+        execFileSync(script, [source, backup], {
+          env: { ...process.env, PATH: `${bin}${path.delimiter}${process.env.PATH}` },
+        }),
+      ).toThrow("SQLite online backup did not create a snapshot");
+      expect(fs.existsSync(backup)).toBe(false);
+      expect(fs.readdirSync(dir).some((name) => name.startsWith("backup.db.tmp."))).toBe(false);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   test("rejects a corrupt source without publishing a backup", () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "moira-online-backup-corrupt-"));
     const source = path.join(dir, "corrupt.db");
