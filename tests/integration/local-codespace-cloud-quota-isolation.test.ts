@@ -110,14 +110,14 @@ test("local VM reservations ignore cloud ceilings and throttle, cloud reservatio
   expect(reserveSpace(CODESPACE_PROVIDER_GITHUB).outcome).toBe("limit");
 });
 
-test("local jobs do not consume cloud concurrency and cooperating writes remain serialized", () => {
+test("local jobs and writes remain independent while cloud concurrency remains bounded", () => {
   const local = runningSpace(CODESPACE_PROVIDER_LOCAL);
   for (let index = 0; index < 10; index++) expect(operation(local).outcome).toBe("reserved");
   const cloud = runningSpace(CODESPACE_PROVIDER_GITHUB);
   expect(operation(cloud).outcome).toBe("reserved");
   expect(operation(cloud).outcome).toBe("busy");
   expect(operation(local, "write").outcome).toBe("reserved");
-  expect(operation(local, "write").outcome).toBe("busy");
+  expect(operation(local, "write").outcome).toBe("reserved");
   expect(operation(local).outcome).toBe("reserved");
 });
 

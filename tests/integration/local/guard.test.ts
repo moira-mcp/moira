@@ -1568,7 +1568,7 @@ supportedGuard("independent guard with a real subprocess SDK substitute", () => 
   });
 
   vmTest(
-    "an unknown guest response fences only its own durable space and settles its worker while a peer remains admitted",
+    "an unknown guest response preserves own and peer admission and a fresh command can execute",
     async () => {
       const local = await fixture();
       const peer = await addPeer(local);
@@ -1582,18 +1582,25 @@ supportedGuard("independent guard with a real subprocess SDK substitute", () => 
       try {
         await guard.operation(${JSON.stringify(job())}).then(()=>{throw new Error('Unknown guest incorrectly succeeded');},error=>{if(error.code!=='LOCAL_GUEST_SETTLEMENT_UNKNOWN')throw error;});
         const own=JSON.parse(await f.readFile(spacePath,'utf8'));
-        if(own.phase!=='stopped'||own.desiredState!=='stopped'||own.failure!=='LOCAL_GUEST_SETTLEMENT_UNKNOWN'||own.generation!==2)throw new Error('Unknown outcome lost its durable fence or confirmed stop');
-        await guard.operation(${JSON.stringify(job())}).then(()=>{throw new Error('Fenced guest reexecuted');},()=>{});
+        if(own.phase!=='usable'||own.desiredState!=='running'||own.failure!==null||own.generation!==1)throw new Error('An ordinary unknown response changed VM admission');
+        await guard.validate();
         await other.validate();
         const row=JSON.parse(await f.readFile(${JSON.stringify(local.observation + ".peers")},'utf8'))[0];
         if(row.status!=='running')throw new Error('Unknown guest stopped a sibling VM');
+        const before=(await f.readFile(${JSON.stringify(local.observation + ".calls")},'utf8')).trim().split(String.fromCharCode(10)).map(line=>JSON.parse(line));
+        if(before.some(argv=>argv[0]==='stop'))throw new Error('Unknown response stopped a native VM');
+        await f.unlink(${JSON.stringify(local.observation + ".guest-unknown")});
+        await f.writeFile(${JSON.stringify(local.release)},'finish fresh command');
+        const next={...${JSON.stringify(job())},remoteMarker:'moira-op-'+ 'b'.repeat(32)};
+        const result=JSON.parse((await guard.operation(next)).toString());
+        if(result.result?.state!=='complete'||result.result?.exitCode!==0)throw new Error('Fresh independent work failed after unknown response');
       }finally{await device.stop();}
     `,
       ]);
       expect(await local.records.get(local.space.id)).toMatchObject({
         phase: "stopped",
         desiredState: "stopped",
-        failure: "LOCAL_GUEST_SETTLEMENT_UNKNOWN",
+        failure: null,
         generation: 2,
       });
       expect(await local.records.get(peer.id)).toMatchObject({ phase: "stopped", generation: 2 });
@@ -1601,7 +1608,7 @@ supportedGuard("independent guard with a real subprocess SDK substitute", () => 
   );
 
   vmTest(
-    "explicit local recovery retains unknown job markers and opens a verified stopped VM's new generation",
+    "explicit stop and local recovery retain unknown job markers without replaying work",
     async () => {
       const local = await fixture();
       await writeFile(local.observation + ".guest-unknown", "unknown");
@@ -1615,7 +1622,8 @@ supportedGuard("independent guard with a real subprocess SDK substitute", () => 
           `
       try {
         await guard.operation(${JSON.stringify(job())}).then(()=>{throw new Error('Unknown guest incorrectly succeeded');},error=>{if(error.code!=='LOCAL_GUEST_SETTLEMENT_UNKNOWN')throw error;});
-        await device.space(${JSON.stringify(local.space.id)},true).then(()=>{throw new Error('Cloud start removed unknown fence');},error=>{if(error.code!=='LOCAL_GUEST_SETTLEMENT_UNKNOWN')throw error;});
+        await guard.validate();
+        await guard.stop();
         const generation=await device.recover(${JSON.stringify(local.space.id)},2);
         if(generation!==3)throw new Error('Recovery did not open a new local generation');
         const recovered=JSON.parse(await f.readFile(spacePath,'utf8'));
@@ -1857,10 +1865,15 @@ supportedGuard("independent guard with a real subprocess SDK substitute", () => 
     });
     expect(await local.records.get(local.space.id)).toMatchObject({
       desiredState: "stopped",
-      phase: "failed",
-      failure: "LOCAL_GUEST_SETTLEMENT_UNKNOWN",
+      // Guest initialization remains recorded; failed physical observation is not an
+      // ordinary-operation failure or a certificate that native stop completed.
+      phase: "usable",
+      failure: null,
       generation: 2,
     });
+    expect((await local.records.get(local.space.id))?.recoveryGeneration).toBe(
+      local.space.recoveryGeneration,
+    );
     expect(await readFile(local.observation + ".daemon-stopped", "utf8")).toBe("stopped");
     await writeFile(local.release, "resume");
     await expect(readFile(local.sentinel)).rejects.toMatchObject({ code: "ENOENT" });

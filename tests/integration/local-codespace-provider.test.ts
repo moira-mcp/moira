@@ -162,6 +162,8 @@ async function fixture(partLimit = 4 * 1024 * 1024, maxObjects = 512, nativeSize
     createRefusal: null as string | null,
     removeRefusal: null as string | null,
     beforeAck: null as ((requestId: string) => Promise<void>) | null,
+    beforePayload: null as
+      ((requestId: string, signal: AbortSignal | null) => Promise<void>) | null,
     afterAck: null as ((requestId: string) => Promise<void>) | null,
     afterCreateAdmitted: null as (() => Promise<void>) | null,
     beforeCreateReady: null as (() => Promise<void>) | null,
@@ -186,6 +188,13 @@ async function fixture(partLimit = 4 * 1024 * 1024, maxObjects = 512, nativeSize
     const url = new URL(String(input));
     expect(url.origin).toBe("https://moira.example");
     options?.signal?.throwIfAborted();
+    const payloadRequestId = url.pathname.match(
+      /^\/api\/local-devices\/relay\/([a-f0-9-]{36})\/payload\/\d+$/,
+    )?.[1];
+    if (payloadRequestId) {
+      await faults.beforePayload?.(payloadRequestId, options?.signal ?? null);
+      options?.signal?.throwIfAborted();
+    }
     const requestTrace = randomUUID();
     let call =
       options?.method === "POST"
@@ -401,13 +410,13 @@ async function fixture(partLimit = 4 * 1024 * 1024, maxObjects = 512, nativeSize
           offset?: number;
           length?: number;
         };
-        if (file.action === "upload") {
+        if (file.action === "upload" || file.action === "write") {
           const bytes = Buffer.from(file.bytesBase64!, "base64");
-          await writeFile(join(guestRoot, "payload.bin"), bytes, { mode: 0o600 });
+          await writeFile(join(guestRoot, file.path), bytes, { mode: 0o600 });
           result = {
             state: "succeeded",
             value: {
-              action: "upload",
+              action: file.action,
               path: file.path,
               previous: null,
               current: { size: bytes.length, sha256: hash(bytes), modifiedAt: Date.now() },
@@ -670,6 +679,302 @@ async function fixture(partLimit = 4 * 1024 * 1024, maxObjects = 512, nativeSize
 }
 
 describe("actual local-only service composition and outbound relay", () => {
+  test.each(["exec", "write"] as const)(
+    "explicit stop cancels %s held before relay enqueue without blocking fresh work or prior results",
+    async (kind) => {
+      const actual = await fixture();
+      const created = await actual.drive(
+        actual.services.resource.create("user-a", actual.target, "main"),
+      );
+      const retained = await actual.drive(
+        actual.services.operation.execute("user-a", created.resource.id, {
+          argv: ["echo", "prior result"],
+          stdin: { kind: "inline", bytes: new Uint8Array() },
+        }),
+      );
+      actual.manager.dependencies.brokerPorts = { http: 0, tunnel: 0 };
+      await actual.manager.open();
+      let releaseInput!: () => void, observeInput!: () => void;
+      const inputHeld = new Promise<void>((resolve) => {
+        observeInput = resolve;
+      });
+      const allowInput = new Promise<void>((resolve) => {
+        releaseInput = resolve;
+      });
+      const retainPayload = actual.services.transfer.retainRelayPayload.bind(
+        actual.services.transfer,
+      );
+      let heldIntent: { requestId: string; remoteMarker: string } | null = null;
+      actual.services.transfer.retainRelayPayload = async (userId, purpose, bytes) => {
+        if (purpose === "local_relay_input" && heldIntent === null) {
+          const envelope = JSON.parse(Buffer.from(bytes).toString("utf8")) as {
+            id: string;
+            request: { action: string; job?: { action: string; remoteMarker: string } };
+          };
+          if (
+            envelope.request.action === "operation" &&
+            envelope.request.job?.action === (kind === "exec" ? "execute" : "file-execute")
+          ) {
+            heldIntent = {
+              requestId: envelope.id,
+              remoteMarker: envelope.request.job.remoteMarker,
+            };
+            observeInput();
+            await allowInput;
+          }
+        }
+        return retainPayload(userId, purpose, bytes);
+      };
+      const submitted =
+        kind === "exec"
+          ? actual.services.operation.execute("user-a", created.resource.id, {
+              argv: ["echo", "must not execute"],
+              stdin: { kind: "inline", bytes: new Uint8Array() },
+            })
+          : actual.services.file.execute("user-a", created.resource.id, {
+              action: "write",
+              path: "must-not-exist.txt",
+              bytes: Buffer.from("never delivered"),
+              expected: { exists: false },
+            });
+      const outcome = submitted.then(
+        (value) => ({ value }),
+        (error: unknown) => ({ error }),
+      );
+      try {
+        await inputHeld;
+        const intent = heldIntent!;
+        expect(actual.services.devices.getRequest("user-a", intent.requestId)).toBeNull();
+        const oldOperation = sqlite
+          .prepare("SELECT id,state FROM codespaceOperation WHERE remoteMarker=?")
+          .get(intent.remoteMarker) as { id: string; state: string };
+        expect(oldOperation.state).toBe("reconcile_pending");
+        expect(
+          await actual.drive(actual.services.resource.stopCodespace("user-a", created.resource.id)),
+        ).toMatchObject({ state: "stopped" });
+        expect(
+          await actual.drive(
+            actual.services.resource.startCodespace("user-a", created.resource.id),
+          ),
+        ).toMatchObject({ state: "usable" });
+        expect(actual.services.devices.getRequest("user-a", intent.requestId)).toBeNull();
+        expect(actual.services.operation.get("user-a", oldOperation.id)).toMatchObject({
+          state: "cancel_pending",
+        });
+        releaseInput();
+        expect(await actual.drive(outcome)).toMatchObject({
+          error: {
+            code: "CODESPACE_OPERATION_CANCELLED",
+            operationId: oldOperation.id,
+          },
+        });
+        expect(actual.services.operation.get("user-a", oldOperation.id)).toMatchObject({
+          state: "cancelled",
+          remoteCleanupPending: 0,
+        });
+        expect(actual.guestActions.filter((action) => action === "execute")).toHaveLength(1);
+        expect(actual.guestActions.filter((action) => action === "file-execute")).toHaveLength(0);
+        expect(
+          await actual.state.read(`effect-${intent.remoteMarker}.json`, (value) => value),
+        ).toBeNull();
+        await expect(readFile(join(actual.guestRoot, "must-not-exist.txt"))).rejects.toMatchObject({
+          code: "ENOENT",
+        });
+        const fresh = await actual.drive(
+          actual.services.operation.execute("user-a", created.resource.id, {
+            argv: ["echo", "fresh result"],
+            stdin: { kind: "inline", bytes: new Uint8Array() },
+          }),
+        );
+        expect(fresh.result).toMatchObject({ state: "succeeded", stdout: "fresh result" });
+        await expect(
+          actual.drive(actual.services.operation.reconcile("user-a", retained.operation.id)),
+        ).resolves.toMatchObject({ state: "succeeded", stdout: "prior result" });
+        expect(actual.guestActions.filter((action) => action === "execute")).toHaveLength(2);
+        expect(actual.guestActions.filter((action) => action === "file-execute")).toHaveLength(0);
+      } finally {
+        releaseInput();
+        actual.services.transfer.retainRelayPayload = retainPayload;
+        await actual.drive(outcome);
+      }
+    },
+  );
+
+  test("cleanup retries an already finalized marker after a lost server commit without replaying execution", async () => {
+    const actual = await fixture();
+    const created = await actual.drive(
+      actual.services.resource.create("user-a", actual.target, "main"),
+    );
+    const completed = await actual.drive(
+      actual.services.operation.execute("user-a", created.resource.id, {
+        argv: ["echo", "retained until cleanup"],
+        stdin: { kind: "inline", bytes: new Uint8Array() },
+      }),
+    );
+    actual.clock.now += actual.policy.cleanupDeadlineMs + 1;
+    expect(await actual.drive(actual.services.operation.reconcileOnce("user-a"))).toBe(true);
+    expect(actual.services.operation.get("user-a", completed.operation.id)).toMatchObject({
+      state: "succeeded",
+      remoteCleanupPending: 0,
+    });
+    // The remote finalization completed, but the server's final flag was lost.
+    sqlite
+      .prepare("UPDATE codespaceOperation SET remoteCleanupPending=1 WHERE id=?")
+      .run(completed.operation.id);
+    actual.clock.now++;
+    expect(await actual.drive(actual.services.operation.reconcileOnce("user-a"))).toBe(true);
+    expect(actual.services.operation.get("user-a", completed.operation.id)).toMatchObject({
+      state: "succeeded",
+      remoteCleanupPending: 0,
+    });
+    expect(actual.guestActions.filter((action) => action === "execute")).toHaveLength(1);
+  });
+
+  test.each(["exec", "write"] as const)(
+    "explicit stop cancels undelivered %s so restart admits only fresh work and preserves prior results",
+    async (kind) => {
+      const actual = await fixture();
+      const created = await actual.drive(
+        actual.services.resource.create("user-a", actual.target, "main"),
+      );
+      const retained = await actual.drive(
+        actual.services.operation.execute("user-a", created.resource.id, {
+          argv: ["echo", "prior result"],
+          stdin: { kind: "inline", bytes: new Uint8Array() },
+        }),
+      );
+      actual.manager.dependencies.brokerPorts = { http: 0, tunnel: 0 };
+      await actual.manager.open();
+      let releaseInput!: () => void, observeInput!: () => void;
+      const inputHeld = new Promise<void>((resolve) => {
+        observeInput = resolve;
+      });
+      const allowInput = new Promise<void>((resolve) => {
+        releaseInput = resolve;
+      });
+      actual.faults.beforePayload = async (_requestId, signal) => {
+        actual.faults.beforePayload = null;
+        observeInput();
+        await Promise.race([
+          allowInput,
+          new Promise<never>((_resolve, reject) => {
+            if (signal?.aborted) reject(signal.reason);
+            else signal?.addEventListener("abort", () => reject(signal.reason), { once: true });
+          }),
+        ]);
+      };
+      const submitted =
+        kind === "exec"
+          ? actual.services.operation.execute("user-a", created.resource.id, {
+              argv: ["echo", "must not execute"],
+              background: true,
+              stdin: { kind: "inline", bytes: new Uint8Array() },
+            })
+          : actual.services.file.execute("user-a", created.resource.id, {
+              action: "write",
+              path: "must-not-exist.txt",
+              bytes: Buffer.from("never delivered"),
+              expected: { exists: false },
+            });
+      const old = actual.drive<unknown>(submitted, true).then(
+        (value) => ({ value }),
+        (error: unknown) => ({ error }),
+      );
+      try {
+        await inputHeld;
+        await actual.drive(
+          actual.services.resource.stopCodespace("user-a", created.resource.id),
+          true,
+        );
+        await actual.drive(
+          actual.services.resource.startCodespace("user-a", created.resource.id),
+          true,
+        );
+        releaseInput();
+        const oldOutcome = await old;
+        expect(oldOutcome).toMatchObject({
+          error: { code: "CODESPACE_PROVIDER_UNAVAILABLE", operationId: expect.any(String) },
+        });
+        expect(actual.guestActions.filter((action) => action === "execute")).toHaveLength(1);
+        expect(actual.guestActions.filter((action) => action === "file-execute")).toHaveLength(0);
+        const fresh = await actual.drive(
+          actual.services.operation.execute("user-a", created.resource.id, {
+            argv: ["echo", "fresh result"],
+            stdin: { kind: "inline", bytes: new Uint8Array() },
+          }),
+        );
+        expect(fresh.result).toMatchObject({ state: "succeeded", stdout: "fresh result" });
+        await expect(
+          actual.drive(actual.services.operation.reconcile("user-a", retained.operation.id)),
+        ).resolves.toMatchObject({ state: "succeeded", stdout: "prior result" });
+        expect(actual.guestActions.filter((action) => action === "execute")).toHaveLength(2);
+        expect(actual.guestActions.filter((action) => action === "file-execute")).toHaveLength(0);
+      } finally {
+        releaseInput();
+        await old;
+      }
+    },
+  );
+
+  test("a stopped native VM refreshes only its stale server row and the next command starts it without replaying the refused write", async () => {
+    const actual = await fixture();
+    const created = await actual.drive(
+      actual.services.resource.create("user-a", actual.target, "main"),
+    );
+    const peer = await actual.drive(
+      actual.services.resource.create("user-a", actual.target, "main"),
+    );
+    const localId = await actual.localSpaceId(created.resource);
+    actual.manager.dependencies.brokerPorts = { http: 0, tunnel: 0 };
+    await actual.manager.open();
+    const space = (await actual.local.records.get(localId))!;
+    // RuntimeOwner's confirmed ordinary shutdown records this stopped receipt tuple.
+    await actual.local.records.put({
+      ...space,
+      generation: space.generation + 1,
+      recoveryGeneration: space.generation + 1,
+      desiredState: "stopped",
+      phase: "stopped",
+    });
+    actual.physical.set(localId, "stopped");
+    actual.clock.now += 1000;
+    await expect(
+      actual.drive(
+        actual.services.file.execute("user-a", created.resource.id, {
+          action: "write",
+          path: "never-written.txt",
+          bytes: Buffer.from("not replayed"),
+          expected: { exists: false },
+        }),
+      ),
+    ).rejects.toMatchObject({ code: "CODESPACE_NOT_RUNNING" });
+    expect(actual.services.resource.getCodespace("user-a", created.resource.id)).toMatchObject({
+      observedState: "stopped",
+      observedAt: actual.clock.now,
+    });
+    expect(actual.services.resource.getCodespace("user-a", peer.resource.id)).toEqual(
+      peer.resource,
+    );
+    expect(actual.guestActions.filter((action) => action === "file-execute")).toHaveLength(0);
+    const restarted = await actual.drive(
+      actual.services.operation.execute("user-a", created.resource.id, {
+        argv: ["echo", "recovered normally"],
+        stdin: { kind: "inline", bytes: new Uint8Array() },
+      }),
+    );
+    expect(restarted.result).toMatchObject({
+      state: "succeeded",
+      stdout: "recovered normally",
+      exitCode: 0,
+    });
+    expect(actual.guestActions.filter((action) => action === "file-execute")).toHaveLength(0);
+    expect(actual.guestActions.filter((action) => action === "execute")).toHaveLength(1);
+    expect(actual.physical.get(localId)).toBe("running");
+    expect(actual.services.resource.getCodespace("user-a", peer.resource.id)).toEqual(
+      peer.resource,
+    );
+  });
+
   test.each([false, true])(
     "an owner deletes an exact VM with agent deletion denied and work disabled (old refused intent=%s), without changing grants",
     async (oldRefusal) => {
@@ -901,7 +1206,7 @@ describe("actual local-only service composition and outbound relay", () => {
         failure: "LOCAL_SETUP_INCOMPLETE",
       });
       await expect(
-        actual.relay.gitAuthority(localId, 2, actual.local.policy.repositories[0].id),
+        actual.relay.gitAuthority(localId, actual.local.policy.repositories[0].id),
       ).rejects.toMatchObject({ code: "LOCAL_CREATE_UNKNOWN" });
       const removed = await actual.drive(
         actual.services.resource.deleteCodespace(
@@ -1069,7 +1374,6 @@ describe("actual local-only service composition and outbound relay", () => {
       ).rejects.toMatchObject({ code: "CODESPACE_NOT_RUNNING" });
       const authority = await actual.relay.gitAuthority(
         localId,
-        1,
         actual.local.policy.repositories[0].id,
       );
       expect(authority).toMatchObject({ resourceId: pending.id, resourceGeneration: 2 });
@@ -1264,10 +1568,10 @@ describe("actual local-only service composition and outbound relay", () => {
       const reconciled = actual.services.resource.getCodespace("user-a", pending.id);
       expect(reconciled).toMatchObject({ state: "usable", generation: 3 });
       const auth = actual.services.devices.getRequest("user-a", accepted.requestId)!;
-      // An old input cannot start more work, while the same live accepted claim can settle.
-      expect(() =>
+      // Reconciliation of the same native VM does not revoke the live accepted request.
+      expect(
         actual.services.devices.authorizePayload(auth, accepted.requestId, accepted.claimId),
-      ).toThrow(expect.objectContaining({ code: "LOCAL_UNAUTHORIZED" }));
+      ).toMatchObject({ resourceId: pending.id });
       expect(
         actual.services.devices.authorizeResult(auth, accepted.requestId, accepted.claimId),
       ).toMatchObject({ resourceGeneration: 2 });
@@ -1888,7 +2192,7 @@ describe("actual local-only service composition and outbound relay", () => {
     },
   );
 
-  test.each(["generation", "future", "name", "provider", "owner", "authorization"])(
+  test.each(["name", "provider", "owner", "authorization"])(
     "old operation recovery refuses changed %s before contacting relay",
     async (change) => {
       const actual = await fixture();
@@ -1913,23 +2217,41 @@ describe("actual local-only service composition and outbound relay", () => {
       const transport = new LocalCodespaceJobTransport(
         new NoGuestRelay(actual.services.devices, actual.services.transfer),
       );
-      if (change === "future") operation.resourceGeneration = resource.generation + 1;
       if (change === "name") operation.providerResourceName = "another-owned-space";
       if (change === "provider") operation.provider = "github-codespaces";
       if (change === "owner") operation.userId = "user-b";
       if (change === "authorization") operation.authorizationGeneration++;
-      if (change === "generation")
-        await expect(
-          transport.execute(localCodespaceCredential("user-a"), resource, operation, {
-            argv: ["true"],
-            stdin: { kind: "inline", bytes: new Uint8Array() },
-          }),
-        ).rejects.toMatchObject({ code: "CODESPACE_GENERATION_CONFLICT" });
-      else
-        await expect(
-          transport.cancel(localCodespaceCredential("user-a"), resource, operation),
-        ).rejects.toMatchObject({ code: "CODESPACE_GENERATION_CONFLICT" });
+      await expect(
+        transport.cancel(localCodespaceCredential("user-a"), resource, operation),
+      ).rejects.toMatchObject({ code: "CODESPACE_AUTHORIZATION_REQUIRED" });
       expect(sends).toBe(0);
+    },
+  );
+  test.each([-2, 2])(
+    "ordinary local operations use stable identity despite a lifecycle snapshot offset %s",
+    async (offset) => {
+      const actual = await fixture();
+      const created = await actual.drive(
+        actual.services.resource.create("user-a", actual.target, "main"),
+      );
+      const first = await actual.drive(
+        actual.services.operation.execute("user-a", created.resource.id, {
+          argv: ["echo", "retained"],
+          stdin: { kind: "inline", bytes: new Uint8Array() },
+        }),
+      );
+      const operation = {
+        ...first.operation,
+        resourceGeneration: created.resource.generation + offset,
+      };
+      const transport = new LocalCodespaceJobTransport(
+        new LocalCodespaceRelay(actual.services.devices, actual.services.transfer),
+      );
+      const result = await actual.drive(
+        transport.inspect(localCodespaceCredential("user-a"), created.resource, operation),
+      );
+      expect(result).toMatchObject({ state: "succeeded", stdout: "retained", exitCode: 0 });
+      expect(actual.guestActions.filter((action) => action === "execute")).toHaveLength(1);
     },
   );
   test("creates and adopts a local resource through owned SQL, private blobs, HTTP and actual RPC without GitHub OAuth", async () => {

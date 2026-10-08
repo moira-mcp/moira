@@ -701,19 +701,51 @@ describe("Durable local device enrollment and relay", () => {
     ).toThrow("generation is no longer active");
     expect(service.getResult("user-a", first.requestId)?.status).toBe("revoked");
   });
-  test("enforces local lease, owner blocking and resource generation at each dispatch boundary", () => {
+  test("admits work across lifecycle changes while enforcing local lease and owner blocking", () => {
     const { device, credential } = enroll(),
       resource = bind(device),
       auth = service.authenticateDevice(credential),
       request = queue(device, resource);
     sqlite.prepare("UPDATE codespaceResource SET generation=2 WHERE id=?").run(resource);
-    expect(service.claim(auth)).toEqual([]);
-    expect(service.getResult("user-a", request.requestId)?.status).toBe("refused");
+    const claim = service.claim(auth)[0];
+    expect(claim.requestId).toBe(request.requestId);
+    expect(service.authorizePayload(auth, request.requestId, claim.claimId)).toMatchObject({
+      resourceId: resource,
+    });
+    sqlite.prepare("UPDATE codespaceResource SET generation=3 WHERE id=?").run(resource);
+    expect(service.authorizeResult(auth, request.requestId, claim.claimId)).toMatchObject({
+      resourceId: resource,
+    });
     now = device.policy.leaseUntil;
     expect(() => service.claim(auth)).toThrow("Renew the device work lease");
     sqlite.prepare("UPDATE user SET blocked=1 WHERE id='user-a'").run();
     expect(() => service.authenticateDevice(credential)).toThrow("Account access");
   });
+  test.each(["repository grant", "device"] as const)(
+    "lifecycle changes never bypass revoked %s access to accepted input or output",
+    (revocation) => {
+      const { device, credential } = enroll();
+      const resource = bind(device),
+        auth = service.authenticateDevice(credential);
+      const request = queue(device, resource),
+        claim = service.claim(auth)[0];
+      sqlite.prepare("UPDATE codespaceResource SET generation=2 WHERE id=?").run(resource);
+      expect(service.authorizeResult(auth, request.requestId, claim.claimId)).toMatchObject({
+        resourceId: resource,
+      });
+      if (revocation === "repository grant")
+        sqlite
+          .prepare("DELETE FROM codespaceConnectionRepository WHERE connectionId=?")
+          .run(device.connectionId);
+      else service.revokeOwned("user-a", device.deviceId, device.deviceGeneration);
+      expect(() => service.authorizePayload(auth, request.requestId, claim.claimId)).toThrow(
+        expect.objectContaining({ code: "LOCAL_UNAUTHORIZED" }),
+      );
+      expect(() => service.authorizeResult(auth, request.requestId, claim.claimId)).toThrow(
+        expect.objectContaining({ code: "LOCAL_UNAUTHORIZED" }),
+      );
+    },
+  );
   test("expires an unused pairing and preserves existing GitHub connection data", () => {
     sqlite
       .prepare(

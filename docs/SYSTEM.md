@@ -614,19 +614,32 @@ management and companion wire contracts are documented in
 [API](API.md#local-device-enrollment-and-relay-api).
 
 `LocalCodespaceRelay` durably reserves request metadata and private transfer parts
-before dispatch. Claim leases, account/device/resource generations and complete
-payload hashes gate every read, upload and acknowledgement. Private objects use
-the common byte, object, in-flight and expiry quotas. Reconnect reuses the request
-identity and its durable companion receipt; losing an acknowledgement does not
-authorize another guest effect. The companion retains a separate binding between
-server resource generation and local space generation. A server observation may
-advance its own counter while the exact local tuple stays unchanged; it cannot
-adopt another VM or clear a local recovery fence.
-An ordinary stop of the same owned VM publishes a durable stopped-generation proof
-only after physical settlement and an unchanged identity check. Relay reconnect
-can reconcile that proof without operator acknowledgement: a resource-bound
-snapshot permits the retained server counter, while a new mutation requires a
-newer one. Uncertain outcomes and external lifetime changes remain fenced.
+before dispatch. Current account, device, connection and repository authority,
+claim leases and complete payload hashes gate delivery and result access.
+Lifecycle counters do not authorize ordinary commands, files, Git or retained
+results; the exact resource and native VM identities remain required. Private
+objects use the common byte, object, in-flight and expiry quotas. Reconnect reuses
+the request identity and durable companion receipt; losing an acknowledgement
+does not authorize another guest effect. Retained results remain readable within
+their retention period and current authority after a lifecycle change. Missing or
+expired output is reported without replaying the original work.
+
+Ordinary commands and files return their result synchronously; `codespace_process`
+owns deliberately background work. Guest contacts run independently of the
+lifecycle lane, and an unresolved operation journal does not lock new Local work.
+File preconditions and a short guest kernel lock protect actual commit and recovery;
+the lock is released when its holder exits. Conflicting recovery preserves backups
+and external changes while allowing unrelated writes. An unknown write outcome
+must be inspected by its operation identity before repeating that effect.
+
+Explicit stop revokes undelivered execute/file-execute requests. First relay
+insertion checks the exact operation's cancellation state in its SQL transaction,
+including when payload retention finishes after stop/start. Confirmed pre-delivery
+cancellation returns `CODESPACE_OPERATION_CANCELLED`, records a terminal cancelled
+operation and requires no remote cleanup. Restart cannot admit that old work.
+Confirmed native `NOT_RUNNING` refreshes only the affected resource observation;
+the next ordinary call uses start-on-use. Configuration readiness and cached usable
+state do not certify successful guest I/O.
 
 `LocalWebControl` applies owner-requested settings only within a separately pinned
 local approval. The browser sends device-generation and revision guards; the
@@ -656,7 +669,7 @@ placeholders are not evidence of a usable host credential.
 
 Enrolled private Git and write operations use a repository-scoped server proxy
 with the existing encrypted GitHub App user OAuth credential. Local authority
-binds the device, server resource, local generation and approved repository;
+binds the current device, server resource, native VM identity and approved repository;
 failure never selects a host token fallback. Public read-only Git remains direct
 and unauthenticated. Guest Git author identity is repository-local, supplied by
 owner settings or the verified GitHub account's noreply identity. An empty remote
@@ -670,18 +683,22 @@ and VM workers, and maps SDK UUIDs to private container identities before admitt
 work. Shutdown does not depend on a readable SDK credential store. It signals only
 captured incarnations, preserves disks, and records settlement only after confirmed
 exit. Missing ownership, unsupported capture, expired policy or uncertain guest
-transport fails closed. Confirmed physical stop does not erase unknown job markers.
-Explicit local recovery acknowledges them without replay, checks identity and
-opens a new local generation; cloud actions cannot acknowledge recovery.
+transport fails closed. A lost ordinary guest response does not retire the whole
+VM or prevent independent commands. Confirmed physical stop does not erase unknown
+job markers. Explicit local recovery of uncertain native settlement checks identity
+and acknowledges the retained outcome without replay; cloud actions cannot
+acknowledge that recovery.
 
 Runner ownership also uses a persistent `runner-gate.lock` inode with a kernel
 file lock. The fixed native helper holds it until release or parent pipe closure;
-the gate file is never removed or replaced. Ordinary commands refuse an existing
-`runner.lock` marker. Explicit device recovery while disabled may reclaim a safe,
-unchanged marker only when its PID is confirmed absent and no recorded independent
-owner is live. Recovery retains the exact profile and receipt checks, confirms
-fresh physical shutdown, and preserves jobs and data without enabling work.
-Malformed or ambiguous ownership remains a refusal; do not remove lock files manually.
+the gate file is never removed or replaced. Companion startup may reclaim an
+unchanged, safe `runner.lock` marker only when its PID is confirmed absent under
+that gate. It also requires the recorded independent guard to be absent before
+starting another owner. A live PID, unverifiable unsettled owner or malformed
+receipt refuses startup. This admission preserves policy and retained jobs rather
+than acknowledging their outcomes. Explicit device recovery while disabled retains
+the exact profile and receipt checks, confirms fresh physical shutdown and preserves
+jobs and data without enabling work. Do not remove lock files manually.
 
 The supported runtime is macOS with the pinned SDK contract described in
 [Codespaces](CODESPACES.md). Linux VM execution is refused before creation while

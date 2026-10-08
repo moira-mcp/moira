@@ -157,7 +157,7 @@ describe("local operation dispatch with an external-runtime substitute", () => {
     expect(local.requests[0].maxStdoutBytes).toBe(4 * 1024 * 1024);
     expect(await state.keys("job-")).toHaveLength(1);
   });
-  test("an unknown guest receipt is persisted and never redispatched after the local job reader restarts", async () => {
+  test("an unknown guest receipt is inspected without replaying the command after the local job reader restarts", async () => {
     const local = await fixture();
     local.response(async () => {
       throw new LocalRefusal("LOCAL_GUEST_SETTLEMENT_UNKNOWN", "Guest exit was not observed.");
@@ -167,13 +167,12 @@ describe("local operation dispatch with an external-runtime substitute", () => {
       code: "LOCAL_GUEST_SETTLEMENT_UNKNOWN",
     });
     const ledger = JSON.parse(await readFile(join(root, (await state.keys("job-"))[0]), "utf8"));
-    expect(ledger).toMatchObject({ unknown: true, terminal: false, marker: request.remoteMarker });
-    await expect(
-      new LocalJobs(local.manager).dispatch(local.space.id, request),
-    ).rejects.toMatchObject({
-      code: "LOCAL_GUEST_SETTLEMENT_UNKNOWN",
+    expect(ledger).toMatchObject({ terminal: false, marker: request.remoteMarker });
+    local.response(async () => ({ state: "running" }));
+    await expect(new LocalJobs(local.manager).dispatch(local.space.id, request)).resolves.toEqual({
+      state: "running",
     });
-    expect(local.requests).toHaveLength(1);
+    expect(local.requests.map((item) => item.action)).toEqual(["execute", "inspect"]);
   });
   test("a local policy revocation during boundary validation prevents guest dispatch", async () => {
     const local = await fixture();
@@ -286,6 +285,24 @@ describe("local operation dispatch with an external-runtime substitute", () => {
     finish();
     await first;
   });
+  test("confirmed remote finalization removes the local job receipt and permits new work", async () => {
+    const local = await fixture();
+    const request = command();
+    await local.jobs.dispatch(local.space.id, request);
+    local.response(async () => ({ state: "absent" }));
+    await expect(
+      local.jobs.dispatch(local.space.id, {
+        version: 1,
+        action: "finalize",
+        remoteMarker: request.remoteMarker,
+      }),
+    ).resolves.toEqual({ state: "absent" });
+    expect(await state.keys("job-")).toEqual([]);
+    local.response(async () => ({ state: "running" }));
+    await expect(local.jobs.dispatch(local.space.id, command())).resolves.toEqual({
+      state: "running",
+    });
+  });
   test("requests choose execution bounds independently of owner settings while repository and enabled authority remain fenced", async () => {
     const local = await fixture();
     await expect(
@@ -304,7 +321,7 @@ describe("local operation dispatch with an external-runtime substitute", () => {
     });
     expect(local.requests).toHaveLength(2);
   });
-  test("multiple active jobs are admitted without an owner concurrency quota and old generations cannot execute", async () => {
+  test("multiple active jobs and retained inspection do not depend on lifecycle counters", async () => {
     const local = await fixture();
     const first = command();
     await local.jobs.dispatch(local.space.id, first);
@@ -321,7 +338,68 @@ describe("local operation dispatch with an external-runtime substitute", () => {
         action: "inspect",
         remoteMarker: first.remoteMarker,
       }),
-    ).toEqual({ state: "interrupted" });
-    expect(local.requests).toHaveLength(count);
+    ).toEqual({ state: "running" });
+    expect(local.requests).toHaveLength(count + 1);
+    expect(local.requests.at(-1)?.action).toBe("inspect");
+  });
+  test("historical retained receipts do not impose an operation admission quota", async () => {
+    const local = await fixture();
+    for (let index = 0; index < 4096; index++) {
+      const marker = index.toString(16).padStart(32, "0");
+      writeFileSync(
+        join(root, `job-${local.space.id}-${marker}.json`),
+        JSON.stringify({
+          marker: `moira-op-${marker}`,
+          digest: "a".repeat(64),
+          deadlineAt: 1,
+          terminal: true,
+          kind: "exec",
+        }),
+        { mode: 0o600 },
+      );
+    }
+    await expect(local.jobs.dispatch(local.space.id, command())).resolves.toEqual({
+      state: "running",
+    });
+    expect(await state.keys("job-")).toHaveLength(4097);
+    expect(local.requests).toHaveLength(1);
+  });
+  test("a held guest contact does not block a different command or file read", async () => {
+    const local = await fixture();
+    const held = command();
+    let entered!: () => void;
+    const accepted = new Promise<void>((done) => {
+      entered = done;
+    });
+    let release!: () => void;
+    const pending = new Promise<void>((done) => {
+      release = done;
+    });
+    local.response(async (request) => {
+      if (request.remoteMarker === held.remoteMarker) {
+        entered();
+        await pending;
+      }
+      return { state: "running" };
+    });
+    const first = local.jobs.dispatch(local.space.id, held);
+    await accepted;
+    try {
+      await expect(local.jobs.dispatch(local.space.id, command())).resolves.toEqual({
+        state: "running",
+      });
+      await expect(
+        local.jobs.dispatch(local.space.id, {
+          version: 1,
+          action: "file-execute",
+          remoteMarker: command().remoteMarker,
+          request: { action: "read", path: "package.json", offset: 0, length: 100 },
+        }),
+      ).resolves.toEqual({ state: "running" });
+      expect(local.requests).toHaveLength(3);
+    } finally {
+      release();
+      await first;
+    }
   });
 });

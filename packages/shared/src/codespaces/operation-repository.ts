@@ -103,20 +103,8 @@ export class CodespaceOperationRepository {
           return { outcome: "busy" } as ReserveOperationResult;
         }
       }
-      // Serialize cooperating file mutations for their staged atomic commits. Commands
-      // and reads can stay active while an agent edits through the file API.
-      if (
-        ["write", "apply_patch", "upload"].includes(input.kind ?? "exec") &&
-        this.sqlite
-          .prepare(
-            `SELECT 1 FROM codespaceOperation WHERE resourceId = ?
-             AND kind IN ('write', 'apply_patch', 'upload')
-             AND state IN (${activeSql}) LIMIT 1`,
-          )
-          .get(input.resourceId, ...ACTIVE_OPERATION_STATES)
-      ) {
-        return { outcome: "busy" } as ReserveOperationResult;
-      }
+      // A journal entry is not an execution lock. The guest owns atomic file commits;
+      // lost responses and retained results must never block independent work.
       const id = randomUUID();
       const remoteMarker = `moira-op-${randomBytes(16).toString("hex")}`;
       this.sqlite
@@ -252,12 +240,11 @@ export class CodespaceOperationRepository {
     return record;
   }
 
-  /** Caller-visible bytes require current authority; cleanup uses getContext independently. */
-  requireResultContext(
+  /** Lifecycle changes do not revoke access; current account and repository authority does. */
+  requireAuthority(
     userId: string,
     operationId: string,
     policy: CodespaceResourcePolicy,
-    now: number,
   ): { operation: CodespaceOperationRecord; codespace: CodespaceResourceRecord } {
     const context = this.getContext(userId, operationId);
     if (!context) {
@@ -278,18 +265,14 @@ export class CodespaceOperationRepository {
       );
     }
     if (
-      codespace.generation !== operation.resourceGeneration ||
       codespace.authorizationGeneration !== operation.authorizationGeneration ||
       codespace.provider !== operation.provider ||
       codespace.providerResourceName !== operation.providerResourceName
     ) {
       throw new CodespaceResourceError(
-        "CODESPACE_GENERATION_CONFLICT",
+        "CODESPACE_AUTHORIZATION_REQUIRED",
         "Codespace operation authority changed",
       );
-    }
-    if (codespace.state !== "usable" || codespace.desiredState !== "running") {
-      throw new CodespaceResourceError("CODESPACE_NOT_RUNNING", "Codespace is not running");
     }
     const connection = this.sqlite
       .prepare(
@@ -300,8 +283,8 @@ export class CodespaceOperationRepository {
       { credentialGeneration: number; status: string } | undefined;
     if (connection && connection.credentialGeneration !== operation.authorizationGeneration) {
       throw new CodespaceResourceError(
-        "CODESPACE_GENERATION_CONFLICT",
-        "Codespace authorization generation changed",
+        "CODESPACE_AUTHORIZATION_REQUIRED",
+        "Codespace authorization must be restored in settings",
       );
     }
     if (
@@ -317,6 +300,18 @@ export class CodespaceOperationRepository {
         "Codespace authorization must be restored in settings",
       );
     }
+    return context;
+  }
+
+  /** Caller-visible bytes additionally require a retained result. */
+  requireResultContext(
+    userId: string,
+    operationId: string,
+    policy: CodespaceResourcePolicy,
+    now: number,
+  ): { operation: CodespaceOperationRecord; codespace: CodespaceResourceRecord } {
+    const context = this.requireAuthority(userId, operationId, policy);
+    const { operation } = context;
     if (
       ["succeeded", "failed", "cancelled", "timed_out"].includes(operation.state) &&
       (operation.remoteCleanupPending !== 1 ||
@@ -331,42 +326,29 @@ export class CodespaceOperationRepository {
     return context;
   }
 
-  markRunning(
-    userId: string,
-    operationId: string,
-    expectedGeneration: number,
-    now: number,
-  ): boolean {
+  markRunning(userId: string, operationId: string, now: number): boolean {
     return (
       this.sqlite
         .prepare(
           `UPDATE codespaceOperation SET state = 'running', lastOutcome = 'remote_started',
            claimId = NULL, claimExpiresAt = NULL, updatedAt = ?
-           WHERE id = ? AND userId = ? AND resourceGeneration = ?
-             AND state = 'reconcile_pending' AND lastOutcome = 'dispatch_submitted'
-             AND EXISTS (SELECT 1 FROM codespaceResource r WHERE r.id = resourceId
-               AND r.userId = ? AND r.generation = resourceGeneration
-               AND r.desiredState = 'running' AND r.state = 'usable')`,
+           WHERE id = ? AND userId = ?
+             AND state = 'reconcile_pending' AND lastOutcome = 'dispatch_submitted'`,
         )
-        .run(now, operationId, userId, expectedGeneration, userId).changes === 1
+        .run(now, operationId, userId).changes === 1
     );
   }
 
-  recordConnectorRunning(
-    userId: string,
-    resourceId: string,
-    generation: number,
-    now: number,
-  ): boolean {
+  recordConnectorRunning(userId: string, resourceId: string, now: number): boolean {
     return (
       this.sqlite
         .prepare(
           `UPDATE codespaceResource SET observedState = 'running',
            lastOutcome = 'connector_observed_running', updatedAt = ?
-           WHERE id = ? AND userId = ? AND generation = ?
+           WHERE id = ? AND userId = ?
              AND desiredState = 'running' AND state = 'usable'`,
         )
-        .run(now, resourceId, userId, generation).changes === 1
+        .run(now, resourceId, userId).changes === 1
     );
   }
 
@@ -383,8 +365,11 @@ export class CodespaceOperationRepository {
            WHERE operation.id = ? AND operation.userId = ? AND operation.state = 'reserved'
              AND operation.deadlineAt > ?
              AND resource.userId = operation.userId
-             AND resource.generation = operation.resourceGeneration
+             AND resource.provider = operation.provider
+             AND resource.providerResourceName = operation.providerResourceName
+             AND resource.authorizationGeneration = operation.authorizationGeneration
              AND resource.state = 'usable' AND resource.desiredState = 'running'
+             AND connection.userId = resource.userId AND connection.provider = resource.provider
              AND connection.status = 'connected'
              AND connection.externalAccountId = resource.externalOwnerId
              AND connection.credentialGeneration = operation.authorizationGeneration
@@ -404,7 +389,6 @@ export class CodespaceOperationRepository {
   beginDispatch(
     userId: string,
     operationId: string,
-    expectedGeneration: number,
     claimId: string,
     claimExpiresAt: number,
     now: number,
@@ -416,7 +400,7 @@ export class CodespaceOperationRepository {
           `UPDATE codespaceOperation SET state = 'reconcile_pending',
            lastOutcome = 'dispatch_submitted', claimId = ?, claimExpiresAt = ?, updatedAt = ?,
            deadlineAt = MAX(deadlineAt, ?)
-           WHERE id = ? AND userId = ? AND resourceGeneration = ? AND state = 'reserved'
+           WHERE id = ? AND userId = ? AND state = 'reserved'
              AND deadlineAt > ?
              AND EXISTS (SELECT 1 FROM codespaceResource resource
                JOIN codespaceConnection connection ON connection.id = resource.connectionId
@@ -425,8 +409,11 @@ export class CodespaceOperationRepository {
                  AND grantRow.externalRepositoryId = resource.repositoryId
                WHERE resource.id = codespaceOperation.resourceId
                  AND resource.userId = codespaceOperation.userId
-                 AND resource.generation = codespaceOperation.resourceGeneration
+                 AND resource.provider = codespaceOperation.provider
+                 AND resource.providerResourceName = codespaceOperation.providerResourceName
+                 AND resource.authorizationGeneration = codespaceOperation.authorizationGeneration
                  AND resource.state = 'usable' AND resource.desiredState = 'running'
+                 AND connection.userId = resource.userId AND connection.provider = resource.provider
                  AND connection.status = 'connected'
                  AND connection.externalAccountId = resource.externalOwnerId
                  AND connection.credentialGeneration = codespaceOperation.authorizationGeneration)
@@ -434,16 +421,7 @@ export class CodespaceOperationRepository {
                WHERE control.disabled = 1
                  AND control.scope IN ('global', 'provider:' || codespaceOperation.provider))`,
         )
-        .run(
-          claimId,
-          claimExpiresAt,
-          now,
-          deadlineAt ?? 0,
-          operationId,
-          userId,
-          expectedGeneration,
-          now,
-        ).changes === 1
+        .run(claimId, claimExpiresAt, now, deadlineAt ?? 0, operationId, userId, now).changes === 1
     );
   }
 
@@ -468,7 +446,6 @@ export class CodespaceOperationRepository {
   complete(
     userId: string,
     operationId: string,
-    expectedGeneration: number,
     result: CodespaceOperationResult,
     maxStdoutBytes: number,
     maxStderrBytes: number,
@@ -478,28 +455,16 @@ export class CodespaceOperationRepository {
   ): CodespaceOperationResult | null {
     const stdout = truncateUtf8(result.stdout, maxStdoutBytes);
     const stderr = truncateUtf8(result.stderr, maxStderrBytes);
-    const operation = this.getOwned(userId, operationId);
-    if (!operation) return null;
-    const terminalState =
-      result.state === "succeeded" &&
-      !this.sqlite
-        .prepare(
-          `SELECT 1 FROM codespaceResource WHERE id = ? AND userId = ?
-           AND generation = ? AND desiredState = 'running'`,
-        )
-        .get(operation.resourceId, userId, expectedGeneration)
-        ? "cancelled"
-        : result.state;
     const changed = this.sqlite
       .prepare(
         `UPDATE codespaceOperation SET state = ?, outputBytes = ?, exitCode = ?,
            resultExpiresAt = ?, lastOutcome = ?,
            claimId = NULL, claimExpiresAt = NULL, updatedAt = ?
-           WHERE id = ? AND userId = ? AND resourceGeneration = ?
+           WHERE id = ? AND userId = ? AND kind = 'exec'
              AND state IN ('reserved', 'running', 'cancel_pending', 'reconcile_pending')`,
       )
       .run(
-        terminalState,
+        result.state,
         // The recorded size is the command's complete output, not the part this answer carried.
         result.stdoutTotalBytes + result.stderrTotalBytes,
         result.exitCode,
@@ -508,95 +473,58 @@ export class CodespaceOperationRepository {
         now,
         operationId,
         userId,
-        expectedGeneration,
       ).changes;
-    return changed === 1 ? { ...result, state: terminalState, stdout, stderr } : null;
+    return changed === 1 ? { ...result, stdout, stderr } : null;
+  }
+
+  /** An authenticated refusal proves no guest job was accepted and needs no remote cleanup. */
+  rejectDispatch(userId: string, operationId: string, code: string, now: number): void {
+    this.sqlite
+      .prepare(
+        `UPDATE codespaceOperation SET state = CASE WHEN ? = 'CODESPACE_OPERATION_CANCELLED'
+           THEN 'cancelled' ELSE 'failed' END, remoteCleanupPending = 0,
+         resultExpiresAt = NULL, claimId = NULL, claimExpiresAt = NULL,
+         lastOutcome = ?, updatedAt = ? WHERE id = ? AND userId = ?
+           AND state IN ('reserved', 'reconcile_pending', 'cancel_pending')`,
+      )
+      .run(code, `refused:${code}`, now, operationId, userId);
   }
 
   completeMetadata(
     userId: string,
     operationId: string,
-    expectedGeneration: number,
     outputBytes: number,
     resultExpiresAt: number,
     now: number,
     state: "succeeded" | "failed" = "succeeded",
-    observedCodespace?: CodespaceResourceRecord,
   ): boolean {
-    // Background recovery may observe an older marker in the same local sandbox. Its
-    // current snapshot fences the write; it never grants permission to dispatch again.
-    if (observedCodespace) {
-      if (
-        observedCodespace.userId !== userId ||
-        observedCodespace.provider !== CODESPACE_PROVIDER_LOCAL ||
-        !observedCodespace.providerResourceName ||
-        expectedGeneration > observedCodespace.generation
-      ) {
-        return false;
-      }
-      return (
-        this.sqlite
-          .prepare(
-            `UPDATE codespaceOperation SET state = ?, outputBytes = ?, exitCode = NULL,
-             resultExpiresAt = ?, lastOutcome = 'remote_terminal', claimId = NULL,
-             claimExpiresAt = NULL, updatedAt = ?
-             WHERE id = ? AND userId = ? AND resourceGeneration = ? AND kind <> 'exec'
-               AND state IN ('running', 'cancel_pending', 'reconcile_pending')
-               AND EXISTS (SELECT 1 FROM codespaceResource resource
-                 JOIN codespaceConnection connection ON connection.id = resource.connectionId
-                 JOIN codespaceConnectionRepository grantRow
-                   ON grantRow.connectionId = connection.id
-                   AND grantRow.externalRepositoryId = resource.repositoryId
-                 WHERE resource.id = codespaceOperation.resourceId AND resource.id = ?
-                   AND resource.userId = codespaceOperation.userId
-                   AND resource.generation = ?
-                   AND resource.generation >= codespaceOperation.resourceGeneration
-                   AND resource.provider = ? AND resource.provider = codespaceOperation.provider
-                   AND resource.providerResourceName = ?
-                   AND resource.providerResourceName = codespaceOperation.providerResourceName
-                   AND resource.authorizationGeneration = ?
-                   AND resource.authorizationGeneration = codespaceOperation.authorizationGeneration
-                   AND resource.connectionId = ? AND resource.repositoryId = ?
-                   AND resource.desiredState = 'running' AND resource.state = 'usable'
-                   AND connection.userId = resource.userId AND connection.provider = resource.provider
-                   AND connection.status = 'connected'
-                   AND connection.externalAccountId = resource.externalOwnerId
-                   AND connection.credentialGeneration = codespaceOperation.authorizationGeneration)`,
-          )
-          .run(
-            state,
-            outputBytes,
-            resultExpiresAt,
-            now,
-            operationId,
-            userId,
-            expectedGeneration,
-            observedCodespace.id,
-            observedCodespace.generation,
-            observedCodespace.provider,
-            observedCodespace.providerResourceName,
-            observedCodespace.authorizationGeneration,
-            observedCodespace.connectionId,
-            observedCodespace.repositoryId,
-          ).changes === 1
-      );
-    }
+    // Store the observed outcome of this exact operation independently of lifecycle state.
+    // Caller-visible bytes are still checked against current authority before and after I/O.
     return (
       this.sqlite
         .prepare(
           `UPDATE codespaceOperation SET state = ?, outputBytes = ?, exitCode = NULL,
            resultExpiresAt = ?, lastOutcome = 'remote_terminal', claimId = NULL,
            claimExpiresAt = NULL, updatedAt = ?
-           WHERE id = ? AND userId = ? AND resourceGeneration = ?
-             AND state IN ('reserved', 'running', 'cancel_pending', 'reconcile_pending')
+           WHERE id = ? AND userId = ?
+             AND kind <> 'exec'
+             AND state IN ('running', 'cancel_pending', 'reconcile_pending')
              AND EXISTS (SELECT 1 FROM codespaceResource resource
+               JOIN codespaceConnection connection ON connection.id = resource.connectionId
+               JOIN codespaceConnectionRepository grantRow
+                 ON grantRow.connectionId = connection.id
+                 AND grantRow.externalRepositoryId = resource.repositoryId
                WHERE resource.id = codespaceOperation.resourceId
                  AND resource.userId = codespaceOperation.userId
-                 AND resource.generation = codespaceOperation.resourceGeneration
-                 AND resource.desiredState = 'running' AND resource.state = 'usable')`,
+                 AND resource.provider = codespaceOperation.provider
+                 AND resource.providerResourceName = codespaceOperation.providerResourceName
+                 AND resource.authorizationGeneration = codespaceOperation.authorizationGeneration
+                 AND connection.userId = resource.userId AND connection.provider = resource.provider
+                 AND connection.status = 'connected'
+                 AND connection.externalAccountId = resource.externalOwnerId
+                 AND connection.credentialGeneration = codespaceOperation.authorizationGeneration)`,
         )
-        .run(state, outputBytes, resultExpiresAt, now, operationId, userId, expectedGeneration)
-        .changes === 1
+        .run(state, outputBytes, resultExpiresAt, now, operationId, userId).changes === 1
     );
   }
 

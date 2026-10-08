@@ -1403,6 +1403,91 @@ async function readFileOperationResult(directory) {
   }
 }
 
+/** The kernel owns this short commit lock; a dead worker leaves no admission fence. */
+async function withFileCommitLock(work) {
+  await mkdir(STATE_ROOT, { recursive: true, mode: 0o700 });
+  const lockPath = join(STATE_ROOT, "file-commit.lock");
+  const holder =
+    process.platform === "linux"
+      ? spawn(
+          "/usr/bin/flock",
+          ["--exclusive", lockPath, "/bin/sh", "-c", "printf 1; cat >/dev/null"],
+          { stdio: ["pipe", "pipe", "pipe"] },
+        )
+      : spawn(
+          "python3",
+          [
+            "-c",
+            "import fcntl,sys; f=open(sys.argv[1],'a'); fcntl.flock(f,fcntl.LOCK_EX); print('1',flush=True); sys.stdin.buffer.read()",
+            lockPath,
+          ],
+          { stdio: ["pipe", "pipe", "pipe"] },
+        );
+  let acquired = false;
+  let releasing = false;
+  const closed = new Promise((done) => holder.once("close", done));
+  holder.stdin.on("error", () => undefined);
+  holder.stderr.resume();
+  await new Promise((done, reject) => {
+    holder.once("error", reject);
+    holder.once("close", () => {
+      if (!acquired) reject(new Error("file commit lock is unavailable"));
+      // Losing the lock while committing cannot permit unprotected filesystem writes.
+      else if (!releasing) process.kill(process.pid, "SIGKILL");
+    });
+    holder.stdout.once("data", () => {
+      acquired = true;
+      done();
+    });
+  });
+  try {
+    return await work();
+  } finally {
+    releasing = true;
+    holder.stdin.end();
+    await closed;
+  }
+}
+
+const FILE_MUTATIONS = new Set(["write", "upload", "apply_patch"]);
+
+async function interruptFileCommit(directory, root, action) {
+  try {
+    await recoverFileTransaction(directory, root);
+  } catch {
+    // Preserve the unsafe journal and its backups, but never retry its rollback over later edits.
+    await rename(
+      join(directory, "file-transaction.json"),
+      join(directory, "file-transaction.conflicted.json"),
+    );
+  }
+  const value = { action, state: "failed", code: "CODESPACE_OPERATION_INTERRUPTED" };
+  await writeDurableJson(directory, "result.json", { kind: "file", state: "failed", value });
+  await rm(join(directory, "file-intent.json"), { force: true });
+  return { state: "failed", value };
+}
+
+/** Roll back a dead commit before a different request can change its targets. Never replay it. */
+async function recoverAbandonedFileCommits(root, repositoryFullName, currentDirectory) {
+  for (const marker of await readdir(STATE_ROOT)) {
+    if (!MARKER.test(marker)) continue;
+    const directory = operationDirectory(marker);
+    if (directory === currentDirectory) continue;
+    const intent = await readFileIntent(directory);
+    if (!intent || intent.repositoryFullName !== repositoryFullName) continue;
+    try {
+      await access(join(directory, "file-transaction.json"));
+    } catch (error) {
+      if (error?.code === "ENOENT") continue;
+      throw error;
+    }
+    const result = await readFileOperationResult(directory);
+    if (result) await cleanupFileTransaction(directory, root);
+    else await interruptFileCommit(directory, root, intent.request.action);
+    await rm(join(directory, "file-intent.json"), { force: true });
+  }
+}
+
 async function fileExecute(request, binding) {
   const directory = validateBase(request);
   for (;;) {
@@ -1425,6 +1510,7 @@ async function fileExecute(request, binding) {
     break;
   }
   let intent;
+  let resumed = true;
   try {
     intent = await readFileIntent(directory);
     if (!intent) {
@@ -1440,6 +1526,7 @@ async function fileExecute(request, binding) {
     }
   } catch (error) {
     if (error?.code !== "ENOENT") throw error;
+    resumed = false;
     intent = {
       action: "file-execute",
       version: VERSION,
@@ -1450,24 +1537,31 @@ async function fileExecute(request, binding) {
     await writeDurableJson(directory, "file-intent.json", intent);
   }
   const root = await repositoryRootForFile(intent, binding);
-  await recoverFileTransaction(directory, root);
-  let state = "succeeded";
-  let value;
-  try {
-    value = await executeFileRequest(root, intent.request, request.remoteMarker, directory);
-  } catch {
+  const perform = async () => {
+    if (FILE_MUTATIONS.has(intent.request.action))
+      await recoverAbandonedFileCommits(root, intent.repositoryFullName, directory);
+    if (resumed && FILE_MUTATIONS.has(intent.request.action))
+      return interruptFileCommit(directory, root, intent.request.action);
     await recoverFileTransaction(directory, root);
-    state = "failed";
-    value = {
-      action: intent.request?.action,
-      state: "failed",
-      code: "CODESPACE_FILE_REJECTED",
-    };
-  }
-  await writeDurableJson(directory, "result.json", { kind: "file", state, value });
-  await cleanupFileTransaction(directory, root);
-  await rm(join(directory, "file-intent.json"), { force: true });
-  return { state, value };
+    let state = "succeeded";
+    let value;
+    try {
+      value = await executeFileRequest(root, intent.request, request.remoteMarker, directory);
+    } catch {
+      await recoverFileTransaction(directory, root);
+      state = "failed";
+      value = {
+        action: intent.request?.action,
+        state: "failed",
+        code: "CODESPACE_FILE_REJECTED",
+      };
+    }
+    await writeDurableJson(directory, "result.json", { kind: "file", state, value });
+    await cleanupFileTransaction(directory, root);
+    await rm(join(directory, "file-intent.json"), { force: true });
+    return { state, value };
+  };
+  return FILE_MUTATIONS.has(intent.request.action) ? withFileCommitLock(perform) : perform();
 }
 
 async function fileInspect(request, binding) {
@@ -1487,7 +1581,18 @@ async function fileInspect(request, binding) {
     try {
       const intent = await readFileIntent(directory);
       if (!intent) return { state: "absent" };
-      return fileExecute(intent, binding);
+      if (FILE_MUTATIONS.has(intent.request?.action)) {
+        return withFileCommitLock(async () => {
+          const completed = await readFileOperationResult(directory);
+          if (completed) return completed;
+          return interruptFileCommit(
+            directory,
+            await repositoryRootForFile(intent, binding),
+            intent.request.action,
+          );
+        });
+      }
+      return { state: "absent" };
     } catch (error) {
       if (error?.code === "ENOENT") return { state: "absent" };
       throw error;
@@ -1922,6 +2027,15 @@ async function finalize(request) {
   const directory = validateBase(request);
   const current = await inspect(request);
   if (current.state === "running") fail("operation is still running");
+  try {
+    await access(join(directory, "file-transaction.conflicted.json"));
+    for (const entry of await readdir(directory))
+      if (entry !== "file-transaction.conflicted.json")
+        await rm(join(directory, entry), { recursive: true, force: true });
+    return { state: "absent" };
+  } catch (error) {
+    if (error?.code !== "ENOENT") throw error;
+  }
   await rm(directory, { recursive: true, force: true });
   return { state: "absent" };
 }

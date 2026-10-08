@@ -19,7 +19,6 @@ import {
 import { CodespaceJobTransport } from "./codespace-job-transport.js";
 import { LocalCodespaceRelay } from "./local-codespace-relay.js";
 
-const RECOVERY_JOB_ACTIONS = new Set(["inspect", "cancel", "finalize", "output", "file-inspect"]);
 const LOCAL_JOB_DELIVERY_TIMEOUT_MS = LOCAL_WORKER_REQUEST_TIMEOUT_MS + 120_000;
 
 /** Internal credentials identify the already authenticated caller; they never leave this server. */
@@ -408,7 +407,13 @@ export class LocalCodespaceProvider implements CodespaceProviderAdapter {
 }
 
 export class LocalCodespaceJobTransport extends CodespaceJobTransport {
-  constructor(private readonly relay: LocalCodespaceRelay) {
+  constructor(
+    private readonly relay: LocalCodespaceRelay,
+    private readonly refreshStoppedResource?: (
+      userId: string,
+      codespaceId: string,
+    ) => Promise<unknown>,
+  ) {
     super();
   }
   async health() {
@@ -452,9 +457,7 @@ export class LocalCodespaceJobTransport extends CodespaceJobTransport {
     credential: string,
     codespace: CodespaceResourceRecord,
     operation: import("@mcp-moira/shared").CodespaceOperationRecord,
-    action?: unknown,
   ): void {
-    const recovering = typeof action === "string" && RECOVERY_JOB_ACTIONS.has(action);
     if (
       userFromCredential(credential) !== codespace.userId ||
       operation.userId !== codespace.userId ||
@@ -463,13 +466,13 @@ export class LocalCodespaceJobTransport extends CodespaceJobTransport {
       operation.resourceId !== codespace.id ||
       operation.providerResourceName !== codespace.providerResourceName ||
       operation.authorizationGeneration !== codespace.authorizationGeneration ||
-      operation.resourceGeneration > codespace.generation ||
-      (!recovering && operation.resourceGeneration !== codespace.generation) ||
       !codespace.providerResourceName
     ) {
       throw new CodespaceResourceError(
-        "CODESPACE_GENERATION_CONFLICT",
+        "CODESPACE_AUTHORIZATION_REQUIRED",
         "Local operation authority changed",
+        undefined,
+        true,
       );
     }
   }
@@ -480,22 +483,38 @@ export class LocalCodespaceJobTransport extends CodespaceJobTransport {
     job: Record<string, unknown>,
     timeoutMs: number,
   ) {
-    this.requireOperation(credential, codespace, operation, job.action);
-    const result = await this.relay.send(
-      codespace,
-      {
-        action: "operation",
-        spaceId: codespace.providerResourceName,
-        job,
-      },
-      {
-        mutation:
-          job.action === "execute" || job.action === "file-execute" || job.action === "finalize",
-        // The guest supervisor detaches commands; this call waits for its bounded worker,
-        // not the command's separate retained execution deadline.
-        waitMs: Math.min(timeoutMs, LOCAL_JOB_DELIVERY_TIMEOUT_MS),
-      },
-    );
+    this.requireOperation(credential, codespace, operation);
+    const result = await this.relay
+      .send(
+        codespace,
+        {
+          action: "operation",
+          spaceId: codespace.providerResourceName,
+          job,
+        },
+        {
+          mutation: job.action === "execute" || job.action === "file-execute",
+          // The guest supervisor detaches commands; this call waits for its bounded worker,
+          // not the command's separate retained execution deadline.
+          waitMs: Math.min(timeoutMs, LOCAL_JOB_DELIVERY_TIMEOUT_MS),
+        },
+      )
+      .catch(async (error: unknown) => {
+        if (
+          error instanceof CodespaceResourceError &&
+          error.confirmedRefusal &&
+          error.code === "CODESPACE_NOT_RUNNING"
+        ) {
+          // Refresh only this owned resource; the refused operation is never replayed here.
+          // A failed observation must preserve the authenticated original refusal.
+          try {
+            await this.refreshStoppedResource?.(codespace.userId, codespace.id);
+          } catch {
+            // Observation failure cannot replace the confirmed execution refusal.
+          }
+        }
+        throw error;
+      });
     if (!result || typeof result !== "object" || Array.isArray(result))
       throw new Error("Local guest returned an invalid job result");
     return result as Record<string, unknown>;

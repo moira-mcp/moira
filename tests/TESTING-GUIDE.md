@@ -174,10 +174,16 @@ relay regressions exercise the actual manager/relay with substituted runtime pee
 parent closure, lease expiry and emergency disable fence old requests while confirmed
 recovery permits a fresh start. These host regressions do not establish real-VM recovery.
 
+Broker startup fixtures retain dead runner and guard receipts from a real exited child process,
+then open the manager through its normal kernel gate. They verify unchanged policy, VM records and
+unknown jobs, and refusal of live or unverifiable ownership. Provider fixtures separately hold
+payload retention before the first queue insertion, complete stop/start, and prove that cancelled
+exec/write never reaches the guest while fresh work and prior-result inspection succeed.
+
 The provider and device/relay integration suites use real SQLite migrations, private
 transfer files and authenticated HTTP. The provider suite also uses the production
 companion relay and LocalRpc, with the external runtime substituted. They check device
-and repository binding, independent generations, revocation, replay after response loss,
+and repository binding, lifecycle-independent execution, current revocation, receipt reuse after response loss,
 native bytes retained before input consumption and bounded payload/metadata storage.
 Settings tests cover pairing, confirmation, revocation and provider selection without a
 GitHub connection, exact computer UUID grouping and existing-intent retries with local pending/error
@@ -196,6 +202,20 @@ an owner repository-count quota. Broker cases exercise public destinations beyon
 profile, no cumulative traffic budget, retained public-address/computer-network refusal and
 bounded socket backpressure. Job cases preserve explicit lease and protocol output bounds without
 owner concurrency settings. These checks do not execute a physical VM.
+
+`tests/integration/local/operation-independence.test.ts` holds a native contact while a second
+command proceeds, then verifies that stop closes new admission and settles owned contacts.
+The jobs fixtures distinguish inspecting an uncertain accepted marker from executing it again,
+and verify that historical ledgers and unfinished work do not impose an operation-count gate.
+Relay fixtures hold an old delivery before admission, stop and restart the codespace, and prove
+that only fresh work executes. Current device, repository and exact-VM authority remain required.
+
+`tests/unit/web-backend/github-codespaces-remote-supervisor.test.ts` uses real fixture workers
+and filesystem effects to prove that reads remain independent of a held transaction, worker death
+releases the kernel-owned lock, and another mutation can proceed. It distinguishes safe recovery
+from externally changed targets: the latter preserves current files, the conflicted journal and
+original backups through result finalization, without replaying the old mutation or blocking unrelated
+work. These host/container checks do not establish physical microVM isolation.
 
 `tests/integration/local/guest-docker.test.ts` requires Docker and the configured pinned
 template image. It runs real Linux descriptor-limit behavior with substituted Docker

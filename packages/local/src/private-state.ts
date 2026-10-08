@@ -172,7 +172,7 @@ export class PrivateState {
     return (await readdir(this.root)).filter((name) => KEY.test(name) && name.startsWith(prefix));
   }
 
-  /** Ordinary callers never steal markers; explicit recovery requires a proven absent PID. */
+  /** Default callers retain markers; stale recovery requires a proven absent PID under the gate. */
   async lock(options?: { recoverStale: boolean }): Promise<() => Promise<void>> {
     const releaseGate = await acquireGate(this.root);
     const path = join(this.root, "runner.lock");

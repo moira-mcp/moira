@@ -416,13 +416,13 @@ describe("Locally pinned owner web control", () => {
       });
     const relay = new LocalRelay(f.records, transport);
     try {
-      expect(await relay.gitAuthority(f.space.id, 1, f.space.repositoryId)).toMatchObject({
+      expect(await relay.gitAuthority(f.space.id, f.space.repositoryId)).toMatchObject({
         resourceId,
         resourceGeneration: 4,
       });
       f.space.runtimeId = null;
       await f.records.put(f.space);
-      await expect(relay.gitAuthority(f.space.id, 1, f.space.repositoryId)).rejects.toMatchObject({
+      await expect(relay.gitAuthority(f.space.id, f.space.repositoryId)).rejects.toMatchObject({
         code: "LOCAL_CREATE_UNKNOWN",
       });
     } finally {
@@ -432,7 +432,7 @@ describe("Locally pinned owner web control", () => {
     f.space.runtimeId = "known-fixture-runtime";
     await f.records.put(f.space);
     await f.state.remove(`relay-request-${requestId}.json`);
-    await expect(relay.gitAuthority(f.space.id, 1, f.space.repositoryId)).rejects.toMatchObject({
+    await expect(relay.gitAuthority(f.space.id, f.space.repositoryId)).rejects.toMatchObject({
       code: "LOCAL_CREATE_UNKNOWN",
     });
   });

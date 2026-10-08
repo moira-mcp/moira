@@ -71,7 +71,6 @@ export function createLocalCodespaceServices(
   const settingsUrl = context.settingsUrl ?? localCodespaceSettingsUrl();
   const relay = new LocalCodespaceRelay(devices, transfer, now);
   const provider = new LocalCodespaceProvider(relay, resources, settingsUrl, now);
-  const transport = new LocalCodespaceJobTransport(relay);
   const registry = new CodespaceProviderRegistry();
   registry.register(provider);
   const credentials = {
@@ -97,6 +96,9 @@ export function createLocalCodespaceServices(
     },
     audit: context.resourceAudit ?? recordCodespaceResourceEvent,
   });
+  const transport = new LocalCodespaceJobTransport(relay, (userId, codespaceId) =>
+    resource.refreshProviderState(userId, { codespaceId }),
+  );
   const nativeFetcher = context.nativeFetcher ?? new OpenAINativeReferenceFetcher();
   const operation = new CodespaceOperationService({
     repository: operations,

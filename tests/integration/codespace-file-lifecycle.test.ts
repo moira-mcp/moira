@@ -11,6 +11,7 @@ import {
   CodespaceOperationRepository,
   CodespaceOperationService,
   CodespaceResourceRepository,
+  CodespaceResourceError,
   CodespaceTransferRepository,
   CodespaceTransferService,
   type CodespaceFileResult,
@@ -153,9 +154,9 @@ describe("observed local file-operation completion", () => {
     });
     expect(reserved.outcome).toBe("reserved");
     const operation = reserved.operation!;
-    expect(
-      value.repository.beginDispatch("user-1", operation.id, 1, "claim", now + 5_000, now),
-    ).toBe(true);
+    expect(value.repository.beginDispatch("user-1", operation.id, "claim", now + 5_000, now)).toBe(
+      true,
+    );
     return { ...value, operation };
   }
 
@@ -165,17 +166,14 @@ describe("observed local file-operation completion", () => {
       const value = pendingLocal();
       try {
         value.sqlite.prepare("UPDATE codespaceResource SET generation = ?").run(generation);
-        const observed = value.repository.getContext("user-1", value.operation.id)!.codespace;
         expect(
           value.repository.completeMetadata(
             "user-1",
             value.operation.id,
-            1,
             0,
             now + 30_000,
             now,
             "failed",
-            observed,
           ),
         ).toBe(true);
         expect(value.repository.getOwned("user-1", value.operation.id)).toMatchObject({
@@ -206,7 +204,6 @@ describe("observed local file-operation completion", () => {
   );
 
   test.each([
-    ["newer lifecycle after observation", "UPDATE codespaceResource SET generation = 4"],
     [
       "sandbox identity changed",
       "UPDATE codespaceResource SET providerResourceName = 'replacement'",
@@ -226,26 +223,21 @@ describe("observed local file-operation completion", () => {
     ["credential changed", "UPDATE codespaceConnection SET credentialGeneration = 2"],
     ["connection revoked", "UPDATE codespaceConnection SET status = 'revoked'"],
     ["repository grant revoked", "DELETE FROM codespaceConnectionRepository"],
-    ["resource stopped", "UPDATE codespaceResource SET desiredState = 'stopped'"],
-    ["future operation generation", "UPDATE codespaceOperation SET resourceGeneration = 4"],
     ["exec operation", "UPDATE codespaceOperation SET kind = 'exec'"],
     ["undispatched reservation", "UPDATE codespaceOperation SET state = 'reserved'"],
   ])("preserves pending capacity when %s", (_name, mutation) => {
     const value = pendingLocal();
     try {
       value.sqlite.exec("UPDATE codespaceResource SET generation = 3");
-      const observed = value.repository.getContext("user-1", value.operation.id)!.codespace;
       value.sqlite.exec(mutation);
       expect(
         value.repository.completeMetadata(
           "user-1",
           value.operation.id,
-          value.repository.getOwned("user-1", value.operation.id)!.resourceGeneration,
           0,
           now + 30_000,
           now,
           "failed",
-          observed,
         ),
       ).toBe(false);
       expect(value.repository.countActiveForUser("user-1")).toBe(1);
@@ -260,7 +252,6 @@ describe("observed local file-operation completion", () => {
       const value = pendingLocal();
       try {
         value.sqlite.exec("UPDATE codespaceResource SET generation = 3");
-        const observed = value.repository.getContext("user-1", value.operation.id)!.codespace;
         value.sqlite
           .prepare(
             "INSERT INTO codespaceProviderControl(scope, disabled, reason, updatedAt) VALUES (?, 1, 'incident', ?)",
@@ -270,12 +261,10 @@ describe("observed local file-operation completion", () => {
           value.repository.completeMetadata(
             "user-1",
             value.operation.id,
-            1,
             0,
             now + 30_000,
             now,
             "failed",
-            observed,
           ),
         ).toBe(true);
         expect(value.repository.countActiveForUser("user-1")).toBe(0);
@@ -298,7 +287,7 @@ describe("observed local file-operation completion", () => {
     },
   );
 
-  test("retains the public exact-generation result and dispatch fences", () => {
+  test("completes and reads an earlier lifecycle operation without rewriting its identity", () => {
     const value = pendingLocal();
     try {
       value.sqlite.exec("UPDATE codespaceResource SET generation = 3");
@@ -306,18 +295,17 @@ describe("observed local file-operation completion", () => {
         value.repository.completeMetadata(
           "user-1",
           value.operation.id,
-          1,
           0,
           now + 30_000,
           now,
           "failed",
         ),
-      ).toBe(false);
-      expect(() =>
-        value.repository.requireResultContext("user-1", value.operation.id, policy, now),
-      ).toThrow("Codespace operation authority changed");
+      ).toBe(true);
+      expect(
+        value.repository.requireResultContext("user-1", value.operation.id, policy, now).operation,
+      ).toMatchObject({ id: value.operation.id, state: "failed", resourceGeneration: 1 });
       expect(value.repository.canDispatch("user-1", value.operation.id, now)).toBe(false);
-      expect(value.repository.countActiveForUser("user-1")).toBe(1);
+      expect(value.repository.countActiveForUser("user-1")).toBe(0);
     } finally {
       value.sqlite.close();
     }
@@ -325,6 +313,128 @@ describe("observed local file-operation completion", () => {
 });
 
 describe("durable codespace file operations", () => {
+  test("an uncertain typed file failure exposes the accepted operation for inspection without replay", async () => {
+    const value = fixture();
+    let executions = 0;
+    try {
+      value.transport.executeFile = async () => {
+        executions++;
+        throw new CodespaceResourceError(
+          "CODESPACE_PROVIDER_UNAVAILABLE",
+          "Controlled lost response after admission",
+        );
+      };
+      const failure = await value.service
+        .execute("user-1", "codespace-1", {
+          action: "write",
+          path: "file.txt",
+          bytes: Buffer.from("new"),
+          expected: { exists: false },
+        })
+        .then(
+          () => null,
+          (error: unknown) => error as CodespaceResourceError,
+        );
+      expect(failure).toBeInstanceOf(CodespaceResourceError);
+      expect(failure).toMatchObject({
+        code: "CODESPACE_PROVIDER_UNAVAILABLE",
+        operationId: expect.any(String),
+      });
+      expect(value.repository.getOwned("user-1", failure!.operationId!)).toMatchObject({
+        state: "reconcile_pending",
+      });
+      await expect(value.service.reconcile("user-1", failure!.operationId!)).resolves.toMatchObject(
+        { operation: { state: "succeeded" }, result: { action: "write" } },
+      );
+      expect(executions).toBe(1);
+      expect(value.repository.listOwned("user-1", "codespace-1")).toHaveLength(1);
+    } finally {
+      value.sqlite.close();
+    }
+  });
+
+  test.each(["execution", "inspection"] as const)(
+    "returns the exact file result after a lifecycle change during %s without redispatch",
+    async (boundary) => {
+      const value = fixture();
+      const terminal = value.transport.result;
+      try {
+        const advanceLifecycle = () =>
+          value.sqlite.exec("UPDATE codespaceResource SET generation=generation+1");
+        if (boundary === "execution") {
+          const execute = value.transport.executeFile.bind(value.transport);
+          value.transport.executeFile = async (...args) => {
+            await Promise.resolve();
+            advanceLifecycle();
+            return execute(...args);
+          };
+        } else {
+          value.transport.result = { state: "running" } as unknown as CodespaceFileResult;
+          value.transport.inspectFile = async () => {
+            await Promise.resolve();
+            advanceLifecycle();
+            return terminal;
+          };
+        }
+        await expect(
+          value.service.execute("user-1", "codespace-1", {
+            action: "write",
+            path: "src/file.bin",
+            bytes: Buffer.from("abc"),
+            expected: { exists: false },
+          }),
+        ).resolves.toMatchObject({ operation: { state: "succeeded" }, result: terminal });
+        expect(value.transport.executeCalls).toHaveBeenCalledTimes(1);
+        expect(value.repository.listOwned("user-1", "codespace-1")).toHaveLength(1);
+      } finally {
+        value.sqlite.close();
+      }
+    },
+  );
+
+  test("a lost patch response does not block a new write or replay the unknown patch", async () => {
+    const value = fixture();
+    try {
+      value.sqlite.exec(
+        "UPDATE codespaceConnection SET provider='local-sandboxes'; UPDATE codespaceResource SET provider='local-sandboxes'",
+      );
+      value.transport.throwExecute = true;
+      const old = await value.service.execute("user-1", "codespace-1", {
+        action: "apply_patch",
+        files: [
+          {
+            path: "old.txt",
+            expected: { exists: false },
+            edits: [{ start: 0, end: 0, bytes: Buffer.from("old") }],
+          },
+        ],
+      });
+      expect(old.operation.state).toBe("reconcile_pending");
+      value.transport.throwExecute = false;
+      const fresh = await value.service.execute("user-1", "codespace-1", {
+        action: "write",
+        path: "new.txt",
+        bytes: Buffer.from("new"),
+        expected: { exists: false },
+      });
+      expect(fresh).toMatchObject({
+        operation: { state: "succeeded" },
+        result: { action: "write" },
+      });
+      expect(value.transport.lastRequest).toEqual({
+        action: "write",
+        path: "new.txt",
+        bytes: Buffer.from("new"),
+        expected: { exists: false },
+      });
+      expect(value.repository.getOwned("user-1", old.operation.id)).toEqual(old.operation);
+      expect(value.transport.executeCalls).toHaveBeenCalledTimes(2);
+      expect(value.transport.inspectCalls).not.toHaveBeenCalled();
+    } finally {
+      value.sqlite.close();
+    }
+  });
+
   test("synchronous file waiting rechecks authority after an awaited terminal file result", async () => {
     const value = fixture(true);
     try {
@@ -599,14 +709,24 @@ describe("durable codespace file operations", () => {
       value.credentials.getCredential.mockClear();
       value.transport.inspectCalls.mockClear();
       value.sqlite.exec("UPDATE codespaceResource SET generation = 2");
-      await expect(
-        service.reconcileDownloadReference("user-1", pending.operation.id, {
+      const afterLifecycleChange = await service.reconcileDownloadReference(
+        "user-1",
+        pending.operation.id,
+        {
           fileName: "result.bin",
           mimeType: "application/octet-stream",
-        }),
-      ).rejects.toMatchObject({ code: "CODESPACE_GENERATION_CONFLICT" });
-      expect(value.credentials.getCredential).not.toHaveBeenCalled();
-      expect(value.transport.inspectCalls).not.toHaveBeenCalled();
+        },
+      );
+      expect(afterLifecycleChange.operation).toMatchObject({
+        id: pending.operation.id,
+        state: "succeeded",
+      });
+      const retained = await transfers.claimDownload(afterLifecycleChange.transfer!.referenceId);
+      const retainedChunks: Buffer[] = [];
+      for await (const chunk of retained.stream) retainedChunks.push(Buffer.from(chunk));
+      expect(Buffer.concat(retainedChunks)).toEqual(bytes);
+      await transfers.consume(retained.record);
+      expect(value.transport.executeCalls).toHaveBeenCalledTimes(1);
       expect(value.sqlite.prepare("SELECT COUNT(*) count FROM codespaceTransfer").get()).toEqual({
         count: 0,
       });
@@ -895,9 +1015,9 @@ describe("durable codespace file operations", () => {
   );
 
   test.each([
-    "generation-change",
+    "resource-stopped",
     "reservation-expiry",
-    "begin-dispatch-rejection",
+    "authority-revoked",
     "credential-failure",
   ] as const)("removes native upload bytes after %s before provider dispatch", async (failure) => {
     const value = fixture();
@@ -907,10 +1027,8 @@ describe("durable codespace file operations", () => {
     const credentials = {
       getCredential: jest.fn(async () => {
         if (failure === "credential-failure") throw new Error("credential unavailable");
-        if (failure === "begin-dispatch-rejection") {
-          value.sqlite
-            .prepare("UPDATE codespaceResource SET generation = 2 WHERE id = 'codespace-1'")
-            .run();
+        if (failure === "authority-revoked") {
+          value.sqlite.prepare("DELETE FROM codespaceConnectionRepository").run();
         }
         return "ghu_access";
       }),
@@ -930,7 +1048,7 @@ describe("durable codespace file operations", () => {
       transfers,
       nativeFetcher: {
         fetch: async () => {
-          if (failure === "generation-change") {
+          if (failure === "resource-stopped") {
             value.sqlite
               .prepare(
                 "UPDATE codespaceResource SET desiredState = 'stopped' WHERE id = 'codespace-1'",
@@ -950,8 +1068,8 @@ describe("durable codespace file operations", () => {
       },
     });
     try {
-      await expect(
-        service.uploadReference("user-1", "codespace-1", {
+      const outcome = await service
+        .uploadReference("user-1", "codespace-1", {
           path: "input.bin",
           expected: { exists: false },
           reference: {
@@ -961,8 +1079,26 @@ describe("durable codespace file operations", () => {
             mimeType: "application/octet-stream",
             declaredSize: bytes.length,
           },
-        }),
-      ).resolves.toMatchObject({ operation: { state: "cancelled" }, result: null });
+        })
+        .then(
+          (value) => ({ state: value.operation.state }),
+          (error: unknown) => ({ code: (error as { code: string }).code }),
+        );
+      expect(outcome).toEqual(
+        failure === "credential-failure"
+          ? { state: "cancelled" }
+          : {
+              code:
+                failure === "authority-revoked"
+                  ? "CODESPACE_AUTHORIZATION_REQUIRED"
+                  : failure === "reservation-expiry"
+                    ? "CODESPACE_PROVIDER_UNAVAILABLE"
+                    : "CODESPACE_NOT_RUNNING",
+            },
+      );
+      expect(value.repository.listOwned("user-1", "codespace-1")).toEqual([
+        expect.objectContaining({ state: "cancelled", remoteCleanupPending: 0 }),
+      ]);
       expect(value.sqlite.prepare("SELECT COUNT(*) count FROM codespaceTransfer").get()).toEqual({
         count: 0,
       });
@@ -1222,51 +1358,51 @@ describe("durable codespace file operations", () => {
     }
   });
 
-  test.each(["write", "upload", "apply_patch"] as const)(
-    "serializes file mutations behind %s without excluding reads or commands",
-    (activeKind) => {
-      const value = fixture();
-      const reserve = (kind: "write" | "upload" | "apply_patch" | "read" | "exec" | "stat") =>
-        value.repository.reserve({
-          userId: "user-1",
-          resourceId: "codespace-1",
-          kind,
-          inputBytes: 0,
-          stdoutLimitBytes: 0,
-          stderrLimitBytes: 0,
-          deadlineAt: now + 30_000,
-          policy,
-          now,
-        });
-      try {
-        const active = reserve(activeKind);
-        expect(active.outcome).toBe("reserved");
-        expect(
-          value.repository.beginDispatch(
-            "user-1",
-            active.operation!.id,
-            1,
-            "file-claim",
-            now + 1000,
-            now,
-          ),
-        ).toBe(true);
-        expect(value.repository.markRunning("user-1", active.operation!.id, 1, now)).toBe(true);
-        for (const nextKind of ["write", "upload", "apply_patch"] as const) {
-          expect(reserve(nextKind).outcome).toBe("busy");
-        }
-        const read = reserve("read");
-        expect(read.outcome).toBe("reserved");
-        expect(reserve("stat").outcome).toBe("busy");
-        expect(value.repository.cancelBeforeDispatch("user-1", read.operation!.id, now)).toBe(true);
-        expect(reserve("exec").outcome).toBe("reserved");
-        expect(reserve("stat").outcome).toBe("busy");
-        expect(value.repository.countActiveForUser("user-1")).toBe(2);
-      } finally {
-        value.sqlite.close();
+  test.each(
+    (["github-codespaces", "local-sandboxes"] as const).flatMap((provider) =>
+      (["reserved", "running", "cancel_pending", "reconcile_pending"] as const).map(
+        (state) => [provider, state] as const,
+      ),
+    ),
+  )("admits independent file writes with %s journal work left %s", (provider, state) => {
+    const value = fixture();
+    const reserve = (kind: "write" | "upload" | "apply_patch" | "read" | "exec" | "stat") =>
+      value.repository.reserve({
+        userId: "user-1",
+        resourceId: "codespace-1",
+        kind,
+        inputBytes: 0,
+        stdoutLimitBytes: 0,
+        stderrLimitBytes: 0,
+        deadlineAt: now + 30_000,
+        policy: {
+          ...policy,
+          maxConcurrentOperationsPerUser: 20,
+          maxConcurrentOperationsGlobal: 20,
+        },
+        now,
+      });
+    try {
+      value.sqlite.prepare("UPDATE codespaceConnection SET provider=?").run(provider);
+      value.sqlite.prepare("UPDATE codespaceResource SET provider=?").run(provider);
+      const active = reserve("apply_patch");
+      expect(active.outcome).toBe("reserved");
+      value.sqlite
+        .prepare("UPDATE codespaceOperation SET state=? WHERE id=?")
+        .run(state, active.operation!.id);
+      const before = value.repository.getOwned("user-1", active.operation!.id);
+      for (const nextKind of ["write", "upload", "apply_patch"] as const) {
+        expect(reserve(nextKind).outcome).toBe("reserved");
       }
-    },
-  );
+      expect(reserve("read").outcome).toBe("reserved");
+      expect(reserve("exec").outcome).toBe("reserved");
+      expect(reserve("stat").outcome).toBe("reserved");
+      expect(value.repository.getOwned("user-1", active.operation!.id)).toEqual(before);
+      expect(value.repository.countActiveForUser("user-1")).toBe(7);
+    } finally {
+      value.sqlite.close();
+    }
+  });
 
   test.each(["write", "upload", "apply_patch"] as const)(
     "admits %s beside a background command while retaining file preconditions and shared ceilings",

@@ -64,7 +64,6 @@ export async function startBroker(options: BrokerOptions, port = 0) {
       if (
         !fresh ||
         fresh.spaceId !== grant.spaceId ||
-        fresh.generation !== grant.generation ||
         fresh.repository.id !== grant.repository.id ||
         fresh.repository.fullName !== grant.repository.fullName
       )

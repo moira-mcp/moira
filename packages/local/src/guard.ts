@@ -150,6 +150,22 @@ function refuseLiveRecoveryOwner(receipt: z.infer<typeof receiptSchema> | null):
   );
 }
 
+/** Under the runner gate, a former guard must be absent before a new owner can start. */
+export async function requireRuntimeOwnerAbsent(records: LocalRecords): Promise<void> {
+  const receipt = await records.state.read("runtime-owner.json", (value) => {
+    const parsed = receiptSchema.safeParse(value);
+    if (!parsed.success)
+      throw new LocalRefusal("LOCAL_STATE_UNSAFE", "The retained runtime owner is invalid.");
+    return parsed.data;
+  });
+  if (receipt && !receipt.settled && !receipt.ownerPID)
+    throw new LocalRefusal(
+      "LOCAL_OWNER_ACTIVE",
+      "The previous runtime owner has no verifiable process identity.",
+    );
+  refuseLiveRecoveryOwner(receipt);
+}
+
 async function recoveryAdmission(records: LocalRecords) {
   const policy = await records.policy();
   if (policy.enabled)
@@ -301,7 +317,7 @@ const callSchema = z.discriminatedUnion("action", [
   z.object({ ...scope, action: z.literal("start-space") }).strict(),
   z.object({ ...admittedScope, action: z.literal("prepare") }).strict(),
   z.object({ ...admittedScope, action: z.literal("validate") }).strict(),
-  z.object({ ...admittedScope, action: z.literal("operation"), request: z.unknown() }).strict(),
+  z.object({ ...scope, action: z.literal("operation"), request: z.unknown() }).strict(),
   z.object({ ...admittedScope, action: z.literal("stop-space") }).strict(),
   z.object({ ...admittedScope, action: z.literal("retire-space") }).strict(),
   z.object({ ...admittedScope, action: z.literal("recover-space") }).strict(),
@@ -388,7 +404,7 @@ export const startGuard: StartGuard = (root, mode = "work") =>
             : action === "remove-space"
               ? { id, action, spaceId, generation, localApproval: value }
               : action === "operation"
-                ? { id, action, spaceId, generation, request: value }
+                ? { id, action, spaceId, request: value }
                 : action === "admit" || action === "start-space"
                   ? { id, action, spaceId }
                   : { id, action, spaceId, generation };
@@ -843,6 +859,7 @@ async function runGuard(
           "This space has no independent local admission.",
         );
       if (
+        call.action !== "operation" &&
         call.generation !== owner.generation &&
         (call.action !== "stop-space" || call.generation !== owner.admittedGeneration)
       )
@@ -856,7 +873,11 @@ async function runGuard(
             ? await control.prepareSpace(call.spaceId, call.generation, () => owner.prepare())
             : await owner.operation(call.request);
         } catch (error) {
-          if (error instanceof LocalRefusal && error.code === "LOCAL_GUEST_SETTLEMENT_UNKNOWN")
+          if (
+            call.action === "prepare" &&
+            error instanceof LocalRefusal &&
+            error.code === "LOCAL_GUEST_SETTLEMENT_UNKNOWN"
+          )
             process.send?.({ retired: call.spaceId });
           throw error;
         }

@@ -12,7 +12,13 @@ import {
 import type { LocalVmRuntime, LocalVmIdentity, LocalVmRuntimeFactory } from "./local-vm-runtime.js";
 import { createLocalVmRuntime } from "./local-vm-runtime-factory.js";
 import { admitStorage } from "./storage.js";
-import { startGuard, type SpaceGuard, type StartGuard, type DeviceGuard } from "./guard.js";
+import {
+  startGuard,
+  requireRuntimeOwnerAbsent,
+  type SpaceGuard,
+  type StartGuard,
+  type DeviceGuard,
+} from "./guard.js";
 import { startBroker } from "./broker.js";
 import { startBrokerTunnel } from "./broker-tunnel.js";
 import { gitBroker } from "./git-broker.js";
@@ -88,7 +94,17 @@ export class LocalManager {
   }
 
   async holdRunnerLock(): Promise<void> {
-    this.releaseLock ??= await this.records.state.lock();
+    await this.serial("runner-lock", async () => {
+      if (this.releaseLock) return;
+      const release = await this.records.state.lock({ recoverStale: true });
+      try {
+        await requireRuntimeOwnerAbsent(this.records);
+        this.releaseLock = release;
+      } catch (error) {
+        await release();
+        throw error;
+      }
+    });
   }
   async open(): Promise<void> {
     await this.holdRunnerLock();
@@ -308,12 +324,14 @@ export class LocalManager {
     }
   }
 
-  async operation(id: string, request: unknown): Promise<Buffer> {
+  async operation(id: string, request: unknown, signal?: AbortSignal): Promise<Buffer> {
+    signal?.throwIfAborted();
     let guard = this.guards.get(id);
     if (!guard?.active) {
       guard = await (await this.owner()).space(id);
       this.guards.set(id, guard);
     }
+    signal?.throwIfAborted();
     return guard.operation(request);
   }
 
@@ -327,12 +345,15 @@ export class LocalManager {
     await runtime.boundary.verify(this.identity(space), space.networkPolicy);
   }
 
-  /** Hold the existing lifecycle boundary until this guest contact has settled. */
+  /** Admit against current identity; independent guest contacts do not hold the lifecycle lane. */
   async dispatchGuest<T>(
     id: string,
     dispatch: (space: LocalSpace, policy: LocalPolicy) => Promise<T>,
+    signal?: AbortSignal,
   ): Promise<T> {
-    return this.serial(`space:${id}`, async () => {
+    signal?.throwIfAborted();
+    const admitted = await this.serial(`space:${id}`, async () => {
+      signal?.throwIfAborted();
       const space = await this.require(id);
       const policy = await this.records.policy();
       requireLocalGrant(policy, space.repositoryId, this.now());
@@ -360,7 +381,6 @@ export class LocalManager {
       if (
         current.desiredState !== "running" ||
         current.phase !== "usable" ||
-        current.generation !== space.generation ||
         current.runtimeId !== space.runtimeId
       )
         throw new LocalRefusal("LOCAL_NOT_RUNNING", "The local sandbox changed before dispatch.");
@@ -368,8 +388,10 @@ export class LocalManager {
       requireLocalGrant(currentPolicy, current.repositoryId, this.now());
       if (JSON.stringify(currentPolicy.runtime) !== JSON.stringify(policy.runtime))
         throw new LocalRefusal("LOCAL_RUNTIME_CHANGED", "The locally approved runtime changed.");
-      return dispatch(current, currentPolicy);
+      return { space: current, policy: currentPolicy };
     });
+    signal?.throwIfAborted();
+    return dispatch(admitted.space, admitted.policy);
   }
 
   async start(id: string, onAdmitted?: () => void): Promise<LocalSpace> {
