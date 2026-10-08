@@ -17,7 +17,7 @@ level headings classify the tracked test paths listed beneath them.
 **unit**
 
 - `tests/unit/config/docker-image-contract.test.ts` — canonical parameterized OSS runtime image contract, one Node engine across package/docs/CI/Docker, explicit non-secret compile-time inputs, and prohibition on embedding deployment env files
-- `tests/unit/scripts/sqlite-online-backup.test.ts` — coherent SQLite online backup under concurrent WAL writes, integrity verification, and missing-source fail-closed behavior
+- `tests/unit/scripts/sqlite-online-backup.test.ts` — coherent SQLite online backup under concurrent WAL writes, a pinned source snapshot retaining pre-commit data while an independent writer commits before the real CLI copy, integrity verification, and missing-source fail-closed behavior
 - `tests/unit/scripts/self-host-startup-guard.test.ts` — pre-Supervisor generation reset, real SQLite success, stale/ordered terminal sentinels, partial-init restore with persistent reconciliation-bundle retention and hard-failure guidance, interrupted existing/first-start recovery, removal/marker/sentinel faults, staging/restore symlink rejection, SIGTERM/SIGKILL recovery, prompt-manifest integrity, and bounded rotation including WAL sidecars
 - `tests/unit/scripts/self-host-upgrade-contract.test.ts` — latest-image quickstart, image-owned startup-guard wiring, plus optional pinned-image isolated preflight, health check, and rollback
 - `tests/unit/scripts/docker-build-and-run-extra-workflows.test.ts` — the contributor container script (dry run) reports and skips a missing `EXTRA_WORKFLOWS_DIRS` entry and still mounts the ones that exist, instead of aborting under `set -e`

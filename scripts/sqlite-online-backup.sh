@@ -32,7 +32,10 @@ TEMP="${DESTINATION}.tmp.$$"
 cleanup() { rm -f "$TEMP" "$TEMP-wal" "$TEMP-shm"; }
 trap cleanup EXIT HUP INT TERM
 
-sqlite3 -cmd ".timeout 5000" "$SOURCE" ".backup '$TEMP'" || fail "SQLite online backup failed"
+# Pin the source snapshot so external commits cannot restart incremental backup.
+# WAL writers may continue committing while this read transaction is active.
+sqlite3 -bail -cmd ".timeout 5000" -cmd "BEGIN; SELECT count(*) FROM sqlite_schema;" \
+  "$SOURCE" ".backup '$TEMP'" "ROLLBACK;" >/dev/null || fail "SQLite online backup failed"
 RESULT=$(sqlite3 "$TEMP" "PRAGMA integrity_check;")
 [ "$RESULT" = "ok" ] || fail "backup integrity_check failed: $RESULT"
 mv -f "$TEMP" "$DESTINATION"

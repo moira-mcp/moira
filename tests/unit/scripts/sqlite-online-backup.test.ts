@@ -59,6 +59,57 @@ describe("SQLite online backup", () => {
     }
   });
 
+  test("pins the source snapshot before an independent WAL commit during backup", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "moira-backup-snapshot-"));
+    const source = path.join(dir, "source.db");
+    const backup = path.join(dir, "backup.db");
+    const sqlite = execFileSync("sh", ["-c", "command -v sqlite3"], { encoding: "utf8" }).trim();
+    const bin = path.join(dir, "bin");
+    const writer = path.join(dir, "writer.cjs");
+    try {
+      execFileSync(sqlite, [
+        source,
+        "PRAGMA journal_mode=WAL; CREATE TABLE marker(value INTEGER); INSERT INTO marker VALUES(0);",
+      ]);
+      fs.mkdirSync(bin);
+      fs.writeFileSync(
+        writer,
+        `require("node:child_process").execFileSync(${JSON.stringify(sqlite)}, [${JSON.stringify(source)}, "UPDATE marker SET value=1;"]);`,
+      );
+      // Delegate every command to the real CLI. Insert a second connection's
+      // commit after its source setup and before .backup, without sleeps.
+      fs.writeFileSync(
+        path.join(bin, "sqlite3"),
+        `#!/usr/bin/env node
+const { spawnSync } = require("node:child_process");
+const args = process.argv.slice(2);
+const backupAt = args.findIndex((arg) => arg.startsWith(".backup "));
+if (backupAt !== -1) args.splice(backupAt, 0, ${JSON.stringify(`.shell "${process.execPath}" "${writer}"`)});
+const result = spawnSync(${JSON.stringify(sqlite)}, args, { stdio: "inherit" });
+if (result.error) throw result.error;
+process.exit(result.status ?? 1);
+`,
+        { mode: 0o700 },
+      );
+      const output = execFileSync(script, [source, backup], {
+        encoding: "utf8",
+        env: { ...process.env, PATH: `${bin}${path.delimiter}${process.env.PATH}` },
+      });
+      expect(output.trim()).toBe(`BACKUP_OK ${backup}`);
+      expect(
+        execFileSync(sqlite, [source, "SELECT value FROM marker;"], { encoding: "utf8" }).trim(),
+      ).toBe("1");
+      expect(
+        execFileSync(sqlite, [backup, "SELECT value FROM marker;"], { encoding: "utf8" }).trim(),
+      ).toBe("0");
+      expect(
+        execFileSync(sqlite, [backup, "PRAGMA integrity_check;"], { encoding: "utf8" }).trim(),
+      ).toBe("ok");
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   test("fails closed for a missing source", () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "moira-online-backup-missing-"));
     try {
