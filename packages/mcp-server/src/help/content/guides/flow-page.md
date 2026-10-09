@@ -167,6 +167,11 @@ The **Graph** view is the same editor drawn as the node graph. In edit mode:
 - **Drop a dragged output on the empty canvas** to create a step there that the output leads to.
   The step joins the block you dropped it in, or its source's block.
 
+A drag completes where you release the mouse or lift your finger inside this graph's pane.
+Releasing over a side panel, an overlay or another graph opens no dialog and creates no edit,
+even if the pointer passed near a target port. Inside the pane, dropping near a target port still
+connects to its step. Dropping on the card the drag started from does nothing.
+
 Each of these is one edit, like the same change made in the block panel. The graph keeps the step
 you changed in view, and the layout stays automatic, so cards can't be moved by hand.
 

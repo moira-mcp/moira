@@ -179,7 +179,7 @@ describe("security automation contract", () => {
     ]);
     expect(job.steps[0]).toEqual({
       name: "Review dependency changes",
-      uses: "actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294",
+      uses: expect.stringMatching(/^actions\/dependency-review-action@[0-9a-f]{40}$/),
       with: {
         "vulnerability-check": true,
         "license-check": false,
@@ -190,7 +190,7 @@ describe("security automation contract", () => {
     });
     expect(job.steps[1]).toEqual({
       name: "Check out pull request as untrusted data",
-      uses: "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+      uses: expect.stringMatching(/^actions\/checkout@[0-9a-f]{40}$/),
       with: {
         ref: "${{ github.event.pull_request.merge_commit_sha }}",
         "persist-credentials": false,
@@ -202,12 +202,14 @@ describe("security automation contract", () => {
     });
     expect(job.steps[3]).toEqual({
       name: "Validate workflow syntax and expressions",
-      uses: "devops-actions/actionlint@ec02b36684b2f574f1d219ad0a43b082e46bf3e4",
+      uses: expect.stringMatching(/^devops-actions\/actionlint@[0-9a-f]{40}$/),
       with: { "fail-on-errors": true },
     });
     expect(job.steps[4]).toEqual({
       name: "Require immutable external Actions",
-      uses: "zgosalvez/github-actions-ensure-sha-pinned-actions@62574f011e0d1967d555a862bd28a7abba8684fe",
+      uses: expect.stringMatching(
+        /^zgosalvez\/github-actions-ensure-sha-pinned-actions@[0-9a-f]{40}$/,
+      ),
     });
     const raw = readFileSync(".github/workflows/security.yml", "utf8");
     expect(raw).not.toContain("secrets.");

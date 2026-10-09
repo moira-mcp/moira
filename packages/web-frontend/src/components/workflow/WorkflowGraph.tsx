@@ -71,6 +71,11 @@ import {
 import { useTranslation } from "react-i18next";
 import { useNodeTypes } from "../../hooks/useNodeTypes";
 import { guideAnchor } from "../../guides/anchors";
+import {
+  blockAtPoint,
+  completeGraphConnection,
+  type GraphConnectionState,
+} from "./graphConnection";
 
 // Every authored type renders the same step node; the per-type registration keeps React Flow's
 // `react-flow__node-<type>` class, which the node-type catalog and the graph specs rely on.
@@ -98,34 +103,6 @@ const nodeTypes = {
 };
 
 const edgeTypes = { graph: GraphEdgeView };
-
-/**
- * The block whose group lies under a screen point. Groups take no pointer events (edges must reach
- * through them), so hit-testing cannot find them; their boxes are compared instead.
- */
-function blockAtPoint(x: number, y: number): string | null {
-  for (const group of document.querySelectorAll<HTMLElement>("[data-graph-group]")) {
-    const box = group.getBoundingClientRect();
-    if (x >= box.left && x <= box.right && y >= box.top && y <= box.bottom) {
-      return group.getAttribute("data-block-id");
-    }
-  }
-  return null;
-}
-
-/**
- * Where a dragged connection was released: on a step card, on the empty canvas, or outside the
- * graph (over a panel beside it). React Flow reports a target only near one of a card's handles; a
- * release anywhere else on the card still means that step.
- */
-function releaseAt(x: number, y: number): { node: string } | "canvas" | "outside" {
-  if (!document.elementFromPoint(x, y)?.closest(".react-flow")) return "outside";
-  for (const element of document.elementsFromPoint(x, y)) {
-    const card = element.closest("[data-graph-node]");
-    if (card) return { node: card.getAttribute("data-graph-node")! };
-  }
-  return "canvas";
-}
 
 /** Output ports whose connection has a problem carry it, so the port is marked and explains it. */
 function withProblems(ports: PortInfo[] | undefined, issues: IssuePlacement): PortInfo[] {
@@ -313,6 +290,7 @@ export const WorkflowGraph: React.FC<WorkflowGraphProps> = ({
   // the control panel drive fitView through this ref rather than a hook, so the graph does not
   // need a provider of its own around it.
   const instanceRef = useRef<XyflowInstance | null>(null);
+  const graphRootRef = useRef<HTMLDivElement>(null);
   /** The last layout's block groups, read by the opening placement. */
   const groupsRef = useRef<{ id: string; x: number; y: number }[]>([]);
   /**
@@ -937,7 +915,7 @@ export const WorkflowGraph: React.FC<WorkflowGraphProps> = ({
   }
 
   return (
-    <div className={`h-full relative flex flex-col ${className}`}>
+    <div ref={graphRootRef} className={`h-full relative flex flex-col ${className}`}>
       {showControls && (
         <DiagramToolbar
           surface="graph"
@@ -988,46 +966,15 @@ export const WorkflowGraph: React.FC<WorkflowGraphProps> = ({
                     // A drop near a card's drop port still lands on it: the port is small, and
                     // the canvas pans under the pointer while a connection is dragged.
                     connectionRadius: 40,
-                    onConnect: (connection: {
-                      source: string;
-                      sourceHandle?: string | null;
-                      target: string;
-                    }) =>
-                      editing.onConnect({
-                        source: connection.source,
-                        sourceHandle: connection.sourceHandle ?? null,
-                        target: connection.target,
-                      }),
-                    onConnectEnd: (
-                      event: MouseEvent | TouchEvent,
-                      state: {
-                        isValid: boolean | null;
-                        toNode: Node | null;
-                        fromNode: Node | null;
-                        fromHandle: { id?: string | null; type?: string } | null;
-                      },
-                    ) => {
-                      // A valid drop on a handle has already gone to `onConnect`.
-                      if (state.isValid || !state.fromNode || state.fromHandle?.type !== "source")
-                        return;
-                      const point = "changedTouches" in event ? event.changedTouches[0] : event;
-                      const gesture = {
-                        source: state.fromNode.id,
-                        sourceHandle: state.fromHandle.id ?? null,
-                      };
-                      // Released on a card, away from its ports: a connection to that step. A
-                      // release on the card it started from, or outside the graph, is a drag
-                      // that went nowhere.
-                      const at = state.toNode
-                        ? { node: state.toNode.id }
-                        : releaseAt(point.clientX, point.clientY);
-                      if (at === "outside") return;
-                      if (at === "canvas") {
-                        editing.onDropOnCanvas(gesture, blockAtPoint(point.clientX, point.clientY));
-                        return;
-                      }
-                      if (at.node !== gesture.source)
-                        editing.onConnect({ ...gesture, target: at.node });
+                    onConnectEnd: (event: MouseEvent | TouchEvent, state: GraphConnectionState) => {
+                      const completion = completeGraphConnection(
+                        graphRootRef.current?.querySelector<HTMLElement>(".react-flow") ?? null,
+                        event,
+                        state,
+                      );
+                      if (completion?.kind === "connect") editing.onConnect(completion.gesture);
+                      if (completion?.kind === "canvas")
+                        editing.onDropOnCanvas(completion.gesture, completion.blockId);
                     },
                     onNodeContextMenu: (event: React.MouseEvent, node: Node) => {
                       if (node.type === "block-group") return;
@@ -1049,7 +996,11 @@ export const WorkflowGraph: React.FC<WorkflowGraphProps> = ({
                       event.preventDefault();
                       editing.onPaneMenu(
                         event as React.MouseEvent,
-                        blockAtPoint(event.clientX, event.clientY),
+                        blockAtPoint(
+                          graphRootRef.current?.querySelector<HTMLElement>(".react-flow") ?? null,
+                          event.clientX,
+                          event.clientY,
+                        ),
                       );
                     },
                   }

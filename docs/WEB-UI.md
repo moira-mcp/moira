@@ -1364,14 +1364,18 @@ request, or the run moving to another step, replaces the travelled step.
     - a connection, from its line or its output port (`[data-port="out"][data-transition]`):
       insert on it, lead elsewhere, remove (disabled for a primary output);
     - the empty canvas: add a step in the block whose group is under the pointer. Groups take no
-      pointer events, so `blockAtPoint` compares the pointer with the groups' boxes.
+      pointer events, so `blockAtPoint` compares the pointer with this graph's groups' boxes.
   - **Ports.** Each card that can have outputs carries a `+ output` port (`out:new`), and every card
     carries a drop port (`in:new`), with a 40 px connection radius.
   - **`connectIntent`.** A drag from an output port to a card retargets it (`set-connection`); a
-    drag from `out:new` opens the output-name dialog. React Flow reports a target only near a
-    handle, so `releaseAt` resolves the release: anywhere on a card (the `[data-graph-node]` under
-    the pointer) still connects to that step, while a release on the card the drag started from, or
-    outside the graph, does nothing.
+    drag from `out:new` opens the output-name dialog. `completeGraphConnection`
+    (`components/workflow/graphConnection.ts`) admits completion only at the final mouse or touch
+    release inside this mounted graph's pane, with this graph receiving the pointer. A release
+    over a neighboring panel, an overlay or another graph opens no dialog and creates no edit,
+    even when React Flow retains a nearby target handle. Inside the pane, a valid nearby handle
+    still connects to its step; otherwise the card body under the release supplies the target.
+    Releasing on the source card or retaining a source-node target does nothing. Cancelled touch
+    gestures and missing final touches also produce no edit.
   - **`dropOnCanvasIntent`.** A drop on the empty canvas opens the add-step dialog for a step the
     output leads to, which is one `add-connected-node` operation. A new output is named in the same
     dialog.

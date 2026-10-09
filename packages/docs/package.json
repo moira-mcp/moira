@@ -13,16 +13,16 @@
     "@astrojs/starlight": "^0.42.5",
     "@fontsource-variable/inter": "^5.3.0",
     "@mcp-moira/mcp-server": "*",
-    "astro": "~7.3.5",
+    "astro": "~7.3.6",
     "astro-icon": "^1.2.0",
     "astro-mermaid": "^2.1.0",
     "mermaid": "^11.17.2",
-    "vite": "^7.3.1"
+    "vite": "^7.3.7"
   },
   "devDependencies": {
     "@astrojs/check": "^0.9.10",
-    "@astrojs/markdown-remark": "^7.3.1",
-    "@astrojs/mdx": "^8.0.2",
+    "@astrojs/markdown-remark": "^7.3.2",
+    "@astrojs/mdx": "^8.0.3",
     "@iconify-json/flat-color-icons": "^1.2.1",
     "@iconify-json/tabler": "^1.2.41",
     "@tailwindcss/vite": "^4.3.3",

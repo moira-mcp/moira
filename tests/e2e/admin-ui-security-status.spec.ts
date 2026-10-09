@@ -30,20 +30,32 @@ test.describe("Admin UI Security Status", () => {
     await page.waitForTimeout(1000);
 
     // Force password reset via UI button (AlertDialog)
-    const forceResetBtn = page.locator('button:has-text("Force Password Reset")');
+    const forceResetBtn = page.getByRole("button", { name: "Force Password Reset", exact: true });
 
     // Wait for API response
     const responsePromise = page.waitForResponse(
       (response) =>
-        response.url().includes("/api/admin/users/") &&
-        response.url().includes("/force-password-reset"),
+        new URL(response.url()).pathname ===
+          `/api/admin/users/${testUser.userId}/force-password-reset` &&
+        response.request().method() === "POST",
     );
 
     await forceResetBtn.click();
     // Confirm in AlertDialog
-    await page.locator('[role="alertdialog"]').waitFor();
-    await page.locator('[role="alertdialog"] button:has-text("Force Password Reset")').click();
-    await responsePromise;
+    const resetDialog = page.getByRole("alertdialog", {
+      name: "Force Password Reset",
+      exact: true,
+      includeHidden: true,
+    });
+    await expect(resetDialog).toBeVisible();
+    await resetDialog.getByRole("button", { name: "Force Password Reset", exact: true }).click();
+    const response = await responsePromise;
+    expect(response.status()).toBe(200);
+    expect(await response.json()).toMatchObject({
+      success: true,
+      data: { userId: testUser.userId, passwordResetRequired: true },
+    });
+    await expect(resetDialog).toHaveCount(0);
 
     // Check badge visible (confirms data loaded)
     const badge = page.locator("text=Password Reset Required").first();
@@ -54,7 +66,7 @@ test.describe("Admin UI Security Status", () => {
     await expect(infoPanel).toBeVisible({ timeout: 5000 });
 
     // Check Clear Reset button visible
-    const clearButton = page.locator('button:has-text("Clear Reset")');
+    const clearButton = page.getByRole("button", { name: "Clear Reset", exact: true });
     await expect(clearButton).toBeVisible({ timeout: 5000 });
   });
 
@@ -77,10 +89,28 @@ test.describe("Admin UI Security Status", () => {
     await page.waitForTimeout(1000);
 
     // Force password reset via UI (AlertDialog)
-    const forceResetBtn = page.locator('button:has-text("Force Password Reset")');
+    const forceResetBtn = page.getByRole("button", { name: "Force Password Reset", exact: true });
+    const resetResponsePromise = page.waitForResponse(
+      (response) =>
+        new URL(response.url()).pathname ===
+          `/api/admin/users/${testUser.userId}/force-password-reset` &&
+        response.request().method() === "POST",
+    );
     await forceResetBtn.click();
-    await page.locator('[role="alertdialog"]').waitFor();
-    await page.locator('[role="alertdialog"] button:has-text("Force Password Reset")').click();
+    const resetDialog = page.getByRole("alertdialog", {
+      name: "Force Password Reset",
+      exact: true,
+      includeHidden: true,
+    });
+    await expect(resetDialog).toBeVisible();
+    await resetDialog.getByRole("button", { name: "Force Password Reset", exact: true }).click();
+    const resetResponse = await resetResponsePromise;
+    expect(resetResponse.status()).toBe(200);
+    expect(await resetResponse.json()).toMatchObject({
+      success: true,
+      data: { userId: testUser.userId, passwordResetRequired: true },
+    });
+    await expect(resetDialog).toHaveCount(0);
 
     // Wait for badge to appear (confirms force reset completed)
     await expect(page.locator("text=Password Reset Required").first()).toBeVisible({
@@ -88,20 +118,31 @@ test.describe("Admin UI Security Status", () => {
     });
 
     // Click clear reset button
-    const clearButton = page.locator('button:has-text("Clear Reset")');
+    const clearButton = page.getByRole("button", { name: "Clear Reset", exact: true });
 
     // Wait for the API call to complete after clicking
     const responsePromise = page.waitForResponse(
       (response) =>
-        response.url().includes(`/api/admin/users/${testUser.userId}`) &&
+        new URL(response.url()).pathname === `/api/admin/users/${testUser.userId}` &&
         response.request().method() === "PUT",
     );
 
     await clearButton.click();
     // Confirm in AlertDialog
-    await page.locator('[role="alertdialog"]').waitFor();
-    await page.locator('[role="alertdialog"] button:has-text("Clear Reset")').click();
-    await responsePromise;
+    const clearDialog = page.getByRole("alertdialog", {
+      name: "Clear Reset",
+      exact: true,
+      includeHidden: true,
+    });
+    await expect(clearDialog).toBeVisible();
+    await clearDialog.getByRole("button", { name: "Clear Reset", exact: true }).click();
+    const response = await responsePromise;
+    expect(response.status()).toBe(200);
+    expect(await response.json()).toMatchObject({
+      success: true,
+      data: { id: testUser.userId, updated: true },
+    });
+    await expect(clearDialog).toHaveCount(0);
 
     // Wait for UI to update and badge to disappear
     const badge = page.locator("text=Password Reset Required").first();
@@ -125,7 +166,7 @@ test.describe("Admin UI Security Status", () => {
     const cookies = await page.context().cookies();
     const cookieHeader = cookies.map((c) => `${c.name}=${c.value}`).join("; ");
 
-    await fetch(`${FETCH_URL}/api/admin/users/${testUser.userId}/block`, {
+    const blockResponse = await fetch(`${FETCH_URL}/api/admin/users/${testUser.userId}/block`, {
       method: "POST",
       headers: {
         Cookie: cookieHeader,
@@ -133,13 +174,18 @@ test.describe("Admin UI Security Status", () => {
       },
       body: JSON.stringify({ reason: "UI test block" }),
     });
+    expect(blockResponse.status).toBe(200);
+    expect(await blockResponse.json()).toMatchObject({
+      success: true,
+      data: { id: testUser.userId, blocked: true },
+    });
 
     // Navigate to user page
     await page.goto(`${BASE_URL}/admin/users/${testUser.userId}`);
     await page.waitForLoadState("domcontentloaded");
 
     // Check blocked badge visible
-    const badge = page.locator("text=Blocked").first();
+    const badge = page.getByText("Blocked", { exact: true });
     await expect(badge).toBeVisible({ timeout: 10000 });
 
     // Check block info panel visible
@@ -147,7 +193,7 @@ test.describe("Admin UI Security Status", () => {
     await expect(blockInfo).toBeVisible({ timeout: 5000 });
 
     // Check Unblock button visible
-    const unblockButton = page.locator('button:has-text("Unblock User")');
+    const unblockButton = page.getByRole("button", { name: "Unblock User", exact: true });
     await expect(unblockButton).toBeVisible();
   });
 
@@ -173,43 +219,68 @@ test.describe("Admin UI Security Status", () => {
     await page.waitForTimeout(500); // Small stabilization delay
 
     // Initially should show Block button
-    await expect(page.locator('button:has-text("Block User")')).toBeVisible();
+    const blockButton = page.getByRole("button", { name: "Block User", exact: true });
+    const unblockButton = page.getByRole("button", { name: "Unblock User", exact: true });
+    const blockedBadge = page.getByText("Blocked", { exact: true });
+    await expect(blockButton).toBeVisible();
 
     // The shared confirmation keeps the block reason with the action.
-    await page.click('button:has-text("Block User")');
-    const blockDialog = page.getByRole("alertdialog", { name: "Block User", exact: true });
+    await blockButton.click();
+    const blockDialog = page.getByRole("alertdialog", {
+      name: "Block User",
+      exact: true,
+      includeHidden: true,
+    });
     await expect(blockDialog).toBeVisible();
     await blockDialog.getByRole("textbox").fill("Test block reason");
 
     // Click block confirm and wait for API response
     const blockResponsePromise = page.waitForResponse(
       (response) =>
-        response.url().includes("/api/admin/users/") && response.url().includes("/block"),
+        new URL(response.url()).pathname === `/api/admin/users/${testUser.userId}/block` &&
+        response.request().method() === "POST",
     );
 
     await blockDialog.getByRole("button", { name: "Block User", exact: true }).click();
-    await blockResponsePromise;
+    const blockResponse = await blockResponsePromise;
+    expect(blockResponse.status()).toBe(200);
+    expect(await blockResponse.json()).toMatchObject({
+      success: true,
+      data: { id: testUser.userId, blocked: true },
+    });
+    await expect(blockDialog).toHaveCount(0);
 
     // Should now show Unblock button
-    await expect(page.locator('button:has-text("Unblock User")')).toBeVisible();
-    await expect(page.locator("text=Blocked").first()).toBeVisible();
+    await expect(unblockButton).toBeVisible();
+    await expect(blockedBadge).toBeVisible();
 
     // Click unblock button - opens AlertDialog
-    await page.click('button:has-text("Unblock User")');
-    const unblockDialog = page.getByRole("alertdialog", { name: "Unblock User", exact: true });
+    await unblockButton.click();
+    const unblockDialog = page.getByRole("alertdialog", {
+      name: "Unblock User",
+      exact: true,
+      includeHidden: true,
+    });
     await expect(unblockDialog).toBeVisible();
 
     // Click confirm and wait for API response
     const unblockResponsePromise = page.waitForResponse(
       (response) =>
-        response.url().includes("/api/admin/users/") && response.url().includes("/unblock"),
+        new URL(response.url()).pathname === `/api/admin/users/${testUser.userId}/unblock` &&
+        response.request().method() === "POST",
     );
 
     await unblockDialog.getByRole("button", { name: "Unblock User", exact: true }).click();
-    await unblockResponsePromise;
+    const unblockResponse = await unblockResponsePromise;
+    expect(unblockResponse.status()).toBe(200);
+    expect(await unblockResponse.json()).toMatchObject({
+      success: true,
+      data: { id: testUser.userId, unblocked: true },
+    });
+    await expect(unblockDialog).toHaveCount(0);
 
     // Should show Block button again
-    await expect(page.locator('button:has-text("Block User")')).toBeVisible();
-    await expect(page.locator("text=Blocked").first()).not.toBeVisible();
+    await expect(blockButton).toBeVisible();
+    await expect(blockedBadge).not.toBeVisible();
   });
 });

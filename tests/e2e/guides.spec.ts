@@ -22,7 +22,7 @@ import { createAuthenticatedMCPClient } from "../utils/mcp-auth.js";
 import { loginAsAdmin } from "./helpers/auth-helper.js";
 import { quickTaskWithRepairLoop } from "./helpers/quick-task.js";
 import { GRAPH, graphOverview, settledCamera } from "./helpers/diagram.js";
-import { freshReader } from "./helpers/guides.js";
+import { expectGuideStep, freshReader } from "./helpers/guides.js";
 
 const BASE_URL = getTestBaseUrl();
 
@@ -70,43 +70,13 @@ const SETTINGS_STEPS = [
 ];
 
 /**
- * Runs in the page: for an element inside a React Flow node, whether its box lies within the
- * diagram pane that draws it; for any other element, true.
- */
-function insideItsPane(element: Element): boolean {
-  const node = element.closest(".react-flow__node");
-  if (!node) return true;
-  const pane = node.closest(".react-flow");
-  if (!pane) return false;
-  const box = element.getBoundingClientRect();
-  const frame = pane.getBoundingClientRect();
-  return (
-    box.left >= frame.left &&
-    box.right <= frame.right &&
-    box.top >= frame.top &&
-    box.bottom <= frame.bottom
-  );
-}
-
-/**
  * Walk the open guide to its end, asserting that each step names itself and that the element its
  * card points at is rendered where the reader can see it.
  */
 async function walk(page: Page, guideId: string, steps: readonly string[]): Promise<void> {
   const card = page.getByTestId("guide-card");
   for (const [index, id] of steps.entries()) {
-    await expect(card).toHaveAttribute("data-guide-id", guideId);
-    await expect(card).toHaveAttribute("data-guide-step", id);
-    await expect(card).toHaveAttribute("data-guide-anchor", /.+/, { timeout: 15000 });
-    const anchor = await card.getAttribute("data-guide-anchor");
-    if (!anchor) throw new Error(`Guide step ${guideId}/${id} has no anchor`);
-    await expect(page.getByTestId("guide-spotlight")).toHaveAttribute("data-guide-anchor", anchor, {
-      timeout: 15000,
-    });
-    const target = page.locator(`[data-guide~="${anchor}"]:visible`).first();
-    await expect(target).toBeVisible({ timeout: 15000 });
-    await expect(target).toBeInViewport({ ratio: 0.5, timeout: 15000 });
-    await expect.poll(() => target.evaluate(insideItsPane), { timeout: 15000 }).toBe(true);
+    await expectGuideStep(page, guideId, id);
     if (index < steps.length - 1) await page.getByTestId("guide-next").click();
   }
   await page.getByTestId("guide-finish").click();

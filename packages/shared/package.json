@@ -37,6 +37,6 @@
   },
   "private": true,
   "devDependencies": {
-    "@types/nodemailer": "^8.0.1"
+    "@types/nodemailer": "^8.0.2"
   }
 }
