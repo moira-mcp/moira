@@ -615,7 +615,7 @@ test("a reconnection into a return is explained before it saves, and connections
   }
 });
 
-test("a block is added with a connected step in it, and only an empty block can be deleted", async ({
+test("a block is added with a connected step in it and labelled rewires persist", async ({
   page,
 }) => {
   await loginAsAdmin(page);
@@ -625,16 +625,6 @@ test("a block is added with a connected step in it, and only an empty block can 
     await openEditing(page, id);
     await expect(page.getByTestId("block-delete-plan")).toBeDisabled();
 
-    await page.getByTestId("block-add").click();
-    await page.getByTestId("add-block-id").fill("triage");
-    await page.getByTestId("add-block-label").fill("Triage the task");
-    await page.getByTestId("add-block-summary").fill("Decide how much work the task needs.");
-    await page.getByTestId("add-block-after").click();
-    await page.getByRole("option", { name: /Understand the task/ }).click();
-    await page.getByTestId("add-block-confirm").click();
-    // A new block owns nothing yet: it can be deleted again, and added back.
-    await page.getByTestId("block-delete-triage").click();
-    await expect(page.getByTestId("map-contents-triage")).toHaveCount(0);
     await page.getByTestId("block-add").click();
     await page.getByTestId("add-block-id").fill("triage");
     await page.getByTestId("add-block-label").fill("Triage the task");
@@ -690,6 +680,66 @@ test("a block is added with a connected step in it, and only an empty block can 
       connectionLabels: { success: "size decided" },
     });
     expect(saved.nodes.find((n: any) => n.id === "get-task").connections.success).toBe("sort-task");
+    expect(saved.nodes.find((n: any) => n.id === "get-task").connectionLabels.success).toBe(
+      "task contract written",
+    );
+  } finally {
+    await page.request.delete(`${BASE_URL}/api/workflows/${id}`);
+  }
+});
+
+test("an empty block can be deleted and added back, and moving its last step permits persisted deletion", async ({
+  page,
+}) => {
+  await loginAsAdmin(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const id = await copyQuickTask(page);
+  try {
+    await openEditing(page, id);
+    await expect(page.getByTestId("block-delete-plan")).toBeDisabled();
+    await page.getByTestId("block-add").click();
+    await page.getByTestId("add-block-id").fill("triage");
+    await page.getByTestId("add-block-label").fill("Triage the task");
+    await page.getByTestId("add-block-summary").fill("Decide how much work the task needs.");
+    await page.getByTestId("add-block-after").click();
+    await page.getByRole("option", { name: /Understand the task/ }).click();
+    await page.getByTestId("add-block-confirm").click();
+    // A newly added block owns nothing: deletion removes it and the same id can be added again.
+    await expect(page.getByTestId("block-delete-triage")).toBeEnabled();
+    await page.getByTestId("block-delete-triage").click();
+    await expect(page.getByTestId("map-contents-triage")).toHaveCount(0);
+    await page.getByTestId("block-add").click();
+    await page.getByTestId("add-block-id").fill("triage");
+    await page.getByTestId("add-block-label").fill("Triage the task");
+    await page.getByTestId("add-block-summary").fill("Decide how much work the task needs.");
+    await page.getByTestId("add-block-after").click();
+    await page.getByRole("option", { name: /Understand the task/ }).click();
+    await page.getByTestId("add-block-confirm").click();
+    await expect(page.getByTestId("block-delete-triage")).toBeEnabled();
+
+    // Seed this case's independent saved connected block through the real owner API; creation
+    // and wiring through the editor are the preceding case's responsibility.
+    const current = await detailOf(page, id);
+    const workflow = current.workflow;
+    workflow.progress.nodes.splice(1, 0, {
+      id: "triage",
+      label: "Triage the task",
+      content: { summary: "Decide how much work the task needs." },
+    });
+    workflow.nodes.push({
+      type: "agent-directive",
+      id: "sort-task",
+      directive: "Decide whether the task is small.",
+      completionCondition: "The size is recorded.",
+      progressNodeId: "triage",
+      connections: { success: "create-plan" },
+      connectionLabels: { success: "size decided" },
+    });
+    workflow.nodes.find((n: any) => n.id === "get-task").connections.success = "sort-task";
+    const seeded = await page.request.put(`${BASE_URL}/api/workflows/${id}`, {
+      data: { workflow, expectedRevision: current.fileInfo.revision },
+    });
+    expect(seeded.status()).toBe(200);
 
     // Moving the block's last step out empties it (a problem until it goes); then it can be deleted.
     await page.goto(`${BASE_URL}/workflows/${id}?edit=1`);
@@ -705,6 +755,15 @@ test("a block is added with a connected step in it, and only an empty block can 
     const emptied = (await detailOf(page, id)).workflow;
     expect(emptied.progress.nodes.map((b: any) => b.id)).not.toContain("triage");
     expect(emptied.nodes.find((n: any) => n.id === "sort-task").progressNodeId).toBe("scope");
+    expect(emptied.nodes.find((n: any) => n.id === "sort-task").connections).toEqual({
+      success: "create-plan",
+    });
+    expect(emptied.nodes.find((n: any) => n.id === "sort-task").connectionLabels).toEqual({
+      success: "size decided",
+    });
+    expect(emptied.nodes.find((n: any) => n.id === "get-task").connections.success).toBe(
+      "sort-task",
+    );
   } finally {
     await page.request.delete(`${BASE_URL}/api/workflows/${id}`);
   }
@@ -985,6 +1044,27 @@ test("dropping an output on empty graph space creates a connected step, and the 
     await page.getByTestId("flow-edit-export-toggle").click();
     await page.getByTestId("flow-edit-undo").click();
 
+    await focusGraphNode(page, "create-plan");
+    const output = page.locator(
+      `${GRAPH} [data-graph-node="create-plan"] [data-port="out"][data-transition="create-plan.success"]`,
+    );
+    await expect
+      .poll(() =>
+        output.evaluate((element) => {
+          const box = element.getBoundingClientRect();
+          const pane = element.closest(".react-flow")!.getBoundingClientRect();
+          const x = box.left + box.width / 2;
+          const y = box.top + box.height / 2;
+          return (
+            x >= pane.left &&
+            x <= pane.right &&
+            y >= pane.top &&
+            y <= pane.bottom &&
+            document.elementFromPoint(x, y)?.closest("[data-port]") === element
+          );
+        }),
+      )
+      .toBe(true);
     await canvasAction(
       page,
       `${GRAPH} [data-graph-node="create-plan"] [data-port="out"][data-transition="create-plan.success"]`,
@@ -1031,6 +1111,52 @@ test("a graph canvas step joins its block, while a drag outside the pane changes
       x: pane.x + pane.width + 80,
       y: pane.y + pane.height / 2,
     }));
+    await expect(page.getByTestId("add-step-dialog")).toHaveCount(0);
+    await expect(page.getByTestId("name-output-dialog")).toHaveCount(0);
+    await expect(page.getByTestId("flow-edit-count")).toContainText("0");
+  } finally {
+    await page.request.delete(`${BASE_URL}/api/workflows/${id}`);
+  }
+});
+
+test("releasing a graph output over the visible Navigator creates no dialog or edit", async ({
+  page,
+}) => {
+  await loginAsAdmin(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const id = await copyQuickTask(page);
+  try {
+    await openGraphEditing(page, id);
+    await focusGraphNode(page, "start");
+    const toggle = page.getByTestId("graph-toolbar").getByTestId("toolbar-minimap");
+    await expect(toggle).not.toHaveAttribute("aria-pressed", "true");
+    await toggle.click();
+    await expect(toggle).toHaveAttribute("aria-pressed", "true");
+    const navigator = page.locator(`${GRAPH} .react-flow__minimap svg`);
+    await expect(navigator).toBeVisible();
+    let release: { x: number; y: number } | undefined;
+    await dragPort(page, `${GRAPH} [data-graph-node="start"] [data-new-output]`, async (pane) => {
+      const box = await restingBox(page, `${GRAPH} .react-flow__minimap svg`);
+      expect(box.x).toBeGreaterThanOrEqual(pane.x);
+      expect(box.y).toBeGreaterThanOrEqual(pane.y);
+      expect(box.x + box.width).toBeLessThanOrEqual(pane.x + pane.width);
+      expect(box.y + box.height).toBeLessThanOrEqual(pane.y + pane.height);
+      release = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+      expect(
+        await navigator.evaluate(
+          (svg, point) => svg.contains(document.elementFromPoint(point.x, point.y)),
+          release,
+        ),
+      ).toBe(true);
+      return release;
+    });
+    // The release lands on the actual SVG (or its drawn rect/path), inside this graph's pane.
+    expect(
+      await navigator.evaluate(
+        (svg, point) => svg.contains(document.elementFromPoint(point.x, point.y)),
+        release!,
+      ),
+    ).toBe(true);
     await expect(page.getByTestId("add-step-dialog")).toHaveCount(0);
     await expect(page.getByTestId("name-output-dialog")).toHaveCount(0);
     await expect(page.getByTestId("flow-edit-count")).toContainText("0");
