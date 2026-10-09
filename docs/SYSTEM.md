@@ -397,14 +397,30 @@ Batch definition access uses `AuthorizationService.canMany` with the same centra
 single-resource read, including the strongest direct or group grant; it does not give an operator
 the owner's authority.
 
+File-backed overview reads use `withReadSnapshot` in `packages/shared/src/database/connection.ts`.
+It opens an independent read-only SQLite connection, requires write-ahead logging (WAL), and pins a
+read transaction before the first awaited discovery. The shared writer remains outside that
+transaction and can commit while the reader awaits. The reader rolls back its transaction and
+closes its connection on success or failure.
+
+`withExecutionTaskTitles` in `packages/web-backend/src/utils/execution-task-titles.ts` uses the same
+snapshot for native user and administrator execution lists and analytics attention rows. Its
+callback must construct the native repository from the supplied database, so membership, count,
+page identities and selective heading dependencies, including authorized definitions and defaults,
+come from that snapshot. A subsequent request reads subsequent commits. The database-generation
+guard remains active inside the snapshot, with bounded retries and `ConflictError` if it cannot
+settle. A private in-memory database cannot be reopened; it retains its original connection and
+relies on that guard. `executionTaskTitles` preserves the identity and complete context of supplied
+authorized execution snapshots while reading their authored heading dependencies; it does not
+replace those inputs with later stored execution state.
+
 `progressReadDependencies` determines the variables, counter histories and list windows needed
 for the compact projection. `ExecutionRepository.getManyForProgress` selects those values before
 they cross SQLite: unrelated variables, node states, journals and reminders are not returned.
 List windows preserve array length, item indices, counter semantics and JSON value types. Runtime
 fragment dependencies are discovered in additional batches; their depth, rather than the number of
-page rows, determines these reads. Changing snapshots receive bounded retries and a `ConflictError`
-if they do not settle. A moving cursor can require the needed list in full to keep its counters and
-items coherent. These narrowed execution objects are read-only inputs and must never be saved.
+page rows, determines these reads. A moving cursor can require the needed list in full to keep its
+counters and items coherent. These narrowed execution objects are read-only inputs and must never be saved.
 
 `projectExecutionRunSummary` shares the full projection's route, stage, wait and list rules while
 omitting narrative content, facts, route output and inactive lists. The active list carries its

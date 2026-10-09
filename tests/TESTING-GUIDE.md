@@ -24,6 +24,11 @@ npm run test:workflow -- --file tests/workflow/engine/template-processor.test.ts
 npm run test:e2e -- --file tests/e2e/admin-panel.spec.ts
 ```
 
+E2E runs installation-wide settings writers in `global-settings` before parallel `chromium`
+readers. A selected Chromium file also runs the complete dependency project; a selected
+global-settings file runs only its matching cases. See [E2E projects](docs/test-infrastructure.md#e2e-projects)
+for scheduling and dependency-failure semantics.
+
 For a worktree whose normal CI ports are already occupied, copy `.env.ci` to an ignored local
 environment file and set unique `DOCKER_PORT`, `DOCKER_CONTAINER_NAME`, `DOCKER_IMAGE_NAME`,
 `MOIRA_HOST` and `STATIC_ARTIFACTS_DOMAIN` values. Run the complete Docker gate with that file and a
@@ -288,6 +293,12 @@ import { test, expect } from "./fixtures.js";
 import { test, expect } from "@playwright/test";
 ```
 
+Use `login` or `loginAsAdmin` from `tests/e2e/helpers/auth-helper.ts` for authenticated browser
+scenarios, including translation checks. The helper signs in through the real auth endpoint,
+installs its session cookie and sets the beta-acceptance cookie by default. Navigation then uses
+ordinary actionable clicks while admission rechecks settle. Tests of the login form itself use
+the browser-based auth helper.
+
 ### Test Structure
 
 ```typescript
@@ -505,6 +516,11 @@ If the answer to #2 is "yes" and #3 is "no" — don't write the test.
 
 ## Analyzing Failures
 
+A successful raw JSON report alone does not establish a passing run. Inspect the aggregated
+runner outcome and executor log when preparation, teardown or process completion fails; the
+[framework result guard](docs/test-infrastructure.md#how-it-works) distinguishes those failures
+from executed test assertions.
+
 1. **Read `.md` failure reports first** - clean error messages
 2. **Read `.log` if tests crash** - full console output
 3. **Analyze database** if needed
@@ -528,6 +544,10 @@ E2E_CPU_THROTTLE=8 npm run test:e2e -- --file tests/e2e/flow-page.spec.ts -- --r
 Fix what the slowness exposes; do not raise a timeout. A spec acting on a diagram waits for the
 diagram's `data-diagram-settled="true"` (`settledCamera` in `tests/e2e/helpers/diagram.ts`), never
 for a camera value that a second layout pass or an animated placement can still change.
+
+For a phone guide's dock/geometry assertion, sample `data-guide-dock` and its bounding rectangle
+inside one `locator.evaluate` call. Separate browser reads can observe different top/bottom
+placements while target reveal or entrance motion changes the card.
 
 ---
 

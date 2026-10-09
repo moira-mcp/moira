@@ -128,10 +128,12 @@ test.describe("Flow list items", () => {
     await expect(ownedCard.getByRole("button", { name: "Delete Workflow" })).toBeVisible();
 
     // A public workflow of another owner offers no delete button to this user
+    await page.getByPlaceholder(/Search workflows|Поиск воркфлоу/).fill(PUBLIC_WORKFLOW.name);
     const foreignCard = page
       .locator('[data-testid="workflow-card"]')
       .filter({ hasText: PUBLIC_WORKFLOW.name })
       .first();
+    await expect(foreignCard).toBeVisible();
     await foreignCard.hover();
     await expect(foreignCard.getByRole("button", { name: "Delete Workflow" })).toHaveCount(0);
   });

@@ -39,9 +39,6 @@ test.describe("User Profile Management", () => {
         timeout: 15000,
       });
 
-      // Security section is also visible (scrollable page, no tabs)
-      await expect(page.getByLabel("Current Password")).toBeVisible();
-
       // Check user data fields are visible
       await expect(page.getByLabel("Name")).toBeVisible();
       await expect(page.getByLabel("Email")).toBeVisible();
@@ -50,6 +47,10 @@ test.describe("User Profile Management", () => {
       const emailInput = page.getByLabel("Email");
       const emailValue = await emailInput.inputValue();
       expect(emailValue).toBe(testUser.email);
+
+      // Security is reached through its task tab while the account panel is retained.
+      await page.getByTestId("settings-nav-security").click();
+      await expect(page.getByLabel("Current Password")).toBeVisible();
 
       console.log("✓ Profile page loaded with user data");
     });
@@ -184,7 +185,8 @@ test.describe("User Profile Management", () => {
       await page.goto(`${BASE_URL}/settings`);
       await page.waitForLoadState("domcontentloaded");
 
-      // Wait for security section to be visible on scrollable page (no tab switching needed)
+      await page.getByTestId("settings-nav-security").click();
+      // The Security tab exposes the password form.
       await expect(page.getByLabel("Current Password")).toBeVisible({
         timeout: 15000,
       });
@@ -214,7 +216,8 @@ test.describe("User Profile Management", () => {
       await page.goto(`${BASE_URL}/settings`);
       await page.waitForLoadState("domcontentloaded");
 
-      // Security section visible on scrollable page (no tab switching)
+      await page.getByTestId("settings-nav-security").click();
+      // The Security tab exposes the password form.
       await expect(page.getByLabel("Current Password")).toBeVisible({ timeout: 15000 });
       await page.getByLabel("Current Password").fill(testUser.password);
       await page.getByLabel("New Password").fill("NewPassword123!");
@@ -246,7 +249,8 @@ test.describe("User Profile Management", () => {
       await page.goto(`${BASE_URL}/settings`);
       await page.waitForLoadState("domcontentloaded");
 
-      // Security section visible on scrollable page (no tab switching)
+      await page.getByTestId("settings-nav-security").click();
+      // The Security tab exposes the password form.
       await expect(page.getByLabel("Current Password")).toBeVisible({ timeout: 15000 });
 
       // Fill with password shorter than 6 characters
@@ -283,7 +287,8 @@ test.describe("User Profile Management", () => {
       await page.goto(`${BASE_URL}/settings`);
       await page.waitForLoadState("domcontentloaded");
 
-      // Security section visible on scrollable page (no tab switching)
+      await page.getByTestId("settings-nav-security").click();
+      // The Security tab exposes the password form.
       const newPasswordInput = page.getByLabel("New Password");
       await expect(newPasswordInput).toBeVisible({ timeout: 15000 });
 
@@ -320,7 +325,8 @@ test.describe("User Profile Management", () => {
       await page.goto(`${BASE_URL}/settings`);
       await page.waitForLoadState("domcontentloaded");
 
-      // Security section visible on scrollable page (no tab switching)
+      await page.getByTestId("settings-nav-security").click();
+      // The Security tab exposes the password form.
       await expect(page.getByLabel("Current Password")).toBeVisible({ timeout: 15000 });
 
       // Fill with valid matching passwords

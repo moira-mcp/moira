@@ -18,12 +18,7 @@ test.describe("i18n URL Parameter Support", () => {
     await page.waitForLoadState("domcontentloaded");
 
     // Check for Russian content
-    const pageContent = await page.content();
-    const hasRussian =
-      pageContent.includes("Войти") ||
-      pageContent.includes("Вход") ||
-      pageContent.includes("Пароль");
-    expect(hasRussian).toBe(true);
+    await expect(page.getByLabel("Пароль", { exact: true })).toBeVisible();
 
     // Verify localStorage has language preference
     const storedLang = await page.evaluate(() => localStorage.getItem("i18nextLng"));
@@ -48,12 +43,7 @@ test.describe("i18n URL Parameter Support", () => {
     expect(storedLang).toBe("ru");
 
     // Verify Russian content is still shown
-    const pageContent = await page.content();
-    const hasRussian =
-      pageContent.includes("Войти") ||
-      pageContent.includes("Вход") ||
-      pageContent.includes("Пароль");
-    expect(hasRussian).toBe(true);
+    await expect(page.getByLabel("Пароль", { exact: true })).toBeVisible();
   });
 
   test("should switch to English with ?lang=en parameter", async ({ page }) => {
@@ -66,12 +56,7 @@ test.describe("i18n URL Parameter Support", () => {
     await page.waitForLoadState("domcontentloaded");
 
     // Check for English content
-    const pageContent = await page.content();
-    const hasEnglish =
-      pageContent.includes("Sign In") ||
-      pageContent.includes("Log in") ||
-      pageContent.includes("Password");
-    expect(hasEnglish).toBe(true);
+    await expect(page.getByLabel("Password", { exact: true })).toBeVisible();
 
     // Verify localStorage updated
     const storedLang = await page.evaluate(() => localStorage.getItem("i18nextLng"));

@@ -218,7 +218,7 @@ test("the flow page switches block, step, tab and view without remounting anythi
   // The step asked for is the one the camera settles on — not the first step of its block — and
   // it is clicked there.
   await settledCamera(page, GRAPH);
-  await page.locator('[data-graph-node="execute-step"]').click();
+  await page.locator('[data-graph-node="execute-step"] [data-step-title]').click();
   await expect(page.getByTestId("node-panel")).toHaveAttribute("data-node-id", "execute-step");
   await expectNoLoaders(page);
 

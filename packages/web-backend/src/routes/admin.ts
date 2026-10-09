@@ -1932,7 +1932,7 @@ router.get(
 router.get(
   "/executions",
   asyncHandler(async (req: Request, res: Response) => {
-    const { mapLegacyStatusArray, getDatabase } = await import("@mcp-moira/shared");
+    const { mapLegacyStatusArray } = await import("@mcp-moira/shared");
 
     const userId = req.query.userId as string | undefined;
     const statusParam = req.query.status as string | undefined;
@@ -1968,8 +1968,8 @@ router.get(
       }
     }
 
-    const result = await withExecutionTaskTitles(() =>
-      new ExecutionRepository(getDatabase()).listSummaries({
+    const result = await withExecutionTaskTitles((db) =>
+      new ExecutionRepository(db).listSummaries({
         userId: userId || undefined,
         status: adminDbStatuses,
         includeStopped,

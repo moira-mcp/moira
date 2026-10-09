@@ -4,6 +4,7 @@ import * as React from "react";
 import { Popover as PopoverPrimitive } from "radix-ui";
 
 import { cn } from "@/lib/utils";
+import { useModalLayers } from "./modal-layers";
 
 function Popover({ ...props }: React.ComponentProps<typeof PopoverPrimitive.Root>) {
   return <PopoverPrimitive.Root data-slot="popover" {...props} />;
@@ -15,13 +16,16 @@ function PopoverTrigger({ ...props }: React.ComponentProps<typeof PopoverPrimiti
 
 function PopoverContent({
   className,
+  style,
   align = "center",
   sideOffset = 4,
   ...props
 }: React.ComponentProps<typeof PopoverPrimitive.Content>) {
+  const layers = useModalLayers();
   return (
     <PopoverPrimitive.Portal>
       <PopoverPrimitive.Content
+        style={{ zIndex: layers.popup, ...style }}
         data-slot="popover-content"
         align={align}
         sideOffset={sideOffset}

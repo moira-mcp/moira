@@ -67,8 +67,8 @@ router.get(
 router.get(
   "/attention",
   asyncHandler(async (req: Request, res: Response) => {
-    const data = await withExecutionTaskTitles(() =>
-      analytics().attention(
+    const data = await withExecutionTaskTitles((db) =>
+      new AdminAnalyticsRepository(db).attention(
         parseAnalyticsQuery(req.query, "week"),
         (req as AuthenticatedRequest).userId,
       ),

@@ -24,6 +24,8 @@ const { ReadScopeBoundary } =
   await import("../../../packages/web-frontend/src/auth/ReadScopeBoundary");
 const { authClient } = await import("../../../packages/web-frontend/src/auth/better-auth-client");
 const { apiClient } = await import("../../../packages/web-frontend/src/services/api-client");
+const { revalidateReadSession, getReadIdentity } =
+  await import("../../../packages/web-frontend/src/services/read-scope");
 
 const originalFetch = globalThis.fetch;
 const originalReact = globalThis.React;
@@ -48,6 +50,8 @@ let finishSave!: (response: Response) => void;
 let checkStarted: Promise<void>;
 let saveStarted: Promise<void>;
 let consoleError: ReturnType<typeof jest.spyOn>;
+let holdSessionReads: boolean;
+let sessionReads: Array<{ aborted: boolean; finish: (response: Response) => void }>;
 function json(data: unknown, status = 200) {
   return new Response(JSON.stringify(data), {
     status,
@@ -60,6 +64,8 @@ beforeEach(async () => {
   current = sessionFor("owner-a");
   holdOldCheck = false;
   holdOldSave = false;
+  holdSessionReads = false;
+  sessionReads = [];
   let startedCheck!: () => void;
   let startedSave!: () => void;
   checkStarted = new Promise((resolve) => {
@@ -76,7 +82,25 @@ beforeEach(async () => {
   });
   globalThis.fetch = jest.fn<typeof fetch>().mockImplementation(async (input, init) => {
     const url = String(input);
-    if (url.includes("/get-session")) return json(current);
+    if (url.includes("/get-session")) {
+      if (!holdSessionReads) return json(current);
+      return new Promise<Response>((resolve, reject) => {
+        const read = {
+          aborted: false,
+          finish: (response: Response) => {
+            init?.signal?.removeEventListener("abort", abort);
+            resolve(response);
+          },
+        };
+        const abort = () => {
+          read.aborted = true;
+          reject(new DOMException("Session read canceled", "AbortError"));
+        };
+        sessionReads.push(read);
+        init?.signal?.addEventListener("abort", abort, { once: true });
+        if (init?.signal?.aborted) abort();
+      });
+    }
     if (url.includes("/sign-in/email"))
       return json({ code: "INVALID_EMAIL_OR_PASSWORD", message: "Invalid email or password" }, 401);
     if (url.includes("/oauth/consent/check")) {
@@ -112,6 +136,7 @@ beforeEach(async () => {
 });
 afterEach(async () => {
   cleanup();
+  holdSessionReads = false;
   finishCheck(json({ data: { hasConsent: false } }));
   finishSave(json({ success: true }));
   current = null;
@@ -122,7 +147,7 @@ afterEach(async () => {
 });
 
 function mount() {
-  render(
+  return render(
     <I18nextProvider i18n={i18n}>
       <MemoryRouter
         initialEntries={[
@@ -212,3 +237,39 @@ test("anonymous OAuth login remains a live public form during a failed real auth
   expect(email).toBeVisible();
   expect(email).toHaveValue("typed@example.test");
 });
+
+test.each(["same owner", "replacement", "error", "unmounted"])(
+  "owned consent save waits for the actual %s session after its refetch is canceled",
+  async (outcome) => {
+    holdOldSave = true;
+    const mounted = mount();
+    fireEvent.click(
+      await screen.findByRole("button", { name: i18n.t("pages.oauthAuthorize.allow") }),
+    );
+    await saveStarted;
+    current = {
+      ...sessionFor("owner-a"),
+      session: { ...sessionFor("owner-a").session, id: "renewed-owner-a-session" },
+    };
+    await act(async () => authClient.$store.atoms.session.get().refetch());
+    holdSessionReads = true;
+    await act(async () => finishSave(json({ success: true })));
+    const canceled = sessionReads.at(-1)!;
+    expect(authClient.$store.atoms.session.get().isRefetching).toBe(true);
+    await act(async () => revalidateReadSession());
+    expect(canceled.aborted).toBe(true);
+    expect(getReadIdentity()).toBeNull();
+    expect(navigationAttempts()).toEqual([]);
+    if (outcome === "replacement") current = sessionFor("owner-b");
+    if (outcome === "unmounted") mounted.unmount();
+    holdSessionReads = false;
+    await act(async () => {
+      for (const read of sessionReads.filter((read) => !read.aborted))
+        read.finish(
+          outcome === "error" ? json({ message: "Session check unavailable" }, 500) : json(current),
+        );
+    });
+    expect(navigationAttempts()).toHaveLength(outcome === "same owner" ? 1 : 0);
+    if (outcome === "replacement") expect(screen.getByText("owner-b@example.test")).toBeVisible();
+  },
+);

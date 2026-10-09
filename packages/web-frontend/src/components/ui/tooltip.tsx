@@ -2,6 +2,7 @@ import * as React from "react";
 import * as TooltipPrimitive from "@radix-ui/react-tooltip";
 
 import { cn } from "@/lib/utils";
+import { useModalLayers } from "./modal-layers";
 
 function TooltipProvider({
   delayDuration = 0,
@@ -30,13 +31,16 @@ function TooltipTrigger({ ...props }: React.ComponentProps<typeof TooltipPrimiti
 
 function TooltipContent({
   className,
+  style,
   sideOffset = 0,
   children,
   ...props
 }: React.ComponentProps<typeof TooltipPrimitive.Content>) {
+  const layers = useModalLayers();
   return (
     <TooltipPrimitive.Portal>
       <TooltipPrimitive.Content
+        style={{ zIndex: layers.popup, ...style }}
         data-slot="tooltip-content"
         sideOffset={sideOffset}
         className={cn(

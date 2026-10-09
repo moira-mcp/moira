@@ -22,8 +22,7 @@ test.describe("Theme Loading State", () => {
 
     // The page should have bg-background class somewhere in the DOM
     // This verifies the loading state uses theme CSS variables
-    const bgBackgroundElements = await page.locator(".bg-background").count();
-    expect(bgBackgroundElements).toBeGreaterThan(0);
+    await expect(page.locator(".bg-background").first()).toBeVisible();
 
     // Verify no hardcoded white background on the main container
     const mainDiv = page.locator("body > div").first();
@@ -45,8 +44,7 @@ test.describe("Theme Loading State", () => {
     await page.waitForLoadState("domcontentloaded");
 
     // The page should have bg-background class
-    const bgBackgroundElements = await page.locator(".bg-background").count();
-    expect(bgBackgroundElements).toBeGreaterThan(0);
+    await expect(page.locator(".bg-background").first()).toBeVisible();
 
     // Verify consistent background styling
     const mainDiv = page.locator("body > div").first();
@@ -63,6 +61,7 @@ test.describe("Theme Loading State", () => {
     await page.goto(`${BASE_URL}/login`);
     await page.waitForLoadState("domcontentloaded");
 
+    await expect(page.locator(".bg-background").first()).toBeVisible();
     // Get initial background color
     const loginBgColor = await page.evaluate(() => {
       const el = document.querySelector(".bg-background");
@@ -73,18 +72,18 @@ test.describe("Theme Loading State", () => {
 
     // Navigate to register
     const registerLink = page.getByRole("link", { name: /sign up|register/i });
-    if ((await registerLink.count()) > 0) {
-      await registerLink.click();
-      await page.waitForLoadState("domcontentloaded");
+    await expect(registerLink).toBeVisible();
+    await registerLink.click();
+    await expect(page).toHaveURL(/\/register/);
+    await expect(page.locator(".bg-background").first()).toBeVisible();
 
-      // Get register page background color
-      const registerBgColor = await page.evaluate(() => {
-        const el = document.querySelector(".bg-background");
-        return el ? window.getComputedStyle(el).backgroundColor : null;
-      });
+    // Get register page background color
+    const registerBgColor = await page.evaluate(() => {
+      const el = document.querySelector(".bg-background");
+      return el ? window.getComputedStyle(el).backgroundColor : null;
+    });
 
-      // Both pages should have the same background color (theme consistent)
-      expect(registerBgColor).toBe(loginBgColor);
-    }
+    // Both pages should have the same background color (theme consistent)
+    expect(registerBgColor).toBe(loginBgColor);
   });
 });

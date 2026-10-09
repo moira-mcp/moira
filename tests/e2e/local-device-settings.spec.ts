@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { test, expect } from "./fixtures.js";
 import { createTestUser, login } from "./helpers/auth-helper.js";
 import { getTestBaseUrl } from "../utils/test-config.js";
@@ -19,7 +19,7 @@ test("local computer settings keep requested and applied week policy distinct th
   await createTestUser(email, "LocalEditor123!", "Local editor owner", true);
   await login(page, email, "LocalEditor123!");
   const deviceId = randomUUID();
-  const credential = "L".repeat(43);
+  const credential = randomBytes(32).toString("base64url");
   const GiB = 1024 ** 3;
   let policy: LocalPublicPolicy = {
     version: 1,

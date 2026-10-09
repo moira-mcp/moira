@@ -171,7 +171,8 @@ async function withOwnCopy(page: Page, run: (id: string) => Promise<void>): Prom
 }
 
 test("the flow page's tour shows its owner the edit switch", async ({ page }) => {
-  await loginAsAdmin(page);
+  // A reader's completed shared steps must not turn the owner's walk into an updates-only tour.
+  await freshReader(page, "flow-owner");
   await page.setViewportSize({ width: 1600, height: 1000 });
   await withOwnCopy(page, async () => {
     await expect(page.getByTestId("flow-edit-toggle")).toBeVisible({ timeout: 20000 });
@@ -205,6 +206,46 @@ for (const [guideId, opener, steps] of [
     await page.getByTestId(opener).click();
     await walk(page, guideId, steps);
   });
+}
+
+for (const language of ["en", "ru"] as const) {
+  for (const viewport of [
+    { name: "desktop", width: 1440, height: 900 },
+    { name: "phone", width: 390, height: 600 },
+  ]) {
+    test(`long Settings guide text remains readable with reachable navigation (${language}, ${viewport.name})`, async ({
+      page,
+    }) => {
+      await freshReader(page, `long-guide-${language}-${viewport.name}`);
+      await page.setViewportSize({ width: viewport.width, height: viewport.height });
+      await page.goto(`${BASE_URL}/settings?lang=${language}&guide=settings&step=local-devices`);
+      const card = page.getByTestId("guide-card");
+      await expect(card).toHaveAttribute("data-guide-step", "local-devices");
+      await expect(card).toBeInViewport({ ratio: 1 });
+      const next = page.getByTestId("guide-next");
+      const close = page.getByTestId("guide-close");
+      await expect(next).toBeInViewport({ ratio: 1 });
+      await expect(close).toBeInViewport({ ratio: 1 });
+
+      // Reading to the end of the explanation scrolls only its text, not the actions.
+      const text = page.getByTestId("guide-text-scroll");
+      await expect(text).toBeVisible();
+      await text.evaluate((element) => {
+        element.scrollTop = element.scrollHeight;
+      });
+      await expect
+        .poll(() =>
+          text.evaluate((element) =>
+            Math.abs(element.scrollHeight - element.clientHeight - element.scrollTop),
+          ),
+        )
+        .toBeLessThanOrEqual(1);
+      await expect(next).toBeInViewport({ ratio: 1 });
+      await expect(close).toBeInViewport({ ratio: 1 });
+      await next.click();
+      await expect(card).toHaveAttribute("data-guide-step", "apps");
+    });
+  }
 }
 
 test("the flow page's tour explains the level badge of a flow built at a level", async ({
@@ -264,11 +305,18 @@ test("on a phone the card is a bottom sheet, and a desktop-only step is skipped 
     // The sheet spans the screen along an edge: the bottom, or the top when the element is under
     // the bottom (the panel's tabs sit low on a phone).
     await expect(card).toHaveAttribute("data-guide-dock", /^(bottom|top)$/);
-    const dock = await card.getAttribute("data-guide-dock");
-    const box = (await card.boundingBox())!;
-    expect(box.width).toBeGreaterThanOrEqual(385);
-    const gap = dock === "top" ? box.y : 844 - (box.y + box.height);
-    expect(gap).toBeLessThanOrEqual(4);
+    // Revealing the target can change the sheet's edge. Read its edge and geometry in one
+    // browser sample, then wait for the layout and entrance motion to satisfy both bounds.
+    await expect
+      .poll(() =>
+        card.evaluate((element) => {
+          const dock = element.getAttribute("data-guide-dock");
+          const box = element.getBoundingClientRect();
+          const gap = dock === "top" ? box.top : window.innerHeight - box.bottom;
+          return (dock === "top" || dock === "bottom") && box.width >= 385 && Math.abs(gap) <= 4;
+        }),
+      )
+      .toBe(true);
     // The visibility controls and the edit switch are drawn only on a wide screen: the owner's two
     // steps after the panel's tabs are skipped with a note — and never shown on the way, where
     // they could take a click.

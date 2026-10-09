@@ -11,13 +11,12 @@ import { blockUserViaApi } from "../utils/mcp-auth.js";
 test.describe("User Blocking E2E", () => {
   test("complete blocking scenario: login → block → kicked out → login rejected → unblock → login successful", async ({
     page,
-    context,
+    browser,
   }) => {
     // This is a complex multi-step test, increase timeout
     test.slow();
 
     const baseUrl = getTestBaseUrl();
-    const fetchUrl = getTestFetchUrl();
 
     // Step 1: Create and verify test user
     const testEmail = `block-e2e-${Date.now()}@test.com`;
@@ -46,95 +45,100 @@ test.describe("User Blocking E2E", () => {
     expect(page.url()).toMatch(/\/(\/workflows)?/);
 
     // Step 3: Open admin panel in new page - go directly to user detail page
-    const adminPage = await context.newPage();
-    await loginAsAdmin(adminPage);
-    await adminPage.goto(`${baseUrl}/admin/users/${testUserId}`);
+    const adminContext = await browser.newContext();
+    const adminPage = await adminContext.newPage();
+    try {
+      await loginAsAdmin(adminPage);
+      await adminPage.goto(`${baseUrl}/admin/users/${testUserId}`);
 
-    // Step 4: Block the user via Dialog with reason input
-    const blockButton = adminPage.locator('button:has-text("Block User")');
-    await expect(blockButton).toBeVisible({ timeout: 5000 });
+      // Step 4: Block the user via Dialog with reason input
+      const blockButton = adminPage.locator('button:has-text("Block User")');
+      await expect(blockButton).toBeVisible({ timeout: 5000 });
 
-    // Start listening for response BEFORE clicking (to avoid race condition)
-    const blockResponsePromise = adminPage.waitForResponse(
-      (response) => response.url().includes("/block") && response.status() === 200,
-      { timeout: 15000 },
-    );
+      // Start listening for response BEFORE clicking (to avoid race condition)
+      const blockResponsePromise = adminPage.waitForResponse(
+        (response) => response.url().includes("/block") && response.status() === 200,
+        { timeout: 15000 },
+      );
 
-    await blockButton.click();
+      await blockButton.click();
 
-    // Fill in block reason in the Dialog
-    await adminPage.locator('[role="dialog"]').waitFor();
-    await adminPage.locator('[role="dialog"] input').fill("E2E test block");
-    await adminPage.locator('[role="dialog"] button:has-text("Block User")').click();
+      // Fill in block reason in the Dialog
+      const blockDialog = adminPage.getByRole("alertdialog", { name: "Block User", exact: true });
+      await expect(blockDialog).toBeVisible();
+      await blockDialog.getByRole("textbox").fill("E2E test block");
+      await blockDialog.getByRole("button", { name: "Block User", exact: true }).click();
 
-    // Wait for API call to complete
-    await blockResponsePromise;
+      // Wait for API call to complete
+      await blockResponsePromise;
 
-    // Verify user shows as blocked in UI (badge in header area)
-    await expect(adminPage.getByText("Blocked", { exact: true })).toBeVisible({ timeout: 5000 });
+      // Verify user shows as blocked in UI (badge in header area)
+      await expect(adminPage.getByText("Blocked", { exact: true })).toBeVisible({ timeout: 5000 });
 
-    // Step 5: Verify user cannot login when blocked
-    // Note: Session cache may still be valid for a short time after block,
-    // so we test the login rejection directly instead of session invalidation
-    // Clear browser cookies to simulate session expiry
-    await page.context().clearCookies();
+      // Step 5: Verify user cannot login when blocked
+      // Note: Session cache may still be valid for a short time after block,
+      // so we test the login rejection directly instead of session invalidation
+      // Clear browser cookies to simulate session expiry
+      await page.context().clearCookies();
 
-    // Navigate to login
-    await page.goto(`${baseUrl}/login`);
+      // Navigate to login
+      await page.goto(`${baseUrl}/login`);
 
-    // Step 6: Try to login as blocked user - should fail
-    await page.fill('input[type="email"]', testEmail);
-    await page.fill('input[type="password"]', testPassword);
-    await page.click('button[type="submit"]');
+      // Step 6: Try to login as blocked user - should fail
+      await page.fill('input[type="email"]', testEmail);
+      await page.fill('input[type="password"]', testPassword);
+      await page.click('button[type="submit"]');
 
-    // Should see error message about blocked account
-    // STRICT: Only accept "blocked" messages, NOT Internal Server Error (that would indicate a bug)
-    await expect(page.locator("text=/blocked|Account.*blocked/i").first()).toBeVisible({
-      timeout: 5000,
-    });
+      // Should see error message about blocked account
+      // STRICT: Only accept "blocked" messages, NOT Internal Server Error (that would indicate a bug)
+      await expect(page.locator("text=/blocked|Account.*blocked/i").first()).toBeVisible({
+        timeout: 5000,
+      });
 
-    // Should NOT redirect to workflows
-    expect(page.url()).toContain("/login");
+      // Should NOT redirect to workflows
+      expect(page.url()).toContain("/login");
 
-    // Step 7: Unblock user via admin panel
-    // Re-login as admin (session may have expired during test)
-    await loginAsAdmin(adminPage);
-    await adminPage.goto(`${baseUrl}/admin/users/${testUserId}`);
-    await adminPage.waitForLoadState("domcontentloaded");
+      // Step 7: Unblock user via admin panel
+      // Re-login as admin (session may have expired during test)
+      await loginAsAdmin(adminPage);
+      await adminPage.goto(`${baseUrl}/admin/users/${testUserId}`);
+      await adminPage.waitForLoadState("domcontentloaded");
 
-    const unblockButton = adminPage.locator('button:has-text("Unblock User")');
-    await expect(unblockButton).toBeVisible({ timeout: 10000 });
+      const unblockButton = adminPage.locator('button:has-text("Unblock User")');
+      await expect(unblockButton).toBeVisible({ timeout: 10000 });
 
-    // Start listening for response BEFORE clicking (to avoid race condition)
-    const unblockResponsePromise = adminPage.waitForResponse(
-      (response) => response.url().includes("/unblock") && response.status() === 200,
-      { timeout: 15000 },
-    );
+      // Start listening for response BEFORE clicking (to avoid race condition)
+      const unblockResponsePromise = adminPage.waitForResponse(
+        (response) => response.url().includes("/unblock") && response.status() === 200,
+        { timeout: 15000 },
+      );
 
-    await unblockButton.click();
+      await unblockButton.click();
 
-    // Confirm in AlertDialog
-    await adminPage.locator('[role="alertdialog"]').waitFor();
-    await adminPage.locator('[role="alertdialog"] button:has-text("Unblock User")').click();
+      // Confirm in AlertDialog
+      await adminPage.locator('[role="alertdialog"]').waitFor();
+      await adminPage.locator('[role="alertdialog"] button:has-text("Unblock User")').click();
 
-    // Wait for API call to complete
-    await unblockResponsePromise;
+      // Wait for API call to complete
+      await unblockResponsePromise;
 
-    // Step 8: Login as unblocked user - should succeed
-    await page.goto(`${baseUrl}/login`);
-    await page.fill('input[type="email"]', testEmail);
-    await page.fill('input[type="password"]', testPassword);
-    await page.click('button[type="submit"]');
+      // Step 8: Login as unblocked user - should succeed
+      await page.goto(`${baseUrl}/login`);
+      await page.fill('input[type="email"]', testEmail);
+      await page.fill('input[type="password"]', testPassword);
+      await page.click('button[type="submit"]');
 
-    // Should successfully redirect to app
-    await page.waitForURL(
-      (url) => url.toString().includes("/") && !url.toString().includes("/login"),
-      { timeout: 10000 },
-    );
-    expect(page.url()).toMatch(/\/(\/workflows)?/);
+      // Should successfully redirect to app
+      await page.waitForURL(
+        (url) => url.toString().includes("/") && !url.toString().includes("/login"),
+        { timeout: 10000 },
+      );
+      expect(page.url()).toMatch(/\/(\/workflows)?/);
 
-    // Cleanup
-    await adminPage.close();
+      // Cleanup
+    } finally {
+      await adminContext.close();
+    }
   });
 
   test("blocked user cannot login after being blocked", async ({ page }) => {

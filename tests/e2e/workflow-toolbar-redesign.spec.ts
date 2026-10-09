@@ -43,7 +43,7 @@ test.describe("Workflow Explorer Toolbar", () => {
 
   test("should display pagination info", async ({ page }) => {
     // Pagination shows "X / Y" indicator instead of "N workflows found" text
-    const paginationIndicator = page.locator("text=/\\d+ \\/ \\d+/");
+    const paginationIndicator = page.getByTestId("data-list-pagination").getByText(/^\d+ \/ \d+$/);
     await expect(paginationIndicator).toBeVisible({ timeout: 10000 });
   });
 
@@ -61,21 +61,16 @@ test.describe("Workflow Explorer Toolbar", () => {
   });
 
   test("should reset pagination when filter changes", async ({ page }) => {
-    // Open the filters, then the status filter dropdown
+    const pagination = page.getByTestId("data-list-pagination");
+    // Opening filters can change page size; settle that layout before selecting page 2.
     await page.getByTestId("filters-toggle").click();
-    const statusFilter = page.locator('[data-testid="status-filter"]');
-    await statusFilter.click();
-
-    // Select "Valid" option
-    await page.getByRole("option", { name: "Valid", exact: true }).click();
-    await page.waitForTimeout(500);
-
-    // If there was pagination, it should reset to page 1
-    const pageIndicator = page.locator("text=/^1 \\/ \\d+$/");
-    const indicatorVisible = await pageIndicator.isVisible().catch(() => false);
-
-    if (indicatorVisible) {
-      await expect(pageIndicator).toContainText("1 /");
-    }
+    await page.waitForLoadState("networkidle");
+    await expect(pagination.getByText(/^1 \/ \d+$/)).toBeVisible();
+    await page.getByTestId("pagination-next").click();
+    await expect(pagination.getByText(/^2 \/ \d+$/)).toBeVisible();
+    await page.getByTestId("sort-select").click();
+    await page.getByRole("option", { name: /Name.*↑/ }).click();
+    await expect(pagination.getByText(/^1 \/ \d+$/)).toBeVisible();
+    await expect(page.getByTestId("pagination-prev")).toBeDisabled();
   });
 });

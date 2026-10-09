@@ -4,7 +4,7 @@ import { afterEach, beforeEach, expect, jest, test } from "@jest/globals";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import "@testing-library/jest-dom/jest-globals";
 import { I18nextProvider } from "react-i18next";
-import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
+import { MemoryRouter, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import i18n from "../../../packages/web-frontend/src/i18n";
 
 jest.unstable_mockModule("../../../packages/web-frontend/src/hooks/useFeatures", () => ({
@@ -28,6 +28,8 @@ const { ProtectedRoute } =
 const { ForcedPasswordReset } =
   await import("../../../packages/web-frontend/src/pages/ForcedPasswordReset");
 const { ROUTES } = await import("../../../packages/web-frontend/src/constants/routes");
+const { revalidateReadSession, getReadIdentity } =
+  await import("../../../packages/web-frontend/src/services/read-scope");
 
 const originalFetch = globalThis.fetch;
 const originalReact = globalThis.React;
@@ -49,6 +51,9 @@ let authRequests: string[];
 let signInCredentials: Array<{ email: string; password: string }>;
 let failSignIn: "network" | "http" | false;
 let heldSignIn: Promise<Response> | undefined;
+let holdSessionReads: boolean;
+let holdAfterSignIn: boolean;
+let sessionReads: Array<{ aborted: boolean; finish: (response: Response) => void }>;
 beforeEach(async () => {
   jest.useFakeTimers();
   globalThis.React = React;
@@ -58,9 +63,30 @@ beforeEach(async () => {
   signInCredentials = [];
   failSignIn = false;
   heldSignIn = undefined;
+  holdSessionReads = false;
+  holdAfterSignIn = false;
+  sessionReads = [];
   globalThis.fetch = jest.fn<typeof fetch>().mockImplementation(async (input, init) => {
     const url = new URL(String(input), "http://localhost").pathname;
-    if (url.endsWith("/get-session")) return Response.json(current);
+    if (url.endsWith("/get-session")) {
+      if (!holdSessionReads) return Response.json(current);
+      return new Promise<Response>((resolve, reject) => {
+        const read = {
+          aborted: false,
+          finish: (response: Response) => {
+            init?.signal?.removeEventListener("abort", abort);
+            resolve(response);
+          },
+        };
+        const abort = () => {
+          read.aborted = true;
+          reject(new DOMException("Session read canceled", "AbortError"));
+        };
+        sessionReads.push(read);
+        init?.signal?.addEventListener("abort", abort, { once: true });
+        if (init?.signal?.aborted) abort();
+      });
+    }
     authRequests.push(url);
     if (url.endsWith("/sign-in/email")) {
       const credentials = JSON.parse(String(init?.body)) as { email: string; password: string };
@@ -82,6 +108,7 @@ beforeEach(async () => {
           updatedAt: "2026-02-01T00:00:00.000Z",
         },
       };
+      holdSessionReads = holdAfterSignIn;
       return Response.json({ token: "renewed-token", user: current.user });
     }
     if (url.endsWith("/sign-out")) {
@@ -118,6 +145,7 @@ beforeEach(async () => {
 });
 afterEach(async () => {
   cleanup();
+  holdSessionReads = false;
   current = null;
   await authClient.$store.atoms.session.get().refetch();
   jest.clearAllTimers();
@@ -128,11 +156,13 @@ afterEach(async () => {
 });
 function Observation() {
   const location = useLocation();
+  const navigate = useNavigate();
   const { authError } = useAuthError();
   return (
     <>
       <output data-testid="location">{location.pathname}</output>
       <output data-testid="global-error">{authError}</output>
+      <button onClick={() => navigate("/elsewhere")}>Leave reset</button>
     </>
   );
 }
@@ -291,3 +321,72 @@ test("an owned refused change retains its form and shows the current server erro
   expect(screen.getByLabelText(i18n.t("pages.forcedPasswordReset.currentPassword"))).toBeEnabled();
   expect(authRequests).toEqual([]);
 });
+
+async function finishSessionReads(response: Response) {
+  holdSessionReads = false;
+  await act(async () => {
+    for (const read of sessionReads.filter((read) => !read.aborted)) read.finish(response.clone());
+  });
+}
+
+test.each(["same owner", "replacement", "error", "unmounted"])(
+  "a canceled post-login refetch waits for the actual %s settlement",
+  async (outcome) => {
+    await submit();
+    holdAfterSignIn = true;
+    await act(async () => resolveChange());
+    expect(signInCredentials).toEqual([
+      { email: "owner-a@example.test", password: "NewPassword456!" },
+    ]);
+    expect(authClient.$store.atoms.session.get().isRefetching).toBe(true);
+    const canceled = sessionReads.at(-1)!;
+    await act(async () => revalidateReadSession());
+    expect(canceled.aborted).toBe(true);
+    expect(authClient.$store.atoms.session.get().isRefetching).toBe(true);
+    expect(getReadIdentity()).toBeNull();
+    await act(async () => jest.advanceTimersByTime(1500));
+    expect(screen.getByTestId("location")).toHaveTextContent(ROUTES.FORCED_PASSWORD_RESET);
+    if (outcome === "replacement") current = sessionFor("owner-b");
+    if (outcome === "unmounted") fireEvent.click(screen.getByText("Leave reset"));
+    await finishSessionReads(
+      outcome === "error"
+        ? Response.json({ message: "Session check unavailable" }, { status: 500 })
+        : Response.json(current),
+    );
+    await act(async () => jest.advanceTimersByTime(1500));
+    expect(screen.getByTestId("location").textContent).toBe(
+      outcome === "same owner"
+        ? ROUTES.WORKFLOWS
+        : outcome === "unmounted"
+          ? "/elsewhere"
+          : ROUTES.FORCED_PASSWORD_RESET,
+    );
+    expect(authRequests.filter((url) => url.endsWith("/revoke-session"))).toEqual([]);
+    if (outcome === "replacement")
+      expect(authClient.$store.atoms.session.get().data?.user.id).toBe("owner-b");
+  },
+);
+
+test.each(["same owner", "replacement", "unmounted"])(
+  "a due redirect waits through a held %s session refresh",
+  async (outcome) => {
+    await submit();
+    await act(async () => resolveChange());
+    expect(authClient.$store.atoms.session.get().data?.session.id).toBe("renewed-a-session");
+    holdSessionReads = true;
+    await act(async () => revalidateReadSession());
+    await act(async () => jest.advanceTimersByTime(1500));
+    expect(screen.getByTestId("location")).toHaveTextContent(ROUTES.FORCED_PASSWORD_RESET);
+    if (outcome === "replacement") current = sessionFor("owner-b");
+    if (outcome === "unmounted") fireEvent.click(screen.getByText("Leave reset"));
+    await finishSessionReads(Response.json(current));
+    expect(screen.getByTestId("location").textContent).toBe(
+      outcome === "same owner"
+        ? ROUTES.WORKFLOWS
+        : outcome === "unmounted"
+          ? "/elsewhere"
+          : ROUTES.FORCED_PASSWORD_RESET,
+    );
+    expect(authRequests.filter((url) => url.endsWith("/revoke-session"))).toEqual([]);
+  },
+);

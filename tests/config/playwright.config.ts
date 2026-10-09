@@ -24,11 +24,20 @@ const externalServiceIgnores =
         "**/visual-regression.spec.ts",
       ]
     : [];
+const commonTestIgnores = ["**/auth-mvp/**", "**/packages/**", ...externalServiceIgnores];
+// These specs mutate the same installation-wide settings; finish them before parallel readers.
+const globalSettingsSpecs = [
+  "**/admin-settings.spec.ts",
+  "**/admin-settings-regions.spec.ts",
+  "**/admin-prompt-editor.spec.ts",
+  "**/mcp-prompts.spec.ts",
+  "**/settings-value-history.spec.ts",
+];
 
 export default defineConfig({
   testDir: join(projectRoot, "tests/e2e"),
   testMatch: "**/*.spec.ts",
-  testIgnore: ["**/auth-mvp/**", "**/packages/**", ...externalServiceIgnores],
+  testIgnore: commonTestIgnores,
   // Per test: the slowest test measured alone takes about 2 s and about 10 s under four
   // parallel workers; 30 s leaves headroom without hiding a hung page. Remote browsers add
   // transfer latency to every step.
@@ -64,7 +73,16 @@ export default defineConfig({
   ],
   projects: [
     {
+      name: "global-settings",
+      testMatch: globalSettingsSpecs,
+      workers: 1,
+      fullyParallel: false,
+      use: { ...devices["Desktop Chrome"] },
+    },
+    {
       name: "chromium",
+      testIgnore: [...commonTestIgnores, ...globalSettingsSpecs],
+      dependencies: ["global-settings"],
       use: { ...devices["Desktop Chrome"] },
     },
   ],

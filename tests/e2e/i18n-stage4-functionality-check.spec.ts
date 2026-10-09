@@ -34,13 +34,14 @@ test.describe("Stage 4 Functionality Verification", () => {
     await expect(page.locator("text=Database Size")).toBeVisible();
   });
 
-  // 4. Admin Dashboard quick links navigation
-  test("4. Admin Dashboard quick links", async ({ page }) => {
+  // 4. Admin Dashboard links to the complete management inventories
+  test("4. Admin Dashboard management links", async ({ page }) => {
     await loginAsAdmin(page);
     await page.goto(`${BASE_URL}/admin`);
     await page.waitForLoadState("domcontentloaded");
-    await expect(page.locator("text=Quick Links")).toBeVisible();
-    await expect(page.locator("text=User Management")).toBeVisible();
+    await expect(page.getByRole("link", { name: /^Manage all users/ }).first()).toBeVisible();
+    await expect(page.getByRole("link", { name: /^Manage all runs/ })).toBeVisible();
+    await expect(page.getByRole("link", { name: /^Manage all flows/ })).toBeVisible();
   });
 
   // 5. Admin Executions page filters
@@ -192,7 +193,7 @@ test.describe("Stage 4 Functionality Verification", () => {
     await loginAsAdmin(page);
     await page.goto(`${BASE_URL}/admin/settings`);
     await page.waitForLoadState("domcontentloaded");
-    await page.getByRole("tab", { name: "Maintenance" }).click();
+    await page.getByTestId("admin-settings-nav-maintenance").click();
     await expect(page.locator("text=Database Maintenance")).toBeVisible();
     await expect(page.locator('button:has-text("Vacuum")')).toBeVisible();
     await expect(page.locator('button:has-text("Backup")')).toBeVisible();

@@ -15,7 +15,8 @@ const { OAuthConsent } = await import("../../../packages/web-frontend/src/pages/
 const { ReadScopeBoundary } =
   await import("../../../packages/web-frontend/src/auth/ReadScopeBoundary");
 const { authClient } = await import("../../../packages/web-frontend/src/auth/better-auth-client");
-const { getReadIdentity } = await import("../../../packages/web-frontend/src/services/read-scope");
+const { getReadIdentity, revalidateReadSession } =
+  await import("../../../packages/web-frontend/src/services/read-scope");
 
 const originalFetch = globalThis.fetch;
 const originalReact = globalThis.React;
@@ -34,16 +35,38 @@ function sessionFor(id: string) {
 }
 let current: ReturnType<typeof sessionFor> | null;
 let finishConsent: (response: Response) => void;
+let holdSessionReads: boolean;
+let sessionReads: Array<{ aborted: boolean; finish: (response: Response) => void }>;
 beforeEach(async () => {
   globalThis.React = React;
   await i18n.changeLanguage("en");
   current = sessionFor("owner-a");
+  holdSessionReads = false;
+  sessionReads = [];
   const consent = new Promise<Response>((resolve) => {
     finishConsent = resolve;
   });
   globalThis.fetch = jest.fn<typeof fetch>().mockImplementation(async (input, init) => {
     const url = String(input);
-    if (url.includes("/get-session")) return Response.json(current);
+    if (url.includes("/get-session")) {
+      if (!holdSessionReads) return Response.json(current);
+      return new Promise<Response>((resolve, reject) => {
+        const read = {
+          aborted: false,
+          finish: (response: Response) => {
+            init?.signal?.removeEventListener("abort", abort);
+            resolve(response);
+          },
+        };
+        const abort = () => {
+          read.aborted = true;
+          reject(new DOMException("Session read canceled", "AbortError"));
+        };
+        sessionReads.push(read);
+        init?.signal?.addEventListener("abort", abort, { once: true });
+        if (init?.signal?.aborted) abort();
+      });
+    }
     if (url.includes("/sign-out")) {
       current = null;
       return Response.json({ success: true });
@@ -55,6 +78,7 @@ beforeEach(async () => {
 });
 afterEach(async () => {
   cleanup();
+  holdSessionReads = false;
   finishConsent(Response.json({}));
   current = null;
   await authClient.$store.atoms.session.get().refetch();
@@ -72,7 +96,7 @@ function Location() {
   );
 }
 function mountConsent() {
-  render(
+  return render(
     <I18nextProvider i18n={i18n}>
       <MemoryRouter
         initialEntries={["/oauth/consent?client_id=client&consent_code=code&scope=openid"]}
@@ -138,5 +162,40 @@ test.each([200, 400])(
     expect(screen.getByText("owner-b@example.test")).toBeVisible();
     expect(screen.queryByText("Previous owner consent error")).toBeNull();
     expect(screen.getByRole("button", { name: i18n.t("pages.oauthConsent.allow") })).toBeEnabled();
+  },
+);
+
+test.each(["same owner", "replacement", "error", "unmounted"])(
+  "accepted consent waits for the actual %s session after its refetch is canceled",
+  async (outcome) => {
+    const mounted = mountConsent();
+    await act(async () => {});
+    fireEvent.click(screen.getByRole("button", { name: i18n.t("pages.oauthConsent.allow") }));
+    holdSessionReads = true;
+    await act(async () => finishConsent(Response.json({})));
+    const canceled = sessionReads.at(-1)!;
+    expect(authClient.$store.atoms.session.get().isRefetching).toBe(true);
+    await act(async () => revalidateReadSession());
+    expect(canceled.aborted).toBe(true);
+    expect(getReadIdentity()).toBeNull();
+    expect(screen.getByTestId("location")).toHaveTextContent("/oauth/consent");
+    if (outcome === "replacement") current = sessionFor("owner-b");
+    if (outcome === "unmounted") mounted.unmount();
+    holdSessionReads = false;
+    await act(async () => {
+      for (const read of sessionReads.filter((read) => !read.aborted))
+        read.finish(
+          outcome === "error"
+            ? Response.json({ message: "Session check unavailable" }, { status: 500 })
+            : Response.json(current),
+        );
+    });
+    if (outcome === "unmounted") expect(screen.queryByTestId("location")).toBeNull();
+    else
+      expect(screen.getByTestId("location").textContent).toBe(
+        outcome === "same owner"
+          ? "/"
+          : "/oauth/consent?client_id=client&consent_code=code&scope=openid",
+      );
   },
 );

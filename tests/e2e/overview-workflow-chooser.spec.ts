@@ -17,7 +17,7 @@ for (const viewport of [
 ]) {
   test(`the ${viewport.label} chooser selects a flow beyond two summary pages`, async ({
     page,
-  }, testInfo) => {
+  }) => {
     if (
       isExternalTarget() ||
       new URL(baseUrl).port !== process.env.DOCKER_PORT ||
@@ -109,18 +109,15 @@ for (const viewport of [
       await page.locator('[data-slot="command-input"]').fill(chosenName);
       const choice = page.getByRole("option", { name: chosenName, exact: true });
       await expect(choice).toBeVisible();
+      // A wider sibling sort label must not widen the chooser's grid track and clip its options.
+      await expect
+        .poll(() =>
+          page
+            .getByTestId("overview-filters-popover")
+            .evaluate((element) => element.scrollWidth - element.clientWidth),
+        )
+        .toBe(0);
       await expect(choice).toBeInViewport({ ratio: 1 });
-      await page
-        .getByTestId("overview-filters-popover")
-        .evaluate((element) =>
-          Promise.all(
-            element.getAnimations({ subtree: true }).map((animation) => animation.finished),
-          ),
-        );
-      await page.screenshot({
-        path: testInfo.outputPath(`overview-chooser-${viewport.label}.png`),
-        fullPage: true,
-      });
       const filteredResponse = page.waitForResponse((response) => {
         const url = new URL(response.url());
         return (
@@ -138,15 +135,14 @@ for (const viewport of [
       await expect(page.getByTestId("overview-card")).toHaveCount(1);
       await expect(card).toContainText(taskTitle);
       await expect(card).toContainText(chosenName);
-      await page.screenshot({
-        path: testInfo.outputPath(`overview-chosen-flow-${viewport.label}.png`),
-        fullPage: true,
-      });
       // Every control remains reachable inside the bounded popover, even at the mobile edge.
       await page.getByTestId("overview-filters").click();
       const popover = page.getByTestId("overview-filters-popover");
       await expect(popover).toBeInViewport({ ratio: 1 });
       await popover.locator("summary").click();
+      await expect
+        .poll(() => popover.evaluate((element) => element.scrollWidth - element.clientWidth))
+        .toBe(0);
       const sort = page.getByTestId("overview-filter-sort");
       await sort.scrollIntoViewIfNeeded();
       await expect(sort).toBeInViewport({ ratio: 1 });
@@ -161,10 +157,6 @@ for (const viewport of [
       await reset.click();
       await expect(page).not.toHaveURL(/workflowId=|period=|idle=|activeFrom=|activeTo=|q=|page=/);
       await expect(page.getByTestId("overview-period")).toHaveText("Last 7 days");
-      await page.screenshot({
-        path: testInfo.outputPath(`overview-filters-reset-${viewport.label}.png`),
-        fullPage: true,
-      });
     } finally {
       dockerExecSync([
         "node",

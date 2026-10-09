@@ -54,9 +54,9 @@ test.describe("Workflow List Performance", () => {
     const workflowRequests: string[] = [];
     const recommendedRequests: string[] = [];
     page.on("request", (request) => {
-      const url = request.url();
-      if (url.includes("/api/workflows") && request.method() === "GET") {
-        (url.includes("slugs=") ? recommendedRequests : workflowRequests).push(url);
+      const url = new URL(request.url());
+      if (url.pathname === "/api/workflows" && request.method() === "GET") {
+        (url.searchParams.has("slugs") ? recommendedRequests : workflowRequests).push(url.href);
       }
     });
 
@@ -74,6 +74,7 @@ test.describe("Workflow List Performance", () => {
     // during initial layout. Allow up to 3 requests during layout stabilization.
     // The key invariant: no duplicate URLs (same params shouldn't be fetched twice)
     const uniqueRequests = [...new Set(workflowRequests)];
+    expect(uniqueRequests.length).toBe(workflowRequests.length);
     expect(uniqueRequests.length).toBeLessThanOrEqual(3);
     // Must have at least 1 request
     expect(uniqueRequests.length).toBeGreaterThanOrEqual(1);
@@ -88,13 +89,14 @@ test.describe("Workflow List Performance", () => {
     await page.goto(`${BASE_URL}/workflows`);
     await page.waitForLoadState("domcontentloaded");
     await waitForWorkflowListLoaded(page);
+    await page.waitForLoadState("networkidle");
 
     // Clear request tracking and start fresh
     const searchRequests: string[] = [];
     page.on("request", (request) => {
-      const url = request.url();
-      if (url.includes("/api/workflows") && request.method() === "GET") {
-        searchRequests.push(url);
+      const url = new URL(request.url());
+      if (url.pathname === "/api/workflows" && request.method() === "GET") {
+        searchRequests.push(url.href);
       }
     });
 
@@ -109,7 +111,10 @@ test.describe("Workflow List Performance", () => {
     // Dynamic page sizing may cause an extra request if container resizes
     expect(searchRequests.length).toBeGreaterThanOrEqual(1);
     expect(searchRequests.length).toBeLessThanOrEqual(3);
-    const searchWithParam = searchRequests.find((url) => url.includes("search=test"));
+    expect(new Set(searchRequests).size).toBe(searchRequests.length);
+    const searchWithParam = searchRequests.find(
+      (url) => new URL(url).searchParams.get("search") === "test",
+    );
     expect(searchWithParam).toBeTruthy();
   });
 
@@ -125,38 +130,64 @@ test.describe("Workflow List Performance", () => {
     // Clear request tracking
     const sortRequests: string[] = [];
     page.on("request", (request) => {
-      const url = request.url();
-      if (url.includes("/api/workflows") && request.method() === "GET") {
-        sortRequests.push(url);
+      const url = new URL(request.url());
+      if (url.pathname === "/api/workflows" && request.method() === "GET") {
+        sortRequests.push(url.href);
       }
     });
 
-    // Open the optional filters, then find the sort dropdown (it shows "Date ↓" by default)
+    // Opening filters changes the list's available height. A debounced page-size request
+    // can still use the baseline sort before the option click completes.
     await page.getByTestId("filters-toggle").click();
+    await page.waitForLoadState("networkidle");
+    sortRequests.length = 0;
     const sortTrigger = page.locator('[data-testid="sort-select"]');
     await sortTrigger.click();
 
+    const sortResponsePromise = page.waitForResponse((response) => {
+      const url = new URL(response.url());
+      return (
+        url.pathname === "/api/workflows" &&
+        response.request().method() === "GET" &&
+        url.searchParams.get("sort") === "name" &&
+        url.searchParams.get("sortOrder") === "asc"
+      );
+    });
+
     // Click "Name ↑" option
     await page.getByRole("option", { name: /Name.*↑/ }).click();
+    expect((await sortResponsePromise).status()).toBe(200);
 
     // Wait for request
-    await page.waitForTimeout(500);
+    await page.waitForLoadState("networkidle");
 
     // Should have minimal requests for sort change
     // Dynamic page sizing may cause an extra request if container resizes
     expect(sortRequests.length).toBeGreaterThanOrEqual(1);
     expect(sortRequests.length).toBeLessThanOrEqual(3);
-    const sortByNameRequest = sortRequests.find((url) => url.includes("sort=name"));
-    expect(sortByNameRequest).toBeTruthy();
+    expect(new Set(sortRequests).size).toBe(sortRequests.length);
+    const sortParams = sortRequests.map((url) => new URL(url).searchParams);
+    const transitionIndex = sortParams.findIndex(
+      (params) => params.get("sort") === "name" && params.get("sortOrder") === "asc",
+    );
+    expect(transitionIndex).toBeGreaterThanOrEqual(0);
+    for (const params of sortParams.slice(0, transitionIndex)) {
+      expect(params.get("sort")).toBe("createdAt");
+      expect(params.get("sortOrder")).toBe("desc");
+    }
+    for (const params of sortParams.slice(transitionIndex)) {
+      expect(params.get("sort")).toBe("name");
+      expect(params.get("sortOrder")).toBe("asc");
+    }
   });
 
   test("no requests when not authenticated", async ({ page }) => {
     // Track API requests to /api/workflows
     const workflowRequests: string[] = [];
     page.on("request", (request) => {
-      const url = request.url();
-      if (url.includes("/api/workflows") && request.method() === "GET") {
-        workflowRequests.push(url);
+      const url = new URL(request.url());
+      if (url.pathname === "/api/workflows" && request.method() === "GET") {
+        workflowRequests.push(url.href);
       }
     });
 

@@ -9,7 +9,14 @@ All test suites are managed by **testfold** — a unified test runner configured
 1. `test-runner.config.mjs` defines the Jest and Playwright suite commands, environment variables, and environment routing
 2. `testfold` CLI orchestrates execution: runs suites (parallel or sequential), captures output, parses results
 3. Built-in parsers (Jest, Playwright) extract structured results from JSON output
-4. Built-in reporters generate console output, JSON summary, failure reports, timing stats
+4. The configured `afterSuite` hook verifies apparent framework success before reporting
+5. Built-in reporters generate console output, JSON summary, failure reports, timing stats
+
+`scripts/test-runner-result-guard.mjs` requires a zero process exit from the executor-owned log
+header and at least one executed passing test. Playwright also requires a valid empty global
+`errors` array. Missing or malformed evidence, a nonzero exit, global setup/teardown errors,
+and empty or skipped-only reports become infrastructure failures even when parsed JSON appears
+successful. Already classified test failures keep their original diagnostics and category.
 
 ### Why testfold
 
@@ -63,6 +70,10 @@ Each test suite creates:
 3. **Timing** - Per-test timing statistics (e.g., `unit-timing.txt`)
 4. **Failures/** - Individual `.md` per failed test (ANSI codes removed)
 
+The log begins with the executor's `Command`, `Exit Code` and `Duration` header before framework
+output. A line printed by the test process is not an authoritative exit code. Raw framework JSON
+and the aggregated runner result describe different boundaries; use the runner result for success.
+
 ### Output Locations
 
 ```
@@ -112,13 +123,26 @@ Tests use **@swc/jest** instead of ts-jest for faster TypeScript compilation.
 
 ### Parallel Execution
 
-| Category    | Workers | Notes                                 |
-| ----------- | ------- | ------------------------------------- |
-| Unit        | 2       | Memory-optimized for large test count |
-| Integration | 1       | Sequential files share one SQLite DB  |
-| API         | 5       | Parallel HTTP requests                |
-| MCP Tools   | 1       | Sequential (shared MCP state)         |
-| E2E         | 1       | Sequential (browser context)          |
+| Category    | Workers   | Notes                                           |
+| ----------- | --------- | ----------------------------------------------- |
+| Unit        | 2         | Memory-optimized for large test count           |
+| Integration | 1         | Sequential files share one SQLite DB            |
+| API         | 5         | Parallel HTTP requests                          |
+| MCP Tools   | 1         | Sequential (shared MCP state)                   |
+| E2E         | 1, then 4 | Global settings project, then parallel Chromium |
+
+### E2E Projects
+
+In `tests/config/playwright.config.ts`, `global-settings` runs the MCP prompt, settings import
+and global value-history specs with one worker and `fullyParallel: false`. These cases share
+installation-wide values, so the `chromium` project depends on their completion and excludes
+their files. Chromium runs the remaining specs with the global worker limit and parallel test
+execution. Both projects keep the same browser, server environment and common ignores.
+
+Selecting a Chromium file with `--file` also runs the complete `global-settings` dependency.
+Selecting a file belonging to `global-settings` runs its matching cases without the Chromium
+project. A failed global-settings test does not automatically skip its later cases as a serial
+suite would; an unsuccessful dependency prevents Chromium execution and leaves the run failed.
 
 ### Database
 

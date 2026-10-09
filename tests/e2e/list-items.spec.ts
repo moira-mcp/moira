@@ -114,7 +114,7 @@ test.describe("List items", () => {
     const email = `list-items-paging-${Date.now()}@example.com`;
     expect((await createTestUser(email, PASSWORD, "List Paging")).success).toBe(true);
     await login(page, email, PASSWORD);
-    // Older flows describe themselves over two lines; the four newest, listed first, have no
+    // Older flows describe themselves over two lines; the newest, listed first, has no
     // description and draw shorter
     const long =
       "A flow whose description runs long enough to fill the two lines a list item shows, so its " +
@@ -127,7 +127,7 @@ test.describe("List items", () => {
             metadata: {
               name: `Paging ${String(i).padStart(2, "0")}`,
               version: "1.0.0",
-              ...(i < 24 ? { description: long } : {}),
+              ...(i < 27 ? { description: long } : {}),
             },
             nodes: [
               { type: "start", id: "start", connections: { default: "end" } },
@@ -205,7 +205,7 @@ test.describe("List items", () => {
       const execution = await openListView(page, "/executions", '[data-testid="execution-card"]');
       await expectSlottedItem(execution);
       await expect(execution.locator("[data-status]")).toHaveText(
-        /^(Running|Waiting|Completed|Failed|Locked)$/,
+        /^(Running|Waiting for the agent|Waiting for you|Completed|Failed|Locked|Stopped)$/,
       );
 
       await execution.locator('[data-slot="card-title"]').focus();
@@ -216,36 +216,79 @@ test.describe("List items", () => {
     test("a slower answer to an older page-size request does not replace the newer page", async ({
       page,
     }) => {
-      // The audit log settles its page size in two overlapping requests: one sized by the typical
-      // item height, one by the measured items. The first of the two is held until the second has
-      // answered, so it answers last.
+      // Switching views changes page size; the grid can issue more than one sizing request.
+      // Hold every grid answer until the newer list has actually appeared in the browser.
       await page.setViewportSize({ width: 1440, height: 900 });
+      await openListView(page, "/admin/audit-log", '[data-testid="audit-log-card"]');
+      await page.waitForLoadState("networkidle");
+      const stableListLimit = await page.getByTestId("audit-log-card").count();
       const limits: number[] = [];
+      let phase: "grid" | "list" = "grid";
       let releaseHeld: () => void = () => undefined;
-      const laterAnswered = new Promise<void>((resolve) => (releaseHeld = resolve));
-      let heldDelivered: () => void = () => undefined;
-      const heldAnswer = new Promise<void>((resolve) => (heldDelivered = resolve));
+      const releaseOlder = new Promise<void>((resolve) => (releaseHeld = resolve));
+      let markHeld: () => void = () => undefined;
+      const requestHeld = new Promise<void>((resolve) => (markHeld = resolve));
+      const olderCompleted: Promise<unknown>[] = [];
+      let markNewer: () => void = () => undefined;
+      const newerDelivered = new Promise<void>((resolve) => (markNewer = resolve));
+      let newerTitles: string[] = [];
       await page.route("**/api/admin/audit-log?*", async (route) => {
-        const index = limits.push(Number(new URL(route.request().url()).searchParams.get("limit")));
-        if (index === 2) {
-          await laterAnswered;
-          await route.fulfill({ response: await route.fetch() });
-          heldDelivered();
+        const requestPhase = phase;
+        const limit = Number(new URL(route.request().url()).searchParams.get("limit"));
+        limits.push(limit);
+        const isOlder = requestPhase === "grid" || limit !== stableListLimit;
+        if (isOlder) {
+          const request = route.request();
+          olderCompleted.push(
+            page
+              .waitForResponse((response) => response.request() === request)
+              .then((response) => response.finished()),
+          );
+        }
+        const response = await route.fetch();
+        const body = await response.json();
+        // Legal action strings identify accepted pages, even when their counts happen to match.
+        const entries = body.data.entries.map(
+          (entry: { id: string; action: string }, index: number) => ({
+            ...entry,
+            action: `${isOlder ? "older-grid" : "newer-list"}-${limit}-${index}`,
+          }),
+        );
+        const json = { ...body, data: { ...body.data, entries } };
+        if (isOlder) {
+          markHeld();
+          await releaseOlder;
+          await route.fulfill({ response, json });
           return;
         }
-        await route.fulfill({ response: await route.fetch() });
-        if (index > 2) releaseHeld();
+        newerTitles = entries.map((entry: { action: string }) => entry.action);
+        await route.fulfill({ response, json });
+        markNewer();
       });
 
-      await openListView(page, "/admin/audit-log", '[data-testid="audit-log-card"]');
-      await heldAnswer;
+      await page.getByTestId("view-mode-grid").click();
+      await requestHeld;
+      phase = "list";
+      await page.getByTestId("view-mode-list").click();
+      await newerDelivered;
+      const titles = page.getByTestId("audit-log-card").locator('[data-slot="card-title"]');
+      await expect(titles).toHaveText(newerTitles);
+      const acceptedNewerTitles = await titles.allTextContents();
+      expect(acceptedNewerTitles).toHaveLength(stableListLimit);
+      expect(olderCompleted.length).toBeGreaterThanOrEqual(1);
+      expect(acceptedNewerTitles.every((title) => title.startsWith("newer-list-"))).toBe(true);
+      // Only now can an older page arrive: fulfilment alone never proves React accepted a page.
+      releaseHeld();
+      expect(await Promise.all(olderCompleted)).toEqual(olderCompleted.map(() => null));
       await page.waitForLoadState("networkidle");
       await page.evaluate(
         () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
       );
-      expect(limits.length).toBeGreaterThanOrEqual(3);
+      expect(limits.length).toBeGreaterThanOrEqual(2);
+      expect(limits[0]).not.toBe(limits[limits.length - 1]);
       // Read once, not retried: the older page must not have replaced the newer one
-      expect(await page.getByTestId("audit-log-card").count()).toBe(limits[limits.length - 1]);
+      expect(await titles.allTextContents()).toEqual(acceptedNewerTitles);
+      expect(await page.getByTestId("audit-log-card").count()).toBe(acceptedNewerTitles.length);
     });
 
     for (const { path, item } of [

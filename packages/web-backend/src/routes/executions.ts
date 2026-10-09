@@ -347,8 +347,8 @@ router.get(
         : undefined;
 
     // Get executions with filters
-    const result = await withExecutionTaskTitles(() =>
-      new ExecutionRepository(getDatabase()).listSummaries({
+    const result = await withExecutionTaskTitles((db) =>
+      new ExecutionRepository(db).listSummaries({
         userId: isAdmin && !mine ? undefined : userId, // Admins see all unless `mine`, users see only their own
         status: dbStatuses,
         workflowId,

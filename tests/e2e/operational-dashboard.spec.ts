@@ -33,7 +33,7 @@ test.describe("Operational Dashboard", () => {
       "Total Calls / Day",
       "Calls / Second",
       "Workflows Started / Day",
-      "Workflows Completed / Day",
+      "Genuine Completions / Day",
       "MCP Calls / Second",
     ];
     for (const metricLabel of expectedMetrics) {

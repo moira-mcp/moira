@@ -1,7 +1,7 @@
 /**
  * User OAuth and Sessions E2E Tests
  * Tests OAuth consents and sessions management on Settings page
- * All sections visible in flat layout (no tabs)
+ * Account, security, and connected apps are reached through their task tabs.
  */
 
 import { test, expect, Page } from "./fixtures.js";
@@ -10,22 +10,24 @@ import { getTestBaseUrl } from "../utils/test-config.js";
 
 const TEST_BASE_URL = getTestBaseUrl();
 
-/** Navigate to settings and scroll to Sessions section */
+/** Open Security and reveal its Sessions section. */
 async function goToSessionsSection(page: Page) {
   await page.goto(`${TEST_BASE_URL}/settings`);
   await page.waitForLoadState("domcontentloaded");
+  await page.getByTestId("settings-nav-security").click();
   const sessionsSection = page.getByTestId("settings-section-sessions");
+  await expect(sessionsSection).toBeVisible();
   await sessionsSection.scrollIntoViewIfNeeded();
-  await page.waitForTimeout(500);
 }
 
-/** Navigate to settings and scroll to OAuth section */
+/** Open Access and reveal its connected apps section. */
 async function goToOAuthSection(page: Page) {
   await page.goto(`${TEST_BASE_URL}/settings`);
   await page.waitForLoadState("domcontentloaded");
+  await page.getByTestId("settings-nav-access").click();
   const oauthSection = page.getByTestId("settings-section-oauth");
+  await expect(oauthSection).toBeVisible();
   await oauthSection.scrollIntoViewIfNeeded();
-  await page.waitForTimeout(500);
 }
 
 test.describe("User OAuth and Sessions Management", () => {
@@ -59,8 +61,7 @@ test.describe("User OAuth and Sessions Management", () => {
     });
 
     test("shows OAuth Authorizations section", async () => {
-      await page.goto(`${TEST_BASE_URL}/settings`);
-      await page.waitForLoadState("domcontentloaded");
+      await goToOAuthSection(page);
       await expect(page.getByTestId("settings-section-oauth")).toBeVisible();
     });
   });
@@ -163,6 +164,7 @@ test.describe("User OAuth and Sessions Management", () => {
       await goToSessionsSection(page);
 
       const remainingSessions = page.locator('[data-testid^="session-row-"]');
+      await expect(remainingSessions).toHaveCount(sessionCount - 1);
       const remainingCount = await remainingSessions.count();
       expect(remainingCount).toBeLessThan(sessionCount);
 
@@ -210,6 +212,7 @@ test.describe("User OAuth and Sessions Management", () => {
       );
       try {
         await page.goto(`${TEST_BASE_URL}/settings?lang=ru`);
+        await page.getByTestId("settings-nav-security").click();
         const sessions = page.getByTestId("settings-section-sessions");
         const unknown = sessions.getByTestId("session-row-unknown-everything");
         const located = sessions.getByTestId("session-row-located");
@@ -234,6 +237,7 @@ test.describe("User OAuth and Sessions Management", () => {
     const now = Date.now();
     const lists: ReadonlyArray<{
       name: string;
+      tab: "security" | "access";
       route: string;
       pager: string;
       row: (id: string) => string;
@@ -241,6 +245,7 @@ test.describe("User OAuth and Sessions Management", () => {
     }> = [
       {
         name: "sessions",
+        tab: "security",
         route: "**/api/user/sessions*",
         pager: "sessions-pager",
         row: (id: string) => `session-row-${id}`,
@@ -256,6 +261,7 @@ test.describe("User OAuth and Sessions Management", () => {
       },
       {
         name: "connected apps",
+        tab: "access",
         route: "**/api/user/oauth-consents*",
         pager: "oauth-pager",
         row: (id: string) => `oauth-consent-${id}`,
@@ -291,6 +297,7 @@ test.describe("User OAuth and Sessions Management", () => {
         });
         try {
           await page.goto(`${TEST_BASE_URL}/settings?lang=en`);
+          await page.getByTestId(`settings-nav-${list.tab}`).click();
           const pager = page.getByTestId(list.pager);
           await pager.scrollIntoViewIfNeeded();
           await expect(pager).toContainText("Showing 1-8 of 20");
@@ -320,14 +327,24 @@ test.describe("User OAuth and Sessions Management", () => {
   });
 
   test.describe("Section Visibility", () => {
-    test("all sections are visible on one page", async () => {
+    test("each task tab reveals its sections and retains the other panels", async () => {
       await page.goto(`${TEST_BASE_URL}/settings`);
       await page.waitForLoadState("domcontentloaded");
 
       await expect(page.getByTestId("settings-section-profile")).toBeVisible();
+      await expect(page.getByTestId("settings-section-security")).toBeHidden();
+      await expect(page.getByTestId("settings-section-oauth")).toBeHidden();
+
+      await page.getByTestId("settings-nav-security").click();
       await expect(page.getByTestId("settings-section-security")).toBeVisible();
-      await expect(page.getByTestId("settings-section-oauth")).toBeVisible();
       await expect(page.getByTestId("settings-section-sessions")).toBeVisible();
+      await expect(page.getByTestId("settings-section-profile")).toBeHidden();
+
+      await page.getByTestId("settings-nav-access").click();
+      await expect(page.getByTestId("settings-section-oauth")).toBeVisible();
+      await expect(page.getByTestId("settings-section-security")).toBeHidden();
+      await expect(page.getByTestId("settings-section-profile")).toBeAttached();
+      await expect(page.getByTestId("settings-section-security")).toBeAttached();
     });
   });
 });

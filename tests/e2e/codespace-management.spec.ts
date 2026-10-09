@@ -231,7 +231,8 @@ test("codespaces are created, stopped and deleted with confirmation from Setting
   await expect(management).not.toContainText(/chat|session/i);
   await expect(page.getByTestId(`github-codespace-state-${CODESPACE_ID}`)).toHaveText("Running");
   await expect(page.getByTestId(`github-codespace-state-${SECOND_ID}`)).toHaveText("Creating");
-  await expect(page.getByTestId(`github-codespace-delete-${SECOND_ID}`)).toBeDisabled();
+  // Deletion remains available while creation is pending so the owner can cancel the intent.
+  await expect(page.getByTestId(`github-codespace-delete-${SECOND_ID}`)).toBeEnabled();
   await expect(management).toContainText("personal billing");
   // The create hint and the limits panel count held codespaces, stopped ones included.
   await expect(page.getByTestId("github-codespace-create")).toContainText(
@@ -256,7 +257,9 @@ test("codespaces are created, stopped and deleted with confirmation from Setting
 
   await page.getByTestId("github-codespace-ref").fill("feature/e2e");
   await page.getByTestId("github-codespace-create-submit").click();
-  await expect(page.getByText("Codespace creation was accepted")).toBeVisible();
+  await expect(
+    page.getByText("Request accepted. Completion has not been confirmed yet."),
+  ).toBeVisible();
   await expect(page.getByTestId("github-codespace-list")).toContainText("feature/e2e");
 
   await page.getByTestId(`github-codespace-stop-${CODESPACE_ID}`).click();
@@ -344,7 +347,13 @@ test("a failed codespace request is explained in Russian, for a known and an unk
     ),
   ).toBeVisible();
   await page.getByTestId("github-codespace-create-submit").click();
-  await expect(page.getByText("Запрос к кодспейсу отклонён")).toBeVisible();
+  await expect(
+    page
+      .getByTestId("github-codespace-management")
+      .getByRole("alert")
+      .locator('[data-slot="alert-description"]')
+      .getByText("Запрос к кодспейсу отклонён", { exact: true }),
+  ).toBeVisible();
 
   await expect(page.getByText("A codespace quota or limit was reached")).toHaveCount(0);
   await expect(page.getByText("Brand new English failure")).toHaveCount(0);

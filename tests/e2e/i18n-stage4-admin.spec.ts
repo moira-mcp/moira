@@ -17,7 +17,7 @@ test.describe("i18n Stage 4 - Admin Section Pages Translations", () => {
       // Check admin dashboard content
       await expect(page.locator('h1:has-text("Admin Dashboard")')).toBeVisible({ timeout: 5000 });
       await expect(page.locator("text=Backend Status")).toBeVisible();
-      await expect(page.locator("text=Quick Links")).toBeVisible();
+      await expect(page.getByText("Maintenance", { exact: true })).toBeVisible();
       await expect(page.locator("text=Total Workflows").first()).toBeVisible();
     });
 
@@ -58,7 +58,7 @@ test.describe("i18n Stage 4 - Admin Section Pages Translations", () => {
       // Check settings page content (unified settings page with tabs)
       await expect(page.locator('h1:has-text("Settings")')).toBeVisible({ timeout: 5000 });
       await expect(page.locator("text=Create New Definition")).toBeVisible();
-      await page.getByRole("tab", { name: "Maintenance" }).click();
+      await page.getByTestId("admin-settings-nav-maintenance").click();
       await expect(page.locator("text=Database Maintenance")).toBeVisible();
     });
 
@@ -110,7 +110,7 @@ test.describe("i18n Stage 4 - Admin Section Pages Translations", () => {
         timeout: 5000,
       });
       await expect(page.locator("text=Статус бэкенда")).toBeVisible();
-      await expect(page.locator("text=Быстрые ссылки")).toBeVisible();
+      await expect(page.getByText("Обслуживание", { exact: true })).toBeVisible();
       await expect(page.locator("text=Всего воркфлоу").first()).toBeVisible();
     });
 
@@ -155,7 +155,7 @@ test.describe("i18n Stage 4 - Admin Section Pages Translations", () => {
         timeout: 5000,
       });
       await expect(page.locator("text=Создать новое определение")).toBeVisible();
-      await page.getByRole("tab", { name: /Обслуживание|Maintenance/ }).click();
+      await page.getByTestId("admin-settings-nav-maintenance").click();
       await expect(page.locator("text=Обслуживание базы данных")).toBeVisible();
     });
 

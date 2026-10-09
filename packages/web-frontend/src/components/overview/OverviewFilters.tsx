@@ -194,7 +194,11 @@ export function OverviewFiltersPopover({
             value={filters.sort}
             onValueChange={(value) => onChange({ sort: value as OverviewSort, page: 1 })}
           >
-            <SelectTrigger id="overview-sort" className="w-full" data-testid="overview-filter-sort">
+            <SelectTrigger
+              id="overview-sort"
+              className="h-auto min-h-9 w-full whitespace-normal text-left"
+              data-testid="overview-filter-sort"
+            >
               <SelectValue />
             </SelectTrigger>
             <SelectContent>

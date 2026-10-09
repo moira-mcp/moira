@@ -88,6 +88,27 @@ export const { useSession, signIn, signUp, signOut } = authClient;
 
 export type Session = typeof authClient.$Infer.Session;
 
+/** A canceled refetch promise can finish before the replacement session request settles. */
+export function waitForSessionSettlement(signal?: AbortSignal) {
+  const atom = authClient.$store.atoms.session;
+  return new Promise<ReturnType<typeof atom.get> | null>((resolve) => {
+    let unsubscribe = () => {};
+    const finish = (snapshot: ReturnType<typeof atom.get> | null) => {
+      unsubscribe();
+      signal?.removeEventListener("abort", abort);
+      resolve(snapshot);
+    };
+    const abort = () => finish(null);
+    const settled = (snapshot: ReturnType<typeof atom.get>) => {
+      if (!snapshot.isPending && !snapshot.isRefetching) finish(snapshot);
+    };
+    signal?.addEventListener("abort", abort, { once: true });
+    unsubscribe = atom.listen(settled);
+    if (signal?.aborted) abort();
+    else settled(atom.get());
+  });
+}
+
 /** Revoke the observed session, never whichever cookie became current in another tab.
  * The boolean permits caller-owned completion; it does not claim delivery on a failed request.
  */
@@ -114,19 +135,7 @@ export async function revokeObservedSession(
       // still decides whether the original caller may finish its login fallback.
     } finally {
       await atom.get().refetch();
-      // Installed refetch promises can resolve after cancellation by the delayed signal.
-      // Wait for the actual atom settlement rather than treating that promise as authority.
-      await new Promise<void>((resolve) => {
-        let unsubscribe = () => {};
-        const settled = (snapshot: ReturnType<typeof atom.get>) => {
-          if (!snapshot.isPending && !snapshot.isRefetching) {
-            unsubscribe();
-            resolve();
-          }
-        };
-        unsubscribe = atom.listen(settled);
-        settled(atom.get());
-      });
+      await waitForSessionSettlement();
     }
     const current = atom.get();
     return !replaced && !current.error && (!current.data || owner === getReadOwner());

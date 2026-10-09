@@ -33,15 +33,17 @@ The web app explains itself on screen:
   is remembered.
 - **"Show me around"** is in the sidebar at any time. It offers the full tour, this page's tour, continues
   a tour where you left it, and shows how far you are in each screen's tour. The full tour walks
-  the app's screens in order — home, flows, the example flow, runs, your latest run, notes,
+  the app's screens in order — home, overview, flows, the example flow, runs, your latest run, notes,
   playbooks, artifacts and Settings — and leaving a page pauses it until you continue. With no run
   yet, the run stop tells you how to start one. Under **Tutorials** it starts or resumes **Build
   your first flow**, a hands-on tutorial in the flow editor.
-- **"What is this?"** on a page runs that page's tour. Each card sits beside the part of the page
-  it explains. The right arrow or Enter goes on, the left arrow goes back, and Escape closes. When
+- **"What is this?"** on a page runs that page's tour. A card explains the relevant part of the page
+  beside it or along an edge of the screen; on a phone, it sits at the top or bottom. Long text
+  scrolls inside the card while Back, Next and Close stay visible. The right arrow or Enter goes
+  on, the left arrow goes back, and Escape closes. When
   a tour you have walked has new or changed steps, the button carries a dot, and pressing it shows
   only those steps.
-- **Every page of the app has a tour:** the home page, the flow list and each flow, the runs list
+- **Every page of the app has a tour:** the home page, the overview, the flow list and each flow, the runs list
   and each run, notes, playbooks, artifacts and Settings. The tours explain what a page is for and
   its main controls; steps about a panel you have hidden are skipped. The admin area has no tour.
 - **Where you stopped and what you have seen** follows your account to every browser. Settings →

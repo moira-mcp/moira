@@ -57,7 +57,7 @@ test.describe("Admin Logout All Users", () => {
     await expect(dialogTitle).toContainText(/Logout All|Разлогинить/);
 
     // Verify dialog has description
-    const dialogDescription = dialog.locator('p, [class*="description"]').first();
+    const dialogDescription = dialog.locator('[data-slot="alert-dialog-description"]');
     await expect(dialogDescription).toBeVisible();
   });
 
@@ -90,7 +90,11 @@ test.describe("Admin Logout All Users", () => {
       await route.fulfill({
         status: 200,
         contentType: "application/json",
-        body: JSON.stringify({ success: true, message: "All sessions invalidated" }),
+        body: JSON.stringify({
+          success: true,
+          data: { deletedSessions: 1, message: "All sessions invalidated" },
+          timestamp: new Date().toISOString(),
+        }),
       });
     });
 
@@ -120,14 +124,26 @@ test.describe("Admin Logout All Users", () => {
   });
 
   test("shows loading state during logout", async ({ page }) => {
-    // Mock the logout-all API to avoid killing other tests' sessions
+    let releaseResponse!: () => void;
+    const responseReleased = new Promise<void>((resolve) => {
+      releaseResponse = resolve;
+    });
+    let markRequestEntered!: () => void;
+    const requestEntered = new Promise<void>((resolve) => {
+      markRequestEntered = resolve;
+    });
+    // Keep the request pending until the loading UI has actually been checked.
     await page.route("**/api/admin/sessions/all", async (route) => {
-      // Add small delay to allow loading state to be visible
-      await new Promise((resolve) => setTimeout(resolve, 100));
+      markRequestEntered();
+      await responseReleased;
       await route.fulfill({
         status: 200,
         contentType: "application/json",
-        body: JSON.stringify({ success: true, message: "All sessions invalidated" }),
+        body: JSON.stringify({
+          success: true,
+          data: { deletedSessions: 1, message: "All sessions invalidated" },
+          timestamp: new Date().toISOString(),
+        }),
       });
     });
 
@@ -140,19 +156,24 @@ test.describe("Admin Logout All Users", () => {
     const dialog = page.locator('[role="alertdialog"]');
     await expect(dialog).toBeVisible();
 
-    // Click confirm and check for loading indicator
     const confirmButton = dialog.locator(
       'button:has-text("Logout All"), button:has-text("Разлогинить всех")',
     );
 
-    // Use Promise.race to catch loading state
-    const clickPromise = confirmButton.click();
+    try {
+      await confirmButton.click();
+      await requestEntered;
+      await expect(dialog).toBeVisible();
+      await expect(confirmButton).toBeDisabled();
+      await expect(confirmButton.locator("svg.animate-spin")).toBeVisible();
+      await expect(
+        dialog.getByRole("button", { name: /Cancel|Отмена/, exact: true }),
+      ).toBeDisabled();
+    } finally {
+      // A failed assertion must also release the route before browser teardown.
+      releaseResponse();
+    }
 
-    // The button might show loading spinner briefly
-    // We just verify the action completes without error
-    await clickPromise;
-
-    // Wait for dialog to close
     await expect(dialog).not.toBeVisible({ timeout: 5000 });
   });
 });

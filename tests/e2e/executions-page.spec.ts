@@ -86,7 +86,7 @@ test.describe("Executions Page", () => {
     // Fail the list request once: the page shows the error state with a Retry button
     let failNext = true;
     await page.route(
-      (url) => url.pathname.endsWith("/api/executions"),
+      (url) => url.pathname === "/api/executions" && url.searchParams.has("sort"),
       async (route) => {
         if (failNext) {
           failNext = false;
@@ -104,6 +104,7 @@ test.describe("Executions Page", () => {
     await page.goto(`${BASE_URL}/executions`);
     const retryButton = page.getByRole("button", { name: "Retry" });
     await expect(retryButton).toBeVisible({ timeout: 10000 });
+    await expect(page.getByTestId("locked-executions-region").getByRole("alert")).toHaveCount(0);
     await expect(page.getByTestId("execution-card")).toHaveCount(0);
 
     // Retry reloads the list; the next request succeeds and the cards render
