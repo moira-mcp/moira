@@ -206,6 +206,14 @@ shadcn/ui primitives in `src/components/ui/`: alert-dialog, alert, avatar, badge
 
 Additional: NumberTicker (Magic UI, animated counter using motion/react).
 
+`Dialog`, `AlertDialog` and `Sheet` provide `ModalLayerScope` from `ui/modal-layers.tsx`.
+Their backdrop, content and portaled controls occupy successive layers: content stays above its
+own backdrop, and Select, Popover, DropdownMenu, Tooltip and rich Hint surfaces stay above the
+content. A nested modal starts above its parent's popup layer. Compose these shared primitives
+so their React scope reaches child portals; delegated `HintLayer` reads the target's nearest
+`data-modal-popup-layer` because it lives outside that React scope. This ordering also applies
+when native exit animation retains content while its backdrop closes and reopens.
+
 Tooltips are one surface across the application: `ui/tooltip.tsx`'s `TooltipContent` and the
 diagram system's `Hint` both draw on the popover colours with a hairline border and a soft shadow,
 so no bubble inverts against the theme. `HintLayer` is mounted once in `App.tsx` and gives that same
@@ -423,6 +431,11 @@ that names a playbook) — plus whether a route is recorded. Pass a memoised con
   scroll area, and the sheet docks to the bottom unless the element would be under it there and a
   top sheet covers less of it (`sheetEdge`).
 
+The card's height is bounded by the viewport; `beside` also respects Radix's available popover
+height. Its explanation and skip/missing note scroll inside the shared `ScrollArea`. The title,
+Close, Back/Next and whole-tour action stay outside that scroll area, so the reader can reach
+them after reading a long explanation on either a wide or narrow screen.
+
 When the element sits in a modal dialog (the phone sidebar sheet), the card is rendered inside that
 dialog, which keeps it reachable; an element in a popover keeps the card in the page. Focus moves
 into the card; the right arrow and Enter go on, the left arrow goes back, Escape closes, and none of
@@ -574,6 +587,10 @@ remain mounted. Confirmed account/backend replacement resets private state. Publ
 operations stay outside that private key so their successful continuation can complete. Session
 failure offers retry rather than treating the held account as admitted; see
 [Authentication](AUTHENTICATION.md) for session observation and admission contracts.
+
+Auth and invite completions use the shared `waitForSessionSettlement` before applying owned
+results or delayed redirects; see [Session observations and private state](AUTHENTICATION.md#session-observations-and-private-state)
+for settlement, cancellation and ownership checks.
 
 The existing Better Auth session broadcast channel carries credential-change notifications at
 dispatch and settlement, including a rejected transport. An accepted change of user/session ID

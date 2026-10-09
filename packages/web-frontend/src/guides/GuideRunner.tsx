@@ -31,6 +31,7 @@ import { ChevronLeft, ChevronRight, CircleHelp, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { useOptionalSidebar } from "@/components/ui/sidebar";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { useBeginnerPanels } from "@/components/onboarding/beginnerPanels";
 import { requestReveal } from "../components/diagram/reveal";
 import { findAnchor } from "./anchors";
@@ -584,7 +585,9 @@ function GuideCard({
       animate={{ opacity: 1, y: 0 }}
       transition={reduceMotion ? { duration: 0 } : { duration: 0.18 }}
       className={cn(
-        "w-[380px] max-w-[calc(100vw-2rem)] rounded-xl border bg-popover p-4 text-popover-foreground shadow-xl outline-none",
+        "flex max-h-[calc(100dvh-2rem)] w-[380px] max-w-[calc(100vw-2rem)] flex-col rounded-xl border bg-popover p-4 text-popover-foreground shadow-xl outline-none",
+        dock === "beside" &&
+          "max-h-[min(var(--radix-popover-content-available-height),calc(100dvh-2rem))]",
         dock === "corner" && "fixed bottom-4 right-4 z-[61]",
         (dock === "bottom" || dock === "top") &&
           "fixed inset-x-0 z-[61] w-full max-w-none border-x-0",
@@ -592,7 +595,7 @@ function GuideCard({
         dock === "top" && "top-0 rounded-t-none",
       )}
     >
-      <div className="flex items-start gap-2">
+      <div className="flex shrink-0 items-start gap-2">
         <CircleHelp className="mt-0.5 size-4 shrink-0 text-primary" aria-hidden="true" />
         <div className="min-w-0 flex-1">
           <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
@@ -601,21 +604,6 @@ function GuideCard({
           <h2 id={titleId} className="mt-0.5 text-base font-semibold leading-6">
             {t(`guides.${guideId}.steps.${stepId}.title`)}
           </h2>
-          <p className="mt-1 text-sm leading-6 text-muted-foreground" data-testid="guide-body">
-            {t(`guides.${guideId}.steps.${stepId}.body`)}
-          </p>
-          {(note || missing) && (
-            <p className="mt-2 text-xs text-muted-foreground" data-testid="guide-note">
-              {missing
-                ? t("guides.ui.notFound")
-                : [
-                    note?.hidden ? t("guides.ui.skippedHidden", { count: note.hidden }) : null,
-                    note?.narrow ? t("guides.ui.skippedNarrow", { count: note.narrow }) : null,
-                  ]
-                    .filter(Boolean)
-                    .join(" ")}
-            </p>
-          )}
         </div>
         <button
           type="button"
@@ -627,7 +615,24 @@ function GuideCard({
           <X className="size-4" aria-hidden="true" />
         </button>
       </div>
-      <div className="mt-3 flex items-center justify-between">
+      <ScrollArea className="mt-1 min-h-0 flex-1 pl-6" data-testid="guide-text-scroll">
+        <p className="text-sm leading-6 text-muted-foreground" data-testid="guide-body">
+          {t(`guides.${guideId}.steps.${stepId}.body`)}
+        </p>
+        {(note || missing) && (
+          <p className="mt-2 text-xs text-muted-foreground" data-testid="guide-note">
+            {missing
+              ? t("guides.ui.notFound")
+              : [
+                  note?.hidden ? t("guides.ui.skippedHidden", { count: note.hidden }) : null,
+                  note?.narrow ? t("guides.ui.skippedNarrow", { count: note.narrow }) : null,
+                ]
+                  .filter(Boolean)
+                  .join(" ")}
+          </p>
+        )}
+      </ScrollArea>
+      <div className="mt-3 flex shrink-0 items-center justify-between">
         <button
           type="button"
           disabled={index === 0}
@@ -661,7 +666,7 @@ function GuideCard({
         <button
           type="button"
           onClick={onWholeTour}
-          className="mt-2 text-xs font-medium text-primary underline-offset-4 hover:underline"
+          className="mt-2 shrink-0 text-xs font-medium text-primary underline-offset-4 hover:underline"
           data-testid="guide-whole-tour"
         >
           {t("guides.ui.wholeTour")}

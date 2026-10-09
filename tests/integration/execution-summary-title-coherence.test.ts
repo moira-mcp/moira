@@ -1,10 +1,11 @@
-import { afterEach, describe, expect, test } from "@jest/globals";
+import { afterEach, describe, expect, jest, test } from "@jest/globals";
 import { randomUUID } from "node:crypto";
 import Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import { eq } from "drizzle-orm";
 import {
   ExecutionRepository,
+  WorkflowRepository,
   getDatabase,
   getSqliteInstance,
   getWorkflowService,
@@ -20,6 +21,7 @@ import {
 
 const ownedUsers: string[] = [];
 afterEach(async () => {
+  jest.restoreAllMocks();
   for (const owner of ownedUsers.splice(0)) {
     await getDatabase()
       .delete(schema.workflowExecution)
@@ -30,7 +32,7 @@ afterEach(async () => {
 });
 
 describe("native summary and canonical heading generation", () => {
-  test("repeats the bounded native page when another SQLite connection renames between summary and heading reads", async () => {
+  test("keeps native page and headings in one snapshot despite renames and unrelated writes during discovery", async () => {
     const owner = `coherence-${randomUUID()}`;
     ownedUsers.push(owner);
     const now = Date.now();
@@ -108,11 +110,24 @@ describe("native summary and canonical heading generation", () => {
     const connection = new Database(sqlite.name);
     try {
       const writer = new ExecutionRepository(drizzle(connection, { schema }));
+      let unrelatedWrites = 0;
+      const progressRead = ExecutionRepository.prototype.getManyForProgress;
+      jest
+        .spyOn(ExecutionRepository.prototype, "getManyForProgress")
+        .mockImplementation(async function (this: ExecutionRepository, ...args) {
+          const values = await progressRead.apply(this, args);
+          expect(
+            connection
+              .prepare("UPDATE user SET updatedAt=? WHERE id=?")
+              .run(`unrelated-${++unrelatedWrites}`, owner).changes,
+          ).toBe(1);
+          return values;
+        });
       let reads = 0;
       let replacement:
         Awaited<ReturnType<ExecutionRepository["updateExecutionTaskTitle"]>> | undefined;
-      const result = await withExecutionTaskTitles(async () => {
-        const page = await repository.listSummaries({
+      const result = await withExecutionTaskTitles(async (db = getDatabase()) => {
+        const page = await new ExecutionRepository(db).listSummaries({
           userId: owner,
           workflowId: saved.id,
           actorId: owner,
@@ -132,19 +147,32 @@ describe("native summary and canonical heading generation", () => {
         }
         return { ...page, limit: 1, offset: 0, wrapperFact: "retained" };
       });
-      expect(reads).toBe(2);
+      expect(reads).toBe(1);
+      expect(unrelatedWrites).toBeGreaterThan(0);
       if (!replacement) throw new Error("The independent writer did not rename the execution");
       expect(result).toMatchObject({ total: 1, limit: 1, offset: 0, wrapperFact: "retained" });
       expect(result.executions).toHaveLength(1);
       expect(result.executions[0]).toMatchObject({
         executionId,
-        taskTitle: "Task B",
-        taskIdentity: replacement.taskIdentity,
+        taskTitle: "Task A",
+        taskIdentity: initial.taskIdentity,
         revision: 0,
         note: "Arbitrary diagnostic note",
         stopCapability: { available: true, revision: 0 },
       });
-      expect(result.executions[0].taskIdentity).not.toEqual(initial.taskIdentity);
+      const latest = await withExecutionTaskTitles((db = getDatabase()) =>
+        new ExecutionRepository(db).listSummaries({
+          userId: owner,
+          workflowId: saved.id,
+          actorId: owner,
+          limit: 1,
+          offset: 0,
+        }),
+      );
+      expect(latest.executions[0]).toMatchObject({
+        taskTitle: "Task B",
+        taskIdentity: replacement.taskIdentity,
+      });
       expect(JSON.stringify(result)).not.toContain("private-context-sentinel");
       expect((await repository.get(executionId))?.globalContext).toEqual(execution.globalContext);
 
@@ -182,11 +210,33 @@ describe("native summary and canonical heading generation", () => {
           ),
         ).toBe(true);
       }
+      let defaultChanged = false;
+      const workflowRead = WorkflowRepository.prototype.getManyForTaskTitles;
+      jest
+        .spyOn(WorkflowRepository.prototype, "getManyForTaskTitles")
+        .mockImplementation(async function (this: WorkflowRepository, ...args) {
+          const definitions = await workflowRead.apply(this, args);
+          if (!defaultChanged) {
+            expect(
+              connection
+                .prepare(
+                  "UPDATE workflow SET graph=json_set(graph,'$.variableRegistry.topic.default','New default') WHERE id=?",
+                )
+                .run(saved.id).changes,
+            ).toBe(1);
+            defaultChanged = true;
+          }
+          return definitions;
+        });
       const legacyTitles = await executionTaskTitles(legacySnapshots);
+      expect(defaultChanged).toBe(true);
       expect(legacyTitles.get(legacySnapshots[0].executionId)).toBe("Legacy A");
       // A missing value belongs to the old snapshot and resolves from the flow default, never
       // from the newly stored Legacy B context.
       expect(legacyTitles.get(legacySnapshots[1].executionId)).toBe("Legacy heading");
+      expect((await executionTaskTitles(legacySnapshots)).get(legacySnapshots[1].executionId)).toBe(
+        "New default",
+      );
       expect(legacySnapshots.map((snapshot) => snapshot.globalContext.variables)).toEqual([
         { topic: "Legacy A" },
         {},

@@ -249,6 +249,20 @@ or backend resets the previous private state. Public login and registration form
 remain outside this private retention boundary. Refetches that confirm unchanged
 session observations do not reset an admitted page or request its admission facts again.
 
+A session `refetch()` promise can resolve after its request is canceled while a replacement
+request is still pending. `waitForSessionSettlement` in
+`packages/web-frontend/src/auth/better-auth-client.ts` observes the current session atom until both
+`isPending` and `isRefetching` are false, and returns that observation, including any error.
+Its optional `AbortSignal` resolves the caller's wait with `null` and removes its subscription;
+it does not cancel the shared session fetch. The caller owns the account and mounted-operation
+guards, error checks, and confirmation that the shared read identity is currently admitted.
+
+Forced password reset, OAuth consent and authorization, and invite acceptance wait for actual
+session settlement before applying an owned completion. The password-reset and invite redirect
+timers also wait through a pending authoritative recheck. Confirmation of the same account permits
+completion; a replaced account, a session-check error, or an unmounted component cannot authorize
+that earlier operation. Components abort their own settlement wait on unmount.
+
 Automatic cleanup uses `revokeObservedSession` to target the session observed by
 the failing operation, rather than signing out whichever cookie later became
 current. Completion requires a settled authoritative check; a replacement or

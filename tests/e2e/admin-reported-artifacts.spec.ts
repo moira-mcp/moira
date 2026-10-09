@@ -4,12 +4,75 @@
  * admin can take it down through the UI, after which it stops being served.
  */
 
-import { test, expect } from "./fixtures.js";
+import { test, expect, type Page } from "./fixtures.js";
 import { loginAsAdmin, createTestUser, getSessionCookieHeader } from "./helpers/auth-helper.js";
 import { getTestBaseUrl, getTestFetchUrl } from "../utils/test-config.js";
 
 const BASE_URL = getTestBaseUrl();
 const FETCH_URL = getTestFetchUrl();
+
+/** The initial inventory can shrink once the list measures its real rows. */
+async function reportedPage(page: Page) {
+  const list = page.getByTestId("data-list-items");
+  const region = list.locator("..");
+  await expect(region).toHaveAttribute("aria-busy", "false");
+  await expect
+    .poll(() =>
+      list.evaluate((element) => {
+        const cards = element.querySelectorAll('[data-testid^="reported-artifact-"]');
+        const last = cards.item(cards.length - 1);
+        return (
+          last !== null &&
+          last.getBoundingClientRect().bottom <= element.getBoundingClientRect().bottom + 1
+        );
+      }),
+    )
+    .toBe(true);
+  await expect(region).toHaveAttribute("aria-busy", "false");
+  const indicator = page.getByTestId("data-list-pagination").getByText(/^\d+ \/ \d+$/);
+  const current = (await indicator.count())
+    ? Number((await indicator.innerText()).split("/")[0])
+    : 1;
+  return { list, current };
+}
+
+async function nextReportedPage(page: Page, current: number) {
+  await expect(page.getByTestId("pagination-next")).toBeEnabled();
+  const response = page.waitForResponse((result) => {
+    const url = new URL(result.url());
+    return (
+      url.pathname === "/api/admin/artifacts/reported" && Number(url.searchParams.get("offset")) > 0
+    );
+  });
+  await page.getByTestId("pagination-next").click();
+  const next = await response;
+  expect(next.status()).toBe(200);
+  await expect(
+    page.getByTestId("data-list-pagination").getByText(new RegExp(`^${current + 1} / \\d+$`)),
+  ).toBeVisible();
+  return (await next.json()).data as {
+    artifacts: Array<{ uuid: string; takenDown: boolean }>;
+    total: number;
+  };
+}
+
+/** Search only the fixture's exact identities through the application's own pagination. */
+async function findReportedArtifact(page: Page, ownUuids: string[], minimumPage = 1) {
+  for (;;) {
+    const { list, current } = await reportedPage(page);
+    if (current >= minimumPage) {
+      for (const uuid of ownUuids) {
+        const card = list.getByTestId(`reported-artifact-${uuid}`);
+        if ((await card.count()) && (await card.getByTestId(`takedown-${uuid}`).isEnabled())) {
+          await expect(card).toBeVisible();
+          return { uuid, current };
+        }
+      }
+    }
+    const data = await nextReportedPage(page, current);
+    expect(data.total).toBeGreaterThanOrEqual(12);
+  }
+}
 
 async function createArtifact(
   cookie: string,
@@ -75,7 +138,8 @@ test.describe("Admin Reported Artifacts Page", () => {
     }
     await page.goto(`${BASE_URL}/admin/artifacts/reported`);
 
-    // The reported artifact card is visible
+    await findReportedArtifact(page, [uuid]);
+    // The exact reported artifact is visible on its actual measured page.
     const card = page.locator(`[data-testid="reported-artifact-${uuid}"]`);
     await expect(card).toBeVisible();
 
@@ -108,31 +172,19 @@ test.describe("Admin Reported Artifacts Page", () => {
       await expect(page).toHaveURL(/\/admin(?:\?[^#]*)?$/);
       return;
     }
-    await expect(page.getByTestId("pagination-next")).toBeEnabled();
-    const next = page.waitForResponse((response) => {
-      const url = new URL(response.url());
-      return (
-        url.pathname === "/api/admin/artifacts/reported" &&
-        Number(url.searchParams.get("offset")) > 0
-      );
-    });
-    await page.getByTestId("pagination-next").click();
-    const response = await next;
-    const data = (await response.json()).data as {
-      artifacts: Array<{ uuid: string; takenDown: boolean }>;
-      total: number;
-    };
-    expect(data.total).toBeGreaterThanOrEqual(12);
-    const target = data.artifacts.find(
-      (row) => !row.takenDown && artifacts.some((artifact) => artifact.uuid === row.uuid),
+    const target = await findReportedArtifact(
+      page,
+      artifacts.map((artifact) => artifact.uuid),
+      2,
     );
-    expect(target).toBeDefined();
-    const artifact = artifacts.find((row) => row.uuid === target!.uuid)!;
+    const artifact = artifacts.find((row) => row.uuid === target.uuid)!;
     const card = page.getByTestId(`reported-artifact-${artifact.uuid}`);
     await expect(card).toBeVisible();
     const count = await page.getByTestId("reported-count").textContent();
     const pagination = page.getByTestId("data-list-pagination");
-    await expect(pagination).toContainText(/2 \/ \d+/);
+    const pageIndicator = pagination.getByText(new RegExp(`^${target.current} / \\d+$`));
+    await expect(pageIndicator).toBeVisible();
+    expect((await fetch(`${artifact.origin}/?ack=1`)).status).toBe(200);
     const action = page.getByTestId(`takedown-${artifact.uuid}`);
     await action.click();
     const dialog = page.getByRole("alertdialog");
@@ -147,9 +199,10 @@ test.describe("Admin Reported Artifacts Page", () => {
       expect(await dialog.evaluate((node, previous) => node === previous, mountedDialog)).toBe(
         true,
       );
-      await expect(pagination).toContainText(/2 \/ \d+/);
+      await expect(pageIndicator).toBeVisible();
       await expect(page.getByTestId("reported-count")).toHaveText(count!);
       await expect(card).toBeVisible();
+      expect((await fetch(`${artifact.origin}/?ack=1`)).status).toBe(200);
     } finally {
       await page.unroute(pattern);
     }
@@ -157,7 +210,7 @@ test.describe("Admin Reported Artifacts Page", () => {
     await expect(dialog).toHaveCount(0);
     await expect(action).toBeVisible();
     await expect(action).toBeDisabled();
-    await expect(pagination).toContainText(/2 \/ \d+/);
+    await expect(pageIndicator).toBeVisible();
     await expect.poll(async () => (await fetch(`${artifact.origin}/?ack=1`)).status).toBe(404);
   });
 });

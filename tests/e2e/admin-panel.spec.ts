@@ -57,23 +57,17 @@ test.describe("Admin Panel", () => {
 
     await page.goto(`${BASE_URL}/admin`);
     const events = page.getByTestId("admin-recent-activity");
-    const unknown = events
-      .locator("div")
-      .filter({
-        has: page.getByText("Workflow execution paused · undated-flow", { exact: true }),
-      })
-      .last();
+    const unknown = events.locator(":scope > div > div").filter({
+      hasText: "Workflow execution paused · undated-flow",
+    });
     await expect(unknown).toBeVisible();
     await expect(unknown.locator("span").last()).toHaveText("—");
 
-    const epoch = events
-      .locator("div")
-      .filter({
-        has: page.getByText("Workflow execution completed · epoch-flow", { exact: true }),
-      })
-      .last();
+    const epoch = events.locator(":scope > div > div").filter({
+      hasText: "Workflow execution completed · epoch-flow",
+    });
     await expect(epoch).toBeVisible();
-    const epochTime = epoch.locator("span").last();
+    const epochTime = epoch.locator(":scope > span").last();
     await expect(epochTime).toHaveText(/(?:Jan 1|Dec 31).*\d{2}:\d{2}/);
   });
 

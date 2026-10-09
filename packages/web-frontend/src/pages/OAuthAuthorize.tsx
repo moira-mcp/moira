@@ -8,11 +8,16 @@
  */
 
 import { productFetch } from "@/services/product-fetch";
-import React, { useState, useMemo, useEffect } from "react";
+import React, { useState, useMemo, useEffect, useRef } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { AuthView } from "../auth/LazyAuthView";
-import { authClient, useSession, signOut } from "../auth/better-auth-client";
+import {
+  authClient,
+  useSession,
+  signOut,
+  waitForSessionSettlement,
+} from "../auth/better-auth-client";
 import { Button } from "../components/ui/button";
 import {
   Card,
@@ -67,6 +72,12 @@ export const OAuthAuthorize: React.FC = () => {
 
 const OAuthAuthorizeConsent: React.FC = () => {
   const captureOwner = useReadOwnerGuard();
+  const settlementLifetime = useRef(new AbortController());
+  useEffect(() => {
+    if (settlementLifetime.current.signal.aborted)
+      settlementLifetime.current = new AbortController();
+    return () => settlementLifetime.current.abort();
+  }, []);
   const { t } = useTranslation();
   const [searchParams] = useSearchParams();
   const { data: session, isPending: isLoading } = useSession();
@@ -158,7 +169,9 @@ const OAuthAuthorizeConsent: React.FC = () => {
     }
 
     if (!isCurrent() && ownsPage()) await authClient.$store.atoms.session.get().refetch();
-    if (ownsPage() && getReadIdentity() !== null) window.location.href = authorizeUrl;
+    const settled = await waitForSessionSettlement(settlementLifetime.current.signal);
+    if (ownsPage() && settled && !settled.error && getReadIdentity() !== null)
+      window.location.href = authorizeUrl;
     else if (ownsPage()) setIsSubmitting(false);
   };
 

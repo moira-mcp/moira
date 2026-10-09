@@ -173,6 +173,7 @@ test("Preferences' Start the tour again starts the full tour from the home page"
 }) => {
   await freshReader(page, "full-tour-restart");
   await page.goto(`${BASE_URL}/settings`);
+  await page.getByTestId("settings-nav-preferences").click();
   await page.getByTestId("preferences-guides-restart").click();
   await expect(page).toHaveURL(/\/\?.*guide=home.*tour=full|\/\?.*tour=full.*guide=home/);
   await expect(page.getByTestId("guide-card")).toHaveAttribute("data-guide-id", "home");

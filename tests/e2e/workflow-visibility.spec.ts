@@ -70,16 +70,17 @@ test.describe("Workflow Visibility Features", () => {
     // Navigate to workflows page
     await page.goto(`${BASE_URL}/workflows`);
     await page.waitForLoadState("domcontentloaded");
-    await page.waitForSelector("text=System", { state: "visible" });
-
-    // Verify "System" owner name displayed (for system-admin workflows)
-    const systemOwner = page.locator("text=System").first();
-    await expect(systemOwner).toBeVisible();
-
-    const ownerCount = await page.locator("text=System").count();
-    expect(ownerCount).toBeGreaterThan(0);
-
-    console.log(`✓ Owner name "System" displayed in ${ownerCount} workflow cards`);
+    // Other tests can create newer public flows. Select a known catalog entry instead of
+    // assuming the current first page contains a bundled flow after its page size settles.
+    await page.getByTestId("workflow-scope-catalog").click();
+    await page.getByPlaceholder(/Search workflows|Поиск воркфлоу/).fill("quick-task");
+    const quickTask = page.getByTestId("workflow-card").filter({
+      has: page.locator('[data-slot="card-title"]', { hasText: /^Quick Task$/ }),
+    });
+    await expect(quickTask).toHaveCount(1);
+    const owner = quickTask.getByTestId("workflow-card-owner");
+    await expect(owner).toHaveText("@moira");
+    await expect(owner).toBeVisible();
   });
 
   test("Public workflows accessible after login", async ({ page }) => {

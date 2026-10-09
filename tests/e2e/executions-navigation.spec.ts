@@ -174,7 +174,7 @@ test.describe("Executions Navigation", () => {
     await expect(page.getByTestId("pagination-prev")).toBeEnabled({ timeout: 10000 });
 
     // Check page indicator updated - look for "2 / X" pattern
-    await expect(page.locator("text=/2 \\/ \\d+/")).toBeVisible();
+    await expect(page.getByTestId("data-list-pagination").getByText(/^2 \/ \d+$/)).toBeVisible();
   });
 
   test("clicking card navigates to execution inspector", async ({ page }) => {

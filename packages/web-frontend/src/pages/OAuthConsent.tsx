@@ -8,7 +8,12 @@ import { productFetch } from "@/services/product-fetch";
 import React, { useState, useRef } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { authClient, useSession, signOut } from "../auth/better-auth-client";
+import {
+  authClient,
+  useSession,
+  signOut,
+  waitForSessionSettlement,
+} from "../auth/better-auth-client";
 import { PrivateReadScopeBoundary, useReadOwnerGuard } from "../auth/ReadScopeBoundary";
 import { getReadIdentity, isReadSessionSuspended } from "../services/read-scope";
 import { Button } from "../components/ui/button";
@@ -73,6 +78,12 @@ const OAuthConsentContent: React.FC<{ onSwitchAccount: () => Promise<void> }> = 
   onSwitchAccount,
 }) => {
   const captureOwner = useReadOwnerGuard();
+  const settlementLifetime = useRef(new AbortController());
+  React.useEffect(() => {
+    if (settlementLifetime.current.signal.aborted)
+      settlementLifetime.current = new AbortController();
+    return () => settlementLifetime.current.abort();
+  }, []);
   const { t } = useTranslation();
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
@@ -139,7 +150,8 @@ const OAuthConsentContent: React.FC<{ onSwitchAccount: () => Promise<void> }> = 
       // This auth mutation retires credentials itself. Confirm the cookie's current owner
       // before applying its redirect, rather than accepting the dispatch credential epoch.
       await authClient.$store.atoms.session.get().refetch();
-      if (!isCurrent() || getReadIdentity() === null) return;
+      const settled = await waitForSessionSettlement(settlementLifetime.current.signal);
+      if (!isCurrent() || !settled || settled.error || getReadIdentity() === null) return;
       if (data.redirectURI) {
         window.location.href = data.redirectURI;
       } else if (data.redirectTo) {

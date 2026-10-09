@@ -13,6 +13,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import * as TooltipPrimitive from "@radix-ui/react-tooltip";
 import { cn } from "@/lib/utils";
+import { popupLayerAt, useModalLayers } from "../ui/modal-layers";
 
 export type HintSide = "top" | "right" | "bottom" | "left";
 
@@ -92,6 +93,7 @@ export function Hint({
   className,
   open,
 }: HintProps): React.JSX.Element {
+  const layers = useModalLayers();
   if (content === null || content === undefined || content === "") return children;
   return (
     <TooltipPrimitive.Provider delayDuration={delay}>
@@ -99,6 +101,7 @@ export function Hint({
         <TooltipPrimitive.Trigger asChild>{children}</TooltipPrimitive.Trigger>
         <TooltipPrimitive.Portal>
           <TooltipPrimitive.Content
+            style={{ zIndex: layers.popup }}
             side={side}
             align={align}
             sideOffset={6}
@@ -209,7 +212,7 @@ export function HintLayer(): React.JSX.Element | null {
             // The delegated hint is text, never a target: a surface that could come under the
             // pointer (it is anchored at the pointer for a line) would steal the hover and hide
             // itself, over and over.
-            style={{ pointerEvents: "none" }}
+            style={{ pointerEvents: "none", zIndex: popupLayerAt(target.element) }}
             data-slot="hint"
             data-hint-layer=""
           >

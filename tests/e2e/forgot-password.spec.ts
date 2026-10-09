@@ -6,6 +6,7 @@
 import { test, expect } from "./fixtures.js";
 import { getTestBaseUrl } from "../utils/test-config.js";
 import { createTestUser } from "./helpers/auth-helper.js";
+import { waitForDockerLog } from "../utils/docker-command.js";
 
 const BASE_URL = getTestBaseUrl();
 
@@ -86,9 +87,10 @@ test.describe("Forgot Password Flow E2E", () => {
 
   test("complete reset password flow via API callback", async ({ page }) => {
     // Create test user
-    const testUserEmail = `reset-flow-${Date.now()}-${Math.random().toString(36).slice(2)}@test.com`;
+    const testUserEmail = `reset-flow-${Date.now()}-${Math.random().toString(36).slice(2)}@example.com`;
     const result = await createTestUser(testUserEmail, testPassword, "Reset Flow Test", true);
     expect(result.success).toBe(true);
+    expect(result.userId).toBeTruthy();
 
     // Request password reset via API (use page.request to go through browser on PC)
     const forgotResponse = await page.request.post(`${BASE_URL}/api/auth/request-password-reset`, {
@@ -100,18 +102,65 @@ test.describe("Forgot Password Flow E2E", () => {
     });
     expect(forgotResponse.ok()).toBe(true);
 
-    // Navigate to reset-password page directly (simulating email click result)
-    await page.goto(`${BASE_URL}/reset-password`);
-    await page.waitForLoadState("domcontentloaded");
+    // Select this request's reset email, rather than another parallel user's verification/reset URL.
+    const recipient = JSON.stringify(`"to":${JSON.stringify(testUserEmail)}`);
+    const emailLog = await waitForDockerLog(
+      `awk 'index($0, ${recipient}) && index($0, "TEST MODE: Email URLs for manual testing") && index($0, "/api/auth/reset-password/") { print; exit }'`,
+    );
+    const emailEvent = JSON.parse(emailLog.trim()) as { to: string; urls: string[] };
+    expect(emailEvent.to).toBe(testUserEmail);
+    const callbacks = emailEvent.urls
+      .map((value) => new URL(value))
+      .filter(
+        (url) =>
+          url.origin === new URL(BASE_URL).origin &&
+          /^\/api\/auth\/reset-password\/[^/]+$/.test(url.pathname) &&
+          url.searchParams.get("callbackURL") === `${BASE_URL}/reset-password`,
+      );
+    expect(callbacks).toHaveLength(1);
+    const callback = callbacks[0];
+    const token = callback.pathname.split("/").at(-1);
 
-    // Page should show password form or error about missing/invalid token
-    const pageContent = await page.content();
-    // Either shows form or error - both mean the page works
-    expect(
-      pageContent.includes("Password") ||
-        pageContent.includes("token") ||
-        pageContent.includes("Invalid"),
-    ).toBe(true);
+    await page.goto(callback.href);
+    await expect(page).toHaveURL(
+      (url) => url.pathname === "/reset-password" && url.searchParams.get("token") === token,
+    );
+    const newPassword = "ResetPassword456!";
+    await page.getByLabel("New Password", { exact: true }).fill(newPassword);
+    const resetResponse = page.waitForResponse(
+      (response) =>
+        new URL(response.url()).pathname === "/api/auth/reset-password" &&
+        response.request().method() === "POST",
+    );
+    await page.getByRole("button", { name: "Save new password", exact: true }).click();
+    const reset = await resetResponse;
+    expect(reset.status()).toBe(200);
+    expect(await reset.json()).toMatchObject({ status: true });
+    await expect(page).toHaveURL((url) => url.pathname === "/login");
+
+    const headers = { Origin: new URL(BASE_URL).origin };
+    const oldSignIn = await page.request.post(`${BASE_URL}/api/auth/sign-in/email`, {
+      headers,
+      data: { email: testUserEmail, password: testPassword },
+    });
+    expect(oldSignIn.status()).toBe(401);
+    expect(await oldSignIn.json()).toMatchObject({ code: "INVALID_EMAIL_OR_PASSWORD" });
+
+    const newSignIn = await page.request.post(`${BASE_URL}/api/auth/sign-in/email`, {
+      headers,
+      data: { email: testUserEmail, password: newPassword },
+    });
+    expect(newSignIn.status()).toBe(200);
+    expect(await newSignIn.json()).toMatchObject({
+      user: { id: result.userId, email: testUserEmail },
+    });
+    // APIRequestContext applies the new session cookie to this isolated browser context.
+    const profile = await page.request.get(`${BASE_URL}/api/user/profile`);
+    expect(profile.status()).toBe(200);
+    expect(await profile.json()).toMatchObject({
+      success: true,
+      data: { id: result.userId, email: testUserEmail },
+    });
   });
 
   test("reset-password callback endpoint returns correct redirect", async ({ page }) => {

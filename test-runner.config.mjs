@@ -3,6 +3,7 @@ import { existsSync, readFileSync } from "fs";
 import { resolve } from "path";
 import process from "node:process";
 import { config as dotenvConfig } from "dotenv";
+import { guardSuccessfulFrameworkRun } from "./scripts/test-runner-result-guard.mjs";
 
 // Load .env.test for all suites (test-specific environment, separate from .env.local)
 dotenvConfig({ path: ".env.test" });
@@ -108,6 +109,7 @@ export default defineConfig({
   reporters: ["console", "json", "markdown-failures", "timing", "timing-text", "summary-log"],
 
   hooks: {
+    afterSuite: guardSuccessfulFrameworkRun,
     beforeSuite: async (suite) => {
       // MCP Tools: set MCP_SERVER_URL = TEST_BASE_URL + /mcp
       if (suite.name === "mcp-tools") {

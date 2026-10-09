@@ -4,7 +4,7 @@ import { afterEach, beforeEach, expect, jest, test } from "@jest/globals";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import "@testing-library/jest-dom/jest-globals";
 import { I18nextProvider } from "react-i18next";
-import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
+import { MemoryRouter, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import i18n from "../../../packages/web-frontend/src/i18n";
 
 jest.unstable_mockModule("../../../packages/web-frontend/src/hooks/useFeatures", () => ({
@@ -23,6 +23,8 @@ const { ReadScopeBoundary } =
   await import("../../../packages/web-frontend/src/auth/ReadScopeBoundary");
 const { authClient } = await import("../../../packages/web-frontend/src/auth/better-auth-client");
 const { ROUTES } = await import("../../../packages/web-frontend/src/constants/routes");
+const { revalidateReadSession, getReadIdentity } =
+  await import("../../../packages/web-frontend/src/services/read-scope");
 type AcceptedInvite = Awaited<ReturnType<typeof apiClient.acceptInvite>>;
 
 const originalFetch = globalThis.fetch;
@@ -42,6 +44,8 @@ function sessionFor(id: string) {
 }
 let session: ReturnType<typeof sessionFor> | null;
 let completions: Array<(result: AcceptedInvite) => void>;
+let holdSessionReads: boolean;
+let sessionReads: Array<{ aborted: boolean; finish: (response: Response) => void }>;
 const accepted: AcceptedInvite = {
   accessId: "owner-a-access",
   workflowId: "owner-a-workflow",
@@ -58,6 +62,8 @@ beforeEach(async () => {
   await i18n.changeLanguage("en");
   session = sessionFor("owner-a");
   completions = [];
+  holdSessionReads = false;
+  sessionReads = [];
   jest.spyOn(apiClient, "getInviteInfo").mockResolvedValue({
     valid: true,
     expired: false,
@@ -70,15 +76,34 @@ beforeEach(async () => {
   jest
     .spyOn(apiClient, "acceptInvite")
     .mockImplementation(() => new Promise((resolve) => completions.push(resolve)));
-  globalThis.fetch = jest.fn<typeof fetch>().mockImplementation(async (input) => {
+  globalThis.fetch = jest.fn<typeof fetch>().mockImplementation(async (input, init) => {
     const url = String(input);
-    if (url.includes("/get-session")) return Response.json(session);
+    if (url.includes("/get-session")) {
+      if (!holdSessionReads) return Response.json(session);
+      return new Promise<Response>((resolve, reject) => {
+        const read = {
+          aborted: false,
+          finish: (response: Response) => {
+            init?.signal?.removeEventListener("abort", abort);
+            resolve(response);
+          },
+        };
+        const abort = () => {
+          read.aborted = true;
+          reject(new DOMException("Session read canceled", "AbortError"));
+        };
+        sessionReads.push(read);
+        init?.signal?.addEventListener("abort", abort, { once: true });
+        if (init?.signal?.aborted) abort();
+      });
+    }
     throw new Error(`Unexpected auth request: ${url}`);
   });
   await authClient.$store.atoms.session.get().refetch();
 });
 afterEach(async () => {
   cleanup();
+  holdSessionReads = false;
   session = null;
   await authClient.$store.atoms.session.get().refetch();
   jest.clearAllTimers();
@@ -89,7 +114,13 @@ afterEach(async () => {
 });
 function Location() {
   const location = useLocation();
-  return <output data-testid="location">{location.pathname}</output>;
+  const navigate = useNavigate();
+  return (
+    <>
+      <output data-testid="location">{location.pathname}</output>
+      <button onClick={() => navigate("/elsewhere")}>Leave invite</button>
+    </>
+  );
 }
 async function mountAndAccept() {
   render(
@@ -180,3 +211,60 @@ test("a pending acceptance can finish after authoritative confirmation of the sa
   await act(async () => jest.advanceTimersByTime(2100));
   expect(screen.getByTestId("location")).toHaveTextContent(acceptedPath);
 });
+
+async function settleSession(outcome: string) {
+  if (outcome === "replacement") session = sessionFor("owner-b");
+  if (outcome === "unmounted") fireEvent.click(screen.getByText("Leave invite"));
+  holdSessionReads = false;
+  await act(async () => {
+    for (const read of sessionReads.filter((read) => !read.aborted))
+      read.finish(
+        outcome === "error"
+          ? Response.json({ message: "Session check unavailable" }, { status: 500 })
+          : Response.json(session),
+      );
+  });
+}
+
+test.each(["same owner", "replacement", "error", "unmounted"])(
+  "accepted invite waits for the actual %s session after its refetch is canceled",
+  async (outcome) => {
+    await mountAndAccept();
+    session = sessionFor("owner-a");
+    session.session.id = "owner-a-renewed-session";
+    await act(async () => authClient.$store.atoms.session.get().refetch());
+    holdSessionReads = true;
+    await act(async () => completions[0](accepted));
+    const canceled = sessionReads.at(-1)!;
+    expect(authClient.$store.atoms.session.get().isRefetching).toBe(true);
+    await act(async () => revalidateReadSession());
+    expect(canceled.aborted).toBe(true);
+    expect(getReadIdentity()).toBeNull();
+    expect(screen.getByTestId("location")).toHaveTextContent(invitePath);
+    await settleSession(outcome);
+    if (outcome === "same owner")
+      expect(
+        screen.getByRole("link", { name: i18n.t("pages.inviteAccept.goToWorkflow") }),
+      ).toHaveAttribute("href", acceptedPath);
+    await act(async () => jest.advanceTimersByTime(2000));
+    expect(screen.getByTestId("location").textContent).toBe(
+      outcome === "same owner" ? acceptedPath : outcome === "unmounted" ? "/elsewhere" : invitePath,
+    );
+  },
+);
+
+test.each(["same owner", "replacement", "error", "unmounted"])(
+  "a due invite redirect waits through a held %s session refresh",
+  async (outcome) => {
+    await mountAndAccept();
+    await act(async () => completions[0](accepted));
+    holdSessionReads = true;
+    await act(async () => revalidateReadSession());
+    await act(async () => jest.advanceTimersByTime(2000));
+    expect(screen.getByTestId("location")).toHaveTextContent(invitePath);
+    await settleSession(outcome);
+    expect(screen.getByTestId("location").textContent).toBe(
+      outcome === "same owner" ? acceptedPath : outcome === "unmounted" ? "/elsewhere" : invitePath,
+    );
+  },
+);

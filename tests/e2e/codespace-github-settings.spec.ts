@@ -309,7 +309,7 @@ test.describe("while the GitHub App is not installed yet", () => {
       "Install GitHub App",
       "Check installation",
       "Reconnect GitHub",
-      "GitHub does not show the Moira App installed on your account yet",
+      "GitHub does not show the Moira App installed on your account or organization yet",
     ],
     [
       "ru",

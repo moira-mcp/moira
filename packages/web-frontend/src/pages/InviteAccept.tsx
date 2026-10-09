@@ -13,7 +13,7 @@ import { useParams, useNavigate, Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Users, Clock, AlertCircle, CheckCircle2, XCircle } from "lucide-react";
 import { apiClient, ApiClientError } from "../services/api-client";
-import { authClient, useSession } from "../auth/better-auth-client";
+import { authClient, useSession, waitForSessionSettlement } from "../auth/better-auth-client";
 import { Button } from "../components/ui/button";
 import {
   Card,
@@ -51,12 +51,15 @@ export const InviteAcceptPage: React.FC = () => {
 const InviteAcceptContent: React.FC = () => {
   const captureOwner = useReadOwnerGuard();
   const redirectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(
-    () => () => {
+  const settlementLifetime = useRef(new AbortController());
+  useEffect(() => {
+    if (settlementLifetime.current.signal.aborted)
+      settlementLifetime.current = new AbortController();
+    return () => {
+      settlementLifetime.current.abort();
       if (redirectTimer.current) clearTimeout(redirectTimer.current);
-    },
-    [],
-  );
+    };
+  }, []);
   const { token } = useParams<{ token: string }>();
   const navigate = useNavigate();
   const { t } = useTranslation();
@@ -86,21 +89,31 @@ const InviteAcceptContent: React.FC = () => {
     if (!token) return;
     const isCurrent = captureOwner();
     const ownsPage = captureOwner(false);
+    const confirmOwner = async () => {
+      if (!ownsPage()) return false;
+      try {
+        if (!isCurrent()) await authClient.$store.atoms.session.get().refetch();
+        const settled = await waitForSessionSettlement(settlementLifetime.current.signal);
+        return ownsPage() && !!settled && !settled.error && getReadIdentity() !== null;
+      } catch {
+        return false;
+      }
+    };
 
     try {
       setAccepting(true);
       setAcceptError(null);
       const result = await apiClient.acceptInvite(token);
-      if (!isCurrent() && ownsPage()) await authClient.$store.atoms.session.get().refetch();
-      if (!ownsPage() || getReadIdentity() === null) return;
+      if (!(await confirmOwner())) return;
       setAccepted(true);
       // Use handle/slug format for redirect URL (e.g., /workflows/admin/my-workflow)
       const workflowPath = `${result.ownerHandle}/${result.slug}`;
       setAcceptedWorkflowPath(workflowPath);
       // Auto-redirect after short delay
       redirectTimer.current = setTimeout(() => {
-        if (ownsPage() && getReadIdentity() !== null)
-          navigate(`${ROUTES.WORKFLOWS}/${workflowPath}`);
+        void confirmOwner().then((owned) => {
+          if (owned) navigate(`${ROUTES.WORKFLOWS}/${workflowPath}`);
+        });
       }, 2000);
     } catch (err) {
       if (!isCurrent()) return;

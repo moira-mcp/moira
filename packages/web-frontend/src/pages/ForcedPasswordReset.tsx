@@ -10,7 +10,12 @@ import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { apiClient } from "../services/api-client";
-import { authClient, useSession, revokeObservedSession } from "../auth/better-auth-client";
+import {
+  authClient,
+  useSession,
+  revokeObservedSession,
+  waitForSessionSettlement,
+} from "../auth/better-auth-client";
 import { ROUTES } from "../constants/routes";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
@@ -30,12 +35,15 @@ export const ForcedPasswordReset: React.FC = () => {
   const { setAuthError } = useAuthError();
   const captureOwner = useReadOwnerGuard();
   const redirectTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  useEffect(
-    () => () => {
+  const settlementLifetime = useRef(new AbortController());
+  useEffect(() => {
+    if (settlementLifetime.current.signal.aborted)
+      settlementLifetime.current = new AbortController();
+    return () => {
+      settlementLifetime.current.abort();
       if (redirectTimer.current) clearTimeout(redirectTimer.current);
-    },
-    [],
-  );
+    };
+  }, []);
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -84,12 +92,19 @@ export const ForcedPasswordReset: React.FC = () => {
     };
     const confirmOwner = async () => {
       if (!ownsOperation()) return false;
-      if (!ownsAuthority()) await authClient.$store.atoms.session.get().refetch();
-      return (
-        ownsOperation() &&
-        getReadIdentity() !== null &&
-        authClient.$store.atoms.session.get().data?.user.id === userId
-      );
+      try {
+        if (!ownsAuthority()) await authClient.$store.atoms.session.get().refetch();
+        const settled = await waitForSessionSettlement(settlementLifetime.current.signal);
+        return (
+          ownsOperation() &&
+          !!settled &&
+          !settled.error &&
+          getReadIdentity() !== null &&
+          settled.data?.user.id === userId
+        );
+      } catch {
+        return false;
+      }
     };
 
     try {
@@ -110,17 +125,12 @@ export const ForcedPasswordReset: React.FC = () => {
             password: newPassword,
           });
           if (result.error) throw new Error(result.error.message);
-          await authClient.$store.atoms.session.get().refetch();
-          if (
-            !ownsOperation() ||
-            getReadIdentity() === null ||
-            authClient.$store.atoms.session.get().data?.user.id !== userId
-          )
-            return;
+          if (!(await confirmOwner())) return;
           // Wait 1.5 seconds then redirect
           redirectTimer.current = setTimeout(() => {
-            if (ownsOperation() && getReadIdentity() !== null)
-              navigate(ROUTES.WORKFLOWS, { replace: true });
+            void confirmOwner().then((owned) => {
+              if (owned) navigate(ROUTES.WORKFLOWS, { replace: true });
+            });
           }, 1500);
         } catch {
           if (!ownsOperation()) return;

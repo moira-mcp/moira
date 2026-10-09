@@ -1,8 +1,7 @@
 /**
  * E2E Tests: the run page keeps the inspector's toolbar, panel tabs, context editing, technical
- * graph and admin variant. Opens the first execution in the list, whatever its workflow: with a
- * process view the page has two views and the technical graph is the second of them; without one
- * the graph fills the page as before.
+ * graph and admin variant. Each suite creates its own waiting Quick Task run; list navigation
+ * searches that exact execution before opening its process view and technical graph.
  */
 
 import { test, expect, type Page } from "./fixtures.js";
@@ -12,13 +11,14 @@ import { loginAsAdmin } from "./helpers/auth-helper.js";
 
 const BASE_URL = getTestBaseUrl();
 
-async function openFirstExecution(page: Page, listUrl = `${BASE_URL}/executions`) {
-  await page.goto(listUrl);
-  await page.waitForLoadState("domcontentloaded");
-  const firstRow = page.getByTestId("execution-card").first();
-  await expect(firstRow).toBeVisible({ timeout: 10000 });
-  await firstRow.click();
-  await page.waitForURL(/\/executions\/[a-f0-9-]+/);
+async function openExecution(page: Page, executionId: string) {
+  await page.goto(`${BASE_URL}/executions`);
+  await page.getByTestId("executions-search").fill(executionId);
+  const ownRow = page.getByTestId("execution-card").filter({ hasText: executionId.slice(0, 8) });
+  await expect(ownRow).toHaveCount(1);
+  await expect(ownRow).toBeVisible({ timeout: 10000 });
+  await ownRow.locator('[data-slot="card-title"]').click();
+  await expect(page).toHaveURL(`${BASE_URL}/executions/${executionId}`);
   await expect(page.getByTestId("run-page")).toBeVisible({ timeout: 15000 });
   await expect(page.getByTestId("run-panel").locator('[role="tablist"]')).toBeVisible();
 }
@@ -63,7 +63,7 @@ test.describe("Run page toolbar and panel", () => {
   });
 
   test("compact toolbar displays all elements", async ({ page }) => {
-    await openFirstExecution(page);
+    await openExecution(page, runningExecutionId);
     const toolbar = page.locator(".border-b.bg-card").first();
     await expect(toolbar).toBeVisible();
     await expect(toolbar.locator("button.font-mono")).toBeVisible();
@@ -76,7 +76,7 @@ test.describe("Run page toolbar and panel", () => {
   test("the variables tab holds the run's values and opens the same panel fullscreen", async ({
     page,
   }) => {
-    await openFirstExecution(page);
+    await openExecution(page, runningExecutionId);
     await page.getByRole("tab", { name: /Variables|Переменные/ }).click();
     await expect(page.getByTestId("context-filter-input")).toBeVisible({ timeout: 5000 });
     // There is no separate context tab: the variables panel is the one surface.
@@ -97,7 +97,7 @@ test.describe("Run page toolbar and panel", () => {
   });
 
   test("panel tabs switch between block, variables, errors, steps and locks", async ({ page }) => {
-    await openFirstExecution(page);
+    await openExecution(page, runningExecutionId);
     for (const name of [
       /Variables|Переменные/,
       /Errors|Ошибки/,
@@ -112,10 +112,15 @@ test.describe("Run page toolbar and panel", () => {
   });
 
   test("refresh button reloads execution data", async ({ page }) => {
-    await openFirstExecution(page);
+    await openExecution(page, runningExecutionId);
     const refreshButton = page.locator('button:has(svg[class*="lucide-refresh"])');
     const [response] = await Promise.all([
-      page.waitForResponse((r) => r.url().includes("/api/executions/") && r.status() === 200),
+      page.waitForResponse(
+        (r) =>
+          new URL(r.url()).pathname === `/api/executions/${runningExecutionId}` &&
+          r.request().method() === "GET" &&
+          r.status() === 200,
+      ),
       refreshButton.click(),
     ]);
     expect(response.ok()).toBe(true);
@@ -123,7 +128,7 @@ test.describe("Run page toolbar and panel", () => {
 
   test("copy execution ID to clipboard", async ({ page, context }) => {
     await context.grantPermissions(["clipboard-read", "clipboard-write"]);
-    await openFirstExecution(page);
+    await openExecution(page, runningExecutionId);
     const toolbar = page.locator(".border-b.bg-card").first();
     await toolbar.locator("button.font-mono").click();
     await expect(toolbar.locator('svg[class*="lucide-check"]')).toBeVisible({ timeout: 2000 });
@@ -170,7 +175,7 @@ test.describe("Run page toolbar and panel", () => {
   });
 
   test("the panel sits beside the run on desktop and under it on a phone", async ({ page }) => {
-    await openFirstExecution(page);
+    await openExecution(page, runningExecutionId);
     const panel = page.getByTestId("run-panel");
     await expect(panel).toBeVisible();
     const desktop = await panel.boundingBox();
