@@ -269,7 +269,11 @@ test("on a phone the card is a bottom sheet, and a desktop-only step is skipped 
   await page.setViewportSize({ width: 1600, height: 1000 });
   await withOwnCopy(page, async (id) => {
     await page.setViewportSize({ width: 390, height: 844 });
-    await page.goto(`${BASE_URL}/workflows/${id}?view=steps&guide=flow&step=panel-tabs`);
+    // This focused sequence checks the two wide-only skips. The full reader/owner walks above
+    // also cross Quick Task's absent optional playbook step.
+    await page.goto(
+      `${BASE_URL}/workflows/${id}?view=steps&guide=flow&step=panel-tabs&only=panel-tabs,visibility,edit,explore`,
+    );
     const card = page.getByTestId("guide-card");
     await expect(card).toBeVisible({ timeout: 20000 });
     // The sheet spans the screen along an edge: the bottom, or the top when the element is under
