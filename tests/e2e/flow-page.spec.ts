@@ -265,38 +265,7 @@ test("an owner edits the definition in place; the save persists and advances the
     await page.keyboard.press("Escape");
     await expect(page.getByTestId("flow-edit-count")).toContainText("2");
 
-    // Move a routing node to another block: the diagnostic appears without a round trip and
-    // blocks the save; moving it back clears it.
-    await openSteps(page);
-    await page.getByTestId("edit-owner-plan-review").click();
-    await page.getByRole("option", { name: "Understand the task" }).click();
-    await expect(page.getByTestId("flow-diagnostics")).toContainText("unlabeled-edge");
-    await expect(page.getByTestId("flow-edit-save")).toBeDisabled();
-    // …and on the offending step itself, in the block it now sits in.
-    await openBlock(page, "scope");
-    await openSteps(page);
-    await expect(
-      page.locator('[data-node-id="plan-review"] [data-testid="inline-diagnostic"]'),
-    ).toHaveAttribute("data-diagnostic", /unlabeled-edge/);
-    // The offending connection itself is marked: its chip on the step card, and on the graph
-    // the step's output port for that edge.
-    await expect(
-      page.locator('[data-node-id="plan-review"] [data-connection][data-issue="true"]').first(),
-    ).toBeVisible();
-    await page.getByTestId("flow-modes").locator('[data-mode="graph"]').click();
-    await expect(
-      page.locator('[data-graph-node="plan-review"] [data-port="out"][data-issue="true"]').first(),
-    ).toBeAttached();
-    await page.getByTestId("flow-modes").locator('[data-mode="map"]').click();
-    await openSteps(page);
-    await page.getByTestId("edit-owner-plan-review").click();
-    await page.getByRole("option", { name: "Independent plan review" }).click();
-    await expect(page.getByTestId("flow-diagnostics")).toHaveCount(0);
-    await expect(page.getByTestId("inline-diagnostic")).toHaveCount(0);
-    await expect(page.getByTestId("flow-edit-save")).toBeEnabled();
-
-    // Edit a directive and a registry default; the export lists exactly what changes (the
-    // ownership edit that ended where it started is not a change).
+    // Edit a directive and a registry default; the export lists exactly what changes.
     await openBlock(page, "plan");
     await openSteps(page);
     await page.getByTestId("edit-node-create-plan-directive").fill("Write the plan (edited).");
@@ -347,6 +316,61 @@ test("an owner edits the definition in place; the save persists and advances the
     await expect(page.getByTestId("block-detail")).toContainText(LONG_BLOCK_NAME);
     await openSteps(page);
     await expect(page.getByTestId("block-detail")).toContainText("Write the plan (edited).");
+  } finally {
+    await page.request.delete(`${BASE_URL}/api/workflows/${id}`);
+  }
+});
+
+test("moving a routing node marks its issues in both views, and restoring its owner clears them without an ownership diff", async ({
+  page,
+}) => {
+  await loginAsAdmin(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const id = await copyQuickTask(page);
+  try {
+    await openEditing(page, id);
+    // Keep a real unsaved change: after restoring ownership there is still something to save.
+    const sentinel = "Understand the task (diagnostic check)";
+    await page.getByTestId("edit-block-label-scope").fill(sentinel);
+    await expect(page.getByTestId("flow-edit-save")).toBeEnabled();
+    await openBlock(page, "plan-review");
+    await openSteps(page);
+
+    // Move a routing node to another block: the diagnostic appears before any save and blocks it.
+    await page.getByTestId("edit-owner-plan-review").click();
+    await page.getByRole("option", { name: sentinel, exact: true }).click();
+    await expect(page.getByTestId("flow-diagnostics")).toContainText("unlabeled-edge");
+    await expect(page.getByTestId("flow-edit-save")).toBeDisabled();
+    // …and on the offending step itself, in the block it now sits in.
+    await openBlock(page, "scope");
+    await openSteps(page);
+    await expect(
+      page.locator('[data-node-id="plan-review"] [data-testid="inline-diagnostic"]'),
+    ).toHaveAttribute("data-diagnostic", /unlabeled-edge/);
+    // The offending connection itself is marked on its step chip and its graph output port.
+    await expect(
+      page.locator('[data-node-id="plan-review"] [data-connection][data-issue="true"]').first(),
+    ).toBeVisible();
+    await page.getByTestId("flow-modes").locator('[data-mode="graph"]').click();
+    await expect(
+      page.locator('[data-graph-node="plan-review"] [data-port="out"][data-issue="true"]').first(),
+    ).toBeAttached();
+    await page.getByTestId("flow-modes").locator('[data-mode="map"]').click();
+    await openSteps(page);
+    await page.getByTestId("edit-owner-plan-review").click();
+    await page.getByRole("option", { name: "Independent plan review" }).click();
+    await expect(page.getByTestId("flow-diagnostics")).toHaveCount(0);
+    await expect(page.getByTestId("inline-diagnostic")).toHaveCount(0);
+    await expect(page.getByTestId("flow-edit-save")).toBeEnabled();
+
+    // Ownership ended where it started: the whole export contains only the sentinel label.
+    await page.getByTestId("flow-edit-export-toggle").click();
+    await expect(page.locator("[data-export-path]")).toHaveCount(1);
+    await expect(page.locator("[data-export-entry]")).toHaveCount(0);
+    await expect(page.locator('[data-export-path="progress.nodes[0].label"]')).toContainText(
+      sentinel,
+    );
+    expect((await detailOf(page, id)).fileInfo.revision).toBe(0);
   } finally {
     await page.request.delete(`${BASE_URL}/api/workflows/${id}`);
   }
