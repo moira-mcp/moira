@@ -375,14 +375,16 @@ export class LocalDeviceRepository {
               "LOCAL_CONFLICT",
               "Control acknowledgement changed revision.",
             );
-          if (
-            previous?.ceiling &&
-            canonicalJson(previous.ceiling) !== canonicalJson(report.ceiling)
-          )
+          try {
+            // The authenticated device reports its local owner's approved maximum.
+            // Management observations do not renew an expired work lease.
+            assertLocalControlSettings({ ...report.settings, enabled: false }, report.ceiling, now);
+          } catch {
             throw new LocalDeviceError(
-              "LOCAL_CONFLICT",
-              "Reapprove a changed control ceiling locally.",
+              "LOCAL_INVALID",
+              "Applied resources exceed the locally approved envelope.",
             );
+          }
           const control: LocalDeviceControlView = previous ?? {
             optedIn: true,
             revision: 0,

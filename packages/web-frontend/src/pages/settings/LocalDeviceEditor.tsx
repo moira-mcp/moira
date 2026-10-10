@@ -157,6 +157,7 @@ export function LocalDeviceEditor({
         </p>
         <p className="text-sm text-muted-foreground">{t("localDevices.editor.requestHint")}</p>
         <p className="text-sm text-muted-foreground">{t("localDevices.editor.futureProfile")}</p>
+        <p className="text-sm text-muted-foreground">{t("localDevices.editor.reapproveHint")}</p>
         {control.error && (
           <InlineError title={t("localDevices.editor.rejected")} message={control.error.message} />
         )}

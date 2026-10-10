@@ -464,6 +464,23 @@ by observing that binding. `LOCAL_STORAGE_NOT_MOUNTED` means storage remains una
 custom volume manually, or check that the saved default image is present and can be mounted.
 `LOCAL_STORAGE_OWNER` requires resolving an unsafe image/mount or conflicting binding. Preserve
 the image and state; startup never creates a replacement disk or resets data to bypass a refusal.
+If the companion reports `LOCAL_STORAGE_FULL`, check the computer's shared backing-image capacity
+and its free space separately from free space on the Mac. To raise its approved maximum, stop
+the foreground companion through Ctrl+C or ordinary owner-managed shutdown and repeat locally:
+
+```bash
+npm run local -- web-control --confirm --storage-gib 50
+npm run local -- run
+```
+
+Use the same `--state PATH` on both commands when configured. Do not use `disable` just to revise
+the maximum, since it changes work enablement and its lease. Omitted limits retain the existing
+approval. Refresh **Local computers**, request Storage 50 in the computer's editor and wait for
+the applied revision and actual capacity. Approval itself does not resize storage, renew the lease
+or clear a pending request. A failed or interrupted resize keeps its existing recovery records;
+do not reset state or recreate codespaces. An expired work lease does not prevent management
+from reporting the approval, but guest work still requires valid work permission. If the approval
+reply is lost, reconnect with the same state so the same saved approval is reported again.
 Stop the foreground companion before commands that require its runner lock. Unsupported SDK
 versions, Linux runtime ownership, unsafe mounts/settings or unknown identity refuse work;
 do not reset the personal Docker profile, substitute an ordinary directory for bounded storage,

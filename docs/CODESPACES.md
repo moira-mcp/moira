@@ -265,18 +265,40 @@ unsupported saved shape. Rollback restores the corresponding database, local sta
 bundles and SDK backing storage together; resetting the SDK, deleting journals or enrolling a replacement computer is not
 the conversion procedure.
 
-After pairing confirmation, grant web control once on the local machine:
+After pairing confirmation, approve web control on the local machine:
 
 ```bash
 npm run local -- web-control --confirm --max-lease-hours 168
 npm run local -- run
 ```
 
-Use the same `--state` argument when configured. Omitted ceiling options use the
-current local policy. Choose larger approved bounds during this confirmation with
-`--cpus`, `--memory-gib`, `--storage-gib` and `--docker-gib`. The approval pins the server,
-user, device and connection; the command refuses an existing approval and does
-not replace it. Web or agent requests cannot change this envelope.
+Use the same `--state` argument when configured. On first approval, omitted resource
+ceilings use the current local policy and the lease ceiling defaults to seven days.
+Repeat `web-control --confirm` to revise an existing approval; omitted options then retain
+the previously approved ceilings, including the lease ceiling. The exact server, user,
+device and connection must match. Applied and rejected revisions, delegation, repository
+receipts and pending recovery records are preserved. Web or agent settings requests cannot
+change these locally approved maxima. Applied resources must still fit them; a pending
+request is retained and its ordinary application can reject values outside a revised maximum.
+
+For example, to approve a shared storage maximum of 50 GiB, stop the foreground companion
+through Ctrl+C or its ordinary owner-managed shutdown, then run:
+
+```bash
+npm run local -- web-control --confirm --storage-gib 50
+npm run local -- run
+```
+
+Repeat the same `--state PATH` on both commands when configured. Stopping the companion
+releases its state lock; do not use `disable` to change only a maximum, because that also
+changes work enablement and its lease. Refresh Local computers after the companion reports
+the approval, then request Storage 50 in that computer's existing settings editor. Raising
+the maximum alone neither resizes storage nor renews work permission. Physical resizing
+happens only when the companion applies that settings revision through its existing
+stopped-runtime path. Read the applied policy rather than treating a pending request as success.
+Management reports remain available after a work lease expires without authorizing guest work.
+A lost approval-report reply is resolved by reporting the same saved approval again; do not
+erase local approval or recovery records or enroll a replacement computer.
 
 The Local computers editor controls enablement, finite lease, defaults, storage,
 repository grants and permissions and optional Git author identity.

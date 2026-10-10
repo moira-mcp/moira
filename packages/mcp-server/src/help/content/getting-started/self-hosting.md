@@ -303,12 +303,28 @@ After pairing is confirmed, approve local web control:
 npm run local -- web-control --confirm --max-lease-hours 168
 ```
 
-Use the same `--state PATH` as setup. Unspecified numeric ceilings keep the current local values;
-the command's lease ceiling defaults to seven days. To permit larger resource settings, supply
-the intended ceilings with `--cpus`, `--memory-gib`, `--storage-gib` and `--docker-gib`.
-This approval does not itself renew the work lease.
-An existing web-control approval is not replaced by rerunning this command; browser requests must
-fit its saved ceilings.
+Use the same `--state PATH` as setup. On first approval, unspecified resource ceilings use the
+current local values and the lease ceiling defaults to seven days. Repeat `web-control --confirm`
+on this computer to revise its approval; unspecified options then retain the previously approved
+ceilings. Supply a changed maximum with `--cpus`, `--memory-gib`, `--storage-gib` or `--docker-gib`.
+The server, account, computer and connection must remain the same. Existing permissions and
+application/recovery state are preserved; browser or agent requests cannot raise these maxima.
+Approval alone neither renews the work lease nor changes the actual disk size.
+
+For example, to permit a shared storage size of 50 GiB, first stop the foreground companion with
+Ctrl+C or its ordinary owner-managed shutdown so the local state lock is released. Then run:
+
+```bash
+npm run local -- web-control --confirm --storage-gib 50
+npm run local -- run
+```
+
+Repeat the same `--state PATH` on both commands when configured. Do not use `disable` just to
+revise a maximum: that also changes work enablement and its lease. Refresh **Local computers**,
+set Storage to 50 in that computer's existing editor and choose **Request settings change**.
+The companion applies the requested size through the existing stopped-runtime resize path.
+Wait for the applied revision and actual size; a pending request is not a completed resize.
+Local confirmation preserves the existing disk and codespaces; it does not create replacement VMs.
 Start the foreground companion after confirmation and local approval:
 
 ```bash
