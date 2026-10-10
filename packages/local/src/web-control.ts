@@ -36,6 +36,29 @@ const approvalSchema = z
   })
   .strict();
 
+type ControlIdentity = {
+  origin: string;
+  userId?: string;
+  deviceId: string;
+  deviceGeneration?: number;
+  connectionId?: string;
+};
+
+function assertApprovalIdentity(
+  approval: z.infer<typeof approvalSchema>,
+  identity: ControlIdentity,
+): void {
+  if (
+    (["origin", "userId", "deviceId", "deviceGeneration", "connectionId"] as const).some(
+      (key) => approval[key] !== identity[key],
+    )
+  )
+    throw new LocalRefusal(
+      "LOCAL_IDENTITY_CHANGED",
+      "The web-control approval belongs to another server or owner.",
+    );
+}
+
 export function controlSettings(
   policy: LocalPolicy,
   delegation: AgentRepositoryManagement | null = null,
@@ -110,13 +133,7 @@ export class LocalWebControl {
     } = {},
   ) {}
   async optIn(
-    identity: {
-      origin: string;
-      userId?: string;
-      deviceId: string;
-      deviceGeneration?: number;
-      connectionId?: string;
-    },
+    identity: ControlIdentity,
     ceiling: LocalControlCeiling,
     confirmed: boolean,
   ): Promise<void> {
@@ -127,6 +144,7 @@ export class LocalWebControl {
       );
     const release = await this.records.state.lock();
     try {
+      ceiling = localControlCeilingSchema.parse(ceiling);
       const policy = await this.records.policy();
       assertLocalControlSettings(
         { ...controlSettings(policy), enabled: false },
@@ -134,45 +152,31 @@ export class LocalWebControl {
         Date.now(),
       );
       const previous = await this.records.state.read("web-control.json", approvalSchema.parse);
-      if (previous)
-        throw new LocalRefusal(
-          "LOCAL_CONTROL_CONFLICT",
-          "Web control is already approved; inspect the existing approval before replacing it.",
-        );
+      if (previous) assertApprovalIdentity(previous, identity);
       await this.records.state.write(
         "web-control.json",
-        approvalSchema.parse({
-          origin: identity.origin,
-          userId: identity.userId,
-          deviceId: identity.deviceId,
-          deviceGeneration: identity.deviceGeneration,
-          connectionId: identity.connectionId,
-          ceiling,
-          appliedRevision: 0,
-        }),
+        approvalSchema.parse(
+          previous
+            ? { ...previous, ceiling }
+            : {
+                origin: identity.origin,
+                userId: identity.userId,
+                deviceId: identity.deviceId,
+                deviceGeneration: identity.deviceGeneration,
+                connectionId: identity.connectionId,
+                ceiling,
+                appliedRevision: 0,
+              },
+        ),
       );
     } finally {
       await release();
     }
   }
-  async report(identity: {
-    origin: string;
-    userId?: string;
-    deviceId: string;
-    deviceGeneration?: number;
-    connectionId?: string;
-  }): Promise<LocalControlReport | undefined> {
+  async report(identity: ControlIdentity): Promise<LocalControlReport | undefined> {
     const approval = await this.records.state.read("web-control.json", approvalSchema.parse);
     if (!approval) return undefined;
-    if (
-      (["origin", "userId", "deviceId", "deviceGeneration", "connectionId"] as const).some(
-        (key) => approval[key] !== identity[key],
-      )
-    )
-      throw new LocalRefusal(
-        "LOCAL_IDENTITY_CHANGED",
-        "The web-control approval belongs to another server or owner.",
-      );
+    assertApprovalIdentity(approval, identity);
     return {
       ceiling: approval.ceiling,
       settings: controlSettings(await this.records.policy(), approval.agentRepositoryManagement),

@@ -132,8 +132,20 @@ describe("Owner settings are requested separately from locally applied authority
       private: true,
       allowPush: true,
     });
+    const beforeReapproval = service.getActiveDevice("owner", deviceId);
+    const reapprovedCeiling = { ...ceiling, storageBytes: 96 * GiB };
+    const reapproved = service.heartbeat(auth, policy(deviceId), {
+      ceiling: reapprovedCeiling,
+      settings: delegated,
+      appliedRevision: 1,
+    });
+    expect(reapproved.control).toEqual({
+      ...beforeReapproval.control,
+      ceiling: reapprovedCeiling,
+    });
+    expect(reapproved.policy).toEqual(beforeReapproval.policy);
     service.heartbeat(auth, policy(deviceId, requested), {
-      ceiling,
+      ceiling: reapprovedCeiling,
       settings: requested,
       appliedRevision: 2,
     });
@@ -274,6 +286,124 @@ describe("Owner settings are requested separately from locally applied authority
     expect(rejected.control).toMatchObject({ status: "rejected", revision: 1, appliedRevision: 0 });
     expect(rejected.policy.enabled).toBe(false);
   });
+  test("local reapproval permits an ordinary 8 to 50 GiB request without claiming a resize before its applied acknowledgement", () => {
+    const { deviceId, auth } = enrolled();
+    const applied = { ...settings, storageBytes: 8 * GiB };
+    const initialCeiling = { ...ceiling, storageBytes: 8 * GiB };
+    const largerCeiling = { ...initialCeiling, storageBytes: 50 * GiB };
+    const requested = { ...applied, storageBytes: 50 * GiB };
+    service.heartbeat(auth, policy(deviceId, applied), {
+      ceiling: initialCeiling,
+      settings: applied,
+      appliedRevision: 0,
+    });
+    expect(() =>
+      service.requestSettings("owner", deviceId, {
+        expectedRevision: 0,
+        expectedGeneration: 1,
+        settings: requested,
+      }),
+    ).toThrow("envelope");
+    const before = service.getActiveDevice("owner", deviceId);
+    const report = { ceiling: largerCeiling, settings: applied, appliedRevision: 0 };
+    const reapproved = service.heartbeat(auth, policy(deviceId, applied), report);
+    expect(reapproved.control).toEqual({ ...before.control, ceiling: largerCeiling });
+    expect(reapproved.policy).toEqual(before.policy);
+    expect(reapproved.deviceGeneration).toBe(before.deviceGeneration);
+    expect(reapproved.connectionId).toBe(before.connectionId);
+    expect(service.heartbeat(auth, policy(deviceId, applied), report)).toEqual(reapproved);
+    const pending = service.requestSettings("owner", deviceId, {
+      expectedRevision: 0,
+      expectedGeneration: 1,
+      settings: requested,
+    });
+    expect(pending.control).toMatchObject({
+      status: "pending",
+      revision: 1,
+      appliedRevision: 0,
+      settings: requested,
+    });
+    expect(pending.policy.machine.storageBytes).toBe(8 * GiB);
+    expect(service.heartbeat(auth, policy(deviceId, applied), report).control).toEqual(
+      pending.control,
+    );
+    const acknowledged = service.heartbeat(auth, policy(deviceId, requested), {
+      ...report,
+      settings: requested,
+      appliedRevision: 1,
+    });
+    expect(acknowledged.control).toMatchObject({
+      status: "applied",
+      revision: 1,
+      appliedRevision: 1,
+    });
+    expect(acknowledged.policy.machine.storageBytes).toBe(50 * GiB);
+  });
+  test("a lowered local ceiling preserves an outstanding request until the companion reports its ordinary rejection", () => {
+    const { deviceId, auth } = enrolled();
+    service.heartbeat(auth, policy(deviceId), { ceiling, settings, appliedRevision: 0 });
+    const pending = service.requestSettings("owner", deviceId, {
+      expectedRevision: 0,
+      expectedGeneration: 1,
+      settings: { ...settings, storageBytes: 64 * GiB },
+    });
+    const lowerCeiling = { ...ceiling, storageBytes: 50 * GiB };
+    const report = { ceiling: lowerCeiling, settings, appliedRevision: 0 };
+    const reapproved = service.heartbeat(auth, policy(deviceId), report);
+    expect(reapproved.control).toEqual({ ...pending.control, ceiling: lowerCeiling });
+    expect(reapproved.policy).toEqual(pending.policy);
+    const error = {
+      code: "LOCAL_CONTROL_FAILED",
+      message: "Local control ceiling exceeded: storageBytes",
+    };
+    const rejected = service.heartbeat(auth, policy(deviceId), {
+      ...report,
+      rejectedRevision: 1,
+      error,
+    });
+    expect(rejected.control).toEqual({ ...reapproved.control, status: "rejected", error });
+    expect(rejected.policy.machine.storageBytes).toBe(32 * GiB);
+  });
+  test("an enabled policy whose lease expired still reports a locally reapproved ceiling for management", () => {
+    const { deviceId, auth } = enrolled();
+    const expired = { ...settings, leaseUntil: now - 1 };
+    service.heartbeat(auth, policy(deviceId, expired), {
+      ceiling,
+      settings: expired,
+      appliedRevision: 0,
+    });
+    const renewedCeiling = { ...ceiling, storageBytes: 96 * GiB };
+    const reported = service.heartbeat(auth, policy(deviceId, expired), {
+      ceiling: renewedCeiling,
+      settings: expired,
+      appliedRevision: 0,
+    });
+    expect(reported.control?.ceiling).toEqual(renewedCeiling);
+    expect(reported.policy).toEqual(policy(deviceId, expired));
+    expect(service.claim(auth)).toEqual([]);
+  });
+  test.each([
+    ["cpuCores", 5],
+    ["memoryBytes", 9 * GiB],
+    ["storageBytes", 65 * GiB],
+    ["dockerBytes", 9 * GiB],
+  ] as const)(
+    "an applied %s value above the reported local ceiling refuses the heartbeat without changing stored authority",
+    (key, value) => {
+      const { deviceId, auth } = enrolled();
+      service.heartbeat(auth, policy(deviceId), { ceiling, settings, appliedRevision: 0 });
+      const before = service.getActiveDevice("owner", deviceId);
+      const invalid = { ...settings, [key]: value };
+      expect(() =>
+        service.heartbeat(auth, policy(deviceId, invalid), {
+          ceiling,
+          settings: invalid,
+          appliedRevision: 0,
+        }),
+      ).toThrow("Applied resources exceed the locally approved envelope");
+      expect(service.getActiveDevice("owner", deviceId)).toEqual(before);
+    },
+  );
   test("settings route requires actual browser session and origin; bearer/MCP cannot write", async () => {
     const { deviceId, auth } = enrolled();
     service.heartbeat(auth, policy(deviceId), { ceiling, settings, appliedRevision: 0 });
@@ -313,5 +443,12 @@ describe("Owner settings are requested separately from locally applied authority
       .send(body);
     expect(saved.status).toBe(200);
     expect(saved.body.data.control.status).toBe("pending");
+    const forbiddenCeiling = await request(app)
+      .put(path)
+      .set("X-Fixture-Session", "yes")
+      .set("Origin", "https://moira.example")
+      .send({ ...body, ceiling: { ...ceiling, storageBytes: 128 * GiB } });
+    expect(forbiddenCeiling.status).toBe(400);
+    expect(service.getActiveDevice("owner", deviceId).control).toEqual(saved.body.data.control);
   });
 });

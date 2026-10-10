@@ -1,6 +1,8 @@
 import { mkdir } from "node:fs/promises";
+import { realpathSync } from "node:fs";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
+import { pathToFileURL } from "node:url";
 import { randomBytes } from "node:crypto";
 import { spawn } from "node:child_process";
 import { z } from "zod";
@@ -55,7 +57,8 @@ Usage: moira-local <command> [options]
                Read the browser's pairing token from stdin; confirm the local grants in Moira
   run          Serve the paired Moira account through outbound HTTPS until stopped
   web-control --confirm [--max-lease-hours 168]
-               Opt in locally to owner web settings within the approved numeric ceilings
+               Approve or revise owner web settings within locally confirmed resource limits
+               Omitted limits retain the previous approval; changing a limit does not resize VMs
 
 Options: --state PATH --sbx PATH --template IMAGE@sha256:DIGEST
          --storage-root PATH --storage-gib 32 --cpus 2 --memory-gib 4
@@ -217,21 +220,33 @@ export async function main(args: string[], environment: NodeJS.ProcessEnv): Prom
     return;
   }
   if (command === "web-control") {
+    if (!options.confirm)
+      throw new LocalRefusal(
+        "LOCAL_CONTROL_CONFIRM",
+        "Confirm web control and its finite ceiling on this computer.",
+      );
     const relay = new LocalRelay(records);
     const identity = await relay.confirmed();
-    await new LocalWebControl(records).optIn(
+    const control = new LocalWebControl(records);
+    const previous = await control.report(identity);
+    const defaults = previous?.ceiling ?? {
+      cpuCores: policy.runtime.cpuCores,
+      memoryBytes: policy.runtime.memoryBytes,
+      storageBytes: policy.runtime.maxStorageBytes,
+      dockerBytes: policy.runtime.dockerBytes,
+      maxLeaseMs: MAX_LOCAL_WORK_LEASE_MS,
+    };
+    await control.optIn(
       identity,
       localControlCeilingSchema.parse({
-        cpuCores: number(options.cpus) ?? policy.runtime.cpuCores,
+        cpuCores: number(options.cpus) ?? defaults.cpuCores,
         memoryBytes:
-          (number(options["memory-gib"]) ?? policy.runtime.memoryBytes / 1024 ** 3) * 1024 ** 3,
+          (number(options["memory-gib"]) ?? defaults.memoryBytes / 1024 ** 3) * 1024 ** 3,
         storageBytes:
-          (number(options["storage-gib"]) ?? policy.runtime.maxStorageBytes / 1024 ** 3) *
-          1024 ** 3,
+          (number(options["storage-gib"]) ?? defaults.storageBytes / 1024 ** 3) * 1024 ** 3,
         dockerBytes:
-          (number(options["docker-gib"]) ?? policy.runtime.dockerBytes / 1024 ** 3) * 1024 ** 3,
-        maxLeaseMs:
-          (number(options["max-lease-hours"]) ?? MAX_LOCAL_WORK_LEASE_MS / 3600000) * 3600000,
+          (number(options["docker-gib"]) ?? defaults.dockerBytes / 1024 ** 3) * 1024 ** 3,
+        maxLeaseMs: (number(options["max-lease-hours"]) ?? defaults.maxLeaseMs / 3600000) * 3600000,
       }),
       options.confirm === true,
     );
@@ -409,12 +424,13 @@ async function runManagerCommand(
   }
 }
 
-void main(process.argv.slice(2), { ...process.env }).catch((error: unknown) => {
-  const code = error instanceof LocalRefusal ? error.code : "LOCAL_COMMAND_FAILED";
-  const message =
-    error instanceof LocalRefusal
-      ? error.message
-      : "Local command failed; check its arguments and prerequisites.";
-  process.stderr.write(`${JSON.stringify({ error: { code, message } })}\n`);
-  process.exitCode = 1;
-});
+if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href)
+  void main(process.argv.slice(2), { ...process.env }).catch((error: unknown) => {
+    const code = error instanceof LocalRefusal ? error.code : "LOCAL_COMMAND_FAILED";
+    const message =
+      error instanceof LocalRefusal
+        ? error.message
+        : "Local command failed; check its arguments and prerequisites.";
+    process.stderr.write(`${JSON.stringify({ error: { code, message } })}\n`);
+    process.exitCode = 1;
+  });

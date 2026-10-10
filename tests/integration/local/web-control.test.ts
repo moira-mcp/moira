@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test } from "@jest/globals";
+import { afterEach, beforeEach, describe, expect, jest, test } from "@jest/globals";
 import { mkdtemp, realpath, rm, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -11,6 +11,7 @@ import {
 import { LocalManager } from "../../../packages/local/src/manager.js";
 import { PrivateState } from "../../../packages/local/src/private-state.js";
 import { LocalRelay } from "../../../packages/local/src/relay.js";
+import { main } from "../../../packages/local/src/cli.js";
 import { RequestJournal } from "../../../packages/local/src/journal.js";
 import { localEnvelopeSchema } from "../../../packages/local/src/rpc.js";
 import { canonicalJson } from "../../../packages/shared/src/utils/canonical-json.js";
@@ -51,6 +52,170 @@ async function fixture() {
   return { ...local, state, connection, ceiling };
 }
 describe("Locally pinned owner web control", () => {
+  test("the owner CLI changes only the supplied limit and reports the previous approval metadata", async () => {
+    const f = await fixture(),
+      control = new LocalWebControl(f.records);
+    const initial = { ...f.ceiling, maxLeaseMs: 2 * 3600000 };
+    await control.optIn(f.connection, initial, true);
+    const stored = await f.state.read("web-control.json", (value) => value as object);
+    const before = { ...stored, appliedRevision: 5, repositoryRequests: [randomUUID()] };
+    await f.state.write("web-control.json", before);
+    const reports: unknown[] = [];
+    const transport = jest.spyOn(globalThis, "fetch").mockImplementation(async (_url, options) => {
+      const sent = JSON.parse(String(options?.body));
+      reports.push(sent);
+      return Response.json({
+        success: true,
+        data: { ...f.connection, status: "active", policy: publicPolicy(f.policy) },
+      });
+    });
+    const stdout = jest.spyOn(process.stdout, "write").mockImplementation(() => true);
+    try {
+      await expect(
+        main(["web-control", "--state", directory, "--storage-gib", "50"], {}),
+      ).rejects.toMatchObject({ code: "LOCAL_CONTROL_CONFIRM" });
+      expect(reports).toEqual([]);
+      expect(await f.state.read("web-control.json", (value) => value)).toEqual(before);
+      await main(["web-control", "--state", directory, "--confirm", "--storage-gib", "50"], {});
+      const next = { ...initial, storageBytes: 50 * GiB };
+      expect(await f.state.read("web-control.json", (value) => value)).toEqual({
+        ...before,
+        ceiling: next,
+      });
+      expect(reports.at(-1)).toMatchObject({ control: { ceiling: next, appliedRevision: 5 } });
+      expect(await f.records.policy()).toEqual(f.policy);
+    } finally {
+      stdout.mockRestore();
+      transport.mockRestore();
+    }
+  });
+  test("confirmed ceiling replacement preserves approval metadata, pending recovery and the existing VM", async () => {
+    const f = await fixture();
+    const control = new LocalWebControl(f.records, {
+      resize: async () => {
+        throw new Error("Approval must not resize storage");
+      },
+      replacePolicy: async () => {
+        throw new Error("Approval must not replace the applied policy");
+      },
+    });
+    await control.optIn(f.connection, f.ceiling, true);
+    const stored = await f.state.read("web-control.json", (value) => value as object);
+    const before = {
+      ...stored,
+      appliedRevision: 5,
+      agentRepositoryManagement: {
+        githubUserId: "42",
+        owner: "owner",
+        allowExistingPrivate: true,
+        allowNewPrivate: true,
+        allowPush: true,
+      },
+      repositoryRequests: [randomUUID()],
+      rejectedRevision: 6,
+      error: { code: "LOCAL_STORAGE_FULL", message: "Existing resize remains pending." },
+    };
+    await f.state.write("web-control.json", before);
+    const pending = { revision: 6, settings: controlSettings(f.policy) };
+    const resize = {
+      deviceId: f.policy.deviceId,
+      fromBytes: f.policy.runtime.maxStorageBytes,
+      toBytes: 50 * GiB,
+      volumeUUID: randomUUID(),
+      overheadBytes: 1024 * 1024,
+    };
+    await f.state.write("control-intent.json", pending);
+    await f.state.write("storage-resize.json", resize);
+    const preserved = await Promise.all(
+      ["policy.json", "connection.json", `space-${f.space.id}.json`].map((name) =>
+        readFile(join(directory, name)),
+      ),
+    );
+    const next = { ...f.ceiling, storageBytes: 50 * GiB };
+    await control.optIn(f.connection, next, true);
+    expect(await f.state.read("web-control.json", (value) => value)).toEqual({
+      ...before,
+      ceiling: next,
+    });
+    expect(await f.state.read("control-intent.json", (value) => value)).toEqual(pending);
+    expect(await f.state.read("storage-resize.json", (value) => value)).toEqual(resize);
+    expect(
+      await Promise.all(
+        ["policy.json", "connection.json", `space-${f.space.id}.json`].map((name) =>
+          readFile(join(directory, name)),
+        ),
+      ),
+    ).toEqual(preserved);
+    await control.optIn(f.connection, next, true);
+    expect(await control.report(f.connection)).toMatchObject({
+      ceiling: next,
+      appliedRevision: 5,
+      rejectedRevision: 6,
+      settings: { agentRepositoryManagement: before.agentRepositoryManagement },
+    });
+  });
+  test("existing approval cannot change without fresh local confirmation", async () => {
+    const f = await fixture(),
+      control = new LocalWebControl(f.records);
+    await control.optIn(f.connection, f.ceiling, true);
+    const before = await readFile(join(directory, "web-control.json"));
+    await expect(
+      control.optIn(f.connection, { ...f.ceiling, storageBytes: 50 * GiB }, false),
+    ).rejects.toMatchObject({ code: "LOCAL_CONTROL_CONFIRM" });
+    expect(await readFile(join(directory, "web-control.json"))).toEqual(before);
+  });
+  test.each([
+    ["origin", "https://another.example"],
+    ["userId", "another-owner"],
+    ["deviceId", "00000000-0000-4000-8000-000000000001"],
+    ["deviceGeneration", 2],
+    ["connectionId", "00000000-0000-4000-8000-000000000002"],
+  ] as const)(
+    "reapproval refuses changed %s without changing the stored approval",
+    async (key, value) => {
+      const f = await fixture(),
+        control = new LocalWebControl(f.records);
+      await control.optIn(f.connection, f.ceiling, true);
+      const before = await readFile(join(directory, "web-control.json"));
+      await expect(
+        control.optIn(
+          { ...f.connection, [key]: value },
+          { ...f.ceiling, storageBytes: 50 * GiB },
+          true,
+        ),
+      ).rejects.toMatchObject({ code: "LOCAL_IDENTITY_CHANGED" });
+      expect(await readFile(join(directory, "web-control.json"))).toEqual(before);
+    },
+  );
+  test("a lost reapproval heartbeat response is repaired by reporting the same persisted approval again", async () => {
+    const f = await fixture(),
+      control = new LocalWebControl(f.records);
+    await control.optIn(f.connection, f.ceiling, true);
+    const next = { ...f.ceiling, storageBytes: 50 * GiB };
+    await control.optIn(f.connection, next, true);
+    const before = await readFile(join(directory, "web-control.json"));
+    const reports: unknown[] = [];
+    let lost = true;
+    const transport: typeof fetch = async (_url, options) => {
+      reports.push(JSON.parse(String(options?.body)));
+      if (lost) {
+        lost = false;
+        throw new TypeError("Fixture response lost after accepting the report");
+      }
+      return Response.json({
+        success: true,
+        data: { ...f.connection, status: "active", policy: publicPolicy(f.policy) },
+      });
+    };
+    await expect(new LocalRelay(f.records, transport).confirmed()).rejects.toThrow(
+      "Fixture response lost after accepting the report",
+    );
+    await new LocalRelay(f.records, transport).confirmed();
+    expect(reports).toHaveLength(2);
+    expect(reports[1]).toEqual(reports[0]);
+    expect(reports[1]).toMatchObject({ control: { ceiling: next, appliedRevision: 0 } });
+    expect(await readFile(join(directory, "web-control.json"))).toEqual(before);
+  });
   test.each(["existing", "created"])(
     "applied %s delegation and repository append preserve an existing live space and broker capability",
     async (origin) => {

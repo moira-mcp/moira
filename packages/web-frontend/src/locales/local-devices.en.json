@@ -87,6 +87,7 @@
     "optIn": "Enable settings management on this computer with npm run local -- web-control --confirm --max-lease-hours 168. Use the same --state as your connection. Existing permissions and files are preserved.",
     "requestHint": "The computer applies saved settings. Until then, the current permissions above remain in effect. Offline computers keep the request pending.",
     "futureProfile": "CPU, RAM and Docker storage defaults apply to new codespaces. Existing codespaces keep these resources. Shared storage capacity applies to all local codespaces on this computer.",
+    "reapproveHint": "To raise an approved maximum, repeat web-control --confirm on this computer with the new limit and the same --state, then refresh the computer list. Storage grows after you save the new size here.",
     "authorHint": "Leave both fields empty to use your verified GitHub identity when available. Your computer's Git configuration is not copied.",
     "states": {
       "not-enabled": "Web control is not enabled.",
