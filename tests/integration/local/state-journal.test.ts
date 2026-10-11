@@ -246,6 +246,20 @@ describe("private local state", () => {
 });
 
 describe("replay and result lifetime", () => {
+  test.each([
+    ["at expiration", 1000],
+    ["beyond the maximum future window", 901001],
+    ["with a malformed expiration", Number.NaN],
+  ])("refuses a request %s before any durable effect", async (_condition, expiresAt) => {
+    const journal = new RequestJournal(state, () => 1000);
+    await expect(
+      journal.run(randomUUID(), expiresAt, { action: "write" }, async () => {
+        await state.write("effect.json", { executed: true });
+        return { ok: true };
+      }),
+    ).rejects.toThrow("expired or outside its time window");
+    expect(await state.read("effect.json", (value) => value)).toBeNull();
+  });
   test("coalesces concurrent requests and returns the durable result after restart", async () => {
     const journal = new RequestJournal(state, () => 1000);
     const id = randomUUID();

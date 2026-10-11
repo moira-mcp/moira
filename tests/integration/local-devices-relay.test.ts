@@ -21,6 +21,7 @@ import {
   CodespaceTransferRepository,
   CodespaceTransferService,
   canonicalJson,
+  LOCAL_REQUEST_MAX_WINDOW_MS,
   getFeatureResolver,
   setFeatureResolver,
   ModeFeatureResolver,
@@ -193,6 +194,102 @@ afterEach(() => {
 });
 
 describe("Durable local device enrollment and relay", () => {
+  test.each(["create", "snapshot"] as const)(
+    "reserves clock headroom for a fresh full-window %s without changing retained identity",
+    async (action) => {
+      const { device } = enroll(),
+        resourceId = bind(device);
+      sqlite
+        .prepare("UPDATE codespaceResource SET createDeadlineAt=? WHERE id=?")
+        .run(now + LOCAL_REQUEST_MAX_WINDOW_MS, resourceId);
+      const resource = new CodespaceResourceRepository(sqlite).getOwned("user-a", resourceId)!;
+      const directory = fs.mkdtempSync(path.join(os.tmpdir(), "moira-relay-clock-window-"));
+      const transfers = new CodespaceTransferService({
+        repository: new CodespaceTransferRepository(sqlite),
+        root: directory,
+        policy: () => serverPolicy,
+        now: () => now,
+      });
+      try {
+        const relay = new LocalCodespaceRelay(service, transfers, () => now);
+        const input =
+          action === "create"
+            ? { action, repositoryId, ref: "main", operationMarker: resource.operationMarker }
+            : { action };
+        const options = { mutation: true, waitMs: LOCAL_REQUEST_MAX_WINDOW_MS };
+        const queued = await relay.retain(resource, input, options);
+        const bytes = await transfers.readRelayPayload(
+          "user-a",
+          "local_relay_input",
+          queued.payloadReference,
+        );
+        expect(JSON.parse(bytes.toString("utf8")).expiresAt).toBe(now + 870_000);
+        now += 5000;
+        const repeated = await relay.retain(resource, input, options);
+        expect(repeated).toEqual(queued);
+        expect(
+          await transfers.readRelayPayload(
+            "user-a",
+            "local_relay_input",
+            repeated.payloadReference,
+          ),
+        ).toEqual(bytes);
+      } finally {
+        fs.rmSync(directory, { recursive: true, force: true });
+      }
+    },
+  );
+  test.each(["short request", "resource deadline", "device lease"] as const)(
+    "clock headroom preserves the tighter %s boundary",
+    async (boundary) => {
+      const approved = policy();
+      if (boundary === "device lease") approved.leaseUntil = now + 20_000;
+      const { device } = enroll("user-a", approved),
+        resourceId = bind(device);
+      const createDeadline = now + (boundary === "resource deadline" ? 15_000 : 900_000);
+      sqlite
+        .prepare("UPDATE codespaceResource SET createDeadlineAt=? WHERE id=?")
+        .run(createDeadline, resourceId);
+      const resource = new CodespaceResourceRepository(sqlite).getOwned("user-a", resourceId)!;
+      const directory = fs.mkdtempSync(path.join(os.tmpdir(), "moira-relay-short-window-"));
+      const transfers = new CodespaceTransferService({
+        repository: new CodespaceTransferRepository(sqlite),
+        root: directory,
+        policy: () => serverPolicy,
+        now: () => now,
+      });
+      try {
+        const input =
+          boundary === "resource deadline"
+            ? {
+                action: "create",
+                repositoryId,
+                ref: "main",
+                operationMarker: resource.operationMarker,
+              }
+            : { action: "snapshot" };
+        const queued = await new LocalCodespaceRelay(service, transfers, () => now).retain(
+          resource,
+          input,
+          { waitMs: boundary === "short request" ? 2000 : LOCAL_REQUEST_MAX_WINDOW_MS },
+        );
+        const expectedDeadline =
+          boundary === "short request"
+            ? now + 2000
+            : boundary === "resource deadline"
+              ? createDeadline
+              : approved.leaseUntil;
+        const bytes = await transfers.readRelayPayload(
+          "user-a",
+          "local_relay_input",
+          queued.payloadReference,
+        );
+        expect(JSON.parse(bytes.toString("utf8")).expiresAt).toBe(expectedDeadline);
+      } finally {
+        fs.rmSync(directory, { recursive: true, force: true });
+      }
+    },
+  );
   test.each(["snapshot-only", "accepted-delete"] as const)(
     "owner recovery distinguishes %s from an unknown destructive dispatch",
     async (scope) => {
@@ -221,7 +318,7 @@ describe("Durable local device enrollment and relay", () => {
           scope === "snapshot-only"
             ? { action: "snapshot" }
             : { action: "delete", spaceId: pending.id, generation: pending.generation },
-          { mutation: scope === "accepted-delete" },
+          { mutation: scope === "accepted-delete", waitMs: LOCAL_REQUEST_MAX_WINDOW_MS },
         );
         if (scope === "snapshot-only") {
           const output = await transfers.retainRelayPayload(
@@ -284,6 +381,18 @@ describe("Durable local device enrollment and relay", () => {
         expect(repository.isOwnerDeleteIntent("user-a", resourceId, recovered.generation)).toBe(
           scope === "snapshot-only",
         );
+        const cleanup = await relay.retain(
+          recovered,
+          { action: "delete", spaceId: recovered.id, generation: recovered.generation },
+          { mutation: true, waitMs: LOCAL_REQUEST_MAX_WINDOW_MS },
+        );
+        const cleanupBytes = await transfers.readRelayPayload(
+          "user-a",
+          "local_relay_input",
+          cleanup.payloadReference,
+        );
+        expect(JSON.parse(cleanupBytes.toString("utf8")).expiresAt).toBe(now + 870_000);
+        expect(cleanup.authority).toBe(scope === "snapshot-only" ? "owner-delete" : undefined);
       } finally {
         fs.rmSync(directory, { recursive: true, force: true });
       }

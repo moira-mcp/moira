@@ -283,6 +283,12 @@ Explicit stop cancels undelivered work even while its delivery payload is being 
 confirmed cancellation before delivery returns `CODESPACE_OPERATION_CANCELLED` with detail that no work started. Companion startup after a
 crash or reboot reclaims only proven abandoned host ownership, preserving saved work without replay.
 
+Fresh local creation supports server and computer clocks differing by up to five seconds in either
+direction when delivery is prompt and the request, delivery permission and work lease remain unexpired.
+The server leaves 30 seconds inside the companion's maximum request window; expired authority is
+still refused. Keep both clocks synchronized. A lost reply retains the same request identity and
+expiry, so inspect the accepted work before repeating an effect.
+
 Consecutive commands can share a working context. Open a session with `session` and
 `session_start: true`, then name the same `session` on later commands: it remembers the `cwd` a call
 names and the variables a call passes in `env`, and applies both to every command that continues it.

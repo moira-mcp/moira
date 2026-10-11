@@ -14,6 +14,9 @@ import {
   type LocalRelayRequest,
 } from "@mcp-moira/shared";
 
+// Leave room for independent clocks inside the companion's unchanged admission ceiling.
+const LOCAL_REQUEST_ISSUANCE_WINDOW_MS = LOCAL_REQUEST_MAX_WINDOW_MS - 30_000;
+
 const replySchema = z.discriminatedUnion("ok", [
   z.object({ ok: z.literal(true), result: z.unknown() }).strict(),
   z
@@ -215,8 +218,8 @@ export class LocalCodespaceRelay {
         Math.min(
           this.now() +
             (request.action === "create"
-              ? LOCAL_REQUEST_MAX_WINDOW_MS
-              : Math.min(options.waitMs ?? 120_000, LOCAL_REQUEST_MAX_WINDOW_MS)),
+              ? LOCAL_REQUEST_ISSUANCE_WINDOW_MS
+              : Math.min(options.waitMs ?? 120_000, LOCAL_REQUEST_ISSUANCE_WINDOW_MS)),
           request.action === "create" ? resource.createDeadlineAt : Number.MAX_SAFE_INTEGER,
           authority ? Number.MAX_SAFE_INTEGER : device.policy.leaseUntil,
         );
