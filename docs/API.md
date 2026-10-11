@@ -1686,6 +1686,10 @@ The claim lease lasts at most thirty seconds and cannot exceed the request deadl
 work is also capped by the local work lease. Owner cleanup retains a bounded request deadline
 without that work-lease cap. Renewal extends the same current claim within those bounds.
 Reclaiming an expired claim changes the claim ID, not the request identity.
+For a request already acknowledged as `completed` or `refused`, renewal returns the
+original terminal claim without changing its lease, deadline or stored row, including after
+delivery expiry. It still requires current owner, device, connection, resource and repository
+authority and the exact claim ID. This read-only replay grants neither payload access nor work.
 
 Payload references contain `parts:[{transferId,sha256,size}]` and the complete
 `sha256` and `size`. They allow at most 32 unique parts and 24 MiB in total; part
@@ -1698,7 +1702,19 @@ Authority is checked before and after payload reads and output retention.
 Acknowledgement status is `completed` or `refused`; `outcomeReference` identifies
 the retained complete response. Repeating the same acknowledged claim and result
 metadata is accepted after a lost response. Changed request digest, result or
-authority is refused. Companion durable request receipts prevent redispatch of
+authority is refused. An actually claimed request retains result-only settlement authority
+for its original request identity, digest and latest accepted claim until sixty minutes after
+`deadlineAt`. Result-part upload and acknowledgement may settle it after the delivery or
+ordinary work lease expires, under current authenticated account, device, connection,
+resource binding and repository authority. A never-claimed request has no such authority.
+Settlement cannot renew a nonterminal work claim, fetch its input, change the original result
+or dispatch an effect. Result-part uploads and first settlement refuse revoked authority or
+expired settlement retention; identical committed acknowledgements remain read-only while
+their request metadata and current authority are retained.
+Companion reconnect publishes only cached proved terminal outcomes or completed output-range
+reads; running, unknown, absent and generic RPC errors cannot be published as terminal receipts.
+An uncertain acknowledgement reuses the exact retained outcome reference.
+Companion durable request receipts prevent redispatch of
 effects after reconnect; an unknown outcome is retained as unknown, not retried as
 a new command. Server resource generations and local VM generations are separate:
 a newer server observation cannot erase an unverified local lifetime change or an

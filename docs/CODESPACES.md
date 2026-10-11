@@ -713,8 +713,8 @@ directory, bounded stdin and a timeout. Arguments are data and are never
 interpolated into a shell program. Stdin is either inline bytes or a tenant-bound
 private transfer reference with an exact declared size and MIME type. A native
 reference request records an authenticated operation against the running codespace
-before source fetch. The resulting private object is claimed before credential lookup,
-consumed immediately after durable dispatch intent and materialized as exact binary
+before source fetch. The resulting private object is durably retained for the accepted command
+before its original transfer is consumed, and materialized as exact binary
 connector input without model-context base64. `CodespaceOperationService.executeNativeReference()`
 composes native reference validation/fetch/storage with that dispatch path; callers do
 not handle the internal `codespace-file://` capability.
@@ -729,27 +729,34 @@ The GitHub adapter mounts its provider-owned operation root from
 runtime convention used by the remote supervisor, not a public alias for the
 renamed Moira domain.
 
-A dispatched command is durable and resumable as soon as the connector accepts it.
-Web HTTP callers retain a short post-dispatch observation window and can receive a running
-operation. Ordinary MCP command and file calls opt into waiting for the accepted operation's
-terminal result, using its existing deadline and current authority. Waiting never dispatches
-another command or file mutation. An unconfirmed outcome returns an error and its existing
-operation ID rather than a running success. This does not extend an MCP client's transport timeout;
-after interrupted delivery, inspect the accepted identity before repeating the same effect or
-editing the affected files. Independent work can continue without resolving that operation first.
+A command caller chooses a UUID `request_id` before submission. Moira durably saves its identity,
+normalized semantic digest and private input intent before returning admission. Matching retries
+recover the same operation; changed command, resource or input identity is refused. A command reply
+reports `accepted`, `phase`, `operation_id` and `request_id` without waiting for guest completion.
+`preparing` means input preparation is incomplete; `accepted` does not prove the guest has started.
+Native input preparation and provider delivery continue from the saved intent after server restart.
+
+Use `exec` with only `codespace_id` and `request_id` to look up that accepted request without
+dispatching, or collect by its existing `operation_id`. File calls retain their terminal waiting
+contract. Lookup and bounded waiting never cancel or repeat a command. Transport interruption
+does not extend the MCP client's timeout or prove nonexecution; recover the original identity before
+deciding whether another effect is needed. Independent work can continue while an outcome is unknown.
+`started_at: null` means start is unconfirmed, not that no work ran. Only a proved closed launch
+boundary produces `not_started`; `outcome_unknown` preserves uncertainty.
 An authenticated refusal before guest admission ends that operation and preserves the actual
 reason. If the local runtime confirms that it is stopped while the server still records usable,
 Moira refreshes that exact VM's observed state and returns `CODESPACE_NOT_RUNNING` without replay.
 A subsequent new call can use the ordinary start-on-use path. A generic transport failure is not
 evidence of a stopped VM and does not change its readiness to stopped.
 
-Background reconciliation selects the oldest attempted due operation across reservation expiry,
-active work, cancellation and terminal cleanup. Each claim advances its attempt timestamp, so a
-failed cleanup cannot repeatedly take precedence over other due work.
+Background reconciliation transactionally claims due operations into a bounded recovery pool.
+One held inspection does not prevent independent accepted work from progressing. Selection uses
+the same eligibility rules as dispatch, including explicit-session ordering, and advances the
+attempt timestamp so repeatedly failed cleanup cannot starve ready work.
 
 Before connector contact, SQLite records the authenticated tenant, stable codespace
-and provider identity, credential authority, input bytes,
-independent stdout/stderr bounds and deadline. SQLite stores only
+and provider identity, credential authority, private input/result references,
+independent stdout/stderr bounds and deadlines. SQLite stores only
 operation metadata. It does not store argv, cwd, stdin, stdout, stderr, provider
 tokens or SSH configuration. Cloud concurrency reservations count only cloud operations;
 local operations use no owner-set concurrency quota and do not consume those cloud slots.
@@ -761,8 +768,8 @@ For GitHub, cancellation targets the recorded foreground process group and valid
 process start time before signalling. A lost worker, SSH connection or control
 response is not treated as successful cancellation: the operation remains
 `reconcile_pending` and occupies capacity until remote inspection proves a
-terminal or absent state, or an explicit codespace stop/delete terminates the
-provider environment. A reservation abandoned before dispatch expires without
+terminal state or sufficient proof that launch never occurred, or an explicit codespace stop/delete
+terminates the provider environment. A reservation abandoned before dispatch expires without
 connector contact; dispatch intent is durable before a remote command can start.
 
 A command's complete standard output and standard error are written into its own
@@ -773,15 +780,27 @@ disk a single command's retained output may occupy in the codespace, and passing
 it kills the foreground process group and is reported as reaching that ceiling
 rather than as the command's own failure.
 
-When background reconciliation observes a terminal command, it records only
-bounded result metadata in SQLite and retains the remote stdout/stderr file for
+The guest runtime begins at confirmed command launch. `admission_deadline_at` limits permission
+to start; `started_at` plus `runtime_ms` determines runner enforcement. Caller waiting has its own
+bound and cannot cancel work. `result_expires_at` describes result retention. Historical operations
+without launch receipts keep their stored identity and do not acquire invented start timestamps.
+An original accepted relay claim can settle an immutable result after delivery expiry within its
+separate settlement retention. It cannot fetch input or authorize another launch. Observing the
+original completed/refused claim leaves its row and deadlines unchanged; expired nonterminal work
+cannot renew. Current owner, device, resource, repository and credential authority remain checked.
+
+Before publishing terminal metadata, Moira saves a verified bounded reply prefix in the existing
+private transfer store. Internal command input/results have bounded control accounting distinct
+from native file quotas. Collection of that prefix survives service restart during retention;
+corruption is refused rather than returned. Moira retains the remote stdout/stderr file for
 the configured cleanup window, or for as long as the command itself was allowed
 to run when that is longer. A result therefore stays collectible for at least the
 command's own permitted duration, which is what makes an unattended background
 command safe to collect late. Caller reconciliation can read the same result
 repeatedly during that window. Only after the window expires may background
-cleanup finalize the remote operation directory; failed finalization remains a
-durable, idempotently retried obligation.
+cleanup remove the remote output bytes; failed finalization remains a durable, idempotently retried
+obligation. The small launch proof remains fenced through its admission window, so early output
+cleanup cannot permit another execution of the same accepted command.
 
 A terminal result reports the complete size of each stream next to its bounded
 payload, so a caller knows what the answer omitted. Any range of a retained
@@ -797,10 +816,11 @@ stream's current size, which is how a caller finds where a stream ends.
 A command may also be started with `codespace_process({ action: "start", ... })`. It is the same operation, the
 same single dispatch and the same resume path; only its ceiling and its deadline
 differ. It is admitted against `CODESPACE_MAX_BACKGROUND_OPERATION_HOURS` instead
-of `CODESPACE_MAX_OPERATION_SECONDS`, its deadline is that lifetime so background
-reconciliation observes it rather than cancelling it, and the dispatching call
-returns as soon as the remote runner is proven alive, without the settle window a
-bounded command uses. A caller that names no duration receives the one its mode
+of `CODESPACE_MAX_OPERATION_SECONDS`. The guest runner enforces that duration from confirmed launch,
+and reconciliation observes its outcome independently of caller waiting. The dispatching call
+returns the durable acceptance identity without waiting for a proven running state.
+Start also requires a caller-chosen `request_id`; get can look up that request before the
+first `process_id` response is recovered. A caller that names no duration receives the one its mode
 implies: 300 seconds for a bounded command, the whole ceiling for a background
 one. The lifetime is granted when the command starts running, so a reservation
 that never dispatches is reaped within fifteen minutes whatever it asked for. Its output is readable by range while it runs, and it is
@@ -1020,16 +1040,20 @@ Website deletion still requires its displayed `expected_generation`. Successful 
 responses are compact codespace records; an unconfirmed result carries a bounded error and the
 existing codespace ID, without authorizing another creation.
 
-Ordinary execution and file actions wait for a terminal result and return the action's useful
-output, not a metadata envelope. Exec returns stdout, stderr and exit code. Failed, cancelled
+Ordinary `exec` returns durable acceptance with `request_id`, `operation_id`, `accepted`, `phase`
+and the admission, start/runtime and result-retention fields. Available terminal output includes
+stdout, stderr and exit code. File actions wait for their terminal useful result. Failed, cancelled
 and timed-out commands and rejected file edits are tool errors (`isError: true`) retaining useful
-bounded output. `operation_id` appears when retained output is truncated or exceptional recovery
-needs it. Calling the same action with only `codespace_id` and that ID observes the accepted
-operation without dispatching another effect. Ordinary exec accepts neither `background` nor
-`cancel`; use `codespace_process` for independently managed processes.
+bounded output. Command replies always retain their acceptance identity; file replies include
+`operation_id` when exceptional recovery needs it. Calling the same action with only `codespace_id`
+and that ID observes the accepted operation without dispatching another effect. Exec also accepts
+pure lookup by `request_id`, so a lost first response does not lose the command identity.
+Ordinary exec accepts neither `background` nor `cancel`; use `codespace_process` for independently
+managed processes.
 
-`codespace_process` start accepts the same command/session/stdin inputs and returns `process_id`
-and state after admission, without waiting for completion. Get collects state and available output;
+`codespace_process` start accepts the same required `request_id` and command/session/stdin inputs
+and returns `process_id`, acceptance fields and state without waiting for guest launch or completion.
+Get accepts either `process_id` or pure `request_id` lookup and collects state and available output;
 read returns a bounded UTF-8 stream range; stop cancels that exact process. Ranges use byte offsets:
 a split multibyte character or invalid UTF-8 is shown with replacement
 characters, matching ordinary retained command-output reads. Repository-file reads keep their
@@ -1041,7 +1065,8 @@ Consecutive commands share a working context through a named session. A caller
 opens one with `session` and `session_start: true` and continues it by naming
 `session` alone. The session remembers the `cwd` a call names and the variables a
 call passes in `env`, and applies both to every command that continues it; a
-command without a session is unaffected.
+command without a session is unaffected. Accepted commands in the same session observe the
+predecessor's committed context in admission order; unrelated sessions remain independent.
 
 Inside a session a caller may send `script` instead of `argv`. The script is run
 by the codespace's own shell and sourced, so its directory changes and exports
@@ -1058,7 +1083,7 @@ work: `argv`, a `script` inside a session, or ending a session with neither.
 frees the session's slot and removes its stored context. A codespace holds at most
 sixteen sessions of its current life, and opening one past that is refused with
 that ceiling named; a session left by an earlier life holds no slot and is removed
-by the call that ends it.
+by the call that ends it. A queued end whose launch admission expires does not remove the context.
 
 A script is at most 64 KiB of text, and the stored context is bounded by 64
 variables and 64 KiB, enforced where it is written. A call whose declared context would cross that is refused as a bounded
@@ -1082,7 +1107,8 @@ validated data, never a path: the remote side builds the path from a name it has
 accepted, and a session's stored working directory is resolved by the same rule that
 refuses any escape from the repository.
 
-The `exec` action accepts argv as data, an optional repository-relative `cwd`,
+The `exec` action requires a caller-chosen UUID `request_id` and accepts argv as data,
+an optional repository-relative `cwd`,
 `timeout_seconds`, `session`, `session_start`, `session_end`, `env`, `script`, optional per-stream output limits and exactly one optional stdin
 form: `stdin_text` (UTF-8) or `stdin_file`, a native ChatGPT file reference. The
 registry publishes `_meta["openai/fileParams"]` on the tool for both `stdin_file` and

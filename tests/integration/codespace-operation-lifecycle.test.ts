@@ -2,9 +2,21 @@ import { describe, expect, jest, test } from "@jest/globals";
 import Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import { migrate } from "drizzle-orm/better-sqlite3/migrator";
-import { mkdtempSync, rmSync } from "node:fs";
+import {
+  appendFileSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { randomUUID } from "node:crypto";
+import { spawn, execFileSync } from "node:child_process";
+import { pathToFileURL } from "node:url";
+import { CodespaceJobTransport } from "../../packages/web-backend/src/services/codespace-job-transport.js";
+import { effectiveCodespaceLimits } from "../../packages/shared/src/codespaces/resource-policy.js";
 import {
   CodespaceConnectionRepository,
   CodespaceOperationRepository,
@@ -20,6 +32,8 @@ import {
   type CodespaceOperationResult,
   type CodespaceOperationTransport,
   type CodespaceResourcePolicy,
+  type CodespaceResourceRecord,
+  type CodespaceOperationRecord,
 } from "@mcp-moira/shared";
 
 const migrations = path.resolve(process.cwd(), "packages/web-backend/drizzle");
@@ -46,6 +60,87 @@ const policy: CodespaceResourcePolicy = {
   maxOperationMs: 60_000,
   maxBackgroundOperationMs: 4 * 60 * 60_000,
 };
+
+/** Exercise the production job decoder and supervisor in an isolated owned test repository. */
+function supervisorTransport(
+  root: string,
+  loseExecuteReply = false,
+  beforeExecute?: () => Promise<void>,
+) {
+  let lostReply!: () => void;
+  const executeReplyLost = new Promise<void>((done) => {
+    lostReply = done;
+  });
+  let executeClosed!: () => void;
+  const executeObserved = new Promise<void>((done) => {
+    executeClosed = done;
+  });
+  const repositoryRoot = path.join(root, "repos", "repository");
+  mkdirSync(repositoryRoot, { recursive: true });
+  execFileSync("git", ["init", "--quiet", repositoryRoot]);
+  execFileSync("git", [
+    "-C",
+    repositoryRoot,
+    "remote",
+    "add",
+    "origin",
+    "https://github.com/owner/repository.git",
+  ]);
+  const supervisor = pathToFileURL(
+    path.resolve("packages/web-backend/src/services/github-codespaces-remote-supervisor.mjs"),
+  ).href;
+  const script = `import {runRequest} from ${JSON.stringify(supervisor)};let input='';for await(const chunk of process.stdin)input+=chunk;process.stdout.write(JSON.stringify(await runRequest(JSON.parse(input))));`;
+  class TestGuestTransport extends CodespaceJobTransport {
+    async health() {
+      return { ok: true, reason: null };
+    }
+    protected async sendJob(
+      _credential: string,
+      _resource: CodespaceResourceRecord,
+      _operation: CodespaceOperationRecord,
+      job: Record<string, unknown>,
+    ) {
+      if (job.action === "execute") await beforeExecute?.();
+      const result = await new Promise<Record<string, unknown>>((done, reject) => {
+        const child = spawn(process.execPath, ["--input-type=module", "-e", script], {
+          timeout: 10_000,
+          env: {
+            PATH: process.env.PATH,
+            HOME: root,
+            MOIRA_OPERATION_STATE_DIR: path.join(root, "state"),
+            MOIRA_CODESPACES_ROOT: path.join(root, "repos"),
+            MOIRA_ENVIRONMENT_ID: "test-life",
+          },
+          stdio: ["pipe", "pipe", "pipe"],
+        });
+        const stdout: Buffer[] = [],
+          stderr: Buffer[] = [];
+        child.stdout.on("data", (chunk) => stdout.push(Buffer.from(chunk)));
+        child.stderr.on("data", (chunk) => stderr.push(Buffer.from(chunk)));
+        child.once("error", reject);
+        child.once("close", (code) => {
+          if (job.action === "execute") executeClosed();
+          if (code !== 0) reject(new Error(Buffer.concat(stderr).toString("utf8")));
+          else {
+            try {
+              done(JSON.parse(Buffer.concat(stdout).toString("utf8")));
+            } catch (error) {
+              reject(error);
+            }
+          }
+        });
+        child.stdin.end(JSON.stringify(job));
+      });
+      if (loseExecuteReply && job.action === "execute") {
+        loseExecuteReply = false;
+        lostReply();
+        throw new Error("Controlled lost guest acceptance reply");
+      }
+      return result;
+    }
+  }
+  return { transport: new TestGuestTransport(), repositoryRoot, executeReplyLost, executeObserved };
+}
 
 /**
  * A terminal exec result as the transport reports it: the payload, plus the complete size of each
@@ -164,7 +259,11 @@ class FakeTransport implements CodespaceOperationTransport {
     return this.outputResult;
   }
 
-  async finalize() {
+  async finalize(
+    _credential: string,
+    _codespace: CodespaceResourceRecord,
+    _operation: CodespaceOperationRecord,
+  ) {
     this.finalizeCalls();
     if (this.throwFinalize) throw new Error("remote cleanup unavailable");
   }
@@ -172,6 +271,12 @@ class FakeTransport implements CodespaceOperationTransport {
 
 function fixture(advanceOnDelay = false) {
   const sqlite = new Database(":memory:");
+  const transferRoot = mkdtempSync(path.join(tmpdir(), "moira-operation-control-"));
+  const close = sqlite.close.bind(sqlite);
+  sqlite.close = () => {
+    rmSync(transferRoot, { recursive: true, force: true });
+    return close();
+  };
   sqlite.pragma("foreign_keys = ON");
   migrate(drizzle(sqlite), { migrationsFolder: migrations });
   sqlite.exec(`
@@ -223,12 +328,19 @@ function fixture(advanceOnDelay = false) {
       return new CodespaceResourceRepository(sqlite).getOwned(userId, codespaceId)!;
     }),
   };
+  const transfers = new CodespaceTransferService({
+    repository: new CodespaceTransferRepository(sqlite),
+    root: transferRoot,
+    policy: () => policy,
+    now: () => currentNow,
+  });
   const service = new CodespaceOperationService({
     repository,
     transport,
     credentials,
     lifecycle,
     policy: () => policy,
+    transfers,
     now: () => currentNow,
     delay: async (milliseconds) => {
       settleDelays.push(milliseconds);
@@ -246,6 +358,8 @@ function fixture(advanceOnDelay = false) {
     transport,
     credentials,
     service,
+    transfers,
+    transferRoot,
     lifecycle,
     advance: (milliseconds: number) => {
       currentNow += milliseconds;
@@ -254,6 +368,839 @@ function fixture(advanceOnDelay = false) {
 }
 
 describe("durable direct codespace operations", () => {
+  test("confirmed cancellation before delayed guest execute prevents its effect under the same accepted identity", async () => {
+    const value = fixture();
+    value.advance(Date.now() - now);
+    const root = mkdtempSync(path.join(tmpdir(), "moira-cancel-before-delivery-"));
+    let entered!: () => void, release!: () => void;
+    const delivering = new Promise<void>((done) => {
+      entered = done;
+    });
+    const gate = new Promise<void>((done) => {
+      release = done;
+    });
+    const guest = supervisorTransport(root, false, async () => {
+      entered();
+      await gate;
+    });
+    const service = new CodespaceOperationService({
+      repository: value.repository,
+      transport: guest.transport,
+      credentials: value.credentials,
+      policy: () => policy,
+      transfers: value.transfers,
+      now: Date.now,
+    });
+    let operationId: string | undefined;
+    try {
+      const accepted = await service.execute("user-1", "codespace-1", {
+        requestId: randomUUID(),
+        argv: [
+          process.execPath,
+          "-e",
+          "require('node:fs').appendFileSync('cancelled-effect.txt','x')",
+        ],
+        stdin: { kind: "inline", bytes: new Uint8Array() },
+        timeoutMs: 1000,
+      });
+      operationId = accepted.operation.id;
+      await delivering;
+      const cancelled = await service.cancel("user-1", operationId);
+      expect(cancelled).toMatchObject({
+        operation: {
+          id: operationId,
+          state: "cancelled",
+          startedAt: null,
+          lastOutcome: "cancelled_before_start_not_started",
+        },
+        result: { state: "cancelled", exitCode: null },
+      });
+      release();
+      await guest.executeObserved;
+      const current = value.repository.getOwned("user-1", operationId)!;
+      const resource = value.repository.getContext("user-1", operationId)!.codespace;
+      await expect(guest.transport.inspect("test", resource, current)).resolves.toMatchObject({
+        state: "not_started",
+        requestDigest: current.requestDigest,
+      });
+      expect(() => readFileSync(path.join(guest.repositoryRoot, "cancelled-effect.txt"))).toThrow(
+        expect.objectContaining({ code: "ENOENT" }),
+      );
+      await expect(
+        service.lookupRequest("user-1", current.resourceId, current.requestId!),
+      ).resolves.toMatchObject({ operation: { state: "cancelled", startedAt: null } });
+    } finally {
+      release();
+      if (operationId) {
+        await guest.executeObserved;
+        const context = value.repository.getContext("user-1", operationId)!;
+        await guest.transport.cancel("test", context.codespace, context.operation);
+      }
+      await new Promise<void>((done) => setImmediate(done));
+      service.stop();
+      value.sqlite.close();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+  test("terminal start metadata refuses a contradictory receipt while exact existing proof remains replayable", () => {
+    const value = fixture();
+    const reserve = () =>
+      value.repository.reserve({
+        userId: "user-1",
+        resourceId: "codespace-1",
+        inputBytes: 0,
+        stdoutLimitBytes: 1024,
+        stderrLimitBytes: 512,
+        deadlineAt: now + 60_000,
+        requestId: randomUUID(),
+        requestDigest: "b".repeat(64),
+        runtimeMs: 1000,
+        policy,
+        now,
+      }).operation!;
+    try {
+      const negative = reserve();
+      value.repository.complete(
+        "user-1",
+        negative.id,
+        execResult({ state: "cancelled", stdout: "", stderr: "", exitCode: null }),
+        1024,
+        512,
+        now + 60_000,
+        now,
+        "admission_expired_not_started",
+      );
+      const before = value.repository.getOwned("user-1", negative.id);
+      expect(
+        value.repository.recordStarted(
+          "user-1",
+          negative.id,
+          now,
+          1000,
+          negative.requestDigest!,
+          now + 1,
+        ),
+      ).toBe(false);
+      expect(value.repository.getOwned("user-1", negative.id)).toEqual(before);
+      const positive = reserve();
+      expect(
+        value.repository.recordStarted(
+          "user-1",
+          positive.id,
+          now,
+          1000,
+          positive.requestDigest!,
+          now,
+        ),
+      ).toBe(true);
+      value.repository.complete(
+        "user-1",
+        positive.id,
+        execResult({ state: "succeeded", stdout: "receipt", stderr: "", exitCode: 0 }),
+        1024,
+        512,
+        now + 60_000,
+        now,
+      );
+      expect(
+        value.repository.recordStarted(
+          "user-1",
+          positive.id,
+          now,
+          1000,
+          positive.requestDigest!,
+          now + 1,
+        ),
+      ).toBe(true);
+      expect(value.repository.getOwned("user-1", positive.id)).toMatchObject({
+        state: "succeeded",
+        startedAt: now,
+        runtimeMs: 1000,
+        deadlineAt: now + 1000,
+        outputBytes: 7,
+        exitCode: 0,
+      });
+    } finally {
+      value.sqlite.close();
+    }
+  });
+  test("due backlog and dispatch selection agree for durable input blocked by an earlier explicit session", async () => {
+    const value = fixture();
+    const expanded = {
+      ...policy,
+      maxConcurrentOperationsPerUser: 3,
+      maxConcurrentOperationsGlobal: 4,
+    };
+    try {
+      const operations = [];
+      for (let index = 0; index < 2; index++) {
+        const reserved = value.repository.reserve({
+          userId: "user-1",
+          resourceId: "codespace-1",
+          inputBytes: 0,
+          stdoutLimitBytes: 1024,
+          stderrLimitBytes: 512,
+          deadlineAt: now + 60_000,
+          requestId: randomUUID(),
+          requestDigest: "a".repeat(64),
+          runtimeMs: 1000,
+          sessionKey: "explicit-session",
+          policy: expanded,
+          now,
+        });
+        const input = await value.transfers.retainRelayPayload(
+          "user-1",
+          "operation_input",
+          Buffer.from("{}"),
+        );
+        expect(
+          value.repository.attachInput(
+            "user-1",
+            reserved.operation!.id,
+            JSON.stringify(input),
+            now,
+          ),
+        ).toBe(true);
+        operations.push(reserved.operation!);
+      }
+      expect(value.repository.dueSummary(now)).toEqual({ count: 1, oldestUpdatedAt: now });
+      expect(value.repository.claimDue("first-owner", now, now + 1000)?.id).toBe(operations[0].id);
+      expect(value.repository.claimDue("other-owner", now, now + 1000)).toBeNull();
+      value.repository.complete(
+        "user-1",
+        operations[0].id,
+        execResult({ state: "succeeded", stdout: "", stderr: "", exitCode: 0 }),
+        1024,
+        512,
+        now + 60_000,
+        now,
+      );
+      expect(value.repository.dueSummary(now)).toEqual({ count: 1, oldestUpdatedAt: now });
+      expect(value.repository.claimDue("second-owner", now, now + 1000)?.id).toBe(operations[1].id);
+    } finally {
+      value.sqlite.close();
+    }
+  });
+  test("private accepted input uses bounded control quotas independently of native file object counts", async () => {
+    const value = fixture();
+    const transfers = new CodespaceTransferRepository(value.sqlite);
+    const reserve = (purpose: "codespace_input" | "operation_input") =>
+      transfers.reserve({
+        userId: "user-1",
+        purpose,
+        fileName: "private.bin",
+        mimeType: "application/octet-stream",
+        declaredSize: 1,
+        ownerPid: process.pid,
+        ownerStartTime: null,
+        policy,
+        now,
+      });
+    try {
+      for (
+        let index = 0;
+        index < effectiveCodespaceLimits(policy).transfers.maxObjectsPerUser;
+        index++
+      )
+        expect(reserve("codespace_input")).not.toBeNull();
+      expect(reserve("codespace_input")).toBeNull();
+      const internal = Array.from(
+        { length: effectiveCodespaceLimits(policy).relayTransfers.maxObjectsPerUser },
+        () => reserve("operation_input"),
+      );
+      expect(internal.every(Boolean)).toBe(true);
+      expect(reserve("operation_input")).toBeNull();
+      const request = {
+        requestId: randomUUID(),
+        argv: ["must-not-run"],
+        stdin: { kind: "inline" as const, bytes: new Uint8Array() },
+      };
+      await expect(value.service.execute("user-1", "codespace-1", request)).rejects.toMatchObject({
+        code: "CODESPACE_POLICY_LIMIT",
+      });
+      expect(value.repository.getByRequest("user-1", request.requestId)).toMatchObject({
+        state: "reserved",
+        inputReference: null,
+      });
+      expect(value.transport.executeCalls).not.toHaveBeenCalled();
+      expect(
+        value.sqlite
+          .prepare("SELECT COUNT(*) count FROM codespaceTransfer WHERE purpose='operation_input'")
+          .get(),
+      ).toEqual({ count: internal.length });
+    } finally {
+      value.sqlite.close();
+    }
+  });
+
+  test("changed caller payload and corrupt durable terminal bytes never repeat the accepted effect", async () => {
+    const value = fixture();
+    const effect = path.join(value.transferRoot, "effect.txt");
+    const request = {
+      requestId: randomUUID(),
+      argv: ["append"],
+      stdin: { kind: "inline" as const, bytes: new Uint8Array() },
+    };
+    value.transport.execute = async (_credential, _resource, _operation, submitted) => {
+      appendFileSync(effect, "one");
+      return {
+        ...execResult({ state: "succeeded", stdout: "receipt", stderr: "", exitCode: 0 }),
+        requestDigest: submitted.requestDigest,
+        startedAt: now,
+      };
+    };
+    try {
+      const accepted = await value.service.execute("user-1", "codespace-1", request);
+      const terminal = await value.service.waitForResult("user-1", accepted.operation.id);
+      expect(terminal.result?.stdout).toBe("receipt");
+      await expect(
+        value.service.execute("user-1", "codespace-1", { ...request, argv: ["changed"] }),
+      ).rejects.toMatchObject({ code: "CODESPACE_RESOURCE_INVALID" });
+      const reference = JSON.parse(terminal.operation.resultReference!);
+      const row = value.sqlite
+        .prepare("SELECT objectKey FROM codespaceTransfer WHERE id=?")
+        .get(reference.parts[0].transferId) as { objectKey: string };
+      writeFileSync(
+        path.join(value.transferRoot, row.objectKey),
+        Buffer.alloc(reference.parts[0].size, 120),
+      );
+      await expect(
+        value.service.lookupRequest("user-1", "codespace-1", request.requestId),
+      ).rejects.toMatchObject({ code: "CODESPACE_RESOURCE_INVALID" });
+      expect(readFileSync(effect, "utf8")).toBe("one");
+      expect(value.repository.listOwned("user-1", "codespace-1")).toHaveLength(1);
+    } finally {
+      value.sqlite.close();
+    }
+  });
+
+  test("historical IDs collect real guest output after server upgrade without another execution", async () => {
+    const value = fixture();
+    value.advance(Date.now() - now);
+    const root = mkdtempSync(path.join(tmpdir(), "moira-historical-guest-"));
+    const guest = supervisorTransport(root);
+    const common = {
+      repository: value.repository,
+      transport: guest.transport,
+      credentials: value.credentials,
+      policy: () => policy,
+      transfers: value.transfers,
+      now: Date.now,
+    };
+    try {
+      const previous = await new CodespaceOperationService(common).execute(
+        "user-1",
+        "codespace-1",
+        {
+          argv: [
+            process.execPath,
+            "-e",
+            "require('node:fs').appendFileSync('legacy-effect.txt',String.fromCharCode(111,110,99,101,10));process.stdout.write('historical receipt')",
+          ],
+          stdin: { kind: "inline", bytes: new Uint8Array() },
+          timeoutMs: 2000,
+        },
+      );
+      // Old rows retain guest bytes, not a newly invented server output reference or caller ID.
+      value.sqlite
+        .prepare("UPDATE codespaceOperation SET resultReference=NULL WHERE id=?")
+        .run(previous.operation.id);
+      const upgraded = new CodespaceOperationService(common);
+      const collected = await upgraded.reconcile("user-1", previous.operation.id);
+      expect(collected).toMatchObject({ stdout: "historical receipt", exitCode: 0 });
+      expect(value.repository.getOwned("user-1", previous.operation.id)).toMatchObject({
+        requestId: null,
+        remoteMarker: previous.operation.remoteMarker,
+      });
+      expect(readFileSync(path.join(guest.repositoryRoot, "legacy-effect.txt"), "utf8")).toBe(
+        "once\n",
+      );
+    } finally {
+      value.sqlite.close();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test("native stdin remains durable after consumption and lost guest ACK without refetch or duplicate effect", async () => {
+    const value = fixture();
+    value.advance(Date.now() - now);
+    const root = mkdtempSync(path.join(tmpdir(), "moira-durable-native-guest-"));
+    const guest = supervisorTransport(root, true);
+    const bytes = Buffer.from([0, 255, 128, 17, 0, 65]);
+    const common = {
+      repository: value.repository,
+      transport: guest.transport,
+      credentials: value.credentials,
+      policy: () => policy,
+      transfers: value.transfers,
+      now: Date.now,
+    };
+    const service = new CodespaceOperationService({
+      ...common,
+      nativeFetcher: {
+        fetch: async () => ({
+          contentLength: bytes.length,
+          mimeType: "application/octet-stream",
+          body: (async function* () {
+            yield bytes;
+          })(),
+        }),
+      },
+    });
+    let operationId: string | undefined;
+    try {
+      const accepted = await service.executeNativeReference(
+        "user-1",
+        "codespace-1",
+        {
+          requestId: randomUUID(),
+          argv: [
+            process.execPath,
+            "-e",
+            "const fs=require('node:fs');let chunks=[];process.stdin.on('data',b=>chunks.push(b));process.stdin.on('end',()=>{const bytes=Buffer.concat(chunks);fs.appendFileSync('native-effect.bin',bytes);process.stdout.write(bytes.toString('hex'));const timer=setInterval(()=>{if(fs.existsSync('native-release'))clearInterval(timer)},10)})",
+          ],
+          timeoutMs: 5000,
+        },
+        {
+          fileId: "file_durableNative",
+          downloadUrl: "https://native.example.test/private",
+          declaredSize: bytes.length,
+          mimeType: "application/octet-stream",
+        },
+      );
+      operationId = accepted.operation.id;
+      await guest.executeReplyLost;
+      await new Promise<void>((done) => setImmediate(done));
+      const recovered = new CodespaceOperationService(common);
+      await recovered.reconcile("user-1", accepted.operation.id);
+      expect(value.repository.getOwned("user-1", accepted.operation.id)).toMatchObject({
+        state: "running",
+        startedAt: expect.any(Number),
+      });
+      writeFileSync(path.join(guest.repositoryRoot, "native-release"), "release");
+      const result = await recovered.waitForResult("user-1", accepted.operation.id);
+      expect(result.result).toMatchObject({ stdout: bytes.toString("hex"), exitCode: 0 });
+      expect(readFileSync(path.join(guest.repositoryRoot, "native-effect.bin"))).toEqual(bytes);
+      expect(
+        value.sqlite
+          .prepare("SELECT COUNT(*) count FROM codespaceTransfer WHERE purpose='codespace_input'")
+          .get(),
+      ).toEqual({ count: 0 });
+      const current = value.repository.getOwned("user-1", accepted.operation.id)!;
+      const persisted = await value.transfers.readRelayPayload(
+        "user-1",
+        "operation_input",
+        JSON.parse(current.inputReference!),
+      );
+      expect(JSON.parse(persisted.toString("utf8")).request.stdin.bytesBase64).toBe(
+        bytes.toString("base64"),
+      );
+      expect(current.startedAt).toBeGreaterThan(0);
+      const resource = value.repository.getContext("user-1", current.id)!.codespace;
+      await expect(guest.transport.finalize("test", resource, current)).rejects.toThrow(
+        "Remote operation cleanup is incomplete",
+      );
+      await expect(guest.transport.inspect("test", resource, current)).resolves.toMatchObject({
+        state: "outcome_unknown",
+        requestDigest: current.requestDigest,
+        startedAt: current.startedAt,
+      });
+      await expect(
+        guest.transport.readOutput("test", resource, current, {
+          stream: "stdout",
+          offset: 0,
+          length: 1,
+        }),
+      ).resolves.toEqual({ state: "absent" });
+      // Bytes are gone, while immutable launch authority stays fenced until original admission closes.
+      // The bounded cloud reply remains independent of that retained guest marker.
+      await expect(
+        recovered.lookupRequest("user-1", current.resourceId, current.requestId!),
+      ).resolves.toMatchObject({ result: { stdout: bytes.toString("hex") } });
+    } finally {
+      service.stop();
+      if (operationId) {
+        const context = value.repository.getContext("user-1", operationId)!;
+        await guest.transport.cancel("test", context.codespace, context.operation);
+      }
+      value.sqlite.close();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+  test.each(["exec", "file", "cleanup"] as const)(
+    "held %s recovery across repeated claim expiries leaves independent effects runnable",
+    async (kind) => {
+      const value = fixture();
+      const root = mkdtempSync(path.join(tmpdir(), "moira-fair-operation-recovery-"));
+      const effect = path.join(root, "effects.txt");
+      const expanded = {
+        ...policy,
+        maxConcurrentOperationsPerUser: 12,
+        maxConcurrentOperationsGlobal: 16,
+      };
+      let release!: () => void;
+      const held = new Promise<void>((done) => {
+        release = done;
+      });
+      let entered!: () => void;
+      const inspecting = new Promise<void>((done) => {
+        entered = done;
+      });
+      let effectsDone!: () => void;
+      const completedEffects = new Promise<void>((done) => {
+        effectsDone = done;
+      });
+      let effects = 0;
+      let clock = now;
+      const reserved = value.repository.reserve({
+        userId: "user-1",
+        resourceId: "codespace-1",
+        inputBytes: 0,
+        stdoutLimitBytes: 1024,
+        stderrLimitBytes: 512,
+        deadlineAt: now + 60_000,
+        kind: kind === "file" ? "stat" : "exec",
+        policy: expanded,
+        now,
+      });
+      value.repository.beginDispatch("user-1", reserved.operation!.id, "first", now + 1000, now);
+      value.repository.markRunning("user-1", reserved.operation!.id, now);
+      if (kind === "cleanup")
+        value.repository.complete(
+          "user-1",
+          reserved.operation!.id,
+          execResult({ state: "succeeded", stdout: "", stderr: "", exitCode: 0 }),
+          1024,
+          512,
+          now - 1,
+          now,
+        );
+      value.transport.inspect = async (_credential, _resource, operation) => {
+        if (operation.id === reserved.operation!.id) {
+          entered();
+          await held;
+        }
+        return {
+          state: "running",
+          ...(operation.requestDigest
+            ? { requestDigest: operation.requestDigest, startedAt: now }
+            : {}),
+        };
+      };
+      value.transport.execute = async (_credential, _resource, _operation, request) => {
+        appendFileSync(effect, `${request.argv![1]}\n`);
+        if (++effects === 6) effectsDone();
+        return {
+          ...execResult({ state: "succeeded", stdout: "done", stderr: "", exitCode: 0 }),
+          startedAt: clock,
+          requestDigest: request.requestDigest,
+        };
+      };
+      const transport = Object.assign(value.transport, {
+        inspectFile: async () => {
+          entered();
+          await held;
+          return { state: "running" as const };
+        },
+      });
+      transport.finalize = async (_credential, _resource, operation) => {
+        if (operation.id === reserved.operation!.id) {
+          entered();
+          await held;
+        }
+      };
+      const service = new CodespaceOperationService({
+        repository: value.repository,
+        transport,
+        credentials: value.credentials,
+        transfers: value.transfers,
+        policy: () => expanded,
+        now: () => clock,
+      });
+      const scheduled = jest.spyOn(global, "setInterval");
+      try {
+        service.start();
+        const tick = scheduled.mock.calls[0]![0] as () => void;
+        scheduled.mockRestore();
+        await inspecting;
+        // Run the real scheduled callback after each persisted claim expires while
+        // no independent request exists yet. Duplicate contacts can otherwise fill all slots.
+        for (let expiry = 0; expiry < 3; expiry++) {
+          clock += policy.claimLeaseMs + 1;
+          tick();
+          await new Promise<void>((done) => setImmediate(done));
+        }
+        const requests = Array.from({ length: 6 }, (_entry, index) => ({
+          requestId: randomUUID(),
+          argv: ["append", String(index)],
+          stdin: { kind: "inline" as const, bytes: new Uint8Array() },
+        }));
+        const accepted = await Promise.all(
+          requests.map((request) => service.execute("user-1", "codespace-1", request)),
+        );
+        // Completion must continue without a lookup polling the scheduler or releasing the held job.
+        await Promise.race([
+          completedEffects,
+          new Promise<never>((_done, reject) => {
+            const timer = setTimeout(
+              () => reject(new Error("Free recovery slots did not drain accepted work")),
+              2000,
+            );
+            completedEffects.then(() => clearTimeout(timer));
+          }),
+        ]);
+        const results = await Promise.all(
+          accepted.map((entry) => service.waitForResult("user-1", entry.operation.id)),
+        );
+        expect(results.every((entry) => entry.result?.exitCode === 0)).toBe(true);
+        expect(readFileSync(effect, "utf8").trim().split("\n").sort()).toEqual([
+          "0",
+          "1",
+          "2",
+          "3",
+          "4",
+          "5",
+        ]);
+        expect(value.repository.getOwned("user-1", reserved.operation!.id)?.state).toBe(
+          kind === "cleanup" ? "succeeded" : "running",
+        );
+      } finally {
+        scheduled.mockRestore();
+        service.stop();
+        release();
+        await new Promise<void>((done) => setImmediate(done));
+        value.sqlite.close();
+        rmSync(root, { recursive: true, force: true });
+      }
+    },
+  );
+
+  test("collection after runtime expiry does not cause the cancellation effect", async () => {
+    const value = fixture();
+    const root = mkdtempSync(path.join(tmpdir(), "moira-pure-collection-"));
+    const cancelled = path.join(root, "cancelled.txt");
+    value.transport.executeResult = { state: "running" };
+    value.transport.inspectResult = { state: "running" };
+    value.transport.cancel = async () => {
+      appendFileSync(cancelled, "cancel-effect\n");
+      return execResult({ state: "cancelled", stdout: "", stderr: "", exitCode: null });
+    };
+    try {
+      const accepted = await value.service.execute("user-1", "codespace-1", {
+        argv: ["long-command"],
+        stdin: { kind: "inline", bytes: new Uint8Array() },
+        timeoutMs: 1000,
+      });
+      value.advance(2000);
+      const collected = await value.service.waitForResult("user-1", accepted.operation.id, 0);
+      expect(collected.operation.state).toBe("running");
+      expect(value.repository.getOwned("user-1", accepted.operation.id)?.state).toBe("running");
+      expect(() => readFileSync(cancelled)).toThrow(expect.objectContaining({ code: "ENOENT" }));
+    } finally {
+      value.sqlite.close();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+  test("bounded collection rejects revoked authority while an inspection remains pending without cancellation", async () => {
+    const value = fixture();
+    const reserved = value.repository.reserve({
+      userId: "user-1",
+      resourceId: "codespace-1",
+      inputBytes: 0,
+      stdoutLimitBytes: 1024,
+      stderrLimitBytes: 512,
+      deadlineAt: now + 60_000,
+      policy,
+      now,
+    });
+    value.repository.beginDispatch("user-1", reserved.operation!.id, "original", now + 1000, now);
+    value.repository.markRunning("user-1", reserved.operation!.id, now);
+    let release!: () => void;
+    let entered!: () => void;
+    const gate = new Promise<void>((done) => {
+      release = done;
+    });
+    const inspecting = new Promise<void>((done) => {
+      entered = done;
+    });
+    value.transport.inspect = async () => {
+      entered();
+      await gate;
+      return { state: "running" };
+    };
+    try {
+      const waiting = value.service.waitForResult("user-1", reserved.operation!.id, 20);
+      await inspecting;
+      value.sqlite.exec("DELETE FROM codespaceConnectionRepository");
+      await expect(waiting).rejects.toMatchObject({ code: "CODESPACE_AUTHORIZATION_REQUIRED" });
+      expect(value.transport.cancelCalls).not.toHaveBeenCalled();
+      expect(value.transport.executeCalls).not.toHaveBeenCalled();
+    } finally {
+      release();
+      await new Promise<void>((done) => setImmediate(done));
+      value.sqlite.close();
+    }
+  });
+  test.each(["ABCDEFAB-0000-7000-8000-000000000031", "ABCDEFAB-0000-8000-8000-000000000032"])(
+    "concurrent matching UUID submissions and a lost first reply resume one caller-identified effect after service restart (%s)",
+    async (requestId) => {
+      const value = fixture();
+      const root = mkdtempSync(path.join(tmpdir(), "moira-lost-acceptance-"));
+      const effect = path.join(root, "effect.txt");
+      const request = {
+        requestId,
+        argv: ["append-once"],
+        stdin: { kind: "inline" as const, bytes: new Uint8Array() },
+        timeoutMs: 1000,
+      };
+      value.transport.execute = async (_credential, _resource, _operation, acceptedRequest) => {
+        appendFileSync(effect, "accepted-effect\n");
+        return {
+          ...execResult({ state: "succeeded", stdout: "receipt", stderr: "", exitCode: 0 }),
+          startedAt: now,
+          requestDigest: acceptedRequest.requestDigest,
+        };
+      };
+      try {
+        // The caller receives no first response. A new service has no process-local replay cache.
+        const concurrent = new CodespaceOperationService({
+          repository: value.repository,
+          transport: value.transport,
+          credentials: value.credentials,
+          policy: () => policy,
+          transfers: value.transfers,
+          now: () => now,
+        });
+        const [accepted, matching] = await Promise.all([
+          value.service.execute("user-1", "codespace-1", request),
+          concurrent.execute("user-1", "codespace-1", {
+            ...request,
+            requestId: requestId.toLowerCase(),
+          }),
+        ]);
+        expect(matching.operation.id).toBe(accepted.operation.id);
+        await value.service.waitForResult("user-1", accepted.operation.id);
+        const restarted = new CodespaceOperationService({
+          repository: value.repository,
+          transport: value.transport,
+          credentials: value.credentials,
+          policy: () => policy,
+          transfers: value.transfers,
+          now: () => now,
+          delay: async () => {},
+        });
+        const resumed = await restarted.execute("user-1", "codespace-1", request);
+        expect(readFileSync(effect, "utf8")).toBe("accepted-effect\n");
+        expect(resumed.result).toMatchObject({ stdout: "receipt", exitCode: 0 });
+        await expect(
+          restarted.lookupRequest("user-1", "codespace-1", requestId),
+        ).resolves.toMatchObject({
+          operation: { id: accepted.operation.id, requestId: requestId.toLowerCase() },
+          result: { stdout: "receipt" },
+        });
+        expect(value.repository.listOwned("user-1", "codespace-1")).toHaveLength(1);
+      } finally {
+        value.sqlite.close();
+        rmSync(root, { recursive: true, force: true });
+      }
+    },
+  );
+  test.each(["resolved", "rejected"] as const)(
+    "a stale predispatch worker with %s credentials cannot cancel reclaimed accepted work before its one effect",
+    async (credentialOutcome) => {
+      const value = fixture();
+      const effect = path.join(value.transferRoot, "reclaimed-effect.txt");
+      let firstEntered!: () => void,
+        secondEntered!: () => void,
+        releaseFirst!: () => void,
+        releaseSecond!: () => void;
+      const firstAtCredential = new Promise<void>((done) => {
+        firstEntered = done;
+      });
+      const secondAtCredential = new Promise<void>((done) => {
+        secondEntered = done;
+      });
+      const firstGate = new Promise<void>((done) => {
+        releaseFirst = done;
+      });
+      const secondGate = new Promise<void>((done) => {
+        releaseSecond = done;
+      });
+      let clock = now;
+      const common = {
+        repository: value.repository,
+        transport: value.transport,
+        transfers: value.transfers,
+        policy: () => policy,
+        now: () => clock,
+      };
+      const first = new CodespaceOperationService({
+        ...common,
+        credentials: {
+          getCredential: async () => {
+            firstEntered();
+            await firstGate;
+            if (credentialOutcome === "rejected")
+              throw new Error("Controlled stale credential failure");
+            return "test";
+          },
+        },
+      });
+      const second = new CodespaceOperationService({
+        ...common,
+        credentials: {
+          getCredential: async () => {
+            secondEntered();
+            await secondGate;
+            return "test";
+          },
+        },
+      });
+      value.transport.execute = async (_credential, _resource, _operation, request) => {
+        appendFileSync(effect, "one");
+        return {
+          ...execResult({
+            state: "succeeded",
+            stdout: "reclaimed receipt",
+            stderr: "",
+            exitCode: 0,
+          }),
+          startedAt: clock,
+          requestDigest: request.requestDigest,
+        };
+      };
+      let reclaim: Promise<boolean> | undefined;
+      try {
+        const accepted = await first.execute("user-1", "codespace-1", {
+          requestId: randomUUID(),
+          argv: ["append"],
+          stdin: { kind: "inline", bytes: new Uint8Array() },
+        });
+        await firstAtCredential;
+        expect(value.repository.dueSummary(clock).count).toBe(1);
+        clock += policy.claimLeaseMs + 1;
+        reclaim = second.reconcileOnce();
+        await secondAtCredential;
+        releaseFirst();
+        await new Promise<void>((done) => setImmediate(done));
+        releaseSecond();
+        await reclaim;
+        expect(readFileSync(effect, "utf8")).toBe("one");
+        await expect(
+          second.lookupRequest("user-1", "codespace-1", accepted.operation.requestId!),
+        ).resolves.toMatchObject({
+          operation: { id: accepted.operation.id, state: "succeeded" },
+          result: { stdout: "reclaimed receipt" },
+        });
+      } finally {
+        releaseFirst();
+        releaseSecond();
+        await reclaim;
+        await new Promise<void>((done) => setImmediate(done));
+        value.sqlite.close();
+      }
+    },
+  );
   test("an uncertain typed command failure exposes its accepted operation and recovers without execution replay", async () => {
     const value = fixture();
     let executions = 0;
@@ -413,7 +1360,7 @@ describe("durable direct codespace operations", () => {
     },
   );
 
-  test("rejects unavailable connector before credentials on dispatch and result recovery", async () => {
+  test("retained bounded results survive connector outage while new dispatch is refused before credentials", async () => {
     const value = fixture();
     const request = {
       argv: ["true"],
@@ -426,8 +1373,9 @@ describe("durable direct codespace operations", () => {
       value.transport.available = false;
       value.credentials.getCredential.mockClear();
       value.transport.executeCalls.mockClear();
-      await expect(value.service.reconcile("user-1", started.operation.id)).rejects.toMatchObject({
-        code: "CODESPACE_PROVIDER_UNAVAILABLE",
+      await expect(value.service.reconcile("user-1", started.operation.id)).resolves.toMatchObject({
+        stdout: "ok",
+        exitCode: 0,
       });
       await expect(value.service.execute("user-1", "codespace-1", request)).rejects.toMatchObject({
         code: "CODESPACE_PROVIDER_UNAVAILABLE",
@@ -950,7 +1898,7 @@ describe("durable direct codespace operations", () => {
     }
   });
 
-  test("synchronous command waiting returns a proven deadline cancellation and never retries execution", async () => {
+  test("expired client collection preserves running work until explicit cancellation is requested", async () => {
     const value = fixture(true);
     try {
       value.transport.executeResult = { state: "running" };
@@ -966,7 +1914,13 @@ describe("durable direct codespace operations", () => {
         timeoutMs: 5000,
         stdin: { kind: "inline", bytes: new Uint8Array() },
       });
-      const completed = await value.service.waitForResult("user-1", accepted.operation.id);
+      value.advance(5000);
+      const collected = await value.service.waitForResult("user-1", accepted.operation.id, 0);
+      expect(collected).toMatchObject({
+        operation: { state: "running", id: accepted.operation.id },
+        result: null,
+      });
+      const completed = await value.service.cancel("user-1", accepted.operation.id);
       expect(completed).toMatchObject({
         operation: { state: "cancelled", id: accepted.operation.id },
         result: { state: "cancelled", stdout: "partial" },
@@ -1038,7 +1992,7 @@ describe("durable direct codespace operations", () => {
   });
 
   test.each(["unknown", "revoked", "expired"] as const)(
-    "synchronous command waiting reports %s without returning a running success or repeating execution",
+    "bounded collection keeps %s outcome addressable and never repeats or cancels execution",
     async (failure) => {
       const value = fixture(true);
       try {
@@ -1051,14 +2005,24 @@ describe("durable direct codespace operations", () => {
         if (failure === "unknown") value.transport.throwInspect = true;
         if (failure === "revoked") value.sqlite.exec("DELETE FROM codespaceConnectionRepository");
         if (failure === "expired") value.advance(5000);
-        await expect(
-          value.service.waitForResult("user-1", accepted.operation.id),
-        ).rejects.toMatchObject({
-          code:
-            failure === "revoked"
-              ? "CODESPACE_AUTHORIZATION_REQUIRED"
-              : "CODESPACE_PROVIDER_UNAVAILABLE",
-        });
+        const outcome = await value.service.waitForResult("user-1", accepted.operation.id, 0).then(
+          (response) => ({ response }),
+          (error) => ({ error }),
+        );
+        expect(outcome).toMatchObject(
+          failure === "revoked"
+            ? { error: { code: "CODESPACE_AUTHORIZATION_REQUIRED" } }
+            : {
+                response: {
+                  operation: {
+                    id: accepted.operation.id,
+                    state: failure === "unknown" ? "reconcile_pending" : "running",
+                  },
+                  result: null,
+                },
+              },
+        );
+        expect(value.transport.cancelCalls).not.toHaveBeenCalled();
         expect(value.transport.executeCalls).toHaveBeenCalledTimes(1);
         expect(value.repository.listOwned("user-1", "codespace-1")).toHaveLength(1);
       } finally {
@@ -1137,7 +2101,65 @@ describe("durable direct codespace operations", () => {
     }
   });
 
-  test("rechecks revoked result authority after asynchronous credential refresh", async () => {
+  test.each(["private", "historical"] as const)(
+    "zero-wait collection keeps terminal state coupled to its asynchronously read %s prefix",
+    async (storage) => {
+      const value = fixture();
+      let release!: () => void;
+      const gate = new Promise<void>((done) => {
+        release = done;
+      });
+      try {
+        const started = await value.service.execute("user-1", "codespace-1", {
+          argv: ["true"],
+          stdin: { kind: "inline", bytes: new Uint8Array() },
+          timeoutMs: 1000,
+        });
+        expect(started.operation.state).toBe("succeeded");
+        if (storage === "private") {
+          const read = value.transfers.readRelayPayload.bind(value.transfers);
+          value.transfers.readRelayPayload = async (...args) => {
+            await gate;
+            return read(...args);
+          };
+        } else {
+          value.sqlite
+            .prepare("UPDATE codespaceOperation SET resultReference = NULL WHERE id = ?")
+            .run(started.operation.id);
+          value.transport.inspectObservation = async () => {
+            await gate;
+          };
+        }
+        let settled = false;
+        const collection = value.service.waitForResult("user-1", started.operation.id, 0);
+        void collection.then(
+          () => {
+            settled = true;
+          },
+          () => {
+            settled = true;
+          },
+        );
+        // Registered after collection's zero-wait boundary; any metadata-only response has settled.
+        await new Promise<void>((done) => setTimeout(done, 0));
+        expect(settled).toBe(false);
+        release();
+        await expect(collection).resolves.toMatchObject({
+          operation: { state: "succeeded", id: started.operation.id },
+          result: { stdout: "ok", exitCode: 0 },
+        });
+        expect(value.transport.cancelCalls).not.toHaveBeenCalled();
+        expect(value.transport.inspectCalls).toHaveBeenCalledTimes(
+          storage === "historical" ? 1 : 0,
+        );
+      } finally {
+        release();
+        value.sqlite.close();
+      }
+    },
+  );
+
+  test("rechecks revoked result authority after asynchronous private receipt read", async () => {
     const value = fixture();
     try {
       const started = await value.service.execute("user-1", "codespace-1", {
@@ -1146,10 +2168,12 @@ describe("durable direct codespace operations", () => {
         stdin: { kind: "inline", bytes: new Uint8Array() },
         timeoutMs: 1000,
       });
-      value.credentials.getCredential.mockImplementationOnce(async () => {
+      const read = value.transfers.readRelayPayload.bind(value.transfers);
+      value.transfers.readRelayPayload = async (...args) => {
+        const bytes = await read(...args);
         value.sqlite.exec("DELETE FROM codespaceConnectionRepository");
-        return "ghu_access";
-      });
+        return bytes;
+      };
       await expect(value.service.reconcile("user-1", started.operation.id)).rejects.toMatchObject({
         code: "CODESPACE_AUTHORIZATION_REQUIRED",
       });
@@ -1241,7 +2265,11 @@ describe("durable direct codespace operations", () => {
         expect(result.operation.state).toBe("succeeded");
         expect(result.operation.inputBytes).toBe(bytes.length);
         expect(value.transport.lastRequest?.stdin).toEqual({ kind: "inline", bytes });
-        expect(value.sqlite.prepare("SELECT COUNT(*) count FROM codespaceTransfer").get()).toEqual({
+        expect(
+          value.sqlite
+            .prepare("SELECT COUNT(*) count FROM codespaceTransfer WHERE purpose='codespace_input'")
+            .get(),
+        ).toEqual({
           count: 0,
         });
         await expect(
@@ -1259,7 +2287,11 @@ describe("durable direct codespace operations", () => {
           ),
         ).rejects.toThrow(/input exceeds/);
         expect(nativeFetch).toHaveBeenCalledTimes(1);
-        expect(value.sqlite.prepare("SELECT COUNT(*) count FROM codespaceTransfer").get()).toEqual({
+        expect(
+          value.sqlite
+            .prepare("SELECT COUNT(*) count FROM codespaceTransfer WHERE purpose='codespace_input'")
+            .get(),
+        ).toEqual({
           count: 0,
         });
         expect(value.sqlite.prepare("SELECT COUNT(*) count FROM codespaceOperation").get()).toEqual(
@@ -2161,7 +3193,7 @@ describe("durable direct codespace operations", () => {
     }
   });
 
-  test("does not call cancellation terminal until the remote foreground group is absent", async () => {
+  test("keeps historical cancellation pending on absence until a terminal receipt is confirmed", async () => {
     const value = fixture();
     try {
       value.transport.executeResult = { state: "running" };
@@ -2175,6 +3207,12 @@ describe("durable direct codespace operations", () => {
       const pending = await value.service.cancel("user-1", running.operation.id);
       expect(pending.operation.state).toBe("cancel_pending");
 
+      value.transport.cancelResult = { state: "absent" };
+      const unknown = await value.service.cancel("user-1", running.operation.id);
+      expect(unknown.operation.state).toBe("cancel_pending");
+      expect(unknown.result).toBeNull();
+      expect(unknown.operation.startedAt).toBeNull();
+
       value.transport.cancelResult = execResult({
         state: "cancelled",
         stdout: "",
@@ -2184,7 +3222,7 @@ describe("durable direct codespace operations", () => {
       const terminal = await value.service.cancel("user-1", running.operation.id);
       expect(terminal.operation.state).toBe("cancelled");
       expect(terminal.result?.state).toBe("cancelled");
-      expect(value.transport.cancelCalls).toHaveBeenCalledTimes(2);
+      expect(value.transport.cancelCalls).toHaveBeenCalledTimes(3);
     } finally {
       value.sqlite.close();
     }

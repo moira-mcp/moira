@@ -60,6 +60,15 @@ function expectedRowsAfterRename(table: string, storedRows: StoredRow[]): Stored
     }
     if (table === "workspaceOperation") {
       expected.lastOutcome = String(expected.lastOutcome).replace("workspace_", "codespace_");
+      // Historical operations keep their identity without invented admission or launch proof.
+      expected.requestId = null;
+      expected.requestDigest = null;
+      expected.inputReference = null;
+      expected.resultReference = null;
+      expected.admissionDeadlineAt = null;
+      expected.runtimeMs = null;
+      expected.startedAt = null;
+      expected.sessionKey = null;
     }
     if (table === "workspaceTransfer") {
       expected.purpose = String(expected.purpose).replace("workspace_", "codespace_");
@@ -248,7 +257,18 @@ describe("codespace rename migration", () => {
       ).map(({ name }) => name);
       for (const oldName of oldTables) expect(currentNames).not.toContain(oldName);
       expect(currentNames.filter((name) => /^workspace(?:_|[A-Z])/.test(name))).toEqual([]);
-      expect(indexProjection(sqlite, newTables, false)).toEqual(storedIndexes);
+      expect(indexProjection(sqlite, newTables, false)).toEqual(
+        [
+          ...storedIndexes,
+          {
+            table: "codespaceOperation",
+            name: "codespace_operation_request_idx",
+            unique: 1,
+            partial: 0,
+            columns: ["userId", "requestId"],
+          },
+        ].sort((left, right) => left.name.localeCompare(right.name)),
+      );
       expect(foreignKeyProjection(sqlite, newTables, false)).toEqual(storedForeignKeys);
 
       const connectionColumns = (

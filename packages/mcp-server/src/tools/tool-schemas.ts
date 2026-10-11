@@ -774,6 +774,12 @@ const codespaceOperationResumeSchema = z
 const codespaceExecStartSchema = z
   .object({
     codespace_id: codespaceIdSchema,
+    request_id: z
+      .string()
+      .uuid()
+      .describe(
+        "Choose before submission; reuse this identity with the exact request after any lost reply",
+      ),
     argv: z
       .array(
         z
@@ -833,9 +839,31 @@ const codespaceExecStartSchema = z
   })
   .strict();
 
+const codespaceCommandForms = [
+  codespaceExecStartSchema
+    .omit({ script: true })
+    .extend({ argv: codespaceExecStartSchema.shape.argv.unwrap() }),
+  codespaceExecStartSchema.omit({ argv: true }).extend({
+    script: codespaceExecStartSchema.shape.script.unwrap(),
+    session: codespaceExecStartSchema.shape.session.unwrap(),
+  }),
+  codespaceExecStartSchema.omit({ argv: true, script: true }).extend({
+    session_end: z.literal(true),
+    session: codespaceExecStartSchema.shape.session.unwrap(),
+  }),
+] as const;
+const codespaceCommandRequests = [
+  codespaceCommandForms[0].extend({ stdin_text: z.string().optional() }),
+  codespaceCommandForms[0].extend({ stdin_file: codespaceNativeFileSchema }),
+  codespaceCommandForms[1].extend({ stdin_text: z.string().optional() }),
+  codespaceCommandForms[1].extend({ stdin_file: codespaceNativeFileSchema }),
+  codespaceCommandForms[2].extend({ stdin_text: z.string().optional() }),
+  codespaceCommandForms[2].extend({ stdin_file: codespaceNativeFileSchema }),
+] as const;
+
 export const codespaceExecRequestSchema = z.union([
-  codespaceExecStartSchema.extend({ stdin_text: z.string().optional() }),
-  codespaceExecStartSchema.extend({ stdin_file: codespaceNativeFileSchema }),
+  z.object({ codespace_id: codespaceIdSchema, request_id: z.string().uuid() }).strict(),
+  ...codespaceCommandRequests,
   // Only exceptional recovery after an unknown outcome uses this saved identity.
   codespaceOperationResumeSchema,
 ]);
@@ -1076,16 +1104,13 @@ function flatActionSchema<Requests extends Record<string, z.ZodTypeAny>>(
   );
   for (const form of forms) {
     for (const [key, field] of Object.entries(form.shape as Record<string, z.ZodTypeAny>)) {
-      // A default is dropped here and applied by the action's own contract at dispatch. Left in
-      // place, the published object would fill every action's defaults into every request, and the
-      // action's strict contract would then refuse fields the caller never sent. The description
-      // is re-applied, because it was written after the default and is what the agent reads.
-      const bare =
-        field instanceof z.ZodDefault
-          ? field.description === undefined
-            ? field.removeDefault()
-            : field.removeDefault().describe(field.description)
-          : field;
+      // Presence and defaults belong to the action's dispatch contract, not its field's value
+      // shape. Strip both wrappers before comparing declarations, then make the published field
+      // optional once. Otherwise required/optional forms create impossible undefined alternatives.
+      let bare = field;
+      while (bare instanceof z.ZodDefault || bare instanceof z.ZodOptional)
+        bare = bare instanceof z.ZodDefault ? bare.removeDefault() : bare.unwrap();
+      if (field.description !== undefined) bare = bare.describe(field.description);
       const known = declarations.get(key) ?? [];
       // Two actions may declare the same field name with different bounds — `search` and `download`
       // both take `max_bytes`, with different ceilings. Publishing only the first would narrow the
@@ -1101,9 +1126,16 @@ function flatActionSchema<Requests extends Record<string, z.ZodTypeAny>>(
       .describe(description),
   };
   for (const [key, fields] of declarations) {
+    // A boolean already includes both literals. Keep a lone literal (such as destructive
+    // confirmation) strict, but do not publish redundant branches for boolean session flags.
+    const variants = fields.some((field) => field instanceof z.ZodBoolean)
+      ? fields.filter(
+          (field) => !(field instanceof z.ZodLiteral && typeof field.value === "boolean"),
+        )
+      : fields;
     const published =
-      fields.length === 1 ? fields[0] : z.union(fields as [z.ZodTypeAny, z.ZodTypeAny]);
-    shape[key] = published.isOptional() ? published : published.optional();
+      variants.length === 1 ? variants[0] : z.union(variants as [z.ZodTypeAny, z.ZodTypeAny]);
+    shape[key] = published.optional();
   }
   return z.object(shape).strict();
 }
@@ -1121,11 +1153,11 @@ const codespaceProcessIdentitySchema = z
   .strict();
 
 export const CODESPACE_PROCESS_ACTION_REQUEST_SCHEMAS = {
-  start: z.union([
-    codespaceExecStartSchema.extend({ stdin_text: z.string().optional() }),
-    codespaceExecStartSchema.extend({ stdin_file: codespaceNativeFileSchema }),
+  start: z.union(codespaceCommandRequests),
+  get: z.union([
+    codespaceProcessIdentitySchema,
+    z.object({ codespace_id: codespaceIdSchema, request_id: z.string().uuid() }).strict(),
   ]),
-  get: codespaceProcessIdentitySchema,
   read: codespaceProcessIdentitySchema.extend({
     stream: z.enum(["stdout", "stderr"]),
     ...codespaceReadRangeSchema.shape,

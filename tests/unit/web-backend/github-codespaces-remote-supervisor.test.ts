@@ -149,6 +149,705 @@ async function inspectUntilTerminal(
 }
 
 describe("direct Codespace operation supervisor", () => {
+  test.each([false, true])(
+    "cancel before delayed dispatch survives early finalize=%s without launching the accepted effect",
+    async (earlyFinalize) => {
+      const value = fixture();
+      const remoteMarker = `moira-op-${"e1".repeat(16)}`;
+      const requestDigest = "1".repeat(64);
+      const admissionDeadlineAt = Date.now() + 10000;
+      const effect = join(value.repository, "cancel-before-dispatch-effect");
+      const cancellation = await request(value.environment, {
+        action: "cancel",
+        version: 1,
+        remoteMarker,
+        requestDigest,
+        admissionDeadlineAt,
+      });
+      if (earlyFinalize)
+        await request(value.environment, {
+          action: "finalize",
+          version: 1,
+          remoteMarker,
+          requestDigest,
+        });
+      await request(value.environment, {
+        action: "execute",
+        version: 1,
+        remoteMarker,
+        requestDigest,
+        admissionDeadlineAt,
+        repositoryFullName: "owner/repository",
+        stdin: "",
+        timeoutMs: 5000,
+        maxStdoutBytes: 1024,
+        maxStderrBytes: 1024,
+        maxRetainedBytes: 1024,
+        argv: [
+          process.execPath,
+          "-e",
+          "require('node:fs').appendFileSync(process.argv[1],'x')",
+          effect,
+        ],
+      });
+      const result = await inspectUntilTerminal(value.environment, remoteMarker);
+      expect(existsSync(effect)).toBe(false);
+      expect(cancellation).toMatchObject({ state: "not_started", requestDigest });
+      expect(result).toMatchObject({ state: "not_started", requestDigest });
+      expect(result.startedAt).toBeUndefined();
+    },
+  );
+  test("completed modern work cannot replay after output cleanup while its original admission remains open", async () => {
+    const value = fixture();
+    const remoteMarker = `moira-op-${"e3".repeat(16)}`;
+    const effect = join(value.repository, "completed-cleanup-effect");
+    const admissionDeadlineAt = Date.now() + 10000;
+    const operation = {
+      action: "execute",
+      version: 1,
+      remoteMarker,
+      requestDigest: "3".repeat(64),
+      admissionDeadlineAt,
+      repositoryFullName: "owner/repository",
+      stdin: "",
+      timeoutMs: 5000,
+      maxStdoutBytes: 1024,
+      maxStderrBytes: 1024,
+      maxRetainedBytes: 1024,
+      argv: [
+        process.execPath,
+        "-e",
+        "require('node:fs').appendFileSync(process.argv[1],'x');process.stdout.write('printed')",
+        effect,
+      ],
+    };
+    await request(value.environment, operation);
+    const original = await inspectUntilTerminal(value.environment, remoteMarker);
+    expect(original).toMatchObject({ state: "succeeded", stdout: "printed" });
+    await request(value.environment, {
+      action: "finalize",
+      version: 1,
+      remoteMarker,
+      requestDigest: operation.requestDigest,
+    });
+    await request(value.environment, operation);
+    const replay = await inspectUntilTerminal(value.environment, remoteMarker);
+    expect(readFileSync(effect, "utf8")).toBe("x");
+    expect(replay).toMatchObject({
+      state: "outcome_unknown",
+      requestDigest: operation.requestDigest,
+      startedAt: original.startedAt,
+      runtimeMs: original.runtimeMs,
+    });
+    for (const file of ["stdout.log", "stderr.log", "result.json"])
+      expect(existsSync(join(value.stateRoot, remoteMarker, file))).toBe(false);
+    expect(
+      await request(
+        value.environment,
+        { action: "finalize", version: 1, remoteMarker, requestDigest: operation.requestDigest },
+        (source) => `Date.now=()=>${admissionDeadlineAt + 1};\n${source}`,
+      ),
+    ).toEqual({ state: "absent" });
+    expect(existsSync(join(value.stateRoot, remoteMarker))).toBe(false);
+  });
+
+  test("an expired admission never launches a command and leaves a collectible not_started receipt", async () => {
+    const value = fixture();
+    const remoteMarker = `moira-op-${"a1".repeat(16)}`;
+    const requestDigest = "1".repeat(64);
+    const effect = join(value.repository, "expired-effect");
+    const result = await request(value.environment, {
+      action: "execute",
+      version: 1,
+      remoteMarker,
+      repositoryFullName: "owner/repository",
+      argv: [
+        process.execPath,
+        "-e",
+        "require('node:fs').writeFileSync(process.argv[1],'effect')",
+        effect,
+      ],
+      stdin: "",
+      timeoutMs: 5000,
+      maxStdoutBytes: 1024,
+      maxStderrBytes: 1024,
+      maxRetainedBytes: 1024,
+      admissionDeadlineAt: Date.now() - 1,
+      requestDigest,
+    });
+    // Drain a wrong implementation's already launched command before inspecting its effect.
+    const collected = await inspectUntilTerminal(value.environment, remoteMarker);
+    expect(existsSync(effect)).toBe(false);
+    expect(result).toMatchObject({ state: "not_started", requestDigest });
+    expect(collected).toMatchObject({ state: "not_started", requestDigest });
+    expect(collected.startedAt).toBeUndefined();
+  });
+
+  test("a launch receipt survives replay without executing the same marker twice", async () => {
+    const value = fixture();
+    const remoteMarker = `moira-op-${"a2".repeat(16)}`;
+    const effect = join(value.repository, "once-effect");
+    const operation = {
+      action: "execute",
+      version: 1,
+      remoteMarker,
+      repositoryFullName: "owner/repository",
+      argv: [
+        process.execPath,
+        "-e",
+        "require('node:fs').appendFileSync(process.argv[1],'x')",
+        effect,
+      ],
+      stdin: "",
+      timeoutMs: 5000,
+      maxStdoutBytes: 1024,
+      maxStderrBytes: 1024,
+      maxRetainedBytes: 1024,
+      admissionDeadlineAt: Date.now() + 10000,
+      requestDigest: "2".repeat(64),
+    };
+    await request(value.environment, operation);
+    const original = await inspectUntilTerminal(value.environment, remoteMarker);
+    expect(original.startedAt).toEqual(expect.any(Number));
+    expect(original.requestDigest).toBe(operation.requestDigest);
+    expect(original.runtimeMs).toBe(operation.timeoutMs);
+    await expect(request(value.environment, operation)).resolves.toMatchObject({
+      state: "succeeded",
+      startedAt: original.startedAt,
+      requestDigest: operation.requestDigest,
+      runtimeMs: operation.timeoutMs,
+    });
+    await expect(
+      request(value.environment, { ...operation, requestDigest: "3".repeat(64) }),
+    ).rejects.toThrow();
+    expect(readFileSync(effect, "utf8")).toBe("x");
+  });
+
+  test("spawn callback delay does not move a proved launch beyond its admitted window", async () => {
+    const value = fixture();
+    const remoteMarker = `moira-op-${"b4".repeat(16)}`;
+    const admissionDeadlineAt = Date.now() + 1500;
+    await request(
+      value.environment,
+      {
+        action: "execute",
+        version: 1,
+        remoteMarker,
+        repositoryFullName: "owner/repository",
+        argv: ["/bin/echo", "launched"],
+        stdin: "",
+        timeoutMs: 5000,
+        maxStdoutBytes: 1024,
+        maxStderrBytes: 1024,
+        maxRetainedBytes: 1024,
+        admissionDeadlineAt,
+        requestDigest: "b".repeat(64),
+      },
+      (source) =>
+        source.replace(
+          /child\.once\('spawn',\(\)=>resolve\((.*?)\)\);/,
+          (_match, expression: string) =>
+            `child.once('spawn',()=>{const now=Date.now;Date.now=()=>now()+2000;resolve(${expression})});`,
+        ),
+    );
+    const result = await inspectUntilTerminal(value.environment, remoteMarker);
+    expect(result).toMatchObject({ state: "succeeded", stdout: "launched\n" });
+    expect(result.startedAt).toEqual(expect.any(Number));
+    expect(result.startedAt as number).toBeLessThan(admissionDeadlineAt);
+    expect(result.runtimeMs).toBe(5000);
+  });
+
+  test("a refused child spawn has a durable not_started receipt without launch metadata", async () => {
+    const value = fixture();
+    const remoteMarker = `moira-op-${"a7".repeat(16)}`;
+    const operation = {
+      action: "execute",
+      version: 1,
+      remoteMarker,
+      repositoryFullName: "owner/repository",
+      argv: [join(value.repository, "missing-executable")],
+      stdin: "",
+      timeoutMs: 5000,
+      maxStdoutBytes: 1024,
+      maxStderrBytes: 1024,
+      maxRetainedBytes: 1024,
+      admissionDeadlineAt: Date.now() + 10000,
+      requestDigest: "7".repeat(64),
+    };
+    await request(value.environment, operation);
+    const result = await inspectUntilTerminal(value.environment, remoteMarker);
+    expect(result).toMatchObject({ state: "not_started", requestDigest: operation.requestDigest });
+    expect(result.startedAt).toBeUndefined();
+    expect(result.runtimeMs).toBeUndefined();
+    await expect(request(value.environment, operation)).resolves.toEqual(result);
+  });
+
+  test("queued session commands see committed context while unrelated commands remain independent", async () => {
+    const value = fixture();
+    const environment = { ...value.environment, MOIRA_ENVIRONMENT_ID: "session-order" };
+    const send = (suffix: string, extra: Record<string, unknown>) =>
+      request(environment, {
+        action: "execute",
+        version: 1,
+        remoteMarker: `moira-op-${suffix.repeat(16)}`,
+        repositoryFullName: "owner/repository",
+        stdin: "",
+        timeoutMs: 10000,
+        maxStdoutBytes: 1024,
+        maxStderrBytes: 1024,
+        maxRetainedBytes: 1024,
+        ...extra,
+      });
+    const ready = join(value.repository, "session-ready");
+    const release = join(value.repository, "session-release");
+    await send("a3", {
+      session: "ordered",
+      sessionStart: true,
+      script: `"${process.execPath}" -e "const fs=require('node:fs');fs.writeFileSync(process.argv[1],'ready');const t=setInterval(()=>{if(fs.existsSync(process.argv[2])){clearInterval(t)}},10)" "${ready}" "${release}"\nexport ORDERED_VALUE=committed\n`,
+    });
+    for (let index = 0; index < 200 && !existsSync(ready); index++)
+      await new Promise((done) => setTimeout(done, 5));
+    expect(existsSync(ready)).toBe(true);
+    const queued = send("a4", {
+      session: "ordered",
+      argv: [process.execPath, "-e", "process.stdout.write(process.env.ORDERED_VALUE??'missing')"],
+    });
+    const cancelledMarker = `moira-op-${"e2".repeat(16)}`;
+    const cancelledEffect = join(value.repository, "cancelled-queued-effect");
+    const cancelDeadline = Date.now() + 10000;
+    const cancelledQueue = send("e2", {
+      session: "ordered",
+      requestDigest: "2".repeat(64),
+      admissionDeadlineAt: cancelDeadline,
+      argv: [
+        process.execPath,
+        "-e",
+        "require('node:fs').writeFileSync(process.argv[1],'effect')",
+        cancelledEffect,
+      ],
+    });
+    let queuedCancellation: unknown;
+    try {
+      for (
+        let attempt = 0;
+        attempt < 200 && !existsSync(join(value.stateRoot, cancelledMarker, "execution.json"));
+        attempt++
+      )
+        await new Promise((done) => setTimeout(done, 5));
+      expect(existsSync(join(value.stateRoot, cancelledMarker, "execution.json"))).toBe(true);
+      queuedCancellation = await request(environment, {
+        action: "cancel",
+        version: 1,
+        remoteMarker: cancelledMarker,
+        requestDigest: "2".repeat(64),
+        admissionDeadlineAt: cancelDeadline,
+      });
+      await send("aa", {
+        session: "independent",
+        sessionStart: true,
+        argv: ["/bin/echo", "new-session"],
+        admissionDeadlineAt: Date.now() + 1000,
+        requestDigest: "f".repeat(64),
+      });
+      expect(await inspectUntilTerminal(environment, `moira-op-${"aa".repeat(16)}`)).toMatchObject({
+        state: "succeeded",
+        stdout: "new-session\n",
+      });
+      const expiredEffect = join(value.repository, "expired-session-effect");
+      const expired = await send("a8", {
+        session: "ordered",
+        admissionDeadlineAt: Date.now() + 1000,
+        requestDigest: "8".repeat(64),
+        argv: [
+          process.execPath,
+          "-e",
+          "require('node:fs').writeFileSync(process.argv[1],'effect')",
+          expiredEffect,
+        ],
+      });
+      expect(expired).toMatchObject({ state: "not_started", requestDigest: "8".repeat(64) });
+      expect(expired).not.toHaveProperty("startedAt");
+      expect(existsSync(expiredEffect)).toBe(false);
+      expect(
+        await send("a9", {
+          session: "ordered",
+          sessionEnd: true,
+          admissionDeadlineAt: Date.now() + 1000,
+          requestDigest: "d".repeat(64),
+        }),
+      ).toMatchObject({
+        state: "not_started",
+        requestDigest: "d".repeat(64),
+      });
+      await send("a5", { argv: ["/bin/echo", "independent"] });
+      expect(await inspectUntilTerminal(environment, `moira-op-${"a5".repeat(16)}`)).toMatchObject({
+        stdout: "independent\n",
+      });
+    } finally {
+      writeFileSync(release, "release");
+      await inspectUntilTerminal(environment, `moira-op-${"a3".repeat(16)}`);
+      await queued;
+      await cancelledQueue;
+    }
+    expect(await inspectUntilTerminal(environment, `moira-op-${"a4".repeat(16)}`)).toMatchObject({
+      stdout: "committed",
+    });
+    expect(existsSync(cancelledEffect)).toBe(false);
+    expect(queuedCancellation).toMatchObject({
+      state: "not_started",
+      requestDigest: "2".repeat(64),
+    });
+  });
+
+  test("modern session_end checks its actual effect timestamp and persists success without a child spawn", async () => {
+    const value = fixture();
+    const environment = { ...value.environment, MOIRA_ENVIRONMENT_ID: "modern-end-life" };
+    const base = {
+      action: "execute",
+      version: 1,
+      repositoryFullName: "owner/repository",
+      stdin: "",
+      timeoutMs: 5000,
+      maxStdoutBytes: 1024,
+      maxStderrBytes: 1024,
+      maxRetainedBytes: 1024,
+    };
+    const openingMarker = `moira-op-${"d1".repeat(16)}`;
+    await request(environment, {
+      ...base,
+      remoteMarker: openingMarker,
+      session: "ending",
+      sessionStart: true,
+      argv: ["/bin/echo", "open"],
+    });
+    await inspectUntilTerminal(environment, openingMarker);
+    const remoteMarker = `moira-op-${"d2".repeat(16)}`;
+    const admissionDeadlineAt = Date.now() + 10000;
+    const end = {
+      ...base,
+      remoteMarker,
+      session: "ending",
+      sessionEnd: true,
+      admissionDeadlineAt,
+      requestDigest: "e".repeat(64),
+    };
+    const result = (await request(environment, end, (source) =>
+      source.replace(
+        "if (session.ended) {",
+        "if (session.ended) { let reads=0;Date.now=()=>reads++===0?request.admissionDeadlineAt-1:request.admissionDeadlineAt+1;",
+      ),
+    )) as Record<string, unknown>;
+    expect(result).toMatchObject({
+      state: "succeeded",
+      requestDigest: end.requestDigest,
+      runtimeMs: 5000,
+    });
+    expect(result.startedAt as number).toBeLessThan(admissionDeadlineAt);
+    expect(existsSync(join(value.stateRoot, "sessions", "ending.json"))).toBe(false);
+    expect(existsSync(join(value.stateRoot, remoteMarker, "pid"))).toBe(false);
+    expect(await request(environment, end)).toEqual(result);
+  });
+
+  test("concurrent distinct session starts preserve the sixteen-session admission bound", async () => {
+    const value = fixture();
+    const environment = { ...value.environment, MOIRA_ENVIRONMENT_ID: "capacity-life" };
+    const base = {
+      action: "execute",
+      version: 1,
+      repositoryFullName: "owner/repository",
+      argv: ["/bin/echo", "started"],
+      stdin: "",
+      timeoutMs: 5000,
+      maxStdoutBytes: 1024,
+      maxStderrBytes: 1024,
+      maxRetainedBytes: 1024,
+      sessionStart: true,
+    };
+    const initialMarker = `moira-op-${"c1".repeat(16)}`;
+    await request(environment, { ...base, remoteMarker: initialMarker, session: "initial" });
+    await inspectUntilTerminal(environment, initialMarker);
+    const sessionRoot = join(value.stateRoot, "sessions");
+    const stored = readFileSync(join(sessionRoot, "initial.json"));
+    for (let index = 1; index < 15; index++)
+      writeFileSync(join(sessionRoot, `existing-${index}.json`), stored, { mode: 0o600 });
+    const firstMarker = `moira-op-${"c2".repeat(16)}`;
+    const ready = join(value.stateRoot, firstMarker, "execution.json.capacity-ready");
+    const release = join(value.stateRoot, "capacity-release");
+    const first = request(
+      environment,
+      { ...base, remoteMarker: firstMarker, session: "first-new" },
+      (source) =>
+        source.replace(
+          "if(startedAt!==null&&input.session){await durable(input.session.path,",
+          `if(startedAt!==null&&input.session){await writeFile(input.executionPath+'.capacity-ready','ready');while(!await access(${JSON.stringify(release)}).then(()=>true,()=>false))await new Promise(done=>setTimeout(done,5));await durable(input.session.path,`,
+        ),
+    );
+    let second: Record<string, unknown> | undefined;
+    try {
+      for (let attempt = 0; attempt < 200 && !existsSync(ready); attempt++)
+        await new Promise((done) => setTimeout(done, 5));
+      expect(existsSync(ready)).toBe(true);
+      second = (await request(environment, {
+        ...base,
+        remoteMarker: `moira-op-${"c3".repeat(16)}`,
+        session: "second-new",
+        requestDigest: "c".repeat(64),
+        admissionDeadlineAt: Date.now() + 1000,
+      })) as Record<string, unknown>;
+    } finally {
+      writeFileSync(release, "release");
+      await first;
+      await inspectUntilTerminal(environment, firstMarker);
+    }
+    expect(readdirSync(sessionRoot).filter((name) => name.endsWith(".json"))).toHaveLength(16);
+    expect(["not_started", "session_limit"]).toContain(second?.state);
+  });
+
+  test("a committed session releases its lock while an unrelated background descendant remains alive", async () => {
+    const value = fixture();
+    const environment = { ...value.environment, MOIRA_ENVIRONMENT_ID: "background-session" };
+    const pidPath = join(value.repository, "background-pid");
+    const send = (suffix: string, extra: Record<string, unknown>) =>
+      request(environment, {
+        action: "execute",
+        version: 1,
+        remoteMarker: `moira-op-${suffix.repeat(16)}`,
+        repositoryFullName: "owner/repository",
+        stdin: "",
+        timeoutMs: 5000,
+        maxStdoutBytes: 1024,
+        maxStderrBytes: 1024,
+        maxRetainedBytes: 1024,
+        ...extra,
+      });
+    try {
+      await send("b1", {
+        session: "background",
+        sessionStart: true,
+        script: `"${process.execPath}" -e 'setInterval(()=>{},10000)' </dev/null >/dev/null 2>&1 &\necho $! > "${pidPath}"\nexport BACKGROUND_VALUE=committed\n`,
+      });
+      expect(await inspectUntilTerminal(environment, `moira-op-${"b1".repeat(16)}`)).toMatchObject({
+        state: "succeeded",
+      });
+      process.kill(Number(readFileSync(pidPath, "utf8")), 0);
+      await send("b2", {
+        session: "background",
+        admissionDeadlineAt: Date.now() + 2000,
+        requestDigest: "9".repeat(64),
+        argv: [
+          process.execPath,
+          "-e",
+          "process.stdout.write(process.env.BACKGROUND_VALUE??'missing')",
+        ],
+      });
+      expect(await inspectUntilTerminal(environment, `moira-op-${"b2".repeat(16)}`)).toMatchObject({
+        state: "succeeded",
+        stdout: "committed",
+      });
+    } finally {
+      if (existsSync(pidPath)) {
+        try {
+          process.kill(Number(readFileSync(pidPath, "utf8")), "SIGKILL");
+        } catch {
+          // The background process may already have exited during test cleanup.
+        }
+      }
+    }
+  });
+
+  test("an incomplete launch intent remains outcome_unknown and is never dispatched again", async () => {
+    const value = fixture();
+    const remoteMarker = `moira-op-${"a6".repeat(16)}`;
+    const effect = join(value.repository, "incomplete-effect");
+    const operation = {
+      action: "execute",
+      version: 1,
+      remoteMarker,
+      repositoryFullName: "owner/repository",
+      argv: [
+        process.execPath,
+        "-e",
+        "require('node:fs').writeFileSync(process.argv[1],'effect')",
+        effect,
+      ],
+      stdin: "",
+      timeoutMs: 5000,
+      maxStdoutBytes: 1024,
+      maxStderrBytes: 1024,
+      maxRetainedBytes: 1024,
+      admissionDeadlineAt: Date.now() + 10000,
+      requestDigest: "6".repeat(64),
+    };
+    await expect(
+      request(value.environment, operation, (source) =>
+        source.replace(
+          'await writeDurableJson(directory, "execution.json", execution);',
+          'await writeDurableJson(directory, "execution.json", execution); throw new Error("lost launch observer");',
+        ),
+      ),
+    ).rejects.toThrow("lost launch observer");
+    expect(await request(value.environment, operation)).toEqual({
+      state: "outcome_unknown",
+      requestDigest: operation.requestDigest,
+    });
+    expect(
+      await request(value.environment, { action: "inspect", version: 1, remoteMarker }),
+    ).toEqual({ state: "outcome_unknown", requestDigest: operation.requestDigest });
+    expect(existsSync(effect)).toBe(false);
+  });
+
+  test("a launch attempt lost before PID publication cannot become a negative cancellation proof", async () => {
+    const value = fixture();
+    const remoteMarker = `moira-op-${"d4".repeat(16)}`;
+    const effect = join(value.repository, "lost-start-effect");
+    const operation = {
+      action: "execute",
+      version: 1,
+      remoteMarker,
+      repositoryFullName: "owner/repository",
+      argv: [
+        process.execPath,
+        "-e",
+        "require('node:fs').appendFileSync(process.argv[1],'x')",
+        effect,
+      ],
+      stdin: "",
+      timeoutMs: 5000,
+      maxStdoutBytes: 1024,
+      maxStderrBytes: 1024,
+      maxRetainedBytes: 1024,
+      admissionDeadlineAt: Date.now() + 10000,
+      requestDigest: "d".repeat(64),
+    };
+    await expect(
+      request(value.environment, operation, (source) =>
+        source.replace(
+          "if(startedAt!==null){await durable(input.executionPath,",
+          "if(startedAt!==null){process.exit(1);await durable(input.executionPath,",
+        ),
+      ),
+    ).rejects.toThrow();
+    const proof = JSON.parse(
+      readFileSync(join(value.stateRoot, remoteMarker, "execution.json"), "utf8"),
+    );
+    expect(proof.launchAttempted).toBe(true);
+    expect(proof.startedAt).toBeUndefined();
+    const unknown = { state: "outcome_unknown", requestDigest: operation.requestDigest };
+    expect(
+      await request(value.environment, {
+        action: "cancel",
+        version: 1,
+        remoteMarker,
+        requestDigest: operation.requestDigest,
+        admissionDeadlineAt: operation.admissionDeadlineAt,
+      }),
+    ).toEqual(unknown);
+    expect(await request(value.environment, operation)).toEqual(unknown);
+    expect(readFileSync(effect, "utf8")).toBe("x");
+  });
+
+  test("a proved effect with a lost terminal receipt remains unknown instead of inventing a failure or repeating it", async () => {
+    const value = fixture();
+    const remoteMarker = `moira-op-${"b3".repeat(16)}`;
+    const effect = join(value.repository, "lost-terminal-effect");
+    const operation = {
+      action: "execute",
+      version: 1,
+      remoteMarker,
+      repositoryFullName: "owner/repository",
+      argv: [
+        process.execPath,
+        "-e",
+        "require('node:fs').appendFileSync(process.argv[1],'x')",
+        effect,
+      ],
+      stdin: "",
+      timeoutMs: 5000,
+      maxStdoutBytes: 1024,
+      maxStderrBytes: 1024,
+      maxRetainedBytes: 1024,
+      admissionDeadlineAt: Date.now() + 10000,
+      requestDigest: "a".repeat(64),
+    };
+    await request(value.environment, operation, (source) =>
+      source.replace(
+        "const code=await closed;let cancelled=false;",
+        "const code=await closed;process.exit(1);let cancelled=false;",
+      ),
+    );
+    const outcome = await inspectUntilTerminal(value.environment, remoteMarker);
+    const proof = JSON.parse(
+      readFileSync(join(value.stateRoot, remoteMarker, "execution.json"), "utf8"),
+    );
+    expect(proof).toMatchObject({ startedAt: expect.any(Number), runtimeMs: operation.timeoutMs });
+    expect(outcome).toEqual({
+      state: "outcome_unknown",
+      requestDigest: operation.requestDigest,
+      startedAt: proof.startedAt,
+      runtimeMs: operation.timeoutMs,
+    });
+    await expect(
+      request(value.environment, {
+        action: "finalize",
+        version: 1,
+        remoteMarker,
+        requestDigest: operation.requestDigest,
+      }),
+    ).rejects.toThrow("unresolved");
+    expect(await request(value.environment, operation)).toEqual({
+      state: "outcome_unknown",
+      requestDigest: operation.requestDigest,
+      startedAt: proof.startedAt,
+      runtimeMs: operation.timeoutMs,
+    });
+    expect(readFileSync(effect, "utf8")).toBe("x");
+  });
+
+  test("combined result prefixes fit the control frame without killing or losing retained output", async () => {
+    const value = fixture();
+    const remoteMarker = `moira-op-${"a7".repeat(16)}`;
+    const bytes = 8 * 1024 * 1024;
+    await request(value.environment, {
+      action: "execute",
+      version: 1,
+      remoteMarker,
+      repositoryFullName: "owner/repository",
+      argv: [
+        process.execPath,
+        "-e",
+        "process.stdout.write('x'.repeat(Number(process.argv[1])-4)+'TAIL');process.stderr.write('e'.repeat(Number(process.argv[1])));",
+        String(bytes),
+      ],
+      stdin: "",
+      timeoutMs: 10000,
+      maxStdoutBytes: bytes,
+      maxStderrBytes: bytes,
+      maxRetainedBytes: bytes,
+    });
+    const terminal = await inspectUntilTerminal(value.environment, remoteMarker);
+    expect(terminal).toMatchObject({
+      state: "succeeded",
+      exitCode: 0,
+      stdoutBytes: bytes,
+      stderrBytes: bytes,
+      outputLimitExceeded: false,
+    });
+    expect(statSync(join(value.stateRoot, remoteMarker, "result.json")).size).toBeLessThan(
+      8 * 1024 * 1024,
+    );
+    expect(statSync(join(value.stateRoot, remoteMarker, "stdout.log")).size).toBe(bytes);
+    expect(statSync(join(value.stateRoot, remoteMarker, "stderr.log")).size).toBe(bytes);
+    const tail = (await request(value.environment, {
+      action: "output",
+      version: 1,
+      remoteMarker,
+      stream: "stdout",
+      offset: bytes - 4,
+      length: 4,
+    })) as { bytesBase64: string };
+    expect(Buffer.from(tail.bytesBase64, "base64").toString()).toBe("TAIL");
+  });
+
   test("defaults to the GitHub Codespaces /workspaces repository mount", () => {
     const source = readFileSync(supervisorPath, "utf8");
     expect(source).toContain('process.env.MOIRA_CODESPACES_ROOT || "/workspaces"');

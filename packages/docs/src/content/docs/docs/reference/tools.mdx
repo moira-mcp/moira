@@ -257,17 +257,23 @@ same timeout; turn pausing off if you work in your codespaces directly. Separate
 codespace after at most 240 minutes without user or terminal activity, with pausing on or off, and
 that can also end a background command that prints nothing for that long.
 
+Choose a UUID `request_id` before submitting `exec` or `codespace_process` start and retain it.
+Matching retries recover the same command; changed command, resource or input identity is refused.
 `exec` runs argv as data (no shell interpolation) in a repository-relative `cwd` with a
-timeout (`timeout_seconds`, optional) and optional per-stream output limits, and returns bounded `stdout`, `stderr` and the exact
-`exit_code`. Those limits bound the answer, not the command: a command that prints more keeps
+timeout (`timeout_seconds`, optional) and optional per-stream output limits. A collected result contains
+bounded `stdout`, `stderr` and the exact `exit_code`. Those limits bound the answer, not the command:
+a command that prints more keeps
 running, keeps its own exit code and keeps its own `stderr`, and the result reports each stream's
 complete size and whether the payload was truncated. The whole output stays in the codespace until
 the operation is cleaned up, and any range of it is read with `read`. A command is stopped
 for its volume only if its retained output reaches the codespace ceiling, which is reported as that
-rather than as the command's own failure. Ordinary exec waits for its terminal result;
-`timeout_seconds` defaults to 300. Long-lived development processes use the separate
-`codespace_process` tool: start accepts the same command/session/stdin fields and returns
-`process_id` and state after admission. Get collects that process's state and available output;
+rather than as the command's own failure. Exec returns a durable acceptance response without
+waiting for guest completion: `request_id`, `operation_id`, `accepted` and `phase`, plus available
+output. `timeout_seconds` defaults to 300 and bounds guest runtime from confirmed launch, not
+the client's wait. Long-lived development processes use the separate
+`codespace_process` tool: start accepts the same identity/command/session/stdin fields and returns
+`process_id`, acceptance fields and state without waiting for confirmed launch. Get collects that
+process's state and available output by `process_id` or `request_id`;
 read returns a bounded retained stream range; stop cancels only that process. A pending stop is
 not confirmed cancellation. The omitted duration uses the existing background lifetime ceiling,
 and retained output remains collectible for at least the permitted command duration.
@@ -320,14 +326,25 @@ conflicting edit and retains its recovery journal and backups when rollback cann
 Supply at most one stdin form: `stdin_text` for UTF-8 text or `stdin_file` for a native
 ChatGPT file reference; the file's bytes reach the process without base64 in the conversation.
 Failed, timed-out and cancelled commands and rejected file edits are returned as tool errors that
-keep any useful bounded output and the recovery identity. Successful ordinary calls return the
-action result without operation metadata; `operation_id` remains only for truncated retained output
-or exceptional recovery. An unconfirmed outcome is an error, not a running success. Use its same
-`codespace_id` and `operation_id` to collect the accepted effect without executing it again.
+keep any useful bounded output and the recovery identity. File calls wait for their useful terminal
+result and carry `operation_id` for exceptional recovery. Command calls retain their acceptance
+identity; acceptance does not prove success or a running process. After a lost first response,
+call `exec` with only `codespace_id` and the original `request_id`, or use process get with that
+request identity. Existing `operation_id` collection remains available. Lookup and bounded waiting
+never cancel or repeat the command.
+
+`phase: "preparing"` means input preparation is incomplete; `accepted` means admission is durable.
+`started_at: null` means launch is unconfirmed, not that no effect occurred. `not_started` requires
+proof that launch was prevented, while `outcome_unknown` preserves uncertainty. `admission_deadline_at`
+limits permission to start; `started_at` plus `runtime_ms` bounds actual guest execution;
+`result_expires_at` describes result retention. These times are independent of caller waiting.
 Server waiting does not extend a client's transport timeout. After interrupted delivery, inspect
 the accepted identity before repeating that effect or modifying the affected files. Independent
 work can continue without resolving that operation first.
-Retained results remain readable after an ordinary restart while the same codespace and current
+The bounded reply prefix is verified in private storage before terminal publication and remains
+collectible after server restart during retention. Larger complete streams remain in the guest;
+their availability is separate from that prefix. Retained results remain readable after an ordinary
+restart while the same codespace and current
 access remain valid and the result is still stored. Restart does not preserve a live process.
 `CODESPACE_RESULT_EXPIRED` means the stored result is no longer available; it is not a reason to
 repeat the same write without inspecting the affected files. A typed transport failure after acceptance retains

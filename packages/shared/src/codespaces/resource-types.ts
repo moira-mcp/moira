@@ -331,6 +331,15 @@ export type CodespaceOperationState =
 
 export interface CodespaceOperationRecord {
   id: string;
+  /** Null on operations admitted before caller-owned submission identity. */
+  requestId?: string | null;
+  requestDigest?: string | null;
+  inputReference?: string | null;
+  resultReference?: string | null;
+  admissionDeadlineAt?: number | null;
+  runtimeMs?: number | null;
+  startedAt?: number | null;
+  sessionKey?: string | null;
   userId: string;
   resourceId: string;
   resourceGeneration: number;
@@ -368,6 +377,11 @@ export type CodespaceByteSource =
     };
 
 export interface CodespaceExecRequest {
+  /** Stable identity supplied before submission; matching retry recovers the same effect. */
+  requestId?: string;
+  /** Provider ABI fields resolved from the accepted durable operation. */
+  admissionDeadlineAt?: number;
+  requestDigest?: string;
   /** Absent only for a script command or a call that just ends a session. */
   argv?: readonly string[];
   /** Text run by the codespace's own shell inside a session; its end state is captured. */
@@ -398,6 +412,9 @@ export interface CodespaceExecRequest {
 }
 
 export interface CodespaceOperationResult {
+  startedAt?: number;
+  runtimeMs?: number;
+  requestDigest?: string;
   state: "succeeded" | "failed" | "cancelled" | "timed_out";
   /** Response payload: the beginning of the stream, bounded by the operation's payload limit. */
   stdout: string;
@@ -449,7 +466,9 @@ export interface CodespaceOperationTransport extends CodespaceTransportAvailabil
     request: CodespaceExecRequest,
   ): Promise<
     | CodespaceOperationResult
-    | { state: "running" }
+    | { state: "running"; startedAt?: number; runtimeMs?: number; requestDigest?: string }
+    | { state: "not_started"; requestDigest?: string }
+    | { state: "outcome_unknown"; startedAt?: number; runtimeMs?: number; requestDigest?: string }
     | { state: "session_unavailable" }
     | { state: "session_limit"; limit: "context" | "sessions" }
   >;
@@ -459,17 +478,24 @@ export interface CodespaceOperationTransport extends CodespaceTransportAvailabil
     operation: CodespaceOperationRecord,
   ): Promise<
     | CodespaceOperationResult
-    | { state: "running" }
+    | { state: "running"; startedAt?: number; runtimeMs?: number; requestDigest?: string }
+    | { state: "not_started"; requestDigest?: string }
+    | { state: "outcome_unknown"; startedAt?: number; runtimeMs?: number; requestDigest?: string }
     | { state: "absent" }
     /** The operation belongs to an earlier life of the codespace: it was lost to a restart. */
-    | { state: "interrupted" }
+    | { state: "interrupted"; startedAt?: number; runtimeMs?: number; requestDigest?: string }
   >;
   cancel(
     credential: string,
     codespace: CodespaceResourceRecord,
     operation: CodespaceOperationRecord,
   ): Promise<
-    CodespaceOperationResult | { state: "running" } | { state: "absent" } | { state: "interrupted" }
+    | CodespaceOperationResult
+    | { state: "running"; startedAt?: number; runtimeMs?: number; requestDigest?: string }
+    | { state: "not_started"; requestDigest?: string }
+    | { state: "outcome_unknown"; startedAt?: number; runtimeMs?: number; requestDigest?: string }
+    | { state: "absent" }
+    | { state: "interrupted"; startedAt?: number; runtimeMs?: number; requestDigest?: string }
   >;
   finalize(
     credential: string,
@@ -623,7 +649,13 @@ export interface CodespaceNativeFileReference {
 export interface CodespaceTransferRecord {
   id: string;
   userId: string;
-  purpose: "codespace_input" | "codespace_download" | "local_relay_input" | "local_relay_output";
+  purpose:
+    | "codespace_input"
+    | "codespace_download"
+    | "local_relay_input"
+    | "local_relay_output"
+    | "operation_input"
+    | "operation_result";
   state: "reserved" | "ready" | "claimed" | "consumed";
   fileName: string;
   mimeType: string;

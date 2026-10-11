@@ -135,6 +135,218 @@ async function fixture(now: () => number = Date.now) {
 }
 
 describe("local operation dispatch with an external-runtime substitute", () => {
+  test("a known cancellation reaches the guest before delayed dispatch and keeps its negative fence through early finalize", async () => {
+    let now = Date.now();
+    const local = await fixture(() => now);
+    const operation = {
+      ...command(),
+      requestDigest: "a".repeat(64),
+      admissionDeadlineAt: now + 10000,
+    };
+    let fenced = false;
+    let effects = 0;
+    local.response(async (request) => {
+      if (request.action === "cancel") fenced = true;
+      if (request.action === "finalize")
+        return now > operation.admissionDeadlineAt
+          ? { state: "absent" }
+          : {
+              state: "not_started",
+              requestDigest: operation.requestDigest,
+            };
+      if (request.action === "execute" && !fenced) effects++;
+      return fenced
+        ? { state: "not_started", requestDigest: operation.requestDigest }
+        : { state: "running" };
+    });
+    const cancellation = await local.jobs.dispatch(local.space.id, {
+      action: "cancel",
+      version: 1,
+      remoteMarker: operation.remoteMarker,
+      requestDigest: operation.requestDigest,
+      admissionDeadlineAt: operation.admissionDeadlineAt,
+    });
+    const earlyFinalize = await local.jobs.dispatch(local.space.id, {
+      action: "finalize",
+      version: 1,
+      remoteMarker: operation.remoteMarker,
+      requestDigest: operation.requestDigest,
+    });
+    const restarted = new LocalJobs(local.manager);
+    const delayed = await restarted.dispatch(local.space.id, operation);
+    expect(effects).toBe(0);
+    expect(cancellation).toEqual({ state: "not_started", requestDigest: operation.requestDigest });
+    expect(earlyFinalize).toEqual({ state: "not_started", requestDigest: operation.requestDigest });
+    expect(delayed).toEqual({ state: "not_started", requestDigest: operation.requestDigest });
+    expect(await state.keys("job-")).toHaveLength(1);
+    now = operation.admissionDeadlineAt + 1;
+    expect(
+      await restarted.dispatch(local.space.id, {
+        action: "finalize",
+        version: 1,
+        remoteMarker: operation.remoteMarker,
+        requestDigest: operation.requestDigest,
+      }),
+    ).toEqual({ state: "absent" });
+    expect(local.requests.at(-1)).toMatchObject({ action: "finalize" });
+    expect(await state.keys("job-")).toEqual([]);
+  });
+
+  test("cancel fences a preparing dispatch rather than reporting an unproved running reply", async () => {
+    const local = await fixture();
+    const operation = {
+      ...command(),
+      requestDigest: "b".repeat(64),
+      admissionDeadlineAt: Date.now() + 10000,
+    };
+    let entered!: () => void, release!: () => void;
+    const waiting = new Promise<void>((done) => {
+      entered = done;
+    });
+    const held = new Promise<void>((done) => {
+      release = done;
+    });
+    let first = true;
+    local.boundary(async () => {
+      if (first) {
+        first = false;
+        entered();
+        await held;
+      }
+    });
+    let fenced = false;
+    let effects = 0;
+    local.response(async (request) => {
+      if (request.action === "cancel") fenced = true;
+      if (request.action === "execute" && !fenced) effects++;
+      return fenced
+        ? { state: "not_started", requestDigest: operation.requestDigest }
+        : { state: "running" };
+    });
+    const executing = local.jobs.dispatch(local.space.id, operation);
+    await waiting;
+    let cancellation: unknown;
+    const cancelling = local.jobs.dispatch(local.space.id, {
+      action: "cancel",
+      version: 1,
+      remoteMarker: operation.remoteMarker,
+      requestDigest: operation.requestDigest,
+      admissionDeadlineAt: operation.admissionDeadlineAt,
+    });
+    try {
+      const key = `job-${local.space.id}-${operation.remoteMarker.slice(9)}.json`;
+      let intent: { cancelRequested?: boolean } | null = null;
+      for (let attempt = 0; attempt < 200; attempt++) {
+        // Observe atomic persisted replacement without participating in the authority reader's
+        // link-count check while that replacement is in progress.
+        intent = JSON.parse(await readFile(join(root, key), "utf8"));
+        if (intent?.cancelRequested) break;
+        await new Promise<void>((done) => setImmediate(done));
+      }
+      expect(intent?.cancelRequested).toBe(true);
+    } finally {
+      release();
+      await executing;
+      cancellation = await cancelling;
+    }
+    expect(effects).toBe(0);
+    expect(cancellation).toEqual({ state: "not_started", requestDigest: operation.requestDigest });
+    expect(local.requests.every((request) => request.action !== "execute")).toBe(true);
+  });
+
+  test.each(["changed digest", "proved start"])(
+    "a negative cancel receipt with %s cannot be cached as proof of no launch",
+    async (conflict) => {
+      const local = await fixture();
+      const operation = {
+        ...command(),
+        requestDigest: "c".repeat(64),
+        admissionDeadlineAt: Date.now() + 10000,
+      };
+      local.response(async () => ({
+        state: "not_started",
+        requestDigest: conflict === "changed digest" ? "d".repeat(64) : operation.requestDigest,
+        ...(conflict === "proved start" ? { startedAt: Date.now() } : {}),
+      }));
+      await expect(
+        local.jobs.dispatch(local.space.id, {
+          action: "cancel",
+          version: 1,
+          remoteMarker: operation.remoteMarker,
+          requestDigest: operation.requestDigest,
+          admissionDeadlineAt: operation.admissionDeadlineAt,
+        }),
+      ).rejects.toMatchObject({ code: "LOCAL_REPLAY_CONFLICT" });
+      const keys = await state.keys("job-");
+      expect(keys).toHaveLength(1);
+      expect(await state.read(keys[0], (value) => value)).toMatchObject({
+        cancelRequested: true,
+        terminal: false,
+      });
+      expect(
+        await state.read(keys[0], (value) => (value as Record<string, unknown>).notStarted),
+      ).toBeUndefined();
+    },
+  );
+
+  test("admission that closes during boundary inspection is not launched and its receipt remains collectible", async () => {
+    let now = Date.now();
+    const local = await fixture(() => now);
+    const operation = {
+      ...command(),
+      admissionDeadlineAt: now + 10,
+      requestDigest: "4".repeat(64),
+    };
+    local.boundary(async () => {
+      now += 11;
+    });
+    expect(await local.jobs.dispatch(local.space.id, operation)).toEqual({
+      state: "not_started",
+      requestDigest: operation.requestDigest,
+    });
+    expect(local.requests).toEqual([]);
+    const restarted = new LocalJobs(local.manager);
+    expect(await restarted.dispatch(local.space.id, operation)).toEqual({
+      state: "not_started",
+      requestDigest: operation.requestDigest,
+    });
+    expect(
+      await restarted.dispatch(local.space.id, {
+        action: "inspect",
+        version: 1,
+        remoteMarker: operation.remoteMarker,
+      }),
+    ).toEqual({ state: "not_started", requestDigest: operation.requestDigest });
+    expect(local.requests).toEqual([]);
+    await expect(
+      restarted.dispatch(local.space.id, { ...operation, requestDigest: "5".repeat(64) }),
+    ).rejects.toMatchObject({ code: "LOCAL_REPLAY_CONFLICT" });
+    expect(
+      await restarted.dispatch(local.space.id, {
+        action: "finalize",
+        version: 1,
+        remoteMarker: operation.remoteMarker,
+      }),
+    ).toEqual({ state: "absent" });
+    expect(await state.keys("job-")).toEqual([]);
+  });
+
+  test("delivery waiting does not consume the admitted command's own execution timer", async () => {
+    let now = Date.now();
+    const local = await fixture(() => now);
+    local.boundary(async () => {
+      now += 50;
+    });
+    const operation = {
+      ...command(),
+      admissionDeadlineAt: now + 500,
+      requestDigest: "6".repeat(64),
+    };
+    await local.jobs.dispatch(local.space.id, operation);
+    expect(local.requests[0].timeoutMs).toBe(1000);
+    expect(local.requests[0].admissionDeadlineAt).toBe(operation.admissionDeadlineAt);
+  });
+
   test("combined encoded stdout and stderr are refused before ledger acceptance or guest effects", async () => {
     const local = await fixture();
     await expect(

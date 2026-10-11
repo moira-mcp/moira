@@ -446,7 +446,9 @@ async function fixture(partLimit = 4 * 1024 * 1024, maxObjects = 512, nativeSize
           ? { state: "running" }
           : (retainedResults.get(String(job.remoteMarker)) ?? { state: "absent" });
       } else if (job.action === "cancel") {
-        result = faults.holdOperations ? { state: "running" } : { state: "absent" };
+        result = faults.holdOperations
+          ? { state: "running" }
+          : (retainedResults.get(String(job.remoteMarker)) ?? { state: "absent" });
       } else if (job.action === "file-inspect") {
         result = faults.holdOperations
           ? { state: "running" }
@@ -1560,6 +1562,9 @@ describe("actual local-only service composition and outbound relay", () => {
       requestId: row.requestId,
       deadlineAt: row.deadlineAt,
     });
+    expect(() =>
+      actual.services.devices.authorizePayload(auth, row.requestId, row.claimId),
+    ).toThrow(expect.objectContaining({ code: "LOCAL_EXPIRED" }));
     expect(
       sqlite.prepare("SELECT * FROM codespaceLocalRelay WHERE requestId=?").get(row.requestId),
     ).toEqual(before);
@@ -2285,7 +2290,9 @@ describe("actual local-only service composition and outbound relay", () => {
       actual.faults.holdOperations = false;
       expect(await actual.drive(actual.services.operation.reconcileOnce("user-a"))).toBe(true);
       const settled = actual.services.operation.get("user-a", pending.operation.id)!;
-      expect(settled.state).toBe(kind === "exec" ? "cancelled" : "succeeded");
+      // The substitute already completed the effect; cancellation observes that exact
+      // terminal proof rather than inventing cancellation from an absent PID/marker.
+      expect(settled.state).toBe("succeeded");
       expect(settled.resourceGeneration).toBe(originalGeneration);
       expect(
         actual.guestActions.filter(
@@ -2535,7 +2542,7 @@ describe("actual local-only service composition and outbound relay", () => {
       code: "LOCAL_UNAUTHORIZED",
     });
   });
-  test("collects completed private payloads so sequential commands fit the default ten-object quota", async () => {
+  test("collects transient relay payloads while durable command results retain their own bounded control accounting", async () => {
     const actual = await fixture(4 * 1024 * 1024, 10);
     const created = await actual.drive(
       actual.services.resource.create("user-a", actual.target, "main"),
@@ -2550,13 +2557,35 @@ describe("actual local-only service composition and outbound relay", () => {
       );
       expect(executed.operation.state).toBe("succeeded");
       expect(executed.result?.stdout).toBe(text);
-      const count = sqlite
-        .prepare("SELECT COUNT(*) count FROM codespaceTransfer WHERE userId='user-a'")
+      const transient = sqlite
+        .prepare(
+          "SELECT COUNT(*) count FROM codespaceTransfer WHERE userId='user-a' AND purpose IN ('local_relay_input','local_relay_output')",
+        )
         .get() as { count: number };
-      expect(count.count).toBeLessThanOrEqual(2);
+      expect(transient.count).toBeLessThanOrEqual(2);
+      expect(
+        sqlite
+          .prepare(
+            "SELECT COUNT(*) count FROM codespaceTransfer WHERE userId='user-a' AND purpose='operation_result'",
+          )
+          .get(),
+      ).toEqual({ count: index + 1 });
+      expect(new CodespaceTransferRepository(sqlite).usageForUser("user-a")).toEqual({
+        objects: 0,
+        bytes: 0,
+        inflightBytes: 0,
+      });
     }
     expect(
       sqlite.prepare("SELECT COUNT(*) count FROM codespaceOperation WHERE state='succeeded'").get(),
     ).toEqual({ count: 12 });
+    const expires = sqlite
+      .prepare("SELECT MAX(expiresAt) expiresAt FROM codespaceTransfer WHERE userId='user-a'")
+      .get() as { expiresAt: number };
+    actual.clock.now = expires.expiresAt + 1;
+    await actual.services.transfer.cleanup();
+    expect(
+      sqlite.prepare("SELECT COUNT(*) count FROM codespaceTransfer WHERE userId='user-a'").get(),
+    ).toEqual({ count: 0 });
   });
 });

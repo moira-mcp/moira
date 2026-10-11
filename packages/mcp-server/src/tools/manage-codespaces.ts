@@ -187,16 +187,19 @@ export interface CodespaceToolServices {
     | "deleteCodespace"
     | "waitForState"
   > | null;
-  operation: Pick<
-    CodespaceOperationService,
-    | "execute"
-    | "executeNativeReference"
-    | "get"
-    | "reconcile"
-    | "readOutput"
-    | "cancel"
-    | "waitForResult"
-  > | null;
+  operation:
+    | (Pick<
+        CodespaceOperationService,
+        | "execute"
+        | "executeNativeReference"
+        | "get"
+        | "reconcile"
+        | "readOutput"
+        | "cancel"
+        | "waitForResult"
+      > &
+        Partial<Pick<CodespaceOperationService, "lookupRequest">>)
+    | null;
   file: Pick<
     CodespaceFileService,
     | "execute"
@@ -408,6 +411,49 @@ function interruptedByRestart(operation: CodespaceOperationRecord): boolean {
   return operation.state === "failed" && operation.lastOutcome === "codespace_restarted";
 }
 
+export function projectOperationAcceptance(operation: CodespaceOperationRecord): {
+  request_id?: string;
+  accepted?: boolean;
+  phase?: string;
+  admission_deadline_at?: number | null;
+  started_at?: number | null;
+  runtime_ms?: number | null;
+  result_expires_at?: number | null;
+  error?: { code: string; message: string; retryable: boolean };
+} {
+  if (!operation.requestId) return {};
+  const refusalCode =
+    operation.lastOutcome === "session_unavailable_not_started"
+      ? "CODESPACE_SESSION_UNAVAILABLE"
+      : operation.lastOutcome === "session_limit_not_started"
+        ? "CODESPACE_POLICY_LIMIT"
+        : undefined;
+  const phase =
+    operation.state === "reserved"
+      ? operation.inputReference
+        ? "accepted"
+        : "preparing"
+      : operation.state === "reconcile_pending"
+        ? "outcome_unknown"
+        : operation.lastOutcome?.endsWith("_not_started")
+          ? "not_started"
+          : operation.state;
+  return {
+    request_id: operation.requestId,
+    accepted: phase !== "preparing",
+    phase,
+    admission_deadline_at: operation.admissionDeadlineAt,
+    started_at: operation.startedAt,
+    runtime_ms: operation.runtimeMs,
+    result_expires_at: operation.resultExpiresAt,
+    ...(refusalCode
+      ? {
+          error: { code: refusalCode, message: SAFE_ERROR_MESSAGES[refusalCode], retryable: false },
+        }
+      : {}),
+  };
+}
+
 function projectOperation(response: CodespaceOperationResponse | CodespaceFileOperationResponse) {
   const { operation } = response;
   return {
@@ -415,6 +461,7 @@ function projectOperation(response: CodespaceOperationResponse | CodespaceFileOp
     // has to be able to tell them apart to decide whether running it again is safe.
     ...(interruptedByRestart(operation) ? { interrupted_by_restart: true } : {}),
     operation_id: operation.id,
+    ...projectOperationAcceptance(operation),
     kind: operation.kind,
     state: operation.state,
   };
@@ -447,6 +494,7 @@ function operationResult(
 ): CallToolResult {
   const code =
     projectionError ??
+    operation.error?.code ??
     (operation.state === "failed"
       ? operation.interrupted_by_restart
         ? "CODESPACE_OPERATION_INTERRUPTED"
@@ -465,6 +513,15 @@ function operationResult(
       : {}),
     ...(code ? { error: { code, message: SAFE_ERROR_MESSAGES[code], retryable: false } } : {}),
   });
+  if (operation.request_id) {
+    const accepted = jsonResult({
+      ...operation,
+      accepted: operation.phase !== "preparing",
+      ...(result ?? {}),
+      ...(code ? { error: { code, message: SAFE_ERROR_MESSAGES[code], retryable: false } } : {}),
+    });
+    return code ? { ...accepted, isError: true } : accepted;
+  }
   if (!code && !result) {
     const error = {
       code: "CODESPACE_PROVIDER_UNAVAILABLE",
@@ -975,6 +1032,26 @@ export async function executeCodespaceTool(
       });
     }
 
+    if (
+      action === "exec" &&
+      "request_id" in params &&
+      !(
+        ("argv" in params && params.argv) ||
+        ("script" in params && params.script) ||
+        ("session_end" in params && params.session_end)
+      )
+    ) {
+      const input = params as { codespace_id: string; request_id: string };
+      const response = await services.operation.lookupRequest!(
+        userId,
+        input.codespace_id,
+        input.request_id,
+      );
+      return operationResult(
+        projectOperation(response),
+        response.result ? projectExecResult(response.result) : null,
+      );
+    }
     if ("operation_id" in params) {
       const resumableKind: Partial<Record<CodespaceAction, CodespaceOperationRecord["kind"]>> = {
         exec: "exec",
@@ -1107,8 +1184,12 @@ export async function executeCodespaceTool(
         );
       }
       case "exec": {
-        const input = params as CodespaceNewToolParams<"exec">;
+        const input = params as Extract<
+          CodespaceNewToolParams<"exec">,
+          { session_end: boolean }
+        > & { argv?: string[]; script?: string; stdin_text?: string };
         const request = {
+          requestId: input.request_id,
           ...(input.argv !== undefined ? { argv: input.argv } : {}),
           ...(input.script !== undefined ? { script: input.script } : {}),
           ...(input.cwd !== undefined ? { cwd: input.cwd } : {}),
@@ -1148,9 +1229,7 @@ export async function executeCodespaceTool(
                 },
               });
         acceptedOperationId = accepted.operation.id;
-        const response = accepted.result
-          ? accepted
-          : await services.operation.waitForResult(userId, accepted.operation.id);
+        const response = accepted;
         return operationResult(
           projectOperation(response),
           response.result ? projectExecResult(response.result) : null,

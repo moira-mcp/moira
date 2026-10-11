@@ -32,6 +32,8 @@ const USER_ID = "user-a";
 const CODESPACE_ID = "00000000-0000-4000-8000-000000000001";
 const OPERATION_ID = "00000000-0000-4000-8000-000000000002";
 const OTHER_CODESPACE_ID = "00000000-0000-4000-8000-000000000003";
+const REQUEST_ID = "00000000-0000-4000-8000-000000000004";
+const OTHER_REQUEST_ID = "00000000-0000-4000-8000-000000000005";
 
 function codespace(overrides: Partial<CodespaceResourceRecord> = {}): CodespaceResourceRecord {
   return {
@@ -104,6 +106,22 @@ function operation(
     lastOutcome: "remote_result_recorded",
     createdAt: 30,
     updatedAt: 40,
+  };
+}
+
+function acceptedOperation(
+  overrides: Partial<CodespaceOperationRecord> = {},
+): CodespaceOperationRecord {
+  return {
+    ...operation("exec"),
+    requestId: REQUEST_ID,
+    requestDigest: "d".repeat(64),
+    inputReference: "private-accepted-input",
+    resultReference: "private-terminal-result",
+    admissionDeadlineAt: 400,
+    runtimeMs: 300_000,
+    startedAt: 50,
+    ...overrides,
   };
 }
 
@@ -220,24 +238,28 @@ function services(overrides: Partial<CodespaceToolServices> = {}): CodespaceTool
         totalBytes: 12,
         bytes: Buffer.from("retained"),
       })),
-      execute: jest.fn(async () => ({
-        operation: operation("exec"),
-        result: execResult({
-          state: "succeeded" as const,
-          stdout: "ok\n",
-          stderr: "",
-          exitCode: 0,
+      execute: jest.fn(
+        async (_userId: string, _codespaceId: string, request: { requestId?: string }) => ({
+          operation: acceptedOperation({ requestId: request.requestId ?? null }),
+          result: execResult({
+            state: "succeeded" as const,
+            stdout: "ok\n",
+            stderr: "",
+            exitCode: 0,
+          }),
         }),
-      })),
-      executeNativeReference: jest.fn(async () => ({
-        operation: operation("exec"),
-        result: execResult({
-          state: "succeeded" as const,
-          stdout: "native\n",
-          stderr: "",
-          exitCode: 0,
+      ),
+      executeNativeReference: jest.fn(
+        async (_userId: string, _codespaceId: string, request: { requestId?: string }) => ({
+          operation: acceptedOperation({ requestId: request.requestId ?? null }),
+          result: execResult({
+            state: "succeeded" as const,
+            stdout: "native\n",
+            stderr: "",
+            exitCode: 0,
+          }),
         }),
-      })),
+      ),
     },
     file: {
       reconcile: jest.fn(async () => {
@@ -307,14 +329,36 @@ function data(result: Awaited<ReturnType<typeof executeCodespaceTool>>) {
 }
 
 describe("codespace MCP adapter", () => {
-  it("returns ordinary command output without an internal operation envelope", async () => {
+  it("returns caller identity and available command output without private operation data", async () => {
     const response = await executeCodespaceTool(
-      parseCodespaceToolParams({ action: "exec", codespace_id: CODESPACE_ID, argv: ["pwd"] }),
+      parseCodespaceToolParams({
+        action: "exec",
+        codespace_id: CODESPACE_ID,
+        request_id: REQUEST_ID,
+        argv: ["pwd"],
+      }),
       USER_ID,
       services(),
     );
     expect(response.isError).toBeUndefined();
-    expect(data(response)).toEqual({ stdout: "ok\n", stderr: "", exit_code: 0 });
+    expect(data(response)).toEqual({
+      request_id: REQUEST_ID,
+      operation_id: OPERATION_ID,
+      kind: "exec",
+      state: "succeeded",
+      phase: "succeeded",
+      accepted: true,
+      admission_deadline_at: 400,
+      started_at: 50,
+      runtime_ms: 300_000,
+      result_expires_at: 500,
+      stdout: "ok\n",
+      stderr: "",
+      exit_code: 0,
+    });
+    expect(JSON.stringify(data(response))).not.toMatch(
+      /private-accepted-input|private-terminal-result|secret-provider|secret-operation-marker/,
+    );
   });
 
   it.each(["exec", "write"] as const)(
@@ -337,7 +381,7 @@ describe("codespace MCP adapter", () => {
       });
       const request =
         action === "exec"
-          ? { action, codespace_id: CODESPACE_ID, argv: ["build"] }
+          ? { action, codespace_id: CODESPACE_ID, request_id: REQUEST_ID, argv: ["build"] }
           : {
               action,
               codespace_id: CODESPACE_ID,
@@ -371,7 +415,7 @@ describe("codespace MCP adapter", () => {
     },
   );
 
-  it("keeps the ordinary command call open until the accepted command returns its terminal output", async () => {
+  it("returns durable acceptance before a held terminal result becomes available", async () => {
     const base = services();
     let release!: () => void;
     let entered!: () => void;
@@ -382,7 +426,13 @@ describe("codespace MCP adapter", () => {
       entered = resolve;
     });
     const execute = jest.fn(async () => ({
-      operation: { ...operation("exec"), state: "running" as const },
+      operation: acceptedOperation({
+        state: "reserved",
+        exitCode: null,
+        startedAt: null,
+        resultReference: null,
+        resultExpiresAt: null,
+      }),
       result: null,
     }));
     const dependencies = services({
@@ -393,7 +443,7 @@ describe("codespace MCP adapter", () => {
           entered();
           await held;
           return {
-            operation: operation("exec"),
+            operation: acceptedOperation(),
             result: execResult({
               state: "succeeded",
               stdout: "build complete\n",
@@ -404,24 +454,38 @@ describe("codespace MCP adapter", () => {
         }),
       },
     });
-    let completed = false;
     const pending = executeCodespaceTool(
-      parseCodespaceToolParams({ action: "exec", codespace_id: CODESPACE_ID, argv: ["build"] }),
+      parseCodespaceToolParams({
+        action: "exec",
+        codespace_id: CODESPACE_ID,
+        request_id: REQUEST_ID,
+        argv: ["build"],
+      }),
       USER_ID,
       dependencies,
-    ).then((response) => {
-      completed = true;
-      return response;
-    });
+    );
     try {
-      await waiting;
-      expect(completed).toBe(false);
+      const winner = await Promise.race([
+        pending.then(() => "accepted"),
+        waiting.then(() => "waited-for-terminal"),
+      ]);
+      expect(winner).toBe("accepted");
+      const result = await pending;
+      expect(result.isError).toBeUndefined();
+      expect(data(result)).toMatchObject({
+        request_id: REQUEST_ID,
+        operation_id: OPERATION_ID,
+        accepted: true,
+        phase: "accepted",
+        state: "reserved",
+        started_at: null,
+        result_expires_at: null,
+      });
+      expect(data(result)).not.toHaveProperty("exit_code");
     } finally {
       release();
+      await pending;
     }
-    const result = await pending;
-    expect(data(result)).toEqual({ stdout: "build complete\n", stderr: "", exit_code: 0 });
-    expect(execute).toHaveBeenCalledTimes(1);
   });
 
   it("lists each environment once without attaching provider settings or repository inventories", async () => {
@@ -810,6 +874,7 @@ describe("codespace MCP adapter", () => {
       parseCodespaceToolParams({
         action: "exec",
         codespace_id: CODESPACE_ID,
+        request_id: REQUEST_ID,
         argv: ["node", "script.js"],
         cwd: ".",
         timeout_seconds: 30,
@@ -822,6 +887,7 @@ describe("codespace MCP adapter", () => {
       parseCodespaceToolParams({
         action: "exec",
         codespace_id: CODESPACE_ID,
+        request_id: OTHER_REQUEST_ID,
         argv: ["node", "script.js"],
         cwd: ".",
         timeout_seconds: 30,
@@ -841,13 +907,14 @@ describe("codespace MCP adapter", () => {
       USER_ID,
       CODESPACE_ID,
       expect.objectContaining({
+        requestId: REQUEST_ID,
         stdin: { kind: "inline", bytes: Buffer.from("hello") },
       }),
     );
     expect(dependencies.operation?.executeNativeReference).toHaveBeenCalledWith(
       USER_ID,
       CODESPACE_ID,
-      expect.objectContaining({ argv: ["node", "script.js"] }),
+      expect.objectContaining({ requestId: OTHER_REQUEST_ID, argv: ["node", "script.js"] }),
       {
         fileId: "sediment://file_00000000000000000000000000000000",
         downloadUrl: "https://oaiusercontent.com/private-token",
@@ -902,6 +969,85 @@ describe("codespace MCP adapter", () => {
     expect(data(resumed)).toEqual({ stdout: "recovered\n", stderr: "", exit_code: 0 });
   });
 
+  it("recovers a lost first command reply by caller identity and preserves an uncertain launch until a terminal receipt exists", async () => {
+    const base = services();
+    let saved = {
+      operation: acceptedOperation({
+        state: "reconcile_pending",
+        startedAt: null,
+        resultReference: null,
+        resultExpiresAt: null,
+      }),
+      result: null as CodespaceOperationResult | null,
+    };
+    const dependencies = services({
+      operation: {
+        ...base.operation!,
+        execute: async () => {
+          throw new Error("Recovery must not launch a command");
+        },
+        lookupRequest: async (userId, codespaceId, requestId) => {
+          if (userId !== USER_ID || codespaceId !== CODESPACE_ID || requestId !== REQUEST_ID)
+            throw new CodespaceResourceError("CODESPACE_NOT_FOUND", "Foreign request");
+          return saved;
+        },
+      },
+    });
+    const input = { action: "exec", codespace_id: CODESPACE_ID, request_id: REQUEST_ID };
+    const unknown = await executeCodespaceTool(
+      parseCodespaceToolParams(input),
+      USER_ID,
+      dependencies,
+    );
+    expect(unknown.isError).toBeUndefined();
+    expect(data(unknown)).toMatchObject({
+      request_id: REQUEST_ID,
+      operation_id: OPERATION_ID,
+      phase: "outcome_unknown",
+      state: "reconcile_pending",
+      accepted: true,
+      started_at: null,
+    });
+    expect(data(unknown)).not.toHaveProperty("exit_code");
+
+    saved = {
+      operation: acceptedOperation(),
+      result: execResult({
+        state: "succeeded",
+        stdout: "original command output\n",
+        stderr: "",
+        exitCode: 0,
+      }),
+    };
+    const terminal = await executeCodespaceTool(
+      parseCodespaceToolParams(input),
+      USER_ID,
+      dependencies,
+    );
+    expect(terminal.isError).toBeUndefined();
+    expect(data(terminal)).toMatchObject({
+      request_id: REQUEST_ID,
+      operation_id: OPERATION_ID,
+      phase: "succeeded",
+      started_at: 50,
+      result_expires_at: 500,
+      stdout: "original command output\n",
+      exit_code: 0,
+    });
+    const foreign = await executeCodespaceTool(
+      parseCodespaceToolParams({ ...input, codespace_id: OTHER_CODESPACE_ID }),
+      USER_ID,
+      dependencies,
+    );
+    expect(foreign).toMatchObject({
+      isError: true,
+      structuredContent: { error: { code: "CODESPACE_NOT_FOUND" } },
+    });
+    expect(JSON.stringify([unknown, terminal, foreign])).not.toMatch(
+      /private-accepted-input|private-terminal-result|secret-operation-marker|Foreign request/,
+    );
+  });
+
   it.each([
     ["failed", "CODESPACE_OPERATION_FAILED"],
     ["cancelled", "CODESPACE_OPERATION_CANCELLED"],
@@ -914,6 +1060,7 @@ describe("codespace MCP adapter", () => {
         parseCodespaceToolParams({
           action: "exec",
           codespace_id: CODESPACE_ID,
+          request_id: REQUEST_ID,
           argv: ["node", "test.js"],
           cwd: ".",
           timeout_seconds: 30,
@@ -923,7 +1070,7 @@ describe("codespace MCP adapter", () => {
           operation: {
             ...base.operation!,
             execute: jest.fn(async () => ({
-              operation: { ...operation("exec"), state, exitCode: 1 },
+              operation: acceptedOperation({ state, exitCode: 1 }),
               result: execResult({ state, stdout: "", stderr: "test failed", exitCode: 1 }),
             })),
           },
@@ -1252,7 +1399,7 @@ describe("codespace MCP adapter", () => {
       operation: {
         ...base.operation!,
         execute: jest.fn(async () => ({
-          operation: { ...operation("exec"), state: "failed" as const, exitCode: 7 },
+          operation: acceptedOperation({ state: "failed", exitCode: 7 }),
           result: execResult({
             state: "failed" as const,
             stdout: "first bytes",
@@ -1267,6 +1414,7 @@ describe("codespace MCP adapter", () => {
       parseCodespaceToolParams({
         action: "exec",
         codespace_id: CODESPACE_ID,
+        request_id: REQUEST_ID,
         argv: ["build"],
         cwd: ".",
         timeout_seconds: 60,
@@ -1344,7 +1492,7 @@ describe("codespace MCP adapter", () => {
       operation: {
         ...base.operation!,
         execute: jest.fn(async () => ({
-          operation: { ...operation("exec"), state: "failed" as const, exitCode: null },
+          operation: acceptedOperation({ state: "failed", exitCode: null }),
           result: execResult({
             state: "failed" as const,
             stdout: "partial",
@@ -1360,6 +1508,7 @@ describe("codespace MCP adapter", () => {
       parseCodespaceToolParams({
         action: "exec",
         codespace_id: CODESPACE_ID,
+        request_id: REQUEST_ID,
         argv: ["flood"],
         cwd: ".",
         timeout_seconds: 60,
@@ -1379,6 +1528,7 @@ describe("codespace MCP adapter", () => {
       parseCodespaceToolParams({
         action: "exec",
         codespace_id: CODESPACE_ID,
+        request_id: REQUEST_ID,
         argv: ["npm", "run", "build"],
         session: "build",
         session_start: true,
@@ -1659,12 +1809,18 @@ describe("codespace MCP adapter", () => {
       },
     });
     expect(
-      parseCodespaceToolParams({ action: "exec", codespace_id: CODESPACE_ID, argv: ["ls"] }),
+      parseCodespaceToolParams({
+        action: "exec",
+        codespace_id: CODESPACE_ID,
+        request_id: REQUEST_ID,
+        argv: ["ls"],
+      }),
       // A bounded command names no duration: the service applies the default its mode implies.
     ).toEqual({
       action: "exec",
       request: {
         codespace_id: CODESPACE_ID,
+        request_id: REQUEST_ID,
         argv: ["ls"],
         session_start: false,
         session_end: false,
@@ -1724,6 +1880,58 @@ describe("codespace MCP adapter", () => {
     }
   });
 
+  it.each([
+    { action: "exec", codespace_id: CODESPACE_ID, argv: ["build"] },
+    {
+      action: "exec",
+      codespace_id: CODESPACE_ID,
+      request_id: "private-invalid-id",
+      argv: ["build"],
+    },
+  ])("requires a valid caller-known identity before submitting a command (%#)", async (input) => {
+    const response = await requestContext.run({ userId: USER_ID }, () =>
+      manageCodespaceTool(input),
+    );
+    expect(response).toMatchObject({
+      isError: true,
+      structuredContent: { error: { code: "CODESPACE_REQUEST_INVALID" } },
+    });
+    expect(JSON.stringify(response)).not.toContain("private-invalid-id");
+  });
+
+  it.each([
+    { cwd: "service" },
+    { stdin_text: "private input" },
+    { env: { SECRET_VALUE: "private input" } },
+    { session: "build", session_start: true },
+  ])("refuses partial command fields in an identity-only recovery request (%#)", async (fields) => {
+    const restoreLoader = setCodespaceToolServicesLoaderForTests(async () =>
+      services({
+        operation: {
+          ...services().operation!,
+          lookupRequest: async () => ({ operation: acceptedOperation(), result: null }),
+        },
+      }),
+    );
+    try {
+      const response = await requestContext.run({ userId: USER_ID }, () =>
+        manageCodespaceTool({
+          action: "exec",
+          codespace_id: CODESPACE_ID,
+          request_id: REQUEST_ID,
+          ...fields,
+        }),
+      );
+      expect(response).toMatchObject({
+        isError: true,
+        structuredContent: { error: { code: "CODESPACE_REQUEST_INVALID" } },
+      });
+      expect(JSON.stringify(response)).not.toContain("private input");
+    } finally {
+      restoreLoader();
+    }
+  });
+
   // One published object carries every action's fields, so the only thing standing between a caller
   // and a request shaped for a different action is this check. Each row sends one action a field
   // that belongs to another and asserts the refusal's identity: "an error happened" is also true of
@@ -1742,7 +1950,10 @@ describe("codespace MCP adapter", () => {
         query: "TODO",
       },
     ],
-    ["exec", { codespace_id: CODESPACE_ID, argv: ["ls"], path: "README.md" }],
+    [
+      "exec",
+      { codespace_id: CODESPACE_ID, request_id: REQUEST_ID, argv: ["ls"], path: "README.md" },
+    ],
     ["stat", { codespace_id: CODESPACE_ID, path: "README.md", argv: ["ls"] }],
     ["search", { codespace_id: CODESPACE_ID, path: ".", query: "TODO", text: "x" }],
     ["read", { codespace_id: CODESPACE_ID, path: "README.md", query: "TODO" }],
@@ -1806,10 +2017,12 @@ describe("codespace MCP adapter", () => {
     ["start", { codespace_id: CODESPACE_ID }],
     ["stop", { codespace_id: CODESPACE_ID }],
     ["delete", { codespace_id: CODESPACE_ID, confirm_delete: true }],
+    ["exec", { codespace_id: CODESPACE_ID, request_id: REQUEST_ID }],
     [
       "exec",
       {
         codespace_id: CODESPACE_ID,
+        request_id: REQUEST_ID,
         argv: ["node", "script.js"],
         cwd: "packages",
         env: { PATH_EXTRA: "x" },

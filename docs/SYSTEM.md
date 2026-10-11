@@ -540,6 +540,10 @@ request contract at dispatch, so a mixed stdin form, a partial resume call or a 
 another action is rejected there as `CODESPACE_REQUEST_INVALID`. A default declared by an action is
 applied by that contract and is deliberately absent from the published object, which would otherwise
 inject every action's defaults into every request. Where two actions declare the same field name with
+the same supplied value constraints, the publisher removes default/optional presence wrappers
+before comparing their shapes and publishes optionality once. A boolean includes its boolean
+literals without redundant alternatives; a lone destructive-confirmation literal `true` remains
+strict. Where two actions declare the same field name with
 different bounds — `search` and `download` both take `max_bytes` — the published object carries both
 forms under that one key, so neither action's parameter is narrowed by the projection; the action's
 own contract decides which form the request had to match. Validation failures at either boundary are returned as MCP
@@ -631,17 +635,62 @@ management and companion wire contracts are documented in
 
 `LocalCodespaceRelay` durably reserves request metadata and private transfer parts
 before dispatch. Current account, device, connection and repository authority,
-claim leases and complete payload hashes gate delivery and result access.
+live delivery claims and complete payload hashes gate new work. Result-only settlement
+uses the retained original request, digest and latest accepted claim after delivery expiry,
+within its separate retention boundary and current authority; it cannot fetch input or
+authorize another execution. An acknowledged completed/refused claim can be returned by
+renewal read-only, with its original deadlines and stored row unchanged. Expired nonterminal
+claims cannot renew work.
 Lifecycle counters do not authorize ordinary commands, files, Git or retained
 results; the exact resource and native VM identities remain required. Private
-objects use the common byte, object, in-flight and expiry quotas. Reconnect reuses
+objects use the common byte, object, in-flight and expiry quotas. Internal operation input,
+bounded results and relay parts share the bounded control-object group; native files retain
+their separate object accounting and existing byte/in-flight bounds. Reconnect reuses
 the request identity and durable companion receipt; losing an acknowledgement
 does not authorize another guest effect. Retained results remain readable within
 their retention period and current authority after a lifecycle change. Missing or
 expired output is reported without replaying the original work.
 
-Ordinary commands and files return their result synchronously; `codespace_process`
-owns deliberately background work. Guest contacts run independently of the
+Command submission returns a durable acceptance response before credential lookup, guest
+delivery or completion. The caller supplies a UUID `request_id`; the operation service
+normalizes its spelling and binds it to the authenticated owner, codespace and immutable
+semantic request digest. Matching concurrent retries recover one operation and marker;
+changed command or input identity is refused. The immutable input intent is published in verified
+private storage before acknowledgement, and dispatch recovers through the existing claimed
+outbox after server restart. Native stdin is retained before its source is consumed.
+SQLite keeps only identity, authority, byte counts and private references, not command or
+stream content.
+
+`codespace` exec and `codespace_process` start/get share the acceptance projection:
+`request_id`, `accepted`, `phase`, `admission_deadline_at`, `started_at`, `runtime_ms` and
+`result_expires_at`. Acceptance is distinct from confirmed running. Caller-identity lookup
+contains no command fields and performs no dispatch or cancellation; existing operation/process
+IDs remain collectible without inventing caller identities or start timestamps.
+File actions retain their bounded completion contract. `codespace_process` owns explicitly
+managed background work and addressed cancellation.
+
+Admission limits permission to launch, proved guest start begins runtime, collection has its
+own waiting bound, and terminal output has its own retention. A collection timeout does not
+cancel the command. Guest launch and cancellation share a short marker admission boundary;
+an admitted launch attempt without start or terminal proof remains unknown and cannot be
+executed again. Missing PID or marker information is not proof of no effect. Explicit session
+commands serialize context resolution through terminal context publication; distinct sessions
+and stateless commands remain independent. The short new-session capacity lock protects only
+initial context publication, not command lifetime.
+
+Terminal metadata commits with a verified private bounded reply reference. Collection rechecks
+current authority and rejects corrupt stored bytes. The prefix carries complete stream byte
+counts; omitted output remains guest-retained and is read by range from the original marker.
+Cleanup may purge full guest output while retaining its immutable admission fence until launch
+authority closes. An ambiguous launch fence is not removed to make redispatch possible.
+Recovery uses a bounded pool of existing transactional claims; a held inspection does not stop
+ready independent work. While a live owner awaits a command, file or cleanup contact, claim
+selection excludes that pending operation identity even if its persisted lease expires. Every
+return or failure releases the live exclusion; a replacement owner can reclaim the expired
+persisted claim after owner loss. Stale claim holders cannot cancel or replace reclaimed input after an
+asynchronous boundary. Backlog observation uses the same runnable-work predicate as dispatch.
+
+Guest contacts run independently of the
 lifecycle lane, and an unresolved operation journal does not lock new Local work.
 File preconditions and a short guest kernel lock protect actual commit and recovery;
 the lock is released when its holder exits. Conflicting recovery preserves backups
@@ -650,12 +699,22 @@ must be inspected by its operation identity before repeating that effect.
 
 Explicit stop revokes undelivered execute/file-execute requests. First relay
 insertion checks the exact operation's cancellation state in its SQL transaction,
-including when payload retention finishes after stop/start. Confirmed pre-delivery
-cancellation returns `CODESPACE_OPERATION_CANCELLED`, records a terminal cancelled
-operation and requires no remote cleanup. Restart cannot admit that old work.
+including when payload retention finishes after stop/start. Confirmed cancellation
+before any delivery returns `CODESPACE_OPERATION_CANCELLED`, records a terminal
+cancelled operation and requires no guest cleanup. A delivered marker instead requires actual
+guest negative or terminal proof; absence alone leaves cancellation pending. Guest no-start
+fences remain until the original launch authority closes. Restart cannot admit that old work.
 Confirmed native `NOT_RUNNING` refreshes only the affected resource observation;
 the next ordinary call uses start-on-use. Configuration readiness and cached usable
 state do not certify successful guest I/O.
+
+Late reconnect settles a cached proved terminal receipt or completed output read, never a
+running, unknown, absent or generic RPC error. Receipt replay does not execute the request.
+The host owner's cached-receipt and job-ledger behavior belongs to its installed bundle;
+updating guest assets alone does not replace a running owner. An owner without retained late
+receipt replay remains recoverable by a fresh server inspection of the original guest marker.
+Heartbeat and web-control edition changes follow the coordinated update contract in
+[Codespaces](CODESPACES.md#owner-web-control-and-bundle-updates).
 
 `LocalWebControl` applies owner-requested settings only within a separately pinned
 local approval. The browser sends device-generation and revision guards; the

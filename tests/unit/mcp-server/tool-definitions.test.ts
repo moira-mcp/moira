@@ -315,6 +315,7 @@ describe("MCP tool definitions", () => {
     expect(
       codespaceExecRequestSchema.safeParse({
         codespace_id: "00000000-0000-4000-8000-000000000000",
+        request_id: "11111111-1111-4111-8111-111111111111",
         argv: ["node", "script.js"],
         timeout_seconds: 30,
         stdin_file: {
@@ -328,6 +329,7 @@ describe("MCP tool definitions", () => {
     expect(
       codespaceExecRequestSchema.safeParse({
         codespace_id: "00000000-0000-4000-8000-000000000000",
+        request_id: "11111111-1111-4111-8111-111111111111",
         argv: ["node", "script.js"],
         timeout_seconds: 30,
         stdin_text: "input",

@@ -106,6 +106,13 @@ export class LocalRpc {
     );
   }
 
+  /** Read an accepted immutable receipt even after admission closed; no work callback exists. */
+  async retained(value: unknown): Promise<LocalReply | undefined> {
+    const message = localEnvelopeSchema.parse(value);
+    return (await this.journal.retained(message.id, message.expiresAt, this.intent(message))) as
+      LocalReply | undefined;
+  }
+
   /** Only a retained journal outcome can answer this path; it never dispatches an effect. */
   async replay(value: unknown): Promise<LocalReply> {
     try {

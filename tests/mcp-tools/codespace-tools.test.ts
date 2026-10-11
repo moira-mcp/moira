@@ -7,6 +7,7 @@ import { dockerExecSync } from "../utils/docker-command.js";
 
 const codespaceId = "00000000-0000-4000-8000-000000000162";
 const operationId = "00000000-0000-4000-8000-000000000163";
+const requestId = "00000000-0000-4000-8000-000000000164";
 const actions = [
   "create",
   "list",
@@ -120,6 +121,10 @@ describe("Codespace MCP HTTP contract on a default-disabled installation", () =>
     expect(process.inputSchema.properties?.action).toMatchObject({
       enum: ["start", "get", "read", "stop"],
     });
+    expect(process.inputSchema.properties?.request_id).toMatchObject({
+      type: "string",
+      format: "uuid",
+    });
     expect(process._meta).toEqual({ "openai/fileParams": ["stdin_file"] });
     const codespace = catalog.tools.find((tool) => tool.name === "codespace")!;
     expect(codespace.description?.length).toBeGreaterThan(20);
@@ -159,6 +164,7 @@ describe("Codespace MCP HTTP contract on a default-disabled installation", () =>
         stdin_text: { type: "string" },
         stdin_file: expect.any(Object),
         operation_id: expect.any(Object),
+        request_id: expect.objectContaining({ type: "string", format: "uuid" }),
         // The session form reaches the agent through the published catalog, not only through the
         // in-process schema: a projection that dropped these would leave an agent unable to ask
         // for a session while every in-process check still passed.
@@ -225,7 +231,7 @@ describe("Codespace MCP HTTP contract on a default-disabled installation", () =>
   });
 
   test.each([
-    ["start", { argv: ["pwd"] }],
+    ["start", { request_id: requestId, argv: ["pwd"] }],
     ["get", { process_id: operationId }],
     ["read", { process_id: operationId, stream: "stdout", offset: 0, length: 1024 }],
     ["stop", { process_id: operationId }],
@@ -345,11 +351,15 @@ describe("Codespace MCP HTTP contract on a default-disabled installation", () =>
 
   test.each([
     ["create", { repository_id: "162", ref: "master" }],
-    ["exec", { codespace_id: codespaceId, argv: ["pwd"], timeout_seconds: 10 }],
+    [
+      "exec",
+      { codespace_id: codespaceId, request_id: requestId, argv: ["pwd"], timeout_seconds: 10 },
+    ],
     [
       "exec",
       {
         codespace_id: codespaceId,
+        request_id: requestId,
         argv: ["cat"],
         timeout_seconds: 10,
         stdin_file: {
@@ -441,6 +451,7 @@ describe("Codespace MCP HTTP contract on a default-disabled installation", () =>
         arguments: {
           action: "exec",
           codespace_id: codespaceId,
+          request_id: requestId,
           argv: ["cat"],
           timeout_seconds: 10,
           stdin_text: "exclusive-input-canary",
@@ -474,6 +485,7 @@ describe("Codespace MCP HTTP contract on a default-disabled installation", () =>
         arguments: {
           action: "exec",
           codespace_id: codespaceId,
+          request_id: requestId,
           argv: ["pwd"],
           timeout_seconds: 10,
           [field]: "rejected-input-canary",

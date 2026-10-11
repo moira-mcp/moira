@@ -358,10 +358,15 @@ export class CodespaceTransferService {
 
   async retainRelayPart(
     userId: string,
-    purpose: "local_relay_input" | "local_relay_output",
+    purpose: "local_relay_input" | "local_relay_output" | "operation_input" | "operation_result",
     bytes: Uint8Array,
+    expiresAt?: number,
   ): Promise<LocalRelayPayloadReference["parts"][number]> {
-    if (purpose !== "local_relay_input" && purpose !== "local_relay_output") {
+    if (
+      !["local_relay_input", "local_relay_output", "operation_input", "operation_result"].includes(
+        purpose,
+      )
+    ) {
       throw new CodespaceResourceError("CODESPACE_RESOURCE_INVALID", "Invalid relay purpose");
     }
     const reserved = this.reserve(
@@ -370,6 +375,7 @@ export class CodespaceTransferService {
       "relay.bin",
       "application/octet-stream",
       bytes.byteLength,
+      expiresAt,
     );
     const handle = await this.publishObject(reserved, bytes);
     return { transferId: reserved.record.id, sha256: handle.sha256, size: handle.size };
@@ -377,8 +383,9 @@ export class CodespaceTransferService {
 
   async retainRelayPayload(
     userId: string,
-    purpose: "local_relay_input" | "local_relay_output",
+    purpose: "local_relay_input" | "local_relay_output" | "operation_input" | "operation_result",
     input: Uint8Array,
+    expiresAt?: number,
   ): Promise<LocalRelayPayloadReference> {
     if (input.byteLength > 24 * 1024 * 1024) {
       throw new CodespaceResourceError("CODESPACE_POLICY_LIMIT", "Relay payload exceeds its limit");
@@ -403,7 +410,12 @@ export class CodespaceTransferService {
           );
         }
         reference.parts.push(
-          await this.retainRelayPart(userId, purpose, bytes.subarray(offset, offset + partSize)),
+          await this.retainRelayPart(
+            userId,
+            purpose,
+            bytes.subarray(offset, offset + partSize),
+            expiresAt,
+          ),
         );
       }
       return localRelayPayloadReferenceSchema.parse(reference);
@@ -415,7 +427,7 @@ export class CodespaceTransferService {
 
   async readRelayChunk(
     userId: string,
-    purpose: "local_relay_input" | "local_relay_output",
+    purpose: "local_relay_input" | "local_relay_output" | "operation_input" | "operation_result",
     reference: LocalRelayPayloadReference,
     partIndex: number,
     offset: number,
@@ -445,7 +457,7 @@ export class CodespaceTransferService {
 
   async readRelayPayload(
     userId: string,
-    purpose: "local_relay_input" | "local_relay_output",
+    purpose: "local_relay_input" | "local_relay_output" | "operation_input" | "operation_result",
     reference: LocalRelayPayloadReference,
   ): Promise<Buffer> {
     const valid = localRelayPayloadReferenceSchema.parse(reference);
@@ -467,7 +479,7 @@ export class CodespaceTransferService {
 
   async discardRelayPayload(
     userId: string,
-    purpose: "local_relay_input" | "local_relay_output",
+    purpose: "local_relay_input" | "local_relay_output" | "operation_input" | "operation_result",
     reference: LocalRelayPayloadReference,
   ): Promise<void> {
     for (const part of reference.parts) {
@@ -484,7 +496,7 @@ export class CodespaceTransferService {
 
   private relayPart(
     userId: string,
-    purpose: "local_relay_input" | "local_relay_output",
+    purpose: "local_relay_input" | "local_relay_output" | "operation_input" | "operation_result",
     part: LocalRelayPayloadReference["parts"][number],
   ): CodespaceTransferRecord {
     const record = this.dependencies.repository.getReadyOwned(
@@ -624,6 +636,7 @@ export class CodespaceTransferService {
     fileName: string,
     mimeType: string,
     size: number,
+    expiresAt?: number,
   ) {
     this.validateFileMetadata(fileName, mimeType, size);
     const value = this.dependencies.repository.reserve({
@@ -636,6 +649,7 @@ export class CodespaceTransferService {
       ownerStartTime: this.ownerStartTime,
       policy: this.dependencies.policy(),
       now: this.now(),
+      expiresAt,
     });
     if (!value)
       throw new CodespaceResourceError("CODESPACE_POLICY_LIMIT", "Transfer quota exceeded");

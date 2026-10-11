@@ -6,7 +6,12 @@ import { CodespaceResourceError } from "./resource-types.js";
 
 const LIVE_STATES = ["reserved", "ready", "claimed"] as const;
 const NATIVE_PURPOSES = ["codespace_input", "codespace_download"] as const;
-const RELAY_PURPOSES = ["local_relay_input", "local_relay_output"] as const;
+const RELAY_PURPOSES = [
+  "local_relay_input",
+  "local_relay_output",
+  "operation_input",
+  "operation_result",
+] as const;
 
 export function digestCodespaceTransferToken(token: string): string {
   return createHash("sha256").update(token).digest("hex");
@@ -25,21 +30,22 @@ export class CodespaceTransferRepository {
     ownerStartTime: string | null;
     policy: CodespaceResourcePolicy;
     now: number;
+    /** Internal control objects follow their owning operation's retention. */
+    expiresAt?: number;
   }): { token: string; record: CodespaceTransferRecord } | null {
     if (![...NATIVE_PURPOSES, ...RELAY_PURPOSES].includes(input.purpose)) {
       throw new CodespaceResourceError("CODESPACE_RESOURCE_INVALID", "Invalid transfer purpose");
     }
     return this.sqlite
       .transaction(() => {
-        const relay =
-          input.purpose === "local_relay_input" || input.purpose === "local_relay_output";
+        const relay = input.purpose !== "codespace_input" && input.purpose !== "codespace_download";
         const purposes = relay ? RELAY_PURPOSES : NATIVE_PURPOSES;
         const states = LIVE_STATES.map(() => "?").join(",");
         const user = this.sqlite
           .prepare(
             `SELECT COUNT(*) count, COALESCE(SUM(declaredSize), 0) bytes,
              COALESCE(SUM(CASE WHEN state IN ('reserved','claimed') THEN declaredSize ELSE 0 END), 0) inflight
-           FROM codespaceTransfer WHERE userId = ? AND purpose IN (?, ?) AND state IN (${states})`,
+           FROM codespaceTransfer WHERE userId = ? AND purpose IN (${purposes.map(() => "?").join(",")}) AND state IN (${states})`,
           )
           .get(input.userId, ...purposes, ...LIVE_STATES) as {
           count: number;
@@ -50,7 +56,7 @@ export class CodespaceTransferRepository {
           .prepare(
             `SELECT COUNT(*) count, COALESCE(SUM(declaredSize), 0) bytes,
              COALESCE(SUM(CASE WHEN state IN ('reserved','claimed') THEN declaredSize ELSE 0 END), 0) inflight
-           FROM codespaceTransfer WHERE purpose IN (?, ?) AND state IN (${states})`,
+           FROM codespaceTransfer WHERE purpose IN (${purposes.map(() => "?").join(",")}) AND state IN (${states})`,
           )
           .get(...purposes, ...LIVE_STATES) as { count: number; bytes: number; inflight: number };
         const effective = effectiveCodespaceLimits(input.policy);
@@ -69,7 +75,14 @@ export class CodespaceTransferRepository {
         const id = randomUUID();
         const token = randomBytes(32).toString("base64url");
         const objectKey = randomBytes(24).toString("hex");
-        const expiresAt = input.now + limits.ttlMs;
+        const expiresAt =
+          relay && input.expiresAt !== undefined ? input.expiresAt : input.now + limits.ttlMs;
+        if (!Number.isSafeInteger(expiresAt) || expiresAt <= input.now) {
+          throw new CodespaceResourceError(
+            "CODESPACE_RESOURCE_INVALID",
+            "Invalid control object retention",
+          );
+        }
         this.sqlite
           .prepare(
             `INSERT INTO codespaceTransfer

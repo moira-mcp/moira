@@ -414,6 +414,13 @@
       "when": 1791406800000,
       "tag": "0057_codespace_observation",
       "breakpoints": true
+    },
+    {
+      "idx": 59,
+      "version": "7",
+      "when": 1791745200000,
+      "tag": "0058_codespace_operation_acceptance",
+      "breakpoints": true
     }
   ]
 }

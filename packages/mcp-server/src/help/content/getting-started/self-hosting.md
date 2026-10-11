@@ -386,15 +386,27 @@ OAuth stays on the server. Live App permissions and provider compatibility requi
 
 Each codespace has its own VM; a repository can have multiple codespaces.
 Local VMs and operations do not consume cloud Codespaces slots or use its machine ceiling.
-Use `codespace_process` for background start/get/read/stop in that VM. Ordinary `codespace` commands
-and files wait for their result, without normal polling. Backend, frontend and browser checks share
-guest localhost. A client's transport timeout remains independent; after interrupted or unknown
-delivery, inspect the returned `operation_id` instead of repeating the command or edit. Commands,
-reads and writes are independent; a pending journal entry does not lock new work. File edits retain
+Choose a UUID `request_id` before `codespace` exec or `codespace_process` start. The command returns
+durable acceptance with its `operation_id` or `process_id`, without waiting for execution to finish.
+`accepted` and `phase` distinguish input preparation, accepted work, confirmed running work and an
+unknown or terminal outcome. Acceptance is not proof of guest start; `started_at: null` means no
+start has been confirmed, not that no effect happened. File actions still wait for their result.
+Use `codespace_process` for background start/get/read/stop in that VM. Recover a lost first command
+reply with exec containing only `codespace_id` and the original `request_id`, or process get with
+those fields. Repeating the exact submission with the same UUID returns the same operation;
+changing its payload is refused. Collect a returned `operation_id` through exec, or `process_id`
+through process get. Collection and bounded waiting never cancel or repeat the command; process
+stop requests cancellation explicitly, and a pending stop is not confirmed cancellation.
+Backend, frontend and browser checks share guest localhost. Admission expiry bounds guest launch;
+`timeout_seconds` bounds runtime from confirmed guest start. Client waiting and result retention
+have separate deadlines. After an unknown file outcome, inspect its returned `operation_id` rather
+than repeat the edit. Commands, reads and writes are independent; a pending journal entry does not lock new work. File edits retain
 their expected-content checks and serialize only the guest file commit and recovery. Ordinary
 execution and retained results do not depend on lifecycle counters; current repository/device
 rights and the exact VM identity still apply. A restart can interrupt a process without discarding
-an already saved result, which remains readable within its retention period. Public package registries and other public
+an already saved result. The bounded terminal stdout/stderr reply is kept in private server storage
+within result retention. Complete streams remain in the guest; reading them requires available
+guest bytes and can fail after cleanup even while the stored reply remains readable. Public package registries and other public
 DNS destinations are available independently of the language or framework, with public-address and
 computer-network checks on every connection. Network downloads have no cumulative traffic budget or
 per-download byte quota; bounded socket capacity provides backpressure. Host, LAN and service
@@ -451,6 +463,10 @@ includes exact creation identity, guest readiness and native stop confirmation. 
 unobserved until a verified read. Follow the coordinated shutdown and backup procedure above;
 rollback restores the matching server database, complete local state, SDK storage and bundles
 together. Convert unsupported saved policy/control formats only while both sides are stopped.
+Updating the server or rebuilding the CLI does not replace an already running daemon's journal and
+replay code or the guest's installed worker. A receipt without start proof leaves that start
+unconfirmed. Inspect the original operation instead of
+restarting the companion to recover a lost reply. Companion shutdown stops its owned VM processes.
 
 Manager-backed CLI create/start/exec commands are one-shot and stop owned VM processes on exit;
 persistent server work uses `run`. Stop it before another command needs the same runner lock.
@@ -558,9 +574,11 @@ shows approved targets and refreshes stale grants, `setup_help` returns the curr
 the provider's exact links, `create` provisions a persistent personal-billed Codespace for an approved repository,
 and `exec`, `stat`, `search`, `read`, `write`, `apply_patch`, `upload` and `download` work inside it
 by `codespace_id`. Create/start wait for a usable environment, stop for confirmed shutdown while
-keeping data, and delete for confirmed absence with explicit confirmation. Ordinary successful
-calls return useful results without operation journals or quota envelopes. Use `codespace_process`
-with `process_id` for background start/get/read/stop. Different chats and clients may reuse the same
+keeping data, and delete for confirmed absence with explicit confirmation. Exec requires a stable
+UUID `request_id` and returns acceptance plus `operation_id`; collect its result with that ID, or
+recover a lost first reply with only `codespace_id` and `request_id`. Successful file calls return
+their useful result without an operation journal. Use `codespace_process` with a stable `request_id`
+for background start and its returned `process_id` for get/read/stop. Different chats and clients may reuse the same
 codespace; nothing is deleted when a command finishes or a client disconnects.
 
 An agent working in a codespace acts as the ordinary Codespace user: it can read the repository,

@@ -312,21 +312,36 @@ the later edit or deleting its journal.
 
 ## Local codespaces
 
-Ordinary `codespace` commands and files wait for the accepted result; create/start wait for usable
-guest readiness, stop for confirmed shutdown and delete for confirmed absence. Successful results
-omit operation journals. Long-lived servers use `codespace_process` with start/get/read/stop and its
-retained `process_id`; a pending process stop is not confirmed cancellation. Unconfirmed delivery
-returns an error with the accepted `operation_id` or `process_id` when available. Inspect that
-identity instead of repeating the same effect; independent work can continue. Server waiting does
-not extend an MCP client's transport timeout. Use `repositories`
+Choose a UUID `request_id` before `codespace` exec or `codespace_process` start. Submission returns
+durable acceptance and an `operation_id` or `process_id`, without waiting for command completion.
+`accepted` is not proof of guest start. The `phase` distinguishes preparation, acceptance,
+confirmed running work, `outcome_unknown` and terminal outcomes. `started_at: null` means start
+has not been confirmed; it does not prove no effect happened. File actions still wait for their
+result; create/start wait for usable guest readiness, stop for confirmed shutdown and delete for
+confirmed absence.
+
+Recover even a lost first command reply with exec containing only `codespace_id` and the original
+`request_id`, or process get with those fields. An exact submission repeated with the same UUID
+returns the same operation; changed input is refused. Collect a known `operation_id` through exec,
+or a `process_id` through process get. Lookup and bounded waiting never cancel or repeat a command.
+Only an explicit process stop requests cancellation; a pending stop is not confirmed cancellation.
+Keep the identity while an outcome is unknown, and inspect affected files before intentionally
+repeating an effect. Independent work can continue. Admission expiry bounds the right to launch;
+`timeout_seconds` bounds runtime from confirmed guest start. Client waiting and result retention
+are separate, and waiting does not extend an MCP client's transport timeout. Use `repositories`
 to discover approved targets separately from `list`.
 
 Restarting a codespace does not invalidate a retained result or require manual counter
-synchronization. A saved result remains available until its retention expires, subject to current
-repository, device and account authority. Reading it may require the runtime to be reachable.
+synchronization. The bounded terminal reply prefix remains in private server storage within its
+retention, subject to current repository, device and account authority. Its collection does not
+require the complete guest streams to remain available. Full stdout/stderr streams stay in the
+guest: range collection requires reachable, retained guest bytes and may fail after guest cleanup
+while the bounded reply is still available.
 `CODESPACE_RESULT_EXPIRED` means retained bytes are unavailable; it does not prove that the command
 or edit never ran. A process lost to a VM restart reports interruption rather than executing again.
-After an explicit stop, undelivered commands and edits remain cancelled when the VM starts again.
+After an explicit stop, undelivered work cannot regain dispatch authority merely because the VM
+starts again. A missing guest marker or an unconfirmed cancellation remains uncertain;
+`not_started` requires proof that the accepted command was fenced before launch.
 Submit fresh work only when intended; inspecting a previous operation never executes it again.
 
 `CODESPACE_NOT_RUNNING` means Local refused work because the guest was not ready. Moira refreshes
@@ -490,7 +505,11 @@ existing stores are preserved.
 
 After an update, a strict heartbeat or `web-control.json` rejection can mean the server, companion
 and owner guard use different control-contract editions, even with delegation disabled. Rebuilding
-the CLI alone does not replace a running guard. Arrange ordinary owner-managed shutdown and confirmed
+the CLI alone does not replace a running guard, the daemon's journal/replay code or an installed
+guest worker. A receipt without launch proof keeps that start unconfirmed.
+Inspect the original operation; an unknown
+command result alone does not require restarting the companion or stopping its VM.
+For an incompatible control-contract edition, arrange ordinary owner-managed shutdown and confirmed
 settlement. With both sides stopped, back up the server database, the complete private companion
 state and SDK backing storage, including VM disks. Keep matching bundles, coordinate server/companion
 editions, then restart with the same state and disks. Rollback restores that complete paired backup

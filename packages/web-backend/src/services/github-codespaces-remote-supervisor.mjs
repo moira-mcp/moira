@@ -41,7 +41,8 @@ const OUTPUT_STREAMS = new Map([
 ]);
 const MARKER = /^moira-op-[a-f0-9]{32}$/;
 const REPOSITORY = /^[A-Za-z0-9_.-]{1,100}\/([A-Za-z0-9_.-]{1,100})$/;
-const TERMINAL = new Set(["succeeded", "failed", "cancelled", "timed_out"]);
+const TERMINAL = new Set(["succeeded", "failed", "cancelled", "timed_out", "not_started"]);
+const MAX_RESULT_PREFIX_BYTES = Math.floor(((MAX_RESULT_BYTES - 64 * 1024) * 3) / 4);
 const FILE_ACTIONS = new Set([
   "stat",
   "search",
@@ -120,6 +121,9 @@ function validateExecution(request) {
   const match = request.repositoryFullName?.match(REPOSITORY);
   if (
     !match ||
+    (request.admissionDeadlineAt !== undefined &&
+      (!Number.isSafeInteger(request.admissionDeadlineAt) || request.admissionDeadlineAt < 1)) ||
+    (request.requestDigest !== undefined && !/^[a-f0-9]{64}$/.test(request.requestDigest)) ||
     (request.argv !== undefined && request.argv !== null && !Array.isArray(request.argv)) ||
     (request.script === undefined &&
       !request.sessionEnd &&
@@ -1637,9 +1641,11 @@ function capture(executable, argv) {
 const RUNNER = String.raw`
 const {spawn}=require("node:child_process");
 const {createWriteStream}=require("node:fs");
-const {access,readFile,rename,rm,writeFile}=require("node:fs/promises");
+const {access,readFile,rename,rm,writeFile,open}=require("node:fs/promises");
+const durable=async(path,value)=>{const temporary=path+'.'+process.pid+'.tmp';const f=await open(temporary,'wx',0o600);try{await f.writeFile(JSON.stringify(value));await f.sync()}finally{await f.close()}await rename(temporary,path);const parent=await open(require('node:path').dirname(path),'r');try{await parent.sync().catch(e=>{if(process.platform==='linux'||!['EINVAL','ENOTSUP'].includes(e.code))throw e})}finally{await parent.close()}};
 const startTimeOf=async(path)=>{try{const value=await readFile(path,'utf8');const field=value.slice(value.lastIndexOf(') ')+2).split(' ')[19]??null;return /^[0-9]+$/.test(field)?field:null}catch{return null}};
 (async()=>{let raw="";for await(const chunk of process.stdin)raw+=chunk;const input=JSON.parse(raw);
+if(input.admissionDeadlineAt!==undefined&&Date.now()>=input.admissionDeadlineAt){await durable(input.resultPath,{state:'not_started',stdout:'',stderr:'',exitCode:null,stdoutBytes:0,stderrBytes:0,outputLimitExceeded:false,sessionCaptureDropped:false,requestDigest:input.requestDigest});return}
 // The payload prefix is what a response may carry; the file beside it keeps the complete stream.
 // Only the retained ceiling stops the command, so an ordinary noisy command keeps its own exit
 // code and its own standard error.
@@ -1651,18 +1657,25 @@ let runnerStartTime=null;if(process.platform==="linux"){runnerStartTime=await st
 await writeFile(input.runnerPidPath,JSON.stringify({pid:process.pid,startTime:runnerStartTime}),{mode:0o600});
 const childEnv={...process.env};
 for(const [name,value] of Object.entries(input.env??{})){if(value===null)delete childEnv[name];else childEnv[name]=value}
+// One launch boundary governs admission and runtime; the later spawn event proves
+// success without replacing it with the time its notification was delivered.
+// A crash after this durable intent cannot be mistaken for proof of nonexecution.
+await durable(input.executionPath,{...input.execution,launchAttempted:true});
+const launchAt=Date.now();
+if(input.admissionDeadlineAt!==undefined&&launchAt>=input.admissionDeadlineAt){await durable(input.resultPath,{state:'not_started',stdout:'',stderr:'',exitCode:null,stdoutBytes:0,stderrBytes:0,outputLimitExceeded:false,sessionCaptureDropped:false,requestDigest:input.requestDigest});for(const stream of ['stdout','stderr'])sink[stream].end();return}
 // A script runs under the codespace's own shell, sourced so that its directory changes and exports
 // take effect in that shell, and the shell then reports where it ended and what it ended with. An
 // argv command is spawned exactly as before, with no shell anywhere near it.
 const spawned=input.script
-?spawn("/bin/sh",["-c",'. "$1"; __moira_status=$?; { pwd; "$2" -e "process.stdout.write(JSON.stringify(process.env))"; } > "$3"; exit $__moira_status',"sh",input.script,process.execPath,input.capturePath],{cwd:input.cwd,env:childEnv,detached:true,stdio:["pipe","pipe","pipe"]})
-:spawn(input.argv[0],input.argv.slice(1),{cwd:input.cwd,env:childEnv,detached:true,stdio:["pipe","pipe","pipe"]});
+?spawn("/bin/sh",["-c",'. "$1"; __moira_status=$?; { pwd; "$2" -e "process.stdout.write(JSON.stringify(process.env))"; } > "$3"; exit $__moira_status',"sh",input.script,process.execPath,input.capturePath],{cwd:input.cwd,env:childEnv,detached:true,stdio:input.sessionLock?["pipe","pipe","pipe",3]:["pipe","pipe","pipe"]})
+:spawn(input.argv[0],input.argv.slice(1),{cwd:input.cwd,env:childEnv,detached:true,stdio:input.sessionLock?["pipe","pipe","pipe",3]:["pipe","pipe","pipe"]});
 const child=spawned;
+const started=new Promise(resolve=>{child.once('spawn',()=>resolve(launchAt));child.once('error',()=>resolve(null))});
 const payloadLimit=(stream)=>stream==="stdout"?input.maxStdoutBytes:input.maxStderrBytes;
 const collect=(stream)=>(chunk)=>{if(retainedExceeded)return;const buffer=Buffer.from(chunk);
 const room=input.maxRetainedBytes-total[stream];const kept=buffer.length>room?buffer.subarray(0,room):buffer;
 if(kept.length>0){total[stream]+=kept.length;sink[stream].write(kept);
-const headroom=payloadLimit(stream)-prefixBytes[stream];
+const headroom=Math.min(payloadLimit(stream)-prefixBytes[stream],input.maxPrefixBytes-prefixBytes.stdout-prefixBytes.stderr);
 if(headroom>0){const head=kept.length>headroom?kept.subarray(0,headroom):kept;prefix[stream].push(head);prefixBytes[stream]+=head.length}}
 if(buffer.length>room){retainedExceeded=true;try{process.kill(-child.pid,"SIGKILL")}catch{}}};
 // Output collection, exit observation and pipe-error tolerance are installed before any
@@ -1670,17 +1683,25 @@ if(buffer.length>room){retainedExceeded=true;try{process.kill(-child.pid,"SIGKIL
 // and writing its stdin after it exited must not abort the runner without a result.
 child.stdout.on("data",collect("stdout"));child.stderr.on("data",collect("stderr"));
 child.on("error",()=>{});for(const stream of [child.stdin,child.stdout,child.stderr])stream.on("error",()=>{});
-const timer=setTimeout(()=>{if(terminal)return;timedOut=true;try{process.kill(-child.pid,"SIGKILL")}catch{}},input.timeoutMs);timer.unref();
+const timer=setTimeout(()=>{if(terminal)return;timedOut=true;try{process.kill(-child.pid,"SIGKILL")}catch{}},Math.max(0,input.timeoutMs-(Date.now()-launchAt)));timer.unref();
 const closed=new Promise((resolveClose)=>child.once("close",(code)=>{terminal=true;clearTimeout(timer);resolveClose(code)}));
+const startedAt=await started;
+if(startedAt!==null){await durable(input.executionPath,{...input.execution,launchAttempted:true,startedAt,runtimeMs:input.timeoutMs})}
+if(startedAt!==null&&input.session){await durable(input.session.path,{environment:input.session.identity,cwd:input.session.cwd,env:input.session.context})}
+// Capacity serializes only new-slot publication, never the command's lifetime.
+if(input.sessionCapacityLock){require('node:fs').writeSync(4,'release\n');require('node:fs').closeSync(4)}
 try{child.stdin.end(Buffer.from(input.stdin,"base64"))}catch{}
 // A start time is unreadable only once the child is gone; the published result is then the
 // authority, and an unverifiable identity is never reported as a live process.
 const startTime=process.platform==="linux"?await startTimeOf('/proc/'+child.pid+'/stat'):null;
 await writeFile(input.pidPath,JSON.stringify({pid:child.pid,startTime}),{mode:0o600});
+// FD5 is held only until launch proof and process identity are published. Neither
+// it nor the capacity gate is inherited by the actual command or descendants.
+if(input.admissionLock){require('node:fs').writeSync(5,'release\n');require('node:fs').closeSync(5)}
 const code=await closed;let cancelled=false;try{await access(input.cancelPath);cancelled=true}catch{}
 // The retained streams must be complete on disk before the result announces their size.
 await Promise.all(["stdout","stderr"].map((stream)=>new Promise((done)=>{sink[stream].end(done)})));
-const state=cancelled?"cancelled":timedOut?"timed_out":retainedExceeded?"failed":code===0?"succeeded":"failed";
+const state=startedAt===null&&input.requestDigest!==undefined?"not_started":cancelled?"cancelled":timedOut?"timed_out":retainedExceeded?"failed":code===0?"succeeded":"failed";
 // What the script left behind is the difference from the environment it started with, and only that.
 let captureDropped=false;
 if(input.session&&input.script&&(state==="succeeded"||state==="failed")){
@@ -1713,102 +1734,346 @@ await writeFile(temporary,encoded,{mode:0o600});await rename(temporary,input.ses
 }
 else if(input.session&&input.script)captureDropped=true;
 if(input.session&&input.sessionEnd)await rm(input.session.path,{force:true}).catch(()=>{});
-await writeFile(input.resultTempPath,JSON.stringify({state,stdout:Buffer.concat(prefix.stdout).toString("base64"),stderr:Buffer.concat(prefix.stderr).toString("base64"),exitCode:Number.isInteger(code)?code:null,stdoutBytes:total.stdout,stderrBytes:total.stderr,outputLimitExceeded:retainedExceeded,sessionCaptureDropped:captureDropped}),{mode:0o600});await rename(input.resultTempPath,input.resultPath);
+await durable(input.resultPath,{state,stdout:Buffer.concat(prefix.stdout).toString("base64"),stderr:Buffer.concat(prefix.stderr).toString("base64"),exitCode:Number.isInteger(code)?code:null,stdoutBytes:total.stdout,stderrBytes:total.stderr,outputLimitExceeded:retainedExceeded,sessionCaptureDropped:captureDropped,...(input.requestDigest===undefined?{}:{requestDigest:input.requestDigest,...(startedAt===null?{}:{startedAt,runtimeMs:input.timeoutMs})})});
+if(input.sessionLock){require('node:fs').writeSync(3,'release\n');require('node:fs').closeSync(3)}
 })().catch(async()=>{process.exitCode=1});`;
+
+async function executionMetadata(directory) {
+  try {
+    return await readBoundedJson(join(directory, "execution.json"), 4096);
+  } catch (error) {
+    if (error?.code === "ENOENT") return null;
+    throw error;
+  }
+}
+
+function receiptMetadata(value) {
+  return value?.requestDigest === undefined
+    ? {}
+    : {
+        requestDigest: value.requestDigest,
+        ...(Number.isSafeInteger(value.startedAt) && value.startedAt > 0
+          ? {
+              startedAt: value.startedAt,
+              ...(Number.isSafeInteger(value.runtimeMs) && value.runtimeMs > 0
+                ? { runtimeMs: value.runtimeMs }
+                : {}),
+            }
+          : {}),
+      };
+}
+
+async function readCancellation(directory, request) {
+  let value;
+  try {
+    value = await readBoundedJson(join(directory, "cancel-intent.json"), 4096);
+  } catch (error) {
+    if (error?.code === "ENOENT") return null;
+    throw error;
+  }
+  if (
+    typeof value.noStart !== "boolean" ||
+    (value.requestDigest !== undefined && !/^[a-f0-9]{64}$/.test(value.requestDigest)) ||
+    (value.admissionDeadlineAt !== undefined &&
+      (!Number.isSafeInteger(value.admissionDeadlineAt) || value.admissionDeadlineAt < 1))
+  )
+    fail("invalid operation cancellation intent");
+  if (request.requestDigest !== undefined && request.requestDigest !== value.requestDigest)
+    fail("operation cancellation intent mismatch");
+  if (
+    request.admissionDeadlineAt !== undefined &&
+    value.admissionDeadlineAt !== undefined &&
+    request.admissionDeadlineAt !== value.admissionDeadlineAt
+  )
+    fail("operation cancellation deadline mismatch");
+  return value;
+}
+
+async function publishNotStarted(directory, metadata) {
+  await writeDurableJson(directory, "result.json", {
+    state: "not_started",
+    stdout: "",
+    stderr: "",
+    exitCode: null,
+    stdoutBytes: 0,
+    stderrBytes: 0,
+    outputLimitExceeded: false,
+    sessionCaptureDropped: false,
+    ...(metadata.requestDigest === undefined ? {} : { requestDigest: metadata.requestDigest }),
+  });
+  return readResult(directory);
+}
+
+/** The existing kernel-lock pattern, scoped to one explicit session and handed to its runner. */
+async function acquireSessionLock(request, capacity = false) {
+  if (!request.session || (capacity && !request.sessionStart)) return null;
+  await mkdir(SESSION_ROOT, { recursive: true, mode: 0o700 });
+  const path = join(SESSION_ROOT, capacity ? ".capacity.lock" : `${request.session}.lock`);
+  return acquireKernelLock(path, request.admissionDeadlineAt);
+}
+
+/** One kernel-owned primitive also fences cancellation against the actual launch boundary. */
+async function acquireKernelLock(path, deadlineAt) {
+  const holder =
+    process.platform === "linux"
+      ? spawn(
+          "/usr/bin/flock",
+          [
+            "--exclusive",
+            path,
+            "/bin/sh",
+            "-c",
+            'printf 1; while IFS= read -r line; do [ "$line" = release ] && break; done',
+          ],
+          { stdio: ["pipe", "pipe", "pipe"] },
+        )
+      : spawn(
+          "python3",
+          [
+            "-c",
+            "import fcntl,sys; f=open(sys.argv[1],'a'); fcntl.flock(f,fcntl.LOCK_EX); print('1',flush=True);\nfor line in sys.stdin:\n if line.rstrip('\\n') == 'release': break",
+            path,
+          ],
+          { stdio: ["pipe", "pipe", "pipe"] },
+        );
+  holder.stdin.on("error", () => undefined);
+  holder.stderr.resume();
+  let timer;
+  try {
+    const acquired = await new Promise((done, reject) => {
+      holder.once("error", reject);
+      holder.once("close", () => reject(new Error("lock owner exited before admission")));
+      holder.stdout.once("data", () => done(true));
+      if (deadlineAt !== undefined)
+        timer = setTimeout(() => done(false), Math.max(0, deadlineAt - Date.now()));
+    });
+    if (!acquired) {
+      holder.kill("SIGTERM");
+      holder.stdin.destroy();
+      return null;
+    }
+    return {
+      stream: holder.stdin,
+      release: () => {
+        holder.stdin.destroy();
+        holder.stdout.destroy();
+        holder.stderr.destroy();
+        holder.unref();
+      },
+    };
+  } catch (error) {
+    holder.kill("SIGTERM");
+    holder.stdin.destroy();
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 async function execute(request, binding) {
   const directory = validateBase(request);
   const { repositoryName } = validateExecution(request);
-  const session = await resolveSession(request);
-  // A command whose session belongs to an earlier life of this environment does not run at all.
-  if (session === null) return { state: "session_unavailable" };
-  if (session.limit) return { state: "session_limit", limit: session.limit };
-  // Ending a session is answered here: the stored context is removed and nothing is dispatched.
-  if (session.ended) {
-    await session.end?.();
-    return { state: "session_ended" };
-  }
-  const cwd = await verifyRepository({ ...request, cwd: session.cwd }, repositoryName, binding);
+  const requestHash = createHash("sha256").update(JSON.stringify(request)).digest("hex");
   await mkdir(dirname(directory), { recursive: true, mode: 0o700 });
-  await mkdir(directory, { mode: 0o700 });
-  // The life of the environment the command runs in, so a later inspection can tell a command whose
-  // codespace restarted underneath it from a supervisor that exited without publishing a result.
-  const life = await environmentIdentity();
-  if (life) await writeFile(join(directory, "environment"), life, { mode: 0o600 });
-  const pidPath = join(directory, "pid");
-  const runnerPidPath = join(directory, "runner-pid");
-  const stdoutPath = join(directory, OUTPUT_STREAMS.get("stdout"));
-  const stderrPath = join(directory, OUTPUT_STREAMS.get("stderr"));
-  const resultPath = join(directory, "result.json");
-  const resultTempPath = join(directory, "result.tmp");
-  const cancelPath = join(directory, "cancel-requested");
-  const capturePath = join(directory, "session-capture.json");
-  let scriptPath = null;
-  if (request.script !== undefined) {
-    scriptPath = join(directory, "script.sh");
-    await writeFile(scriptPath, request.script, { mode: 0o600 });
+  try {
+    await mkdir(directory, { mode: 0o700 });
+  } catch (error) {
+    if (error?.code !== "EEXIST") throw error;
+    const cancellation = await readCancellation(directory, request);
+    if (cancellation) {
+      if (cancellation.requestDigest !== request.requestDigest)
+        fail("operation cancellation intent mismatch");
+      return inspect(request);
+    }
+    const accepted = await executionMetadata(directory);
+    if (
+      !accepted ||
+      accepted.requestHash !== requestHash ||
+      accepted.requestDigest !== request.requestDigest
+    )
+      fail("operation execution intent mismatch");
+    return inspect(request);
   }
-  const runner = spawn(process.execPath, ["-e", RUNNER], {
-    detached: true,
-    stdio: ["pipe", "ignore", "ignore"],
-    env: process.env,
-  });
-  // The session is recorded only once its command is about to run, so a refused request leaves the
-  // stored context exactly as it was. What a script leaves behind is merged when it ends.
-  const stored = await session.store?.();
-  if (stored?.limit) {
-    runner.kill("SIGKILL");
-    await rm(directory, { recursive: true, force: true });
-    return { state: "session_limit", limit: stored.limit };
+  const execution = {
+    requestHash,
+    launchAttempted: false,
+    ...(request.requestDigest === undefined ? {} : { requestDigest: request.requestDigest }),
+    ...(request.admissionDeadlineAt === undefined
+      ? {}
+      : { admissionDeadlineAt: request.admissionDeadlineAt }),
+  };
+  await writeDurableJson(directory, "execution.json", execution);
+  const notStarted = async () => {
+    await writeDurableJson(directory, "result.json", {
+      state: "not_started",
+      stdout: "",
+      stderr: "",
+      exitCode: null,
+      stdoutBytes: 0,
+      stderrBytes: 0,
+      outputLimitExceeded: false,
+      sessionCaptureDropped: false,
+      ...receiptMetadata(execution),
+    });
+    return readResult(directory);
+  };
+  if (request.admissionDeadlineAt !== undefined && Date.now() >= request.admissionDeadlineAt)
+    return notStarted();
+  const sessionLock = await acquireSessionLock(request);
+  let capacityLock = null;
+  let admissionLock = null;
+  try {
+    if (request.session && !sessionLock) return notStarted();
+    if (request.admissionDeadlineAt !== undefined && Date.now() >= request.admissionDeadlineAt)
+      return notStarted();
+    capacityLock = await acquireSessionLock(request, true);
+    if (request.session && request.sessionStart && !capacityLock) return notStarted();
+    if (request.admissionDeadlineAt !== undefined && Date.now() >= request.admissionDeadlineAt)
+      return notStarted();
+    const session = await resolveSession(request);
+    // A command whose session belongs to an earlier life of this environment does not run at all.
+    if (session === null) return { state: "session_unavailable", ...receiptMetadata(execution) };
+    if (session.limit)
+      return { state: "session_limit", limit: session.limit, ...receiptMetadata(execution) };
+    admissionLock = await acquireKernelLock(
+      join(directory, "admission.lock"),
+      request.admissionDeadlineAt,
+    );
+    if (!admissionLock) return notStarted();
+    if (request.admissionDeadlineAt !== undefined && Date.now() >= request.admissionDeadlineAt)
+      return notStarted();
+    const cancellation = await readCancellation(directory, request);
+    if (cancellation) return inspect(request);
+    // Ending a session is answered here: the stored context is removed and nothing is dispatched.
+    if (session.ended) {
+      await writeDurableJson(directory, "execution.json", { ...execution, launchAttempted: true });
+      const startedAt = Date.now();
+      if (request.admissionDeadlineAt !== undefined && startedAt >= request.admissionDeadlineAt)
+        return notStarted();
+      await session.end?.();
+      await writeDurableJson(directory, "execution.json", {
+        ...execution,
+        launchAttempted: true,
+        startedAt,
+        runtimeMs: request.timeoutMs,
+      });
+      await writeDurableJson(directory, "result.json", {
+        state: "succeeded",
+        stdout: "",
+        stderr: "",
+        exitCode: 0,
+        stdoutBytes: 0,
+        stderrBytes: 0,
+        outputLimitExceeded: false,
+        sessionCaptureDropped: false,
+        requestDigest: request.requestDigest,
+        startedAt,
+        runtimeMs: request.timeoutMs,
+      });
+      if (request.requestDigest === undefined) return { state: "session_ended" };
+      return readResult(directory);
+    }
+    const cwd = await verifyRepository({ ...request, cwd: session.cwd }, repositoryName, binding);
+    // The life of the environment the command runs in, so a later inspection can tell a command whose
+    // codespace restarted underneath it from a supervisor that exited without publishing a result.
+    const life = await environmentIdentity();
+    if (life) await writeFile(join(directory, "environment"), life, { mode: 0o600 });
+    const pidPath = join(directory, "pid");
+    const runnerPidPath = join(directory, "runner-pid");
+    const stdoutPath = join(directory, OUTPUT_STREAMS.get("stdout"));
+    const stderrPath = join(directory, OUTPUT_STREAMS.get("stderr"));
+    const resultPath = join(directory, "result.json");
+    const resultTempPath = join(directory, "result.tmp");
+    const cancelPath = join(directory, "cancel-requested");
+    const capturePath = join(directory, "session-capture.json");
+    let scriptPath = null;
+    if (request.script !== undefined) {
+      scriptPath = join(directory, "script.sh");
+      await writeFile(scriptPath, request.script, { mode: 0o600 });
+    }
+    const runner = spawn(process.execPath, ["-e", RUNNER], {
+      detached: true,
+      stdio: [
+        "pipe",
+        "ignore",
+        "ignore",
+        sessionLock?.stream ?? "ignore",
+        capacityLock?.stream ?? "ignore",
+        admissionLock.stream,
+      ],
+      env: process.env,
+    });
+    // The runner records initial context only after an actual launch, so an expired admission
+    // cannot modify a session before returning its not_started receipt.
+    runner.stdin.end(
+      JSON.stringify({
+        argv: request.argv ?? null,
+        script: scriptPath,
+        capturePath,
+        shellOwned: [...SHELL_OWNED_VARIABLES],
+        sessionEnd: Boolean(request.sessionEnd),
+        repositoryRoot: binding?.root ?? join(CODESPACES_ROOT, repositoryName),
+        session: session.store
+          ? {
+              path: sessionPath(request.session),
+              identity: await environmentIdentity(),
+              context: session.context,
+              cwd: session.cwd,
+              maxVariables: MAX_SESSION_VARIABLES,
+              maxBytes: MAX_SESSION_BYTES,
+              maxValueLength: MAX_SESSION_VALUE_LENGTH,
+              namePattern: ENVIRONMENT_NAME.source,
+            }
+          : null,
+        cwd,
+        // The context travels as it is stored, so a removal reaches the child as a removal.
+        env: session.context ?? session.env,
+        stdin: request.stdin,
+        timeoutMs: request.timeoutMs,
+        maxStdoutBytes: request.maxStdoutBytes,
+        maxStderrBytes: request.maxStderrBytes,
+        maxRetainedBytes: request.maxRetainedBytes,
+        maxPrefixBytes: MAX_RESULT_PREFIX_BYTES,
+        admissionDeadlineAt: request.admissionDeadlineAt,
+        requestDigest: request.requestDigest,
+        execution,
+        executionPath: join(directory, "execution.json"),
+        sessionLock: Boolean(sessionLock),
+        sessionCapacityLock: Boolean(capacityLock),
+        admissionLock: true,
+        pidPath,
+        runnerPidPath,
+        stdoutPath,
+        stderrPath,
+        resultPath,
+        resultTempPath,
+        cancelPath,
+      }),
+    );
+    runner.unref();
+    // Dispatch is proven by the child's identity or by a result the runner already published;
+    // a command that outlives neither is not silently left running.
+    for (let attempt = 0; attempt < 80; attempt++) {
+      if (await dispatched(pidPath, resultPath)) break;
+      await new Promise((resolveValue) => setTimeout(resolveValue, 25));
+    }
+    if (!(await dispatched(pidPath, resultPath))) {
+      await access(pidPath, constants.R_OK);
+    }
+    const proof = await executionMetadata(directory);
+    if (request.requestDigest !== undefined)
+      return (
+        (await readResult(directory)) ?? {
+          state: proof?.startedAt ? "running" : "outcome_unknown",
+          ...receiptMetadata(proof),
+        }
+      );
+    return { state: "running" };
+  } finally {
+    admissionLock?.release();
+    capacityLock?.release();
+    sessionLock?.release();
   }
-  runner.stdin.end(
-    JSON.stringify({
-      argv: request.argv ?? null,
-      script: scriptPath,
-      capturePath,
-      shellOwned: [...SHELL_OWNED_VARIABLES],
-      sessionEnd: Boolean(request.sessionEnd),
-      repositoryRoot: binding?.root ?? join(CODESPACES_ROOT, repositoryName),
-      session: session.store
-        ? {
-            path: sessionPath(request.session),
-            identity: await environmentIdentity(),
-            context: session.context,
-            cwd: session.cwd,
-            maxVariables: MAX_SESSION_VARIABLES,
-            maxBytes: MAX_SESSION_BYTES,
-            maxValueLength: MAX_SESSION_VALUE_LENGTH,
-            namePattern: ENVIRONMENT_NAME.source,
-          }
-        : null,
-      cwd,
-      // The context travels as it is stored, so a removal reaches the child as a removal.
-      env: session.context ?? session.env,
-      stdin: request.stdin,
-      timeoutMs: request.timeoutMs,
-      maxStdoutBytes: request.maxStdoutBytes,
-      maxStderrBytes: request.maxStderrBytes,
-      maxRetainedBytes: request.maxRetainedBytes,
-      pidPath,
-      runnerPidPath,
-      stdoutPath,
-      stderrPath,
-      resultPath,
-      resultTempPath,
-      cancelPath,
-    }),
-  );
-  runner.unref();
-  // Dispatch is proven by the child's identity or by a result the runner already published;
-  // a command that outlives neither is not silently left running.
-  for (let attempt = 0; attempt < 80; attempt++) {
-    if (await dispatched(pidPath, resultPath)) break;
-    await new Promise((resolveValue) => setTimeout(resolveValue, 25));
-  }
-  if (!(await dispatched(pidPath, resultPath))) {
-    await access(pidPath, constants.R_OK);
-  }
-  return { state: "running" };
 }
 
 async function dispatched(pidPath, resultPath) {
@@ -1836,6 +2101,7 @@ async function readResult(directory) {
       stderrBytes: Number.isSafeInteger(value.stderrBytes) ? value.stderrBytes : 0,
       outputLimitExceeded: value.outputLimitExceeded === true,
       sessionCaptureDropped: value.sessionCaptureDropped === true,
+      ...receiptMetadata(value),
     };
   } catch (error) {
     if (error?.code !== "ENOENT") throw error;
@@ -1903,15 +2169,51 @@ async function inspect(request) {
   const directory = validateBase(request);
   try {
     await access(directory, constants.R_OK);
+    const proof = await executionMetadata(directory);
+    const cancellation = await readCancellation(directory, request);
+    if (cancellation?.noStart && proof?.startedAt !== undefined)
+      fail("cancellation contradicts a proved launch");
+    if (
+      request.requestDigest !== undefined &&
+      proof?.requestDigest !== undefined &&
+      request.requestDigest !== proof.requestDigest
+    )
+      fail("operation inspection intent mismatch");
     const result = await readResult(directory);
-    if (result) return result;
+    if (result && !proof?.finalized) return result;
+    if (cancellation?.noStart) {
+      if (proof?.startedAt !== undefined) fail("cancellation contradicts a proved launch");
+      return {
+        state: "not_started",
+        stdoutBase64: "",
+        stderrBase64: "",
+        exitCode: null,
+        stdoutBytes: 0,
+        stderrBytes: 0,
+        outputLimitExceeded: false,
+        sessionCaptureDropped: false,
+        ...receiptMetadata(cancellation),
+      };
+    }
+    const running = () => ({
+      state: proof?.requestDigest !== undefined && !proof.startedAt ? "outcome_unknown" : "running",
+      ...receiptMetadata(proof),
+    });
     const identity = await readOptionalProcessIdentity(directory, "pid");
-    if (identity && (await processExists(identity))) return { state: "running" };
+    if (identity && (await processExists(identity))) return running();
     const runnerIdentity = await readOptionalProcessIdentity(directory, "runner-pid");
-    if (runnerIdentity && (await processExists(runnerIdentity))) return { state: "running" };
+    if (runnerIdentity && (await processExists(runnerIdentity))) return running();
     const publishedAfterRunnerExit = await readResult(directory);
     if (publishedAfterRunnerExit) return publishedAfterRunnerExit;
-    if (await lostWithEnvironment(directory)) return { state: "interrupted" };
+    if (await lostWithEnvironment(directory))
+      return { state: "interrupted", ...receiptMetadata(proof) };
+    if (
+      proof?.requestDigest !== undefined ||
+      cancellation ||
+      proof?.launchAttempted === false ||
+      (proof?.launchAttempted === true && proof.startedAt === undefined)
+    )
+      return { state: "outcome_unknown", ...receiptMetadata(proof ?? cancellation) };
     return {
       state: "failed",
       stdoutBase64: "",
@@ -1921,50 +2223,114 @@ async function inspect(request) {
       stderrBytes: 0,
       outputLimitExceeded: false,
       sessionCaptureDropped: false,
+      ...receiptMetadata(proof),
     };
   } catch (error) {
-    if (error?.code === "ENOENT") return { state: "absent" };
+    if (error?.code === "ENOENT")
+      return {
+        state: "absent",
+        ...(request.requestDigest === undefined ? {} : { requestDigest: request.requestDigest }),
+      };
     throw error;
   }
 }
 
 async function cancel(request) {
   const directory = validateBase(request);
-  const current = await inspect(request);
-  if (current.state !== "running") return current;
-  const identity = await readProcessIdentity(directory);
-  const { pid } = identity;
-  await writeFile(join(directory, "cancel-requested"), "1", { mode: 0o600 });
+  if (
+    (request.requestDigest !== undefined && !/^[a-f0-9]{64}$/.test(request.requestDigest)) ||
+    (request.admissionDeadlineAt !== undefined &&
+      (!Number.isSafeInteger(request.admissionDeadlineAt) || request.admissionDeadlineAt < 1))
+  )
+    fail("invalid cancellation request");
+  await mkdir(dirname(directory), { recursive: true, mode: 0o700 });
+  let created = false;
   try {
-    process.kill(-pid, "SIGTERM");
+    await mkdir(directory, { mode: 0o700 });
+    created = true;
   } catch (error) {
-    if (error?.code !== "ESRCH") throw error;
+    if (error?.code !== "EEXIST") throw error;
   }
-  await new Promise((resolveValue) => setTimeout(resolveValue, 250));
-  if (await processExists(identity)) {
+  // Cancellation is control authority, so its gate does not reopen or extend admission.
+  const gate = await acquireKernelLock(join(directory, "admission.lock"));
+  try {
+    const proof = await executionMetadata(directory);
+    if (
+      request.requestDigest !== undefined &&
+      proof?.requestDigest !== undefined &&
+      proof.requestDigest !== request.requestDigest
+    )
+      fail("operation cancellation intent mismatch");
+    if (
+      request.admissionDeadlineAt !== undefined &&
+      proof?.admissionDeadlineAt !== undefined &&
+      proof.admissionDeadlineAt !== request.admissionDeadlineAt
+    )
+      fail("operation cancellation deadline mismatch");
+    const previous = await readCancellation(directory, request);
+    const current = await inspect(request);
+    if (current.state !== "not_started" && (await readResult(directory))) return current;
+    const noStart =
+      previous?.noStart === true ||
+      current.state === "not_started" ||
+      (proof?.startedAt === undefined && (created || proof?.launchAttempted === false));
+    const intent = {
+      noStart,
+      ...(request.requestDigest === undefined ? {} : { requestDigest: request.requestDigest }),
+      ...((previous?.admissionDeadlineAt ??
+        proof?.admissionDeadlineAt ??
+        request.admissionDeadlineAt) === undefined
+        ? {}
+        : {
+            admissionDeadlineAt:
+              previous?.admissionDeadlineAt ??
+              proof?.admissionDeadlineAt ??
+              request.admissionDeadlineAt,
+          }),
+    };
+    await writeDurableJson(directory, "cancel-intent.json", intent);
+    if (noStart) return publishNotStarted(directory, intent);
+    // An attempted launch without durable proof is ambiguous even if its gate owner crashed.
+    if (current.state !== "running")
+      return { state: "outcome_unknown", ...receiptMetadata(proof ?? intent) };
+    const identity = await readProcessIdentity(directory);
+    const { pid } = identity;
+    await writeFile(join(directory, "cancel-requested"), "1", { mode: 0o600 });
     try {
-      process.kill(-pid, "SIGKILL");
+      process.kill(-pid, "SIGTERM");
     } catch (error) {
       if (error?.code !== "ESRCH") throw error;
     }
-  }
-  await new Promise((resolveValue) => setTimeout(resolveValue, 100));
-  if (await processExists(identity)) return { state: "running" };
-  const result = {
-    state: "cancelled",
-    stdoutBase64: "",
-    stderrBase64: "",
-    exitCode: null,
-    stdoutBytes: await retainedSize(directory, "stdout"),
-    stderrBytes: await retainedSize(directory, "stderr"),
-    outputLimitExceeded: false,
-    sessionCaptureDropped: false,
-  };
-  // A cancelled command still produced whatever it printed; the published result names those
-  // sizes so the retained streams stay readable by range until cleanup removes them.
-  await writeFile(
-    join(directory, "result.json"),
-    JSON.stringify({
+    await new Promise((resolveValue) => setTimeout(resolveValue, 250));
+    if (await processExists(identity)) {
+      try {
+        process.kill(-pid, "SIGKILL");
+      } catch (error) {
+        if (error?.code !== "ESRCH") throw error;
+      }
+    }
+    await new Promise((resolveValue) => setTimeout(resolveValue, 100));
+    if (await processExists(identity))
+      return { state: "running", ...receiptMetadata(await executionMetadata(directory)) };
+    const completed = await readResult(directory);
+    if (completed) return completed;
+    const runnerIdentity = await readOptionalProcessIdentity(directory, "runner-pid");
+    if (runnerIdentity && (await processExists(runnerIdentity)))
+      return { state: "running", ...receiptMetadata(proof) };
+    const result = {
+      state: "cancelled",
+      stdoutBase64: "",
+      stderrBase64: "",
+      exitCode: null,
+      stdoutBytes: await retainedSize(directory, "stdout"),
+      stderrBytes: await retainedSize(directory, "stderr"),
+      outputLimitExceeded: false,
+      sessionCaptureDropped: false,
+      ...receiptMetadata(await executionMetadata(directory)),
+    };
+    // A cancelled command still produced whatever it printed; the published result names those
+    // sizes so the retained streams stay readable by range until cleanup removes them.
+    await writeDurableJson(directory, "result.json", {
       state: result.state,
       stdout: "",
       stderr: "",
@@ -1972,10 +2338,12 @@ async function cancel(request) {
       stdoutBytes: result.stdoutBytes,
       stderrBytes: result.stderrBytes,
       outputLimitExceeded: false,
-    }),
-    { mode: 0o600 },
-  );
-  return result;
+      ...receiptMetadata(result),
+    });
+    return result;
+  } finally {
+    gate.release();
+  }
 }
 
 async function retainedSize(directory, stream) {
@@ -1989,6 +2357,7 @@ async function retainedSize(directory, stream) {
 
 async function readOutput(request) {
   const directory = validateBase(request);
+  if ((await executionMetadata(directory))?.finalized) return { state: "absent" };
   const fileName = OUTPUT_STREAMS.get(request.stream);
   if (
     !fileName ||
@@ -2026,7 +2395,29 @@ async function readOutput(request) {
 async function finalize(request) {
   const directory = validateBase(request);
   const current = await inspect(request);
+  const proof = await executionMetadata(directory);
   if (current.state === "running") fail("operation is still running");
+  if (current.state === "outcome_unknown" && !proof?.finalized)
+    fail("operation outcome is unresolved");
+  const cancellation = await readCancellation(directory, request);
+  if (
+    cancellation?.noStart &&
+    (cancellation.admissionDeadlineAt === undefined ||
+      cancellation.admissionDeadlineAt > Date.now())
+  )
+    return current;
+  if (
+    proof?.requestDigest !== undefined &&
+    (proof.admissionDeadlineAt === undefined || proof.admissionDeadlineAt > Date.now())
+  ) {
+    // Output retention does not reopen launch authority. Remove bytes now, but
+    // retain the immutable marker until the original admission has closed.
+    await writeDurableJson(directory, "execution.json", { ...proof, finalized: true });
+    for (const entry of await readdir(directory))
+      if (!["execution.json", "cancel-intent.json", "admission.lock"].includes(entry))
+        await rm(join(directory, entry), { recursive: true, force: true });
+    return { state: "outcome_unknown", ...receiptMetadata(proof) };
+  }
   try {
     await access(join(directory, "file-transaction.conflicted.json"));
     for (const entry of await readdir(directory))

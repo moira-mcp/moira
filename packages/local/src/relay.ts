@@ -19,6 +19,7 @@ import { canonicalJson } from "../../shared/src/utils/canonical-json.js";
 import {
   localManagementOutcomeSchema,
   localResourceSnapshotSchema,
+  LOCAL_RESULT_SETTLEMENT_RETENTION_MS,
 } from "../../shared/src/codespaces/local-protocol.js";
 
 const uuid = z.string().uuid();
@@ -79,6 +80,17 @@ const resourceSnapshot = (value: unknown, spaceId: string | null) => {
 // Reconnect instances share the same admitted records. A binding observation cannot
 // overtake a creation between its durable intent and the manager's native admission.
 const resourceGates = new WeakMap<LocalRecords, Map<string, Promise<unknown>>>();
+const TERMINAL_RECEIPT_STATES = new Set([
+  "succeeded",
+  "failed",
+  "cancelled",
+  "timed_out",
+  "not_started",
+  "interrupted",
+  "session_ended",
+  "session_unavailable",
+  "session_limit",
+]);
 const bindingSchema = z
   .object({
     resourceId: uuid,
@@ -106,6 +118,10 @@ const intentSchema = z
     message: localEnvelopeSchema,
     authority: z.literal("owner-delete").optional(),
     sourceMessage: localEnvelopeSchema.optional(),
+    settlementClaim: claimSchema.optional(),
+    outcomeReference: localRelayPayloadReferenceSchema.optional(),
+    outcomeStatus: z.enum(["completed", "refused"]).optional(),
+    settled: z.boolean().optional(),
   })
   .strict();
 
@@ -910,6 +926,7 @@ export class LocalRelay {
           serverGeneration: claim.resourceGeneration,
           message,
           sourceMessage,
+          settlementClaim: claim,
         });
         await this.records.state.write(intentKey, intent);
       }
@@ -1155,6 +1172,7 @@ export class LocalRelay {
         ...(claim.authority ? { authority: claim.authority } : {}),
         message,
         ...(sourceMessage !== message ? { sourceMessage } : {}),
+        settlementClaim: claim,
       });
       await this.records.state.write(intentKey, intent);
     }
@@ -1366,13 +1384,194 @@ export class LocalRelay {
     await Promise.allSettled([...this.deliveries.values()]);
   }
 
+  private async sendOutcome(
+    connection: Connection,
+    claim: LocalRelayClaim,
+    result: LocalReply,
+    maxPartBytes: number,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    const bytes = Buffer.from(JSON.stringify(result));
+    if (bytes.length > MAX_MESSAGE_BYTES || Math.ceil(bytes.length / maxPartBytes) > 32)
+      throw new LocalRefusal(
+        "LOCAL_OUTPUT_LIMIT",
+        "The result exceeds the relay's bounded capacity.",
+      );
+    const key = `relay-request-${claim.requestId}.json`;
+    const intent = await this.records.state.read(key, intentSchema.parse);
+    const status = result.ok ? "completed" : "refused";
+    // A fresh dispatch claim repeats its live authority checks. Only an uncertain
+    // delivery of the same claim must reuse the exact previously uploaded receipt.
+    let reference =
+      !intent?.settled && intent?.settlementClaim?.claimId === claim.claimId
+        ? intent.outcomeReference
+        : undefined;
+    if (intent && intent.settlementClaim?.claimId !== claim.claimId) {
+      // A live reclaim fences the old claim even if the next upload loses its
+      // response. Persist that fence before transport so later collection uses
+      // the latest admitted claim rather than a displaced historical one.
+      intent.settlementClaim = claim;
+      delete intent.outcomeReference;
+      delete intent.outcomeStatus;
+      intent.settled = false;
+      await this.records.state.write(key, intent);
+    }
+    if (reference) {
+      if (
+        reference.size !== bytes.length ||
+        reference.sha256 !== hash(bytes) ||
+        intent?.outcomeStatus !== status
+      )
+        throw new LocalRefusal(
+          "LOCAL_REPLAY_CONFLICT",
+          "A retained receipt cannot change its outcome.",
+        );
+    } else {
+      const parts: LocalRelayPayloadReference["parts"] = [];
+      for (let offset = 0; offset < bytes.length; offset += maxPartBytes) {
+        const part = bytes.subarray(offset, offset + maxPartBytes);
+        const response = await this.request(connection, `/relay/${claim.requestId}/result-part`, {
+          binary: part,
+          claim: claim.claimId,
+          signal,
+          limit: 8192,
+        });
+        const uploaded = z
+          .object({
+            success: z.literal(true),
+            data: localRelayPayloadReferenceSchema.innerType().shape.parts.element,
+          })
+          .passthrough()
+          .parse(JSON.parse(response.toString("utf8"))).data;
+        if (uploaded.size !== part.length || uploaded.sha256 !== hash(part))
+          throw new LocalRefusal(
+            "LOCAL_PAYLOAD_CHANGED",
+            "The uploaded result part differs from its digest.",
+          );
+        parts.push(uploaded);
+      }
+      reference = { parts, size: bytes.length, sha256: hash(bytes) };
+      if (intent) {
+        intent.settlementClaim = claim;
+        intent.outcomeReference = reference;
+        intent.outcomeStatus = status;
+        intent.settled = false;
+        await this.records.state.write(key, intent);
+      }
+    }
+    await this.json(
+      connection,
+      "/relay/ack",
+      {
+        requestId: claim.requestId,
+        claimId: claim.claimId,
+        digest: claim.digest,
+        status,
+        outcomeReference: reference,
+      },
+      signal,
+    );
+    if (intent) {
+      intent.settled = true;
+      await this.records.state.write(key, intent);
+      await new RequestJournal(this.records.state).acknowledge(claim.requestId, true);
+    }
+  }
+
+  /** Reconnect can publish a cached receipt, but cannot renew, fetch input or execute a request. */
+  private async settleReceipts(
+    rpc: LocalRpc,
+    connection: Connection,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    for (const key of await this.records.state.keys("relay-request-")) {
+      const intent = await this.records.state.read(key, intentSchema.parse);
+      const claim = intent?.settlementClaim;
+      if (
+        !intent ||
+        !claim ||
+        intent.settled ||
+        intent.message.request.action !== "operation" ||
+        this.deliveries.has(claim.requestId)
+      )
+        continue;
+      if (
+        intent.message.expiresAt > Date.now() ||
+        intent.message.expiresAt + LOCAL_RESULT_SETTLEMENT_RETENTION_MS <= Date.now()
+      )
+        continue;
+      if (
+        claim.deviceId !== connection.deviceId ||
+        claim.userId !== connection.userId ||
+        claim.connectionId !== connection.connectionId ||
+        claim.deviceGeneration !== connection.deviceGeneration ||
+        claim.requestId !== intent.message.id ||
+        claim.digest !== intent.digest ||
+        claim.resourceId !== intent.resourceId ||
+        claim.deadlineAt !== intent.message.expiresAt ||
+        intent.authority !== undefined ||
+        hash(Buffer.from(canonicalJson(intent.sourceMessage ?? intent.message))) !== intent.digest
+      )
+        continue;
+      const binding = await this.records.state.read(
+        `relay-space-${claim.resourceId}.json`,
+        bindingSchema.parse,
+      );
+      const policy = await this.records.policy();
+      if (
+        !binding ||
+        binding.deviceId !== claim.deviceId ||
+        binding.userId !== claim.userId ||
+        binding.connectionId !== claim.connectionId ||
+        binding.deviceGeneration !== claim.deviceGeneration ||
+        !policy.repositories.some((repo) => repo.id === binding.repositoryId)
+      )
+        continue;
+      const result = await rpc.retained(intent.message);
+      if (result === undefined) continue;
+      // A completed RPC admission may still contain an intermediate guest state.
+      // Late collection cannot turn that observation into a terminal settlement.
+      if (!result.ok) continue;
+      const job = intent.message.request.job;
+      const outputRead =
+        typeof job === "object" && job !== null && "action" in job && job.action === "output";
+      if (
+        !outputRead &&
+        (typeof result.result !== "object" ||
+          result.result === null ||
+          !("state" in result.result) ||
+          typeof result.result.state !== "string" ||
+          !TERMINAL_RECEIPT_STATES.has(result.result.state))
+      )
+        continue;
+      const delivery = this.sendOutcome(connection, claim, result, 4 * 1024 * 1024, signal)
+        .catch((error: unknown) => {
+          if (!signal?.aborted && !(error instanceof LocalClaimRefusal)) {
+            this.deliveryFailures.push(error);
+            this.polling?.abort();
+          }
+        })
+        .finally(() => {
+          if (this.deliveries.get(claim.requestId) === delivery)
+            this.deliveries.delete(claim.requestId);
+        });
+      this.deliveries.set(claim.requestId, delivery);
+    }
+  }
+
   async poll(rpc: LocalRpc, signal?: AbortSignal, background = false): Promise<number> {
     if (this.deliveryFailures.length) throw this.deliveryFailures.shift();
     const connection = await this.confirmed(signal);
     for (const key of await this.records.state.keys("relay-request-")) {
       const entry = await this.records.state.read(key, intentSchema.parse);
-      if (entry && entry.message.expiresAt <= Date.now()) await this.records.state.remove(key);
+      if (
+        entry &&
+        entry.message.expiresAt + (entry.settled ? 0 : LOCAL_RESULT_SETTLEMENT_RETENTION_MS) <=
+          Date.now()
+      )
+        await this.records.state.remove(key);
     }
+    await this.settleReceipts(rpc, connection, signal);
     const wake = new AbortController();
     this.polling = wake;
     const pollingSignal = signal ? AbortSignal.any([signal, wake.signal]) : wake.signal;
@@ -1445,47 +1644,7 @@ export class LocalRelay {
             // not a revocation of independent work on sibling resources.
             result = rpc.failure(error);
           }
-          const bytes = Buffer.from(JSON.stringify(result));
-          if (Math.ceil(bytes.length / data.maxPartBytes) > 32)
-            throw new LocalRefusal(
-              "LOCAL_OUTPUT_LIMIT",
-              "The result exceeds the configured relay's bounded part capacity.",
-            );
-          const parts: LocalRelayPayloadReference["parts"] = [];
-          for (let offset = 0; offset < bytes.length; offset += data.maxPartBytes) {
-            const part = bytes.subarray(offset, offset + data.maxPartBytes);
-            const response = await this.request(
-              connection,
-              `/relay/${claim.requestId}/result-part`,
-              { binary: part, claim: claim.claimId, signal: scope, limit: 8192 },
-            );
-            const uploaded = z
-              .object({
-                success: z.literal(true),
-                data: localRelayPayloadReferenceSchema.innerType().shape.parts.element,
-              })
-              .passthrough()
-              .parse(JSON.parse(response.toString("utf8"))).data;
-            if (uploaded.size !== part.length || uploaded.sha256 !== hash(part))
-              throw new LocalRefusal(
-                "LOCAL_PAYLOAD_CHANGED",
-                "The uploaded result part differs from its digest.",
-              );
-            parts.push(uploaded);
-          }
-          await this.json(
-            connection,
-            "/relay/ack",
-            {
-              requestId: claim.requestId,
-              claimId: claim.claimId,
-              digest: claim.digest,
-              status: result.ok ? "completed" : "refused",
-              outcomeReference: { parts, size: bytes.length, sha256: hash(bytes) },
-            },
-            scope,
-          );
-          // Keep the journal's cached result until expiry: another claim may replay a lost acknowledgement.
+          await this.sendOutcome(connection, claim, result, data.maxPartBytes, scope);
         },
         signal,
       );

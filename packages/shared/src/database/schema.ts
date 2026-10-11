@@ -443,6 +443,14 @@ export const codespaceOperation = sqliteTable(
   "codespaceOperation",
   {
     id: text("id").primaryKey(),
+    requestId: text("requestId"),
+    requestDigest: text("requestDigest"),
+    inputReference: text("inputReference"),
+    resultReference: text("resultReference"),
+    admissionDeadlineAt: integer("admissionDeadlineAt"),
+    runtimeMs: integer("runtimeMs"),
+    startedAt: integer("startedAt"),
+    sessionKey: text("sessionKey"),
     userId: text("userId")
       .notNull()
       .references(() => user.id),
@@ -472,6 +480,7 @@ export const codespaceOperation = sqliteTable(
   },
   (table) => ({
     ownerIdx: index("codespace_operation_owner_idx").on(table.userId, table.resourceId),
+    requestIdx: uniqueIndex("codespace_operation_request_idx").on(table.userId, table.requestId),
     reconcileIdx: index("codespace_operation_reconcile_idx").on(table.state, table.claimExpiresAt),
   }),
 );
@@ -650,6 +659,7 @@ export const codespaceLocalRelay = sqliteTable(
     inputReference: text("inputReference").notNull(),
     status: text("status").notNull(),
     claimId: text("claimId"),
+    settlementClaimId: text("settlementClaimId"),
     claimExpiresAt: integer("claimExpiresAt"),
     outputReference: text("outputReference"),
     deadlineAt: integer("deadlineAt").notNull(),

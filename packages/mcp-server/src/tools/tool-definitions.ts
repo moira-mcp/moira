@@ -403,9 +403,15 @@ export const TOOL_DEFINITIONS = [
       {
         action: "exec",
         codespace_id: "00000000-0000-4000-8000-000000000000",
+        request_id: "11111111-1111-4111-8111-111111111111",
         argv: ["git", "status", "--short"],
         cwd: ".",
         timeout_seconds: 60,
+      },
+      {
+        action: "exec",
+        codespace_id: "00000000-0000-4000-8000-000000000000",
+        request_id: "11111111-1111-4111-8111-111111111111",
       },
       {
         action: "read",
@@ -455,13 +461,13 @@ export const TOOL_DEFINITIONS = [
         summary:
           "Work in a persistent GitHub or local Docker Sandboxes codespace: lifecycle, commands and files, by action.",
         result:
-          "Compact codespace or repository discovery, confirmed lifecycle state, stdout/stderr/exit_code, file results, a native download link or PNG/JPEG ImageContent. Recovery identities appear only for unknown outcomes or retained large output. Background commands use codespace_process.",
+          "Compact discovery, confirmed lifecycle state, durable command acceptance with request_id/operation_id and phase, available stdout/stderr/exit_code, file results, a native download link or PNG/JPEG ImageContent. Collect a command by its original request_id without command fields, or by operation_id; lookup never cancels or repeats it. Background commands use codespace_process.",
       },
       ru: {
         summary:
           "Работа в постоянном codespace GitHub или локальной Docker Sandboxes VM: жизненный цикл, команды и файлы, по action.",
         result:
-          "Краткий список кодспейсов или репозиториев, подтверждённое состояние, stdout/stderr/exit_code, результаты работы с файлами, нативная ссылка или PNG/JPEG ImageContent. Идентификаторы восстановления появляются только при неизвестном результате или большом сохранённом выводе. Фоновые команды используют codespace_process.",
+          "Краткое обнаружение, подтверждённое состояние, долговечное принятие команды с request_id/operation_id и фазой, доступные stdout/stderr/exit_code, результаты работы с файлами, нативная ссылка или PNG/JPEG ImageContent. Получайте команду по исходному request_id без полей команды либо по operation_id; чтение состояния не отменяет и не повторяет её. Фоновые команды используют codespace_process.",
       },
     },
   }),
@@ -474,12 +480,18 @@ export const TOOL_DEFINITIONS = [
       {
         action: "start",
         codespace_id: "00000000-0000-4000-8000-000000000000",
+        request_id: "11111111-1111-4111-8111-111111111111",
         argv: ["npm", "run", "dev"],
       },
       {
         action: "get",
         codespace_id: "00000000-0000-4000-8000-000000000000",
         process_id: "11111111-1111-4111-8111-111111111111",
+      },
+      {
+        action: "get",
+        codespace_id: "00000000-0000-4000-8000-000000000000",
+        request_id: "11111111-1111-4111-8111-111111111111",
       },
       {
         action: "read",
@@ -499,12 +511,12 @@ export const TOOL_DEFINITIONS = [
       en: {
         summary: "Start, inspect, read and stop a background command in an owned codespace.",
         result:
-          "A process_id, its state and available command output or a bounded output range; no lifecycle generations or journals.",
+          "Durable acceptance with request_id/process_id, phase and admission/runtime/result deadlines, available command output or a bounded output range. Recover a lost start response through get with the original request_id; stop is explicit cancellation, and lookup does not cancel or launch work.",
       },
       ru: {
         summary: "Запускает, проверяет, читает и останавливает фоновую команду в своём кодспейсе.",
         result:
-          "process_id, состояние и доступный результат команды либо диапазон вывода; без поколений и журналов.",
+          "Долговечное принятие с request_id/process_id, фазой и сроками допуска, выполнения и хранения результата, доступный вывод либо его диапазон. После потери ответа start используйте get с исходным request_id; stop явно отменяет работу, а чтение состояния не отменяет и не запускает её.",
       },
     },
   }),

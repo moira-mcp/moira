@@ -93,7 +93,9 @@ export abstract class CodespaceJobTransport
     request: CodespaceExecRequest,
   ): Promise<
     | CodespaceOperationResult
-    | { state: "running" }
+    | { state: "running"; startedAt?: number; requestDigest?: string }
+    | { state: "not_started"; requestDigest?: string }
+    | { state: "outcome_unknown"; requestDigest?: string }
     | { state: "session_unavailable" }
     | { state: "session_limit"; limit: "context" | "sessions" }
   > {
@@ -118,11 +120,18 @@ export abstract class CodespaceJobTransport
     request: CodespaceExecRequest,
   ): Record<string, unknown> {
     if (request.stdin.kind !== "inline") throw new Error("Operation input is not materialized");
+    const combinedPrefixBudget = Math.floor(((8 * 1024 * 1024 - 64 * 1024) * 3) / 4);
+    const stdout = request.maxStdoutBytes!;
+    const stderr = request.maxStderrBytes!;
+    const ratio = Math.min(1, combinedPrefixBudget / (stdout + stderr));
     return {
       action: "execute",
       version: 1,
       remoteMarker: operation.remoteMarker,
       repositoryFullName: codespace.repositoryFullName,
+      ...(request.requestDigest
+        ? { requestDigest: request.requestDigest, admissionDeadlineAt: request.admissionDeadlineAt }
+        : {}),
       ...(request.argv !== undefined ? { argv: request.argv } : {}),
       ...(request.cwd !== undefined ? { cwd: request.cwd } : {}),
       ...(request.session !== undefined ? { session: request.session } : {}),
@@ -132,8 +141,8 @@ export abstract class CodespaceJobTransport
       ...(request.env !== undefined ? { env: request.env } : {}),
       stdin: Buffer.from(request.stdin.bytes).toString("base64"),
       timeoutMs: request.timeoutMs,
-      maxStdoutBytes: request.maxStdoutBytes,
-      maxStderrBytes: request.maxStderrBytes,
+      maxStdoutBytes: Math.max(1, Math.floor(stdout * ratio)),
+      maxStderrBytes: Math.max(1, Math.floor(stderr * ratio)),
       maxRetainedBytes: request.maxRetainedBytes,
     };
   }
@@ -143,7 +152,12 @@ export abstract class CodespaceJobTransport
     codespace: CodespaceResourceRecord,
     operation: CodespaceOperationRecord,
   ): Promise<
-    CodespaceOperationResult | { state: "running" } | { state: "absent" } | { state: "interrupted" }
+    | CodespaceOperationResult
+    | { state: "running"; startedAt?: number; requestDigest?: string }
+    | { state: "not_started"; requestDigest?: string }
+    | { state: "outcome_unknown"; requestDigest?: string }
+    | { state: "absent" }
+    | { state: "interrupted" }
   > {
     // Only a dispatch can be refused for its session; an inspection of an existing operation
     // cannot, so that answer is not part of this contract.
@@ -151,6 +165,7 @@ export abstract class CodespaceJobTransport
       action: "inspect",
       version: 1,
       remoteMarker: operation.remoteMarker,
+      ...(operation.requestDigest ? { requestDigest: operation.requestDigest } : {}),
     });
     if (result.state === "session_unavailable" || result.state === "session_limit") {
       throw new Error("Codespace operation transport returned an invalid result");
@@ -163,12 +178,23 @@ export abstract class CodespaceJobTransport
     codespace: CodespaceResourceRecord,
     operation: CodespaceOperationRecord,
   ): Promise<
-    CodespaceOperationResult | { state: "running" } | { state: "absent" } | { state: "interrupted" }
+    | CodespaceOperationResult
+    | { state: "running"; startedAt?: number; requestDigest?: string }
+    | { state: "not_started"; requestDigest?: string }
+    | { state: "outcome_unknown"; requestDigest?: string }
+    | { state: "absent" }
+    | { state: "interrupted" }
   > {
     const result = await this.operationJob(credential, codespace, operation, {
       action: "cancel",
       version: 1,
       remoteMarker: operation.remoteMarker,
+      ...(operation.requestDigest
+        ? {
+            requestDigest: operation.requestDigest,
+            admissionDeadlineAt: operation.admissionDeadlineAt,
+          }
+        : {}),
     });
     if (result.state === "session_unavailable" || result.state === "session_limit") {
       throw new Error("Codespace operation transport returned an invalid result");
@@ -185,6 +211,7 @@ export abstract class CodespaceJobTransport
       action: "finalize",
       version: 1,
       remoteMarker: operation.remoteMarker,
+      ...(operation.requestDigest ? { requestDigest: operation.requestDigest } : {}),
     });
     if (result.state !== "absent") throw new Error("Remote operation cleanup is incomplete");
   }
@@ -591,13 +618,50 @@ export abstract class CodespaceJobTransport
     job: Record<string, unknown>,
   ): Promise<
     | CodespaceOperationResult
-    | { state: "running" }
+    | { state: "running"; startedAt?: number; requestDigest?: string }
+    | { state: "not_started"; requestDigest?: string }
+    | { state: "outcome_unknown"; requestDigest?: string }
     | { state: "absent" }
     | { state: "interrupted" }
     | { state: "session_unavailable" }
     | { state: "session_limit"; limit: "context" | "sessions" }
   > {
     const value = await this.submitOperationJob(credential, codespace, operation, job);
+    // Cleanup confirms absence after deliberately removing execution proof; it is not a result receipt.
+    const receipt =
+      operation.requestDigest && job.action !== "finalize"
+        ? (() => {
+            const startRequired =
+              value.state === "running" ||
+              value.state === "session_ended" ||
+              TERMINAL_OPERATION_STATES.has(String(value.state));
+            if (
+              value.requestDigest !== operation.requestDigest ||
+              (startRequired && value.startedAt === undefined) ||
+              (value.startedAt !== undefined &&
+                (!nonnegativeInteger(value.startedAt) ||
+                  value.startedAt === 0 ||
+                  value.startedAt > operation.admissionDeadlineAt!)) ||
+              (value.state === "not_started" &&
+                (value.startedAt !== undefined || operation.startedAt != null))
+            )
+              throw new Error("Codespace receipt does not match accepted request");
+            if (
+              value.runtimeMs !== undefined &&
+              (!nonnegativeInteger(value.runtimeMs) ||
+                value.runtimeMs === 0 ||
+                Number(value.runtimeMs) > operation.runtimeMs!)
+            )
+              throw new Error("Codespace runtime receipt exceeds accepted duration");
+            return {
+              requestDigest: value.requestDigest as string,
+              ...(value.startedAt !== undefined ? { startedAt: value.startedAt as number } : {}),
+              ...(value.runtimeMs !== undefined ? { runtimeMs: value.runtimeMs as number } : {}),
+            };
+          })()
+        : {};
+    if (value.state === "not_started") return { state: "not_started", ...receipt };
+    if (value.state === "outcome_unknown") return { state: "outcome_unknown", ...receipt };
     if (
       value.state === "running" ||
       value.state === "absent" ||
@@ -606,6 +670,7 @@ export abstract class CodespaceJobTransport
     ) {
       return {
         state: value.state as "running" | "absent" | "interrupted" | "session_unavailable",
+        ...receipt,
       };
     }
     if (value.state === "session_limit") {
@@ -617,6 +682,7 @@ export abstract class CodespaceJobTransport
       // nothing to show.
       return {
         state: "succeeded",
+        ...receipt,
         stdout: "",
         stderr: "",
         exitCode: 0,
@@ -653,6 +719,7 @@ export abstract class CodespaceJobTransport
     }
     return {
       state: value.state as CodespaceOperationResult["state"],
+      ...receipt,
       stdout: stdout.toString("utf8"),
       stderr: stderr.toString("utf8"),
       exitCode: value.exitCode as number | null,

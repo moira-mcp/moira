@@ -7,9 +7,9 @@ import Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 import { spawn, spawnSync } from "node:child_process";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
-import { mkdtempSync, mkdirSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import type { ClientRequest, IncomingMessage, RequestOptions } from "node:http";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -161,6 +161,7 @@ class DomainFixture {
   transfers!: CodespaceTransferService;
   services!: CodespaceToolServices;
   connection!: CodespaceConnectionService;
+  operation!: CodespaceOperationService;
 
   constructor() {
     mkdirSync(this.repositoryPath, { recursive: true });
@@ -203,6 +204,7 @@ class DomainFixture {
   }
 
   reopen() {
+    this.operation?.stop();
     this.sqlite?.close();
     this.sqlite = new Database(this.databasePath);
     this.sqlite.pragma("foreign_keys = ON");
@@ -280,6 +282,7 @@ class DomainFixture {
       transfers: this.transfers,
       nativeFetcher,
     };
+    this.operation = new CodespaceOperationService(dependencies);
     this.services = {
       connection: this.connection,
       guidance: (situation) => ({
@@ -306,7 +309,7 @@ class DomainFixture {
         requiredCapabilities: { exactLifecycle: true, personalBillingOnly: true },
         policy: () => policy,
       }),
-      operation: new CodespaceOperationService(dependencies),
+      operation: this.operation,
       file: new CodespaceFileService(dependencies),
     };
   }
@@ -380,7 +383,15 @@ class DomainFixture {
     });
   }
 
-  close() {
+  async close() {
+    this.operation.stop();
+    const active = this.sqlite
+      .prepare(
+        "SELECT id,userId FROM codespaceOperation WHERE kind='exec' AND state IN ('reserved','running','cancel_pending','reconcile_pending')",
+      )
+      .all() as Array<{ id: string; userId: string }>;
+    for (const row of active) await this.operation.cancel(row.userId, row.id);
+    await new Promise<void>((done) => setImmediate(done));
     this.sqlite.close();
     rmSync(this.root, { recursive: true, force: true });
   }
@@ -430,15 +441,54 @@ function recoveryId(result: CallToolResult): string {
 }
 
 async function finish(
-  _mcp: Awaited<ReturnType<typeof client>>,
-  _name: string,
-  _codespaceId: string,
+  mcp: Awaited<ReturnType<typeof client>>,
+  name: string,
+  codespaceId: string,
   first: CallToolResult,
 ): Promise<CallToolResult> {
-  // The ordinary first call itself must be complete, not made to look synchronous by test polling.
   expect(first.structuredContent).not.toHaveProperty("operation");
-  if (!first.isError) expect(first.structuredContent).not.toHaveProperty("operation_id");
-  return first;
+  if (name !== "exec") {
+    expect(first.structuredContent).not.toHaveProperty("operation_id");
+    return first;
+  }
+  expect(first.isError).not.toBe(true);
+  // Submission proves durable acceptance; the public collection form observes the same effect.
+  expect(first.structuredContent).toMatchObject({
+    accepted: true,
+    request_id: expect.any(String),
+    operation_id: expect.any(String),
+  });
+  const operationId = recoveryId(first);
+  let result = first;
+  const deadline = Date.now() + 10_000;
+  while (
+    !["succeeded", "failed", "cancelled", "timed_out"].includes(
+      String(result.structuredContent?.state),
+    )
+  ) {
+    if (Date.now() >= deadline)
+      throw new Error(`Accepted command did not settle: ${JSON.stringify(result)}`);
+    result = await mcp.call("exec", { codespace_id: codespaceId, operation_id: operationId });
+  }
+  expect(result.structuredContent).toMatchObject({ operation_id: operationId });
+  return result;
+}
+
+async function waitForProcessState(
+  mcp: Awaited<ReturnType<typeof client>>,
+  codespaceId: string,
+  processId: string,
+  state: "running" | "cancelled",
+) {
+  const deadline = Date.now() + 10_000;
+  let result = await mcp.process("get", { codespace_id: codespaceId, process_id: processId });
+  while (result.structuredContent?.state !== state) {
+    if (result.isError || Date.now() >= deadline)
+      throw new Error(`Process did not become ${state}: ${JSON.stringify(result)}`);
+    await new Promise<void>((done) => setTimeout(done, 25));
+    result = await mcp.process("get", { codespace_id: codespaceId, process_id: processId });
+  }
+  return result;
 }
 
 const cleanups: Array<() => Promise<void> | void> = [];
@@ -567,7 +617,13 @@ describe("ChatGPT-compatible codespace MCP with real domain services", () => {
         mcp,
         "exec",
         codespaceId,
-        await mcp.call("exec", { ...args, argv, cwd: ".", timeout_seconds: 10 }),
+        await mcp.call("exec", {
+          ...args,
+          request_id: randomUUID(),
+          argv,
+          cwd: ".",
+          timeout_seconds: 10,
+        }),
       );
     const tests = await run([
       process.execPath,
@@ -606,6 +662,7 @@ describe("ChatGPT-compatible codespace MCP with real domain services", () => {
       codespaceId,
       await mcp.call("exec", {
         ...args,
+        request_id: randomUUID(),
         argv: [
           process.execPath,
           "-e",
@@ -640,6 +697,7 @@ describe("ChatGPT-compatible codespace MCP with real domain services", () => {
       codespaceId,
       await mcp.call("exec", {
         ...args,
+        request_id: randomUUID(),
         argv: [process.execPath, "-e", "process.stdin.pipe(process.stdout)"],
         cwd: ".",
         timeout_seconds: 10,
@@ -721,23 +779,26 @@ describe("ChatGPT-compatible codespace MCP with real domain services", () => {
 
     const started = await mcp.process("start", {
       ...args,
+      request_id: randomUUID(),
       argv: [
         process.execPath,
         "-e",
-        "process.stdout.write('progress\\n');setTimeout(()=>{require('node:fs').writeFileSync('background-done.txt','done');process.stdout.write('finished\\n')},400)",
+        "const fs=require('node:fs');process.stdout.write('progress\\n');const timer=setInterval(()=>{if(fs.existsSync('background-release')){clearInterval(timer);fs.writeFileSync('background-done.txt','done');process.stdout.write('finished\\n')}},10)",
       ],
       cwd: ".",
       // Far past anything a single call could wait for; the command is short so the test is fast.
       timeout_seconds: 3 * 60 * 60,
     });
-    // The call returns while the command is still running, with no result and no waiting.
+    // The call acknowledges accepted work before waiting for its actual guest start.
     expect(started.structuredContent).toMatchObject({
-      state: "running",
+      state: "starting",
+      accepted: true,
       process_id: expect.any(String),
     });
     expect(started.structuredContent).not.toHaveProperty("operation");
     expect(started.structuredContent).not.toHaveProperty("result");
     const operationId = started.structuredContent!.process_id as string;
+    await waitForProcessState(mcp, codespaceId, operationId, "running");
     const beforeForeign = fixture.jobs.length;
     for (const action of ["get", "stop"])
       expect(
@@ -761,6 +822,7 @@ describe("ChatGPT-compatible codespace MCP with real domain services", () => {
       }
     }
     expect(progress).toContain("progress");
+    writeFileSync(join(fixture.repositoryPath, "background-release"), "release");
 
     let collected = await mcp.process("get", { ...args, process_id: operationId });
     const deadline = Date.now() + 10_000;
@@ -784,11 +846,18 @@ describe("ChatGPT-compatible codespace MCP with real domain services", () => {
 
     const running = await mcp.process("start", {
       ...args,
+      request_id: randomUUID(),
       argv: [process.execPath, "-e", "setInterval(()=>{},1000)"],
       cwd: ".",
       timeout_seconds: 3 * 60 * 60,
     });
-    expect(running.structuredContent).toMatchObject({ state: "running" });
+    expect(running.structuredContent).toMatchObject({ state: "starting", accepted: true });
+    await waitForProcessState(
+      mcp,
+      codespaceId,
+      running.structuredContent!.process_id as string,
+      "running",
+    );
     const stopped = await mcp.process("stop", {
       ...args,
       process_id: running.structuredContent!.process_id,
@@ -816,6 +885,7 @@ describe("ChatGPT-compatible codespace MCP with real domain services", () => {
       codespaceId,
       await mcp.call("exec", {
         ...args,
+        request_id: randomUUID(),
         argv: observe,
         timeout_seconds: 10,
         session: "build",
@@ -837,6 +907,7 @@ describe("ChatGPT-compatible codespace MCP with real domain services", () => {
       codespaceId,
       await mcp.call("exec", {
         ...args,
+        request_id: randomUUID(),
         argv: observe,
         timeout_seconds: 10,
         session: "build",
@@ -850,7 +921,12 @@ describe("ChatGPT-compatible codespace MCP with real domain services", () => {
       mcp,
       "exec",
       codespaceId,
-      await mcp.call("exec", { ...args, argv: observe, timeout_seconds: 10 }),
+      await mcp.call("exec", {
+        ...args,
+        request_id: randomUUID(),
+        argv: observe,
+        timeout_seconds: 10,
+      }),
     );
     expect(outside.structuredContent).toMatchObject({
       stdout: "repository|none",
@@ -870,6 +946,7 @@ describe("ChatGPT-compatible codespace MCP with real domain services", () => {
       codespaceId,
       await mcp.call("exec", {
         ...args,
+        request_id: randomUUID(),
         session: "build",
         script: "cd service\nexport BUILD_TARGET=debug\nexport TOOLCHAIN=/opt/toolchain\n",
         timeout_seconds: 20,
@@ -884,6 +961,7 @@ describe("ChatGPT-compatible codespace MCP with real domain services", () => {
       codespaceId,
       await mcp.call("exec", {
         ...args,
+        request_id: randomUUID(),
         argv: [
           process.execPath,
           "-e",
@@ -899,27 +977,45 @@ describe("ChatGPT-compatible codespace MCP with real domain services", () => {
     });
 
     // Ending the session removes what it stored, so naming it afterwards is refused.
-    const ended = await mcp.call("exec", {
-      ...args,
-      session: "build",
-      session_end: true,
-    });
+    const ended = await finish(
+      mcp,
+      "exec",
+      codespaceId,
+      await mcp.call("exec", {
+        ...args,
+        request_id: randomUUID(),
+        session: "build",
+        session_end: true,
+      }),
+    );
     expect(ended.structuredContent).toMatchObject({ exit_code: 0 });
-    const afterEnd = await mcp.call("exec", {
-      ...args,
-      argv: observe,
-      timeout_seconds: 10,
-      session: "build",
-    });
+    const afterEnd = await finish(
+      mcp,
+      "exec",
+      codespaceId,
+      await mcp.call("exec", {
+        ...args,
+        request_id: randomUUID(),
+        argv: observe,
+        timeout_seconds: 10,
+        session: "build",
+      }),
+    );
     expect(afterEnd.isError).toBe(true);
 
     // A session that was never opened is refused rather than silently created.
-    const unknown = await mcp.call("exec", {
-      ...args,
-      argv: observe,
-      timeout_seconds: 10,
-      session: "never-opened",
-    });
+    const unknown = await finish(
+      mcp,
+      "exec",
+      codespaceId,
+      await mcp.call("exec", {
+        ...args,
+        request_id: randomUUID(),
+        argv: observe,
+        timeout_seconds: 10,
+        session: "never-opened",
+      }),
+    );
     expect(unknown.isError).toBe(true);
     expect(JSON.stringify(unknown.structuredContent)).toContain("CODESPACE_SESSION_UNAVAILABLE");
   });
@@ -928,6 +1024,7 @@ describe("ChatGPT-compatible codespace MCP with real domain services", () => {
     const { fixture, mcp } = await setup();
     const codespaceId = await createCodespace(mcp);
     for (const kind of ["write", "exec"] as const) {
+      const requestId = randomUUID();
       fixture.loseNextResponse = kind === "write" ? "file-execute" : "execute";
       const first = await mcp.call(
         kind,
@@ -940,6 +1037,7 @@ describe("ChatGPT-compatible codespace MCP with real domain services", () => {
             }
           : {
               codespace_id: codespaceId,
+              request_id: requestId,
               argv: [
                 process.execPath,
                 "-e",
@@ -949,8 +1047,18 @@ describe("ChatGPT-compatible codespace MCP with real domain services", () => {
               timeout_seconds: 10,
             },
       );
-      expect(first.isError).toBe(true);
+      expect(first).toMatchObject(
+        kind === "write"
+          ? { isError: true }
+          : { structuredContent: { accepted: true, request_id: requestId } },
+      );
       const operationId = recoveryId(first);
+      if (kind === "exec") {
+        // The lost reply belongs to guest delivery, after the caller's durable acceptance.
+        await mcp.call("exec", { codespace_id: codespaceId, operation_id: operationId });
+        await new Promise<void>((done) => setImmediate(done));
+      }
+      expect(fixture.loseNextResponse).toBeNull();
       fixture.unavailableMarker = null;
       fixture.reopen();
       const second = await client();
@@ -967,7 +1075,10 @@ describe("ChatGPT-compatible codespace MCP with real domain services", () => {
         second,
         kind,
         codespaceId,
-        await second.call(kind, { codespace_id: codespaceId, operation_id: operationId }),
+        await second.call(kind, {
+          codespace_id: codespaceId,
+          ...(kind === "exec" ? { request_id: requestId } : { operation_id: operationId }),
+        }),
       );
       expect(recovered.isError).not.toBe(true);
       const row = fixture.sqlite

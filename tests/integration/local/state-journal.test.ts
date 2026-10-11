@@ -246,6 +246,48 @@ describe("private local state", () => {
 });
 
 describe("replay and result lifetime", () => {
+  test("a confirmed live receipt remains replayable only until its original admission expires", async () => {
+    let now = 1000;
+    const id = randomUUID();
+    const input = { action: "write" };
+    const journal = new RequestJournal(state, () => now);
+    await journal.run(id, 2000, input, async () => ({ ok: true }));
+    await journal.acknowledge(id, true);
+    await expect(
+      journal.run(id, 2000, input, async () => {
+        throw new Error("must not repeat the effect");
+      }),
+    ).resolves.toEqual({ ok: true });
+    now = 2000;
+    await journal.expire();
+    expect(await state.read(`result-${id}.json`, (value) => value)).toBeNull();
+    expect(await journal.retained(id, 2000, input)).toBeUndefined();
+  });
+  test("an expired admission retains its completed receipt for collection without admitting another effect", async () => {
+    let now = 1000;
+    const id = randomUUID();
+    const journal = new RequestJournal(state, () => now);
+    await journal.run(id, 2000, { action: "write" }, async () => {
+      await state.write("effect.json", { count: 1 });
+      return { ok: true, value: "completed" };
+    });
+    now = 2001;
+    await journal.expire();
+    expect(await state.read(`result-${id}.json`, (value) => value)).toEqual({
+      ok: true,
+      value: "completed",
+    });
+    expect(
+      await new RequestJournal(state, () => now).retained(id, 2000, { action: "write" }),
+    ).toEqual({ ok: true, value: "completed" });
+    await expect(journal.retained(id, 2000, { action: "delete" })).rejects.toThrow("cannot change");
+    await expect(
+      journal.run(id, 2000, { action: "write" }, async () => {
+        await state.write("effect.json", { count: 2 });
+      }),
+    ).rejects.toThrow("expired");
+    expect(await state.read("effect.json", (value) => value)).toEqual({ count: 1 });
+  });
   test.each([
     ["at expiration", 1000],
     ["beyond the maximum future window", 901001],
@@ -323,7 +365,7 @@ describe("replay and result lifetime", () => {
     );
     expect(results).toEqual([{ index: 0 }, { index: 1 }, { index: 2 }, { index: 3 }]);
     expect(await state.keys("result-")).toHaveLength(4);
-    now = 2001;
+    now = 2000 + 60 * 60_000;
     await journal.expire();
     expect(await state.keys("result-")).toEqual([]);
     await expect(journal.run(ids[0], 2000, {}, async () => null)).rejects.toThrow("expired");

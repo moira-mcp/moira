@@ -19,6 +19,118 @@ const codespaceId = "00000000-0000-4000-8000-000000000001";
 const processId = "00000000-0000-4000-8000-000000000002";
 
 describe("ordinary codespace and background process contracts", () => {
+  it.each([
+    ["session_unavailable_not_started", "CODESPACE_SESSION_UNAVAILABLE"],
+    ["session_limit_not_started", "CODESPACE_POLICY_LIMIT"],
+  ])("collects asynchronous %s with its precise refusal code", async (lastOutcome, code) => {
+    const services = {
+      operation: {
+        lookupRequest: jest.fn(async () => ({
+          operation: {
+            id: processId,
+            resourceId: codespaceId,
+            kind: "exec",
+            requestId: processId,
+            inputReference: "private-input",
+            state: "cancelled",
+            lastOutcome,
+            exitCode: null,
+            startedAt: null,
+          },
+          result: null,
+        })),
+      },
+    } as unknown as CodespaceToolServices;
+    const response = await executeCodespaceProcess(
+      { action: "get", request: { codespace_id: codespaceId, request_id: processId } },
+      "owned-user",
+      services,
+    );
+    expect(response).toMatchObject({
+      isError: true,
+      structuredContent: {
+        process_id: processId,
+        request_id: processId,
+        accepted: true,
+        phase: "not_started",
+        started_at: null,
+        error: { code, retryable: false },
+      },
+    });
+    expect(JSON.stringify(response)).not.toContain(lastOutcome);
+  });
+
+  it("projects the same durable acceptance and uncertain phase on process start and caller-ID lookup", async () => {
+    const response = {
+      operation: {
+        id: processId,
+        resourceId: codespaceId,
+        kind: "exec",
+        requestId: processId,
+        inputReference: "private-input",
+        state: "reserved",
+        exitCode: null,
+        admissionDeadlineAt: 1000,
+        startedAt: null,
+        runtimeMs: 5000,
+        resultExpiresAt: null,
+      },
+      result: null,
+    };
+    const execute = jest.fn(async () => response);
+    const lookupRequest = jest.fn(
+      async (_userId: string, _codespaceId: string, _requestId: string) => ({
+        ...response,
+        operation: { ...response.operation, state: "reconcile_pending" },
+      }),
+    );
+    const services = { operation: { execute, lookupRequest } } as unknown as CodespaceToolServices;
+    const started = await executeCodespaceProcess(
+      {
+        action: "start",
+        request: {
+          codespace_id: codespaceId,
+          request_id: processId,
+          argv: ["serve"],
+          session_start: false,
+          session_end: false,
+        },
+      },
+      "owned-user",
+      services,
+    );
+    expect(started.structuredContent).toMatchObject({
+      process_id: processId,
+      request_id: processId,
+      accepted: true,
+      phase: "accepted",
+      started_at: null,
+      admission_deadline_at: 1000,
+      runtime_ms: 5000,
+    });
+    const collected = await executeCodespaceProcess(
+      {
+        action: "get",
+        request: {
+          codespace_id: codespaceId,
+          request_id: processId,
+        },
+      },
+      "owned-user",
+      services,
+    );
+    expect(collected.structuredContent).toMatchObject({
+      process_id: processId,
+      request_id: processId,
+      accepted: true,
+      phase: "outcome_unknown",
+      state: "unknown",
+      started_at: null,
+    });
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(lookupRequest).toHaveBeenCalledWith("owned-user", codespaceId, processId);
+  });
+
   it("keeps the accepted process identity after a typed uncertain start failure", async () => {
     const execute = jest.fn(async () => {
       throw new CodespaceResourceError(
@@ -35,6 +147,7 @@ describe("ordinary codespace and background process contracts", () => {
         action: "start",
         request: {
           codespace_id: codespaceId,
+          request_id: processId,
           argv: ["serve"],
           session_start: false,
           session_end: false,
