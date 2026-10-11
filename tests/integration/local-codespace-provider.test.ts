@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test } from "@jest/globals";
+import { afterEach, beforeEach, describe, expect, jest, test } from "@jest/globals";
 import express from "express";
 import request from "supertest";
 import Database from "better-sqlite3";
@@ -16,6 +16,7 @@ import {
   localRepositoryTargetId,
   projectCodespaceSummary,
   localCodespaceFailureGuidance,
+  LOCAL_REQUEST_MAX_WINDOW_MS,
   type CodespaceResourcePolicy,
   type CodespaceResourceRecord,
   type LocalRelayAcknowledgement,
@@ -165,6 +166,7 @@ async function fixture(partLimit = 4 * 1024 * 1024, maxObjects = 512, nativeSize
     beforePayload: null as
       ((requestId: string, signal: AbortSignal | null) => Promise<void>) | null,
     afterAck: null as ((requestId: string) => Promise<void>) | null,
+    afterRenew: null as (() => void) | null,
     afterCreateAdmitted: null as (() => Promise<void>) | null,
     beforeCreateReady: null as (() => Promise<void>) | null,
   };
@@ -224,6 +226,7 @@ async function fixture(partLimit = 4 * 1024 * 1024, maxObjects = 512, nativeSize
       );
     });
     if (ack && response.status === 200) await faults.afterAck?.(ack.requestId);
+    if (url.pathname.endsWith("/renew") && response.status === 200) faults.afterRenew?.();
     if (response.status >= 400) {
       const serialized =
         typeof response.text === "string"
@@ -679,6 +682,114 @@ async function fixture(partLimit = 4 * 1024 * 1024, maxObjects = 512, nativeSize
 }
 
 describe("actual local-only service composition and outbound relay", () => {
+  test.each([-5000, 5000])(
+    "fresh full-window creation becomes usable when the server clock offset is %s ms",
+    async (serverOffsetMs) => {
+      const companionNow = Date.now();
+      const companionClock = jest.spyOn(Date, "now").mockReturnValue(companionNow);
+      let actual: Awaited<ReturnType<typeof fixture>> | undefined;
+      try {
+        actual = await fixture();
+        actual.clock.now = companionNow + serverOffsetMs;
+        actual.policy.createDeadlineMs = LOCAL_REQUEST_MAX_WINDOW_MS;
+        const created = await actual.drive(
+          actual.services.resource.create("user-a", actual.target, "main"),
+        );
+        expect(created.resource.state).toBe("usable");
+        const spaces = await actual.local.records.list();
+        expect(spaces).toHaveLength(1);
+        expect(spaces[0].operationMarker).toBe(created.resource.operationMarker);
+        expect(actual.physical.get(spaces[0].id)).toBe("running");
+      } finally {
+        try {
+          await actual?.relay.drain();
+        } finally {
+          companionClock.mockRestore();
+        }
+      }
+    },
+  );
+
+  test("held creation remains usable after actual claim renewal with the companion clock 5000 ms ahead", async () => {
+    const companionNow = Date.now();
+    const companionClock = jest.spyOn(Date, "now").mockReturnValue(companionNow);
+    let actual: Awaited<ReturnType<typeof fixture>> | undefined;
+    let driven: Promise<{ resource: CodespaceResourceRecord }> | undefined;
+    let release!: () => void;
+    const allowReady = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    try {
+      actual = await fixture();
+      actual.clock.now = companionNow - 5000;
+      actual.policy.createDeadlineMs = LOCAL_REQUEST_MAX_WINDOW_MS;
+      let entered!: () => void, renewed!: () => void;
+      const preparing = new Promise<void>((resolve) => {
+        entered = resolve;
+      });
+      const renewalReturned = new Promise<void>((resolve) => {
+        renewed = resolve;
+      });
+      actual.faults.beforeCreateReady = async () => {
+        entered();
+        await allowReady;
+      };
+      let renewalResponses = 0;
+      actual.faults.afterRenew = () => {
+        // A second request is issued only after the companion validates the first reply.
+        if (++renewalResponses === 2) renewed();
+      };
+      driven = actual.drive(actual.services.resource.create("user-a", actual.target, "main"), true);
+      await preparing;
+      await renewalReturned;
+      release();
+      const created = await driven;
+      expect(created.resource.state).toBe("usable");
+      const spaces = await actual.local.records.list();
+      expect(spaces).toHaveLength(1);
+      expect(spaces[0]).toMatchObject({
+        operationMarker: created.resource.operationMarker,
+        phase: "usable",
+      });
+      expect(actual.physical.get(spaces[0].id)).toBe("running");
+    } finally {
+      release();
+      try {
+        await driven;
+        await actual?.relay.drain();
+      } finally {
+        companionClock.mockRestore();
+      }
+    }
+  });
+
+  test("an expired relay claim is refused before creation reaches the local runtime", async () => {
+    const companionNow = Date.now();
+    const companionClock = jest.spyOn(Date, "now").mockReturnValue(companionNow);
+    let actual: Awaited<ReturnType<typeof fixture>> | undefined;
+    let creation: Promise<{ resource: CodespaceResourceRecord }> | undefined;
+    try {
+      actual = await fixture();
+      // Claims last 30 seconds; this claim is already expired on the companion clock.
+      actual.clock.now = companionNow - 30_000;
+      actual.policy.createDeadlineMs = LOCAL_REQUEST_MAX_WINDOW_MS;
+      creation = actual.services.resource.create("user-a", actual.target, "main");
+      await expect(actual.drive(creation)).rejects.toMatchObject({
+        code: "LOCAL_IDENTITY_CHANGED",
+      });
+      expect(await actual.local.records.list()).toHaveLength(0);
+      expect(actual.physical.size).toBe(0);
+    } finally {
+      try {
+        if (actual) actual.clock.now = companionNow + LOCAL_REQUEST_MAX_WINDOW_MS + 1;
+        await creation;
+        await actual?.relay.drain();
+      } finally {
+        companionClock.mockRestore();
+      }
+    }
+  });
+
   test.each(["exec", "write"] as const)(
     "explicit stop cancels %s held before relay enqueue without blocking fresh work or prior results",
     async (kind) => {

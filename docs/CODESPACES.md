@@ -174,6 +174,20 @@ npm run local -- run
 
 Keep that foreground process running to serve the account; Ctrl+C settles owned work. Reconnection
 uses durable request IDs, digests and claims, so a lost response does not authorize redispatch.
+
+New local relay envelopes expire at most 870000 ms after the server's issuance time, leaving
+30 seconds inside the companion's strict 900000 ms future-window ceiling. Shorter requested
+windows, the resource's creation deadline and the ordinary work lease still cap expiry.
+Retained requests keep their original deadline, digest and payload bytes on replay.
+Fresh creation supports a clock difference of up to five seconds in either direction with prompt
+delivery and sufficient unexpired request, delivery-claim and work-lease authority. Delivery claims
+remain limited to 30 seconds and are checked on receipt and renewal; the issuance reserve does not
+grant a 30-second clock tolerance or acceptance after expiry. Malformed, expired and excessive-window
+requests remain refused before durable effects. Keep the server and computer clocks synchronized.
+The issuance rule uses the existing envelope and control schemas: deploying the server issuer
+does not require rebuilding a compatible companion or converting saved state. It applies to new
+requests, without rewriting retained or rejected identities.
+
 Transient network failures, including failed response reads, and server 5xx responses pause relay
 contact without stopping already admitted work. An addressed resource refusal returns that request's
 bounded error. A refused delivery claim aborts only its request scope; it does not close VM ownership
