@@ -1,6 +1,7 @@
 import { describe, expect, test } from "@jest/globals";
 import { spawn as spawnProcess } from "node:child_process";
 import { EventEmitter } from "node:events";
+import { createHash } from "node:crypto";
 import { resolve } from "node:path";
 import type { ClientRequest, IncomingMessage, RequestOptions } from "node:http";
 import { GitHubCodespacesConnector } from "../../../packages/web-backend/src/services/github-codespaces-connector.js";
@@ -66,6 +67,8 @@ const version = { size: 3, sha256: "a".repeat(64), modifiedAt: 1 };
 function fileOperation(kind: CodespaceOperationRecord["kind"]): CodespaceOperationRecord {
   return { ...operation, kind };
 }
+
+const sha256 = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex");
 
 describe("GitHub Codespaces connector boundary", () => {
   test("passes credentials only in the Unix-socket request body", async () => {
@@ -217,6 +220,7 @@ describe("GitHub Codespaces connector boundary", () => {
       totalSize: 3,
       bytes: output,
       sha256: "a".repeat(64),
+      rangeSha256: sha256(output),
     });
     const job = JSON.parse(harness.calls[0].body).job;
     expect(job.action).toBe("file-execute");
@@ -226,6 +230,206 @@ describe("GitHub Codespaces connector boundary", () => {
       offset: 0,
       length: 3,
     });
+  });
+
+  test("collects large stat and bounded range metadata without confusing whole and range digests", async () => {
+    const bytes = Buffer.from("selected bytes");
+    const totalSize = 9 * 1024 ** 3;
+    const stat = {
+      action: "stat",
+      stat: {
+        path: "large.bin",
+        type: "file",
+        size: totalSize,
+        mode: 0o600,
+        modifiedAt: 1,
+        version: null,
+      },
+    };
+    const read = {
+      action: "read",
+      path: "large.bin",
+      offset: totalSize - bytes.length,
+      totalSize,
+      bytesBase64: bytes.toString("base64"),
+      sha256: null,
+      rangeSha256: sha256(bytes),
+    };
+    const harness = requestHarness((body) => ({
+      value: JSON.stringify({
+        state: "succeeded",
+        value:
+          (body as { job: { remoteMarker: string } }).job.remoteMarker === "stat-marker"
+            ? stat
+            : read,
+      }),
+    }));
+    const connector = new GitHubCodespacesConnector(harness.requestImpl);
+    await expect(
+      connector.inspectFile("ghu_topsecret", codespace, {
+        ...fileOperation("stat"),
+        remoteMarker: "stat-marker",
+      }),
+    ).resolves.toEqual(stat);
+    await expect(
+      connector.inspectFile("ghu_topsecret", codespace, fileOperation("read")),
+    ).resolves.toEqual({
+      action: "read",
+      path: read.path,
+      offset: read.offset,
+      totalSize,
+      bytes,
+      sha256: null,
+      rangeSha256: sha256(bytes),
+    });
+  });
+
+  test("preserves a retained legacy whole digest while deriving its actual partial-range digest", async () => {
+    const full = Buffer.from("before selected after");
+    const bytes = Buffer.from("selected");
+    const whole = sha256(full);
+    const harness = requestHarness(() => ({
+      value: JSON.stringify({
+        state: "succeeded",
+        value: {
+          action: "read",
+          path: "small.txt",
+          offset: 7,
+          totalSize: full.length,
+          bytesBase64: bytes.toString("base64"),
+          sha256: whole,
+        },
+      }),
+    }));
+    const connector = new GitHubCodespacesConnector(harness.requestImpl);
+    await expect(
+      connector.inspectFile("ghu_topsecret", codespace, fileOperation("read")),
+    ).resolves.toMatchObject({
+      sha256: whole,
+      rangeSha256: sha256(bytes),
+      bytes,
+    });
+    expect(whole).not.toBe(sha256(bytes));
+  });
+
+  test.each([0, 3])("collects verified small and EOF ranges at offset %s", async (offset) => {
+    const full = Buffer.from("abc");
+    const bytes = full.subarray(offset, offset + 1);
+    const value = {
+      action: "read",
+      path: "small.txt",
+      offset,
+      totalSize: full.length,
+      bytesBase64: bytes.toString("base64"),
+      sha256: sha256(full),
+      rangeSha256: sha256(bytes),
+    };
+    const harness = requestHarness(() => ({
+      value: JSON.stringify({ state: "succeeded", value }),
+    }));
+    const connector = new GitHubCodespacesConnector(harness.requestImpl);
+    await expect(
+      connector.inspectFile("ghu_topsecret", codespace, fileOperation("read")),
+    ).resolves.toMatchObject({
+      offset,
+      bytes,
+      sha256: sha256(full),
+      rangeSha256: sha256(bytes),
+    });
+  });
+
+  test.each([
+    [
+      "wrong range digest",
+      {
+        action: "read",
+        path: "large.bin",
+        offset: 0,
+        totalSize: 8 * 1024 ** 2,
+        bytesBase64: "YQ==",
+        sha256: null,
+        rangeSha256: "a".repeat(64),
+      },
+    ],
+    [
+      "legacy unavailable whole digest",
+      {
+        action: "read",
+        path: "large.bin",
+        offset: 0,
+        totalSize: 8 * 1024 ** 2,
+        bytesBase64: "YQ==",
+        sha256: null,
+      },
+    ],
+    [
+      "small unavailable whole digest",
+      {
+        action: "read",
+        path: "small.bin",
+        offset: 0,
+        totalSize: 1,
+        bytesBase64: "YQ==",
+        sha256: null,
+        rangeSha256: sha256(Buffer.from("a")),
+      },
+    ],
+    [
+      "unsafe large size",
+      {
+        action: "stat",
+        stat: {
+          path: "large.bin",
+          type: "file",
+          size: Number.MAX_SAFE_INTEGER + 1,
+          mode: 0o600,
+          modifiedAt: 1,
+          version: null,
+        },
+      },
+    ],
+    [
+      "oversized download",
+      {
+        action: "download",
+        path: "large.bin",
+        offset: 0,
+        totalSize: 8 * 1024 ** 2,
+        bytesBase64: "YQ==",
+        sha256: "a".repeat(64),
+      },
+    ],
+    [
+      "unbounded failure reason",
+      {
+        action: "read",
+        state: "failed",
+        code: "CODESPACE_FILE_REJECTED",
+        reason: "/host/private/file",
+      },
+    ],
+  ] as const)("refuses malformed range/stat/failure metadata: %s", async (_name, value) => {
+    const harness = requestHarness(() => ({
+      value: JSON.stringify({ state: "state" in value ? "failed" : "succeeded", value }),
+    }));
+    const connector = new GitHubCodespacesConnector(harness.requestImpl);
+    await expect(
+      connector.inspectFile("ghu_topsecret", codespace, fileOperation(value.action)),
+    ).rejects.toThrow(/invalid/);
+  });
+
+  test("collects bounded guard reasons without exposing provider diagnostics", async () => {
+    const value = {
+      action: "read",
+      state: "failed",
+      code: "CODESPACE_FILE_REJECTED",
+      reason: "concurrent_change",
+    };
+    const harness = requestHarness(() => ({ value: JSON.stringify({ state: "failed", value }) }));
+    const connector = new GitHubCodespacesConnector(harness.requestImpl);
+    await expect(
+      connector.inspectFile("ghu_topsecret", codespace, fileOperation("read")),
+    ).resolves.toEqual(value);
   });
 
   test("returns all binary bytes at the supported four MiB file boundary", async () => {

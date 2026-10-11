@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+import { CODESPACE_FILE_FAILURE_REASONS } from "@mcp-moira/shared";
 import type {
   CodespaceExecRequest,
   CodespaceFileRequest,
@@ -383,34 +385,64 @@ export abstract class CodespaceJobTransport
         throw new Error("Codespace file transport returned invalid bytes");
       }
       if (
-        !hasExactKeys(value, ["action", "path", "offset", "totalSize", "bytesBase64", "sha256"]) ||
+        !hasExactKeys(value, [
+          "action",
+          "path",
+          "offset",
+          "totalSize",
+          "bytesBase64",
+          "sha256",
+          ...(value.action === "read" && value.rangeSha256 !== undefined ? ["rangeSha256"] : []),
+        ]) ||
         bytes.length > Math.min(MAX_FILE_BYTES, outputLimitBytes) ||
         !validResultPath(value.path) ||
         !nonnegativeInteger(value.offset) ||
-        !nonnegativeInteger(value.totalSize, MAX_FILE_BYTES) ||
+        !nonnegativeInteger(
+          value.totalSize,
+          value.action === "download" ? MAX_FILE_BYTES : Number.MAX_SAFE_INTEGER,
+        ) ||
         value.offset > value.totalSize ||
         bytes.length > value.totalSize - value.offset ||
         (value.action === "download" && (value.offset !== 0 || bytes.length !== value.totalSize)) ||
-        typeof value.sha256 !== "string" ||
-        !/^[a-f0-9]{64}$/.test(value.sha256)
+        (value.sha256 !== null &&
+          (typeof value.sha256 !== "string" || !/^[a-f0-9]{64}$/.test(value.sha256))) ||
+        (value.totalSize <= MAX_FILE_BYTES && value.sha256 === null) ||
+        (value.action === "download" && value.sha256 === null) ||
+        (value.action === "read" &&
+          value.rangeSha256 === undefined &&
+          (value.sha256 === null || value.totalSize > MAX_FILE_BYTES))
       ) {
         throw new Error("Codespace file transport returned invalid bytes metadata");
       }
-      return {
-        action: value.action,
+      const metadata = {
         path: value.path,
         offset: value.offset,
         totalSize: value.totalSize,
         bytes,
-        sha256: value.sha256,
       };
+      if (value.action === "download")
+        return { action: "download", ...metadata, sha256: value.sha256 as string };
+      const rangeSha256 = createHash("sha256").update(bytes).digest("hex");
+      if (
+        (value.totalSize > MAX_FILE_BYTES && value.sha256 !== null) ||
+        (value.rangeSha256 !== undefined && value.rangeSha256 !== rangeSha256)
+      )
+        throw new Error("Codespace file transport returned invalid range digest");
+      return { action: "read", ...metadata, sha256: value.sha256 as string | null, rangeSha256 };
     }
     if (!FILE_RESULT_ACTIONS.has(String(value.action))) {
       throw new Error("Codespace file transport returned an invalid action");
     }
     if (value.state === "failed") {
       if (
-        !hasExactKeys(value, ["action", "state", "code"]) ||
+        !hasExactKeys(value, [
+          "action",
+          "state",
+          "code",
+          ...(value.reason !== undefined ? ["reason"] : []),
+        ]) ||
+        (value.reason !== undefined &&
+          !CODESPACE_FILE_FAILURE_REASONS.some((reason) => reason === value.reason)) ||
         ![
           "CODESPACE_FILE_REJECTED",
           "WORKSPACE_FILE_REJECTED",
@@ -437,10 +469,13 @@ export abstract class CodespaceJobTransport
         !hasExactKeys(stat, ["path", "type", "size", "mode", "modifiedAt", "version"]) ||
         !validResultPath(stat.path, true) ||
         !["file", "directory"].includes(String(stat.type)) ||
-        !nonnegativeInteger(stat.size, MAX_FILE_BYTES) ||
+        !nonnegativeInteger(stat.size) ||
         !nonnegativeInteger(stat.mode, 0o777) ||
         !nonnegativeInteger(stat.modifiedAt) ||
-        (stat.type === "file" && (!version || version.size !== stat.size)) ||
+        (stat.type === "file" &&
+          (stat.size <= MAX_FILE_BYTES
+            ? !version || version.size !== stat.size
+            : stat.version !== null)) ||
         (stat.type === "directory" && (stat.size !== 0 || stat.version !== null))
       ) {
         throw new Error("Codespace file transport returned invalid stat metadata");

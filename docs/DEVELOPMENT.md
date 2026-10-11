@@ -44,7 +44,11 @@ npm run local:verify:guest
 under `packages/local/dist`, including native ownership and credential helpers.
 Do not copy a single JavaScript entry without its companion assets.
 `local:verify:guest` rebuilds and exercises the packaged guest helper in a Docker
-container; it is a guest diagnostic, not proof of microVM isolation or SDK lifecycle.
+container, including large-file metadata, bounded range reads and distinct whole-file/range
+digests. It also exercises commands, stdin, persistent sessions, cancellation and repository/path
+binding refusals. It is a guest diagnostic, not proof of microVM isolation or SDK lifecycle.
+Building these assets does not replace workers already installed in running guests or update a
+running host daemon's journal implementation.
 Host runtime validation requires the supported macOS SDK and locally approved
 state. Linux VM execution fails closed before creation.
 

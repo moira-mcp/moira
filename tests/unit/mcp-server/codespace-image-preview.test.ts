@@ -127,6 +127,26 @@ describe("codespace image preview projection", () => {
     },
   );
 
+  test("retains a bounded file refusal reason without publishing image bytes", () => {
+    const projected = previewImageResult({
+      operation: operation("failed"),
+      result: {
+        action: "download",
+        state: "failed",
+        code: "CODESPACE_FILE_REJECTED",
+        reason: "unsafe_access",
+      },
+    });
+    expect(projected.isError).toBe(true);
+    expect(projected.structuredContent).toMatchObject({
+      operation_id: operation().id,
+      reason: "unsafe_access",
+      error: { code: "CODESPACE_FILE_REJECTED" },
+    });
+    expect(projected.content.every((block) => block.type === "text")).toBe(true);
+    expect(JSON.stringify(projected)).not.toContain("secret-");
+  });
+
   test.each([
     [0, 2],
     [8193, 1],

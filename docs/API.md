@@ -1997,6 +1997,13 @@ Deliver one private codespace file published by the MCP `codespace` tool's `down
 returns this URL to the agent as an MCP `resource_link`; the token in the path is the only
 authorization, so the URL must not be logged or shared.
 
+The download is a complete regular file within the effective `transfers.max_file_bytes`
+ceiling, at most 4 MiB. A complete empty file is valid; image preview requires a nonempty,
+validated PNG or JPEG within its separate byte and dimension bounds. Large-file metadata
+and bounded text ranges use MCP `stat` and `read`, rather than this complete-download route;
+their nullable whole-file digest and separate range digest are described in
+[File operations and native transfer](CODESPACES.md#file-operations-and-native-transfer).
+
 Success returns the exact stored bytes as an attachment with the published MIME type and file
 name and these headers:
 

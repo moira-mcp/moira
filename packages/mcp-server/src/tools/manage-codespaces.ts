@@ -556,7 +556,13 @@ function projectVersion(version: { size: number; sha256: string; modifiedAt: num
 }
 
 function projectFileResult(result: NonNullable<CodespaceFileOperationResponse["result"]>) {
-  if ("state" in result) return { action: result.action, state: result.state, code: result.code };
+  if ("state" in result)
+    return {
+      action: result.action,
+      state: result.state,
+      code: result.code,
+      ...(result.reason ? { reason: result.reason } : {}),
+    };
   switch (result.action) {
     case "stat":
       return {
@@ -619,6 +625,7 @@ function projectFileResult(result: NonNullable<CodespaceFileOperationResponse["r
         offset: result.offset,
         total_size: result.totalSize,
         sha256: result.sha256,
+        range_sha256: result.rangeSha256,
         text,
       };
     }

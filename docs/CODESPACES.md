@@ -864,8 +864,24 @@ links and keeps the opened parent across staging and replacement. Final files mu
 single-link regular files. Symlinks, hard links, directories in file position, FIFOs,
 sockets and devices are rejected.
 
-Read returns an explicit byte offset, total size, content digest and a bounded byte
-range. Search is bounded by scanned/result bytes, match count and remote time and does
+Stat holds a confined regular-file descriptor and reports safe-integer metadata. A regular file
+larger than the 4 MiB editable-file ceiling has a null hashed `version`, without reading its content.
+Small files retain their whole-file SHA-256 version, computed with bounded hashing chunks. Directory
+metadata retains zero size and a null version. Regular-file observations compare descriptor device,
+inode, size, nanosecond timestamps and single-link status before and after work, then re-resolve
+the repository-relative path and compare its identity. Moving a parent while the original inode
+remains linked therefore cannot publish a result for a different named file.
+
+Read returns an explicit byte offset, total size and only the selected bounded byte range. Its
+`sha256` is the whole-file digest for files up to 4 MiB and null for larger files; `rangeSha256`
+hashes exactly its returned bytes. A large range reads no content outside that interval. A small
+range retains only selected bytes while streaming the whole-file hash in chunks of at most 256 KiB.
+Offsets equal to file size return an empty range; offsets beyond size are refused. Range lengths
+remain bounded by the code-file ceiling, and arithmetic uses safe integers without overflowing
+offset-plus-length. Complete download and guarded code edits keep their separate bounded full-file
+behavior. Empty complete downloads are valid, while image preview requires a nonempty image.
+
+Search is bounded by scanned/result bytes, match count and remote time and does
 not traverse links or special files. It also skips the repository's own `.git`
 directory wherever it meets one and refuses a search rooted at or inside it; those
 files stay readable, writable and inspectable by exact path. Skipping is not
@@ -875,7 +891,10 @@ a match that reaches the search deadline returns a truncated result instead of b
 the supervisor event loop. The result-byte ceiling covers the complete serialized search
 envelope, including its action, match separators and `truncated` state. A typed file
 failure carries no file payload and therefore remains recordable even when the caller's
-success-payload budget is smaller than a JSON error envelope.
+success-payload budget is smaller than a JSON error envelope. A classified guard failure carries
+an optional bounded `reason`: `unsafe_access`, `size_limit`, `invalid_range`, `concurrent_change`
+or `precondition`. Unclassified and retained older failures may omit it; raw exception text and
+host paths are not added to the result.
 
 Write requires an expected existence state and may require the previous size and
 SHA-256 digest. Patch supplies ordered byte edits for each file. A successful patch
@@ -910,7 +929,11 @@ recovery re-resolve that repository-relative parent and fail before mutation if 
 namespace now points at another directory. The connector validates the complete remote
 result as untrusted input, including exact result variants, operation/action agreement,
 relative paths, byte ranges, versions, search coordinates and bounds, unique patch paths,
-summary totals and agreement between inner and outer success or failure state.
+summary totals and agreement between inner and outer success or failure state. Read and complete
+download are distinct result variants: download retains its non-null whole-file digest and complete
+bounded bytes. Modern read range digests are verified against the decoded bytes. A retained older
+SHA-only read keeps its original whole-file digest and receives a locally computed range digest;
+stored receipts and operation identities are not rewritten.
 
 Inbound native references contain a `sediment://file_...` identifier, HTTPS download
 URL, safe file name, supported MIME type and declared size. Only the reviewed OpenAI
@@ -1117,8 +1140,11 @@ required, while `file_name`, `mime_type` and `size_bytes` are optional. Native i
 goes directly through the one-call native execution path and is never staged through
 the `upload` action; neither the file ID nor the temporary URL is echoed back.
 
-The `read` action returns UTF-8 text with offset, total size and, for a repository
-file, SHA-256; `length` defaults to 64 KiB, and `search` defaults to 100 matches within 64 KiB of
+The `stat` action can inspect a large regular file with a null hashed version. The `read` action
+returns UTF-8 text with offset and total size; for a repository file, `sha256` is its whole-file
+digest or null beyond the editable ceiling, while `range_sha256` hashes the returned bytes. The
+range digest is not an expected whole-file version for editing. `length` defaults to 64 KiB with a
+4 MiB ceiling, and `search` defaults to 100 matches within 64 KiB of
 result bytes, so a call that names only the codespace, path and query is complete.
 A range that is not valid UTF-8 returns `CODESPACE_BINARY_READ_REQUIRES_DOWNLOAD`
 instead of base64. The `write` action replaces a file atomically from UTF-8 text under an explicit

@@ -625,6 +625,27 @@ The existing GitHub-named management HTTP prefix serves both providers. MCP keep
 the same lifecycle, command, session, file and native-file actions; local transport
 uses the shared `CodespaceJobTransport` codec rather than a second executor.
 
+Regular-file metadata and range access share the guest's confined descriptor lifecycle. A file
+larger than 4 MiB returns `stat.version: null` without content reads; small editable files retain
+their whole-file hashed version. Large reads allocate and read only the requested bounded range.
+Small reads hash the whole file in bounded chunks while retaining only the selected bytes.
+The descriptor's device, inode, size, timestamps and link count must remain unchanged, and the
+repository path is resolved again before returning to detect replacement of its parent.
+
+The common decoder separates range reads from complete downloads. MCP `read.sha256` is the
+whole-file digest for a small file and null for a large file; `range_sha256` hashes exactly the
+returned bytes. Retained SHA-only read receipts preserve their whole digest and receive a range
+digest derived from their bounded decoded bytes, without rewriting the receipt. Modern range
+digests are verified against those bytes. Safe-integer sizes, exact result shapes and existing
+byte budgets remain enforced. Download stays complete and bounded to 4 MiB, including empty
+files; image preview requires a nonempty complete validated image. Guarded write/patch and
+search retain their code-size, expected-version and atomic replacement limits.
+
+File failures may carry a validated `reason`: `unsafe_access`, `size_limit`, `invalid_range`,
+`concurrent_change` or `precondition`. It names an observed guard failure; unclassified and
+retained older failures may omit it. Ordinary file results and image-preview refusals preserve
+the reason and operation identity without returning host paths or provider exception text.
+
 `LocalDeviceService` separates browser confirmation from companion authentication.
 Each device has its own credential digest, connection identity, generation and
 locally approved public policy. Resource bindings retain that exact device tuple.

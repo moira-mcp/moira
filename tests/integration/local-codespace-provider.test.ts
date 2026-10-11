@@ -169,6 +169,7 @@ async function fixture(partLimit = 4 * 1024 * 1024, maxObjects = 512, nativeSize
     afterRenew: null as (() => void) | null,
     afterCreateAdmitted: null as (() => Promise<void>) | null,
     beforeCreateReady: null as (() => Promise<void>) | null,
+    fileResult: null as Record<string, unknown> | null,
   };
   const removal = { completed: 0 };
   const physical = new Map<string, SandboxObservation["status"]>();
@@ -413,7 +414,8 @@ async function fixture(partLimit = 4 * 1024 * 1024, maxObjects = 512, nativeSize
           offset?: number;
           length?: number;
         };
-        if (file.action === "upload" || file.action === "write") {
+        if (faults.fileResult) result = faults.fileResult;
+        else if (file.action === "upload" || file.action === "write") {
           const bytes = Buffer.from(file.bytesBase64!, "base64");
           await writeFile(join(guestRoot, file.path), bytes, { mode: 0o600 });
           result = {
@@ -2462,6 +2464,7 @@ describe("actual local-only service composition and outbound relay", () => {
       action: "read",
       path: "payload.bin",
       sha256: hash(actual.nativeBytes),
+      rangeSha256: hash(actual.nativeBytes),
     });
     expect(read.result && "bytes" in read.result ? Buffer.from(read.result.bytes) : null).toEqual(
       actual.nativeBytes,
@@ -2487,6 +2490,117 @@ describe("actual local-only service composition and outbound relay", () => {
         .get(),
     ).toMatchObject({ count: expect.any(Number) });
   });
+  test("collects large metadata and retained range bytes through the actual Local relay", async () => {
+    const actual = await fixture();
+    const created = await actual.drive(
+      actual.services.resource.create("user-a", actual.target, "main"),
+    );
+    const totalSize = 8 * 1024 ** 2;
+    const stat = {
+      action: "stat",
+      stat: {
+        path: "large.bin",
+        type: "file",
+        size: totalSize,
+        mode: 0o600,
+        modifiedAt: 1,
+        version: null,
+      },
+    };
+    actual.faults.fileResult = { state: "succeeded", value: stat };
+    const observed = await actual.drive(
+      actual.services.file.execute("user-a", created.resource.id, {
+        action: "stat",
+        path: "large.bin",
+      }),
+    );
+    expect(observed.operation.state).toBe("succeeded");
+    expect(observed.result).toEqual(stat);
+    const bytes = Buffer.from("selected range");
+    const offset = totalSize - bytes.length;
+    actual.faults.fileResult = {
+      state: "succeeded",
+      value: {
+        action: "read",
+        path: "large.bin",
+        offset,
+        totalSize,
+        bytesBase64: bytes.toString("base64"),
+        sha256: null,
+        rangeSha256: hash(bytes),
+      },
+    };
+    actual.faults.holdOperations = true;
+    const pending = await actual.drive(
+      actual.services.file.execute("user-a", created.resource.id, {
+        action: "read",
+        path: "large.bin",
+        offset,
+        length: bytes.length,
+      }),
+    );
+    expect(pending.operation.state).toBe("running");
+    expect(pending.result).toBeNull();
+    actual.faults.holdOperations = false;
+    actual.faults.fileResult = null;
+    const collected = await actual.drive(
+      actual.services.file.reconcile("user-a", pending.operation.id),
+    );
+    expect(collected.operation).toMatchObject({
+      id: pending.operation.id,
+      state: "succeeded",
+      outputBytes: bytes.length,
+    });
+    expect(collected.result).toEqual({
+      action: "read",
+      path: "large.bin",
+      offset,
+      totalSize,
+      bytes,
+      sha256: null,
+      rangeSha256: hash(bytes),
+    });
+    expect(actual.guestActions.filter((action) => action === "file-execute")).toHaveLength(2);
+  });
+
+  test("collects a retained legacy partial read through Local without relabeling its whole hash", async () => {
+    const actual = await fixture();
+    const created = await actual.drive(
+      actual.services.resource.create("user-a", actual.target, "main"),
+    );
+    const full = Buffer.from("before selected after");
+    const bytes = Buffer.from("selected");
+    await writeFile(join(actual.guestRoot, "payload.bin"), full);
+    actual.faults.holdOperations = true;
+    const pending = await actual.drive(
+      actual.services.file.execute("user-a", created.resource.id, {
+        action: "read",
+        path: "payload.bin",
+        offset: 7,
+        length: bytes.length,
+      }),
+    );
+    expect(pending.operation.state).toBe("running");
+    actual.faults.holdOperations = false;
+    const collected = await actual.drive(
+      actual.services.file.reconcile("user-a", pending.operation.id),
+    );
+    expect(collected.operation.state).toBe("succeeded");
+    expect(collected.result).toMatchObject({
+      action: "read",
+      bytes,
+      sha256: hash(full),
+      rangeSha256: hash(bytes),
+    });
+    expect(hash(full)).not.toBe(hash(bytes));
+    expect(actual.guestActions.filter((action) => action === "file-execute")).toHaveLength(1);
+    const contacts = actual.guestActions.length;
+    await expect(
+      actual.services.file.reconcile("user-b", pending.operation.id),
+    ).rejects.toMatchObject({ code: "CODESPACE_NOT_FOUND" });
+    expect(actual.guestActions).toHaveLength(contacts);
+  });
+
   test("recovers a lost acknowledged create response without creating a second local sandbox", async () => {
     const actual = await fixture();
     actual.faults.dropNextAck = true;

@@ -1,4 +1,5 @@
 import { describe, expect, it, jest } from "@jest/globals";
+import { createHash } from "node:crypto";
 import { z } from "zod";
 import {
   CodespaceConnectionError,
@@ -1164,12 +1165,53 @@ describe("codespace MCP adapter", () => {
         },
       });
       expect(execute).toHaveBeenCalledTimes(1);
+      expect(data(response)).not.toHaveProperty("reason");
       if (code === "CODESPACE_OPERATION_INTERRUPTED") {
         const message = (data(response) as { error: { message: string } }).error.message;
         expect(message).toContain("Inspect the affected files");
         expect(message).toContain("will not be replayed automatically");
         expect(message).not.toMatch(/retry|rerun/i);
       }
+    },
+  );
+
+  it.each([
+    ["write", "unsafe_access"],
+    ["write", "size_limit"],
+    ["read", "invalid_range"],
+    ["stat", "concurrent_change"],
+    ["write", "precondition"],
+  ] as const)(
+    "returns bounded %s failure reason %s with the original operation",
+    async (action, reason) => {
+      const base = services();
+      const response = await executeCodespaceTool(
+        parseCodespaceToolParams({
+          action,
+          codespace_id: CODESPACE_ID,
+          path: "source.txt",
+          ...(action === "write" ? { text: "new", expected: { exists: false } } : {}),
+        }),
+        USER_ID,
+        services({
+          file: {
+            ...base.file!,
+            execute: async () => ({
+              operation: { ...operation(action), state: "failed" },
+              result: { action, state: "failed", code: "CODESPACE_FILE_REJECTED", reason },
+            }),
+          },
+        }),
+      );
+      expect(response.isError).toBe(true);
+      expect(data(response)).toMatchObject({
+        action,
+        state: "failed",
+        reason,
+        operation_id: OPERATION_ID,
+        error: { code: "CODESPACE_FILE_REJECTED", retryable: false },
+      });
+      expect(JSON.stringify(response)).not.toMatch(/secret-|remoteMarker|providerResourceName/);
     },
   );
 
@@ -1228,6 +1270,7 @@ describe("codespace MCP adapter", () => {
               totalSize: 5,
               bytes: Buffer.from("hello"),
               sha256: "d".repeat(64),
+              rangeSha256: createHash("sha256").update("hello").digest("hex"),
             },
           };
         }
@@ -1315,7 +1358,13 @@ describe("codespace MCP adapter", () => {
       dependencies,
     );
 
-    expect(data(read)).toMatchObject({ text: "hello", offset: 0, total_size: 5 });
+    expect(data(read)).toMatchObject({
+      text: "hello",
+      offset: 0,
+      total_size: 5,
+      sha256: "d".repeat(64),
+      range_sha256: createHash("sha256").update("hello").digest("hex"),
+    });
     expect(data(patched)).toMatchObject({
       summary: { files_changed: 1, edits_applied: 1, truncated: false },
     });
@@ -1742,6 +1791,9 @@ describe("codespace MCP adapter", () => {
             totalSize: 2,
             bytes: Uint8Array.from([0xff, 0xfe]),
             sha256: "f".repeat(64),
+            rangeSha256: createHash("sha256")
+              .update(Uint8Array.from([0xff, 0xfe]))
+              .digest("hex"),
           },
         })),
       },

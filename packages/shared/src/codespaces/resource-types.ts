@@ -580,16 +580,38 @@ export type CodespaceFileRequest =
     }
   | { action: "download"; path: string; maxBytes: number };
 
+export const CODESPACE_FILE_FAILURE_REASONS = [
+  "unsafe_access",
+  "size_limit",
+  "invalid_range",
+  "concurrent_change",
+  "precondition",
+] as const;
+
+export type CodespaceFileFailureReason = (typeof CODESPACE_FILE_FAILURE_REASONS)[number];
+
 export type CodespaceFileResult =
   | {
       action: Exclude<CodespaceOperationKind, "exec">;
       state: "failed";
       code: "CODESPACE_FILE_REJECTED" | "CODESPACE_OPERATION_INTERRUPTED";
+      reason?: CodespaceFileFailureReason;
     }
   | { action: "stat"; stat: CodespaceFileStat }
   | { action: "search"; matches: CodespaceSearchMatch[]; truncated: boolean }
   | {
-      action: "read" | "download";
+      action: "read";
+      path: string;
+      offset: number;
+      totalSize: number;
+      bytes: Uint8Array;
+      /** Whole-file digest, unavailable beyond the bounded editable-file ceiling. */
+      sha256: string | null;
+      /** Digest of exactly the returned range, never a replacement for the whole-file digest. */
+      rangeSha256: string;
+    }
+  | {
+      action: "download";
       path: string;
       offset: number;
       totalSize: number;

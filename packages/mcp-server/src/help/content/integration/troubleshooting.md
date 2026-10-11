@@ -310,6 +310,28 @@ process dies. A failed edit does not require stopping the development server. If
 with a later edit, preserve the current files and retained recovery data rather than overwriting
 the later edit or deleting its journal.
 
+### Large files and rejected file operations
+
+Use `stat` for metadata and `read` with `offset` and bounded `length` for selected bytes. A regular
+file larger than 4 MiB can be inspected without reading its contents; its `stat.version` is `null`.
+For a small file, the hashed version remains available for guarded edits. A large range read returns
+`sha256: null`; `range_sha256` hashes exactly the returned bytes. For a small file, `sha256` still
+hashes the whole file, even when only a range is returned. Do not use a range digest as an expected
+whole-file version. Reading at EOF returns an empty range; an offset beyond EOF is refused.
+
+The selected range, code edits and complete `download` remain bounded to 4 MiB, subject to effective
+limits. Metadata access does not authorize a larger native download. Complete downloads include
+empty files; image preview still requires a valid nonempty image.
+
+A file rejection may include `reason`: `size_limit` means a byte bound was exceeded;
+`invalid_range` means the requested range or bound is invalid; `unsafe_access` means path or file
+type safety checks failed; `concurrent_change` means the file or its path changed during access;
+`precondition` means the expected version did not match. Reduce a bounded request, correct its range,
+or reread and reconcile a changed version as appropriate. Do not bypass link/type checks or remove
+expected-version guards. Older or unclassified failures may omit `reason`; absence does not identify
+the cause. Server or companion updates do not automatically replace an installed guest worker, so
+an existing guest may still return an older receipt or reject large metadata/ranges.
+
 ## Local codespaces
 
 Choose a UUID `request_id` before `codespace` exec or `codespace_process` start. Submission returns

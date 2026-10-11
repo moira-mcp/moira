@@ -97,6 +97,12 @@ function fail(message) {
   throw new Error(message);
 }
 
+function failFile(reason, message) {
+  const error = new Error(message);
+  error.fileReason = reason;
+  throw error;
+}
+
 async function readBoundedJson(path, maximumBytes) {
   const value = await lstat(path);
   if (!value.isFile() || value.isSymbolicLink() || value.nlink !== 1 || value.size > maximumBytes) {
@@ -388,7 +394,7 @@ function safeRelativePath(value, allowRoot = false) {
     /^[A-Za-z]:/.test(value) ||
     value.split(/[\\/]/).some((part) => !part || part === "." || part === "..")
   ) {
-    fail("invalid codespace path");
+    failFile("unsafe_access", "invalid codespace path");
   }
   return value.replaceAll("\\", "/");
 }
@@ -435,7 +441,7 @@ async function openDirectory(root, relative = ".") {
       openedRoot.ino !== inspectedRoot.ino ||
       (typeof root !== "string" && (openedRoot.dev !== root.dev || openedRoot.ino !== root.ino))
     ) {
-      fail("codespace root changed during validation");
+      failFile("concurrent_change", "codespace root changed during validation");
     }
     if (normalized === ".") return current;
     for (const part of normalized.split("/")) {
@@ -447,7 +453,7 @@ async function openDirectory(root, relative = ".") {
       const value = await child.stat();
       if (!value.isDirectory()) {
         await child.close();
-        fail("codespace parent is not a directory");
+        failFile("unsafe_access", "codespace parent is not a directory");
       }
       if (current !== rootHandle) await current.close();
       current = child;
@@ -479,7 +485,7 @@ async function inspectPath(root, relative, allowDirectory = false) {
     const value = await handle.stat();
     if (!(value.isDirectory() && allowDirectory) && (!value.isFile() || value.nlink !== 1)) {
       await handle.close();
-      fail("codespace path is not an allowed file type");
+      failFile("unsafe_access", "codespace path is not an allowed file type");
     }
     return { handle, stat: value, relative: normalized };
   } finally {
@@ -487,22 +493,23 @@ async function inspectPath(root, relative, allowDirectory = false) {
   }
 }
 
-async function readRegular(root, relative, maximum = MAX_FILE_BYTES, { keepOpen = false } = {}) {
-  const inspected = await inspectPath(root, relative);
+/** One confined descriptor owns both content access and the final path/identity observation. */
+async function withRegularFile(
+  root,
+  relative,
+  work,
+  { maximum = Number.MAX_SAFE_INTEGER, keepOpen = false, inspected: opened } = {},
+) {
+  const inspected = opened ?? (await inspectPath(root, relative));
   const handle = inspected.handle;
   let transferred = false;
   try {
     const current = await handle.stat({ bigint: true });
-    if (!current.isFile() || current.nlink !== 1n || current.size > BigInt(maximum)) {
-      fail("codespace file exceeds its bound or has an unsafe type");
-    }
-    const bytes = Buffer.alloc(Number(current.size));
-    let offset = 0;
-    while (offset < bytes.length) {
-      const read = await handle.read(bytes, offset, bytes.length - offset, offset);
-      if (read.bytesRead === 0) fail("codespace file changed during read");
-      offset += read.bytesRead;
-    }
+    if (!current.isFile() || current.nlink !== 1n)
+      failFile("unsafe_access", "codespace path is not an allowed regular file");
+    if (current.size > BigInt(maximum) || current.size > BigInt(Number.MAX_SAFE_INTEGER))
+      failFile("size_limit", "codespace file exceeds its size bound");
+    const result = await work(handle, Number(current.size));
     const after = await handle.stat({ bigint: true });
     if (
       after.dev !== current.dev ||
@@ -512,13 +519,31 @@ async function readRegular(root, relative, maximum = MAX_FILE_BYTES, { keepOpen 
       after.ctimeNs !== current.ctimeNs ||
       after.nlink !== 1n
     ) {
-      fail("codespace file changed during read");
+      failFile("concurrent_change", "codespace file changed during read");
+    }
+    // The held inode can remain linked after its parent is moved out of this path.
+    // Resolve the confined path again rather than treating an unchanged descriptor as enough.
+    let named;
+    try {
+      named = await inspectPath(root, inspected.relative);
+      if (
+        !sameFileIdentity(
+          fileIdentity(current),
+          fileIdentity(await named.handle.stat({ bigint: true })),
+        )
+      )
+        failFile("concurrent_change", "codespace path changed during read");
+    } catch {
+      failFile("concurrent_change", "codespace path changed during read");
+    } finally {
+      await named?.handle.close();
     }
     transferred = keepOpen;
     return {
-      bytes,
+      ...result,
       stat: {
-        ...inspected.stat,
+        size: Number(after.size),
+        mode: Number(after.mode),
         mtimeMs: Number(after.mtimeNs / 1_000_000n),
         identity: fileIdentity(after),
       },
@@ -530,6 +555,42 @@ async function readRegular(root, relative, maximum = MAX_FILE_BYTES, { keepOpen 
   } finally {
     if (!transferred) await handle.close();
   }
+}
+
+async function readExact(handle, bytes, position = 0) {
+  let offset = 0;
+  while (offset < bytes.length) {
+    const read = await handle.read(bytes, offset, bytes.length - offset, position + offset);
+    if (read.bytesRead === 0) failFile("concurrent_change", "codespace file changed during read");
+    offset += read.bytesRead;
+  }
+}
+
+async function readRegular(root, relative, maximum = MAX_FILE_BYTES, { keepOpen = false } = {}) {
+  return withRegularFile(
+    root,
+    relative,
+    async (handle, size) => {
+      const bytes = Buffer.alloc(size);
+      await readExact(handle, bytes);
+      return { bytes };
+    },
+    { maximum, keepOpen },
+  );
+}
+
+async function hashRegular(handle, size) {
+  const hash = createHash("sha256");
+  const chunk = Buffer.alloc(Math.min(size, 256 * 1024));
+  for (let offset = 0; offset < size;) {
+    const length = Math.min(chunk.length, size - offset);
+    const read = await handle.read(chunk, 0, length, offset);
+    if (read.bytesRead === 0)
+      failFile("concurrent_change", "codespace file changed during hashing");
+    hash.update(chunk.subarray(0, read.bytesRead));
+    offset += read.bytesRead;
+  }
+  return hash.digest("hex");
 }
 
 async function writeAll(handle, bytes) {
@@ -551,13 +612,13 @@ function version(bytes, value) {
 
 function validateExpected(expected, current) {
   if (!expected || typeof expected.exists !== "boolean") fail("invalid file precondition");
-  if (expected.exists !== Boolean(current)) fail("file precondition failed");
+  if (expected.exists !== Boolean(current)) failFile("precondition", "file precondition failed");
   if (!current) return;
   const actual = version(current.bytes, current.stat);
   if (expected.size !== undefined && expected.size !== actual.size)
-    fail("file size precondition failed");
+    failFile("precondition", "file size precondition failed");
   if (expected.sha256 !== undefined && expected.sha256 !== actual.sha256)
-    fail("file digest precondition failed");
+    failFile("precondition", "file digest precondition failed");
 }
 
 /**
@@ -610,7 +671,7 @@ async function verifyParentIdentity(root, relative, expected) {
   try {
     const current = await directoryIdentity(location.handle);
     if (!sameDirectoryIdentity(current, expected)) {
-      fail("codespace parent identity changed during commit");
+      failFile("concurrent_change", "codespace parent identity changed during commit");
     }
   } finally {
     await location.handle.close();
@@ -628,7 +689,7 @@ async function verifyEntryIdentity(parentHandle, name, expected) {
       !current.isFile() ||
       !sameFileIdentity(expected, fileIdentity(current), { afterRename: true })
     ) {
-      fail("codespace target identity changed during commit");
+      failFile("concurrent_change", "codespace target identity changed during commit");
     }
   } finally {
     await handle.close();
@@ -654,7 +715,7 @@ async function currentFile(root, relative, options = {}) {
 
 async function stageReplacement(root, relative, bytes, expected, marker) {
   if (!Buffer.isBuffer(bytes) || bytes.length > MAX_FILE_BYTES)
-    fail("codespace write exceeds its bound");
+    failFile("size_limit", "codespace write exceeds its bound");
   const location = await parentDirectory(root, relative);
   let temporaryName = null;
   let current = null;
@@ -781,7 +842,7 @@ async function commitStaged(staged, marker, directory) {
           !sameFileIdentity(item.current.stat.identity, held) ||
           !sameFileIdentity(item.current.stat.identity, current?.stat.identity)
         ) {
-          fail("codespace target identity changed during commit");
+          failFile("concurrent_change", "codespace target identity changed during commit");
         }
       }
       const target = descriptorPath(item.handle, item.name);
@@ -1021,8 +1082,8 @@ async function claimFileRunner(directory) {
 function decodeBytes(value, maximum = MAX_FILE_BYTES) {
   if (typeof value !== "string") fail("invalid encoded file bytes");
   const bytes = Buffer.from(value, "base64");
-  if (bytes.toString("base64") !== value || bytes.length > maximum)
-    fail("invalid encoded file bytes");
+  if (bytes.toString("base64") !== value) fail("invalid encoded file bytes");
+  if (bytes.length > maximum) failFile("size_limit", "encoded file bytes exceed their bound");
   return bytes;
 }
 
@@ -1119,46 +1180,65 @@ async function executeFileRequest(root, request, marker, directory) {
         await inspected.handle.close();
       }
     }
-    await inspected.handle.close();
-    const current = await readRegular(root, request.path);
+    const current = await withRegularFile(
+      root,
+      request.path,
+      async (handle, size) => ({
+        sha256: size <= MAX_FILE_BYTES ? await hashRegular(handle, size) : null,
+      }),
+      { inspected },
+    );
     return {
       action: "stat",
       stat: {
         path: current.path,
         type: "file",
-        size: current.bytes.length,
+        size: current.stat.size,
         mode: current.stat.mode & 0o777,
         modifiedAt: Math.trunc(current.stat.mtimeMs),
-        version: version(current.bytes, current.stat),
+        version:
+          current.sha256 === null
+            ? null
+            : {
+                size: current.stat.size,
+                sha256: current.sha256,
+                modifiedAt: Math.trunc(current.stat.mtimeMs),
+              },
       },
     };
   }
-  if (request.action === "read" || request.action === "download") {
-    const current = await readRegular(
-      root,
-      request.path,
-      request.action === "download" ? request.maxBytes : MAX_FILE_BYTES,
-    );
-    const offset = request.action === "read" ? request.offset : 0;
-    const length = request.action === "read" ? request.length : current.bytes.length;
-    if (
-      !Number.isSafeInteger(offset) ||
-      offset < 0 ||
-      !Number.isSafeInteger(length) ||
-      length < 1 ||
-      offset > current.bytes.length
-    )
-      fail("invalid read range");
-    const selected = current.bytes.subarray(
-      offset,
-      Math.min(current.bytes.length, offset + length),
-    );
+  if (request.action === "read") {
+    const { offset, length } = request;
+    if (!Number.isSafeInteger(offset) || offset < 0 || !Number.isSafeInteger(length) || length < 1)
+      failFile("invalid_range", "invalid read range");
+    if (length > MAX_FILE_BYTES) failFile("size_limit", "read range exceeds its bound");
+    const current = await withRegularFile(root, request.path, async (handle, size) => {
+      if (offset > size) failFile("invalid_range", "read offset exceeds the file size");
+      const bytes = Buffer.alloc(Math.min(length, size - offset));
+      await readExact(handle, bytes, offset);
+      return { bytes, sha256: size <= MAX_FILE_BYTES ? await hashRegular(handle, size) : null };
+    });
     return {
-      action: request.action,
+      action: "read",
       path: current.path,
       offset,
+      totalSize: current.stat.size,
+      bytesBase64: current.bytes.toString("base64"),
+      sha256: current.sha256,
+      rangeSha256: createHash("sha256").update(current.bytes).digest("hex"),
+    };
+  }
+  if (request.action === "download") {
+    if (!Number.isSafeInteger(request.maxBytes) || request.maxBytes < 1)
+      failFile("invalid_range", "invalid download bound");
+    if (request.maxBytes > MAX_FILE_BYTES) failFile("size_limit", "download exceeds its bound");
+    const current = await readRegular(root, request.path, request.maxBytes);
+    return {
+      action: "download",
+      path: current.path,
+      offset: 0,
       totalSize: current.bytes.length,
-      bytesBase64: selected.toString("base64"),
+      bytesBase64: current.bytes.toString("base64"),
       sha256: version(current.bytes, current.stat).sha256,
     };
   }
@@ -1223,7 +1303,7 @@ async function executeFileRequest(root, request, marker, directory) {
         }
         parts.push(original.subarray(cursor));
         const bytes = Buffer.concat(parts);
-        if (bytes.length > MAX_FILE_BYTES) fail("patched file exceeds its bound");
+        if (bytes.length > MAX_FILE_BYTES) failFile("size_limit", "patched file exceeds its bound");
         staged.push(await stageReplacement(root, relative, bytes, file.expected, marker));
         summaryEntries.push({
           path: relative,
@@ -1551,13 +1631,25 @@ async function fileExecute(request, binding) {
     let value;
     try {
       value = await executeFileRequest(root, intent.request, request.remoteMarker, directory);
-    } catch {
+    } catch (error) {
       await recoverFileTransaction(directory, root);
       state = "failed";
+      const reason =
+        error?.fileReason ??
+        (["ELOOP", "ENOTDIR"].includes(error?.code) ? "unsafe_access" : undefined);
       value = {
         action: intent.request?.action,
         state: "failed",
         code: "CODESPACE_FILE_REJECTED",
+        ...([
+          "unsafe_access",
+          "size_limit",
+          "invalid_range",
+          "concurrent_change",
+          "precondition",
+        ].includes(reason)
+          ? { reason }
+          : {}),
       };
     }
     await writeDurableJson(directory, "result.json", { kind: "file", state, value });

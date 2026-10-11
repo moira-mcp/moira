@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { randomBytes, randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { DEFAULT_TEMPLATE } from "../packages/local/dist/config.js";
 
@@ -188,6 +188,39 @@ try {
   });
   assert.equal(read.state, "succeeded");
   assert.deepEqual(Buffer.from(read.value.bytesBase64, "base64"), bytes);
+  assert.equal(read.value.sha256, createHash("sha256").update(bytes).digest("hex"));
+  assert.equal(read.value.rangeSha256, createHash("sha256").update(bytes).digest("hex"));
+  const largeSize = 8 * 1024 * 1024;
+  const rangeOffset = 5 * 1024 * 1024 + 7;
+  const rangeBytes = Buffer.from("guest range");
+  await command({
+    argv: [
+      "node",
+      "-e",
+      "const f=require('node:fs');const fd=f.openSync('large.dat','wx');try{f.ftruncateSync(fd,Number(process.argv[1]));f.writeSync(fd,process.argv[3],Number(process.argv[2]));}finally{f.closeSync(fd)}",
+      String(largeSize),
+      String(rangeOffset),
+      rangeBytes.toString("utf8"),
+    ],
+  });
+  const metadata = await call({
+    action: "file-execute",
+    remoteMarker: marker(),
+    request: { action: "stat", path: "large.dat" },
+  });
+  assert.equal(metadata.state, "succeeded");
+  assert.equal(metadata.value.stat.size, largeSize);
+  assert.equal(metadata.value.stat.version, null);
+  const range = await call({
+    action: "file-execute",
+    remoteMarker: marker(),
+    request: { action: "read", path: "large.dat", offset: rangeOffset, length: rangeBytes.length },
+  });
+  assert.equal(range.state, "succeeded");
+  assert.equal(range.value.totalSize, largeSize);
+  assert.equal(range.value.sha256, null);
+  assert.deepEqual(Buffer.from(range.value.bytesBase64, "base64"), rangeBytes);
+  assert.equal(range.value.rangeSha256, createHash("sha256").update(rangeBytes).digest("hex"));
   await command({
     script: "export MOIRA_LOCAL_CHECK=retained; cd nested",
     session: "local-check",
@@ -244,7 +277,7 @@ try {
   const cancelled = await call({ action: "cancel", remoteMarker: running });
   assert.equal(cancelled.state, "cancelled");
   console.log(
-    "Guest image compatibility passed: execution, stdin, binary files, persistent sessions and cancellation.",
+    "Guest image compatibility passed: execution, stdin, binary files, large metadata/ranges, persistent sessions and cancellation.",
   );
   console.log(
     "Prepared broker-origin repository uses the production binding routine; mismatched repository and escaped file path are refused.",

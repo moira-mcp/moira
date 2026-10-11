@@ -4,9 +4,12 @@ import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
   existsSync,
+  closeSync,
+  ftruncateSync,
   linkSync,
   mkdtempSync,
   mkdirSync,
+  openSync,
   readFileSync,
   readdirSync,
   realpathSync,
@@ -15,6 +18,7 @@ import {
   statSync,
   symlinkSync,
   writeFileSync,
+  writeSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -853,6 +857,89 @@ describe("direct Codespace operation supervisor", () => {
     expect(source).toContain('process.env.MOIRA_CODESPACES_ROOT || "/workspaces"');
   });
 
+  test.each(["stat", "read"] as const)(
+    "large sparse %s uses metadata or only the selected descriptor bytes",
+    async (action) => {
+      const value = fixture();
+      const path = join(value.repository, "large.bin");
+      const audit = join(value.stateRoot, "descriptor-reads.jsonl");
+      const size = 64 * 1024 * 1024;
+      const offset = 8 * 1024 * 1024 + 7;
+      const selected = Buffer.from("selected range");
+      const fd = openSync(path, "w", 0o600);
+      try {
+        ftruncateSync(fd, size);
+        writeSync(fd, selected, 0, selected.length, offset);
+      } finally {
+        closeSync(fd);
+      }
+      const observe = (source: string) =>
+        source.replace(
+          "handle.moiraPath = join(parent.moiraPath, name);",
+          `handle.moiraPath = join(parent.moiraPath, name);
+if(handle.moiraPath===${JSON.stringify(path)}){
+  const actualRead=handle.read.bind(handle);
+  handle.read=async(buffer,bufferOffset,length,position)=>{
+    await writeFile(${JSON.stringify(audit)},JSON.stringify({bufferBytes:buffer.length,length,position})+'\\n',{flag:'a'});
+    if(${JSON.stringify(action)}==='stat'||position<${offset}||length>${selected.length}||position+length>${offset + selected.length})throw new Error('unexpected whole-file content access');
+    return actualRead(buffer,bufferOffset,length,position);
+  };
+}`,
+        );
+      const outcome = await request(
+        value.environment,
+        {
+          action: "file-execute",
+          version: 1,
+          remoteMarker: `moira-op-${(action === "stat" ? "d5" : "d6").repeat(16)}`,
+          repositoryFullName: "owner/repository",
+          request:
+            action === "stat"
+              ? { action, path: "large.bin" }
+              : {
+                  action,
+                  path: "large.bin",
+                  offset,
+                  length: selected.length,
+                },
+        },
+        observe,
+      );
+      const reads = existsSync(audit)
+        ? readFileSync(audit, "utf8")
+            .trim()
+            .split("\n")
+            .map(
+              (line) =>
+                JSON.parse(line) as { bufferBytes: number; length: number; position: number },
+            )
+        : [];
+      expect(outcome).toMatchObject({ state: "succeeded" });
+      if (action === "stat") {
+        expect(outcome).toMatchObject({ value: { action, stat: { size, version: null } } });
+        expect(reads).toEqual([]);
+      } else {
+        expect(outcome).toMatchObject({
+          value: {
+            action,
+            offset,
+            totalSize: size,
+            bytesBase64: selected.toString("base64"),
+            sha256: null,
+            rangeSha256: createHash("sha256").update(selected).digest("hex"),
+          },
+        });
+        expect(reads.length).toBeGreaterThan(0);
+        expect(reads.reduce((total, read) => total + read.length, 0)).toBe(selected.length);
+        for (const read of reads) {
+          expect(read.bufferBytes).toBeLessThanOrEqual(selected.length);
+          expect(read.position).toBeGreaterThanOrEqual(offset);
+          expect(read.position + read.length).toBeLessThanOrEqual(offset + selected.length);
+        }
+      }
+    },
+  );
+
   test("performs bounded stat, search, ranges and atomic binary writes without shell paths", async () => {
     const value = fixture();
     writeFileSync(join(value.repository, "source.txt"), "alpha\nbeta needle\ngamma\n");
@@ -873,9 +960,21 @@ describe("direct Codespace operation supervisor", () => {
       remoteMarker: `moira-op-${"7".repeat(32)}`,
       repositoryFullName: "owner/repository",
       request: { action: "read", path: "source.txt", offset: 6, length: 4 },
-    })) as { value: { bytesBase64: string; offset: number; totalSize: number } };
+    })) as {
+      value: {
+        bytesBase64: string;
+        offset: number;
+        totalSize: number;
+        sha256: string;
+        rangeSha256: string;
+      };
+    };
     expect(Buffer.from(readResult.value.bytesBase64, "base64").toString()).toBe("beta");
     expect(readResult.value).toMatchObject({ offset: 6, totalSize: 24 });
+    expect(readResult.value.sha256).toBe(
+      createHash("sha256").update("alpha\nbeta needle\ngamma\n").digest("hex"),
+    );
+    expect(readResult.value.rangeSha256).toBe(createHash("sha256").update("beta").digest("hex"));
 
     mkdirSync(join(value.repository, "sub"));
     writeFileSync(join(value.repository, "sub", "match.txt"), "needle\n");
@@ -960,6 +1059,166 @@ describe("direct Codespace operation supervisor", () => {
     })) as { value: { current: { sha256: string } } };
     expect(readFileSync(join(value.repository, "binary.dat"))).toEqual(binary);
     expect(writeResult.value.current.sha256).toMatch(/^[a-f0-9]{64}$/);
+  });
+
+  test("a small partial read streams its whole-file hash with bounded buffers", async () => {
+    const value = fixture();
+    const bytes = Buffer.alloc(1024 * 1024, "a");
+    const path = join(value.repository, "small.bin");
+    writeFileSync(path, bytes);
+    const audit = join(value.stateRoot, "small-reads.jsonl");
+    const outcome = await request(
+      value.environment,
+      {
+        action: "file-execute",
+        version: 1,
+        remoteMarker: `moira-op-${"d7".repeat(16)}`,
+        repositoryFullName: "owner/repository",
+        request: { action: "read", path: "small.bin", offset: 7, length: 11 },
+      },
+      (source) =>
+        source.replace(
+          "handle.moiraPath = join(parent.moiraPath, name);",
+          `handle.moiraPath = join(parent.moiraPath, name);
+if(handle.moiraPath===${JSON.stringify(path)}){
+ const actualRead=handle.read.bind(handle);
+ handle.read=async(buffer,offset,length,position)=>{
+  await writeFile(${JSON.stringify(audit)},JSON.stringify({bufferBytes:buffer.length,length})+'\\n',{flag:'a'});
+  return actualRead(buffer,offset,length,position);
+ };
+}`,
+        ),
+    );
+    expect(outcome).toMatchObject({
+      state: "succeeded",
+      value: {
+        sha256: createHash("sha256").update(bytes).digest("hex"),
+        rangeSha256: createHash("sha256").update(bytes.subarray(7, 18)).digest("hex"),
+        bytesBase64: bytes.subarray(7, 18).toString("base64"),
+      },
+    });
+    const reads = readFileSync(audit, "utf8")
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line) as { bufferBytes: number; length: number });
+    expect(reads.reduce((total, read) => total + read.length, 0)).toBe(bytes.length + 11);
+    for (const read of reads) expect(read.bufferBytes).toBeLessThanOrEqual(256 * 1024);
+  });
+
+  test.each(["parent", "content"] as const)(
+    "a range rejects concurrent %s substitution",
+    async (change) => {
+      const value = fixture();
+      const parent = join(value.repository, "sub");
+      mkdirSync(parent);
+      const path = join(parent, "file.txt");
+      writeFileSync(path, "abc");
+      const oldParent = join(value.repository, "old-sub");
+      const result = await request(
+        value.environment,
+        {
+          action: "file-execute",
+          version: 1,
+          remoteMarker: `moira-op-${(change === "parent" ? "d8" : "d9").repeat(16)}`,
+          repositoryFullName: "owner/repository",
+          request: { action: "read", path: "sub/file.txt", offset: 0, length: 1 },
+        },
+        (source) =>
+          source.replace(
+            "handle.moiraPath = join(parent.moiraPath, name);",
+            `handle.moiraPath = join(parent.moiraPath, name);
+if(handle.moiraPath===${JSON.stringify(path)}){
+ const actualRead=handle.read.bind(handle);let changed=false;
+ handle.read=async(...args)=>{
+  const read=await actualRead(...args);
+  if(!changed){changed=true;${change === "parent" ? `await rename(${JSON.stringify(parent)},${JSON.stringify(oldParent)});await mkdir(${JSON.stringify(parent)});await writeFile(${JSON.stringify(path)},'abc');` : `await writeFile(${JSON.stringify(path)},'changed');`}}
+  return read;
+ };
+}`,
+          ),
+      );
+      expect(result).toMatchObject({
+        state: "failed",
+        value: { code: "CODESPACE_FILE_REJECTED", reason: "concurrent_change" },
+      });
+      if (change === "parent") {
+        expect(statSync(join(oldParent, "file.txt")).nlink).toBe(1);
+        expect(readFileSync(join(oldParent, "file.txt"), "utf8")).toBe("abc");
+      }
+    },
+  );
+
+  test("EOF ranges remain empty while invalid ranges and oversized whole-file edits stay refused", async () => {
+    const value = fixture();
+    const path = join(value.repository, "large.bin");
+    const size = 8 * 1024 * 1024;
+    const fd = openSync(path, "w");
+    try {
+      ftruncateSync(fd, size);
+    } finally {
+      closeSync(fd);
+    }
+    const send = (suffix: string, requestValue: Record<string, unknown>) =>
+      request(value.environment, {
+        action: "file-execute",
+        version: 1,
+        remoteMarker: `moira-op-${suffix.repeat(16)}`,
+        repositoryFullName: "owner/repository",
+        request: requestValue,
+      });
+    expect(
+      await send("e3", { action: "read", path: "large.bin", offset: size, length: 1 }),
+    ).toMatchObject({
+      state: "succeeded",
+      value: {
+        totalSize: size,
+        bytesBase64: "",
+        sha256: null,
+        rangeSha256: createHash("sha256").update("").digest("hex"),
+      },
+    });
+    expect(
+      await send("e4", { action: "read", path: "large.bin", offset: size + 1, length: 1 }),
+    ).toMatchObject({ state: "failed", value: { reason: "invalid_range" } });
+    expect(
+      await send("e5", {
+        action: "read",
+        path: "large.bin",
+        offset: 0,
+        length: 4 * 1024 * 1024 + 1,
+      }),
+    ).toMatchObject({ state: "failed", value: { reason: "size_limit" } });
+    expect(
+      await send("e6", { action: "download", path: "large.bin", maxBytes: 4 * 1024 * 1024 }),
+    ).toMatchObject({ state: "failed", value: { reason: "size_limit" } });
+    expect(
+      await send("e7", {
+        action: "write",
+        path: "large.bin",
+        bytesBase64: Buffer.from("replacement").toString("base64"),
+        expected: { exists: true, size },
+      }),
+    ).toMatchObject({ state: "failed", value: { reason: "size_limit" } });
+    expect(statSync(path).size).toBe(size);
+    expect(
+      await send("e8", {
+        action: "write",
+        path: "new.bin",
+        bytesBase64: Buffer.alloc(4 * 1024 * 1024 + 1).toString("base64"),
+        expected: { exists: false },
+      }),
+    ).toMatchObject({ state: "failed", value: { reason: "size_limit" } });
+    expect(existsSync(join(value.repository, "new.bin"))).toBe(false);
+    writeFileSync(join(value.repository, "empty.bin"), "");
+    expect(await send("e9", { action: "download", path: "empty.bin", maxBytes: 1 })).toMatchObject({
+      state: "succeeded",
+      value: {
+        totalSize: 0,
+        offset: 0,
+        bytesBase64: "",
+        sha256: createHash("sha256").update("").digest("hex"),
+      },
+    });
   });
 
   test("searches repository content without descending into version-control internals", async () => {
@@ -1138,9 +1397,28 @@ describe("direct Codespace operation supervisor", () => {
         }),
       ).resolves.toMatchObject({
         state: "failed",
-        value: { action: "read", state: "failed", code: "CODESPACE_FILE_REJECTED" },
+        value: {
+          action: "read",
+          state: "failed",
+          code: "CODESPACE_FILE_REJECTED",
+          reason: "unsafe_access",
+        },
+      });
+      await expect(
+        request(value.environment, {
+          action: "file-execute",
+          version: 1,
+          remoteMarker: `moira-op-${suffix.repeat(31)}0`,
+          repositoryFullName: "owner/repository",
+          request: { action: "stat", path },
+        }),
+      ).resolves.toMatchObject({
+        state: "failed",
+        value: { action: "stat", reason: "unsafe_access" },
       });
     }
+    // Restore a single-link target so the next refusal observes the expected-version guard.
+    rmSync(join(value.repository, "hard.txt"));
     await expect(
       request(value.environment, {
         action: "file-execute",
@@ -1156,7 +1434,12 @@ describe("direct Codespace operation supervisor", () => {
       }),
     ).resolves.toMatchObject({
       state: "failed",
-      value: { action: "write", state: "failed", code: "CODESPACE_FILE_REJECTED" },
+      value: {
+        action: "write",
+        state: "failed",
+        code: "CODESPACE_FILE_REJECTED",
+        reason: "precondition",
+      },
     });
     expect(readFileSync(outside, "utf8")).toBe("outside");
     expect(readFileSync(join(value.repository, "original.txt"), "utf8")).toBe("original");

@@ -9,7 +9,17 @@ import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 import { spawn, spawnSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  closeSync,
+  ftruncateSync,
+  mkdtempSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+  writeSync,
+} from "node:fs";
 import type { ClientRequest, IncomingMessage, RequestOptions } from "node:http";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -579,7 +589,19 @@ describe("ChatGPT-compatible codespace MCP with real domain services", () => {
     expect(
       (await mcp.call("read", { ...args, path: "app.mjs", offset: 0, length: 1024 }))
         .structuredContent,
-    ).toMatchObject({ text: initialSource });
+    ).toMatchObject({
+      text: initialSource,
+      sha256: digest(Buffer.from(initialSource)),
+      range_sha256: digest(Buffer.from(initialSource)),
+    });
+    const prefix = Buffer.from(initialSource).subarray(0, 6);
+    const partial = await mcp.call("read", { ...args, path: "app.mjs", offset: 0, length: 6 });
+    expect(partial.isError).not.toBe(true);
+    expect(partial.structuredContent).toMatchObject({
+      text: prefix.toString("utf8"),
+      sha256: digest(Buffer.from(initialSource)),
+      range_sha256: digest(prefix),
+    });
     expect(
       (
         await mcp.call("search", {
@@ -769,6 +791,39 @@ describe("ChatGPT-compatible codespace MCP with real domain services", () => {
     expect((await second.call("get", args)).structuredContent).toMatchObject({
       state: "deleted",
     });
+  });
+
+  it("reads large-file metadata and a bounded text range through the registered MCP contract", async () => {
+    const { fixture, mcp } = await setup();
+    const codespaceId = await createCodespace(mcp);
+    const size = 8 * 1024 * 1024 + 137;
+    const offset = 5 * 1024 * 1024 + 11;
+    const bytes = Buffer.from("selected large-file range\n");
+    const descriptor = openSync(join(fixture.repositoryPath, "large.txt"), "wx");
+    try {
+      ftruncateSync(descriptor, size);
+      writeSync(descriptor, bytes, 0, bytes.length, offset);
+    } finally {
+      closeSync(descriptor);
+    }
+    const args = { codespace_id: codespaceId, path: "large.txt" };
+    const stat = await mcp.call("stat", args);
+    expect(stat.isError).not.toBe(true);
+    expect(stat.structuredContent).toMatchObject({
+      stat: { type: "file", size_bytes: size, version: null },
+    });
+    const range = await mcp.call("read", { ...args, offset, length: bytes.length });
+    expect(range.isError).not.toBe(true);
+    expect(range.structuredContent).toEqual({
+      action: "read",
+      path: "large.txt",
+      offset,
+      total_size: size,
+      text: bytes.toString("utf8"),
+      sha256: null,
+      range_sha256: digest(bytes),
+    });
+    expect(JSON.stringify([stat, range])).not.toMatch(/secret-|base64/);
   });
 
   it("runs a command past the call that started it, watches it, and stops one on request", async () => {

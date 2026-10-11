@@ -350,11 +350,20 @@ access remain valid and the result is still stored. Restart does not preserve a 
 repeat the same write without inspecting the affected files. A typed transport failure after acceptance retains
 `operation_id`, or `process_id` for a background start, so it can be inspected without another launch.
 
-`read` returns UTF-8 text with `offset` and `total_size`, plus `sha256` for a repository
-file; give `path` for a file, or `operation_id` and `stream` for a command's retained `stdout` or
+`stat` returns repository-file metadata without reading a large file's contents. Regular files
+above the 4 MiB code-edit ceiling have `version: null`; small editable files retain their whole-file
+SHA256 version. Repository paths, regular-file type, single-link identity and concurrent changes
+are checked independently of file size.
+
+`read` returns only the selected bounded UTF-8 range with `offset` and `total_size`. For a repository
+file, `sha256` means the whole-file digest: it remains available for files up to 4 MiB and is `null`
+for larger files. `range_sha256` hashes exactly the returned bytes and does not replace the whole-file
+version used by edits. Retained older SHA-only results keep their whole-file digest and receive a
+computed range digest when collected. A file offset equal to its size returns an empty range; an
+offset beyond it is refused. Give `path` for a file, or `operation_id` and `stream` for a command's retained `stdout` or
 `stderr`, naming the codespace that command belongs to. A read that starts at or past the end of a
 stream returns no text and the stream's current size. `length` defaults to
-64 KiB, and `search` defaults to 100 matches within 64 KiB of results, so naming only the
+64 KiB with a maximum of 4 MiB, and `search` defaults to 100 matches within 64 KiB of results, so naming only the
 codespace, path and query is a complete call. Search covers repository content and skips the
 repository's own `.git` directory, and it refuses a search rooted at or inside that directory; a
 file there is still readable by its exact path. A non-text range returns
@@ -365,6 +374,13 @@ under an `expected` precondition (`exists`, optional `size_bytes` and `sha256`),
 returns old/new versions plus a content-free summary. `upload` writes a native file
 reference to a path; `download` returns the file as an MCP `resource_link` whose one-use
 HTTPS link expires automatically and is never repeated in the JSON result.
+Code writes, patches, complete native downloads and image previews keep their 4 MiB ceiling.
+A complete empty download is valid; an empty image is not a valid preview.
+
+A retained file refusal may include a bounded `reason`: `unsafe_access`, `size_limit`,
+`invalid_range`, `concurrent_change` or `precondition`. It names the actual failed guard without
+exposing host paths or provider exception text. Older or unclassified refusals may omit it;
+the error code and original recovery identity still apply.
 
 The agent runs as the ordinary Codespace user with that environment's repository, network and
 configured secrets. Moira bounds cloud concurrency, input/output size, time and transfer quotas and
