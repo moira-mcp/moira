@@ -87,7 +87,7 @@
   },
   "devDependencies": {
     "@jest/globals": "^30.5.2",
-    "@playwright/test": "^1.63.0",
+    "@playwright/test": "^1.64.0",
     "@swc/core": "^1.16.13",
     "@swc/jest": "^0.2.39",
     "@testing-library/jest-dom": "^6.9.1",
