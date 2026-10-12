@@ -122,6 +122,12 @@ Do NOT read `unit.log` for workflow tests — it's huge and wastes tokens.
 **Location:** `tests/unit/`
 **Purpose:** Test components in isolation, mock all dependencies
 
+The root unit runner builds the fixed guest worker and file CLI before starting tests,
+including filtered runs. It uses `scripts/build-guest-assets.js`; no manual prebuild is
+required. Each program is compiled before an exclusive temporary file is written and
+atomically renamed into place. Readers holding an open file retain the complete original
+program. Publication is per file, not a transaction across both programs.
+
 ### 2. Integration Tests
 
 **Location:** `tests/integration/`
@@ -370,6 +376,8 @@ describe("Feature Name", () => {
 - Descriptive names starting with "should"
 - Test success AND failure paths
 - Add cleanup in afterEach
+- Abort owned event streams and await reader closure in afterEach, including when an
+  assertion fails. Wait for the required event kind rather than an arbitrary event count.
 - Use utilities from `tests/utils/`
 
 **DON'T:**

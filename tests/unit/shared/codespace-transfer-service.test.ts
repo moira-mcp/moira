@@ -874,6 +874,71 @@ describe("private codespace transfer service", () => {
     }
   });
 
+  test("replays an exact maximum chunk and rejects an oversized chunk without changing its larger reservation", async () => {
+    const value = fixture({
+      maxTransferFileBytes: 1024 * 1024,
+      maxTransferBytesPerUser: 1024 * 1024,
+      maxTransferBytesGlobal: 2 * 1024 * 1024,
+      maxTransferInflightBytesPerUser: 1024 * 1024,
+      maxTransferInflightBytesGlobal: 2 * 1024 * 1024,
+    });
+    const authority = {
+      resourceId: "space-1",
+      provider: "local",
+      resourceGeneration: 1,
+      authorizationGeneration: 2,
+      environmentIdentity: "boot-one",
+    };
+    const bytes = Buffer.alloc(256 * 1024 + 1, 0x61);
+    bytes[bytes.length - 1] = 0xff;
+    const sha256 = createHash("sha256").update(bytes).digest("hex");
+    try {
+      const reserved = await value.service.reserveResumable("user-1", {
+        requestId: "00000000-0000-7000-8000-000000000007",
+        requestDigest: "a".repeat(64),
+        purpose: "codespace_download",
+        fileName: "boundary.bin",
+        mimeType: "application/octet-stream",
+        size: bytes.length,
+        sha256,
+        authority,
+      });
+      const chunk = bytes.subarray(0, 256 * 1024);
+      const request = {
+        offset: 0,
+        bytes: chunk,
+        sha256: createHash("sha256").update(chunk).digest("hex"),
+      };
+      const written = await value.service.writeTransferChunk(
+        "user-1",
+        reserved.transferId,
+        authority,
+        request,
+      );
+      expect(written.offset).toBe(chunk.length);
+      const record = value.repository.getOwned("user-1", reserved.transferId)!;
+      const partial = join(value.root, `${record.objectKey}.partial`);
+      expect(readFileSync(partial)).toEqual(chunk);
+      expect(
+        await value.service.writeTransferChunk("user-1", reserved.transferId, authority, request),
+      ).toEqual(written);
+      expect(value.repository.getOwned("user-1", reserved.transferId)).toEqual(record);
+      expect(readFileSync(partial)).toEqual(chunk);
+
+      await expect(
+        value.service.writeTransferChunk("user-1", reserved.transferId, authority, {
+          offset: 0,
+          bytes,
+          sha256,
+        }),
+      ).rejects.toThrow("Invalid transfer chunk");
+      expect(value.repository.getOwned("user-1", reserved.transferId)).toEqual(record);
+      expect(readFileSync(partial)).toEqual(chunk);
+    } finally {
+      value.sqlite.close();
+    }
+  });
+
   test("native caller recovery preserves the original ready object and skips another external fetch", async () => {
     const value = fixture();
     const authority = {

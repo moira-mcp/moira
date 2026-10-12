@@ -8,12 +8,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { TelegramClient } from "@mcp-moira/workflow-engine";
 import { ownedByteStream } from "../helpers/owned-byte-stream.js";
+import { createRateLimiters } from "../../packages/web-backend/src/middleware/rate-limit-middleware.js";
 
 describe("Telegram streamed attachment HTTP transport", () => {
   it.each(["film.mp4", 'ролик "версия".mp4'])(
     "delivers %s as a complete multipart file through native fetch",
     async (filename) => {
       const root = mkdtempSync(join(tmpdir(), "moira-telegram-stream-"));
+      const receiverPath = join(root, "received-document.bin");
       const chunk = Buffer.alloc(256 * 1024, 0xa7);
       const count = 20;
       const expected = createHash("sha256");
@@ -28,16 +30,34 @@ describe("Telegram streamed attachment HTTP transport", () => {
         chatId: string;
       } | null = null;
       const app = express();
+      const { apiLimiter } = createRateLimiters({ skipLimits: false, whitelist: [] });
       app.post(
         "/bot123:fixture/sendDocument",
-        multer({ dest: root, limits: { fileSize: 20 * 1024 * 1024 } }).single("document"),
+        apiLimiter,
+        multer({
+          storage: multer.diskStorage({
+            destination: root,
+            filename: (_request, _file, done) => done(null, "received-document.bin"),
+          }),
+          limits: {
+            fileSize: 20 * 1024 * 1024,
+            files: 1,
+            fields: 2,
+            fieldSize: 1024,
+            parts: 3,
+          },
+        }).single("document"),
         async (req, res) => {
           try {
             if (!req.file) throw new Error("Multipart file is missing");
             const hash = createHash("sha256");
-            for await (const bytes of createReadStream(req.file.path)) hash.update(bytes);
+            let size = 0;
+            for await (const bytes of createReadStream(receiverPath)) {
+              size += bytes.length;
+              hash.update(bytes);
+            }
             observed = {
-              size: req.file.size,
+              size,
               sha256: hash.digest("hex"),
               // Multer's Busboy decoder uses Latin-1 for ordinary filename parameters.
               // Recover the wire UTF-8 bytes explicitly; this fixture is not Telegram.

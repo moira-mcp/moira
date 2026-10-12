@@ -2659,7 +2659,7 @@ describe("actual local-only service composition and outbound relay", () => {
     const argv = [
       process.execPath,
       "-e",
-      `const c=require('node:crypto');const h=c.createHash('sha256');process.stdin.on('data',b=>h.update(b));process.stdin.on('end',()=>{if(h.digest('hex')!==${JSON.stringify(hash(actual.nativeBytes))})process.exit(23);process.stdout.write('controlled guest result')})`,
+      "const {createHash}=require('node:crypto'); const h=createHash('sha256');process.stdin.on('data',b=>h.update(b));process.stdin.on('end',()=>process.stdout.write(h.digest('hex')));",
       "private-argv-canary",
     ];
     const executed = await actual.drive(
@@ -2689,7 +2689,7 @@ describe("actual local-only service composition and outbound relay", () => {
       throw new Error(`Native execution ${executed.operation.state}: ${JSON.stringify(errors)}`);
     }
     expect(executed.operation.state).toBe("succeeded");
-    expect(executed.result?.stdout).toBe("controlled guest result");
+    expect(executed.result?.stdout).toBe(hash(actual.nativeBytes));
     const effect = await actual.state.read(
       `effect-${executed.operation.remoteMarker}.json`,
       (value) => value,

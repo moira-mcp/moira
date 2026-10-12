@@ -2879,7 +2879,7 @@ const foreign = ${substituted === "target" ? "target" : "backup"};
 const foreignBytes = await readFile(foreign);
 await rename(foreign, foreign + '.pinned');
 await writeFile(foreign, foreignBytes);
-await writeFile(${JSON.stringify(audit)}, JSON.stringify({path:foreign,ino:(await stat(foreign)).ino,bytes:foreignBytes.toString('base64')}));
+await writeFile(${JSON.stringify(audit)}, JSON.stringify({path:await realpath(foreign),ino:(await stat(foreign)).ino,bytes:foreignBytes.toString('base64')}));
 fail('injected commit failure');`,
           );
           injected = changed !== source;
