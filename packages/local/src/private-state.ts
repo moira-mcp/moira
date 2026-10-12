@@ -9,6 +9,8 @@ import { runtimeControlAsset } from "./assets.js";
 
 const KEY = /^[a-z][a-z0-9-]{0,127}\.json$/;
 const MAX_STATE_BYTES = 16 * 1024 * 1024;
+// All instances of this module share ownership of each canonical document target.
+const documentLanes = new Map<string, Promise<unknown>>();
 const busy = () =>
   new LocalRefusal(
     "LOCAL_ALREADY_RUNNING",
@@ -89,38 +91,58 @@ export class PrivateState {
     return join(this.root, key);
   }
 
-  async read<T>(key: string, parse: (value: unknown) => T): Promise<T | null> {
-    let handle;
+  private async serial<T>(target: string, action: () => Promise<T>): Promise<T> {
+    const work = (documentLanes.get(target) ?? Promise.resolve())
+      .catch(() => undefined)
+      .then(action);
+    documentLanes.set(target, work);
     try {
-      handle = await open(this.path(key), constants.O_RDONLY | constants.O_NOFOLLOW);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
-      throw error;
-    }
-    try {
-      const metadata = await handle.stat();
-      if (
-        !metadata.isFile() ||
-        metadata.nlink !== 1 ||
-        (metadata.mode & 0o077) !== 0 ||
-        metadata.size > MAX_STATE_BYTES ||
-        (process.getuid && metadata.uid !== process.getuid())
-      ) {
-        throw new LocalRefusal("LOCAL_STATE_UNSAFE", "Unsafe local state file.");
-      }
-      const bytes = Buffer.alloc(metadata.size + 1);
-      let total = 0;
-      while (total < bytes.length) {
-        const { bytesRead } = await handle.read(bytes, total, bytes.length - total, total);
-        if (bytesRead === 0) break;
-        total += bytesRead;
-      }
-      if (total !== metadata.size)
-        throw new LocalRefusal("LOCAL_STATE_CHANGED", "Local state changed while reading.");
-      return parse(JSON.parse(bytes.subarray(0, total).toString("utf8")));
+      return await work;
     } finally {
-      await handle.close();
+      if (documentLanes.get(target) === work) documentLanes.delete(target);
     }
+  }
+
+  async read<T>(key: string, parse: (value: unknown) => T): Promise<T | null> {
+    const target = this.path(key);
+    const snapshot = await this.serial(target, async () => {
+      let handle;
+      try {
+        handle = await open(target, constants.O_RDONLY | constants.O_NOFOLLOW);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") return { present: false } as const;
+        throw error;
+      }
+      try {
+        const metadata = await handle.stat();
+        if (
+          !metadata.isFile() ||
+          metadata.nlink !== 1 ||
+          (metadata.mode & 0o077) !== 0 ||
+          metadata.size > MAX_STATE_BYTES ||
+          (process.getuid && metadata.uid !== process.getuid())
+        ) {
+          throw new LocalRefusal("LOCAL_STATE_UNSAFE", "Unsafe local state file.");
+        }
+        const bytes = Buffer.alloc(metadata.size + 1);
+        let total = 0;
+        while (total < bytes.length) {
+          const { bytesRead } = await handle.read(bytes, total, bytes.length - total, total);
+          if (bytesRead === 0) break;
+          total += bytesRead;
+        }
+        if (total !== metadata.size)
+          throw new LocalRefusal("LOCAL_STATE_CHANGED", "Local state changed while reading.");
+        return {
+          present: true,
+          value: JSON.parse(bytes.subarray(0, total).toString("utf8")) as unknown,
+        } as const;
+      } finally {
+        await handle.close();
+      }
+    });
+    // Caller parsing may itself access this target; its descriptor ownership has ended.
+    return snapshot.present ? parse(snapshot.value) : null;
   }
 
   async write(key: string, value: unknown): Promise<void> {
@@ -128,44 +150,50 @@ export class PrivateState {
     const bytes = Buffer.from(JSON.stringify(value));
     if (bytes.length > MAX_STATE_BYTES)
       throw new LocalRefusal("LOCAL_STATE_FULL", "Local state limit reached.");
-    const temporary = join(this.root, `.write-${randomBytes(16).toString("hex")}`);
-    const handle = await open(
-      temporary,
-      constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY,
-      0o600,
-    );
-    try {
-      await handle.writeFile(bytes);
-      await handle.sync();
-    } finally {
-      await handle.close();
-    }
-    try {
-      const existing = await lstat(target).catch((error: NodeJS.ErrnoException) => {
-        if (error.code !== "ENOENT") throw error;
-        return null;
-      });
-      if (existing && (!existing.isFile() || existing.isSymbolicLink() || existing.nlink !== 1)) {
-        throw new LocalRefusal("LOCAL_STATE_UNSAFE", "Unsafe local state replacement.");
-      }
-      await rename(temporary, target);
-      const directory = await open(dirname(target), constants.O_RDONLY);
+    await this.serial(target, async () => {
+      const temporary = join(this.root, `.write-${randomBytes(16).toString("hex")}`);
+      // Only a successful exclusive open establishes ownership for cleanup.
+      const handle = await open(
+        temporary,
+        constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY,
+        0o600,
+      );
       try {
-        await directory.sync();
+        try {
+          await handle.writeFile(bytes);
+          await handle.sync();
+        } finally {
+          await handle.close();
+        }
+        const existing = await lstat(target).catch((error: NodeJS.ErrnoException) => {
+          if (error.code !== "ENOENT") throw error;
+          return null;
+        });
+        if (existing && (!existing.isFile() || existing.isSymbolicLink() || existing.nlink !== 1)) {
+          throw new LocalRefusal("LOCAL_STATE_UNSAFE", "Unsafe local state replacement.");
+        }
+        await rename(temporary, target);
+        const directory = await open(dirname(target), constants.O_RDONLY);
+        try {
+          await directory.sync();
+        } finally {
+          await directory.close();
+        }
       } finally {
-        await directory.close();
+        await unlink(temporary).catch((error: NodeJS.ErrnoException) => {
+          if (error.code !== "ENOENT") throw error;
+        });
       }
-    } finally {
-      await unlink(temporary).catch((error: NodeJS.ErrnoException) => {
-        if (error.code !== "ENOENT") throw error;
-      });
-    }
+    });
   }
 
   async remove(key: string): Promise<void> {
-    await unlink(this.path(key)).catch((error: NodeJS.ErrnoException) => {
-      if (error.code !== "ENOENT") throw error;
-    });
+    const target = this.path(key);
+    await this.serial(target, () =>
+      unlink(target).catch((error: NodeJS.ErrnoException) => {
+        if (error.code !== "ENOENT") throw error;
+      }),
+    );
   }
 
   async keys(prefix: string): Promise<string[]> {

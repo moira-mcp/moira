@@ -230,6 +230,200 @@ describe("private local state", () => {
     expect(await readFile(join(root, "outside"), "utf8")).toBe("host-data");
     await expect(state.write("../outside.json", {})).rejects.toThrow("Invalid local state key");
   });
+  test.each([
+    ["same instance", "write"],
+    ["another instance", "write"],
+    ["same instance", "remove"],
+    ["another instance", "remove"],
+    ["another root", "write"],
+    ["foreign filesystem", "foreign-unlink"],
+  ] as const)(
+    "a held reader precedes %s %s while another target progresses",
+    async (instance, action) => {
+      const module = join(root, "private-state.mjs");
+      await build({
+        entryPoints: ["packages/local/src/private-state.ts"],
+        outfile: module,
+        bundle: true,
+        platform: "node",
+        format: "esm",
+        target: "node24",
+      });
+      const result = await execute(process.execPath, [
+        "--input-type=module",
+        "-e",
+        `
+      import fs from 'node:fs/promises';
+      import {constants} from 'node:fs';
+      import {syncBuiltinESMExports} from 'node:module';
+      import {AsyncLocalStorage} from 'node:async_hooks';
+      const context=new AsyncLocalStorage();
+      const originalOpen=fs.open, originalUnlink=fs.unlink;
+      let readerEntered, releaseReader, mutationEntered=false;
+      const entered=new Promise(resolve=>readerEntered=resolve);
+      const released=new Promise(resolve=>releaseReader=resolve);
+      fs.open=async function(path,flags,...args){
+        if(context.getStore()==='mutation') mutationEntered=true;
+        const handle=await originalOpen(path,flags,...args);
+        if(context.getStore()==='reader' && flags===(constants.O_RDONLY|constants.O_NOFOLLOW)){
+          const stat=handle.stat.bind(handle);
+          handle.stat=async (...args)=>{readerEntered();await released;return stat(...args);};
+        }
+        return handle;
+      };
+      fs.unlink=async function(...args){
+        if(context.getStore()==='mutation') mutationEntered=true;
+        return originalUnlink(...args);
+      };
+      syncBuiltinESMExports();
+      const {PrivateState}=await import(${JSON.stringify(`file://${module}`)});
+      const state=await PrivateState.open(${JSON.stringify(root)});
+      const instance=${JSON.stringify(instance)}, action=${JSON.stringify(action)};
+      const writer=instance==='same instance'?state:await PrivateState.open(
+        instance==='another root'?state.root+'/peer':state.root);
+      await state.write('held.json',{edition:'old'});
+      const read=context.run('reader',()=>state.read('held.json',value=>value));
+      const readOutcome=read.then(value=>({value}),error=>({code:error.code}));
+      await entered;
+      let mutation, heldMutationEntered, independent;
+      try {
+        mutation=context.run('mutation',()=>action==='write'
+          ?writer.write('held.json',{edition:'new'}):action==='foreign-unlink'
+          ?fs.unlink(state.root+'/held.json'):writer.remove('held.json'));
+        if(action==='foreign-unlink') await mutation;
+        await context.run('independent',()=>writer.write('independent.json',{independent:true}));
+        independent=await writer.read('independent.json',value=>value);
+        heldMutationEntered=mutationEntered;
+      } finally {releaseReader();}
+      await mutation;
+      const reader=await readOutcome;
+      console.log(JSON.stringify({heldMutationEntered,independent,reader,
+        stored:await writer.read('held.json',value=>value),
+        temporary:(await fs.readdir(state.root)).filter(name=>name.startsWith('.write-'))}));
+    `,
+      ]);
+      expect(JSON.parse(result.stdout)).toEqual({
+        heldMutationEntered: instance === "another root" || action === "foreign-unlink",
+        independent: { independent: true },
+        reader:
+          action === "foreign-unlink"
+            ? { code: "LOCAL_STATE_UNSAFE" }
+            : { value: { edition: "old" } },
+        stored: action === "write" ? { edition: "new" } : null,
+        temporary: [],
+      });
+    },
+  );
+  test.each(["writeFile", "sync", "close", "exclusive-open"] as const)(
+    "a failed %s preserves prior bytes, cleans only owned temporary files and permits later work",
+    async (phase) => {
+      const module = join(root, "private-state.mjs");
+      await build({
+        entryPoints: ["packages/local/src/private-state.ts"],
+        outfile: module,
+        bundle: true,
+        platform: "node",
+        format: "esm",
+        target: "node24",
+      });
+      const result = await execute(process.execPath, [
+        "--input-type=module",
+        "-e",
+        `
+        import fs from 'node:fs/promises';
+        import {syncBuiltinESMExports} from 'node:module';
+        import {AsyncLocalStorage} from 'node:async_hooks';
+        const context=new AsyncLocalStorage(), originalOpen=fs.open;
+        const phase=${JSON.stringify(phase)}, root=${JSON.stringify(root)};
+        let failed=false, foreign;
+        fs.open=async function(path,flags,...args){
+          if(context.getStore()==='failing' && !failed){
+            failed=true;
+            if(phase==='exclusive-open'){
+              foreign=path;
+              const handle=await originalOpen(path,flags,...args);
+              await handle.writeFile('foreign-owned');await handle.close();
+              return originalOpen(path,flags,...args);
+            }
+            const handle=await originalOpen(path,flags,...args);
+            const original=handle[phase].bind(handle);
+            handle[phase]=async (...args)=>{
+              if(phase==='close') await original(...args);
+              throw Object.assign(new Error('controlled '+phase),{code:'CONTROLLED_FAILURE'});
+            };
+            return handle;
+          }
+          return originalOpen(path,flags,...args);
+        };
+        syncBuiltinESMExports();
+        const {PrivateState}=await import(${JSON.stringify(`file://${module}`)});
+        const state=await PrivateState.open(root);
+        await state.write('prior.json',{edition:'old'});
+        let failure;
+        try{await context.run('failing',()=>state.write('prior.json',{edition:'rejected'}));}
+        catch(error){failure=error.code;}
+        const prior=await fs.readFile(root+'/prior.json','utf8');
+        const temporary=(await fs.readdir(root)).filter(name=>name.startsWith('.write-'));
+        const foreignBytes=foreign?await fs.readFile(foreign,'utf8'):null;
+        await state.write('prior.json',{edition:'later'});
+        console.log(JSON.stringify({failure,prior,temporaryCount:temporary.length,foreignBytes,
+          later:await state.read('prior.json',value=>value)}));
+      `,
+      ]);
+      expect(JSON.parse(result.stdout)).toEqual({
+        failure: phase === "exclusive-open" ? "EEXIST" : "CONTROLLED_FAILURE",
+        prior: JSON.stringify({ edition: "old" }),
+        temporaryCount: phase === "exclusive-open" ? 1 : 0,
+        foreignBytes: phase === "exclusive-open" ? "foreign-owned" : null,
+        later: { edition: "later" },
+      });
+    },
+  );
+  test("failed parsing releases the target and a reentrant parser can publish its next value", async () => {
+    await state.write("parse.json", null);
+    await expect(
+      state.read("parse.json", () => {
+        throw new Error("controlled parse");
+      }),
+    ).rejects.toThrow("controlled parse");
+    expect(
+      await state.read("parse.json", async (value) => {
+        await state.write("parse.json", { parsed: value });
+        return value;
+      }),
+    ).toBeNull();
+    expect(await state.read("parse.json", (value) => value)).toEqual({ parsed: null });
+    await state.remove("parse.json");
+    expect(
+      await state.read("parse.json", () => {
+        throw new Error("absent must not parse");
+      }),
+    ).toBeNull();
+  });
+  test.each(["hardlink", "oversized", "invalid-json"] as const)(
+    "an unsafe %s read refuses its bytes and releases the target for later work",
+    async (kind) => {
+      const path = join(root, "unsafe.json");
+      await writeFile(
+        path,
+        kind === "oversized"
+          ? Buffer.alloc(16 * 1024 * 1024 + 1, 32)
+          : kind === "invalid-json"
+            ? "{"
+            : "{}",
+        { mode: 0o600 },
+      );
+      if (kind === "hardlink") await link(path, join(root, "foreign-link"));
+      const before = await readFile(path);
+      await expect(state.read("unsafe.json", (value) => value)).rejects.toThrow(
+        kind === "invalid-json" ? /JSON/ : "Unsafe local state file",
+      );
+      expect(await readFile(path)).toEqual(before);
+      await state.remove("unsafe.json");
+      await state.write("unsafe.json", { recovered: true });
+      expect(await state.read("unsafe.json", (value) => value)).toEqual({ recovered: true });
+    },
+  );
   test("refuses broad permissions and a second owner of the runner lock", async () => {
     await state.write("credential.json", { value: "sensitive" });
     await chmod(join(root, "credential.json"), 0o644);
