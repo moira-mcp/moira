@@ -450,6 +450,10 @@ its installed per-space broker credential, so clients such as npm need not send 
 A client-supplied proxy credential cannot select another space. Repository Git authorization remains
 separate. The host still checks the current lease, grant, destination and public network address;
 this credential is neither a GitHub token nor a forwarded host credential.
+The fixed tunnel's five-second framing guard ends when its broker connection is established.
+The broker's 15-second CONNECT guard ends after the connected peer passes address verification.
+These guards do not impose an idle deadline on an established tunnel. Current leases, revocation,
+socket closure and broker shutdown still govern its lifetime.
 The guest may contain public SDK credential placeholders: API sentinel values and the pinned SDK's
 public GitHub sentinel are not forwarded user tokens. Their presence alone neither proves forwarding
 nor authorizes access. The companion supplies no AI-provider keys or host credential values.
@@ -1042,6 +1046,10 @@ CLI upload publishes a private server object; CLI download pulls an owned privat
 guarded repository target. Its default target precondition is absence; `--replace-sha256` supplies
 the existing full-file version for replacement. Chunk retries retain offset/hash checkpoints and
 the exact immutable transfer identity. Pure status never resumes network or target effects.
+An unconfirmed CLI HTTP exchange retains `TRANSFER_OUTCOME_UNKNOWN` and reports only bounded
+HTTP/process diagnostics, without raw response content, stderr, URLs or credentials. Inspect status
+with the original request UUID before resuming that same immutable transfer; the diagnostic does
+not establish whether its effect happened.
 
 The bootstrap credential is file-only and binds setup, owner, resource, provider, authorization/resource
 generations, actual guest life and finite expiry. Per-transfer credentials additionally bind the

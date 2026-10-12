@@ -334,7 +334,7 @@ async function fileHttp(
     const argv = [
       "--silent",
       "--show-error",
-      "--fail-with-body",
+      "--fail",
       "--proto",
       "=https",
       "--proto-redir",
@@ -354,47 +354,62 @@ async function fileHttp(
     ];
     if (bytes !== undefined) argv.push("--data-binary", "@-");
     argv.push(configuration.origin + path);
-    const body = await new Promise((done, reject) => {
+    const outcome = await new Promise((done) => {
       const child = spawn("curl", argv, { stdio: ["pipe", "pipe", "pipe"], env: process.env });
       const chunks = [];
       let length = 0;
-      let rejected = false;
-      const refuse = () => {
-        if (rejected) return;
-        rejected = true;
+      let failure;
+      const refuse = (kind) => {
+        if (failure) return;
+        failure = kind;
         child.kill("SIGKILL");
-        const error = new Error("file HTTP operation is unconfirmed");
-        error.code = "TRANSFER_OUTCOME_UNKNOWN";
-        reject(error);
       };
       child.stderr.resume();
       child.stdin.on("error", () => undefined);
       child.stdout.on("data", (chunk) => {
         length += chunk.length;
-        if (length > maximum) refuse();
+        if (length > maximum) refuse("response_limit");
         else chunks.push(Buffer.from(chunk));
       });
-      child.once("error", refuse);
+      child.once("error", () => refuse("process"));
       child.once("close", (code) => {
-        if (rejected) return;
-        if (code !== 0) {
-          const error = new Error("file HTTP operation is unconfirmed");
-          error.code = "TRANSFER_OUTCOME_UNKNOWN";
-          reject(error);
-        } else done(Buffer.concat(chunks, length));
+        done({
+          kind: failure ?? (code === 0 ? null : "transport"),
+          processExitCode: Number.isInteger(code) && code > 0 && code <= 255 ? code : null,
+          body: !failure && code === 0 ? Buffer.concat(chunks, length) : null,
+        });
       });
       child.stdin.end(bytes);
     });
-    const headerStat = await lstat(responsePath);
-    if (
-      !headerStat.isFile() ||
-      headerStat.isSymbolicLink() ||
-      headerStat.nlink !== 1 ||
-      headerStat.size > 16384
-    )
-      fail("invalid transfer response headers");
-    const responseHeaders = await readFile(responsePath, "utf8");
-    return { body, headers: responseHeaders };
+    const responseHeaders = await (async () => {
+      const headerStat = await lstat(responsePath);
+      if (
+        !headerStat.isFile() ||
+        headerStat.isSymbolicLink() ||
+        headerStat.nlink !== 1 ||
+        headerStat.size > 16384
+      )
+        fail("invalid transfer response headers");
+      return readFile(responsePath, "utf8");
+    })().catch((error) => {
+      // Missing/invalid headers cannot replace a genuinely unconfirmed process outcome.
+      if (!outcome.kind) throw error;
+      return "";
+    });
+    if (outcome.kind) {
+      const statuses = [...responseHeaders.matchAll(/^HTTP\/\d(?:\.\d)? ([0-9]{3})(?: |\r?$)/gm)];
+      const observed = Number(statuses.at(-1)?.[1]);
+      const httpStatus = observed >= 400 && observed <= 599 ? observed : null;
+      const error = new Error("file HTTP operation is unconfirmed");
+      error.code = "TRANSFER_OUTCOME_UNKNOWN";
+      error.diagnostic = {
+        kind: outcome.kind === "transport" && httpStatus !== null ? "http" : outcome.kind,
+        ...(httpStatus !== null && outcome.kind === "transport" ? { httpStatus } : {}),
+        ...(outcome.processExitCode === null ? {} : { processExitCode: outcome.processExitCode }),
+      };
+      throw error;
+    }
+    return { body: outcome.body, headers: responseHeaders };
   } finally {
     await rm(headersPath, { force: true });
     await rm(responsePath, { force: true });
