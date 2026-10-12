@@ -622,7 +622,7 @@ const communicationMimeType = z
 
 export const communicationSchema = z
   .object({
-    action: z.enum(["send", "attachment-token"]),
+    action: z.enum(["send", "attachment-token", "deliver-file"]),
     message: z.string().min(1).max(4096),
     format: z.enum(["plain", "markdown", "html"]).optional(),
     silent: z.boolean().optional(),
@@ -635,6 +635,19 @@ export const communicationSchema = z
       .min(1)
       .max(20 * 1024 * 1024)
       .optional(),
+    referenceId: z
+      .string()
+      .regex(/^codespace-file:\/\/[A-Za-z0-9_-]{43}$/)
+      .optional()
+      .describe("Owned ready private file reference for explicit deliver-file"),
+    channelId: z
+      .string()
+      .max(128)
+      .regex(/^[a-z0-9][a-z0-9._-]*$/)
+      .optional()
+      .describe(
+        "Deliver-file only: one configured channel, or omit for ordinary configured-channel delivery",
+      ),
   })
   .strict();
 
@@ -686,6 +699,34 @@ export const codespaceNativeFileSchema = z
   })
   .strict()
   .describe("Native ChatGPT file reference; pass the attachment reference without base64");
+
+const codespaceBinaryNativeFileSchema = codespaceNativeFileSchema.extend({
+  size_bytes: z
+    .number()
+    .int()
+    .min(0)
+    .max(Number.MAX_SAFE_INTEGER)
+    .optional()
+    .describe("Binary file size; enforced against the instance's effective transfer policy"),
+});
+
+export const codespaceFilesSetupSchema = z
+  .object({
+    codespace_id: codespaceIdSchema,
+    request_id: z
+      .string()
+      .uuid()
+      .describe("Stable provisioning identity; reuse after a lost response"),
+  })
+  .strict();
+
+export const codespaceTransferStatusSchema = codespaceFilesSetupSchema.extend({
+  transfer_id: z
+    .string()
+    .uuid()
+    .optional()
+    .describe("Known transfer handle; omit to recover by request_id"),
+});
 
 export const codespaceListSchema = z
   .object({
@@ -774,6 +815,12 @@ const codespaceOperationResumeSchema = z
 const codespaceExecStartSchema = z
   .object({
     codespace_id: codespaceIdSchema,
+    request_id: z
+      .string()
+      .uuid()
+      .describe(
+        "Choose before submission; reuse this identity with the exact request after any lost reply",
+      ),
     argv: z
       .array(
         z
@@ -833,9 +880,31 @@ const codespaceExecStartSchema = z
   })
   .strict();
 
+const codespaceCommandForms = [
+  codespaceExecStartSchema
+    .omit({ script: true })
+    .extend({ argv: codespaceExecStartSchema.shape.argv.unwrap() }),
+  codespaceExecStartSchema.omit({ argv: true }).extend({
+    script: codespaceExecStartSchema.shape.script.unwrap(),
+    session: codespaceExecStartSchema.shape.session.unwrap(),
+  }),
+  codespaceExecStartSchema.omit({ argv: true, script: true }).extend({
+    session_end: z.literal(true),
+    session: codespaceExecStartSchema.shape.session.unwrap(),
+  }),
+] as const;
+const codespaceCommandRequests = [
+  codespaceCommandForms[0].extend({ stdin_text: z.string().optional() }),
+  codespaceCommandForms[0].extend({ stdin_file: codespaceNativeFileSchema }),
+  codespaceCommandForms[1].extend({ stdin_text: z.string().optional() }),
+  codespaceCommandForms[1].extend({ stdin_file: codespaceNativeFileSchema }),
+  codespaceCommandForms[2].extend({ stdin_text: z.string().optional() }),
+  codespaceCommandForms[2].extend({ stdin_file: codespaceNativeFileSchema }),
+] as const;
+
 export const codespaceExecRequestSchema = z.union([
-  codespaceExecStartSchema.extend({ stdin_text: z.string().optional() }),
-  codespaceExecStartSchema.extend({ stdin_file: codespaceNativeFileSchema }),
+  z.object({ codespace_id: codespaceIdSchema, request_id: z.string().uuid() }).strict(),
+  ...codespaceCommandRequests,
   // Only exceptional recovery after an unknown outcome uses this saved identity.
   codespaceOperationResumeSchema,
 ]);
@@ -938,8 +1007,12 @@ export const codespaceUploadRequestSchema = z.union([
   z
     .object({
       codespace_id: codespaceIdSchema,
+      request_id: z
+        .string()
+        .uuid()
+        .describe("Choose before upload; reuse with unchanged input to resume"),
       path: codespacePathSchema,
-      file: codespaceNativeFileSchema,
+      file: codespaceBinaryNativeFileSchema,
       expected: codespaceExpectedSchema,
     })
     .strict(),
@@ -962,7 +1035,19 @@ const codespaceDownloadStartSchema = z
   .strict();
 
 export const codespaceDownloadRequestSchema = z.union([
-  codespaceDownloadStartSchema,
+  codespaceDownloadStartSchema.extend({
+    request_id: z
+      .string()
+      .uuid()
+      .describe("Choose before download; reuse the exact request after a lost reply"),
+    max_bytes: z
+      .number()
+      .int()
+      .min(1)
+      .max(Number.MAX_SAFE_INTEGER)
+      .default(20 * 1024 * 1024)
+      .describe("Binary transfer bound; checked against the instance's effective policy"),
+  }),
   codespaceOperationResumeSchema.extend({
     file_name: codespaceFileNameSchema,
     mime_type: codespaceMimeTypeSchema,
@@ -999,6 +1084,8 @@ export const codespacePullRequestFindSchema = z
   .strict();
 
 export const CODESPACE_ACTION_REQUEST_SCHEMAS = {
+  files_setup: codespaceFilesSetupSchema,
+  transfer_status: codespaceTransferStatusSchema,
   local_devices: codespaceLocalDevicesSchema,
   repository_add: codespaceRepositoryAddSchema,
   repository_create: codespaceRepositoryCreateSchema,
@@ -1076,16 +1163,13 @@ function flatActionSchema<Requests extends Record<string, z.ZodTypeAny>>(
   );
   for (const form of forms) {
     for (const [key, field] of Object.entries(form.shape as Record<string, z.ZodTypeAny>)) {
-      // A default is dropped here and applied by the action's own contract at dispatch. Left in
-      // place, the published object would fill every action's defaults into every request, and the
-      // action's strict contract would then refuse fields the caller never sent. The description
-      // is re-applied, because it was written after the default and is what the agent reads.
-      const bare =
-        field instanceof z.ZodDefault
-          ? field.description === undefined
-            ? field.removeDefault()
-            : field.removeDefault().describe(field.description)
-          : field;
+      // Presence and defaults belong to the action's dispatch contract, not its field's value
+      // shape. Strip both wrappers before comparing declarations, then make the published field
+      // optional once. Otherwise required/optional forms create impossible undefined alternatives.
+      let bare = field;
+      while (bare instanceof z.ZodDefault || bare instanceof z.ZodOptional)
+        bare = bare instanceof z.ZodDefault ? bare.removeDefault() : bare.unwrap();
+      if (field.description !== undefined) bare = bare.describe(field.description);
       const known = declarations.get(key) ?? [];
       // Two actions may declare the same field name with different bounds — `search` and `download`
       // both take `max_bytes`, with different ceilings. Publishing only the first would narrow the
@@ -1101,9 +1185,16 @@ function flatActionSchema<Requests extends Record<string, z.ZodTypeAny>>(
       .describe(description),
   };
   for (const [key, fields] of declarations) {
+    // A boolean already includes both literals. Keep a lone literal (such as destructive
+    // confirmation) strict, but do not publish redundant branches for boolean session flags.
+    const variants = fields.some((field) => field instanceof z.ZodBoolean)
+      ? fields.filter(
+          (field) => !(field instanceof z.ZodLiteral && typeof field.value === "boolean"),
+        )
+      : fields;
     const published =
-      fields.length === 1 ? fields[0] : z.union(fields as [z.ZodTypeAny, z.ZodTypeAny]);
-    shape[key] = published.isOptional() ? published : published.optional();
+      variants.length === 1 ? variants[0] : z.union(variants as [z.ZodTypeAny, z.ZodTypeAny]);
+    shape[key] = published.optional();
   }
   return z.object(shape).strict();
 }
@@ -1121,11 +1212,11 @@ const codespaceProcessIdentitySchema = z
   .strict();
 
 export const CODESPACE_PROCESS_ACTION_REQUEST_SCHEMAS = {
-  start: z.union([
-    codespaceExecStartSchema.extend({ stdin_text: z.string().optional() }),
-    codespaceExecStartSchema.extend({ stdin_file: codespaceNativeFileSchema }),
+  start: z.union(codespaceCommandRequests),
+  get: z.union([
+    codespaceProcessIdentitySchema,
+    z.object({ codespace_id: codespaceIdSchema, request_id: z.string().uuid() }).strict(),
   ]),
-  get: codespaceProcessIdentitySchema,
   read: codespaceProcessIdentitySchema.extend({
     stream: z.enum(["stdout", "stderr"]),
     ...codespaceReadRangeSchema.shape,

@@ -187,26 +187,32 @@ export interface CodespaceToolServices {
     | "deleteCodespace"
     | "waitForState"
   > | null;
-  operation: Pick<
-    CodespaceOperationService,
-    | "execute"
-    | "executeNativeReference"
-    | "get"
-    | "reconcile"
-    | "readOutput"
-    | "cancel"
-    | "waitForResult"
-  > | null;
-  file: Pick<
-    CodespaceFileService,
-    | "execute"
-    | "uploadReference"
-    | "downloadReference"
-    | "reconcile"
-    | "reconcileDownloadReference"
-    | "waitForResult"
-    | "waitForDownloadReference"
-  > | null;
+  operation:
+    | (Pick<
+        CodespaceOperationService,
+        | "execute"
+        | "executeNativeReference"
+        | "get"
+        | "reconcile"
+        | "readOutput"
+        | "cancel"
+        | "waitForResult"
+      > &
+        Partial<Pick<CodespaceOperationService, "lookupRequest">>)
+    | null;
+  file:
+    | (Pick<
+        CodespaceFileService,
+        | "execute"
+        | "uploadReference"
+        | "downloadReference"
+        | "reconcile"
+        | "reconcileDownloadReference"
+        | "waitForResult"
+        | "waitForDownloadReference"
+      > &
+        Partial<Pick<CodespaceFileService, "ensureFileClient" | "transferStatus">>)
+    | null;
 }
 
 const PROVIDER_REFUSAL_CODES: ReadonlySet<string> = new Set([
@@ -408,6 +414,49 @@ function interruptedByRestart(operation: CodespaceOperationRecord): boolean {
   return operation.state === "failed" && operation.lastOutcome === "codespace_restarted";
 }
 
+export function projectOperationAcceptance(operation: CodespaceOperationRecord): {
+  request_id?: string;
+  accepted?: boolean;
+  phase?: string;
+  admission_deadline_at?: number | null;
+  started_at?: number | null;
+  runtime_ms?: number | null;
+  result_expires_at?: number | null;
+  error?: { code: string; message: string; retryable: boolean };
+} {
+  if (!operation.requestId) return {};
+  const refusalCode =
+    operation.lastOutcome === "session_unavailable_not_started"
+      ? "CODESPACE_SESSION_UNAVAILABLE"
+      : operation.lastOutcome === "session_limit_not_started"
+        ? "CODESPACE_POLICY_LIMIT"
+        : undefined;
+  const phase =
+    operation.state === "reserved"
+      ? operation.inputReference
+        ? "accepted"
+        : "preparing"
+      : operation.state === "reconcile_pending"
+        ? "outcome_unknown"
+        : operation.lastOutcome?.endsWith("_not_started")
+          ? "not_started"
+          : operation.state;
+  return {
+    request_id: operation.requestId,
+    accepted: phase !== "preparing",
+    phase,
+    admission_deadline_at: operation.admissionDeadlineAt,
+    started_at: operation.startedAt,
+    runtime_ms: operation.runtimeMs,
+    result_expires_at: operation.resultExpiresAt,
+    ...(refusalCode
+      ? {
+          error: { code: refusalCode, message: SAFE_ERROR_MESSAGES[refusalCode], retryable: false },
+        }
+      : {}),
+  };
+}
+
 function projectOperation(response: CodespaceOperationResponse | CodespaceFileOperationResponse) {
   const { operation } = response;
   return {
@@ -415,6 +464,7 @@ function projectOperation(response: CodespaceOperationResponse | CodespaceFileOp
     // has to be able to tell them apart to decide whether running it again is safe.
     ...(interruptedByRestart(operation) ? { interrupted_by_restart: true } : {}),
     operation_id: operation.id,
+    ...projectOperationAcceptance(operation),
     kind: operation.kind,
     state: operation.state,
   };
@@ -447,6 +497,7 @@ function operationResult(
 ): CallToolResult {
   const code =
     projectionError ??
+    operation.error?.code ??
     (operation.state === "failed"
       ? operation.interrupted_by_restart
         ? "CODESPACE_OPERATION_INTERRUPTED"
@@ -465,6 +516,15 @@ function operationResult(
       : {}),
     ...(code ? { error: { code, message: SAFE_ERROR_MESSAGES[code], retryable: false } } : {}),
   });
+  if (operation.request_id) {
+    const accepted = jsonResult({
+      ...operation,
+      accepted: operation.phase !== "preparing",
+      ...(result ?? {}),
+      ...(code ? { error: { code, message: SAFE_ERROR_MESSAGES[code], retryable: false } } : {}),
+    });
+    return code ? { ...accepted, isError: true } : accepted;
+  }
   if (!code && !result) {
     const error = {
       code: "CODESPACE_PROVIDER_UNAVAILABLE",
@@ -499,7 +559,13 @@ function projectVersion(version: { size: number; sha256: string; modifiedAt: num
 }
 
 function projectFileResult(result: NonNullable<CodespaceFileOperationResponse["result"]>) {
-  if ("state" in result) return { action: result.action, state: result.state, code: result.code };
+  if ("state" in result)
+    return {
+      action: result.action,
+      state: result.state,
+      code: result.code,
+      ...(result.reason ? { reason: result.reason } : {}),
+    };
   switch (result.action) {
     case "stat":
       return {
@@ -526,6 +592,9 @@ function projectFileResult(result: NonNullable<CodespaceFileOperationResponse["r
         path: result.path,
         previous: projectVersion(result.previous),
         current: projectVersion(result.current),
+        ...("transferId" in result
+          ? { transfer_id: result.transferId, size_bytes: result.size, sha256: result.sha256 }
+          : {}),
       };
     case "apply_patch":
       return {
@@ -562,6 +631,7 @@ function projectFileResult(result: NonNullable<CodespaceFileOperationResponse["r
         offset: result.offset,
         total_size: result.totalSize,
         sha256: result.sha256,
+        range_sha256: result.rangeSha256,
         text,
       };
     }
@@ -697,6 +767,7 @@ function resourceLinkResult(transfer: {
   };
   const structuredContent = {
     file: {
+      reference_id: transfer.referenceId,
       name: transfer.fileName,
       mime_type: transfer.mimeType,
       size_bytes: transfer.size,
@@ -975,6 +1046,26 @@ export async function executeCodespaceTool(
       });
     }
 
+    if (
+      action === "exec" &&
+      "request_id" in params &&
+      !(
+        ("argv" in params && params.argv) ||
+        ("script" in params && params.script) ||
+        ("session_end" in params && params.session_end)
+      )
+    ) {
+      const input = params as { codespace_id: string; request_id: string };
+      const response = await services.operation.lookupRequest!(
+        userId,
+        input.codespace_id,
+        input.request_id,
+      );
+      return operationResult(
+        projectOperation(response),
+        response.result ? projectExecResult(response.result) : null,
+      );
+    }
     if ("operation_id" in params) {
       const resumableKind: Partial<Record<CodespaceAction, CodespaceOperationRecord["kind"]>> = {
         exec: "exec",
@@ -1026,6 +1117,60 @@ export async function executeCodespaceTool(
     }
 
     switch (action) {
+      case "files_setup": {
+        const input = params as CodespaceToolParams["files_setup"];
+        if (!services.file.ensureFileClient) return errorResult("CODESPACE_NOT_CONFIGURED");
+        const setup = await services.file.ensureFileClient(userId, input.codespace_id, {
+          requestId: input.request_id,
+        });
+        return jsonResult({
+          request_id: input.request_id,
+          operation_id: setup.operationId,
+          provisioned: setup.provisioned,
+          abi: setup.abi,
+          environment_identity: setup.environmentIdentity,
+          command: setup.command,
+          ...(!setup.provisioned ? { pending: true } : {}),
+          ...(setup.workerSha256 !== undefined ? { worker_sha256: setup.workerSha256 } : {}),
+          ...(setup.cliSha256 !== undefined ? { cli_sha256: setup.cliSha256 } : {}),
+          ...(setup.executableSha256 !== undefined
+            ? { executable_sha256: setup.executableSha256 }
+            : {}),
+        });
+      }
+      case "transfer_status": {
+        const input = params as CodespaceToolParams["transfer_status"];
+        if (!services.file.transferStatus) return errorResult("CODESPACE_NOT_CONFIGURED");
+        const status = await services.file.transferStatus(userId, input.codespace_id, {
+          requestId: input.request_id,
+          ...(input.transfer_id ? { transferId: input.transfer_id } : {}),
+        });
+        const transfer = status.transfer;
+        const metadata = {
+          request_id: input.request_id,
+          ...(status.operation
+            ? { operation: projectOperation({ operation: status.operation, result: null }) }
+            : {}),
+          transfer: transfer
+            ? {
+                transfer_id: transfer.transferId,
+                request_id: transfer.requestId,
+                scope: "private_object",
+                direction: transfer.direction,
+                state: transfer.state,
+                offset: transfer.offset,
+                size_bytes: transfer.size,
+                sha256: transfer.sha256,
+                expires_at: transfer.expiresAt,
+              }
+            : null,
+        };
+        if (transfer?.handle && transfer.direction === "guest_to_server") {
+          const link = resourceLinkResult(transfer.handle);
+          return { ...link, structuredContent: { ...metadata, ...link.structuredContent } };
+        }
+        return jsonResult(metadata);
+      }
       case "preview_image": {
         const input = params as CodespaceNewToolParams<"preview_image">;
         const accepted = await services.file.execute(userId, input.codespace_id, {
@@ -1107,8 +1252,12 @@ export async function executeCodespaceTool(
         );
       }
       case "exec": {
-        const input = params as CodespaceNewToolParams<"exec">;
+        const input = params as Extract<
+          CodespaceNewToolParams<"exec">,
+          { session_end: boolean }
+        > & { argv?: string[]; script?: string; stdin_text?: string };
         const request = {
+          requestId: input.request_id,
           ...(input.argv !== undefined ? { argv: input.argv } : {}),
           ...(input.script !== undefined ? { script: input.script } : {}),
           ...(input.cwd !== undefined ? { cwd: input.cwd } : {}),
@@ -1148,9 +1297,7 @@ export async function executeCodespaceTool(
                 },
               });
         acceptedOperationId = accepted.operation.id;
-        const response = accepted.result
-          ? accepted
-          : await services.operation.waitForResult(userId, accepted.operation.id);
+        const response = accepted;
         return operationResult(
           projectOperation(response),
           response.result ? projectExecResult(response.result) : null,
@@ -1218,6 +1365,7 @@ export async function executeCodespaceTool(
       case "upload": {
         const input = params as CodespaceNewToolParams<"upload">;
         const accepted = await services.file.uploadReference(userId, input.codespace_id, {
+          requestId: input.request_id,
           path: input.path,
           reference: publicNativeReference(input.file),
           expected: publicExpected(input.expected),
@@ -1232,6 +1380,7 @@ export async function executeCodespaceTool(
       case "download": {
         const input = params as CodespaceNewToolParams<"download">;
         const accepted = await services.file.downloadReference(userId, input.codespace_id, {
+          requestId: input.request_id,
           path: input.path,
           maxBytes: input.max_bytes,
           fileName: input.file_name,

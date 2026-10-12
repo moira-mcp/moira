@@ -443,6 +443,14 @@ export const codespaceOperation = sqliteTable(
   "codespaceOperation",
   {
     id: text("id").primaryKey(),
+    requestId: text("requestId"),
+    requestDigest: text("requestDigest"),
+    inputReference: text("inputReference"),
+    resultReference: text("resultReference"),
+    admissionDeadlineAt: integer("admissionDeadlineAt"),
+    runtimeMs: integer("runtimeMs"),
+    startedAt: integer("startedAt"),
+    sessionKey: text("sessionKey"),
     userId: text("userId")
       .notNull()
       .references(() => user.id),
@@ -472,6 +480,7 @@ export const codespaceOperation = sqliteTable(
   },
   (table) => ({
     ownerIdx: index("codespace_operation_owner_idx").on(table.userId, table.resourceId),
+    requestIdx: uniqueIndex("codespace_operation_request_idx").on(table.userId, table.requestId),
     reconcileIdx: index("codespace_operation_reconcile_idx").on(table.state, table.claimExpiresAt),
   }),
 );
@@ -482,6 +491,16 @@ export const codespaceTransfer = sqliteTable(
   {
     id: text("id").primaryKey(),
     tokenDigest: text("tokenDigest").notNull().unique(),
+    requestId: text("requestId"),
+    requestDigest: text("requestDigest"),
+    direction: text("direction"),
+    resourceId: text("resourceId"),
+    provider: text("provider"),
+    resourceGeneration: integer("resourceGeneration"),
+    authorizationGeneration: integer("authorizationGeneration"),
+    environmentIdentity: text("environmentIdentity"),
+    expectedSha256: text("expectedSha256"),
+    uploadedBytes: integer("uploadedBytes").notNull().default(0),
     userId: text("userId")
       .notNull()
       .references(() => user.id, { onDelete: "cascade" }),
@@ -508,6 +527,7 @@ export const codespaceTransfer = sqliteTable(
       table.expiresAt,
     ),
     stateExpiryIdx: index("codespace_transfer_state_expiry_idx").on(table.state, table.expiresAt),
+    requestIdx: uniqueIndex("codespace_transfer_request_idx").on(table.userId, table.requestId),
   }),
 );
 
@@ -650,6 +670,7 @@ export const codespaceLocalRelay = sqliteTable(
     inputReference: text("inputReference").notNull(),
     status: text("status").notNull(),
     claimId: text("claimId"),
+    settlementClaimId: text("settlementClaimId"),
     claimExpiresAt: integer("claimExpiresAt"),
     outputReference: text("outputReference"),
     deadlineAt: integer("deadlineAt").notNull(),

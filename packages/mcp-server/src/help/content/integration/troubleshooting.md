@@ -310,23 +310,107 @@ process dies. A failed edit does not require stopping the development server. If
 with a later edit, preserve the current files and retained recovery data rather than overwriting
 the later edit or deleting its journal.
 
+### Large files and rejected file operations
+
+Use `stat` for metadata and `read` with `offset` and bounded `length` for selected bytes. A regular
+file larger than 4 MiB can be inspected without reading its contents; its `stat.version` is `null`.
+For a small file, the hashed version remains available for guarded edits. A large range read returns
+`sha256: null`; `range_sha256` hashes exactly the returned bytes. For a small file, `sha256` still
+hashes the whole file, even when only a range is returned. Do not use a range digest as an expected
+whole-file version. Reading at EOF returns an empty range; an offset beyond EOF is refused.
+
+The selected range, code edits and image preview have a 4 MiB upper bound. Stdin follows its
+effective input limit, 1 MiB by default and at most 4 MiB. Native `upload`
+and `download` use a separate effective binary limit, 20 MiB by default, with 256 KiB chunks and
+the existing aggregate/in-flight quotas. Large metadata does not bypass those quotas. Complete
+downloads include empty files; image preview still requires a valid nonempty image.
+
+Keep the original UUID `request_id` for native upload/download. After a lost reply, repeat the exact
+request or collect its `operation_id`; a download collection also retains `file_name` and `mime_type`.
+For CLI work, repeat the original command with the same `--request-id` and unchanged bytes/target
+guard to resume. `status UUID` and MCP `transfer_status` only read current metadata; they do not
+resume, refetch input or grant new authority. `scope: "private_object"` and `state: "ready"` describe
+private storage, not a committed guest destination. A missing first guest marker or unconfirmed
+commit is not proof that a file mutation never happened. Preserve the identity and inspect the
+target before intentionally requesting another effect.
+
+Interrupted input preparation or copying resumes the original bound object and checkpoint. If that
+object has been consumed or is unavailable, retry refuses a replacement or another source fetch;
+inspect the operation that used it before intentionally requesting new work. A completed independent
+copy can still settle when its original source was consumed separately, provided the copy remains
+available and current authority permits collection. Matching terminal retries reuse the saved
+receipt without another publication or result allocation. Neither retry nor status extends the
+original admission, capability or retention deadlines.
+
+If the remote client is unavailable, call `files_setup` with a stable setup `request_id` and wait
+for `provisioned: true`. Use its returned absolute `command`; `command: null` is pending and a guest
+PATH change is unnecessary. Setup measures installed executable/client bytes and refreshes fixed
+guest assets without restarting an existing VM or host daemon. It does not upgrade the host daemon's
+journal. New transfer phases still require current owner/provider permission, generations and
+measured guest life. Expired or revoked authority cannot be renewed by status; consumed or expired
+native references cannot be published again by replay.
+Repeat pending setup with the original `request_id`. A marker may exist before launch proof or a
+terminal receipt is saved. When neither a retained result nor a verified live runner establishes
+the outcome, inspection preserves `outcome_unknown` rather than proving failed installation, no
+execution or a VM restart. Continue collecting that setup;
+only verified completion returns `provisioned: true` and its command. A confirmed guest restart and
+an actual retained terminal result are separate observations.
+If the original admission expires before dispatch was admitted, the request is settled as cancelled
+without execution even if its private input or preparation is expired or missing. This applies to
+setup, native upload/download and CLI preparation. A terminal setup refusal ends pending collection;
+request another setup only if new work is intended. The original identity and deadline are preserved.
+This nonexecution outcome does not apply to already-admitted dispatch with an unknown outcome:
+inspect the original operation without repeating its effect or extending its authority.
+
+`communication` `deliver-file` requires an owned ready `file.reference_id` in `referenceId`, with
+an optional configured `channelId`. A foreign, unavailable or expired object is refused before
+provider delivery. Private upload alone sends no message. Delivery preserves native retention;
+channels whose attachment contract cannot stream report unsupported rather than buffering the
+whole file. Safe Unicode/quoted basenames are valid; paths, ASCII controls, `.`/`..` and names
+larger than 255 UTF-8 bytes are not.
+
+A file rejection may include `reason`: `size_limit` means a byte bound was exceeded;
+`invalid_range` means the requested range or bound is invalid; `unsafe_access` means path or file
+type safety checks failed; `concurrent_change` means the file or its path changed during access;
+`precondition` means the expected version did not match. Reduce a bounded request, correct its range,
+or reread and reconcile a changed version as appropriate. Do not bypass link/type checks or remove
+expected-version guards. Older or unclassified failures may omit `reason`; absence does not identify
+the cause. Server or companion updates do not automatically replace an installed guest worker, so
+an existing guest may still return an older receipt or reject large metadata/ranges. Use the
+supported `files_setup` refresh before relying on the installed file-client contract.
+
 ## Local codespaces
 
-Ordinary `codespace` commands and files wait for the accepted result; create/start wait for usable
-guest readiness, stop for confirmed shutdown and delete for confirmed absence. Successful results
-omit operation journals. Long-lived servers use `codespace_process` with start/get/read/stop and its
-retained `process_id`; a pending process stop is not confirmed cancellation. Unconfirmed delivery
-returns an error with the accepted `operation_id` or `process_id` when available. Inspect that
-identity instead of repeating the same effect; independent work can continue. Server waiting does
-not extend an MCP client's transport timeout. Use `repositories`
+Choose a UUID `request_id` before `codespace` exec or `codespace_process` start. Submission returns
+durable acceptance and an `operation_id` or `process_id`, without waiting for command completion.
+`accepted` is not proof of guest start. The `phase` distinguishes preparation, acceptance,
+confirmed running work, `outcome_unknown` and terminal outcomes. `started_at: null` means start
+has not been confirmed; it does not prove no effect happened. File actions still wait for their
+result; create/start wait for usable guest readiness, stop for confirmed shutdown and delete for
+confirmed absence.
+
+Recover even a lost first command reply with exec containing only `codespace_id` and the original
+`request_id`, or process get with those fields. An exact submission repeated with the same UUID
+returns the same operation; changed input is refused. Collect a known `operation_id` through exec,
+or a `process_id` through process get. Lookup and bounded waiting never cancel or repeat a command.
+Only an explicit process stop requests cancellation; a pending stop is not confirmed cancellation.
+Keep the identity while an outcome is unknown, and inspect affected files before intentionally
+repeating an effect. Independent work can continue. Admission expiry bounds the right to launch;
+`timeout_seconds` bounds runtime from confirmed guest start. Client waiting and result retention
+are separate, and waiting does not extend an MCP client's transport timeout. Use `repositories`
 to discover approved targets separately from `list`.
 
 Restarting a codespace does not invalidate a retained result or require manual counter
-synchronization. A saved result remains available until its retention expires, subject to current
-repository, device and account authority. Reading it may require the runtime to be reachable.
+synchronization. The bounded terminal reply prefix remains in private server storage within its
+retention, subject to current repository, device and account authority. Its collection does not
+require the complete guest streams to remain available. Full stdout/stderr streams stay in the
+guest: range collection requires reachable, retained guest bytes and may fail after guest cleanup
+while the bounded reply is still available.
 `CODESPACE_RESULT_EXPIRED` means retained bytes are unavailable; it does not prove that the command
 or edit never ran. A process lost to a VM restart reports interruption rather than executing again.
-After an explicit stop, undelivered commands and edits remain cancelled when the VM starts again.
+After an explicit stop, undelivered work cannot regain dispatch authority merely because the VM
+starts again. A missing guest marker or an unconfirmed cancellation remains uncertain;
+`not_started` requires proof that the accepted command was fenced before launch.
 Submit fresh work only when intended; inspecting a previous operation never executes it again.
 
 `CODESPACE_NOT_RUNNING` means Local refused work because the guest was not ready. Moira refreshes
@@ -490,7 +574,11 @@ existing stores are preserved.
 
 After an update, a strict heartbeat or `web-control.json` rejection can mean the server, companion
 and owner guard use different control-contract editions, even with delegation disabled. Rebuilding
-the CLI alone does not replace a running guard. Arrange ordinary owner-managed shutdown and confirmed
+the CLI alone does not replace a running guard, the daemon's journal/replay code or an installed
+guest worker. A receipt without launch proof keeps that start unconfirmed.
+Inspect the original operation; an unknown
+command result alone does not require restarting the companion or stopping its VM.
+For an incompatible control-contract edition, arrange ordinary owner-managed shutdown and confirmed
 settlement. With both sides stopped, back up the server database, the complete private companion
 state and SDK backing storage, including VM disks. Keep matching bundles, coordinate server/companion
 editions, then restart with the same state and disks. Rollback restores that complete paired backup

@@ -59,7 +59,13 @@ export function evaluateCodespaceResourcePolicy(
     256,
   );
   const persistentRetentionDays = integer("CODESPACE_PERSISTENT_RETENTION_DAYS", 30);
-  const maxTransferFileBytes = scaledInteger("CODESPACE_MAX_TRANSFER_FILE_MB", 4, 1024 ** 2, 1, 4);
+  const maxTransferFileBytes = scaledInteger(
+    "CODESPACE_MAX_TRANSFER_FILE_MB",
+    20,
+    1024 ** 2,
+    1,
+    1024,
+  );
   const maxTransferBytesPerUser = scaledInteger(
     "CODESPACE_MAX_TRANSFER_TOTAL_MB_PER_USER",
     100,
@@ -192,6 +198,7 @@ export function evaluateCodespaceResourcePolicy(
     maxOperationMs: scaledInteger("CODESPACE_MAX_OPERATION_SECONDS", 900, 1000, 1, 900),
     maxBackgroundOperationMs: backgroundOperationMs,
     maxTransferFileBytes,
+    maxCodeFileBytes: 4 * 1024 * 1024,
     maxTransferBytesPerUser,
     maxTransferBytesGlobal,
     maxTransferObjectsPerUser: integer("CODESPACE_MAX_TRANSFER_OBJECTS_PER_USER", 10, 1, 100),
@@ -213,12 +220,17 @@ export const CODESPACE_CONNECTOR_LIMITS = {
   /** GitHub's longest idle timeout: a background command cannot outlive its codespace. */
   maxBackgroundMs: GITHUB_MAX_IDLE_MINUTES * 60_000,
   maxRetainedOutputBytes: 4 * 1024 * 1024 * 1024,
-  maxTransferFileBytes: 4 * 1024 * 1024,
+  maxTransferFileBytes: 1024 * 1024 * 1024,
+  maxCodeFileBytes: 4 * 1024 * 1024,
+  maxReadRangeBytes: 4 * 1024 * 1024,
+  maxRelayPartBytes: 4 * 1024 * 1024,
+  maxTransferChunkBytes: 256 * 1024,
 } as const;
 
 /** Every limit Moira enforces, with the optional policy values resolved as enforcement reads them. */
 export interface CodespaceEffectiveLimits {
   persistentRetentionMs: number;
+  files: { maxCodeFileBytes: number; maxReadRangeBytes: number };
   operations: {
     maxConcurrentPerUser: number;
     maxConcurrentGlobal: number;
@@ -231,6 +243,7 @@ export interface CodespaceEffectiveLimits {
   };
   transfers: {
     maxFileBytes: number;
+    maxChunkBytes: number;
     maxBytesPerUser: number;
     maxBytesGlobal: number;
     maxObjectsPerUser: number;
@@ -253,9 +266,10 @@ export function effectiveCodespaceLimits(
   const connector = CODESPACE_CONNECTOR_LIMITS;
   const transfers = {
     maxFileBytes: Math.min(
-      policy.maxTransferFileBytes ?? connector.maxTransferFileBytes,
+      policy.maxTransferFileBytes ?? 20 * 1024 * 1024,
       connector.maxTransferFileBytes,
     ),
+    maxChunkBytes: connector.maxTransferChunkBytes,
     maxBytesPerUser: policy.maxTransferBytesPerUser ?? 100 * 1024 * 1024,
     maxBytesGlobal: policy.maxTransferBytesGlobal ?? 1024 * 1024 * 1024,
     maxObjectsPerUser: policy.maxTransferObjectsPerUser ?? 10,
@@ -266,6 +280,16 @@ export function effectiveCodespaceLimits(
   };
   return {
     persistentRetentionMs: policy.persistentRetentionMs ?? 30 * 24 * 60 * 60_000,
+    files: {
+      maxCodeFileBytes: Math.min(
+        policy.maxCodeFileBytes ?? policy.maxTransferFileBytes ?? connector.maxCodeFileBytes,
+        connector.maxCodeFileBytes,
+      ),
+      maxReadRangeBytes: Math.min(
+        policy.maxCodeFileBytes ?? policy.maxTransferFileBytes ?? connector.maxReadRangeBytes,
+        connector.maxReadRangeBytes,
+      ),
+    },
     operations: {
       maxConcurrentPerUser: policy.maxConcurrentOperationsPerUser ?? 2,
       maxConcurrentGlobal: policy.maxConcurrentOperationsGlobal ?? 20,
@@ -299,6 +323,7 @@ export function effectiveCodespaceLimits(
     // slots. Its byte budget is independent of native files; replay still owns expiry.
     relayTransfers: {
       ...transfers,
+      maxFileBytes: Math.min(transfers.maxFileBytes, connector.maxRelayPartBytes),
       maxObjectsPerUser:
         ((policy.maxConcurrentOperationsPerUser ?? 2) + policy.maxActivePerUser) *
         2 *

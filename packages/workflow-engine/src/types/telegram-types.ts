@@ -2,6 +2,7 @@
  * Telegram Bot API Type Definitions
  * Type-safe interfaces for Telegram notification functionality
  */
+import type { CodespaceVerifiedByteSource } from "@mcp-moira/shared";
 
 /**
  * Configuration for Telegram Bot integration
@@ -39,7 +40,8 @@ export interface SendMessageParams {
 
 export interface SendPhotoParams {
   chatId: string;
-  photo: Uint8Array;
+  photo: Uint8Array | CodespaceVerifiedByteSource;
+  signal?: AbortSignal;
   filename: string;
   mimeType: "image/png" | "image/jpeg";
   caption?: string;
@@ -50,7 +52,8 @@ export interface SendPhotoParams {
 
 export interface SendDocumentParams {
   chatId: string;
-  document: Uint8Array;
+  document: Uint8Array | CodespaceVerifiedByteSource;
+  signal?: AbortSignal;
   filename: string;
   mimeType: string;
   caption?: string;

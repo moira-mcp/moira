@@ -9,7 +9,13 @@ import { CommunicationChannelError } from "./user-communication.js";
 export class TelegramCommunicationAdapter implements CommunicationChannelAdapter {
   readonly id = "telegram";
   readonly provider = "telegram";
-  readonly capabilities = { text: true, image: true, document: true, trusted: false } as const;
+  readonly capabilities = {
+    text: true,
+    image: true,
+    document: true,
+    trusted: false,
+    streamingAttachments: true,
+  } as const;
   readonly metadata = {
     title: "Telegram",
     description: "Messages delivered through your configured Telegram bot and chat.",
@@ -57,7 +63,8 @@ export class TelegramCommunicationAdapter implements CommunicationChannelAdapter
         const caption = request.text.length <= 1024 ? request.text || undefined : undefined;
         await client.sendPhoto({
           chatId,
-          photo: request.attachment.bytes,
+          photo: request.attachment.source ?? request.attachment.bytes,
+          signal,
           filename: request.attachment.filename,
           mimeType: request.attachment.mimeType,
           caption,
@@ -78,7 +85,8 @@ export class TelegramCommunicationAdapter implements CommunicationChannelAdapter
         const caption = request.text.length <= 1024 ? request.text || undefined : undefined;
         await client.sendDocument({
           chatId,
-          document: request.attachment.bytes,
+          document: request.attachment.source ?? request.attachment.bytes,
+          signal,
           filename: request.attachment.filename,
           mimeType: request.attachment.mimeType,
           caption,

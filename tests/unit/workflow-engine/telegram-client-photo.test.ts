@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, jest, test } from "@jest/globals";
 import { TelegramClient } from "@mcp-moira/workflow-engine";
 import { ServiceLogger } from "@mcp-moira/shared/logging/logger";
+import { createHash } from "node:crypto";
+import { ownedByteStream } from "../../helpers/owned-byte-stream.js";
 
 describe("TelegramClient photo transport", () => {
   afterEach(() => {
@@ -100,5 +102,187 @@ describe("TelegramClient photo transport", () => {
     expect(emitted).not.toContain("private-destination");
     expect(emitted).not.toContain("private-message");
     expect(emitted).not.toContain("embedded-secret");
+  });
+
+  test.each(["photo", "document"] as const)(
+    "does not send a buffered %s after its parent has cancelled",
+    async (kind) => {
+      const fetchSpy = jest.spyOn(global, "fetch").mockResolvedValue(Response.json({ ok: true }));
+      const controller = new AbortController();
+      controller.abort();
+      const client = new TelegramClient({ botToken: "123:token" });
+      const params = {
+        chatId: "7",
+        filename: "attachment.bin",
+        mimeType: "application/octet-stream",
+        signal: controller.signal,
+      };
+      const send =
+        kind === "photo"
+          ? client.sendPhoto({ ...params, mimeType: "image/png", photo: Uint8Array.of(1) })
+          : client.sendDocument({ ...params, document: Uint8Array.of(1) });
+      await expect(send).rejects.toThrow("cancelled or timed out");
+      expect(fetchSpy).not.toHaveBeenCalled();
+    },
+  );
+
+  test.each(["film.mp4", 'ролик "версия".mp4'])(
+    "streams %s through bounded multipart chunks with exact bytes",
+    async (filename) => {
+      const chunk = Buffer.alloc(256 * 1024, 0xa7);
+      const count = 20;
+      const expected = createHash("sha256");
+      for (let index = 0; index < count; index++) expected.update(chunk);
+      const digest = expected.digest("hex");
+      let read = 0;
+      const source = {
+        size: chunk.length * count,
+        sha256: digest,
+        async open() {
+          return ownedByteStream(
+            (async function* () {
+              for (let index = 0; index < count; index++) {
+                read++;
+                yield chunk;
+              }
+            })(),
+          );
+        },
+      };
+      jest.spyOn(global, "fetch").mockImplementation(async (_url, init) => {
+        expect(read).toBe(0);
+        const iterator = (init?.body as unknown as AsyncIterable<Uint8Array>)[
+          Symbol.asyncIterator
+        ]();
+        const prefix = Buffer.from((await iterator.next()).value).toString();
+        expect(prefix).toContain(`name="document"; filename="${filename.replaceAll('"', '\\"')}"`);
+        expect(prefix).toContain("Content-Type: video/mp4");
+        expect(prefix).toContain("Report");
+        const observed = createHash("sha256");
+        for (let index = 0; index < count; index++) {
+          const bytes = (await iterator.next()).value;
+          expect(bytes.byteLength).toBe(chunk.length);
+          observed.update(bytes);
+        }
+        expect(observed.digest("hex")).toBe(digest);
+        expect(Buffer.from((await iterator.next()).value).toString()).toMatch(/^\r\n--.+--\r\n$/);
+        expect((await iterator.next()).done).toBe(true);
+        expect(read).toBe(count);
+        return Response.json({ ok: true });
+      });
+      await new TelegramClient({ botToken: "123:token" }).sendDocument({
+        chatId: "7",
+        document: source,
+        filename,
+        mimeType: "video/mp4",
+        caption: "Report",
+      });
+    },
+  );
+
+  test.each([
+    "",
+    ".",
+    "..",
+    "dir/file.bin",
+    "dir\\file.bin",
+    "bad\r\nheader",
+    "bad\0name",
+    "я".repeat(128),
+  ])("refuses unsafe streamed filename %j before opening or sending bytes", async (filename) => {
+    const fetchSpy = jest.spyOn(global, "fetch").mockResolvedValue(Response.json({ ok: true }));
+    const open = jest.fn(async () =>
+      ownedByteStream(
+        (async function* () {
+          yield Uint8Array.of(1);
+        })(),
+      ),
+    );
+    await expect(
+      new TelegramClient({ botToken: "123:token" }).sendDocument({
+        chatId: "7",
+        filename,
+        mimeType: "application/octet-stream",
+        document: {
+          size: 1,
+          sha256: createHash("sha256").update(Uint8Array.of(1)).digest("hex"),
+          open,
+        },
+      }),
+    ).rejects.toThrow("filename or MIME type is invalid");
+    expect(open).not.toHaveBeenCalled();
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  test.each(["size", "digest"])("rejects a streamed document with changed %s", async (fault) => {
+    const bytes = Buffer.from("test");
+    const source = {
+      size: fault === "size" ? 5 : 4,
+      sha256:
+        fault === "digest" ? "0".repeat(64) : createHash("sha256").update(bytes).digest("hex"),
+      async open() {
+        return ownedByteStream(
+          (async function* () {
+            yield bytes;
+          })(),
+        );
+      },
+    };
+    jest.spyOn(global, "fetch").mockImplementation(async (_url, init) => {
+      for await (const chunk of init?.body as unknown as AsyncIterable<Uint8Array>) void chunk;
+      return Response.json({ ok: true });
+    });
+    await expect(
+      new TelegramClient({ botToken: "123:token" }).sendDocument({
+        chatId: "7",
+        document: source,
+        filename: "report.bin",
+        mimeType: "application/octet-stream",
+      }),
+    ).rejects.toThrow("Streamed attachment");
+  });
+
+  test("cancels a streamed attachment and closes its source when the parent aborts", async () => {
+    const controller = new AbortController();
+    let reads = 0;
+    let closed = false;
+    const source = {
+      size: 2,
+      sha256: createHash("sha256").update(Uint8Array.of(1, 2)).digest("hex"),
+      async open(signal?: AbortSignal) {
+        return ownedByteStream(
+          (async function* () {
+            try {
+              for (const byte of [1, 2]) {
+                signal?.throwIfAborted();
+                reads++;
+                yield Uint8Array.of(byte);
+              }
+            } finally {
+              closed = true;
+            }
+          })(),
+        );
+      },
+    };
+    jest.spyOn(global, "fetch").mockImplementation(async (_url, init) => {
+      const iterator = (init?.body as unknown as AsyncIterable<Uint8Array>)[Symbol.asyncIterator]();
+      await iterator.next();
+      expect([...(await iterator.next()).value]).toEqual([1]);
+      controller.abort();
+      await iterator.next();
+      return Response.json({ ok: true });
+    });
+    await expect(
+      new TelegramClient({ botToken: "123:token" }).sendDocument({
+        chatId: "7",
+        document: source,
+        filename: "report.bin",
+        mimeType: "application/octet-stream",
+        signal: controller.signal,
+      }),
+    ).rejects.toThrow("cancelled or timed out");
+    expect(reads).toBe(1);
+    expect(closed).toBe(true);
   });
 });

@@ -8,6 +8,7 @@ import {
   localManagementOutcomeSchema,
   localRelayMutationId as mutationId,
   LOCAL_REQUEST_MAX_WINDOW_MS,
+  LOCAL_RESULT_SETTLEMENT_RETENTION_MS,
   type CodespaceResourceRecord,
   type CodespaceTransferService,
   type LocalDeviceService,
@@ -244,7 +245,12 @@ export class LocalCodespaceRelay {
       }
       const reference =
         previous?.payloadReference ??
-        (await this.transfers.retainRelayPayload(resource.userId, "local_relay_input", bytes));
+        (await this.transfers.retainRelayPayload(
+          resource.userId,
+          "local_relay_input",
+          bytes,
+          deadlineAt + LOCAL_RESULT_SETTLEMENT_RETENTION_MS,
+        ));
       try {
         const envelope: LocalRelayRequest = {
           userId: binding.userId,

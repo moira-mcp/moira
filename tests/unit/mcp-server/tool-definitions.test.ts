@@ -22,8 +22,11 @@ import {
   type McpToolName,
 } from "../../../packages/mcp-server/src/tools/tool-definitions.js";
 import {
+  CODESPACE_ACTION_REQUEST_SCHEMAS,
+  CODESPACE_PROCESS_ACTION_REQUEST_SCHEMAS,
   codespaceDownloadRequestSchema,
   codespaceExecRequestSchema,
+  startRequestSchema,
 } from "../../../packages/mcp-server/src/tools/tool-schemas.js";
 import {
   registerTools,
@@ -256,17 +259,19 @@ describe("MCP tool definitions", () => {
       "text",
       "timeout_seconds",
       "title",
+      "transfer_id",
     ]);
     const operationId = published.properties.operation_id as { anyOf?: unknown[] };
     const maxBytes = published.properties.max_bytes as { anyOf?: unknown[] };
     expect(operationId.anyOf).toBeUndefined();
-    expect(maxBytes.anyOf).toHaveLength(2);
+    expect(maxBytes.anyOf).toHaveLength(3);
     expect(getToolOperations(definition("codespace")).slice().sort()).toEqual([
       "apply_patch",
       "create",
       "delete",
       "download",
       "exec",
+      "files_setup",
       "get",
       "list",
       "local_devices",
@@ -283,6 +288,7 @@ describe("MCP tool definitions", () => {
       "start",
       "stat",
       "stop",
+      "transfer_status",
       "upload",
       "write",
     ]);
@@ -315,6 +321,7 @@ describe("MCP tool definitions", () => {
     expect(
       codespaceExecRequestSchema.safeParse({
         codespace_id: "00000000-0000-4000-8000-000000000000",
+        request_id: "11111111-1111-4111-8111-111111111111",
         argv: ["node", "script.js"],
         timeout_seconds: 30,
         stdin_file: {
@@ -328,6 +335,7 @@ describe("MCP tool definitions", () => {
     expect(
       codespaceExecRequestSchema.safeParse({
         codespace_id: "00000000-0000-4000-8000-000000000000",
+        request_id: "11111111-1111-4111-8111-111111111111",
         argv: ["node", "script.js"],
         timeout_seconds: 30,
         stdin_text: "input",
@@ -477,6 +485,26 @@ describe("MCP tool definitions", () => {
       expect(definition.examples.length).toBeGreaterThan(0);
       for (const example of definition.examples) {
         expect(definition.schema.safeParse(example).success).toBe(true);
+        let schema: z.ZodTypeAny = definition.schema;
+        let request: Readonly<Record<string, unknown>> = example;
+        if (definition.name === "codespace") {
+          const { action, ...params } = example;
+          schema =
+            CODESPACE_ACTION_REQUEST_SCHEMAS[
+              action as keyof typeof CODESPACE_ACTION_REQUEST_SCHEMAS
+            ];
+          request = params;
+        } else if (definition.name === "codespace_process") {
+          const { action, ...params } = example;
+          schema =
+            CODESPACE_PROCESS_ACTION_REQUEST_SCHEMAS[
+              action as keyof typeof CODESPACE_PROCESS_ACTION_REQUEST_SCHEMAS
+            ];
+          request = params;
+        } else if (definition.name === "start") {
+          schema = startRequestSchema;
+        }
+        expect(schema.safeParse(request)).toMatchObject({ success: true });
       }
     }
 
@@ -1020,13 +1048,15 @@ describe("MCP tool definitions", () => {
     expect(russian).toContain("### Схема входа");
     expect(russian).toContain('"set-visibility"');
 
-    for (const [index, definition] of TOOL_DEFINITIONS.entries()) {
-      const next = TOOL_DEFINITIONS[index + 1];
-      const start = english.indexOf(`## \`${definition.name}\``);
-      const end = next ? english.indexOf(`## \`${next.name}\``, start) : english.length;
-      const block = english.slice(start, end);
-      for (const example of definition.examples) {
-        expect(block).toContain(JSON.stringify(example, null, 2));
+    for (const reference of [english, russian]) {
+      for (const [index, definition] of TOOL_DEFINITIONS.entries()) {
+        const next = TOOL_DEFINITIONS[index + 1];
+        const start = reference.indexOf(`## \`${definition.name}\``);
+        const end = next ? reference.indexOf(`## \`${next.name}\``, start) : reference.length;
+        const block = reference.slice(start, end);
+        for (const example of definition.examples) {
+          expect(block).toContain(JSON.stringify(example, null, 2));
+        }
       }
     }
   });

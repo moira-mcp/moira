@@ -38,6 +38,10 @@ const SENSITIVE_PATTERNS = [
   "passphrase",
   "message",
   "filename",
+  "capability",
+  "grant",
+  "referenceid",
+  "reference_id",
 ];
 
 /**
@@ -235,7 +239,7 @@ export function extractResourceIds(input: unknown): ResourceIds {
 
   for (const [key, value] of Object.entries(input)) {
     // Match fields ending with "Id" (case-sensitive to avoid false positives)
-    if (key.endsWith("Id") && typeof value === "string") {
+    if (key.endsWith("Id") && typeof value === "string" && !isSensitiveField(key)) {
       resourceIds[key] = value;
     }
   }

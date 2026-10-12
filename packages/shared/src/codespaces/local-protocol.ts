@@ -35,6 +35,8 @@ export function localRelayMutationId(
 
 export const LOCAL_WORKER_REQUEST_TIMEOUT_MS = 30_000;
 export const LOCAL_REQUEST_MAX_WINDOW_MS = 15 * 60_000;
+/** Result-only replay does not extend an envelope's permission to launch work. */
+export const LOCAL_RESULT_SETTLEMENT_RETENTION_MS = 60 * 60_000;
 
 const uuid = z.string().uuid();
 const generation = z.number().int().positive();

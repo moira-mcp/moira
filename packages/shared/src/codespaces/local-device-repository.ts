@@ -4,6 +4,7 @@ import { CodespaceResourceRepository } from "./resource-repository.js";
 import { CodespaceResourceError } from "./resource-types.js";
 import { canonicalJson } from "../utils/canonical-json.js";
 import { getAccountAccessDenial } from "../auth/account-admission.js";
+import { LOCAL_RESULT_SETTLEMENT_RETENTION_MS } from "./local-protocol.js";
 import {
   CODESPACE_PROVIDER_LOCAL,
   LocalDeviceError,
@@ -36,7 +37,7 @@ import {
 export function digestLocalSecret(value: string): string {
   return createHash("sha256").update(value).digest("hex");
 }
-const RELAY_REPLAY_RETENTION_MS = 60 * 60_000;
+const RELAY_REPLAY_RETENTION_MS = LOCAL_RESULT_SETTLEMENT_RETENTION_MS;
 const MAX_RETAINED_RELAY_REQUESTS_PER_DEVICE = 2048;
 const MAX_RETAINED_RELAY_REQUESTS_PER_OWNER = 8192;
 interface DeviceRow {
@@ -71,6 +72,7 @@ interface RelayRow extends LocalDeviceAuth {
   outputReference: string | null;
   status: LocalRelayResult["status"];
   claimId: string | null;
+  settlementClaimId: string | null;
   claimExpiresAt: number | null;
   deadlineAt: number;
 }
@@ -909,9 +911,9 @@ export class LocalDeviceRepository {
             );
           this.sqlite
             .prepare(
-              "UPDATE codespaceLocalRelay SET status='claimed',claimId=?,claimExpiresAt=?,updatedAt=? WHERE requestId=?",
+              "UPDATE codespaceLocalRelay SET status='claimed',claimId=?,settlementClaimId=?,claimExpiresAt=?,updatedAt=? WHERE requestId=?",
             )
-            .run(claimId, claimExpiresAt, now, row.requestId);
+            .run(claimId, claimId, claimExpiresAt, now, row.requestId);
           claims.push({
             ...auth,
             ...(this.ownerDeleteAuthority(row) ? { authority: "owner-delete" as const } : {}),
@@ -941,7 +943,7 @@ export class LocalDeviceRepository {
       .transaction(() => {
         this.requireDevice(auth);
         const row = this.requireRelayOwner(auth, ack.requestId);
-        if (row.digest !== ack.digest || row.claimId !== ack.claimId)
+        if (row.digest !== ack.digest || (row.settlementClaimId ?? row.claimId) !== ack.claimId)
           throw new LocalDeviceError("LOCAL_CONFLICT", "Relay acknowledgement changed.");
         this.requireResourceAuthority(row, now, true);
         const encoded = canonicalJson(ack.outcomeReference);
@@ -950,14 +952,12 @@ export class LocalDeviceRepository {
             throw new LocalDeviceError("LOCAL_CONFLICT", "Relay result changed.");
           return result(row);
         }
-        if (row.status !== "claimed" || row.claimExpiresAt === null || row.claimExpiresAt <= now)
-          throw new LocalDeviceError("LOCAL_EXPIRED", "Relay claim expired.");
         this.authorizeOutput(auth, ack, now);
         this.sqlite
           .prepare(
-            "UPDATE codespaceLocalRelay SET status=?,outputReference=?,updatedAt=? WHERE requestId=? AND claimId=? AND status='claimed'",
+            "UPDATE codespaceLocalRelay SET status=?,outputReference=?,updatedAt=?,claimId=? WHERE requestId=? AND COALESCE(settlementClaimId,claimId)=? AND status IN ('claimed','expired','revoked')",
           )
-          .run(ack.status, encoded, now, ack.requestId, ack.claimId);
+          .run(ack.status, encoded, now, ack.claimId, ack.requestId, ack.claimId);
         return result(this.relay(ack.requestId)!);
       })
       .immediate();
@@ -1049,9 +1049,13 @@ export class LocalDeviceRepository {
       .transaction(() => {
         const row = this.requireRelayOwner(auth, requestId);
         if (row.status === "completed" || row.status === "refused") {
+          // An ACK may already be committed while its response is still in flight.
+          // Replaying that terminal claim observes the receipt; it grants no work lease.
           this.requireResourceAuthority(row, now, true);
           return this.retainedClaim(auth, row, claimId);
         }
+        this.requireDispatch(row, now);
+        this.acceptedClaim(auth, row, claimId, now);
         const claim = this.authorizeResult(auth, requestId, claimId, now);
         const policy = localPublicPolicySchema.parse(JSON.parse(this.requireDevice(auth).policy));
         this.sqlite
@@ -1093,9 +1097,18 @@ export class LocalDeviceRepository {
     now: number,
   ): LocalRelayClaim {
     const row = this.requireRelayOwner(auth, requestId);
-    const policy = this.requireResourceAuthority(row, now, true);
-    this.requireDeliveryDeadline(row, policy, now);
-    return this.acceptedClaim(auth, row, claimId, now);
+    this.requireResourceAuthority(row, now, true);
+    if (
+      (row.settlementClaimId ?? row.claimId) !== claimId ||
+      !["claimed", "expired", "revoked", "completed", "refused"].includes(row.status) ||
+      now >= row.deadlineAt + RELAY_REPLAY_RETENTION_MS
+    )
+      throw new LocalDeviceError("LOCAL_EXPIRED", "Accepted result settlement is unavailable.");
+    return this.retainedClaim(
+      auth,
+      { ...row, claimId, claimExpiresAt: row.claimExpiresAt ?? row.deadlineAt },
+      claimId,
+    );
   }
 
   private acceptedClaim(
@@ -1198,7 +1211,7 @@ export class LocalDeviceRepository {
           "LOCAL_UNAUTHORIZED",
           "Owner cleanup consent is no longer active.",
         );
-    } else this.requireLease(policy, now);
+    } else if (!acceptedResult) this.requireLease(policy, now);
     const binding = this.getBinding(input.userId, input.resourceId);
     const resource = this.sqlite
       .prepare(

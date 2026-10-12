@@ -205,7 +205,7 @@ docker compose --profile codespaces up -d
 | `CODESPACE_MAX_RETAINED_OUTPUT_MB`             |      64 | Retained output per stream, in the codespace; maximum 4096  |
 | `CODESPACE_MAX_OPERATION_SECONDS`              |     900 | Bounded-command duration; maximum 900 seconds               |
 | `CODESPACE_MAX_BACKGROUND_OPERATION_HOURS`     |       4 | Background duration; max 4 (GitHub's 240-min idle stop)     |
-| `CODESPACE_MAX_TRANSFER_FILE_MB`               |       4 | File/native payload ceiling; maximum 4 MiB                  |
+| `CODESPACE_MAX_TRANSFER_FILE_MB`               |      20 | Native binary file ceiling; parser accepts 1–1024 MiB       |
 | `CODESPACE_MAX_TRANSFER_TOTAL_MB_PER_USER`     |     100 | Live private-transfer bytes per user; maximum 1024 MiB      |
 | `CODESPACE_MAX_TRANSFER_TOTAL_MB_GLOBAL`       |    1024 | Instance live private-transfer bytes; maximum 16384 MiB     |
 | `CODESPACE_MAX_TRANSFER_OBJECTS_PER_USER`      |      10 | Live private-transfer objects per user; maximum 100         |
@@ -214,11 +214,24 @@ docker compose --profile codespaces up -d
 | `CODESPACE_MAX_TRANSFER_INFLIGHT_MB_GLOBAL`    |     256 | Instance reserved/claimed bytes; maximum 4096 MiB           |
 | `CODESPACE_TRANSFER_TTL_MINUTES`               |      10 | Private object/capability lifetime; maximum 60 minutes      |
 
+The binary file ceiling applies to native private transfers. Transfer chunks are
+bounded to 256 KiB. Code-file reads and edits, individual read ranges, image previews
+and relay parts retain their separate 4 MiB ceilings. Command stdin defaults to
+1 MiB and can be configured up to 4 MiB through `CODESPACE_MAX_OPERATION_INPUT_KB`.
+The relay control-envelope ceiling remains 24 MiB. Raising
+`CODESPACE_MAX_TRANSFER_FILE_MB` does not raise these limits or place binary bytes
+inside relay control envelopes.
+
 The global active-resource limit must be at least the per-user limit. The same
-constraint applies to global and per-user operation concurrency. A transfer aggregate
-must contain the maximum single file; each global byte or in-flight ceiling must be
-at least its per-user counterpart. Invalid policy values fail configuration
-rather than silently weakening a limit. The complete
+constraint applies to global and per-user operation concurrency. Both transfer
+aggregate and in-flight byte budgets must contain the maximum single file; each
+global byte or in-flight ceiling must be at least its per-user counterpart. Although
+the file setting parser accepts up to 1024 MiB, the per-user in-flight setting accepts
+at most 256 MiB, so a valid combined policy cannot allow a file above 256 MiB. With
+the default per-user in-flight budget of 40 MiB, increasing the file ceiling above
+40 MiB also requires increasing that budget and any smaller aggregate budget.
+Invalid policy values fail configuration rather than silently weakening a limit.
+The complete
 connection, lifecycle, operation and isolation contracts are documented in
 `docs/CODESPACES.md`; the website connection procedure remains in the public
 Self-Hosting guide.
@@ -488,7 +501,7 @@ CODESPACE_MAX_OPERATION_STDERR_KB=256
 CODESPACE_MAX_RETAINED_OUTPUT_MB=64
 CODESPACE_MAX_OPERATION_SECONDS=900
 CODESPACE_MAX_BACKGROUND_OPERATION_HOURS=4
-CODESPACE_MAX_TRANSFER_FILE_MB=4
+CODESPACE_MAX_TRANSFER_FILE_MB=20
 CODESPACE_MAX_TRANSFER_TOTAL_MB_PER_USER=100
 CODESPACE_MAX_TRANSFER_TOTAL_MB_GLOBAL=1024
 CODESPACE_MAX_TRANSFER_OBJECTS_PER_USER=10

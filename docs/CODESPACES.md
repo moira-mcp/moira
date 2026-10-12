@@ -12,8 +12,8 @@ collaboration happens through version-control branches in the repository.
 
 GitHub authorization belongs to the authenticated website. Agents do not
 receive provider credentials, OAuth operations, SSH configuration or lifecycle
-capabilities. Agents reach codespaces only through the authenticated MCP
-`codespace` and `codespace_process` tools described below; the website owns the GitHub connection and
+capabilities. Agents reach codespaces through the authenticated MCP
+`codespace` and `codespace_process` tools and the scoped guest file CLI described below; the website owns the GitHub connection and
 offers the same basic codespace management (list, create, start, stop, confirmed
 delete) over the same services. Administrators own the instance-wide kill switches.
 
@@ -32,6 +32,10 @@ delete) over the same services. Administrators own the instance-wide kill switch
 - `packages/shared/src/codespaces/file-service.ts`, `transfer-service.ts` and
   `transfer-repository.ts` own provider-neutral file operations, native byte
   authority, quotas and private object lifecycle.
+- `packages/shared/src/codespaces/file-transfer-service.ts` and
+  `file-transfer-capability.ts` compose resumable native/CLI transfers with scoped file authority.
+  The backend's `codespace-file-transfers.ts` factory, `codespace-file-client-assets.ts` and
+  `routes/codespace-files.ts` provide fixed-asset provisioning and the bounded HTTPS byte channel.
 - `packages/shared/src/codespaces/provider-registry.ts` enforces the versioned
   provider contract. `github-codespaces` and `local-sandboxes` implement it.
 - `packages/local/` owns the user-run companion, local policy, bounded storage,
@@ -713,8 +717,8 @@ directory, bounded stdin and a timeout. Arguments are data and are never
 interpolated into a shell program. Stdin is either inline bytes or a tenant-bound
 private transfer reference with an exact declared size and MIME type. A native
 reference request records an authenticated operation against the running codespace
-before source fetch. The resulting private object is claimed before credential lookup,
-consumed immediately after durable dispatch intent and materialized as exact binary
+before source fetch. The resulting private object is durably retained for the accepted command
+before its original transfer is consumed, and materialized as exact binary
 connector input without model-context base64. `CodespaceOperationService.executeNativeReference()`
 composes native reference validation/fetch/storage with that dispatch path; callers do
 not handle the internal `codespace-file://` capability.
@@ -729,27 +733,34 @@ The GitHub adapter mounts its provider-owned operation root from
 runtime convention used by the remote supervisor, not a public alias for the
 renamed Moira domain.
 
-A dispatched command is durable and resumable as soon as the connector accepts it.
-Web HTTP callers retain a short post-dispatch observation window and can receive a running
-operation. Ordinary MCP command and file calls opt into waiting for the accepted operation's
-terminal result, using its existing deadline and current authority. Waiting never dispatches
-another command or file mutation. An unconfirmed outcome returns an error and its existing
-operation ID rather than a running success. This does not extend an MCP client's transport timeout;
-after interrupted delivery, inspect the accepted identity before repeating the same effect or
-editing the affected files. Independent work can continue without resolving that operation first.
+A command caller chooses a UUID `request_id` before submission. Moira durably saves its identity,
+normalized semantic digest and private input intent before returning admission. Matching retries
+recover the same operation; changed command, resource or input identity is refused. A command reply
+reports `accepted`, `phase`, `operation_id` and `request_id` without waiting for guest completion.
+`preparing` means input preparation is incomplete; `accepted` does not prove the guest has started.
+Native input preparation and provider delivery continue from the saved intent after server restart.
+
+Use `exec` with only `codespace_id` and `request_id` to look up that accepted request without
+dispatching, or collect by its existing `operation_id`. File calls retain their terminal waiting
+contract. Lookup and bounded waiting never cancel or repeat a command. Transport interruption
+does not extend the MCP client's timeout or prove nonexecution; recover the original identity before
+deciding whether another effect is needed. Independent work can continue while an outcome is unknown.
+`started_at: null` means start is unconfirmed, not that no work ran. Only a proved closed launch
+boundary produces `not_started`; `outcome_unknown` preserves uncertainty.
 An authenticated refusal before guest admission ends that operation and preserves the actual
 reason. If the local runtime confirms that it is stopped while the server still records usable,
 Moira refreshes that exact VM's observed state and returns `CODESPACE_NOT_RUNNING` without replay.
 A subsequent new call can use the ordinary start-on-use path. A generic transport failure is not
 evidence of a stopped VM and does not change its readiness to stopped.
 
-Background reconciliation selects the oldest attempted due operation across reservation expiry,
-active work, cancellation and terminal cleanup. Each claim advances its attempt timestamp, so a
-failed cleanup cannot repeatedly take precedence over other due work.
+Background reconciliation transactionally claims due operations into a bounded recovery pool.
+One held inspection does not prevent independent accepted work from progressing. Selection uses
+the same eligibility rules as dispatch, including explicit-session ordering, and advances the
+attempt timestamp so repeatedly failed cleanup cannot starve ready work.
 
 Before connector contact, SQLite records the authenticated tenant, stable codespace
-and provider identity, credential authority, input bytes,
-independent stdout/stderr bounds and deadline. SQLite stores only
+and provider identity, credential authority, private input/result references,
+independent stdout/stderr bounds and deadlines. SQLite stores only
 operation metadata. It does not store argv, cwd, stdin, stdout, stderr, provider
 tokens or SSH configuration. Cloud concurrency reservations count only cloud operations;
 local operations use no owner-set concurrency quota and do not consume those cloud slots.
@@ -761,9 +772,19 @@ For GitHub, cancellation targets the recorded foreground process group and valid
 process start time before signalling. A lost worker, SSH connection or control
 response is not treated as successful cancellation: the operation remains
 `reconcile_pending` and occupies capacity until remote inspection proves a
-terminal or absent state, or an explicit codespace stop/delete terminates the
-provider environment. A reservation abandoned before dispatch expires without
+terminal state or sufficient proof that launch never occurred, or an explicit codespace stop/delete
+terminates the provider environment. A reservation abandoned before dispatch expires without
 connector contact; dispatch intent is durable before a remote command can start.
+
+The shared scheduler settles an expired `reserved` admission before reading retained private
+preparation or delegating file recovery. This includes native upload/download, file-client setup
+and CLI upload/download. The captured claim must still own the transition; a displaced owner cannot
+publish terminal evidence. Settlement preserves the original request/operation IDs and deadline,
+marks the never-dispatched operation cancelled, releases active accounting and creates no result
+object or guest cleanup obligation. Missing or expired preparation does not prevent this outcome.
+Original source and target bytes remain unchanged; private preparation follows ordinary owned
+retention cleanup. This rule does not classify an already-dispatched unknown effect as not started
+or replace the separate collection and cleanup contract for retained terminal results.
 
 A command's complete standard output and standard error are written into its own
 remote operation directory as it runs. The per-stream response limits bound only
@@ -773,15 +794,27 @@ disk a single command's retained output may occupy in the codespace, and passing
 it kills the foreground process group and is reported as reaching that ceiling
 rather than as the command's own failure.
 
-When background reconciliation observes a terminal command, it records only
-bounded result metadata in SQLite and retains the remote stdout/stderr file for
+The guest runtime begins at confirmed command launch. `admission_deadline_at` limits permission
+to start; `started_at` plus `runtime_ms` determines runner enforcement. Caller waiting has its own
+bound and cannot cancel work. `result_expires_at` describes result retention. Historical operations
+without launch receipts keep their stored identity and do not acquire invented start timestamps.
+An original accepted relay claim can settle an immutable result after delivery expiry within its
+separate settlement retention. It cannot fetch input or authorize another launch. Observing the
+original completed/refused claim leaves its row and deadlines unchanged; expired nonterminal work
+cannot renew. Current owner, device, resource, repository and credential authority remain checked.
+
+Before publishing a dispatched command's terminal result metadata, Moira saves a verified bounded reply prefix in the existing
+private transfer store. Internal command input/results have bounded control accounting distinct
+from native file quotas. Collection of that prefix survives service restart during retention;
+corruption is refused rather than returned. Moira retains the remote stdout/stderr file for
 the configured cleanup window, or for as long as the command itself was allowed
 to run when that is longer. A result therefore stays collectible for at least the
 command's own permitted duration, which is what makes an unattended background
 command safe to collect late. Caller reconciliation can read the same result
 repeatedly during that window. Only after the window expires may background
-cleanup finalize the remote operation directory; failed finalization remains a
-durable, idempotently retried obligation.
+cleanup remove the remote output bytes; failed finalization remains a durable, idempotently retried
+obligation. The small launch proof remains fenced through its admission window, so early output
+cleanup cannot permit another execution of the same accepted command.
 
 A terminal result reports the complete size of each stream next to its bounded
 payload, so a caller knows what the answer omitted. Any range of a retained
@@ -797,10 +830,11 @@ stream's current size, which is how a caller finds where a stream ends.
 A command may also be started with `codespace_process({ action: "start", ... })`. It is the same operation, the
 same single dispatch and the same resume path; only its ceiling and its deadline
 differ. It is admitted against `CODESPACE_MAX_BACKGROUND_OPERATION_HOURS` instead
-of `CODESPACE_MAX_OPERATION_SECONDS`, its deadline is that lifetime so background
-reconciliation observes it rather than cancelling it, and the dispatching call
-returns as soon as the remote runner is proven alive, without the settle window a
-bounded command uses. A caller that names no duration receives the one its mode
+of `CODESPACE_MAX_OPERATION_SECONDS`. The guest runner enforces that duration from confirmed launch,
+and reconciliation observes its outcome independently of caller waiting. The dispatching call
+returns the durable acceptance identity without waiting for a proven running state.
+Start also requires a caller-chosen `request_id`; get can look up that request before the
+first `process_id` response is recovered. A caller that names no duration receives the one its mode
 implies: 300 seconds for a bounded command, the whole ceiling for a background
 one. The lifetime is granted when the command starts running, so a reservation
 that never dispatches is reaped within fifteen minutes whatever it asked for. Its output is readable by range while it runs, and it is
@@ -808,6 +842,13 @@ stopped with `codespace_process({ action: "stop", codespace_id, process_id })`. 
 does not certify cancellation. A command that outlives the
 codespace's idle lifetime stops with the codespace, so the two values belong
 together.
+
+Inspection returns a retained terminal result when one is published, and reports running only
+under the applicable live-process and launch-proof contract. An existing marker without a result,
+live runner, explicit no-start proof or proved environment change remains `outcome_unknown`, including when launch metadata
+is missing. It is not a synthetic command failure or proof that execution never began. Provisioning
+with an unproved dispatch stays pending until the original maintenance outcome is proved; an
+expired, never-dispatched admission follows the cancellation rule above.
 
 A codespace restart takes every process with it and leaves the operation files
 behind. The codespace records the life of the environment each command is
@@ -835,7 +876,8 @@ command execution. It supports stat, bounded literal or regular-expression searc
 byte-range read, atomic write, structured multi-file patch, native-reference upload
 and private download. Each request records a durable operation kind, stable codespace and
 provider identity, credential authority, deadline and byte budget before credential or connector
-contact. SQLite stores no path, query, patch or file content.
+contact. SQLite stores metadata and private references; paths, queries, patches and content remain
+in verified private storage rather than database payloads.
 
 Paths are repository-relative data. Empty components, `.`/`..`, absolute and drive
 paths, NUL bytes and overlong values are rejected. The Codespaces supervisor snapshots
@@ -844,8 +886,27 @@ links and keeps the opened parent across staging and replacement. Final files mu
 single-link regular files. Symlinks, hard links, directories in file position, FIFOs,
 sockets and devices are rejected.
 
-Read returns an explicit byte offset, total size, content digest and a bounded byte
-range. Search is bounded by scanned/result bytes, match count and remote time and does
+Stat holds a confined regular-file descriptor and reports safe-integer metadata. A regular file
+larger than the 4 MiB editable-file ceiling has a null hashed `version`, without reading its content.
+Small files retain their whole-file SHA-256 version, computed with bounded hashing chunks. Directory
+metadata retains zero size and a null version. Regular-file observations compare descriptor device,
+inode, size, nanosecond timestamps and single-link status before and after work, then re-resolve
+the repository-relative path and compare its identity. Moving a parent while the original inode
+remains linked therefore cannot publish a result for a different named file.
+
+Read returns an explicit byte offset, total size and only the selected bounded byte range. Its
+`sha256` is the whole-file digest for files up to 4 MiB and null for larger files; `rangeSha256`
+hashes exactly its returned bytes. A large range reads no content outside that interval. A small
+range retains only selected bytes while streaming the whole-file hash in chunks of at most 256 KiB.
+Offsets equal to file size return an empty range; offsets beyond size are refused. Range lengths
+remain bounded by the code-file ceiling, and arithmetic uses safe integers without overflowing
+offset-plus-length. Guarded code edits and inline image preview retain a 4 MiB full-file ceiling.
+Native binary upload/download use a separate effective binary ceiling, default 20 MiB, and
+256 KiB HTTP chunks. Complete empty binary downloads are valid; preview requires a nonempty image.
+Relay parts remain at most 4 MiB, with unchanged 8 MiB IPC frame and 24 MiB relay-envelope limits.
+Streamed native binary payloads and their base64 encodings do not cross MCP or the owner relay.
+
+Search is bounded by scanned/result bytes, match count and remote time and does
 not traverse links or special files. It also skips the repository's own `.git`
 directory wherever it meets one and refuses a search rooted at or inside it; those
 files stay readable, writable and inspectable by exact path. Skipping is not
@@ -855,7 +916,10 @@ a match that reaches the search deadline returns a truncated result instead of b
 the supervisor event loop. The result-byte ceiling covers the complete serialized search
 envelope, including its action, match separators and `truncated` state. A typed file
 failure carries no file payload and therefore remains recordable even when the caller's
-success-payload budget is smaller than a JSON error envelope.
+success-payload budget is smaller than a JSON error envelope. A classified guard failure carries
+an optional bounded `reason`: `unsafe_access`, `size_limit`, `invalid_range`, `concurrent_change`
+or `precondition`. Unclassified and retained older failures may omit it; raw exception text and
+host paths are not added to the result.
 
 Write requires an expected existence state and may require the previous size and
 SHA-256 digest. Patch supplies ordered byte edits for each file. A successful patch
@@ -890,7 +954,12 @@ recovery re-resolve that repository-relative parent and fail before mutation if 
 namespace now points at another directory. The connector validates the complete remote
 result as untrusted input, including exact result variants, operation/action agreement,
 relative paths, byte ranges, versions, search coordinates and bounds, unique patch paths,
-summary totals and agreement between inner and outer success or failure state.
+summary totals and agreement between inner and outer success or failure state. Read and complete
+download are distinct result variants: inline download retains its non-null whole-file digest and
+bounded bytes; streamed native download returns a compact verified transfer receipt. Modern read
+range digests are verified against the decoded bytes. A retained older
+SHA-only read keeps its original whole-file digest and receives a locally computed range digest;
+stored receipts and operation identities are not rewritten.
 
 Inbound native references contain a `sediment://file_...` identifier, HTTPS download
 URL, safe file name, supported MIME type and declared size. Only the reviewed OpenAI
@@ -903,7 +972,9 @@ absolute transfer expiry also bounds a response that continues to produce data.
 
 Transfer bytes live under `<dirname(DB_PATH)>/codespace-transfers`, separate from
 public artifacts. SQLite stores only a digest of the capability, tenant, purpose,
-size/MIME/digest metadata, expiry, claim state and the creating process identity.
+size/MIME/digest metadata, expiry, claim state, immutable request/authority identity and offset.
+The original random native receipt is retained in a protected private receipt file for replay;
+the database does not store its raw bearer capability.
 Per-user and instance-wide object, aggregate-byte and in-flight-byte reservations occur
 before source I/O, independently for native file transfers and internal local-relay payloads.
 Native purposes `codespace_input` and `codespace_download` retain their configured object ceilings;
@@ -912,16 +983,83 @@ relay object ceiling is `(maxConcurrentOperations + maxActiveResources) × 2 dir
 using the corresponding per-user or instance capacities. Existing
 byte, in-flight-byte, single-file and expiry bounds apply to each class. Public transfer usage
 reports native files only; internal relay objects have no public download capability.
-For outbound download, the declared `maxBytes` capacity is reserved
-before credential or connector contact and atomically reduced to the observed file size
-when the object is published. Published directory entries are synced before their SQLite
+Native download observes a confined source's size and full digest and reserves that exact object
+before transferring its bytes. Inline download reserves its declared `maxBytes` capacity and
+reduces it to the observed size on publication. Published directory entries are synced before their SQLite
 state becomes ready. Expired physical objects remain quota-bound until cleanup removes
 their bytes and metadata together. Startup and periodic cleanup preserve reservations
-owned by either live Moira process, verify each ready/claimed object's type, link count,
-size and digest, and remove dead, expired, consumed, partial, missing or invalid objects.
-If an upload becomes invalid after ingestion because its current codespace authority, operation
-deadline, dispatch fence or credential lookup changed, the now-unreachable private object
-is discarded immediately.
+owned by a live Moira process, verify each ready/claimed object's type, link count,
+size and digest, and remove eligible expired, consumed, missing or invalid objects under current
+ownership checks. Resumable offsets survive process loss; an uncheckpointed tail is reconciled
+before append. Explicit input disposal uses its current random claim identity, so lease renewal
+or a successor claim cannot cause deletion of another owner's bytes. Confirmed pre-dispatch refusal
+can discard an ephemeral input; an unconfirmed remote effect retains its input for collection.
+
+Native upload/download require a caller UUID `request_id`, bound to owner, codespace and immutable
+semantic input. A matching retry recovers the original operation, transfer and receipt; a changed
+request is refused, including while the first request is pending. Explicit repeat resumes retained
+work, while `transfer_status`, CLI status and operation lookup only collect. A consumed or expired
+receipt cannot be republished under the same request identity. Admission, guest runtime, client
+waiting and retained object/result expiry remain separate bounds. Missing guest markers do not
+prove nonexecution; collection does not cancel or restart the accepted effect.
+
+The accepted native-input or CLI-copy intent binds the original transfer ID before ready
+publication. If another one-use consumer removes that object, recovery reports its loss rather
+than fetching or copying another object under the same request. A ready private copy can settle
+its retained operation without reopening the original source, even when that source was consumed
+independently. Matching ready/terminal replay does not allocate another result or consume extra
+control-object quota; current authority and expiry still apply.
+
+### Scoped guest file client
+
+`files_setup` installs fixed worker/client/config assets through the existing provider maintenance
+boundary without recreating the VM, repository or execution sessions. It returns `provisioned: false`,
+`pending: true` and `command: null` until installation and a fresh provider probe are confirmed.
+Successful setup returns the measured absolute executable `command`, ABI, actual environment identity,
+client SHA and independently measured executable SHA. Executable and client bytes must match the
+expected packaged asset. Invoke that returned path; provisioning does not modify PATH or shell files.
+
+Provision through the authenticated MCP action before using the returned command:
+
+```json
+{
+  "action": "files_setup",
+  "codespace_id": "<owned-codespace-id>",
+  "request_id": "af77e0b3-c266-43f0-aabf-c95dcb469075"
+}
+```
+
+Assign the returned absolute path to `command`; the installed client supports these forms:
+
+```bash
+"$command" upload output/video.mp4 --request-id 6ad0a423-67e8-498d-9e10-f4a18a3a93d2 --mime video/mp4
+"$command" download "$reference_id" input/data.bin --request-id fcfb50ce-4f89-41a9-a724-bfc50b151a17
+"$command" status 6ad0a423-67e8-498d-9e10-f4a18a3a93d2
+```
+
+Here `reference_id` is an owned private reference returned by a completed transfer.
+CLI upload publishes a private server object; CLI download pulls an owned private reference into a
+guarded repository target. Its default target precondition is absence; `--replace-sha256` supplies
+the existing full-file version for replacement. Chunk retries retain offset/hash checkpoints and
+the exact immutable transfer identity. Pure status never resumes network or target effects.
+
+The bootstrap credential is file-only and binds setup, owner, resource, provider, authorization/resource
+generations, actual guest life and finite expiry. Per-transfer credentials additionally bind the
+transfer, direction, size and full SHA. Every phase checks current account/provider ownership;
+new effects also freshly observe the accepted setup's guest life. A matching generation counter
+alone is insufficient. Boot change refuses new work while original terminal receipts remain
+collectible under their retained authority. Expired provisioning requires a new setup request,
+not an extension of its original grant. No full MCP/OAuth, GitHub, Telegram or host credential is
+installed in the guest. This asset installation does not replace the host companion executable.
+The HTTP phase contracts and rate admission are described in
+[Scoped Codespace File Channel](API.md#scoped-codespace-file-channel).
+
+`transfer_status.transfer.scope` is `private_object`: ready bytes, offsets and expiry describe server
+storage, and operation state is separate. Server-to-guest finalize checks fresh commit authority
+after staged full-digest validation, including an empty file, but source readiness is not proof of
+guest target commit. The guest's guarded target/result is collected separately; native input is
+consumed only after that result is confirmed. Guest partial cleanup observes descriptor expiry,
+runner ownership and held inode/path identity, preserving ambiguous commits and foreign replacements.
 
 Outbound download uses the rate-limited
 `/api/codespaces/transfers/:token` capability route. It sends an attachment with
@@ -937,7 +1075,7 @@ digest and expiry but not the URL.
 The authenticated MCP catalog exposes ordinary development through `codespace`, whose required
 `action` selects the operation: `list`, `repositories`, `setup_help`, `create`, `get`,
 `start`, `stop`, `delete`, `exec`, `stat`, `search`, `read`, `write`, `apply_patch`,
-`upload`, `download`, `local_devices`, `repository_add`, `repository_create`, `preview_image`, `pull_request_create`, `pull_request_get` and
+`upload`, `download`, `files_setup`, `transfer_status`, `local_devices`, `repository_add`, `repository_create`, `preview_image`, `pull_request_create`, `pull_request_get` and
 `pull_request_find`. The public tools reference renders its schema from the typed
 registry. `codespace_process` separately exposes background `start`, `get`, `read` and `stop`.
 Changing the catalog changes `MCP_TOOLS_REVISION`, so a client holding an older catalog
@@ -956,7 +1094,7 @@ a mixed stdin form or a partial resume call is refused as `CODESPACE_REQUEST_INV
 rather than by the published schema. A default an action declares is applied by that
 contract and is deliberately absent from the published object, which would otherwise
 inject every action's defaults into every request; the field keeps its description. A field two
-actions declare differently — `max_bytes`, which `search` bounds at 1 MiB and `download` at 4 MiB —
+actions declare differently — `max_bytes`, which `search` bounds at 1 MiB and native `download` at the binary ceiling —
 is published as both forms under one key, so the projection narrows neither. `operation_id`, whose
 declarations differ only in description, is published once. `list` returns compact owned
 codespaces (`codespace_id`, repository, ref and state); `repositories` returns approved targets
@@ -1020,16 +1158,20 @@ Website deletion still requires its displayed `expected_generation`. Successful 
 responses are compact codespace records; an unconfirmed result carries a bounded error and the
 existing codespace ID, without authorizing another creation.
 
-Ordinary execution and file actions wait for a terminal result and return the action's useful
-output, not a metadata envelope. Exec returns stdout, stderr and exit code. Failed, cancelled
+Ordinary `exec` returns durable acceptance with `request_id`, `operation_id`, `accepted`, `phase`
+and the admission, start/runtime and result-retention fields. Available terminal output includes
+stdout, stderr and exit code. File actions wait for their terminal useful result. Failed, cancelled
 and timed-out commands and rejected file edits are tool errors (`isError: true`) retaining useful
-bounded output. `operation_id` appears when retained output is truncated or exceptional recovery
-needs it. Calling the same action with only `codespace_id` and that ID observes the accepted
-operation without dispatching another effect. Ordinary exec accepts neither `background` nor
-`cancel`; use `codespace_process` for independently managed processes.
+bounded output. Command replies always retain their acceptance identity; file replies include
+`operation_id` when exceptional recovery needs it. Calling the same action with only `codespace_id`
+and that ID observes the accepted operation without dispatching another effect. Exec also accepts
+pure lookup by `request_id`, so a lost first response does not lose the command identity.
+Ordinary exec accepts neither `background` nor `cancel`; use `codespace_process` for independently
+managed processes.
 
-`codespace_process` start accepts the same command/session/stdin inputs and returns `process_id`
-and state after admission, without waiting for completion. Get collects state and available output;
+`codespace_process` start accepts the same required `request_id` and command/session/stdin inputs
+and returns `process_id`, acceptance fields and state without waiting for guest launch or completion.
+Get accepts either `process_id` or pure `request_id` lookup and collects state and available output;
 read returns a bounded UTF-8 stream range; stop cancels that exact process. Ranges use byte offsets:
 a split multibyte character or invalid UTF-8 is shown with replacement
 characters, matching ordinary retained command-output reads. Repository-file reads keep their
@@ -1041,7 +1183,8 @@ Consecutive commands share a working context through a named session. A caller
 opens one with `session` and `session_start: true` and continues it by naming
 `session` alone. The session remembers the `cwd` a call names and the variables a
 call passes in `env`, and applies both to every command that continues it; a
-command without a session is unaffected.
+command without a session is unaffected. Accepted commands in the same session observe the
+predecessor's committed context in admission order; unrelated sessions remain independent.
 
 Inside a session a caller may send `script` instead of `argv`. The script is run
 by the codespace's own shell and sourced, so its directory changes and exports
@@ -1058,7 +1201,7 @@ work: `argv`, a `script` inside a session, or ending a session with neither.
 frees the session's slot and removes its stored context. A codespace holds at most
 sixteen sessions of its current life, and opening one past that is refused with
 that ceiling named; a session left by an earlier life holds no slot and is removed
-by the call that ends it.
+by the call that ends it. A queued end whose launch admission expires does not remove the context.
 
 A script is at most 64 KiB of text, and the stored context is bounded by 64
 variables and 64 KiB, enforced where it is written. A call whose declared context would cross that is refused as a bounded
@@ -1082,7 +1225,8 @@ validated data, never a path: the remote side builds the path from a name it has
 accepted, and a session's stored working directory is resolved by the same rule that
 refuses any escape from the repository.
 
-The `exec` action accepts argv as data, an optional repository-relative `cwd`,
+The `exec` action requires a caller-chosen UUID `request_id` and accepts argv as data,
+an optional repository-relative `cwd`,
 `timeout_seconds`, `session`, `session_start`, `session_end`, `env`, `script`, optional per-stream output limits and exactly one optional stdin
 form: `stdin_text` (UTF-8) or `stdin_file`, a native ChatGPT file reference. The
 registry publishes `_meta["openai/fileParams"]` on the tool for both `stdin_file` and
@@ -1091,15 +1235,23 @@ required, while `file_name`, `mime_type` and `size_bytes` are optional. Native i
 goes directly through the one-call native execution path and is never staged through
 the `upload` action; neither the file ID nor the temporary URL is echoed back.
 
-The `read` action returns UTF-8 text with offset, total size and, for a repository
-file, SHA-256; `length` defaults to 64 KiB, and `search` defaults to 100 matches within 64 KiB of
+The `stat` action can inspect a large regular file with a null hashed version. The `read` action
+returns UTF-8 text with offset and total size; for a repository file, `sha256` is its whole-file
+digest or null beyond the editable ceiling, while `range_sha256` hashes the returned bytes. The
+range digest is not an expected whole-file version for editing. `length` defaults to 64 KiB with a
+4 MiB ceiling, and `search` defaults to 100 matches within 64 KiB of
 result bytes, so a call that names only the codespace, path and query is complete.
 A range that is not valid UTF-8 returns `CODESPACE_BINARY_READ_REQUIRES_DOWNLOAD`
 instead of base64. The `write` action replaces a file atomically from UTF-8 text under an explicit
 existence precondition with optional size/digest guards; `apply_patch` takes
 ordered byte-offset edits with UTF-8 replacement text and returns old/new versions and
-the content-free summary. The `download` action returns the private transfer as a
-`resource_link` (see the previous section).
+the content-free summary. New native `upload` and `download` calls require `request_id`;
+their existing operation IDs remain collectible. `files_setup` takes `codespace_id` and `request_id`.
+`transfer_status` takes those fields and optional `transfer_id`, returns private-object metadata and
+the separate operation, and does not dispatch or republish. A ready guest-to-server transfer returns
+its original private `resource_link` and `reference_id`. The `download` action returns that same kind
+of private receipt (see the previous section). Sending it to a person is a separate explicit
+`communication` action `deliver-file`, not an automatic consequence of download.
 
 `preview_image` instead returns a complete repository-relative PNG/JPEG as standard MCP
 `ImageContent`, with safe image format, dimensions and byte-size metadata. Pass `codespace_id`, `path` and optional
@@ -1407,41 +1559,45 @@ Codespace creation and direct operations require
 `CODESPACE_CODESPACES_ENABLED=true`. These policy defaults apply when a value is
 not supplied:
 
-| Variable                                       | Default | Meaning                                                      |
-| ---------------------------------------------- | ------: | ------------------------------------------------------------ |
-| `CODESPACE_MAX_CPU_CORES`                      |       4 | Maximum selected Linux machine CPU cores                     |
-| `CODESPACE_MAX_MEMORY_GB`                      |       8 | Maximum selected machine memory                              |
-| `CODESPACE_MAX_STORAGE_GB`                     |      32 | Maximum selected machine storage                             |
-| `CODESPACE_MAX_ACTIVE_PER_USER`                |       4 | Codespaces a user may hold, stopped ones included            |
-| `CODESPACE_MAX_ACTIVE_GLOBAL`                  |      16 | Codespaces held across the instance, stopped ones included   |
-| `CODESPACE_CREATE_THROTTLE_SECONDS`            |      60 | Minimum interval between creation reservations               |
-| `CODESPACE_PERSISTENT_RETENTION_DAYS`          |      30 | Codespaces stopped-codespace retention requested at creation |
-| `CODESPACE_CREATE_DEADLINE_MINUTES`            |      15 | Create reconciliation deadline                               |
-| `CODESPACE_CLEANUP_DEADLINE_MINUTES`           |      15 | Lifecycle cleanup deadline and terminal-result retention     |
-| `CODESPACE_CLAIM_LEASE_SECONDS`                |      30 | Cross-process reconciliation claim lease                     |
-| `CODESPACE_RECONCILE_INTERVAL_SECONDS`         |      30 | Background reconciliation interval                           |
-| `CODESPACE_START_WAIT_SECONDS`                 |     180 | Wait for a codespace an operation started; 5 to 900          |
-| `CODESPACE_MAX_CONCURRENT_OPERATIONS_PER_USER` |       8 | Direct operations per user                                   |
-| `CODESPACE_MAX_CONCURRENT_OPERATIONS_GLOBAL`   |      32 | Direct operations across the instance                        |
-| `CODESPACE_MAX_OPERATION_INPUT_KB`             |    1024 | Maximum direct-operation stdin                               |
-| `CODESPACE_MAX_OPERATION_STDOUT_KB`            |    1024 | Stdout carried by one answer                                 |
-| `CODESPACE_MAX_OPERATION_STDERR_KB`            |     256 | Stderr carried by one answer                                 |
-| `CODESPACE_MAX_RETAINED_OUTPUT_MB`             |      64 | Retained output per stream before a command is stopped       |
-| `CODESPACE_MAX_OPERATION_SECONDS`              |     900 | Maximum bounded-command duration                             |
-| `CODESPACE_MAX_BACKGROUND_OPERATION_HOURS`     |       4 | Background-command duration; 1 to 4, higher is refused       |
-| `CODESPACE_MAX_TRANSFER_FILE_MB`               |       4 | Maximum native or file payload; maximum 4 MiB                |
-| `CODESPACE_MAX_TRANSFER_TOTAL_MB_PER_USER`     |     100 | Live private-transfer bytes per user                         |
-| `CODESPACE_MAX_TRANSFER_TOTAL_MB_GLOBAL`       |    1024 | Live private-transfer bytes across the instance              |
-| `CODESPACE_MAX_TRANSFER_OBJECTS_PER_USER`      |      10 | Live private-transfer objects per user                       |
-| `CODESPACE_MAX_TRANSFER_OBJECTS_GLOBAL`        |    1000 | Live private-transfer objects across the instance            |
-| `CODESPACE_MAX_TRANSFER_INFLIGHT_MB_PER_USER`  |      40 | Reserved/claimed transfer bytes per user                     |
-| `CODESPACE_MAX_TRANSFER_INFLIGHT_MB_GLOBAL`    |     256 | Reserved/claimed transfer bytes across the instance          |
-| `CODESPACE_TRANSFER_TTL_MINUTES`               |      10 | Private capability and object lifetime; maximum 60 minutes   |
+| Variable                                       | Default | Meaning                                                                                |
+| ---------------------------------------------- | ------: | -------------------------------------------------------------------------------------- |
+| `CODESPACE_MAX_CPU_CORES`                      |       4 | Maximum selected Linux machine CPU cores                                               |
+| `CODESPACE_MAX_MEMORY_GB`                      |       8 | Maximum selected machine memory                                                        |
+| `CODESPACE_MAX_STORAGE_GB`                     |      32 | Maximum selected machine storage                                                       |
+| `CODESPACE_MAX_ACTIVE_PER_USER`                |       4 | Codespaces a user may hold, stopped ones included                                      |
+| `CODESPACE_MAX_ACTIVE_GLOBAL`                  |      16 | Codespaces held across the instance, stopped ones included                             |
+| `CODESPACE_CREATE_THROTTLE_SECONDS`            |      60 | Minimum interval between creation reservations                                         |
+| `CODESPACE_PERSISTENT_RETENTION_DAYS`          |      30 | Codespaces stopped-codespace retention requested at creation                           |
+| `CODESPACE_CREATE_DEADLINE_MINUTES`            |      15 | Create reconciliation deadline                                                         |
+| `CODESPACE_CLEANUP_DEADLINE_MINUTES`           |      15 | Lifecycle cleanup deadline and terminal-result retention                               |
+| `CODESPACE_CLAIM_LEASE_SECONDS`                |      30 | Cross-process reconciliation claim lease                                               |
+| `CODESPACE_RECONCILE_INTERVAL_SECONDS`         |      30 | Background reconciliation interval                                                     |
+| `CODESPACE_START_WAIT_SECONDS`                 |     180 | Wait for a codespace an operation started; 5 to 900                                    |
+| `CODESPACE_MAX_CONCURRENT_OPERATIONS_PER_USER` |       8 | Direct operations per user                                                             |
+| `CODESPACE_MAX_CONCURRENT_OPERATIONS_GLOBAL`   |      32 | Direct operations across the instance                                                  |
+| `CODESPACE_MAX_OPERATION_INPUT_KB`             |    1024 | Maximum direct-operation stdin                                                         |
+| `CODESPACE_MAX_OPERATION_STDOUT_KB`            |    1024 | Stdout carried by one answer                                                           |
+| `CODESPACE_MAX_OPERATION_STDERR_KB`            |     256 | Stderr carried by one answer                                                           |
+| `CODESPACE_MAX_RETAINED_OUTPUT_MB`             |      64 | Retained output per stream before a command is stopped                                 |
+| `CODESPACE_MAX_OPERATION_SECONDS`              |     900 | Maximum bounded-command duration                                                       |
+| `CODESPACE_MAX_BACKGROUND_OPERATION_HOURS`     |       4 | Background-command duration; 1 to 4, higher is refused                                 |
+| `CODESPACE_MAX_TRANSFER_FILE_MB`               |      20 | Native binary ceiling; parser accepts 1–1024 MiB, subject to aggregate/inflight quotas |
+| `CODESPACE_MAX_TRANSFER_TOTAL_MB_PER_USER`     |     100 | Live private-transfer bytes per user                                                   |
+| `CODESPACE_MAX_TRANSFER_TOTAL_MB_GLOBAL`       |    1024 | Live private-transfer bytes across the instance                                        |
+| `CODESPACE_MAX_TRANSFER_OBJECTS_PER_USER`      |      10 | Live private-transfer objects per user                                                 |
+| `CODESPACE_MAX_TRANSFER_OBJECTS_GLOBAL`        |    1000 | Live private-transfer objects across the instance                                      |
+| `CODESPACE_MAX_TRANSFER_INFLIGHT_MB_PER_USER`  |      40 | Reserved/claimed transfer bytes per user                                               |
+| `CODESPACE_MAX_TRANSFER_INFLIGHT_MB_GLOBAL`    |     256 | Reserved/claimed transfer bytes across the instance                                    |
+| `CODESPACE_TRANSFER_TTL_MINUTES`               |      10 | Private capability and object lifetime; maximum 60 minutes                             |
 
 The global active-resource limit cannot be lower than the per-user limit; the same
 rule applies to operation concurrency and the global/per-user byte and in-flight
 transfer pairs. Transfer byte and in-flight aggregates cannot be lower than the
-single-file ceiling.
+single-file ceiling. The per-user inflight setting accepts at most 256 MiB, so the largest valid
+combined binary-file ceiling is currently 256 MiB, with matching aggregate and global limits.
+Code files, read ranges, inline preview and relay parts remain at most 4 MiB independently of this
+binary setting; transfer chunks remain 256 KiB. Increasing it does not increase command stdin,
+search, output, IPC or relay-envelope budgets.
 Configured operation input cannot
 exceed 4096 KiB, either output stream cannot exceed 8192 KiB, command duration
 cannot exceed 900 seconds, background-command duration cannot exceed 4 hours (GitHub's

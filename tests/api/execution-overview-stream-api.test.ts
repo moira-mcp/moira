@@ -5,7 +5,7 @@
  * stream's session every `OVERVIEW_STREAM_RECHECK_MS` (2 s in the test environments).
  */
 
-import { afterAll, beforeAll, describe, expect, test } from "@jest/globals";
+import { afterAll, afterEach, beforeAll, describe, expect, test } from "@jest/globals";
 import { getTestBaseUrl, getTestRequestOrigin } from "../utils/test-config.js";
 import {
   blockUserViaApi,
@@ -189,6 +189,16 @@ describe("GET /api/executions/overview/stream", () => {
     for (const cleanup of cleanups) await cleanup();
   });
 
+  afterEach(async () => {
+    const owned = streams.splice(0);
+    for (const stream of owned) stream.close();
+    await Promise.all(
+      owned
+        .filter((stream) => stream.status === 200)
+        .map((stream) => stream.closedWithin(CLOSE_WITHIN_MS)),
+    );
+  });
+
   test("a new stream announces where it starts, then delivers the owner's changes in order", async () => {
     const stream = await open(owner.cookie);
     expect(stream.status).toBe(200);
@@ -196,10 +206,13 @@ describe("GET /api/executions/overview/stream", () => {
 
     const executionId = await startRun("Import March orders");
     await setNote(executionId, "Import March orders again");
-    const events = await stream.until(
-      (all) =>
-        all.filter((event) => event.event === "change" && event.data.executionId === executionId)
-          .length >= 2,
+    const events = await stream.until((all) =>
+      all.some(
+        (event) =>
+          event.event === "change" &&
+          event.data.executionId === executionId &&
+          event.data.kind === "meta",
+      ),
     );
     const mine = events.filter(
       (event) => event.event === "change" && event.data.executionId === executionId,

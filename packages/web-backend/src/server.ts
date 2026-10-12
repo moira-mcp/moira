@@ -95,6 +95,7 @@ import { tokenRoutes } from "./routes/tokens.js";
 import { adminTokenRoutes } from "./routes/admin-tokens.js";
 import { createCodespaceConnectionRoutes } from "./routes/codespace-connections.js";
 import { createCodespaceManagementRoutes } from "./routes/codespace-management.js";
+import { createCodespaceFileRoutes } from "./routes/codespace-files.js";
 import {
   createLocalDeviceManagementRoutes,
   createLocalDeviceRoutes,
@@ -216,6 +217,11 @@ class MoiraApiServer {
    * Setup middleware that must run AFTER Better Auth routes
    */
   private setupMiddlewareAfterAuth(): void {
+    this.app.use("/api/public/codespace-files", createCodespaceFileRoutes(), (_request, response) =>
+      response
+        .status(404)
+        .json({ error: { code: "CODESPACE_NOT_FOUND", message: "File endpoint was not found" } }),
+    );
     // Device secrets and native byte payloads never pass through global body logging/context.
     this.app.use(
       "/api/local-devices",

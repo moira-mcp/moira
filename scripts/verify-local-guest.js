@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { randomBytes, randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
+import { build } from "esbuild";
 import { DEFAULT_TEMPLATE } from "../packages/local/dist/config.js";
 
 function docker(argv, input = "") {
@@ -75,7 +76,7 @@ try {
       "--tmpfs",
       "/workspaces:rw,nosuid,nodev,mode=1777",
       "--tmpfs",
-      "/home/agent:rw,nosuid,nodev,mode=700,uid=1000,gid=1000",
+      "/home/agent:rw,exec,nosuid,nodev,mode=700,uid=1000,gid=1000",
       DEFAULT_TEMPLATE,
       "sleep",
       "300",
@@ -128,10 +129,10 @@ try {
       },
     }),
   );
-  const call = async (request) => {
+  const call = async (request, workerPath = "/tmp/worker.mjs") => {
     const output = JSON.parse(
       await docker(
-        ["exec", "--interactive", container, "node", "/tmp/worker.mjs"],
+        ["exec", "--interactive", container, "node", workerPath],
         JSON.stringify({
           kind: "operation",
           request: { version: 1, repositoryFullName: "owner/project", ...request },
@@ -158,7 +159,13 @@ try {
       await new Promise((resolve) => setTimeout(resolve, 100));
       result = await call({ action: "inspect", remoteMarker });
     }
-    assert.equal(result.state, "succeeded");
+    assert.equal(
+      result.state,
+      "succeeded",
+      `exit=${result.exitCode}; stderr=${Buffer.from(result.stderrBase64 ?? "", "base64")
+        .toString("utf8")
+        .slice(0, 512)}`,
+    );
     assert.equal(result.exitCode, 0);
     return Buffer.from(result.stdoutBase64, "base64").toString();
   };
@@ -188,6 +195,39 @@ try {
   });
   assert.equal(read.state, "succeeded");
   assert.deepEqual(Buffer.from(read.value.bytesBase64, "base64"), bytes);
+  assert.equal(read.value.sha256, createHash("sha256").update(bytes).digest("hex"));
+  assert.equal(read.value.rangeSha256, createHash("sha256").update(bytes).digest("hex"));
+  const largeSize = 8 * 1024 * 1024;
+  const rangeOffset = 5 * 1024 * 1024 + 7;
+  const rangeBytes = Buffer.from("guest range");
+  await command({
+    argv: [
+      "node",
+      "-e",
+      "const f=require('node:fs');const fd=f.openSync('large.dat','wx');try{f.ftruncateSync(fd,Number(process.argv[1]));f.writeSync(fd,process.argv[3],Number(process.argv[2]));}finally{f.closeSync(fd)}",
+      String(largeSize),
+      String(rangeOffset),
+      rangeBytes.toString("utf8"),
+    ],
+  });
+  const metadata = await call({
+    action: "file-execute",
+    remoteMarker: marker(),
+    request: { action: "stat", path: "large.dat" },
+  });
+  assert.equal(metadata.state, "succeeded");
+  assert.equal(metadata.value.stat.size, largeSize);
+  assert.equal(metadata.value.stat.version, null);
+  const range = await call({
+    action: "file-execute",
+    remoteMarker: marker(),
+    request: { action: "read", path: "large.dat", offset: rangeOffset, length: rangeBytes.length },
+  });
+  assert.equal(range.state, "succeeded");
+  assert.equal(range.value.totalSize, largeSize);
+  assert.equal(range.value.sha256, null);
+  assert.deepEqual(Buffer.from(range.value.bytesBase64, "base64"), rangeBytes);
+  assert.equal(range.value.rangeSha256, createHash("sha256").update(rangeBytes).digest("hex"));
   await command({
     script: "export MOIRA_LOCAL_CHECK=retained; cd nested",
     session: "local-check",
@@ -199,6 +239,110 @@ try {
       session: "local-check",
     }),
     "retained|/workspaces/project/nested",
+  );
+  // Exercise the production fixed installer inside the existing Linux guest, without bootstrap.
+  const compiled = await build({
+    entryPoints: ["packages/web-backend/src/services/codespace-file-client-assets.ts"],
+    bundle: true,
+    platform: "node",
+    format: "esm",
+    write: false,
+  });
+  const { buildFileClientLifeProbe, buildFileClientMaintenance } = await import(
+    `data:text/javascript;base64,${Buffer.from(compiled.outputFiles[0].text).toString("base64")}`
+  );
+  const original = marker();
+  let oldResult = await call({
+    action: "execute",
+    remoteMarker: original,
+    argv: ["printf", "old-collectible"],
+    stdin: "",
+    timeoutMs: 1000,
+    maxStdoutBytes: 1024,
+    maxStderrBytes: 1024,
+    maxRetainedBytes: 4096,
+  });
+  while (oldResult.state === "running")
+    oldResult = await call({ action: "inspect", remoteMarker: original });
+  const lifeProbe = { ...buildFileClientLifeProbe(), stdin: "" };
+  const life = JSON.parse(await command(lifeProbe));
+  const cli = await readFile("packages/local/dist/guest-files-cli.js");
+  const worker = await readFile("packages/local/dist/guest-worker.js");
+  const digest = (bytes) => createHash("sha256").update(bytes).digest("hex");
+  const assets = { abi: 1, cli, worker, cliSha256: digest(cli), workerSha256: digest(worker) };
+  const configuration = {
+    version: 1,
+    origin: "https://moira.example",
+    bootstrapCapability: "b".repeat(43),
+    environmentIdentity: life.environmentIdentity,
+    resourceId: randomUUID(),
+    repositoryFullName: "owner/project",
+  };
+  const maintenance = buildFileClientMaintenance(assets, configuration, Date.now() + 60_000);
+  const installed = JSON.parse(
+    await command({ ...maintenance, stdin: Buffer.from(maintenance.stdin).toString("base64") }),
+  );
+  assert.deepEqual(installed, {
+    abi: 1,
+    environmentIdentity: life.environmentIdentity,
+    workerSha256: digest(worker),
+    cliSha256: digest(cli),
+    command: "/home/agent/.local/bin/moira-files",
+    executableSha256: digest(cli),
+  });
+  const installedProbe = await call(
+    { action: "file-inspect", remoteMarker: original, request: { action: "probe" } },
+    "/tmp/moira-local-runtime/worker.mjs",
+  );
+  assert.deepEqual(installedProbe, {
+    state: "succeeded",
+    value: { action: "probe", ...installed },
+  });
+  assert.deepEqual(await call({ action: "inspect", remoteMarker: original }), oldResult);
+  assert.deepEqual(JSON.parse(await command(lifeProbe)), life);
+  assert.match(
+    await command({ argv: [installedProbe.value.command, "--help"] }),
+    /moira-files upload PATH/,
+  );
+  for (const kind of ["symlinkSync", "linkSync"]) {
+    await command({
+      argv: [
+        "node",
+        "-e",
+        "const f=require('node:fs'),p=require('node:os').homedir()+'/.local/share/moira-files/';f.unlinkSync(p+'.install.lock');f[process.argv[1]](p+'client.mjs',p+'.install.lock')",
+        kind,
+      ],
+    });
+    await assert.rejects(
+      command({ ...maintenance, stdin: Buffer.from(maintenance.stdin).toString("base64") }),
+    );
+    await command({
+      argv: [
+        "node",
+        "-e",
+        "const f=require('node:fs'),p=require('node:os').homedir()+'/.local/share/moira-files/';f.unlinkSync(p+'.install.lock');f.writeFileSync(p+'.install.lock','',{mode:384});process.stdout.write(require('node:crypto').createHash('sha256').update(f.readFileSync(p+'client.mjs')).digest('hex'))",
+      ],
+    }).then((hash) => assert.equal(hash, digest(cli)));
+  }
+  assert.equal(
+    await command({
+      script: 'printf \'%s|%s\' "$MOIRA_LOCAL_CHECK" "$PWD"',
+      session: "local-check",
+    }),
+    "retained|/workspaces/project/nested",
+  );
+  assert.deepEqual(
+    Buffer.from(
+      (
+        await call({
+          action: "file-execute",
+          remoteMarker: marker(),
+          request: { action: "read", path: "binary.dat", offset: 0, length: 64 },
+        })
+      ).value.bytesBase64,
+      "base64",
+    ),
+    bytes,
   );
   await assert.rejects(
     call({
@@ -244,7 +388,7 @@ try {
   const cancelled = await call({ action: "cancel", remoteMarker: running });
   assert.equal(cancelled.state, "cancelled");
   console.log(
-    "Guest image compatibility passed: execution, stdin, binary files, persistent sessions and cancellation.",
+    "Guest image compatibility passed: execution, stdin, binary files, large metadata/ranges, persistent sessions and cancellation.",
   );
   console.log(
     "Prepared broker-origin repository uses the production binding routine; mismatched repository and escaped file path are refused.",

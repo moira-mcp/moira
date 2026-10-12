@@ -43,8 +43,29 @@ limited to 20 MiB; images accept PNG or JPEG and documents reject image MIME typ
 delivery begins, a failed MIME, size, image-signature, or in-flight admission check releases the
 grant for another corrected request until expiry. After any provider attempt, success or failure is
 terminal and replay returns the same non-specific invalid-grant response. Each user may have ten
-live grants and two simultaneous upload buffers totalling at most 40 MiB; the installation accepts
+live grants and two simultaneous upload streams totalling at most 40 MiB; the installation accepts
 one thousand live grants. Expired and completed grants do not consume issuance capacity.
+
+To deliver a ready private file, use its returned `file.reference_id` rather than uploading its bytes
+again:
+
+```javascript
+communication({
+  action: "deliver-file",
+  referenceId: "<file.reference_id>",
+  message: "The requested recording",
+  kind: "document",
+});
+```
+
+An optional `channelId` selects one of the user's configured channels; omission uses ordinary
+configured-channel delivery. Filename, MIME and size come from the owned object, so do not provide
+`filename`, `mimeType` or `sizeBytes` with this action. Delivery does not consume its native download
+reference or extend retention. Safe private basenames retain Unicode and quotes within 255 UTF-8
+bytes; paths, control characters and the names `.` and `..` are refused. Telegram streams checked bytes;
+extension channels whose attachment contract supports only buffered bytes are explicitly unsupported
+for this source. Raw authenticated uploads stream through private storage as temporary objects and
+release those objects only after readers settle. Publishing a private file never sends a message.
 
 ### Workflow discovery and execution
 
@@ -62,8 +83,8 @@ for `exec`). A field that belongs to no action is rejected as an MCP error, as b
 belongs to a _different_ action is rejected at dispatch as `CODESPACE_REQUEST_INVALID`. A default an
 action declares is applied there too, so it no longer appears in the published schema. Where two
 actions accept the same field with different limits — `max_bytes` is 1 MiB for `search` and 4 MiB for
-`download` — the schema shows both forms, and the action you named decides which one your call had to
-match.
+`preview_image` — the action you named decides which bound applies. Native `download` uses the
+separate effective binary-transfer policy.
 
 `start({ action: "prepare" })` resolves and validates an authorized workflow, binds the workflow version and request options, and returns a Start attempt ID that expires after 15 minutes without creating an execution. `parentExecutionId` links a child to an existing parent; use `"none"` for a standalone execution. `skipNotificationCheck` records a policy to bypass only optional ordinary-notification preflight during execute. `skipTelegramCheck` remains a deprecated alias with the same behavior, and conflicting values are rejected.
 
@@ -180,7 +201,8 @@ executing a flow in GitHub or on an approved local computer. Each local codespac
 one repository may have several independent codespaces. A codespace is not shared; collaboration happens
 through version-control branches. Ordinary work uses `codespace`: `action` selects the operation —
 `list`, `repositories`, `setup_help`, `create`, `get`, `start`, `stop`, `delete`, `exec`,
-`stat`, `search`, `read`, `write`, `apply_patch`, `upload` or `download` — and the other fields are
+`stat`, `search`, `read`, `write`, `apply_patch`, `upload`, `download`, `files_setup` or
+`transfer_status` — and the other fields are
 those the chosen action declares. GitHub is connected only on the Moira website; no action starts,
 resumes or polls an authorization. When the connection, installation or server configuration is
 missing, the refusal carries the provider's applicable configured link set. `setup_help` returns the
@@ -257,17 +279,23 @@ same timeout; turn pausing off if you work in your codespaces directly. Separate
 codespace after at most 240 minutes without user or terminal activity, with pausing on or off, and
 that can also end a background command that prints nothing for that long.
 
+Choose a UUID `request_id` before submitting `exec` or `codespace_process` start and retain it.
+Matching retries recover the same command; changed command, resource or input identity is refused.
 `exec` runs argv as data (no shell interpolation) in a repository-relative `cwd` with a
-timeout (`timeout_seconds`, optional) and optional per-stream output limits, and returns bounded `stdout`, `stderr` and the exact
-`exit_code`. Those limits bound the answer, not the command: a command that prints more keeps
+timeout (`timeout_seconds`, optional) and optional per-stream output limits. A collected result contains
+bounded `stdout`, `stderr` and the exact `exit_code`. Those limits bound the answer, not the command:
+a command that prints more keeps
 running, keeps its own exit code and keeps its own `stderr`, and the result reports each stream's
 complete size and whether the payload was truncated. The whole output stays in the codespace until
 the operation is cleaned up, and any range of it is read with `read`. A command is stopped
 for its volume only if its retained output reaches the codespace ceiling, which is reported as that
-rather than as the command's own failure. Ordinary exec waits for its terminal result;
-`timeout_seconds` defaults to 300. Long-lived development processes use the separate
-`codespace_process` tool: start accepts the same command/session/stdin fields and returns
-`process_id` and state after admission. Get collects that process's state and available output;
+rather than as the command's own failure. Exec returns a durable acceptance response without
+waiting for guest completion: `request_id`, `operation_id`, `accepted` and `phase`, plus available
+output. `timeout_seconds` defaults to 300 and bounds guest runtime from confirmed launch, not
+the client's wait. Long-lived development processes use the separate
+`codespace_process` tool: start accepts the same identity/command/session/stdin fields and returns
+`process_id`, acceptance fields and state without waiting for confirmed launch. Get collects that
+process's state and available output by `process_id` or `request_id`;
 read returns a bounded retained stream range; stop cancels only that process. A pending stop is
 not confirmed cancellation. The omitted duration uses the existing background lifetime ceiling,
 and retained output remains collectible for at least the permitted command duration.
@@ -320,24 +348,44 @@ conflicting edit and retains its recovery journal and backups when rollback cann
 Supply at most one stdin form: `stdin_text` for UTF-8 text or `stdin_file` for a native
 ChatGPT file reference; the file's bytes reach the process without base64 in the conversation.
 Failed, timed-out and cancelled commands and rejected file edits are returned as tool errors that
-keep any useful bounded output and the recovery identity. Successful ordinary calls return the
-action result without operation metadata; `operation_id` remains only for truncated retained output
-or exceptional recovery. An unconfirmed outcome is an error, not a running success. Use its same
-`codespace_id` and `operation_id` to collect the accepted effect without executing it again.
+keep any useful bounded output and the recovery identity. File calls wait for their useful terminal
+result and carry `operation_id` for exceptional recovery. Command calls retain their acceptance
+identity; acceptance does not prove success or a running process. After a lost first response,
+call `exec` with only `codespace_id` and the original `request_id`, or use process get with that
+request identity. Existing `operation_id` collection remains available. Lookup and bounded waiting
+never cancel or repeat the command.
+
+`phase: "preparing"` means input preparation is incomplete; `accepted` means admission is durable.
+`started_at: null` means launch is unconfirmed, not that no effect occurred. `not_started` requires
+proof that launch was prevented, while `outcome_unknown` preserves uncertainty. `admission_deadline_at`
+limits permission to start; `started_at` plus `runtime_ms` bounds actual guest execution;
+`result_expires_at` describes result retention. These times are independent of caller waiting.
 Server waiting does not extend a client's transport timeout. After interrupted delivery, inspect
 the accepted identity before repeating that effect or modifying the affected files. Independent
 work can continue without resolving that operation first.
-Retained results remain readable after an ordinary restart while the same codespace and current
+The bounded reply prefix is verified in private storage before terminal publication and remains
+collectible after server restart during retention. Larger complete streams remain in the guest;
+their availability is separate from that prefix. Retained results remain readable after an ordinary
+restart while the same codespace and current
 access remain valid and the result is still stored. Restart does not preserve a live process.
 `CODESPACE_RESULT_EXPIRED` means the stored result is no longer available; it is not a reason to
 repeat the same write without inspecting the affected files. A typed transport failure after acceptance retains
 `operation_id`, or `process_id` for a background start, so it can be inspected without another launch.
 
-`read` returns UTF-8 text with `offset` and `total_size`, plus `sha256` for a repository
-file; give `path` for a file, or `operation_id` and `stream` for a command's retained `stdout` or
+`stat` returns repository-file metadata without reading a large file's contents. Regular files
+above the 4 MiB code-edit ceiling have `version: null`; small editable files retain their whole-file
+SHA256 version. Repository paths, regular-file type, single-link identity and concurrent changes
+are checked independently of file size.
+
+`read` returns only the selected bounded UTF-8 range with `offset` and `total_size`. For a repository
+file, `sha256` means the whole-file digest: it remains available for files up to 4 MiB and is `null`
+for larger files. `range_sha256` hashes exactly the returned bytes and does not replace the whole-file
+version used by edits. Retained older SHA-only results keep their whole-file digest and receive a
+computed range digest when collected. A file offset equal to its size returns an empty range; an
+offset beyond it is refused. Give `path` for a file, or `operation_id` and `stream` for a command's retained `stdout` or
 `stderr`, naming the codespace that command belongs to. A read that starts at or past the end of a
 stream returns no text and the stream's current size. `length` defaults to
-64 KiB, and `search` defaults to 100 matches within 64 KiB of results, so naming only the
+64 KiB with a maximum of 4 MiB, and `search` defaults to 100 matches within 64 KiB of results, so naming only the
 codespace, path and query is a complete call. Search covers repository content and skips the
 repository's own `.git` directory, and it refuses a search rooted at or inside that directory; a
 file there is still readable by its exact path. A non-text range returns
@@ -345,9 +393,68 @@ file there is still readable by its exact path. A non-text range returns
 `CODESPACE_REQUEST_INVALID` naming the missing or invalid fields. `write` replaces a file atomically
 under an `expected` precondition (`exists`, optional `size_bytes` and `sha256`), and
 `apply_patch` applies ordered byte-offset edits per file with the same preconditions and
-returns old/new versions plus a content-free summary. `upload` writes a native file
-reference to a path; `download` returns the file as an MCP `resource_link` whose one-use
-HTTPS link expires automatically and is never repeated in the JSON result.
+returns old/new versions plus a content-free summary. Code writes, patches and image previews have
+a 4 MiB upper bound. Stdin uses the effective input limit, at most 4 MiB and 1 MiB by default.
+Binary transfers have a separate effective limit, 20 MiB by default,
+with 256 KiB byte chunks and unchanged aggregate and in-flight quotas.
+A complete empty download is valid; an empty image is not a valid preview.
+
+Choose a UUID `request_id` before native `upload` or `download`. Upload accepts the native attachment
+reference without base64 and replaces the repository target under its `expected` guard. Download
+returns an MCP `resource_link` and `file.reference_id`, size, digest and expiry. Its HTTPS URL is
+one-use and is not duplicated in JSON; consuming it does not authorize another publication. Repeat
+the exact original request after response loss, or collect by the returned `operation_id`. For a
+download collection retain `file_name` and `mime_type`. A pending result is not a complete file or
+proof that target replacement happened.
+
+Provision the remote file client with a stable setup identity:
+
+```javascript
+codespace({ action: "files_setup", codespace_id: "<codespace UUID>", request_id: "<setup UUID>" });
+```
+
+Wait for `provisioned: true` and use the returned absolute `command` with ordinary exec. Pending
+setup returns `command: null`; do not assume `moira-files` is on PATH. Setup reports the measured
+ABI, guest life and worker/client/executable hashes. It refreshes fixed guest assets without VM or
+companion restart, preserves repository/session state and does not upgrade the running host daemon.
+Repeat pending setup with the same `request_id`: it collects the original installation operation.
+An existing operation marker without launch proof or a retained result remains unconfirmed; it is
+not a failed installation or proof that nothing ran. Only verified completion exposes the command.
+
+```bash
+"$command" upload films/demo.mp4 --request-id "$upload_request_id" --mime video/mp4
+"$command" status "$upload_request_id"
+"$command" download "$reference_id" incoming/demo.mp4 --request-id "$download_request_id"
+```
+
+Supply the same UUID on an interrupted CLI transfer. It prints the request identity before network
+admission and resumes only that immutable transfer; changed bytes or target guards are refused.
+A download target must be absent unless `--replace-sha256` supplies its expected whole-file digest.
+`codespace({ action: "transfer_status", codespace_id, request_id })`, with optional `transfer_id`,
+is pure collection, not resume. Its `scope: "private_object"` and `state: "ready"` describe private
+storage, not a committed guest destination. Use the native operation result or CLI completion receipt
+for target replacement. A guest upload publishes only a private object; native download and
+`communication` delivery are separate explicit effects. These narrow file capabilities are bound to
+current owner/provider permissions, resource generations, measured guest life and finite expiry;
+status never renews them. Expired, consumed or revoked references cannot be re-minted by retry.
+
+Interrupted input preparation and private copying retain the original transfer identity before the
+object becomes available to consumers. Resume continues that object's checkpoint; if the bound
+object was consumed or is unavailable, recovery refuses a replacement or another fetch under the
+same request. A completed independent private copy can settle without reopening its original source,
+even if that source was consumed separately. Matching completed retries reuse the retained receipt
+instead of publishing another object or allocating another result. Collection checks current
+permissions; resume never extends the original admission, capability or retention deadlines.
+If admission expires before dispatch was admitted, setup, native transfer or CLI preparation is
+settled as cancelled without execution, even when its private preparation is expired or missing.
+The original identity and deadline remain unchanged. A terminal setup refusal ends waiting and
+exposes no command. Work whose dispatch was already admitted remains uncertain until evidence
+settles its outcome; inspection neither repeats it nor grants a new deadline.
+
+A retained file refusal may include a bounded `reason`: `unsafe_access`, `size_limit`,
+`invalid_range`, `concurrent_change` or `precondition`. It names the actual failed guard without
+exposing host paths or provider exception text. Older or unclassified refusals may omit it;
+the error code and original recovery identity still apply.
 
 The agent runs as the ordinary Codespace user with that environment's repository, network and
 configured secrets. Moira bounds cloud concurrency, input/output size, time and transfer quotas and

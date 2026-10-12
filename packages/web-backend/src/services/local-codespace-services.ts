@@ -33,6 +33,7 @@ import {
   localCodespaceCredential,
 } from "./local-codespace-provider.js";
 import { OpenAINativeReferenceFetcher } from "./codespace-native-reference-fetcher.js";
+import { createCodespaceFileTransfers } from "./codespace-file-transfers.js";
 
 export function localCodespaceSettingsUrl(baseUrl = getBaseUrl(), appPrefix?: string): string {
   const url = new URL(codespaceGitHubSettingsPath(appPrefix), baseUrl);
@@ -109,6 +110,7 @@ export function createLocalCodespaceServices(
     now,
     transfers: transfer,
     nativeFetcher,
+    reconcileFile: (accepted) => file.recoverNative(accepted),
     lifecycle: { ensureRunning: (userId, id) => resource.ensureRunning(userId, id) },
     audit:
       context.operationAudit ??
@@ -122,10 +124,24 @@ export function createLocalCodespaceServices(
     now,
     transfers: transfer,
     nativeFetcher,
+    get native() {
+      return fileTransfers;
+    },
     lifecycle: { ensureRunning: (userId, id) => resource.ensureRunning(userId, id) },
     audit:
       context.operationAudit ??
       ((event) => recordCodespaceOperationEvent(event, event.updatedAt - event.createdAt)),
+  });
+  const fileTransfers = createCodespaceFileTransfers({
+    repository: operations,
+    files: file,
+    transfers: transfer,
+    credentials,
+    transport,
+    policy,
+    now,
+    nativeFetcher,
+    wake: () => operation.notifyAccepted(),
   });
   const observability = new CodespaceObservabilityService({
     providerId: CODESPACE_PROVIDER_LOCAL,
@@ -174,6 +190,7 @@ export function createLocalCodespaceServices(
     resource,
     operation,
     file,
+    fileTransfers,
     observability,
     devices,
     relay,

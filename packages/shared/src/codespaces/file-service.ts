@@ -12,6 +12,7 @@ import type {
   CodespaceResourcePolicy,
   CodespaceNativeFileReference,
   CodespaceTransferRecord,
+  CodespaceTransferStatus,
 } from "./resource-types.js";
 import { CodespaceResourceError } from "./resource-types.js";
 import { CodespaceOperationRepository } from "./operation-repository.js";
@@ -33,6 +34,59 @@ const MIN_SEARCH_RESULT_BYTES = Buffer.byteLength(
   JSON.stringify({ action: "search", matches: [], truncated: false }),
   "utf8",
 );
+
+export interface CodespaceNativeFileTransfers {
+  uploadReference(
+    userId: string,
+    codespaceId: string,
+    input: {
+      requestId: string;
+      path: string;
+      reference: CodespaceNativeFileReference;
+      expected: { exists: boolean; size?: number; sha256?: string };
+    },
+  ): Promise<CodespaceFileOperationResponse>;
+  downloadReference(
+    userId: string,
+    codespaceId: string,
+    input: {
+      requestId: string;
+      path: string;
+      maxBytes: number;
+      fileName: string;
+      mimeType: string;
+    },
+  ): Promise<{ operation: CodespaceOperationRecord; transfer: CodespaceTransferHandle | null }>;
+  collectDownload(
+    userId: string,
+    operationId: string,
+  ): Promise<{ operation: CodespaceOperationRecord; transfer: CodespaceTransferHandle | null }>;
+  collectFile(userId: string, operationId: string): Promise<CodespaceFileOperationResponse>;
+  status(
+    userId: string,
+    codespaceId: string,
+    input: { requestId: string; transferId?: string },
+  ): Promise<{
+    operation: CodespaceOperationRecord | null;
+    transfer: CodespaceTransferStatus | null;
+  }>;
+  setup(
+    userId: string,
+    codespaceId: string,
+    input: { requestId: string },
+  ): Promise<{
+    requestId: string;
+    operationId: string;
+    provisioned: boolean;
+    abi?: number;
+    environmentIdentity?: string;
+    workerSha256?: string | null;
+    cliSha256?: string | null;
+    command: string | null;
+    executableSha256?: string | null;
+  }>;
+  recover(operation: CodespaceOperationRecord): Promise<boolean>;
+}
 
 function kind(request: CodespaceFileRequest): CodespaceOperationKind {
   return request.action;
@@ -67,6 +121,7 @@ function requestBytes(request: CodespaceFileRequest): number {
 
 export function codespaceFileResultBytes(result: CodespaceFileResult): number {
   if ("state" in result) return 0;
+  if ("transferId" in result) return Buffer.byteLength(JSON.stringify(result), "utf8");
   if (result.action === "read" || result.action === "download") {
     return result.bytes.byteLength;
   }
@@ -87,6 +142,7 @@ function validateRequest(
   request: CodespaceFileRequest,
   policy: CodespaceResourcePolicy,
   inputBytesOverride?: number,
+  nativeBounds = false,
 ): number {
   if (
     paths(request).some(
@@ -95,9 +151,12 @@ function validateRequest(
   ) {
     throw new CodespaceResourceError("CODESPACE_RESOURCE_INVALID", "Invalid codespace path");
   }
-  const maximum = effectiveCodespaceLimits(policy).transfers.maxFileBytes;
+  const effective = effectiveCodespaceLimits(policy);
+  const maximum = nativeBounds
+    ? effective.transfers.maxFileBytes
+    : effective.files.maxCodeFileBytes;
   const inputBytes = inputBytesOverride ?? requestBytes(request);
-  if (!Number.isSafeInteger(inputBytes) || inputBytes > maximum) {
+  if (!Number.isSafeInteger(inputBytes) || inputBytes < 0 || inputBytes > maximum) {
     throw new CodespaceResourceError("CODESPACE_POLICY_LIMIT", "File input exceeds its limit");
   }
   if (request.action === "read") {
@@ -106,7 +165,7 @@ function validateRequest(
       request.offset < 0 ||
       !Number.isSafeInteger(request.length) ||
       request.length < 1 ||
-      request.length > maximum
+      request.length > effective.files.maxReadRangeBytes
     ) {
       throw new CodespaceResourceError("CODESPACE_POLICY_LIMIT", "Read range exceeds its limit");
     }
@@ -209,6 +268,7 @@ export class CodespaceFileService {
       /** Starts a codespace that is asleep so the file operation about to reach it does not fail. */
       lifecycle?: CodespaceLifecycleStarter;
       audit?: (event: CodespaceOperationAuditEvent) => Promise<void> | void;
+      native?: CodespaceNativeFileTransfers;
     },
   ) {}
 
@@ -216,11 +276,23 @@ export class CodespaceFileService {
     userId: string,
     codespaceId: string,
     input: {
+      requestId?: string;
       path: string;
       reference: CodespaceNativeFileReference;
       expected: { exists: boolean; size?: number; sha256?: string };
     },
   ): Promise<CodespaceFileOperationResponse> {
+    if (this.dependencies.native) {
+      if (!input.requestId)
+        throw new CodespaceResourceError(
+          "CODESPACE_RESOURCE_INVALID",
+          "Native upload requires a stable request identity",
+        );
+      return this.dependencies.native.uploadReference(userId, codespaceId, {
+        ...input,
+        requestId: input.requestId,
+      });
+    }
     if (!this.dependencies.transfers || !this.dependencies.nativeFetcher) {
       throw new CodespaceResourceError(
         "CODESPACE_PROVIDER_UNAVAILABLE",
@@ -283,11 +355,20 @@ export class CodespaceFileService {
         claimed.record,
       );
       if (response.operation.state === "cancelled") {
-        await this.dependencies.transfers.discard(claimed.record);
+        await this.dependencies.transfers.consume(claimed.record, { ignoreLostClaim: true });
       }
       return response;
     } catch (error) {
-      if (claimed) await this.dependencies.transfers.discard(claimed.record);
+      if (claimed) {
+        if (
+          this.dependencies.repository.getOwned(userId, prepared.operation.id)?.state ===
+          "reconcile_pending"
+        ) {
+          this.dependencies.transfers.release(claimed.record);
+        } else {
+          await this.dependencies.transfers.consume(claimed.record, { ignoreLostClaim: true });
+        }
+      }
       if (
         this.dependencies.repository.cancelBeforeDispatch(
           userId,
@@ -308,8 +389,25 @@ export class CodespaceFileService {
   async downloadReference(
     userId: string,
     codespaceId: string,
-    input: { path: string; maxBytes: number; fileName: string; mimeType: string },
+    input: {
+      requestId?: string;
+      path: string;
+      maxBytes: number;
+      fileName: string;
+      mimeType: string;
+    },
   ): Promise<{ operation: CodespaceOperationRecord; transfer: CodespaceTransferHandle | null }> {
+    if (this.dependencies.native) {
+      if (!input.requestId)
+        throw new CodespaceResourceError(
+          "CODESPACE_RESOURCE_INVALID",
+          "Native download requires a stable request identity",
+        );
+      return this.dependencies.native.downloadReference(userId, codespaceId, {
+        ...input,
+        requestId: input.requestId,
+      });
+    }
     if (!this.dependencies.transfers) {
       throw new CodespaceResourceError(
         "CODESPACE_PROVIDER_UNAVAILABLE",
@@ -343,7 +441,12 @@ export class CodespaceFileService {
       throw error;
     }
     const response = await this.executePrepared(userId, request, prepared);
-    if (!response.result || "state" in response.result || response.result.action !== "download") {
+    if (
+      !response.result ||
+      "state" in response.result ||
+      response.result.action !== "download" ||
+      "transferId" in response.result
+    ) {
       await this.dependencies.transfers.discard(reservation.record);
       return { operation: response.operation, transfer: null };
     }
@@ -382,6 +485,8 @@ export class CodespaceFileService {
     if (context.operation.kind !== "download") {
       throw new CodespaceResourceError("CODESPACE_NOT_FOUND", "Codespace download was not found");
     }
+    if (this.dependencies.native && context.operation.requestId && context.operation.inputReference)
+      return this.dependencies.native.collectDownload(userId, operationId);
     if (!this.dependencies.transfers) {
       throw new CodespaceResourceError(
         "CODESPACE_PROVIDER_UNAVAILABLE",
@@ -394,7 +499,12 @@ export class CodespaceFileService {
     });
     try {
       const response = await this.reconcile(userId, operationId);
-      if (!response.result || "state" in response.result || response.result.action !== "download") {
+      if (
+        !response.result ||
+        "state" in response.result ||
+        response.result.action !== "download" ||
+        "transferId" in response.result
+      ) {
         await this.dependencies.transfers.discard(reservation.record);
         return { operation: response.operation, transfer: null };
       }
@@ -425,6 +535,24 @@ export class CodespaceFileService {
         "CODESPACE_NOT_FOUND",
         "Codespace file operation was not found",
       );
+    if (
+      this.dependencies.native &&
+      context.operation.requestId &&
+      context.operation.inputReference
+    ) {
+      return waitForAcceptedCodespaceResult({
+        deadlineAt: context.operation.deadlineAt,
+        now: () => this.now(),
+        delay: this.dependencies.delay,
+        inspect: async () => {
+          const response = await this.dependencies.native!.collectFile(userId, operationId);
+          return response.result ||
+            ["failed", "cancelled", "timed_out"].includes(response.operation.state)
+            ? response
+            : null;
+        },
+      });
+    }
     return waitForAcceptedCodespaceResult({
       deadlineAt: context.operation.deadlineAt,
       now: () => this.now(),
@@ -480,6 +608,14 @@ export class CodespaceFileService {
     );
     if (context.operation.kind !== "download")
       throw new CodespaceResourceError("CODESPACE_NOT_FOUND", "Codespace download was not found");
+    if (
+      this.dependencies.native &&
+      context.operation.requestId &&
+      context.operation.inputReference
+    ) {
+      await this.waitForResult(userId, operationId);
+      return this.dependencies.native.collectDownload(userId, operationId);
+    }
     if (!this.dependencies.transfers)
       throw new CodespaceResourceError(
         "CODESPACE_PROVIDER_UNAVAILABLE",
@@ -491,7 +627,12 @@ export class CodespaceFileService {
     });
     try {
       const response = await this.waitForResult(userId, operationId);
-      if (!response.result || "state" in response.result || response.result.action !== "download") {
+      if (
+        !response.result ||
+        "state" in response.result ||
+        response.result.action !== "download" ||
+        "transferId" in response.result
+      ) {
         await this.dependencies.transfers.discard(reservation.record);
         return { operation: response.operation, transfer: null };
       }
@@ -523,10 +664,15 @@ export class CodespaceFileService {
     codespaceId: string,
     request: CodespaceFileRequest,
     inputBytesOverride?: number,
+    identity?: { requestId: string; requestDigest: string },
+    nativeBounds = false,
   ) {
     const policy = this.dependencies.policy();
-    const inputBytes = validateRequest(request, policy, inputBytesOverride);
-    const outputLimit = this.outputLimit(request, policy);
+    const inputBytes = validateRequest(request, policy, inputBytesOverride, nativeBounds);
+    const outputLimit =
+      nativeBounds && request.action === "download"
+        ? request.maxBytes
+        : this.outputLimit(request, policy);
     // The clock is read inside the reservation, so a second attempt after waking the codespace
     // carries the time it actually happened rather than the time the first attempt was made.
     const reserveOnce = () =>
@@ -540,6 +686,7 @@ export class CodespaceFileService {
         deadlineAt: this.now() + effectiveCodespaceLimits(policy).operations.maxDurationMs,
         policy,
         now: this.now(),
+        ...identity,
       });
     const reservation = await startOnUse(reserveOnce, this.dependencies.lifecycle, {
       userId,
@@ -583,7 +730,10 @@ export class CodespaceFileService {
     let remoteContacted = false;
     try {
       if (!this.dependencies.repository.canDispatch(userId, operation.id, this.now())) {
-        if (claimedInput) this.dependencies.transfers?.release(claimedInput);
+        if (claimedInput) {
+          await this.dependencies.transfers!.consume(claimedInput, { ignoreLostClaim: true });
+          claimedInput = null;
+        }
         this.dependencies.repository.cancelBeforeDispatch(userId, operation.id, this.now());
         const current = this.dependencies.repository.getOwned(userId, operation.id)!;
         await this.emit("terminal", current);
@@ -603,7 +753,10 @@ export class CodespaceFileService {
           dispatchNow,
         )
       ) {
-        if (claimedInput) this.dependencies.transfers?.release(claimedInput);
+        if (claimedInput) {
+          await this.dependencies.transfers!.consume(claimedInput, { ignoreLostClaim: true });
+          claimedInput = null;
+        }
         this.dependencies.repository.cancelBeforeDispatch(userId, operation.id, this.now());
         const current = this.dependencies.repository.getOwned(userId, operation.id)!;
         await this.emit("terminal", current);
@@ -628,6 +781,18 @@ export class CodespaceFileService {
       );
       this.dependencies.repository.requireAuthority(userId, operation.id, policy);
       this.dependencies.repository.recordConnectorRunning(userId, codespace.id, this.now());
+      if ("state" in result && result.state === "outcome_unknown") {
+        this.dependencies.repository.markReconcilePending(
+          userId,
+          operation.id,
+          "file_outcome_unknown",
+          this.now(),
+        );
+        return {
+          operation: this.dependencies.repository.getOwned(userId, operation.id)!,
+          result: null,
+        };
+      }
       if ("state" in result && result.state === "running") {
         this.dependencies.repository.markRunning(userId, operation.id, this.now());
         const settled = await settleAfterDispatch(this.dependencies.delay, async () => {
@@ -648,7 +813,16 @@ export class CodespaceFileService {
       this.dependencies.repository.requireAuthority(userId, operation.id, policy);
       return completed;
     } catch (error) {
-      if (claimedInput) this.dependencies.transfers?.release(claimedInput);
+      if (claimedInput) {
+        if (
+          remoteContacted &&
+          !(error instanceof CodespaceResourceError && error.confirmedRefusal)
+        ) {
+          this.dependencies.transfers!.release(claimedInput);
+        } else {
+          await this.dependencies.transfers!.consume(claimedInput, { ignoreLostClaim: true });
+        }
+      }
       if (remoteContacted && error instanceof CodespaceResourceError && error.confirmedRefusal) {
         this.dependencies.repository.rejectDispatch(userId, operation.id, error.code, this.now());
         await this.emit("terminal", this.dependencies.repository.getOwned(userId, operation.id)!);
@@ -716,6 +890,8 @@ export class CodespaceFileService {
         "Codespace file operation was not found",
       );
     }
+    if (this.dependencies.native && context.operation.requestId && context.operation.inputReference)
+      return this.dependencies.native.collectFile(userId, operationId);
     await requireCodespaceTransportAvailable(this.dependencies.transport);
     this.dependencies.repository.requireResultContext(
       userId,
@@ -763,15 +939,15 @@ export class CodespaceFileService {
       this.dependencies.policy(),
       this.now(),
     );
-    if ("state" in result && result.state === "running") {
+    if ("state" in result && (result.state === "running" || result.state === "outcome_unknown")) {
       return {
         operation: this.dependencies.repository.getOwned(userId, operationId)!,
         result: null,
       };
     }
     if ("state" in result && result.state === "absent") {
-      // Exact-marker inspection proved the remote never ran or no longer holds this
-      // operation: it is terminal and its capacity is released, exactly like an exec.
+      // Inspection may overtake original delivery. Absence does not fence that
+      // frame or prove that a file mutation had no effect.
       return this.completeAbsent(userId, context.operation);
     }
     if (result.action !== context.operation.kind) {
@@ -797,16 +973,13 @@ export class CodespaceFileService {
     if (["succeeded", "failed", "cancelled", "timed_out"].includes(operation.state)) {
       return { operation, result: null };
     }
-    const completed = this.dependencies.repository.completeMetadata(
+    this.dependencies.repository.markReconcilePending(
       userId,
       operation.id,
-      0,
-      this.now() + this.dependencies.policy().cleanupDeadlineMs,
+      "file_outcome_unknown",
       this.now(),
-      "failed",
     );
     const current = this.dependencies.repository.getOwned(userId, operation.id)!;
-    if (completed) await this.emit("terminal", current);
     return { operation: current, result: null };
   }
 
@@ -843,11 +1016,49 @@ export class CodespaceFileService {
   }
 
   private outputLimit(request: CodespaceFileRequest, policy: CodespaceResourcePolicy): number {
-    const maximum = effectiveCodespaceLimits(policy).transfers.maxFileBytes;
+    const maximum = effectiveCodespaceLimits(policy).files.maxCodeFileBytes;
     if (request.action === "read") return request.length;
     if (request.action === "download") return request.maxBytes;
     if (request.action === "search") return request.maxBytes;
     return Math.min(maximum, 1024 * 1024);
+  }
+
+  ensureFileClient(userId: string, codespaceId: string, input: { requestId: string }) {
+    if (!this.dependencies.native)
+      throw new CodespaceResourceError(
+        "CODESPACE_PROVIDER_UNAVAILABLE",
+        "Guest file client is unavailable",
+      );
+    return this.dependencies.native.setup(userId, codespaceId, input);
+  }
+
+  prepareNative(
+    userId: string,
+    codespaceId: string,
+    request: CodespaceFileRequest,
+    inputBytes: number,
+    identity: { requestId: string; requestDigest: string },
+  ) {
+    if (request.action !== "upload" && request.action !== "download")
+      throw new CodespaceResourceError("CODESPACE_RESOURCE_INVALID", "Invalid native file action");
+    return this.reserve(userId, codespaceId, request, inputBytes, identity, true);
+  }
+
+  transferStatus(
+    userId: string,
+    codespaceId: string,
+    input: { requestId: string; transferId?: string },
+  ) {
+    if (!this.dependencies.native)
+      throw new CodespaceResourceError(
+        "CODESPACE_PROVIDER_UNAVAILABLE",
+        "Native file transfer is unavailable",
+      );
+    return this.dependencies.native.status(userId, codespaceId, input);
+  }
+
+  recoverNative(operation: CodespaceOperationRecord): Promise<boolean> {
+    return this.dependencies.native?.recover(operation) ?? Promise.resolve(false);
   }
 
   private now(): number {

@@ -109,6 +109,9 @@ FROM base AS backend-build
 
 COPY packages/web-backend/ ./packages/web-backend/
 COPY packages/mcp-server/ ./packages/mcp-server/
+COPY packages/local/src/ ./packages/local/src/
+COPY scripts/build-guest-assets.js ./scripts/build-guest-assets.js
+RUN node scripts/build-guest-assets.js
 RUN npx tsc --noEmit --project packages/mcp-server/tsconfig.json
 
 RUN npx tsc --noEmit --project packages/web-backend/tsconfig.json

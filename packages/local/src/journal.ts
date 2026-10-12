@@ -2,7 +2,10 @@ import { createHash } from "node:crypto";
 import { z } from "zod";
 import { PrivateState } from "./private-state.js";
 import { LocalRefusal, MAX_MESSAGE_BYTES } from "./policy.js";
-import { LOCAL_REQUEST_MAX_WINDOW_MS } from "../../shared/src/codespaces/local-protocol.js";
+import {
+  LOCAL_REQUEST_MAX_WINDOW_MS,
+  LOCAL_RESULT_SETTLEMENT_RETENTION_MS,
+} from "../../shared/src/codespaces/local-protocol.js";
 
 const receipt = z
   .object({
@@ -11,6 +14,7 @@ const receipt = z
     expiresAt: z.number().int().nonnegative(),
     state: z.enum(["accepted", "complete", "collected"]),
     reservedBytes: z.number().int().min(0).max(MAX_MESSAGE_BYTES),
+    settled: z.boolean().optional(),
   })
   .strict();
 const receipts = z.array(receipt).max(1024);
@@ -29,6 +33,28 @@ export class RequestJournal {
     const result = this.tail.then(action);
     this.tail = result.catch(() => undefined);
     return result;
+  }
+
+  /** Collection authority is distinct from admission: this path can only read an exact receipt. */
+  async retained(id: string, expiresAt: number, input: unknown): Promise<unknown | undefined> {
+    z.string().uuid().parse(id);
+    const digest = createHash("sha256").update(JSON.stringify(input)).digest("hex");
+    return this.serial(async () => {
+      const entries = (await this.state.read("requests.json", receipts.parse)) ?? [];
+      const entry = entries.find((item) => item.id === id);
+      if (
+        !entry ||
+        entry.state !== "complete" ||
+        entry.expiresAt + LOCAL_RESULT_SETTLEMENT_RETENTION_MS <= this.now()
+      )
+        return undefined;
+      if (entry.digest !== digest || entry.expiresAt !== expiresAt)
+        throw new LocalRefusal(
+          "LOCAL_REPLAY_CONFLICT",
+          "The retained receipt cannot change its accepted request.",
+        );
+      return (await this.state.read(`result-${id}.json`, (value) => value)) ?? undefined;
+    });
   }
 
   /** Inspect a retained admission without redispatching or accepting a completed request. */
@@ -144,12 +170,17 @@ export class RequestJournal {
     return work;
   }
 
-  async acknowledge(id: string): Promise<void> {
+  async acknowledge(id: string, retainLiveReplay = false): Promise<void> {
     z.string().uuid().parse(id);
     await this.serial(async () => {
       const entries = (await this.state.read("requests.json", receipts.parse)) ?? [];
       const entry = entries.find((item) => item.id === id);
       if (entry?.state === "complete") {
+        if (retainLiveReplay && entry.expiresAt > this.now()) {
+          entry.settled = true;
+          await this.state.write("requests.json", entries);
+          return;
+        }
         entry.state = "collected";
         entry.reservedBytes = 0;
         await this.state.write("requests.json", entries);
@@ -161,7 +192,12 @@ export class RequestJournal {
   private async clean() {
     const entries = (await this.state.read("requests.json", receipts.parse)) ?? [];
     const keep = entries.filter(
-      (entry) => entry.expiresAt > this.now() || this.pending.has(entry.id),
+      (entry) =>
+        entry.expiresAt +
+          (entry.state === "collected" || entry.settled
+            ? 0
+            : LOCAL_RESULT_SETTLEMENT_RETENTION_MS) >
+          this.now() || this.pending.has(entry.id),
     );
     await this.state.write("requests.json", keep);
     for (const key of await this.state.keys("result-")) {

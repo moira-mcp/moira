@@ -27,6 +27,7 @@ import type {
   PortableCommunicationMessage,
   UserNotificationNode,
 } from "@mcp-moira/workflow-engine";
+import { ownedByteStream } from "../../helpers/owned-byte-stream.js";
 
 const repository = {} as IDataRepository;
 
@@ -57,6 +58,151 @@ function adapter(
 }
 
 describe("UserCommunicationService", () => {
+  test.each(["ролик.mp4", 'film "final".mp4', `${"é".repeat(125)}a.bin`])(
+    "delivers checked sources with the exact safe basename %s",
+    async (filename) => {
+      const bytes = Uint8Array.of(1, 2, 3, 4);
+      const observed: Array<{ filename: string; bytes: number[] }> = [];
+      const service = new UserCommunicationService([
+        adapter(
+          "stream",
+          async (message) => {
+            const received: number[] = [];
+            for await (const chunk of await message.attachment!.source!.open())
+              received.push(...chunk);
+            observed.push({ filename: message.attachment!.filename, bytes: received });
+          },
+          true,
+          { streamingAttachments: true },
+        ),
+      ]);
+      const result = await service.deliver(
+        {
+          userId: "u",
+          text: "Film",
+          attachment: {
+            kind: "document",
+            filename,
+            mimeType: "application/octet-stream",
+            source: {
+              size: bytes.length,
+              sha256: "9f64a747e1b97f131fabb6b447296c9b6f0201e79fb3c5356e6c77e89b6a806a",
+              async open() {
+                return ownedByteStream(
+                  (async function* () {
+                    yield bytes;
+                  })(),
+                );
+              },
+            },
+          },
+        },
+        repository,
+      );
+      expect(result.status).toBe("delivered");
+      expect(observed).toEqual([{ filename, bytes: [...bytes] }]);
+    },
+  );
+
+  test.each([
+    "",
+    ".",
+    "..",
+    "../film.mp4",
+    "dir\\film.mp4",
+    "film\n.mp4",
+    "film\0.mp4",
+    "film\u007f.mp4",
+    `${"é".repeat(126)}.bin`,
+  ])(
+    "refuses unsafe or oversized attachment basename %j before source delivery",
+    async (filename) => {
+      const deliver = jest.fn(async () => undefined);
+      const service = new UserCommunicationService([
+        adapter("stream", deliver, true, { streamingAttachments: true }),
+      ]);
+      await expect(
+        service.deliver(
+          {
+            userId: "u",
+            text: "Film",
+            attachment: {
+              kind: "document",
+              filename,
+              mimeType: "application/octet-stream",
+              bytes: Uint8Array.of(1),
+            },
+          },
+          repository,
+        ),
+      ).rejects.toThrow("filename is invalid");
+      expect(deliver).not.toHaveBeenCalled();
+    },
+  );
+
+  test("delivers checked attachment sources independently and skips non-streaming channels", async () => {
+    const bytes = Uint8Array.of(1, 2, 3, 4);
+    const observed: number[][] = [];
+    let opens = 0;
+    const source = {
+      size: bytes.length,
+      sha256: "9f64a747e1b97f131fabb6b447296c9b6f0201e79fb3c5356e6c77e89b6a806a",
+      async open() {
+        opens++;
+        return ownedByteStream(
+          (async function* () {
+            yield bytes;
+          })(),
+        );
+      },
+    };
+    const streaming = (id: string) =>
+      adapter(
+        id,
+        async (message) => {
+          const result: number[] = [];
+          for await (const chunk of await message.attachment!.source!.open()) result.push(...chunk);
+          observed.push(result);
+        },
+        true,
+        { streamingAttachments: true },
+      );
+    const unsupported = jest.fn(async () => undefined);
+    const service = new UserCommunicationService([
+      streaming("first"),
+      streaming("second"),
+      adapter("legacy", unsupported),
+    ]);
+    const result = await service.deliver(
+      {
+        userId: "u",
+        text: "Report",
+        attachment: {
+          kind: "document",
+          source,
+          filename: "report.bin",
+          mimeType: "application/octet-stream",
+        },
+      },
+      repository,
+    );
+    expect(result).toMatchObject({
+      status: "partial",
+      deliveredChannels: 2,
+      channels: [
+        { channelId: "first", status: "delivered" },
+        { channelId: "second", status: "delivered" },
+        { channelId: "legacy", status: "unsupported" },
+      ],
+    });
+    expect(observed).toEqual([
+      [1, 2, 3, 4],
+      [1, 2, 3, 4],
+    ]);
+    expect(opens).toBe(2);
+    expect(unsupported).not.toHaveBeenCalled();
+  });
+
   test("prepares mutable content after channel configuration and validates it before handoff", async () => {
     let title = "Old";
     const texts: string[] = [];

@@ -1,6 +1,6 @@
-import { CodespaceOperationRepository } from "./operation-repository.js";
+import { CodespaceOperationRepository, truncateCodespaceUtf8 } from "./operation-repository.js";
 import { effectiveCodespaceLimits } from "./resource-policy.js";
-import { settleAfterDispatch, waitForAcceptedCodespaceResult } from "./settle-after-dispatch.js";
+import { settleAfterDispatch } from "./settle-after-dispatch.js";
 import { requireCodespaceTransportAvailable } from "./transport-availability.js";
 import type {
   CodespaceExecRequest,
@@ -16,7 +16,10 @@ import type {
 } from "./resource-types.js";
 import { CodespaceResourceError } from "./resource-types.js";
 import type { CodespaceCredentialResolver } from "./resource-service.js";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
+import { z } from "zod";
+import { canonicalJson } from "../utils/canonical-json.js";
+import { localRelayPayloadReferenceSchema } from "./local-device-types.js";
 import { codespaceFileResultBytes } from "./file-service.js";
 import type { CodespaceTransferRecord } from "./resource-types.js";
 import type {
@@ -35,6 +38,17 @@ const MAX_CODESPACE_CWD_BYTES = 4096;
 const MAX_SESSION_VARIABLES = 64;
 const MAX_SCRIPT_BYTES = 64 * 1024;
 const MAX_ENVIRONMENT_VALUE_LENGTH = 4096;
+const requestIdentitySchema = z.string().uuid();
+
+function canonicalRequestIdentity(value: unknown): string {
+  const parsed = requestIdentitySchema.safeParse(value);
+  if (!parsed.success)
+    throw new CodespaceResourceError(
+      "CODESPACE_RESOURCE_INVALID",
+      "A stable request_id UUID is required",
+    );
+  return parsed.data.toLowerCase();
+}
 
 /**
  * The disk one command's retained output may occupy in the codespace. It is the only output bound
@@ -100,7 +114,7 @@ function validateRequest(
       "Give argv, or a script inside a session, or end a session with neither.",
     );
   }
-  if (request.script !== undefined && request.session === undefined) {
+  if ((request.script !== undefined || request.sessionEnd) && request.session === undefined) {
     throw new CodespaceResourceError(
       "CODESPACE_RESOURCE_INVALID",
       "A script requires a session",
@@ -222,7 +236,10 @@ function validateRequest(
 
 export class CodespaceOperationService {
   private timer: NodeJS.Timeout | null = null;
-  private scheduledReconcileRunning = false;
+  private readonly recovery = new Set<Promise<void>>();
+  private readonly recoveringOperationIds = new Set<string>();
+  private recoveryWakePending = false;
+  private readonly admissions = new Map<string, Promise<CodespaceOperationResponse>>();
   constructor(
     private readonly dependencies: {
       repository: CodespaceOperationRepository;
@@ -235,8 +252,16 @@ export class CodespaceOperationService {
       /** Injected so a settle window costs no real time in tests. */
       delay?: (milliseconds: number) => Promise<void>;
       audit?: (event: CodespaceOperationAuditEvent) => Promise<void> | void;
-      transfers?: Pick<CodespaceTransferService, "ingest" | "claimInput" | "release" | "consume">;
+      transfers?: Pick<CodespaceTransferService, "ingest" | "claimInput" | "release" | "consume"> &
+        Partial<
+          Pick<
+            CodespaceTransferService,
+            "retainRelayPayload" | "readRelayPayload" | "discardRelayPayload"
+          >
+        >;
       nativeFetcher?: CodespaceNativeReferenceFetcher;
+      /** Durable file intents use this same claimed recovery pool, with their own receipt decoder. */
+      reconcileFile?: (operation: CodespaceOperationRecord) => Promise<boolean>;
       /**
        * Starts a codespace that is asleep so the work about to reach it does not fail. Absent where
        * no lifecycle authority is wired, in which case a stopped codespace is refused as before.
@@ -268,6 +293,7 @@ export class CodespaceOperationService {
         declaredMimeType: reference.mimeType ?? "application/octet-stream",
       },
     };
+    if (request.requestId) return this.submit(userId, codespaceId, nativeRequest, reference);
     const prepared = await this.reserve(userId, codespaceId, nativeRequest);
     let handle: CodespaceTransferHandle | null = null;
     try {
@@ -409,8 +435,311 @@ export class CodespaceOperationService {
     codespaceId: string,
     request: CodespaceExecRequest,
   ): Promise<CodespaceOperationResponse> {
+    if (request.requestId) return this.submit(userId, codespaceId, request);
     const prepared = await this.reserve(userId, codespaceId, request);
     return this.executePrepared(userId, request, prepared);
+  }
+
+  /** Durable acceptance ends before provider delivery; the scheduled worker owns continuation. */
+  private async submit(
+    userId: string,
+    codespaceId: string,
+    request: CodespaceExecRequest,
+    nativeReference?: CodespaceNativeFileReference,
+  ): Promise<CodespaceOperationResponse> {
+    const requestId = canonicalRequestIdentity(request.requestId);
+    request = { ...request, requestId };
+    const source = JSON.parse(
+      JSON.stringify({
+        ...request,
+        requestId: undefined,
+        sessionStart: request.sessionStart ?? false,
+        sessionEnd: request.sessionEnd ?? false,
+        background: request.background ?? false,
+        stdin:
+          request.stdin.kind === "inline"
+            ? { kind: "inline", bytesBase64: Buffer.from(request.stdin.bytes).toString("base64") }
+            : request.stdin,
+      }),
+    );
+    const identity = nativeReference
+      ? {
+          ...source,
+          stdin: {
+            kind: "native",
+            fileId: nativeReference.fileId,
+            declaredSize: nativeReference.declaredSize ?? null,
+            mimeType: nativeReference.mimeType ?? null,
+          },
+        }
+      : source;
+    const digest = createHash("sha256")
+      .update(canonicalJson({ codespaceId, request: identity }))
+      .digest("hex");
+    const key = `${userId}:${requestId}`;
+    const pending = this.admissions.get(key);
+    if (pending) {
+      await pending;
+      return this.lookupRequest(userId, codespaceId, requestId, digest);
+    }
+    const admission = (async () => {
+      const previous = this.dependencies.repository.getByRequest(userId, request.requestId!);
+      if (previous?.inputReference || (previous && previous.state !== "reserved"))
+        return this.lookupRequest(userId, codespaceId, request.requestId!, digest);
+      const policy = this.dependencies.policy();
+      const bounds = validateRequest(request, policy);
+      if (
+        !this.dependencies.transfers?.retainRelayPayload ||
+        !this.dependencies.transfers.readRelayPayload
+      )
+        throw new CodespaceResourceError(
+          "CODESPACE_PROVIDER_UNAVAILABLE",
+          "Durable operation storage is unavailable",
+        );
+      const reserved = this.dependencies.repository.reserve({
+        userId,
+        resourceId: codespaceId,
+        ...bounds,
+        requestId: request.requestId,
+        requestDigest: digest,
+        runtimeMs: bounds.timeoutMs,
+        sessionKey: request.session
+          ? createHash("sha256").update(request.session).digest("hex")
+          : undefined,
+        deadlineAt: previous?.admissionDeadlineAt ?? this.now() + RESERVATION_DEADLINE_MS,
+        policy,
+        now: this.now(),
+      });
+      if (!reserved.operation || !reserved.codespace)
+        throw new CodespaceResourceError(
+          reserved.outcome === "busy"
+            ? "CODESPACE_OPERATION_BUSY"
+            : reserved.outcome === "not_found"
+              ? "CODESPACE_NOT_FOUND"
+              : reserved.outcome === "disabled"
+                ? "CODESPACE_PROVIDER_DISABLED"
+                : "CODESPACE_NOT_RUNNING",
+          "Codespace operation cannot be accepted",
+        );
+      const operation = reserved.operation;
+      const input = Buffer.from(
+        JSON.stringify({
+          request: source,
+          nativeReference,
+          bounds,
+          maxRetainedBytes: retainedOutputBytes(policy),
+        }),
+      );
+      if (input.length > 8 * 1024 * 1024 - 64 * 1024)
+        throw new CodespaceResourceError(
+          "CODESPACE_POLICY_LIMIT",
+          "Accepted command exceeds its control envelope bound",
+          undefined,
+          true,
+          operation.id,
+        );
+      const reference = await this.dependencies.transfers.retainRelayPayload(
+        userId,
+        "operation_input",
+        input,
+        operation.admissionDeadlineAt! + policy.cleanupDeadlineMs,
+      );
+      if (
+        !this.dependencies.repository.attachInput(
+          userId,
+          operation.id,
+          JSON.stringify(reference),
+          this.now(),
+        )
+      ) {
+        await this.dependencies.transfers.discardRelayPayload?.(
+          userId,
+          "operation_input",
+          reference,
+        );
+        const current = this.dependencies.repository.getOwned(userId, operation.id)!;
+        if (!current.inputReference)
+          throw new CodespaceResourceError(
+            "CODESPACE_PROVIDER_UNAVAILABLE",
+            "Operation admission expired before its input was durable",
+            undefined,
+            true,
+            operation.id,
+          );
+      }
+      await this.emit("reserve", this.dependencies.repository.getOwned(userId, operation.id)!);
+      return {
+        operation: this.dependencies.repository.getOwned(userId, operation.id)!,
+        result: null,
+      };
+    })();
+    this.admissions.set(key, admission);
+    try {
+      const accepted = await admission;
+      // A wake-up is an optimization. The persisted input and repository claim survive this process.
+      void this.runScheduledReconcile();
+      return accepted;
+    } finally {
+      if (this.admissions.get(key) === admission) this.admissions.delete(key);
+    }
+  }
+
+  async lookupRequest(
+    userId: string,
+    codespaceId: string,
+    requestId: string,
+    expectedDigest?: string,
+  ): Promise<CodespaceOperationResponse> {
+    const operation = this.dependencies.repository.getByRequest(
+      userId,
+      canonicalRequestIdentity(requestId),
+    );
+    if (!operation || operation.resourceId !== codespaceId)
+      throw new CodespaceResourceError("CODESPACE_NOT_FOUND", "Accepted request was not found");
+    if (expectedDigest && operation.requestDigest !== expectedDigest)
+      throw new CodespaceResourceError(
+        "CODESPACE_RESOURCE_INVALID",
+        "Submission identity belongs to a different request",
+      );
+    this.dependencies.repository.requireAuthority(userId, operation.id, this.dependencies.policy());
+    const result = operation.resultReference
+      ? await this.readStoredResult(userId, operation)
+      : null;
+    return { operation: this.dependencies.repository.getOwned(userId, operation.id)!, result };
+  }
+
+  private async readStoredResult(
+    userId: string,
+    operation: CodespaceOperationRecord,
+  ): Promise<CodespaceOperationResult | null> {
+    if (!operation.resultReference || !this.dependencies.transfers?.readRelayPayload) return null;
+    this.dependencies.repository.requireResultContext(
+      userId,
+      operation.id,
+      this.dependencies.policy(),
+      this.now(),
+    );
+    let projected: CodespaceOperationResult | null;
+    try {
+      const bytes = await this.dependencies.transfers.readRelayPayload(
+        userId,
+        "operation_result",
+        localRelayPayloadReferenceSchema.parse(JSON.parse(operation.resultReference)),
+      );
+      const result: CodespaceOperationResult = JSON.parse(bytes.toString("utf8"));
+      projected = this.projectRetainedResult(operation, result);
+      if (!projected) throw new Error("Terminal metadata mismatch");
+    } catch (error) {
+      if (error instanceof CodespaceResourceError) throw error;
+      throw new CodespaceResourceError(
+        "CODESPACE_RESOURCE_INVALID",
+        "Retained terminal result could not be verified",
+        "Keep the original operation identity; an unavailable receipt does not authorize repeating the command.",
+        false,
+        operation.id,
+      );
+    }
+    this.dependencies.repository.requireResultContext(
+      userId,
+      operation.id,
+      this.dependencies.policy(),
+      this.now(),
+    );
+    return projected;
+  }
+
+  private async dispatchAccepted(operation: CodespaceOperationRecord): Promise<void> {
+    const transfers = this.dependencies.transfers;
+    if (!operation.inputReference || !transfers?.readRelayPayload)
+      throw new Error("Accepted operation input is unavailable");
+    const bytes = await transfers.readRelayPayload(
+      operation.userId,
+      "operation_input",
+      localRelayPayloadReferenceSchema.parse(JSON.parse(operation.inputReference)),
+    );
+    const stored = JSON.parse(bytes.toString("utf8")) as {
+      request: Omit<CodespaceExecRequest, "stdin"> & {
+        stdin: CodespaceExecRequest["stdin"] | { kind: "inline"; bytesBase64: string };
+      };
+      nativeReference?: CodespaceNativeFileReference;
+      bounds: {
+        inputBytes: number;
+        stdoutLimitBytes: number;
+        stderrLimitBytes: number;
+        timeoutMs: number;
+      };
+      maxRetainedBytes: number;
+    };
+    let request: CodespaceExecRequest = {
+      ...stored.request,
+      requestId: operation.requestId!,
+      stdin:
+        stored.request.stdin.kind === "inline" && "bytesBase64" in stored.request.stdin
+          ? { kind: "inline", bytes: Buffer.from(stored.request.stdin.bytesBase64, "base64") }
+          : (stored.request.stdin as CodespaceExecRequest["stdin"]),
+      maxRetainedBytes: stored.maxRetainedBytes,
+    };
+    const policy = this.dependencies.policy();
+    this.dependencies.repository.requireAuthority(operation.userId, operation.id, policy);
+    if (operation.admissionDeadlineAt! <= this.now()) {
+      this.dependencies.repository.cancelBeforeDispatch(
+        operation.userId,
+        operation.id,
+        this.now(),
+        "admission_expired_not_started",
+        operation.claimId ?? undefined,
+      );
+      return;
+    }
+    await this.dependencies.lifecycle?.ensureRunning(operation.userId, operation.resourceId);
+    let nativeHandle: CodespaceTransferHandle | null = null;
+    try {
+      if (stored.nativeReference) {
+        if (!transfers.ingest || !this.dependencies.nativeFetcher)
+          throw new Error("Native input fetcher is unavailable");
+        nativeHandle = await transfers.ingest(
+          operation.userId,
+          stored.nativeReference,
+          this.dependencies.nativeFetcher,
+          operation.inputBytes,
+        );
+        if (
+          !this.dependencies.repository.recordInputBytes(
+            operation.userId,
+            operation.id,
+            nativeHandle.size,
+            this.now(),
+            operation.claimId ?? undefined,
+          )
+        )
+          throw new Error("Accepted input ownership changed during materialization");
+        request = {
+          ...request,
+          stdin: {
+            kind: "reference",
+            referenceId: nativeHandle.referenceId,
+            declaredBytes: nativeHandle.size,
+            declaredMimeType: nativeHandle.mimeType,
+          },
+        };
+      }
+      const { codespace } = this.dependencies.repository.requireAuthority(
+        operation.userId,
+        operation.id,
+        policy,
+      );
+      await this.executePrepared(operation.userId, request, {
+        policy,
+        ...stored.bounds,
+        operation: {
+          ...this.dependencies.repository.getOwned(operation.userId, operation.id)!,
+          claimId: operation.claimId,
+        },
+        codespace,
+      });
+    } finally {
+      if (nativeHandle) await this.discardNativeInput(operation.userId, nativeHandle.referenceId);
+    }
   }
 
   private async reserve(userId: string, codespaceId: string, request: CodespaceExecRequest) {
@@ -484,7 +813,13 @@ export class CodespaceOperationService {
     let preDispatchOutcome = "credential_unavailable_before_dispatch";
     try {
       if (!this.dependencies.repository.canDispatch(userId, operation.id, this.now())) {
-        this.dependencies.repository.cancelBeforeDispatch(userId, operation.id, this.now());
+        this.dependencies.repository.cancelBeforeDispatch(
+          userId,
+          operation.id,
+          this.now(),
+          undefined,
+          operation.requestId ? (operation.claimId ?? undefined) : undefined,
+        );
         this.refuseBeforeDispatch(userId, operation, policy);
       }
       let materializedRequest = request;
@@ -512,6 +847,50 @@ export class CodespaceOperationService {
         }
         claimedInput = claimed.record;
         materializedRequest = { ...request, stdin: { kind: "inline", bytes: claimed.bytes } };
+        if (operation.requestId) {
+          const transfers = this.dependencies.transfers;
+          if (!transfers.retainRelayPayload || !operation.inputReference || !operation.claimId)
+            throw new Error("Accepted input retention is unavailable");
+          const source = {
+            ...materializedRequest,
+            stdin: { kind: "inline", bytesBase64: claimed.bytes.toString("base64") },
+          };
+          const retained = await transfers.retainRelayPayload(
+            userId,
+            "operation_input",
+            Buffer.from(
+              JSON.stringify({
+                request: source,
+                bounds: {
+                  inputBytes: claimed.bytes.length,
+                  stdoutLimitBytes,
+                  stderrLimitBytes,
+                  timeoutMs: resolvedTimeoutMs,
+                },
+                maxRetainedBytes: request.maxRetainedBytes ?? retainedOutputBytes(policy),
+              }),
+            ),
+            operation.admissionDeadlineAt! + policy.cleanupDeadlineMs,
+          );
+          if (
+            !this.dependencies.repository.replaceAcceptedInput(
+              userId,
+              operation.id,
+              operation.inputReference,
+              JSON.stringify(retained),
+              operation.claimId,
+              this.now(),
+            )
+          ) {
+            await transfers.discardRelayPayload?.(userId, "operation_input", retained);
+            throw new Error("Accepted input ownership changed during materialization");
+          }
+          await transfers.discardRelayPayload?.(
+            userId,
+            "operation_input",
+            localRelayPayloadReferenceSchema.parse(JSON.parse(operation.inputReference)),
+          );
+        }
       }
       preDispatchOutcome = "credential_unavailable_before_dispatch";
       const credential = await this.dependencies.credentials.getCredential(
@@ -529,10 +908,17 @@ export class CodespaceOperationService {
           // The command's own lifetime starts when it actually starts, so an undispatched
           // reservation is reaped on the short deadline it was reserved with.
           dispatchNow + resolvedTimeoutMs,
+          operation.requestId ? (operation.claimId ?? undefined) : undefined,
         )
       ) {
         if (claimedInput) this.dependencies.transfers?.release(claimedInput);
-        this.dependencies.repository.cancelBeforeDispatch(userId, operation.id, this.now());
+        this.dependencies.repository.cancelBeforeDispatch(
+          userId,
+          operation.id,
+          this.now(),
+          undefined,
+          operation.requestId ? (operation.claimId ?? undefined) : undefined,
+        );
         this.refuseBeforeDispatch(userId, operation, policy);
       }
       remoteContacted = true;
@@ -541,7 +927,13 @@ export class CodespaceOperationService {
         timeoutMs: resolvedTimeoutMs,
         maxStdoutBytes: stdoutLimitBytes,
         maxStderrBytes: stderrLimitBytes,
-        maxRetainedBytes: retainedOutputBytes(policy),
+        maxRetainedBytes: request.maxRetainedBytes ?? retainedOutputBytes(policy),
+        ...(operation.requestDigest
+          ? {
+              requestDigest: operation.requestDigest,
+              admissionDeadlineAt: operation.admissionDeadlineAt!,
+            }
+          : {}),
       };
       if (claimedInput) {
         await this.dependencies.transport.retainExecuteInput?.(
@@ -564,35 +956,57 @@ export class CodespaceOperationService {
       if (result.state === "session_limit") {
         // The stored record says why this operation ended, so a later audit read does not mistake
         // it for a cancellation the caller asked for.
-        this.complete(userId, operation, terminalWithoutCommand("cancelled"), "session_limit");
+        terminalResult = await this.completeDurably(
+          userId,
+          operation,
+          terminalWithoutCommand("cancelled"),
+          operation.requestId ? "session_limit_not_started" : "session_limit",
+        );
         terminalEmitted = true;
         sessionLimit = result.limit;
         await this.emit("terminal", this.dependencies.repository.getOwned(userId, operation.id)!);
       } else if (result.state === "session_unavailable") {
         // The command never ran, so the operation ends without one; the refusal is raised after
         // this block so it reaches the caller instead of the recovery path below.
-        this.complete(
+        terminalResult = await this.completeDurably(
           userId,
           operation,
           terminalWithoutCommand("cancelled"),
-          "session_unavailable",
+          operation.requestId ? "session_unavailable_not_started" : "session_unavailable",
         );
         terminalEmitted = true;
         sessionUnavailable = true;
         await this.emit("terminal", this.dependencies.repository.getOwned(userId, operation.id)!);
+      } else if (result.state === "outcome_unknown") {
+        if (result.startedAt !== undefined) this.recordStart(operation, result);
+        this.dependencies.repository.markReconcilePending(
+          userId,
+          operation.id,
+          "launch_outcome_unknown",
+          this.now(),
+        );
+      } else if (result.state === "not_started") {
+        terminalResult = await this.completeDurably(
+          userId,
+          operation,
+          terminalWithoutCommand("cancelled"),
+          "admission_expired_not_started",
+        );
       } else if (result.state === "running") {
+        this.recordStart(operation, result);
         this.dependencies.repository.markRunning(userId, operation.id, this.now());
         // A background command is expected to outlive this call, so waiting for it to settle would
         // only delay the running answer the caller asked for.
-        terminalResult = request.background
-          ? null
-          : await settleAfterDispatch(this.dependencies.delay, () =>
-              this.reconcile(userId, operation.id),
-            );
+        terminalResult =
+          request.background || operation.requestId
+            ? null
+            : await settleAfterDispatch(this.dependencies.delay, () =>
+                this.reconcile(userId, operation.id),
+              );
         // Whichever path stored the outcome has already emitted its terminal event.
         terminalEmitted = terminalResult !== null;
       } else {
-        terminalResult = this.complete(userId, operation, result);
+        terminalResult = await this.completeDurably(userId, operation, result);
       }
     } catch (error) {
       if (claimedInput) this.dependencies.transfers?.release(claimedInput);
@@ -608,13 +1022,15 @@ export class CodespaceOperationService {
         );
         await this.emit("reconcile", this.dependencies.repository.getOwned(userId, operation.id)!);
       } else {
-        this.dependencies.repository.cancelBeforeDispatch(
+        const cancelled = this.dependencies.repository.cancelBeforeDispatch(
           userId,
           operation.id,
           this.now(),
           preDispatchOutcome,
+          operation.requestId ? (operation.claimId ?? undefined) : undefined,
         );
-        await this.emit("terminal", this.dependencies.repository.getOwned(userId, operation.id)!);
+        if (cancelled)
+          await this.emit("terminal", this.dependencies.repository.getOwned(userId, operation.id)!);
       }
       if (error instanceof CodespaceResourceError)
         throw new CodespaceResourceError(
@@ -670,6 +1086,16 @@ export class CodespaceOperationService {
   }
 
   async cancel(userId: string, operationId: string): Promise<CodespaceOperationResponse> {
+    const context = this.dependencies.repository.requireAuthority(
+      userId,
+      operationId,
+      this.dependencies.policy(),
+    );
+    if (context.operation.kind !== "exec")
+      throw new CodespaceResourceError(
+        "CODESPACE_NOT_FOUND",
+        "Codespace command operation was not found",
+      );
     const operation = this.dependencies.repository.requestCancel(userId, operationId, this.now());
     if (!operation) {
       throw new CodespaceResourceError("CODESPACE_NOT_FOUND", "Codespace operation was not found");
@@ -685,7 +1111,11 @@ export class CodespaceOperationService {
   }
 
   /** Wait for one already accepted command; never reserve or dispatch it again. */
-  async waitForResult(userId: string, operationId: string): Promise<CodespaceOperationResponse> {
+  async waitForResult(
+    userId: string,
+    operationId: string,
+    waitMs = 5_000,
+  ): Promise<CodespaceOperationResponse> {
     const context = this.dependencies.repository.requireResultContext(
       userId,
       operationId,
@@ -694,37 +1124,75 @@ export class CodespaceOperationService {
     );
     if (context.operation.kind !== "exec")
       throw new CodespaceResourceError("CODESPACE_NOT_FOUND", "Codespace command was not found");
-    return waitForAcceptedCodespaceResult({
-      deadlineAt: context.operation.deadlineAt,
-      now: () => this.now(),
-      delay: this.dependencies.delay,
-      inspect: async () => {
-        const result = await this.reconcile(
-          userId,
-          operationId,
-          this.now() >= context.operation.deadlineAt,
-        );
-        const { operation } = this.dependencies.repository.requireResultContext(
-          userId,
-          operationId,
-          this.dependencies.policy(),
-          this.now(),
-        );
-        if (result) return { operation, result };
-        if (isTerminalOperationState(operation.state))
-          throw new CodespaceResourceError(
-            "CODESPACE_RESULT_EXPIRED",
-            "The command's terminal output is unavailable",
-          );
-        if (operation.state === "reconcile_pending" || operation.state === "reserved")
-          throw new CodespaceResourceError(
-            "CODESPACE_PROVIDER_UNAVAILABLE",
-            "The accepted command outcome is not confirmed",
-            "Check this same operation again using operation_id. Its outcome is unknown; independent commands remain available.",
-          );
-        return null;
-      },
+    if (!Number.isSafeInteger(waitMs) || waitMs < 0 || waitMs > 5_000)
+      throw new CodespaceResourceError(
+        "CODESPACE_RESOURCE_INVALID",
+        "Collection wait must be between0 and5000 milliseconds",
+      );
+    let closed = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const snapshot = (): CodespaceOperationResponse => ({
+      operation: this.dependencies.repository.requireAuthority(
+        userId,
+        operationId,
+        this.dependencies.policy(),
+      ).operation,
+      result: null,
     });
+    const observer = (async (): Promise<CodespaceOperationResponse> => {
+      do {
+        void this.runScheduledReconcile();
+        const latest = this.dependencies.repository.getOwned(userId, operationId)!;
+        const result = latest.requestId
+          ? (await this.lookupRequest(userId, latest.resourceId, latest.requestId)).result
+          : await this.reconcile(userId, operationId, false);
+        const current = snapshot();
+        if (result) return { ...current, result };
+        if (closed || waitMs === 0) return current;
+        await (this.dependencies.delay?.(150) ??
+          new Promise<void>((done) => setTimeout(done, 150)));
+        await new Promise<void>((done) => setImmediate(done));
+      } while (!closed);
+      return snapshot();
+    })();
+    try {
+      const observed = await Promise.race([
+        observer,
+        new Promise<CodespaceOperationResponse>((done, reject) => {
+          timer = setTimeout(() => {
+            try {
+              done(snapshot());
+            } catch (error) {
+              reject(error);
+            }
+          }, waitMs);
+        }),
+      ]);
+      // The observation deadline bounds waiting for guest progress, not collection of a receipt
+      // already committed with terminal metadata. Do not publish terminal state without its prefix.
+      if (!observed.result && observed.operation.resultReference) {
+        if (observed.operation.requestId)
+          return this.lookupRequest(
+            userId,
+            observed.operation.resourceId,
+            observed.operation.requestId,
+          );
+        const result = await this.readStoredResult(userId, observed.operation);
+        return { operation: snapshot().operation, result };
+      }
+      if (
+        !observed.result &&
+        !observed.operation.requestId &&
+        isTerminalOperationState(observed.operation.state) &&
+        observed.operation.remoteCleanupPending === 1
+      )
+        return await observer;
+      return observed;
+    } finally {
+      closed = true;
+      if (timer) clearTimeout(timer);
+      void observer.catch(() => undefined);
+    }
   }
 
   async reconcile(
@@ -742,6 +1210,7 @@ export class CodespaceOperationService {
     if (operation.kind !== "exec") {
       throw new CodespaceResourceError("CODESPACE_NOT_FOUND", "Codespace operation was not found");
     }
+    if (operation.resultReference) return this.readStoredResult(userId, operation);
     await requireCodespaceTransportAvailable(this.dependencies.transport);
     this.dependencies.repository.requireResultContext(
       userId,
@@ -774,7 +1243,12 @@ export class CodespaceOperationService {
           this.dependencies.policy(),
           this.now(),
         );
-        if (retained.state === "running") return null;
+        if (
+          retained.state === "running" ||
+          retained.state === "not_started" ||
+          retained.state === "outcome_unknown"
+        )
+          return null;
         if (retained.state === "absent" || retained.state === "interrupted") {
           // Nothing of this operation survives in the codespace, either because it was cleaned up
           // or because the codespace restarted; its stored result is already the whole truth.
@@ -792,8 +1266,32 @@ export class CodespaceOperationService {
         this.dependencies.policy(),
         this.now(),
       );
-      if (result.state === "running") return null;
+      if (result.state === "running") {
+        this.recordStart(operation, result);
+        this.dependencies.repository.markRunning(userId, operation.id, this.now());
+        return null;
+      }
+      if (result.state === "outcome_unknown") {
+        if (result.startedAt !== undefined) this.recordStart(operation, result);
+        this.dependencies.repository.markReconcilePending(
+          userId,
+          operation.id,
+          "launch_outcome_unknown",
+          this.now(),
+        );
+        return null;
+      }
+      if (result.state === "not_started")
+        return this.completeObserved(
+          userId,
+          operation,
+          terminalWithoutCommand("cancelled"),
+          cancel || operation.state === "cancel_pending"
+            ? "cancelled_before_start_not_started"
+            : "admission_expired_not_started",
+        );
       if (result.state === "interrupted") {
+        if (result.startedAt !== undefined) this.recordStart(operation, result);
         // The codespace restarted under the command: its files survived, its process did not.
         return await this.completeObserved(
           userId,
@@ -803,11 +1301,13 @@ export class CodespaceOperationService {
         );
       }
       if (result.state === "absent") {
-        return await this.completeObserved(
+        this.dependencies.repository.markReconcilePending(
           userId,
-          operation,
-          terminalWithoutCommand(cancel ? "cancelled" : "failed"),
+          operation.id,
+          "launch_outcome_unknown",
+          this.now(),
         );
+        return null;
       }
       return await this.completeObserved(userId, operation, result);
     } catch (error) {
@@ -822,7 +1322,7 @@ export class CodespaceOperationService {
     }
   }
 
-  async reconcileOnce(userId?: string): Promise<boolean> {
+  async reconcileOnce(userId?: string, queuedOnly = false): Promise<boolean> {
     const policy = this.dependencies.policy();
     const claimId = randomUUID();
     const operation = this.dependencies.repository.claimDue(
@@ -831,21 +1331,90 @@ export class CodespaceOperationService {
       this.now() + policy.claimLeaseMs,
       userId,
       this.dependencies.providerId,
+      queuedOnly,
+      [...this.recoveringOperationIds],
     );
     if (!operation) return false;
+    // A slow contact can outlive its durable crash-recovery lease. This live owner
+    // must not spend additional recovery slots on the same pending operation.
+    this.recoveringOperationIds.add(operation.id);
+    try {
+      return await this.reconcileClaimedOperation(operation, claimId, policy);
+    } finally {
+      this.recoveringOperationIds.delete(operation.id);
+    }
+  }
+
+  private async reconcileClaimedOperation(
+    operation: CodespaceOperationRecord,
+    claimId: string,
+    policy: CodespaceResourcePolicy,
+  ): Promise<boolean> {
+    // Reserved state proves dispatch admission never occurred. Its expiry must
+    // settle independently of the retained input or private preparation lifetime.
+    if (operation.state === "reserved" && operation.deadlineAt <= this.now()) {
+      if (
+        this.dependencies.repository.cancelBeforeDispatch(
+          operation.userId,
+          operation.id,
+          this.now(),
+          "reservation_expired_before_dispatch",
+          claimId,
+        )
+      )
+        await this.emit(
+          "terminal",
+          this.dependencies.repository.getOwned(operation.userId, operation.id)!,
+        );
+      return true;
+    }
+    if (
+      operation.inputReference &&
+      (operation.kind !== "exec" || operation.sessionKey === "moira-file-client") &&
+      this.dependencies.reconcileFile
+    ) {
+      try {
+        if (await this.dependencies.reconcileFile(operation)) return true;
+      } catch {
+        this.dependencies.repository.retainClaim(
+          operation.id,
+          claimId,
+          "file_inspection_required",
+          this.now(),
+        );
+        return true;
+      }
+    }
     const context = this.dependencies.repository.getContext(operation.userId, operation.id);
     if (!context) return true;
     if (operation.state === "reserved") {
-      this.dependencies.repository.cancelBeforeDispatch(
-        operation.userId,
-        operation.id,
-        this.now(),
-        "reservation_expired_before_dispatch",
-      );
-      await this.emit(
-        "terminal",
-        this.dependencies.repository.getOwned(operation.userId, operation.id)!,
-      );
+      if (operation.inputReference && operation.deadlineAt > this.now()) {
+        try {
+          await this.dispatchAccepted(operation);
+        } catch {
+          this.dependencies.repository.cancelBeforeDispatch(
+            operation.userId,
+            operation.id,
+            this.now(),
+            "accepted_input_unavailable_not_started",
+            claimId,
+          );
+        }
+        return true;
+      }
+      if (
+        this.dependencies.repository.cancelBeforeDispatch(
+          operation.userId,
+          operation.id,
+          this.now(),
+          "reservation_expired_before_dispatch",
+          claimId,
+        )
+      )
+        await this.emit(
+          "terminal",
+          this.dependencies.repository.getOwned(operation.userId, operation.id)!,
+        );
       return true;
     }
     const cleanupOnly = ["succeeded", "failed", "cancelled", "timed_out"].includes(operation.state);
@@ -872,7 +1441,10 @@ export class CodespaceOperationService {
           context.codespace,
           operation,
         );
-        if ("state" in fileResult && fileResult.state === "running") {
+        if (
+          "state" in fileResult &&
+          (fileResult.state === "running" || fileResult.state === "outcome_unknown")
+        ) {
           this.dependencies.repository.releaseClaim(
             operation.id,
             claimId,
@@ -880,22 +1452,12 @@ export class CodespaceOperationService {
             this.now(),
           );
         } else if ("state" in fileResult && fileResult.state === "absent") {
-          // Exact-marker inspection proved the remote holds no such operation: terminal,
-          // capacity released, the same way an absent exec result is finalized.
-          const completed = this.dependencies.repository.completeMetadata(
-            operation.userId,
+          this.dependencies.repository.releaseClaim(
             operation.id,
-            0,
-            this.now() + policy.cleanupDeadlineMs,
+            claimId,
+            "file_outcome_unknown",
             this.now(),
-            "failed",
           );
-          if (completed) {
-            await this.emit(
-              "terminal",
-              this.dependencies.repository.getOwned(operation.userId, operation.id)!,
-            );
-          }
         } else {
           const completed = this.dependencies.repository.completeMetadata(
             operation.userId,
@@ -914,26 +1476,48 @@ export class CodespaceOperationService {
         }
         return true;
       }
-      const shouldCancel =
-        operation.state === "cancel_pending" || this.now() >= operation.deadlineAt;
+      const shouldCancel = operation.state === "cancel_pending";
       const result = shouldCancel
         ? await this.dependencies.transport.cancel(credential, context.codespace, operation)
         : await this.dependencies.transport.inspect(credential, context.codespace, operation);
       if (result.state === "running") {
+        this.recordStart(operation, result);
+        this.dependencies.repository.markRunning(operation.userId, operation.id, this.now());
         this.dependencies.repository.releaseClaim(
           operation.id,
           claimId,
           shouldCancel ? "remote_cancel_pending" : "remote_running",
           this.now(),
         );
-      } else if (result.state === "interrupted" || result.state === "absent") {
-        const terminal = this.complete(
+      } else if (result.state === "outcome_unknown") {
+        if (result.startedAt !== undefined) this.recordStart(operation, result);
+        this.dependencies.repository.releaseClaim(
+          operation.id,
+          claimId,
+          "launch_outcome_unknown",
+          this.now(),
+        );
+      } else if (result.state === "not_started") {
+        await this.completeDurably(
           operation.userId,
           operation,
-          terminalWithoutCommand(
-            result.state === "interrupted" ? "failed" : shouldCancel ? "cancelled" : "failed",
-          ),
-          result.state === "interrupted" ? "codespace_restarted" : undefined,
+          terminalWithoutCommand("cancelled"),
+          shouldCancel ? "cancelled_before_start_not_started" : "admission_expired_not_started",
+        );
+      } else if (result.state === "absent") {
+        this.dependencies.repository.releaseClaim(
+          operation.id,
+          claimId,
+          "launch_outcome_unknown",
+          this.now(),
+        );
+      } else if (result.state === "interrupted") {
+        if (result.startedAt !== undefined) this.recordStart(operation, result);
+        const terminal = await this.completeDurably(
+          operation.userId,
+          operation,
+          terminalWithoutCommand("failed"),
+          "codespace_restarted",
         );
         if (terminal) {
           await this.emit(
@@ -942,7 +1526,7 @@ export class CodespaceOperationService {
           );
         }
       } else {
-        const terminal = this.complete(operation.userId, operation, result);
+        const terminal = await this.completeDurably(operation.userId, operation, result);
         if (terminal) {
           await this.emit(
             "terminal",
@@ -971,13 +1555,31 @@ export class CodespaceOperationService {
     this.timer.unref();
   }
 
-  private async runScheduledReconcile(): Promise<void> {
-    if (this.scheduledReconcileRunning) return;
-    this.scheduledReconcileRunning = true;
-    try {
-      await this.reconcileOnce();
-    } finally {
-      this.scheduledReconcileRunning = false;
+  notifyAccepted(): void {
+    void this.runScheduledReconcile(true);
+  }
+
+  private async runScheduledReconcile(queuedOnly = false): Promise<void> {
+    if (this.recovery.size >= 4) {
+      this.recoveryWakePending = true;
+      return;
+    }
+    this.recoveryWakePending = false;
+    while (this.recovery.size < 4) {
+      let handled = false;
+      const task = this.reconcileOnce(undefined, queuedOnly)
+        .then(
+          (value) => {
+            handled = value;
+          },
+          () => undefined,
+        )
+        .finally(() => {
+          this.recovery.delete(task);
+          if (this.recoveryWakePending) void this.runScheduledReconcile();
+          else if (handled) void this.runScheduledReconcile(true);
+        });
+      this.recovery.add(task);
     }
   }
 
@@ -998,7 +1600,7 @@ export class CodespaceOperationService {
     result: CodespaceOperationResult,
     lastOutcome?: string,
   ): Promise<CodespaceOperationResult | null> {
-    const terminal = this.complete(userId, operation, result, lastOutcome);
+    const terminal = await this.completeDurably(userId, operation, result, lastOutcome);
     if (terminal) {
       await this.emit("terminal", this.dependencies.repository.getOwned(userId, operation.id)!);
       return terminal;
@@ -1007,11 +1609,108 @@ export class CodespaceOperationService {
     return current ? this.projectRetainedResult(current, result) : null;
   }
 
+  private recordStart(
+    operation: CodespaceOperationRecord,
+    receipt: { startedAt?: number; runtimeMs?: number; requestDigest?: string },
+  ): void {
+    if (!operation.requestDigest) return;
+    if (
+      receipt.requestDigest !== operation.requestDigest ||
+      !Number.isSafeInteger(receipt.startedAt) ||
+      receipt.startedAt! <= 0 ||
+      receipt.startedAt! > operation.admissionDeadlineAt!
+    )
+      throw new CodespaceResourceError(
+        "CODESPACE_RESOURCE_INVALID",
+        "Guest start receipt does not match accepted admission",
+      );
+    const runtimeMs = receipt.runtimeMs ?? operation.runtimeMs!;
+    if (
+      !Number.isSafeInteger(runtimeMs) ||
+      runtimeMs <= 0 ||
+      runtimeMs > operation.runtimeMs! ||
+      !this.dependencies.repository.recordStarted(
+        operation.userId,
+        operation.id,
+        receipt.startedAt!,
+        runtimeMs,
+        operation.requestDigest,
+        this.now(),
+      )
+    )
+      throw new CodespaceResourceError(
+        "CODESPACE_RESOURCE_INVALID",
+        "Guest runtime receipt changed accepted execution",
+      );
+  }
+
+  private async completeDurably(
+    userId: string,
+    operation: CodespaceOperationRecord,
+    result: CodespaceOperationResult,
+    lastOutcome?: string,
+  ): Promise<CodespaceOperationResult | null> {
+    if (operation.requestId && !lastOutcome) this.recordStart(operation, result);
+    result = {
+      ...result,
+      stdout: truncateCodespaceUtf8(result.stdout, operation.stdoutLimitBytes),
+      stderr: truncateCodespaceUtf8(result.stderr, operation.stderrLimitBytes),
+    };
+    // JSON escaping and replacement characters can expand decoded text beyond the guest frame.
+    // Keep the actual retained byte counts; a shorter prefix remains readable by the same marker.
+    const maximum = 8 * 1024 * 1024 - 64 * 1024;
+    while (Buffer.byteLength(JSON.stringify(result)) > maximum) {
+      const scale = Math.min(0.9, maximum / Buffer.byteLength(JSON.stringify(result)));
+      result = {
+        ...result,
+        stdout: truncateCodespaceUtf8(
+          result.stdout,
+          Math.floor(Buffer.byteLength(result.stdout) * scale),
+        ),
+        stderr: truncateCodespaceUtf8(
+          result.stderr,
+          Math.floor(Buffer.byteLength(result.stderr) * scale),
+        ),
+      };
+    }
+    const transfers = this.dependencies.transfers;
+    if (transfers?.retainRelayPayload) {
+      const reference = await transfers.retainRelayPayload(
+        userId,
+        "operation_result",
+        Buffer.from(JSON.stringify(result)),
+        this.now() + this.resultRetentionMs(operation),
+      );
+      const completed = this.complete(
+        userId,
+        operation,
+        result,
+        lastOutcome,
+        JSON.stringify(reference),
+      );
+      if (!completed) {
+        await transfers.discardRelayPayload?.(userId, "operation_result", reference);
+        const current = this.dependencies.repository.getOwned(userId, operation.id)!;
+        const previous =
+          current.resultReference &&
+          localRelayPayloadReferenceSchema.parse(JSON.parse(current.resultReference));
+        if (!previous || previous.sha256 !== reference.sha256)
+          throw new CodespaceResourceError(
+            "CODESPACE_RESOURCE_INVALID",
+            "Accepted terminal result is immutable",
+          );
+      }
+      return completed;
+    } else if (operation.requestId) throw new Error("Durable terminal storage is unavailable");
+    return this.complete(userId, operation, result, lastOutcome);
+  }
+
   private complete(
     userId: string,
     operation: CodespaceOperationRecord,
     result: CodespaceOperationResult,
     lastOutcome?: string,
+    resultReference?: string,
   ): CodespaceOperationResult | null {
     const now = this.now();
     return this.dependencies.repository.complete(
@@ -1023,6 +1722,7 @@ export class CodespaceOperationService {
       now + this.resultRetentionMs(operation),
       now,
       lastOutcome,
+      resultReference,
     );
   }
 
@@ -1033,7 +1733,10 @@ export class CodespaceOperationService {
    */
   private resultRetentionMs(operation: CodespaceOperationRecord): number {
     const cleanupDeadlineMs = this.dependencies.policy().cleanupDeadlineMs;
-    return Math.max(cleanupDeadlineMs, operation.deadlineAt - operation.createdAt);
+    return Math.max(
+      cleanupDeadlineMs,
+      operation.runtimeMs ?? operation.deadlineAt - operation.createdAt,
+    );
   }
 
   private projectRetainedResult(

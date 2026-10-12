@@ -12,6 +12,18 @@ All test suites are managed by **testfold** — a unified test runner configured
 4. The configured `afterSuite` hook verifies apparent framework success before reporting
 5. Built-in reporters generate console output, JSON summary, failure reports, timing stats
 
+The unit suite's `beforeSuite` hook builds the fixed guest worker and file CLI through
+`scripts/build-guest-assets.js`, including filtered runs. Integration global setup runs
+`npm run local:build` for the companion bundles and native helpers before preparing its
+database. A failed build stops preparation before test execution.
+
+The guest asset builder compiles each program in memory, writes an exclusively created
+sibling temporary file, closes it and atomically renames it to the final path. Held file
+descriptors retain their complete original generation. Compilation or rename failure
+preserves existing output and removes only the builder's own temporary file. Publication
+is per asset, not a whole-bundle transaction. Temporary files request mode `0644`, subject
+to the process umask.
+
 `scripts/test-runner-result-guard.mjs` requires a zero process exit from the executor-owned log
 header and at least one executed passing test. Playwright also requires a valid empty global
 `errors` array. Missing or malformed evidence, a nonzero exit, global setup/teardown errors,

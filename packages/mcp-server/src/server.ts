@@ -74,6 +74,7 @@ import { mcpLimiter } from "./middleware/rate-limit-middleware.js";
 
 import { buildReconciliationAwareInstructions } from "./reconciliation-aware-server.js";
 import { registerTools } from "./tools/register-tools.js";
+import { communicationSchema } from "./tools/tool-schemas.js";
 import { codespaceToolLogContext } from "./tools/manage-codespaces.js";
 import { codespaceProcessLogContext } from "./tools/codespace-process.js";
 import {
@@ -399,16 +400,7 @@ async function handleAuthenticatedMcpRequest(
   const toolName = mcpMethod === "tools/call" && mcpParams?.name ? mcpParams.name : undefined;
   const toolArgs = toolName ? mcpParams.arguments || {} : undefined;
   if (toolName === "communication" && toolArgs && typeof toolArgs === "object") {
-    const allowed = new Set([
-      "action",
-      "message",
-      "format",
-      "silent",
-      "kind",
-      "filename",
-      "mimeType",
-      "sizeBytes",
-    ]);
+    const allowed = new Set(Object.keys(communicationSchema.shape));
     if (Object.keys(toolArgs).some((key) => !allowed.has(key))) {
       res.status(400).json({
         jsonrpc: "2.0",
@@ -500,6 +492,7 @@ app.post(
     grantService: attachmentGrantService,
     inflight: attachmentInflight,
     communicationService: getActiveUserCommunicationService(),
+    transfers: codespaceTransferService,
     createRepository: () => new DatabaseRepository(),
     audit: logAuditEvent,
     logger,

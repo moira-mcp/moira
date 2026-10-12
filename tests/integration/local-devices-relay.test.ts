@@ -18,6 +18,7 @@ import {
   CodespaceOperationRepository,
   CodespaceOperationService,
   CodespaceFileService,
+  CodespaceResourceError,
   CodespaceTransferRepository,
   CodespaceTransferService,
   canonicalJson,
@@ -194,6 +195,118 @@ afterEach(() => {
 });
 
 describe("Durable local device enrollment and relay", () => {
+  test("an accepted append result settles after160 seconds without restoring expired work authority", async () => {
+    const { device, credential } = enroll();
+    const resourceId = bind(device);
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "moira-late-append-receipt-"));
+    const transfers = new CodespaceTransferService({
+      repository: new CodespaceTransferRepository(sqlite),
+      root,
+      policy: () => serverPolicy,
+      now: () => now,
+    });
+    const request = {
+      ...queue(device, resourceId),
+      requestId: randomUUID(),
+      deadlineAt: now + 150_000,
+    };
+    service.enqueue(request);
+    const auth = service.authenticateDevice(credential);
+    const claim = service.claim(auth, 2).find((entry) => entry.requestId === request.requestId)!;
+    const effect = path.join(root, "actual-append.txt");
+    fs.appendFileSync(effect, "one actual effect\n");
+    const receipt = Buffer.from(
+      JSON.stringify({
+        ok: true,
+        result: { state: "succeeded", stdout: fs.readFileSync(effect, "utf8"), exitCode: 0 },
+      }),
+    );
+    const app = express();
+    app.use(
+      "/api/local-devices",
+      createLocalDeviceBinaryRoutes(service, transfers, "https://moira.example"),
+    );
+    app.use(
+      "/api/local-devices",
+      createLocalDeviceRoutes(service, transfers, "https://moira.example"),
+    );
+    try {
+      now += 160_000;
+      service.listOwned("user-a");
+      expect(service.getResult("user-a", request.requestId)?.status).toBe("expired");
+      expect(() => service.renewClaim(auth, request.requestId, claim.claimId)).toThrow();
+      const uploaded = await httpRequest(app)
+        .post(`/api/local-devices/relay/${request.requestId}/result-part`)
+        .set("Authorization", `Bearer ${credential}`)
+        .set("X-Moira-Claim-Id", claim.claimId)
+        .set("Content-Type", "application/octet-stream")
+        .send(receipt);
+      expect(uploaded.status).toBe(201);
+      const part = uploaded.body.data;
+      const reference = {
+        parts: [part],
+        size: receipt.length,
+        sha256: createHash("sha256").update(receipt).digest("hex"),
+      };
+      const ack = {
+        requestId: request.requestId,
+        claimId: claim.claimId,
+        digest: request.digest,
+        status: "completed",
+        outcomeReference: reference,
+      };
+      const response = await httpRequest(app)
+        .post("/api/local-devices/relay/ack")
+        .set("Authorization", `Bearer ${credential}`)
+        .send(ack);
+      expect(response.status).toBe(200);
+      expect(response.body.data.status).toBe("completed");
+      expect(await transfers.readRelayPayload("user-a", "local_relay_output", reference)).toEqual(
+        receipt,
+      );
+      expect(fs.readFileSync(effect, "utf8")).toBe("one actual effect\n");
+      expect(() => service.authorizePayload(auth, request.requestId, claim.claimId)).toThrow();
+      const terminalRow = sqlite
+        .prepare("SELECT * FROM codespaceLocalRelay WHERE requestId=?")
+        .get(request.requestId);
+      expect(service.renewClaim(auth, request.requestId, claim.claimId)).toMatchObject({
+        claimId: claim.claimId,
+        claimExpiresAt: claim.claimExpiresAt,
+        deadlineAt: claim.deadlineAt,
+      });
+      expect(
+        sqlite
+          .prepare("SELECT * FROM codespaceLocalRelay WHERE requestId=?")
+          .get(request.requestId),
+      ).toEqual(terminalRow);
+      const duplicate = await httpRequest(app)
+        .post("/api/local-devices/relay/ack")
+        .set("Authorization", `Bearer ${credential}`)
+        .send(ack);
+      expect(duplicate.status).toBe(200);
+      const changed = await httpRequest(app)
+        .post("/api/local-devices/relay/ack")
+        .set("Authorization", `Bearer ${credential}`)
+        .send({ ...ack, status: "refused" });
+      expect(changed.status).toBe(409);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test("an expired never-claimed request has no result-only settlement authority", () => {
+    const { device, credential } = enroll();
+    const request = queue(device, bind(device));
+    now = request.deadlineAt + 1;
+    service.listOwned("user-a");
+    expect(() =>
+      service.authorizeResult(
+        service.authenticateDevice(credential),
+        request.requestId,
+        randomUUID(),
+      ),
+    ).toThrow();
+  });
   test.each(["create", "snapshot"] as const)(
     "reserves clock headroom for a fresh full-window %s without changing retained identity",
     async (action) => {
@@ -1296,9 +1409,13 @@ describe("Durable local device enrollment and relay", () => {
       }
     },
   );
-  test.each(["exec", "upload"] as const)(
-    "a failed native %s retention keeps original private bytes available for recovery",
-    async (mode) => {
+  test.each([
+    ["exec", "generic"],
+    ["upload", "generic"],
+    ["upload", "typed-unknown"],
+  ] as const)(
+    "a failed native %s %s retention keeps original private bytes available for recovery",
+    async (mode, failure) => {
       const { device } = enroll(),
         resourceId = bind(device),
         repository = new CodespaceOperationRepository(sqlite);
@@ -1330,15 +1447,33 @@ describe("Durable local device enrollment and relay", () => {
           })(),
         }),
       };
-      const refuse = async () => {
+      let acceptedOperationId = "";
+      const refuse = async (
+        _credential: string,
+        _space: CodespaceResourceRecord,
+        operation: CodespaceOperationRecord,
+      ) => {
+        acceptedOperationId = operation.id;
+        if (failure === "typed-unknown")
+          throw new CodespaceResourceError(
+            "CODESPACE_PROVIDER_UNAVAILABLE",
+            "Private relay capacity unavailable",
+          );
         throw new Error("Private relay capacity unavailable");
       };
+      const effect = path.join(directory, "guest-execute-effect");
       const transport: CodespaceOperationTransport & CodespaceFileTransport = {
         health: async () => ({ ok: true, reason: null }),
         retainExecuteInput: refuse,
         retainFileInput: refuse,
-        execute: async () => ({ state: "running" }),
-        executeFile: async () => ({ state: "running" }),
+        execute: async () => {
+          fs.appendFileSync(effect, "exec\n");
+          return { state: "running" };
+        },
+        executeFile: async () => {
+          fs.appendFileSync(effect, "upload\n");
+          return { state: "running" };
+        },
         inspect: async () => ({ state: "absent" }),
         cancel: async () => ({ state: "absent" }),
         finalize: async () => undefined,
@@ -1355,26 +1490,45 @@ describe("Durable local device enrollment and relay", () => {
           transfers,
           nativeFetcher,
         };
-        const result =
+        const pending =
           mode === "exec"
-            ? await new CodespaceOperationService(common).executeNativeReference(
+            ? new CodespaceOperationService(common).executeNativeReference(
                 "user-a",
                 resourceId,
                 { argv: ["cat"] },
                 reference,
               )
-            : await new CodespaceFileService(common).uploadReference("user-a", resourceId, {
+            : new CodespaceFileService(common).uploadReference("user-a", resourceId, {
                 path: "file.bin",
                 reference,
                 expected: { exists: false },
               });
-        expect(result.operation.state).toBe("reconcile_pending");
-        expect(result.result).toBeNull();
+        if (failure === "typed-unknown") {
+          const error = await pending.then(
+            () => null,
+            (error: unknown) => error,
+          );
+          expect(error).toBeInstanceOf(CodespaceResourceError);
+          expect(error).toMatchObject({
+            code: "CODESPACE_PROVIDER_UNAVAILABLE",
+            confirmedRefusal: false,
+            operationId: acceptedOperationId,
+          });
+        } else {
+          const result = await pending;
+          expect(result.operation.id).toBe(acceptedOperationId);
+          expect(result.operation.state).toBe("reconcile_pending");
+          expect(result.result).toBeNull();
+        }
+        expect(repository.listOwned("user-a", resourceId)).toEqual([
+          expect.objectContaining({ id: acceptedOperationId, state: "reconcile_pending" }),
+        ]);
+        expect(fs.existsSync(effect)).toBe(false);
         const original = sqlite
           .prepare("SELECT objectKey,state FROM codespaceTransfer WHERE purpose='codespace_input'")
-          .get() as { objectKey: string; state: string };
-        expect(original.state).toBe("ready");
-        expect(fs.readFileSync(path.join(directory, original.objectKey))).toEqual(bytes);
+          .get() as { objectKey: string; state: string } | undefined;
+        expect(original).toEqual(expect.objectContaining({ state: "ready" }));
+        expect(fs.readFileSync(path.join(directory, original!.objectKey))).toEqual(bytes);
       } finally {
         fs.rmSync(directory, { recursive: true, force: true });
       }

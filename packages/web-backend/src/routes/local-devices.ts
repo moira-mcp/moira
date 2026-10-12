@@ -3,6 +3,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { z } from "zod";
 import {
   LocalDeviceError,
+  LOCAL_RESULT_SETTLEMENT_RETENTION_MS,
   localPublicPolicySchema,
   localAcknowledgementSchema,
   localControlReportSchema,
@@ -335,10 +336,15 @@ export function createLocalDeviceBinaryRoutes(
       const auth = deviceAuth(service, req),
         requestId = param(req, "requestId"),
         claimId = claimHeader(req);
-      service.authorizeResult(auth, requestId, claimId);
+      const claim = service.authorizeResult(auth, requestId, claimId);
       if (!Buffer.isBuffer(req.body))
         throw new LocalDeviceError("LOCAL_INVALID", "Binary result part required.");
-      const part = await transfers.retainRelayPart(auth.userId, "local_relay_output", req.body);
+      const part = await transfers.retainRelayPart(
+        auth.userId,
+        "local_relay_output",
+        req.body,
+        claim.deadlineAt + LOCAL_RESULT_SETTLEMENT_RETENTION_MS,
+      );
       try {
         service.registerOutputPart(deviceAuth(service, req), requestId, claimId, part);
       } catch (error) {

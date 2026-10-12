@@ -19,7 +19,12 @@ const ACTIVE_OPERATION_STATES = [
   "reconcile_pending",
 ] as const;
 
-function truncateUtf8(value: string, maximumBytes: number): string {
+const RESERVED_OPERATION_DUE_SQL = `(state = 'reserved' AND (deadlineAt <= ? OR (inputReference IS NOT NULL
+  AND NOT EXISTS (SELECT 1 FROM codespaceOperation earlier
+    WHERE earlier.resourceId=operation.resourceId AND earlier.sessionKey=operation.sessionKey
+      AND earlier.rowid<operation.rowid AND earlier.state IN ('reserved','running','cancel_pending','reconcile_pending')))))`;
+
+export function truncateCodespaceUtf8(value: string, maximumBytes: number): string {
   const bytes = Buffer.from(value, "utf8");
   if (bytes.length <= maximumBytes) return value;
   for (let length = maximumBytes; length >= 0; length--) {
@@ -48,8 +53,36 @@ export class CodespaceOperationRepository {
     policy: CodespaceResourcePolicy;
     now: number;
     kind?: CodespaceOperationKind;
+    requestId?: string;
+    requestDigest?: string;
+    runtimeMs?: number;
+    sessionKey?: string;
+    prepared?: {
+      operationId: string;
+      inputReference: string;
+      provider: string;
+      resourceGeneration: number;
+      authorizationGeneration: number;
+      providerResourceName: string | null;
+    };
   }): ReserveOperationResult {
     const transaction = this.sqlite.transaction(() => {
+      if (input.requestId) {
+        const previous = this.getByRequest(input.userId, input.requestId);
+        if (previous) {
+          if (
+            previous.resourceId !== input.resourceId ||
+            previous.requestDigest !== (input.requestDigest ?? null) ||
+            previous.kind !== (input.kind ?? "exec")
+          )
+            throw new CodespaceResourceError(
+              "CODESPACE_RESOURCE_INVALID",
+              "Submission identity belongs to a different request",
+            );
+          const context = this.requireAuthority(input.userId, previous.id, input.policy);
+          return { outcome: "reserved", ...context } as ReserveOperationResult;
+        }
+      }
       if (!input.policy.enabled) return { outcome: "disabled" } as ReserveOperationResult;
       const authorized = this.sqlite
         .prepare(
@@ -57,14 +90,13 @@ export class CodespaceOperationRepository {
            JOIN codespaceConnection c ON c.id = r.connectionId
            JOIN codespaceConnectionRepository grantRow
              ON grantRow.connectionId = c.id AND grantRow.externalRepositoryId = r.repositoryId
-           WHERE r.id = ? AND r.userId = ? AND r.state = 'usable'
-             AND r.desiredState = 'running'
+           WHERE r.id = ? AND r.userId = ? AND (r.state = 'usable' AND r.desiredState = 'running' OR (? = 1 AND r.state = 'stopped'))
              AND r.providerResourceName IS NOT NULL
              AND c.userId = r.userId AND c.provider = r.provider AND c.status = 'connected'
              AND c.externalAccountId = r.externalOwnerId
              AND c.credentialGeneration = r.authorizationGeneration`,
         )
-        .get(input.resourceId, input.userId) as { id: string } | undefined;
+        .get(input.resourceId, input.userId, input.requestId ? 1 : 0) as { id: string } | undefined;
       if (!authorized) {
         const owned = this.sqlite
           .prepare("SELECT 1 FROM codespaceResource WHERE id = ? AND userId = ?")
@@ -76,6 +108,17 @@ export class CodespaceOperationRepository {
         authorized.id,
       );
       if (!codespace) throw new Error("Authorized codespace disappeared");
+      if (
+        input.prepared &&
+        (input.prepared.provider !== codespace.provider ||
+          input.prepared.resourceGeneration !== codespace.generation ||
+          input.prepared.authorizationGeneration !== codespace.authorizationGeneration ||
+          input.prepared.providerResourceName !== codespace.providerResourceName)
+      )
+        throw new CodespaceResourceError(
+          "CODESPACE_GENERATION_CONFLICT",
+          "Prepared operation authority changed",
+        );
       const disabled = this.sqlite
         .prepare(
           `SELECT 1 FROM codespaceProviderControl
@@ -105,7 +148,7 @@ export class CodespaceOperationRepository {
       }
       // A journal entry is not an execution lock. The guest owns atomic file commits;
       // lost responses and retained results must never block independent work.
-      const id = randomUUID();
+      const id = input.prepared?.operationId ?? randomUUID();
       const remoteMarker = `moira-op-${randomBytes(16).toString("hex")}`;
       this.sqlite
         .prepare(
@@ -113,8 +156,8 @@ export class CodespaceOperationRepository {
            (id, userId, resourceId, resourceGeneration, authorizationGeneration, provider,
             providerResourceName, remoteMarker, kind, state, inputBytes,
             stdoutLimitBytes, stderrLimitBytes, deadlineAt,
-            createdAt, updatedAt)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'reserved', ?, ?, ?, ?, ?, ?)`,
+            createdAt, updatedAt, requestId, requestDigest, admissionDeadlineAt, runtimeMs, sessionKey, inputReference)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'reserved', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
         .run(
           id,
@@ -132,6 +175,12 @@ export class CodespaceOperationRepository {
           input.deadlineAt,
           input.now,
           input.now,
+          input.requestId ?? null,
+          input.requestDigest ?? null,
+          input.requestId ? input.deadlineAt : null,
+          input.runtimeMs ?? null,
+          input.sessionKey ?? null,
+          input.prepared?.inputReference ?? null,
         );
       // Work reaching the codespace is activity: it holds idle auto-stop off. Completion needs no
       // separate write, because the idle check also reads the operation's own last change.
@@ -154,19 +203,113 @@ export class CodespaceOperationRepository {
     return row ?? null;
   }
 
+  getByRequest(userId: string, requestId: string): CodespaceOperationRecord | null {
+    return (
+      (this.sqlite
+        .prepare("SELECT * FROM codespaceOperation WHERE userId=? AND requestId=?")
+        .get(userId, requestId) as CodespaceOperationRecord | undefined) ?? null
+    );
+  }
+
+  getFileClientAnchor(
+    userId: string,
+    resourceId: string,
+    now: number,
+  ): CodespaceOperationRecord | null {
+    return (
+      (this.sqlite
+        .prepare(
+          "SELECT * FROM codespaceOperation WHERE userId=? AND resourceId=? AND kind='exec' AND state='succeeded' AND lastOutcome='file_client_provisioned' AND resultReference IS NOT NULL AND resultExpiresAt>? ORDER BY updatedAt DESC,id DESC LIMIT 1",
+        )
+        .get(userId, resourceId, now) as CodespaceOperationRecord | undefined) ?? null
+    );
+  }
+
+  attachInput(userId: string, operationId: string, reference: string, now: number): boolean {
+    return (
+      this.sqlite
+        .prepare(
+          "UPDATE codespaceOperation SET inputReference=?,updatedAt=? WHERE id=? AND userId=? AND state='reserved' AND inputReference IS NULL AND deadlineAt>?",
+        )
+        .run(reference, now, operationId, userId, now).changes === 1
+    );
+  }
+
+  replaceAcceptedInput(
+    userId: string,
+    operationId: string,
+    previous: string,
+    reference: string,
+    claimId: string,
+    now: number,
+  ): boolean {
+    return (
+      this.sqlite
+        .prepare(
+          `UPDATE codespaceOperation SET inputReference=?,updatedAt=? WHERE id=? AND userId=?
+           AND (state='reserved' OR (state='reconcile_pending' AND sessionKey='moira-private-file-transfer'))
+           AND inputReference=? AND claimId=? AND deadlineAt>?`,
+        )
+        .run(reference, now, operationId, userId, previous, claimId, now).changes === 1
+    );
+  }
+
+  recordStarted(
+    userId: string,
+    operationId: string,
+    startedAt: number,
+    runtimeMs: number,
+    digest: string,
+    now: number,
+  ): boolean {
+    return (
+      this.sqlite
+        .prepare(
+          `UPDATE codespaceOperation SET startedAt=?,runtimeMs=?,deadlineAt=?+?,updatedAt=?
+      WHERE id=? AND userId=? AND requestDigest=? AND runtimeMs>=? AND (startedAt IS NULL OR (startedAt=? AND runtimeMs=?))
+        AND (state IN ('reserved','running','cancel_pending','reconcile_pending') OR (startedAt=? AND runtimeMs=?))`,
+        )
+        .run(
+          startedAt,
+          runtimeMs,
+          startedAt,
+          runtimeMs,
+          now,
+          operationId,
+          userId,
+          digest,
+          runtimeMs,
+          startedAt,
+          runtimeMs,
+          startedAt,
+          runtimeMs,
+        ).changes === 1
+    );
+  }
+
   recordInputBytes(
     userId: string,
     operationId: string,
     inputBytes: number,
     now: number,
+    expectedClaimId?: string,
   ): CodespaceOperationRecord | null {
     if (!Number.isSafeInteger(inputBytes) || inputBytes < 0) return null;
     const changed = this.sqlite
       .prepare(
         `UPDATE codespaceOperation SET inputBytes = ?, updatedAt = ?
-       WHERE id = ? AND userId = ? AND state = 'reserved' AND inputBytes >= ?`,
+       WHERE id = ? AND userId = ? AND state = 'reserved' AND inputBytes >= ?
+         AND (? IS NULL OR claimId = ?)`,
       )
-      .run(inputBytes, now, operationId, userId, inputBytes).changes;
+      .run(
+        inputBytes,
+        now,
+        operationId,
+        userId,
+        inputBytes,
+        expectedClaimId ?? null,
+        expectedClaimId ?? null,
+      ).changes;
     return changed === 1 ? this.getOwned(userId, operationId) : null;
   }
 
@@ -201,9 +344,9 @@ export class CodespaceOperationRepository {
   dueSummary(now: number): { count: number; oldestUpdatedAt: number | null } {
     const row = this.sqlite
       .prepare(
-        `SELECT COUNT(*) count, MIN(updatedAt) oldest FROM codespaceOperation
+        `SELECT COUNT(*) count, MIN(updatedAt) oldest FROM codespaceOperation operation
          WHERE state IN ('running', 'cancel_pending', 'reconcile_pending')
-           OR (state = 'reserved' AND deadlineAt <= ?)
+           OR ${RESERVED_OPERATION_DUE_SQL}
            OR (remoteCleanupPending = 1
              AND state IN ('succeeded', 'failed', 'cancelled', 'timed_out')
              AND resultExpiresAt IS NOT NULL AND resultExpiresAt <= ?)`,
@@ -314,7 +457,7 @@ export class CodespaceOperationRepository {
     const { operation } = context;
     if (
       ["succeeded", "failed", "cancelled", "timed_out"].includes(operation.state) &&
-      (operation.remoteCleanupPending !== 1 ||
+      ((!operation.resultReference && operation.remoteCleanupPending !== 1) ||
         operation.resultExpiresAt === null ||
         operation.resultExpiresAt <= now)
     ) {
@@ -333,7 +476,8 @@ export class CodespaceOperationRepository {
           `UPDATE codespaceOperation SET state = 'running', lastOutcome = 'remote_started',
            claimId = NULL, claimExpiresAt = NULL, updatedAt = ?
            WHERE id = ? AND userId = ?
-             AND state = 'reconcile_pending' AND lastOutcome = 'dispatch_submitted'`,
+             AND state = 'reconcile_pending'
+             AND (lastOutcome = 'dispatch_submitted' OR (requestId IS NOT NULL AND startedAt IS NOT NULL))`,
         )
         .run(now, operationId, userId).changes === 1
     );
@@ -393,15 +537,17 @@ export class CodespaceOperationRepository {
     claimExpiresAt: number,
     now: number,
     deadlineAt?: number,
+    expectedClaimId?: string,
   ): boolean {
     return (
       this.sqlite
         .prepare(
           `UPDATE codespaceOperation SET state = 'reconcile_pending',
            lastOutcome = 'dispatch_submitted', claimId = ?, claimExpiresAt = ?, updatedAt = ?,
-           deadlineAt = MAX(deadlineAt, ?)
+           deadlineAt = CASE WHEN requestId IS NULL THEN MAX(deadlineAt, ?) ELSE deadlineAt END
            WHERE id = ? AND userId = ? AND state = 'reserved'
              AND deadlineAt > ?
+             AND (? IS NULL OR claimId = ?)
              AND EXISTS (SELECT 1 FROM codespaceResource resource
                JOIN codespaceConnection connection ON connection.id = resource.connectionId
                JOIN codespaceConnectionRepository grantRow
@@ -421,7 +567,17 @@ export class CodespaceOperationRepository {
                WHERE control.disabled = 1
                  AND control.scope IN ('global', 'provider:' || codespaceOperation.provider))`,
         )
-        .run(claimId, claimExpiresAt, now, deadlineAt ?? 0, operationId, userId, now).changes === 1
+        .run(
+          claimId,
+          claimExpiresAt,
+          now,
+          deadlineAt ?? 0,
+          operationId,
+          userId,
+          now,
+          expectedClaimId ?? null,
+          expectedClaimId ?? null,
+        ).changes === 1
     );
   }
 
@@ -430,6 +586,7 @@ export class CodespaceOperationRepository {
     operationId: string,
     now: number,
     outcome = "dispatch_fenced",
+    expectedClaimId?: string,
   ): boolean {
     return (
       this.sqlite
@@ -437,9 +594,11 @@ export class CodespaceOperationRepository {
           `UPDATE codespaceOperation SET state = 'cancelled', remoteCleanupPending = 0,
            resultExpiresAt = NULL, claimId = NULL, claimExpiresAt = NULL,
            lastOutcome = ?, updatedAt = ?
-           WHERE id = ? AND userId = ? AND state = 'reserved'`,
+           WHERE id = ? AND userId = ? AND state = 'reserved'
+             AND (? IS NULL OR claimId = ?)`,
         )
-        .run(outcome, now, operationId, userId).changes === 1
+        .run(outcome, now, operationId, userId, expectedClaimId ?? null, expectedClaimId ?? null)
+        .changes === 1
     );
   }
 
@@ -452,13 +611,14 @@ export class CodespaceOperationRepository {
     resultExpiresAt: number,
     now: number,
     lastOutcome = "remote_terminal",
+    resultReference?: string,
   ): CodespaceOperationResult | null {
-    const stdout = truncateUtf8(result.stdout, maxStdoutBytes);
-    const stderr = truncateUtf8(result.stderr, maxStderrBytes);
+    const stdout = truncateCodespaceUtf8(result.stdout, maxStdoutBytes);
+    const stderr = truncateCodespaceUtf8(result.stderr, maxStderrBytes);
     const changed = this.sqlite
       .prepare(
         `UPDATE codespaceOperation SET state = ?, outputBytes = ?, exitCode = ?,
-           resultExpiresAt = ?, lastOutcome = ?,
+           resultExpiresAt = ?, lastOutcome = ?, resultReference = COALESCE(?,resultReference),
            claimId = NULL, claimExpiresAt = NULL, updatedAt = ?
            WHERE id = ? AND userId = ? AND kind = 'exec'
              AND state IN ('reserved', 'running', 'cancel_pending', 'reconcile_pending')`,
@@ -470,6 +630,7 @@ export class CodespaceOperationRepository {
         result.exitCode,
         resultExpiresAt,
         lastOutcome,
+        resultReference ?? null,
         now,
         operationId,
         userId,
@@ -497,6 +658,8 @@ export class CodespaceOperationRepository {
     resultExpiresAt: number,
     now: number,
     state: "succeeded" | "failed" = "succeeded",
+    resultReference?: string,
+    lastOutcome = "remote_terminal",
   ): boolean {
     // Store the observed outcome of this exact operation independently of lifecycle state.
     // Caller-visible bytes are still checked against current authority before and after I/O.
@@ -504,7 +667,7 @@ export class CodespaceOperationRepository {
       this.sqlite
         .prepare(
           `UPDATE codespaceOperation SET state = ?, outputBytes = ?, exitCode = NULL,
-           resultExpiresAt = ?, lastOutcome = 'remote_terminal', claimId = NULL,
+           resultExpiresAt = ?, lastOutcome = ?, resultReference = COALESCE(?,resultReference), claimId = NULL,
            claimExpiresAt = NULL, updatedAt = ?
            WHERE id = ? AND userId = ?
              AND kind <> 'exec'
@@ -524,7 +687,16 @@ export class CodespaceOperationRepository {
                  AND connection.externalAccountId = resource.externalOwnerId
                  AND connection.credentialGeneration = codespaceOperation.authorizationGeneration)`,
         )
-        .run(state, outputBytes, resultExpiresAt, now, operationId, userId).changes === 1
+        .run(
+          state,
+          outputBytes,
+          resultExpiresAt,
+          lastOutcome,
+          resultReference ?? null,
+          now,
+          operationId,
+          userId,
+        ).changes === 1
     );
   }
 
@@ -570,6 +742,8 @@ export class CodespaceOperationRepository {
     leaseExpiresAt: number,
     userId?: string,
     providerId?: string,
+    queuedOnly = false,
+    excludeIds: readonly string[] = [],
   ): CodespaceOperationRecord | null {
     // Every category shares the oldest-attempt order. Claiming/releasing stamps the
     // attempt, so an unavailable terminal cleanup cannot starve active work or expiry.
@@ -579,7 +753,7 @@ export class CodespaceOperationRepository {
           `SELECT id, userId FROM codespaceOperation operation
            WHERE (
              state IN ('running', 'cancel_pending', 'reconcile_pending')
-             OR (state = 'reserved' AND deadlineAt <= ?)
+             OR ${RESERVED_OPERATION_DUE_SQL}
              OR (remoteCleanupPending = 1
                AND state IN ('succeeded', 'failed', 'cancelled', 'timed_out')
                AND resultExpiresAt IS NOT NULL AND resultExpiresAt <= ?
@@ -596,7 +770,9 @@ export class CodespaceOperationRepository {
                    AND connection.credentialGeneration = operation.authorizationGeneration)))
              AND (? IS NULL OR operation.userId = ?)
              AND (? IS NULL OR operation.provider = ?)
+             AND (? = 0 OR (state = 'reserved' AND inputReference IS NOT NULL AND deadlineAt > ?))
              AND (claimExpiresAt IS NULL OR claimExpiresAt <= ?)
+             ${excludeIds.length ? `AND operation.id NOT IN (${excludeIds.map(() => "?").join(",")})` : ""}
            ORDER BY updatedAt, id LIMIT 1`,
         )
         .get(
@@ -606,7 +782,10 @@ export class CodespaceOperationRepository {
           userId ?? null,
           providerId ?? null,
           providerId ?? null,
+          queuedOnly ? 1 : 0,
           now,
+          now,
+          ...excludeIds,
         ) as { id: string; userId: string } | undefined;
       if (!row) return null;
       const changed = this.sqlite
@@ -626,6 +805,18 @@ export class CodespaceOperationRepository {
         .prepare(
           `UPDATE codespaceOperation SET claimId = NULL, claimExpiresAt = NULL,
            lastOutcome = ?, updatedAt = ? WHERE id = ? AND claimId = ?`,
+        )
+        .run(outcome, now, operationId, claimId).changes === 1
+    );
+  }
+
+  /** Keep the existing claim lease as retry backoff after an ambiguous file attempt. */
+  retainClaim(operationId: string, claimId: string, outcome: string, now: number): boolean {
+    return (
+      this.sqlite
+        .prepare(
+          `UPDATE codespaceOperation SET lastOutcome = ?, updatedAt = ?
+      WHERE id = ? AND claimId = ?`,
         )
         .run(outcome, now, operationId, claimId).changes === 1
     );

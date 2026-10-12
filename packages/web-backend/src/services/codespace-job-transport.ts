@@ -1,8 +1,12 @@
+import { createHash } from "node:crypto";
+import { CODESPACE_FILE_FAILURE_REASONS, isCodespaceFileClientCommand } from "@mcp-moira/shared";
 import type {
   CodespaceExecRequest,
   CodespaceFileRequest,
   CodespaceFileResult,
   CodespaceFileTransport,
+  CodespaceFileRuntimeProbe,
+  CodespaceFileTransferDescription,
   CodespaceOperationOutputRequest,
   CodespaceOperationOutputResult,
   CodespaceOperationRecord,
@@ -51,12 +55,12 @@ function nonnegativeInteger(value: unknown, maximum = Number.MAX_SAFE_INTEGER): 
   return Number.isSafeInteger(value) && Number(value) >= 0 && Number(value) <= maximum;
 }
 
-function decodeFileVersion(value: unknown) {
+function decodeFileVersion(value: unknown, maximum = MAX_FILE_BYTES) {
   if (!value || typeof value !== "object") return null;
   const version = value as Record<string, unknown>;
   if (
     !hasExactKeys(version, ["size", "sha256", "modifiedAt"]) ||
-    !nonnegativeInteger(version.size, MAX_FILE_BYTES) ||
+    !nonnegativeInteger(version.size, maximum) ||
     typeof version.sha256 !== "string" ||
     !/^[a-f0-9]{64}$/.test(version.sha256) ||
     !nonnegativeInteger(version.modifiedAt)
@@ -76,6 +80,94 @@ export abstract class CodespaceJobTransport
 {
   constructor(protected readonly jobTimeoutMs = 30_000) {}
 
+  async probeFile(
+    credential: string,
+    codespace: CodespaceResourceRecord,
+    operation: CodespaceOperationRecord,
+  ): Promise<CodespaceFileRuntimeProbe> {
+    const value = await this.fileControlJob(credential, codespace, operation, { action: "probe" });
+    if (
+      !hasExactKeys(value, [
+        "action",
+        "abi",
+        "environmentIdentity",
+        "workerSha256",
+        "cliSha256",
+        "command",
+        "executableSha256",
+      ]) ||
+      value.action !== "probe" ||
+      !nonnegativeInteger(value.abi) ||
+      value.abi !== 1 ||
+      typeof value.environmentIdentity !== "string" ||
+      !/^[a-f0-9]{64}$/.test(value.environmentIdentity) ||
+      !isCodespaceFileClientCommand(value.command) ||
+      [value.workerSha256, value.cliSha256, value.executableSha256].some(
+        (digest) =>
+          digest !== null && (typeof digest !== "string" || !/^[a-f0-9]{64}$/.test(digest)),
+      )
+    )
+      throw new Error("Codespace file runtime probe is invalid");
+    return value as unknown as CodespaceFileRuntimeProbe;
+  }
+
+  async describeTransfer(
+    credential: string,
+    codespace: CodespaceResourceRecord,
+    operation: CodespaceOperationRecord,
+    input: { path: string; maxBytes: number },
+  ): Promise<CodespaceFileTransferDescription> {
+    const value = await this.fileControlJob(credential, codespace, operation, {
+      action: "describe_transfer",
+      ...input,
+    });
+    if (
+      !hasExactKeys(value, ["action", "path", "size", "sha256", "environmentIdentity"]) ||
+      value.action !== "describe_transfer" ||
+      value.path !== input.path ||
+      !validResultPath(value.path) ||
+      !nonnegativeInteger(value.size, input.maxBytes) ||
+      typeof value.sha256 !== "string" ||
+      !/^[a-f0-9]{64}$/.test(value.sha256) ||
+      typeof value.environmentIdentity !== "string" ||
+      !/^[a-f0-9]{64}$/.test(value.environmentIdentity)
+    )
+      throw new Error("Codespace transfer description is invalid");
+    return value as unknown as CodespaceFileTransferDescription;
+  }
+
+  private async fileControlJob(
+    credential: string,
+    codespace: CodespaceResourceRecord,
+    operation: CodespaceOperationRecord,
+    request: Record<string, unknown>,
+  ): Promise<Record<string, unknown>> {
+    if (!codespace.providerResourceName || codespace.id !== operation.resourceId)
+      throw new Error("Invalid codespace file control identity");
+    const reply = await this.sendJob(
+      credential,
+      codespace,
+      operation,
+      {
+        action: "file-inspect",
+        version: 1,
+        remoteMarker: operation.remoteMarker,
+        repositoryFullName: codespace.repositoryFullName,
+        request,
+      },
+      this.jobTimeoutMs + 120_000,
+    );
+    if (
+      !hasExactKeys(reply, ["state", "value"]) ||
+      reply.state !== "succeeded" ||
+      !reply.value ||
+      typeof reply.value !== "object" ||
+      Array.isArray(reply.value)
+    )
+      throw new Error("Codespace file control outcome is unconfirmed");
+    return reply.value as Record<string, unknown>;
+  }
+
   abstract health(): Promise<{ ok: boolean; reason: string | null }>;
 
   protected abstract sendJob(
@@ -93,7 +185,9 @@ export abstract class CodespaceJobTransport
     request: CodespaceExecRequest,
   ): Promise<
     | CodespaceOperationResult
-    | { state: "running" }
+    | { state: "running"; startedAt?: number; requestDigest?: string }
+    | { state: "not_started"; requestDigest?: string }
+    | { state: "outcome_unknown"; requestDigest?: string }
     | { state: "session_unavailable" }
     | { state: "session_limit"; limit: "context" | "sessions" }
   > {
@@ -118,11 +212,18 @@ export abstract class CodespaceJobTransport
     request: CodespaceExecRequest,
   ): Record<string, unknown> {
     if (request.stdin.kind !== "inline") throw new Error("Operation input is not materialized");
+    const combinedPrefixBudget = Math.floor(((8 * 1024 * 1024 - 64 * 1024) * 3) / 4);
+    const stdout = request.maxStdoutBytes!;
+    const stderr = request.maxStderrBytes!;
+    const ratio = Math.min(1, combinedPrefixBudget / (stdout + stderr));
     return {
       action: "execute",
       version: 1,
       remoteMarker: operation.remoteMarker,
       repositoryFullName: codespace.repositoryFullName,
+      ...(request.requestDigest
+        ? { requestDigest: request.requestDigest, admissionDeadlineAt: request.admissionDeadlineAt }
+        : {}),
       ...(request.argv !== undefined ? { argv: request.argv } : {}),
       ...(request.cwd !== undefined ? { cwd: request.cwd } : {}),
       ...(request.session !== undefined ? { session: request.session } : {}),
@@ -132,8 +233,8 @@ export abstract class CodespaceJobTransport
       ...(request.env !== undefined ? { env: request.env } : {}),
       stdin: Buffer.from(request.stdin.bytes).toString("base64"),
       timeoutMs: request.timeoutMs,
-      maxStdoutBytes: request.maxStdoutBytes,
-      maxStderrBytes: request.maxStderrBytes,
+      maxStdoutBytes: Math.max(1, Math.floor(stdout * ratio)),
+      maxStderrBytes: Math.max(1, Math.floor(stderr * ratio)),
       maxRetainedBytes: request.maxRetainedBytes,
     };
   }
@@ -143,7 +244,12 @@ export abstract class CodespaceJobTransport
     codespace: CodespaceResourceRecord,
     operation: CodespaceOperationRecord,
   ): Promise<
-    CodespaceOperationResult | { state: "running" } | { state: "absent" } | { state: "interrupted" }
+    | CodespaceOperationResult
+    | { state: "running"; startedAt?: number; requestDigest?: string }
+    | { state: "not_started"; requestDigest?: string }
+    | { state: "outcome_unknown"; requestDigest?: string }
+    | { state: "absent" }
+    | { state: "interrupted" }
   > {
     // Only a dispatch can be refused for its session; an inspection of an existing operation
     // cannot, so that answer is not part of this contract.
@@ -151,6 +257,7 @@ export abstract class CodespaceJobTransport
       action: "inspect",
       version: 1,
       remoteMarker: operation.remoteMarker,
+      ...(operation.requestDigest ? { requestDigest: operation.requestDigest } : {}),
     });
     if (result.state === "session_unavailable" || result.state === "session_limit") {
       throw new Error("Codespace operation transport returned an invalid result");
@@ -163,12 +270,23 @@ export abstract class CodespaceJobTransport
     codespace: CodespaceResourceRecord,
     operation: CodespaceOperationRecord,
   ): Promise<
-    CodespaceOperationResult | { state: "running" } | { state: "absent" } | { state: "interrupted" }
+    | CodespaceOperationResult
+    | { state: "running"; startedAt?: number; requestDigest?: string }
+    | { state: "not_started"; requestDigest?: string }
+    | { state: "outcome_unknown"; requestDigest?: string }
+    | { state: "absent" }
+    | { state: "interrupted" }
   > {
     const result = await this.operationJob(credential, codespace, operation, {
       action: "cancel",
       version: 1,
       remoteMarker: operation.remoteMarker,
+      ...(operation.requestDigest
+        ? {
+            requestDigest: operation.requestDigest,
+            admissionDeadlineAt: operation.admissionDeadlineAt,
+          }
+        : {}),
     });
     if (result.state === "session_unavailable" || result.state === "session_limit") {
       throw new Error("Codespace operation transport returned an invalid result");
@@ -185,6 +303,7 @@ export abstract class CodespaceJobTransport
       action: "finalize",
       version: 1,
       remoteMarker: operation.remoteMarker,
+      ...(operation.requestDigest ? { requestDigest: operation.requestDigest } : {}),
     });
     if (result.state !== "absent") throw new Error("Remote operation cleanup is incomplete");
   }
@@ -231,7 +350,7 @@ export abstract class CodespaceJobTransport
     codespace: CodespaceResourceRecord,
     operation: CodespaceOperationRecord,
     request: CodespaceFileRequest,
-  ): Promise<CodespaceFileResult | { state: "running" }> {
+  ): Promise<CodespaceFileResult | { state: "running" } | { state: "outcome_unknown" }> {
     const result = await this.fileJob(
       credential,
       codespace,
@@ -256,6 +375,12 @@ export abstract class CodespaceJobTransport
       remoteMarker: operation.remoteMarker,
       repositoryFullName: codespace.repositoryFullName,
       request: this.encodeFileRequest(request),
+      ...(operation.requestDigest
+        ? {
+            requestDigest: operation.requestDigest,
+            admissionDeadlineAt: operation.admissionDeadlineAt,
+          }
+        : {}),
     };
   }
 
@@ -263,11 +388,31 @@ export abstract class CodespaceJobTransport
     credential: string,
     codespace: CodespaceResourceRecord,
     operation: CodespaceOperationRecord,
-  ): Promise<CodespaceFileResult | { state: "running" } | { state: "absent" }> {
+  ): Promise<
+    CodespaceFileResult | { state: "running" } | { state: "outcome_unknown" } | { state: "absent" }
+  > {
     return this.fileJob(credential, codespace, operation, {
       action: "file-inspect",
       version: 1,
       remoteMarker: operation.remoteMarker,
+      ...(operation.requestDigest
+        ? {
+            requestDigest: operation.requestDigest,
+            admissionDeadlineAt: operation.admissionDeadlineAt,
+          }
+        : {}),
+    });
+  }
+
+  resumeFile(
+    credential: string,
+    codespace: CodespaceResourceRecord,
+    operation: CodespaceOperationRecord,
+    request: CodespaceFileRequest,
+  ) {
+    return this.fileJob(credential, codespace, operation, {
+      ...this.fileExecuteJob(codespace, operation, request),
+      action: "file-inspect",
     });
   }
 
@@ -276,7 +421,9 @@ export abstract class CodespaceJobTransport
     codespace: CodespaceResourceRecord,
     operation: CodespaceOperationRecord,
     job: Record<string, unknown>,
-  ): Promise<CodespaceFileResult | { state: "running" } | { state: "absent" }> {
+  ): Promise<
+    CodespaceFileResult | { state: "running" } | { state: "outcome_unknown" } | { state: "absent" }
+  > {
     if (!codespace.providerResourceName || codespace.id !== operation.resourceId) {
       throw new Error("Invalid codespace file operation identity");
     }
@@ -287,14 +434,36 @@ export abstract class CodespaceJobTransport
       job,
       this.jobTimeoutMs + 120_000,
     );
-    if (value.state === "running" || value.state === "absent") {
-      if (!hasExactKeys(value, ["state"])) {
+    if (
+      value.state === "running" ||
+      value.state === "outcome_unknown" ||
+      value.state === "absent"
+    ) {
+      if (
+        !hasExactKeys(value, [
+          "state",
+          ...(value.requestDigest !== undefined ? ["requestDigest"] : []),
+        ]) ||
+        (value.requestDigest !== undefined && value.requestDigest !== operation.requestDigest)
+      ) {
         throw new Error("Codespace file transport returned an invalid pending result");
       }
-      return { state: value.state };
+      return value.state === "outcome_unknown"
+        ? { state: "outcome_unknown" }
+        : value.state === "running"
+          ? { state: "running" }
+          : { state: "absent" };
     }
     if (
-      !hasExactKeys(value, ["state", "value"]) ||
+      !hasExactKeys(value, [
+        "state",
+        "value",
+        ...(value.requestDigest !== undefined ? ["requestDigest"] : []),
+        ...(value.notStarted !== undefined ? ["notStarted"] : []),
+      ]) ||
+      (operation.requestDigest != null && value.requestDigest !== operation.requestDigest) ||
+      (value.notStarted !== undefined &&
+        (value.notStarted !== true || value.state !== "failed" || !operation.requestDigest)) ||
       !["succeeded", "failed"].includes(String(value.state)) ||
       !value.value ||
       typeof value.value !== "object"
@@ -304,6 +473,7 @@ export abstract class CodespaceJobTransport
     const result = this.decodeFileResult(
       value.value as Record<string, unknown>,
       operation.stdoutLimitBytes,
+      operation.inputBytes,
     );
     if (
       result.action !== operation.kind ||
@@ -311,10 +481,24 @@ export abstract class CodespaceJobTransport
     ) {
       throw new Error("Codespace file transport returned an inconsistent result");
     }
-    return result;
+    return value.notStarted === true && "state" in result
+      ? { ...result, notStarted: true }
+      : result;
   }
 
   private encodeFileRequest(request: CodespaceFileRequest): Record<string, unknown> {
+    if ((request.action === "upload" || request.action === "download") && request.transfer) {
+      if (request.action === "upload" && request.bytes.byteLength !== 0)
+        throw new Error("Transfer control cannot contain file bytes");
+      return request.action === "upload"
+        ? {
+            action: request.action,
+            path: request.path,
+            expected: request.expected,
+            transfer: request.transfer,
+          }
+        : { ...request };
+    }
     if (request.action === "write" || request.action === "upload") {
       return {
         ...request,
@@ -342,10 +526,45 @@ export abstract class CodespaceJobTransport
   private decodeFileResult(
     value: Record<string, unknown>,
     outputLimitBytes: number,
+    inputLimitBytes = MAX_FILE_BYTES,
   ): CodespaceFileResult {
     const encoded = JSON.stringify(value);
     if (Buffer.byteLength(encoded, "utf8") > Math.ceil(MAX_FILE_BYTES / 3) * 4 + 64 * 1024) {
       throw new Error("Codespace file transport returned an invalid result");
+    }
+    if (
+      (value.action === "upload" || value.action === "download") &&
+      value.transferId !== undefined
+    ) {
+      const upload = value.action === "upload";
+      const keys = [
+        "action",
+        "transferId",
+        "path",
+        "size",
+        "sha256",
+        ...(upload ? ["previous", "current"] : ["referenceId"]),
+      ];
+      const current = upload ? decodeFileVersion(value.current, Number.MAX_SAFE_INTEGER) : null;
+      const previous = upload ? decodeFileVersion(value.previous, Number.MAX_SAFE_INTEGER) : null;
+      if (
+        !hasExactKeys(value, keys) ||
+        typeof value.transferId !== "string" ||
+        !/^[0-9a-f-]{36}$/i.test(value.transferId) ||
+        !validResultPath(value.path) ||
+        !nonnegativeInteger(value.size, upload ? inputLimitBytes : outputLimitBytes) ||
+        typeof value.sha256 !== "string" ||
+        !/^[a-f0-9]{64}$/.test(value.sha256) ||
+        (upload
+          ? !current ||
+            current.size !== value.size ||
+            current.sha256 !== value.sha256 ||
+            (value.previous !== null && !previous)
+          : typeof value.referenceId !== "string" ||
+            !/^codespace-file:\/\/[A-Za-z0-9_-]{43}$/.test(value.referenceId))
+      )
+        throw new Error("Codespace transfer receipt is invalid");
+      return value as unknown as CodespaceFileResult;
     }
     if (
       (value.action === "read" || value.action === "download") &&
@@ -356,34 +575,64 @@ export abstract class CodespaceJobTransport
         throw new Error("Codespace file transport returned invalid bytes");
       }
       if (
-        !hasExactKeys(value, ["action", "path", "offset", "totalSize", "bytesBase64", "sha256"]) ||
+        !hasExactKeys(value, [
+          "action",
+          "path",
+          "offset",
+          "totalSize",
+          "bytesBase64",
+          "sha256",
+          ...(value.action === "read" && value.rangeSha256 !== undefined ? ["rangeSha256"] : []),
+        ]) ||
         bytes.length > Math.min(MAX_FILE_BYTES, outputLimitBytes) ||
         !validResultPath(value.path) ||
         !nonnegativeInteger(value.offset) ||
-        !nonnegativeInteger(value.totalSize, MAX_FILE_BYTES) ||
+        !nonnegativeInteger(
+          value.totalSize,
+          value.action === "download" ? MAX_FILE_BYTES : Number.MAX_SAFE_INTEGER,
+        ) ||
         value.offset > value.totalSize ||
         bytes.length > value.totalSize - value.offset ||
         (value.action === "download" && (value.offset !== 0 || bytes.length !== value.totalSize)) ||
-        typeof value.sha256 !== "string" ||
-        !/^[a-f0-9]{64}$/.test(value.sha256)
+        (value.sha256 !== null &&
+          (typeof value.sha256 !== "string" || !/^[a-f0-9]{64}$/.test(value.sha256))) ||
+        (value.totalSize <= MAX_FILE_BYTES && value.sha256 === null) ||
+        (value.action === "download" && value.sha256 === null) ||
+        (value.action === "read" &&
+          value.rangeSha256 === undefined &&
+          (value.sha256 === null || value.totalSize > MAX_FILE_BYTES))
       ) {
         throw new Error("Codespace file transport returned invalid bytes metadata");
       }
-      return {
-        action: value.action,
+      const metadata = {
         path: value.path,
         offset: value.offset,
         totalSize: value.totalSize,
         bytes,
-        sha256: value.sha256,
       };
+      if (value.action === "download")
+        return { action: "download", ...metadata, sha256: value.sha256 as string };
+      const rangeSha256 = createHash("sha256").update(bytes).digest("hex");
+      if (
+        (value.totalSize > MAX_FILE_BYTES && value.sha256 !== null) ||
+        (value.rangeSha256 !== undefined && value.rangeSha256 !== rangeSha256)
+      )
+        throw new Error("Codespace file transport returned invalid range digest");
+      return { action: "read", ...metadata, sha256: value.sha256 as string | null, rangeSha256 };
     }
     if (!FILE_RESULT_ACTIONS.has(String(value.action))) {
       throw new Error("Codespace file transport returned an invalid action");
     }
     if (value.state === "failed") {
       if (
-        !hasExactKeys(value, ["action", "state", "code"]) ||
+        !hasExactKeys(value, [
+          "action",
+          "state",
+          "code",
+          ...(value.reason !== undefined ? ["reason"] : []),
+        ]) ||
+        (value.reason !== undefined &&
+          !CODESPACE_FILE_FAILURE_REASONS.some((reason) => reason === value.reason)) ||
         ![
           "CODESPACE_FILE_REJECTED",
           "WORKSPACE_FILE_REJECTED",
@@ -410,10 +659,13 @@ export abstract class CodespaceJobTransport
         !hasExactKeys(stat, ["path", "type", "size", "mode", "modifiedAt", "version"]) ||
         !validResultPath(stat.path, true) ||
         !["file", "directory"].includes(String(stat.type)) ||
-        !nonnegativeInteger(stat.size, MAX_FILE_BYTES) ||
+        !nonnegativeInteger(stat.size) ||
         !nonnegativeInteger(stat.mode, 0o777) ||
         !nonnegativeInteger(stat.modifiedAt) ||
-        (stat.type === "file" && (!version || version.size !== stat.size)) ||
+        (stat.type === "file" &&
+          (stat.size <= MAX_FILE_BYTES
+            ? !version || version.size !== stat.size
+            : stat.version !== null)) ||
         (stat.type === "directory" && (stat.size !== 0 || stat.version !== null))
       ) {
         throw new Error("Codespace file transport returned invalid stat metadata");
@@ -591,13 +843,50 @@ export abstract class CodespaceJobTransport
     job: Record<string, unknown>,
   ): Promise<
     | CodespaceOperationResult
-    | { state: "running" }
+    | { state: "running"; startedAt?: number; requestDigest?: string }
+    | { state: "not_started"; requestDigest?: string }
+    | { state: "outcome_unknown"; requestDigest?: string }
     | { state: "absent" }
     | { state: "interrupted" }
     | { state: "session_unavailable" }
     | { state: "session_limit"; limit: "context" | "sessions" }
   > {
     const value = await this.submitOperationJob(credential, codespace, operation, job);
+    // Cleanup confirms absence after deliberately removing execution proof; it is not a result receipt.
+    const receipt =
+      operation.requestDigest && job.action !== "finalize"
+        ? (() => {
+            const startRequired =
+              value.state === "running" ||
+              value.state === "session_ended" ||
+              TERMINAL_OPERATION_STATES.has(String(value.state));
+            if (
+              value.requestDigest !== operation.requestDigest ||
+              (startRequired && value.startedAt === undefined) ||
+              (value.startedAt !== undefined &&
+                (!nonnegativeInteger(value.startedAt) ||
+                  value.startedAt === 0 ||
+                  value.startedAt > operation.admissionDeadlineAt!)) ||
+              (value.state === "not_started" &&
+                (value.startedAt !== undefined || operation.startedAt != null))
+            )
+              throw new Error("Codespace receipt does not match accepted request");
+            if (
+              value.runtimeMs !== undefined &&
+              (!nonnegativeInteger(value.runtimeMs) ||
+                value.runtimeMs === 0 ||
+                Number(value.runtimeMs) > operation.runtimeMs!)
+            )
+              throw new Error("Codespace runtime receipt exceeds accepted duration");
+            return {
+              requestDigest: value.requestDigest as string,
+              ...(value.startedAt !== undefined ? { startedAt: value.startedAt as number } : {}),
+              ...(value.runtimeMs !== undefined ? { runtimeMs: value.runtimeMs as number } : {}),
+            };
+          })()
+        : {};
+    if (value.state === "not_started") return { state: "not_started", ...receipt };
+    if (value.state === "outcome_unknown") return { state: "outcome_unknown", ...receipt };
     if (
       value.state === "running" ||
       value.state === "absent" ||
@@ -606,6 +895,7 @@ export abstract class CodespaceJobTransport
     ) {
       return {
         state: value.state as "running" | "absent" | "interrupted" | "session_unavailable",
+        ...receipt,
       };
     }
     if (value.state === "session_limit") {
@@ -617,6 +907,7 @@ export abstract class CodespaceJobTransport
       // nothing to show.
       return {
         state: "succeeded",
+        ...receipt,
         stdout: "",
         stderr: "",
         exitCode: 0,
@@ -653,6 +944,7 @@ export abstract class CodespaceJobTransport
     }
     return {
       state: value.state as CodespaceOperationResult["state"],
+      ...receipt,
       stdout: stdout.toString("utf8"),
       stderr: stderr.toString("utf8"),
       exitCode: value.exitCode as number | null,

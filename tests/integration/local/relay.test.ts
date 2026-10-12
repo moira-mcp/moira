@@ -2000,7 +2000,11 @@ describe("outbound companion authority and durable response replay", () => {
         desiredState: "running",
         generation: 1,
       });
-      expect(await daemon.cycle()).toBe(true);
+      const reconnected = await daemon.cycle();
+      expect({ active: reconnected, status: daemon.status }).toEqual({
+        active: true,
+        status: { controlPlane: "connected", code: null },
+      });
       expect(local.creates()).toBe(1);
       local.revokeDevice();
       expect(await daemon.cycle()).toBe(false);

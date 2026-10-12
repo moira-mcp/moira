@@ -15,6 +15,7 @@ import {
   errorResult,
   getCodespaceToolServices,
   projectExecResult,
+  projectOperationAcceptance,
   type CodespaceToolServices,
 } from "./manage-codespaces.js";
 import {
@@ -66,6 +67,7 @@ function project(response: CodespaceOperationResponse): CallToolResult {
           : operation.state;
   const data = {
     process_id: operation.id,
+    ...projectOperationAcceptance(operation),
     state,
     ...(response.result
       ? projectExecResult(response.result)
@@ -74,13 +76,14 @@ function project(response: CodespaceOperationResponse): CallToolResult {
         : {}),
     ...(operation.lastOutcome === "codespace_restarted" ? { interrupted_by_restart: true } : {}),
   };
-  return result(data);
+  const projected = result(data);
+  return data.error ? { ...projected, isError: true } : projected;
 }
 
 function requireOwnedProcess(
   services: CodespaceToolServices,
   userId: string,
-  request: ProcessParams["get"],
+  request: { codespace_id: string; process_id: string },
 ): CodespaceOperationRecord {
   const operation = services.operation?.get(userId, request.process_id);
   if (!operation || operation.resourceId !== request.codespace_id || operation.kind !== "exec")
@@ -103,8 +106,13 @@ export async function executeCodespaceProcess(
         services.connection.getStatus(userId).settingsUrl,
       );
     if (call.action === "start") {
-      const input = call.request;
+      const input = call.request as ProcessParams["start"] & {
+        argv?: string[];
+        script?: string;
+        stdin_text?: string;
+      };
       const request = {
+        requestId: input.request_id,
         ...(input.argv !== undefined ? { argv: input.argv } : {}),
         ...(input.script !== undefined ? { script: input.script } : {}),
         ...(input.cwd !== undefined ? { cwd: input.cwd } : {}),
@@ -136,7 +144,12 @@ export async function executeCodespaceProcess(
             });
       return project(response);
     }
-    requireOwnedProcess(services, userId, call.request);
+    if (call.action === "get" && "request_id" in call.request)
+      return project(
+        await operation.lookupRequest!(userId, call.request.codespace_id, call.request.request_id),
+      );
+    const addressed = call.request as { codespace_id: string; process_id: string };
+    requireOwnedProcess(services, userId, addressed);
     if (call.action === "read") {
       const input = call.request;
       const output = await operation.readOutput(userId, input.process_id, {
@@ -154,9 +167,7 @@ export async function executeCodespaceProcess(
     }
     if (call.action === "stop")
       return project(await operation.cancel(userId, call.request.process_id));
-    const completed = await operation.reconcile(userId, call.request.process_id);
-    const current = requireOwnedProcess(services, userId, call.request);
-    return project({ operation: current, result: completed });
+    return project(await operation.waitForResult(userId, addressed.process_id, 0));
   } catch (error) {
     if (error instanceof CodespaceResourceError || error instanceof CodespaceConnectionError) {
       const failure = errorResult(

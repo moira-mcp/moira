@@ -1,15 +1,19 @@
 import type { IDataRepository } from "../interfaces/data-repository.js";
+import type { CodespaceVerifiedByteSource } from "@mcp-moira/shared";
+import { isSafeAttachmentFilename } from "@mcp-moira/shared/validation/attachment-filename";
 
 export type CommunicationFormat = "plain" | "markdown" | "html";
 export type CommunicationPurpose = "notification" | "trusted";
 export type CommunicationAttachmentKind = "image" | "document";
 
-export interface CommunicationAttachment {
+interface CommunicationAttachmentMetadata {
   kind: CommunicationAttachmentKind;
-  bytes: Uint8Array;
   filename: string;
   mimeType: string;
 }
+
+export type CommunicationAttachment = CommunicationAttachmentMetadata &
+  ({ bytes: Uint8Array; source?: never } | { source: CodespaceVerifiedByteSource; bytes?: never });
 
 export interface PortableCommunicationMessage {
   text: string;
@@ -32,6 +36,8 @@ export interface CommunicationChannelCapabilities {
   image: boolean;
   document: boolean;
   trusted: boolean;
+  /** The adapter consumes checked sources without materializing the complete attachment. */
+  streamingAttachments?: boolean;
 }
 
 export interface CommunicationChannelMetadata {
@@ -436,11 +442,18 @@ export class UserCommunicationService {
     if (request.text.length > this.limits.maxTextLength)
       throw new Error("User communication text exceeds the configured limit");
     if (request.attachment) {
-      if (request.attachment.bytes.byteLength === 0)
+      const size = request.attachment.source?.size ?? request.attachment.bytes!.byteLength;
+      if (!Number.isSafeInteger(size) || size <= 0)
         throw new Error("User communication attachment is empty");
-      if (request.attachment.bytes.byteLength > this.limits.maxAttachmentBytes)
+      if (size > this.limits.maxAttachmentBytes)
         throw new Error("User communication attachment exceeds the configured limit");
-      if (!/^[A-Za-z0-9][A-Za-z0-9._ -]{0,254}$/.test(request.attachment.filename))
+      if (
+        request.attachment.source &&
+        (!/^[a-f0-9]{64}$/.test(request.attachment.source.sha256) ||
+          typeof request.attachment.source.open !== "function")
+      )
+        throw new Error("User communication attachment source is invalid");
+      if (!isSafeAttachmentFilename(request.attachment.filename))
         throw new Error("User communication attachment filename is invalid");
       if (
         !/^[a-zA-Z0-9][a-zA-Z0-9!#$&^_.+-]*\/[a-zA-Z0-9][a-zA-Z0-9!#$&^_.+-]*$/.test(
@@ -457,6 +470,7 @@ export class UserCommunicationService {
   ): boolean {
     if (message.purpose === "trusted" && !adapter.capabilities.trusted) return false;
     if (!message.attachment) return adapter.capabilities.text;
+    if (message.attachment.source && !adapter.capabilities.streamingAttachments) return false;
     return message.attachment.kind === "image"
       ? adapter.capabilities.image
       : adapter.capabilities.document;

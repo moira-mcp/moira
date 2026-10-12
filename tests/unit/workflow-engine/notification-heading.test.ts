@@ -177,7 +177,7 @@ describe("current identity at notification delivery", () => {
             delivered.push({
               text: message.text,
               picture: message.attachment
-                ? Buffer.from(message.attachment.bytes).toString()
+                ? Buffer.from(message.attachment.bytes!).toString()
                 : undefined,
             });
           },

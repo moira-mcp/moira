@@ -8,6 +8,8 @@ import { mkdtemp, realpath, rm, readFile, writeFile, mkdir } from "node:fs/promi
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { createHash, randomUUID } from "node:crypto";
+import { spawn, spawnSync } from "node:child_process";
+import { lstatSync, readFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { setTimeout as delay } from "node:timers/promises";
 import {
@@ -17,6 +19,7 @@ import {
   projectCodespaceSummary,
   localCodespaceFailureGuidance,
   LOCAL_REQUEST_MAX_WINDOW_MS,
+  getSqliteInstance,
   type CodespaceResourcePolicy,
   type CodespaceResourceRecord,
   type LocalRelayAcknowledgement,
@@ -42,6 +45,13 @@ import {
   localCodespaceCredential,
 } from "../../packages/web-backend/src/services/local-codespace-provider.js";
 import { LocalCodespaceRelay } from "../../packages/web-backend/src/services/local-codespace-relay.js";
+import {
+  buildFileClientLifeProbe,
+  buildFileClientMaintenance,
+  loadFileClientAssets,
+} from "../../packages/web-backend/src/services/codespace-file-client-assets.js";
+import { hostFileClientLife, hostFileClientMaintenance } from "../helpers/host-file-client.js";
+import { nativeFileTls } from "../helpers/native-file-tls.js";
 
 let root: string, sqlite: Database.Database;
 let fixtureCleanups: (() => Promise<void>)[];
@@ -67,8 +77,14 @@ afterEach(async () => {
 const boundaryBytes = Buffer.from("controlled external-runtime boundary");
 const hash = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex");
 
-async function fixture(partLimit = 4 * 1024 * 1024, maxObjects = 512, nativeSize = 5) {
+async function fixture(
+  partLimit = 4 * 1024 * 1024,
+  maxObjects = 512,
+  nativeSize = 5,
+  nativeGuest?: { origin: string; caPath: string },
+) {
   const clock = { now: Date.now() };
+  const now = () => (nativeGuest ? Date.now() : clock.now);
   const state = await PrivateState.open(join(root, "companion"));
   const local = await localFixture(state);
   local.policy.leaseUntil = Date.now() + 3600_000;
@@ -90,7 +106,7 @@ async function fixture(partLimit = 4 * 1024 * 1024, maxObjects = 512, nativeSize
     cleanupDeadlineMs: 60_000,
     claimLeaseMs: 30_000,
     reconcileIntervalMs: 30_000,
-    maxOperationMs: 10_000,
+    maxOperationMs: nativeGuest ? 60_000 : 10_000,
     maxOperationStdoutBytes: 1024,
     maxOperationStderrBytes: 1024,
     maxRetainedOutputBytes: 1024 * 1024,
@@ -101,27 +117,113 @@ async function fixture(partLimit = 4 * 1024 * 1024, maxObjects = 512, nativeSize
     pattern = [0, 255, 65, 10, 128];
   for (let index = 0; index < nativeBytes.length; index++)
     nativeBytes[index] = pattern[index % pattern.length];
+  const guestHome = join(root, "guest-home");
+  const workerPath = join(root, "guest-runtime", "worker.mjs");
+  const driverPath = join(root, "guest-runtime", "namespace-worker.mjs");
+  const environmentId = "local-native-fixture-life";
+  const largeNativeBytes = Buffer.alloc(5 * 1024 ** 2 + 7, 0xa7);
+  let nativeFetches = 0;
+  if (nativeGuest) {
+    const global = getSqliteInstance();
+    const databases = global.pragma("database_list") as { name: string; file: string }[];
+    if (
+      databases.find((database) => database.name === "main")?.file !==
+      resolve("data/test-integration.db")
+    )
+      throw new Error("Native fixture account database is not the integration database");
+    const existing = global
+      .prepare("SELECT email,approvedAt,emailVerified,blocked FROM user WHERE id='user-a'")
+      .get() as
+      | { email: string; approvedAt: string | null; emailVerified: number; blocked: number }
+      | undefined;
+    if (existing) {
+      if (
+        existing.email !== "user-a@example.test" ||
+        !existing.approvedAt ||
+        !existing.emailVerified ||
+        existing.blocked
+      )
+        throw new Error("Native fixture account conflicts with an existing account");
+    } else {
+      global
+        .prepare(
+          "INSERT INTO user(id,email,handle,createdAt,updatedAt,approvedAt,emailVerified) VALUES('user-a','user-a@example.test','user-a','before','before','approved',1)",
+        )
+        .run();
+      fixtureCleanups.push(async () => {
+        global.prepare("DELETE FROM user WHERE id='user-a'").run();
+      });
+    }
+    await mkdir(join(guestHome, ".local/share/moira-local"), { recursive: true });
+    await mkdir(join(root, "guest-runtime"), { recursive: true });
+    const origin = `http://device:${"a".repeat(64)}@127.0.0.1:3437/git/owner/project.git`;
+    for (const args of [
+      ["init", "--initial-branch=main", guestRoot],
+      ["-C", guestRoot, "remote", "add", "origin", origin],
+    ]) {
+      const result = spawnSync("git", args, { encoding: "utf8" });
+      if (result.status !== 0) throw new Error(result.stderr);
+    }
+    const metadata = lstatSync(guestRoot);
+    await writeFile(
+      join(guestHome, ".local/share/moira-local/repository.json"),
+      JSON.stringify({
+        repositoryFullName: "owner/project",
+        root: guestRoot,
+        origin,
+        dev: metadata.dev,
+        ino: metadata.ino,
+      }),
+    );
+    await writeFile(
+      join(guestHome, ".local/share/moira-local/environment.json"),
+      JSON.stringify({
+        HTTP_PROXY: "",
+        HTTPS_PROXY: "",
+        http_proxy: "",
+        https_proxy: "",
+        NO_PROXY: "127.0.0.1",
+        no_proxy: "127.0.0.1",
+      }),
+    );
+    // Only the external guest filesystem namespace is mapped; the measured worker stays byte-identical.
+    const worker = readFileSync(
+      resolve("packages/web-backend/dist/guest-assets/guest-worker.js"),
+      "utf8",
+    );
+    if (!worker.includes("/tmp/moira-local-runtime/worker.mjs"))
+      throw new Error("Fixed worker namespace is missing");
+    await writeFile(
+      driverPath,
+      worker.replaceAll("/tmp/moira-local-runtime/worker.mjs", workerPath),
+    );
+  }
   const transfer = new CodespaceTransferService({
     repository: new CodespaceTransferRepository(sqlite),
     root: join(root, "private-transfers"),
     policy: () => policy,
-    now: () => clock.now,
+    now,
   });
   const services = createLocalCodespaceServices(transfer, {
     sqlite,
-    now: () => clock.now,
+    now,
     policy: () => policy,
     settingsUrl: "https://moira.example/app/settings",
     resourceAudit: () => undefined,
     operationAudit: () => undefined,
     nativeFetcher: {
-      fetch: async () => ({
-        contentLength: nativeBytes.length,
-        mimeType: "application/octet-stream",
-        body: (async function* () {
-          yield nativeBytes;
-        })(),
-      }),
+      fetch: async (reference) => {
+        nativeFetches++;
+        const bytes = reference.fileId === "file_localLarge" ? largeNativeBytes : nativeBytes;
+        return {
+          contentLength: bytes.length,
+          mimeType: "application/octet-stream",
+          body: (async function* () {
+            for (let offset = 0; offset < bytes.length; offset += 256 * 1024)
+              yield bytes.subarray(offset, offset + 256 * 1024);
+          })(),
+        };
+      },
     },
   });
   const app = express();
@@ -169,6 +271,7 @@ async function fixture(partLimit = 4 * 1024 * 1024, maxObjects = 512, nativeSize
     afterRenew: null as (() => void) | null,
     afterCreateAdmitted: null as (() => Promise<void>) | null,
     beforeCreateReady: null as (() => Promise<void>) | null,
+    fileResult: null as Record<string, unknown> | null,
   };
   const removal = { completed: 0 };
   const physical = new Map<string, SandboxObservation["status"]>();
@@ -387,6 +490,67 @@ async function fixture(partLimit = 4 * 1024 * 1024, maxObjects = 512, nativeSize
       expect(envelope.kind).toBe("operation");
       const job = envelope.request as Record<string, unknown>;
       guestActions.push(String(job.action));
+      if (nativeGuest) {
+        let adapted = job;
+        if (job.action === "execute" && Array.isArray(job.argv)) {
+          const life = buildFileClientLifeProbe();
+          if (JSON.stringify(job.argv) === JSON.stringify(life.argv)) {
+            const host = hostFileClientLife(environmentId);
+            adapted = { ...job, argv: host.argv };
+          } else {
+            const assets = await loadFileClientAssets("local-sandboxes");
+            const maintenance = buildFileClientMaintenance(
+              assets,
+              {
+                version: 1,
+                origin: nativeGuest.origin,
+                bootstrapCapability: "fixture",
+                environmentIdentity: "a".repeat(64),
+                resourceId: "fixture",
+                repositoryFullName: "owner/project",
+              },
+              Date.now() + 10_000,
+            );
+            if (JSON.stringify(job.argv) === JSON.stringify(maintenance.argv)) {
+              const input = JSON.parse(Buffer.from(String(job.stdin), "base64").toString("utf8"));
+              const host = hostFileClientMaintenance(assets, input.config, workerPath);
+              adapted = {
+                ...job,
+                argv: host.argv,
+                stdin: Buffer.from(host.stdin).toString("base64"),
+              };
+            }
+          }
+        }
+        if (job.action === "execute")
+          await state.write(`effect-${job.remoteMarker}.json`, {
+            argv: job.argv,
+            stdin: job.stdin,
+          });
+        return new Promise<Buffer>((done, fail) => {
+          const child = spawn(process.execPath, [driverPath], {
+            env: {
+              ...process.env,
+              HOME: guestHome,
+              MOIRA_OPERATION_STATE_DIR: join(root, "guest-state"),
+              MOIRA_ENVIRONMENT_ID: environmentId,
+              CURL_CA_BUNDLE: nativeGuest.caPath,
+            },
+            stdio: ["pipe", "pipe", "pipe"],
+          });
+          const stdout: Buffer[] = [],
+            stderr: Buffer[] = [];
+          child.stdout.on("data", (chunk: Buffer) => stdout.push(chunk));
+          child.stderr.on("data", (chunk: Buffer) => stderr.push(chunk));
+          child.once("error", fail);
+          child.once("close", (code) =>
+            code === 0
+              ? done(Buffer.concat(stdout))
+              : fail(new Error(`Actual guest refused: ${Buffer.concat(stderr).toString("utf8")}`)),
+          );
+          child.stdin.end(JSON.stringify({ kind: "operation", request: adapted }));
+        });
+      }
       let result: unknown;
       if (job.action === "execute") {
         await state.write(`effect-${job.remoteMarker}.json`, { argv: job.argv, stdin: job.stdin });
@@ -413,7 +577,8 @@ async function fixture(partLimit = 4 * 1024 * 1024, maxObjects = 512, nativeSize
           offset?: number;
           length?: number;
         };
-        if (file.action === "upload" || file.action === "write") {
+        if (faults.fileResult) result = faults.fileResult;
+        else if (file.action === "upload" || file.action === "write") {
           const bytes = Buffer.from(file.bytesBase64!, "base64");
           await writeFile(join(guestRoot, file.path), bytes, { mode: 0o600 });
           result = {
@@ -446,7 +611,9 @@ async function fixture(partLimit = 4 * 1024 * 1024, maxObjects = 512, nativeSize
           ? { state: "running" }
           : (retainedResults.get(String(job.remoteMarker)) ?? { state: "absent" });
       } else if (job.action === "cancel") {
-        result = faults.holdOperations ? { state: "running" } : { state: "absent" };
+        result = faults.holdOperations
+          ? { state: "running" }
+          : (retainedResults.get(String(job.remoteMarker)) ?? { state: "absent" });
       } else if (job.action === "file-inspect") {
         result = faults.holdOperations
           ? { state: "running" }
@@ -570,6 +737,57 @@ async function fixture(partLimit = 4 * 1024 * 1024, maxObjects = 512, nativeSize
   };
   const rpc = new LocalRpc(manager),
     relay = new LocalRelay(local.records, fetch);
+  const rpcTrace: Array<Record<string, unknown>> = [];
+  if (nativeGuest) {
+    const active = new Set<string>();
+    const observe = (path: string, value: unknown, code: string, wasActive: boolean) => {
+      const envelope = value as {
+        id: string;
+        request: { action: string; job?: { action?: string } };
+      };
+      const entries = JSON.parse(readFileSync(join(state.root, "requests.json"), "utf8")) as Array<{
+        id: string;
+        state: string;
+        expiresAt: number;
+        reservedBytes: number;
+      }>;
+      const entry = entries.find((item) => item.id === envelope.id);
+      const row = sqlite
+        .prepare(
+          "SELECT deadlineAt,claimExpiresAt,status FROM codespaceLocalRelay WHERE requestId=?",
+        )
+        .get(envelope.id);
+      rpcTrace.push({
+        path,
+        code,
+        action: envelope.request.job?.action ?? envelope.request.action,
+        wasActive,
+        journalState: entry?.state,
+        journalBytes: entry?.reservedBytes,
+        remainingMs: entry ? entry.expiresAt - Date.now() : null,
+        relay: row,
+      });
+    };
+    const handle = rpc.handle.bind(rpc);
+    rpc.handle = async (value, ...args) => {
+      const id = (value as { id: string }).id;
+      active.add(id);
+      try {
+        const result = await handle(value, ...args);
+        if (!result.ok) observe("handle", value, result.error.code, true);
+        return result;
+      } finally {
+        active.delete(id);
+      }
+    };
+    const replay = rpc.replay.bind(rpc);
+    rpc.replay = async (value) => {
+      const wasActive = active.has((value as { id: string }).id);
+      const result = await replay(value);
+      if (!result.ok) observe("replay", value, result.error.code, wasActive);
+      return result;
+    };
+  }
   fixtureCleanups.push(async () => {
     deliveryAbort.abort();
     await relay.drain();
@@ -661,6 +879,10 @@ async function fixture(partLimit = 4 * 1024 * 1024, maxObjects = 512, nativeSize
     app,
     drive,
     nativeBytes,
+    largeNativeBytes,
+    nativeFetches: () => nativeFetches,
+    rpcTrace: () => rpcTrace.slice(-3),
+    guestHome,
     guestRoot,
     faults,
     removal,
@@ -679,6 +901,41 @@ async function fixture(partLimit = 4 * 1024 * 1024, maxObjects = 512, nativeSize
     guestActions,
     target: localRepositoryTargetId(local.policy.deviceId, local.policy.repositories[0].id),
   };
+}
+
+async function nativeFixture(partLimit = 1024 * 1024, nativeSize = 1024 * 1024) {
+  let actual: Awaited<ReturnType<typeof fixture>>;
+  const tls = await nativeFileTls(root, () => actual.services.fileTransfers);
+  fixtureCleanups.push(tls.close);
+  const previousHost = process.env.MOIRA_HOST;
+  try {
+    process.env.MOIRA_HOST = new URL(tls.origin).host;
+    actual = await fixture(partLimit, 10, nativeSize, tls);
+  } finally {
+    if (previousHost === undefined) delete process.env.MOIRA_HOST;
+    else process.env.MOIRA_HOST = previousHost;
+  }
+  const created = await actual.drive(
+    actual.services.resource.create("user-a", actual.target, "main"),
+  );
+  const setupId = randomUUID();
+  const provisioned = await actual.drive(
+    (async () => {
+      const deadline = Date.now() + 10_000;
+      while (true) {
+        const result = await actual.services.file.ensureFileClient("user-a", created.resource.id, {
+          requestId: setupId,
+        });
+        if (result.provisioned) return result;
+        if (Date.now() >= deadline) throw new Error("Local file client did not settle");
+        await new Promise<void>((done) => setImmediate(done));
+      }
+    })(),
+    true,
+  );
+  expect(provisioned.command).toBe(join(actual.guestHome, ".local/bin/moira-files"));
+  expect(provisioned.executableSha256).toBe(provisioned.cliSha256);
+  return { actual, created, provisioned };
 }
 
 describe("actual local-only service composition and outbound relay", () => {
@@ -1560,6 +1817,9 @@ describe("actual local-only service composition and outbound relay", () => {
       requestId: row.requestId,
       deadlineAt: row.deadlineAt,
     });
+    expect(() =>
+      actual.services.devices.authorizePayload(auth, row.requestId, row.claimId),
+    ).toThrow(expect.objectContaining({ code: "LOCAL_EXPIRED" }));
     expect(
       sqlite.prepare("SELECT * FROM codespaceLocalRelay WHERE requestId=?").get(row.requestId),
     ).toEqual(before);
@@ -2285,7 +2545,9 @@ describe("actual local-only service composition and outbound relay", () => {
       actual.faults.holdOperations = false;
       expect(await actual.drive(actual.services.operation.reconcileOnce("user-a"))).toBe(true);
       const settled = actual.services.operation.get("user-a", pending.operation.id)!;
-      expect(settled.state).toBe(kind === "exec" ? "cancelled" : "succeeded");
+      // The substitute already completed the effect; cancellation observes that exact
+      // terminal proof rather than inventing cancellation from an absent PID/marker.
+      expect(settled.state).toBe("succeeded");
       expect(settled.resourceGeneration).toBe(originalGeneration);
       expect(
         actual.guestActions.filter(
@@ -2387,21 +2649,24 @@ describe("actual local-only service composition and outbound relay", () => {
     expect(spaces[0].operationMarker).toBe(created.resource.operationMarker);
   });
   test("uses the adopted generation for native stdin and native binary upload/read through the actual relay", async () => {
-    const actual = await fixture(1024 * 1024, 10, 1024 * 1024);
-    const created = await actual.drive(
-      actual.services.resource.create("user-a", actual.target, "main"),
-    );
+    const { actual, created } = await nativeFixture();
     const reference = {
       fileId: "file_localNative",
       downloadUrl: "https://native.example.test/object",
       mimeType: "application/octet-stream",
       declaredSize: actual.nativeBytes.length,
     };
+    const argv = [
+      process.execPath,
+      "-e",
+      "const {createHash}=require('node:crypto'); const h=createHash('sha256');process.stdin.on('data',b=>h.update(b));process.stdin.on('end',()=>process.stdout.write(h.digest('hex')));",
+      "private-argv-canary",
+    ];
     const executed = await actual.drive(
       actual.services.operation.executeNativeReference(
         "user-a",
         created.resource.id,
-        { argv: ["cat", "private-argv-canary"] },
+        { argv },
         reference,
       ),
     );
@@ -2424,21 +2689,24 @@ describe("actual local-only service composition and outbound relay", () => {
       throw new Error(`Native execution ${executed.operation.state}: ${JSON.stringify(errors)}`);
     }
     expect(executed.operation.state).toBe("succeeded");
-    expect(executed.result?.stdout).toBe("controlled guest result");
+    expect(executed.result?.stdout).toBe(hash(actual.nativeBytes));
     const effect = await actual.state.read(
       `effect-${executed.operation.remoteMarker}.json`,
       (value) => value,
     );
     expect(effect).toEqual({
-      argv: ["cat", "private-argv-canary"],
+      argv,
       stdin: actual.nativeBytes.toString("base64"),
     });
     const uploaded = await actual.drive(
-      actual.services.file.uploadReference("user-a", created.resource.id, {
-        path: "payload.bin",
-        reference,
-        expected: { exists: false },
-      }),
+      actual.services.file
+        .uploadReference("user-a", created.resource.id, {
+          requestId: randomUUID(),
+          path: "payload.bin",
+          reference,
+          expected: { exists: false },
+        })
+        .then((response) => actual.services.file.waitForResult("user-a", response.operation.id)),
     );
     expect(uploaded.operation.state).toBe("succeeded");
     expect(await readFile(join(actual.guestRoot, "payload.bin"))).toEqual(actual.nativeBytes);
@@ -2455,6 +2723,7 @@ describe("actual local-only service composition and outbound relay", () => {
       action: "read",
       path: "payload.bin",
       sha256: hash(actual.nativeBytes),
+      rangeSha256: hash(actual.nativeBytes),
     });
     expect(read.result && "bytes" in read.result ? Buffer.from(read.result.bytes) : null).toEqual(
       actual.nativeBytes,
@@ -2480,6 +2749,308 @@ describe("actual local-only service composition and outbound relay", () => {
         .get(),
     ).toMatchObject({ count: expect.any(Number) });
   });
+  test("streams large native files through the actual Local relay and retains the original committed identity", async () => {
+    const { actual, created } = await nativeFixture(20 * 1024 ** 2, 5);
+    const reference = {
+      fileId: "file_localLarge",
+      downloadUrl: "https://native.example.test/object",
+      mimeType: "application/octet-stream",
+    };
+    const largeRequestId = randomUUID();
+    const largeRequest = {
+      requestId: largeRequestId,
+      path: "large.bin",
+      reference: {
+        ...reference,
+        fileId: "file_localLarge",
+        declaredSize: actual.largeNativeBytes.length,
+      },
+      expected: { exists: false as const },
+    };
+    const largeUpload = await actual.drive(
+      actual.services.file
+        .uploadReference("user-a", created.resource.id, largeRequest)
+        .then(async (response) => {
+          try {
+            return await actual.services.file.waitForResult("user-a", response.operation.id);
+          } catch {
+            const current = sqlite
+              .prepare(
+                "SELECT state,createdAt,deadlineAt,remoteMarker FROM codespaceOperation WHERE id=?",
+              )
+              .get(response.operation.id) as {
+              state: string;
+              createdAt: number;
+              deadlineAt: number;
+              remoteMarker: string;
+            };
+            const progress = await readFile(
+              join(root, "guest-state", current.remoteMarker, "transfer.json"),
+              "utf8",
+            )
+              .then((text) => JSON.parse(text) as { offset: number; state: string })
+              .catch(() => null);
+            const proof = await readFile(
+              join(root, "guest-state", current.remoteMarker, "file-proof.json"),
+              "utf8",
+            )
+              .then(
+                (text) =>
+                  JSON.parse(text) as {
+                    startedAt?: number;
+                    admissionDeadlineAt?: number;
+                    notStarted?: boolean;
+                  },
+              )
+              .catch(() => null);
+            throw new Error(
+              `Local native wait unconfirmed: phase=${current.state}, elapsed=${Date.now() - current.createdAt}, budget=${current.deadlineAt - current.createdAt}, offset=${progress?.offset ?? "none"}, progress=${progress?.state ?? "none"}, started=${proof?.startedAt !== undefined}, negative=${proof?.notStarted === true}, guestContacts=${actual.guestActions.length}`,
+            );
+          }
+        }),
+      true,
+    );
+    if (largeUpload.operation.state !== "succeeded") {
+      const receipt = JSON.parse(
+        await readFile(
+          join(root, "guest-state", largeUpload.operation.remoteMarker, "result.json"),
+          "utf8",
+        ),
+      ) as { state?: string; exitCode?: number; stderrBase64?: string };
+      const diagnostic = Buffer.from(receipt.stderrBase64 ?? "", "base64").toString("utf8");
+      const safeCode =
+        diagnostic.match(/\b(?:CODESPACE|TRANSFER)_[A-Z_]+\b/)?.[0] ?? "unclassified";
+      throw new Error(
+        `Local native transfer failed: state=${receipt.state}, exit=${receipt.exitCode}, code=${safeCode}`,
+      );
+    }
+    expect(largeUpload.operation.state).toBe("succeeded");
+    const target = join(actual.guestRoot, "large.bin");
+    expect(lstatSync(target).size).toBe(actual.largeNativeBytes.length);
+    expect(hash(await readFile(target))).toBe(hash(actual.largeNativeBytes));
+    const identity = lstatSync(target, { bigint: true });
+    const fetched = actual.nativeFetches();
+    const replay = await actual.drive(
+      actual.services.file.uploadReference("user-a", created.resource.id, largeRequest),
+      true,
+    );
+    expect(replay.operation.id).toBe(largeUpload.operation.id);
+    expect(lstatSync(target, { bigint: true }).ino).toBe(identity.ino);
+    expect(actual.nativeFetches()).toBe(fetched);
+    const largeRange = await actual.drive(
+      actual.services.file.execute("user-a", created.resource.id, {
+        action: "read",
+        path: "large.bin",
+        offset: 0,
+        length: 4 * 1024 ** 2,
+      }),
+      true,
+    );
+    expect(largeRange.result).toMatchObject({
+      action: "read",
+      sha256: null,
+      rangeSha256: hash(actual.largeNativeBytes.subarray(0, 4 * 1024 ** 2)),
+    });
+    const downloadId = randomUUID();
+    const downloaded = await actual.drive(
+      actual.services.file
+        .downloadReference("user-a", created.resource.id, {
+          requestId: downloadId,
+          path: "large.bin",
+          maxBytes: actual.largeNativeBytes.length,
+          fileName: "large.bin",
+          mimeType: "application/octet-stream",
+        })
+        .then((response) =>
+          actual.services.file.waitForDownloadReference("user-a", response.operation.id, {
+            fileName: "large.bin",
+            mimeType: "application/octet-stream",
+          }),
+        )
+        .catch((cause: unknown) => {
+          throw new Error(
+            `Local download collection refused: ${JSON.stringify(actual.rpcTrace())}`,
+            { cause },
+          );
+        }),
+      true,
+    );
+    expect(downloaded.transfer?.sha256).toBe(hash(actual.largeNativeBytes));
+    const beforeStatus = actual.guestActions.length;
+    const status = await actual.services.file.transferStatus("user-a", created.resource.id, {
+      requestId: downloadId,
+    });
+    expect(status).toMatchObject({
+      transfer: { state: "ready", size: actual.largeNativeBytes.length },
+    });
+    expect(actual.guestActions).toHaveLength(beforeStatus);
+    const claimed = await actual.services.transfer.claimDownload(downloaded.transfer!.referenceId);
+    const received = createHash("sha256");
+    let size = 0;
+    for await (const chunk of claimed.stream) {
+      size += chunk.byteLength;
+      received.update(chunk);
+    }
+    expect(size).toBe(actual.largeNativeBytes.length);
+    expect(received.digest("hex")).toBe(hash(actual.largeNativeBytes));
+    await actual.services.transfer.consume(claimed.record);
+  });
+
+  test("collects large metadata and retained range bytes through the actual Local relay", async () => {
+    const actual = await fixture();
+    const created = await actual.drive(
+      actual.services.resource.create("user-a", actual.target, "main"),
+    );
+    const totalSize = 8 * 1024 ** 2;
+    const stat = {
+      action: "stat",
+      stat: {
+        path: "large.bin",
+        type: "file",
+        size: totalSize,
+        mode: 0o600,
+        modifiedAt: 1,
+        version: null,
+      },
+    };
+    actual.faults.fileResult = { state: "succeeded", value: stat };
+    const observed = await actual.drive(
+      actual.services.file.execute("user-a", created.resource.id, {
+        action: "stat",
+        path: "large.bin",
+      }),
+    );
+    expect(observed.operation.state).toBe("succeeded");
+    expect(observed.result).toEqual(stat);
+    const bytes = Buffer.from("selected range");
+    const offset = totalSize - bytes.length;
+    actual.faults.fileResult = {
+      state: "succeeded",
+      value: {
+        action: "read",
+        path: "large.bin",
+        offset,
+        totalSize,
+        bytesBase64: bytes.toString("base64"),
+        sha256: null,
+        rangeSha256: hash(bytes),
+      },
+    };
+    actual.faults.holdOperations = true;
+    const pending = await actual.drive(
+      actual.services.file.execute("user-a", created.resource.id, {
+        action: "read",
+        path: "large.bin",
+        offset,
+        length: bytes.length,
+      }),
+    );
+    expect(pending.operation.state).toBe("running");
+    expect(pending.result).toBeNull();
+    actual.faults.holdOperations = false;
+    actual.faults.fileResult = null;
+    const collected = await actual.drive(
+      actual.services.file.reconcile("user-a", pending.operation.id),
+    );
+    expect(collected.operation).toMatchObject({
+      id: pending.operation.id,
+      state: "succeeded",
+      outputBytes: bytes.length,
+    });
+    expect(collected.result).toEqual({
+      action: "read",
+      path: "large.bin",
+      offset,
+      totalSize,
+      bytes,
+      sha256: null,
+      rangeSha256: hash(bytes),
+    });
+    expect(actual.guestActions.filter((action) => action === "file-execute")).toHaveLength(2);
+  });
+
+  test("collects a retained legacy partial read through Local without relabeling its whole hash", async () => {
+    const actual = await fixture();
+    const created = await actual.drive(
+      actual.services.resource.create("user-a", actual.target, "main"),
+    );
+    const full = Buffer.from("before selected after");
+    const bytes = Buffer.from("selected");
+    await writeFile(join(actual.guestRoot, "payload.bin"), full);
+    actual.faults.holdOperations = true;
+    const pending = await actual.drive(
+      actual.services.file.execute("user-a", created.resource.id, {
+        action: "read",
+        path: "payload.bin",
+        offset: 7,
+        length: bytes.length,
+      }),
+    );
+    expect(pending.operation.state).toBe("running");
+    actual.faults.holdOperations = false;
+    const collected = await actual.drive(
+      actual.services.file.reconcile("user-a", pending.operation.id),
+    );
+    expect(collected.operation.state).toBe("succeeded");
+    expect(collected.result).toMatchObject({
+      action: "read",
+      bytes,
+      sha256: hash(full),
+      rangeSha256: hash(bytes),
+    });
+    expect(hash(full)).not.toBe(hash(bytes));
+    expect(actual.guestActions.filter((action) => action === "file-execute")).toHaveLength(1);
+    const contacts = actual.guestActions.length;
+    await expect(
+      actual.services.file.reconcile("user-b", pending.operation.id),
+    ).rejects.toMatchObject({ code: "CODESPACE_NOT_FOUND" });
+    expect(actual.guestActions).toHaveLength(contacts);
+  });
+
+  test("acknowledges ordinary relay effects through the active RPC journal", async () => {
+    const actual = await fixture();
+    const acknowledged = jest.spyOn(actual.rpc.journal, "acknowledge");
+    const created = await actual.drive(
+      actual.services.resource.create("user-a", actual.target, "main"),
+    );
+    acknowledged.mockClear();
+    const executed = await actual.drive(
+      actual.services.operation.execute("user-a", created.resource.id, {
+        argv: ["echo", "one retained effect"],
+        stdin: { kind: "inline", bytes: new Uint8Array() },
+      }),
+    );
+    await actual.relay.drain();
+    expect(executed.result).toMatchObject({ state: "succeeded", stdout: "one retained effect" });
+    expect(actual.guestActions.filter((action) => action === "execute")).toHaveLength(1);
+    const requests = [];
+    for (const key of await actual.state.keys("relay-request-")) {
+      const intent = await actual.state.read(
+        key,
+        (value) =>
+          value as {
+            message: { id: string; request: { job?: { action?: string; remoteMarker?: string } } };
+          },
+      );
+      if (
+        intent?.message.request.job?.action === "execute" &&
+        intent.message.request.job.remoteMarker === executed.operation.remoteMarker
+      )
+        requests.push(intent.message.id);
+    }
+    expect(requests).toHaveLength(1);
+    expect(acknowledged).toHaveBeenCalledWith(requests[0], true);
+    const entries = await actual.state.read(
+      "requests.json",
+      (value) => value as Array<{ id: string; state: string; settled?: boolean }>,
+    );
+    for (const [id] of acknowledged.mock.calls)
+      expect(entries?.find((entry) => entry.id === id)).toMatchObject({
+        state: "complete",
+        settled: true,
+      });
+  });
+
   test("recovers a lost acknowledged create response without creating a second local sandbox", async () => {
     const actual = await fixture();
     actual.faults.dropNextAck = true;
@@ -2535,7 +3106,7 @@ describe("actual local-only service composition and outbound relay", () => {
       code: "LOCAL_UNAUTHORIZED",
     });
   });
-  test("collects completed private payloads so sequential commands fit the default ten-object quota", async () => {
+  test("collects transient relay payloads while durable command results retain their own bounded control accounting", async () => {
     const actual = await fixture(4 * 1024 * 1024, 10);
     const created = await actual.drive(
       actual.services.resource.create("user-a", actual.target, "main"),
@@ -2550,13 +3121,35 @@ describe("actual local-only service composition and outbound relay", () => {
       );
       expect(executed.operation.state).toBe("succeeded");
       expect(executed.result?.stdout).toBe(text);
-      const count = sqlite
-        .prepare("SELECT COUNT(*) count FROM codespaceTransfer WHERE userId='user-a'")
+      const transient = sqlite
+        .prepare(
+          "SELECT COUNT(*) count FROM codespaceTransfer WHERE userId='user-a' AND purpose IN ('local_relay_input','local_relay_output')",
+        )
         .get() as { count: number };
-      expect(count.count).toBeLessThanOrEqual(2);
+      expect(transient.count).toBeLessThanOrEqual(2);
+      expect(
+        sqlite
+          .prepare(
+            "SELECT COUNT(*) count FROM codespaceTransfer WHERE userId='user-a' AND purpose='operation_result'",
+          )
+          .get(),
+      ).toEqual({ count: index + 1 });
+      expect(new CodespaceTransferRepository(sqlite).usageForUser("user-a")).toEqual({
+        objects: 0,
+        bytes: 0,
+        inflightBytes: 0,
+      });
     }
     expect(
       sqlite.prepare("SELECT COUNT(*) count FROM codespaceOperation WHERE state='succeeded'").get(),
     ).toEqual({ count: 12 });
+    const expires = sqlite
+      .prepare("SELECT MAX(expiresAt) expiresAt FROM codespaceTransfer WHERE userId='user-a'")
+      .get() as { expiresAt: number };
+    actual.clock.now = expires.expiresAt + 1;
+    await actual.services.transfer.cleanup();
+    expect(
+      sqlite.prepare("SELECT COUNT(*) count FROM codespaceTransfer WHERE userId='user-a'").get(),
+    ).toEqual({ count: 0 });
   });
 });

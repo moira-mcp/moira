@@ -3,6 +3,7 @@ import { crc32 } from "node:zlib";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import {
   projectCodespaceOperationSummary,
+  type CodespaceFileFailureReason,
   type CodespaceFileOperationResponse,
 } from "@mcp-moira/shared";
 
@@ -161,9 +162,17 @@ export function previewImageResult(response: CodespaceFileOperationResponse): Ca
     content: [{ type: "text", text: JSON.stringify(data) }],
     structuredContent: data,
   });
-  const reject = (code: string, message: string): CallToolResult => ({
+  const reject = (
+    code: string,
+    message: string,
+    reason?: CodespaceFileFailureReason,
+  ): CallToolResult => ({
     isError: true,
-    ...json({ operation_id: response.operation.id, error: { code, message } }),
+    ...json({
+      operation_id: response.operation.id,
+      ...(reason ? { reason } : {}),
+      error: { code, message },
+    }),
   });
   if (response.operation.kind !== "download")
     return reject("CODESPACE_IMAGE_REJECTED", "Image preview requires a file download operation.");
@@ -175,6 +184,7 @@ export function previewImageResult(response: CodespaceFileOperationResponse): Ca
           ? "CODESPACE_OPERATION_CANCELLED"
           : "CODESPACE_OPERATION_TIMED_OUT",
       "The image file operation did not succeed.",
+      response.result && "state" in response.result ? response.result.reason : undefined,
     );
   if (!response.result && operation.state !== "succeeded")
     return reject(
@@ -186,6 +196,7 @@ export function previewImageResult(response: CodespaceFileOperationResponse): Ca
     !result ||
     "state" in result ||
     result.action !== "download" ||
+    "transferId" in result ||
     operation.state !== "succeeded"
   )
     return reject("CODESPACE_IMAGE_REJECTED", "A complete successful image download is required.");

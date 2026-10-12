@@ -1,5 +1,15 @@
 import { Readable } from "node:stream";
 import Database from "better-sqlite3";
+import { drizzle } from "drizzle-orm/better-sqlite3";
+import { migrate } from "drizzle-orm/better-sqlite3/migrator";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
+import {
+  CodespaceTransferRepository,
+  CodespaceTransferService,
+  evaluateCodespaceResourcePolicy,
+} from "@mcp-moira/shared";
 import type { Request, Response } from "express";
 import { afterEach, describe, expect, it } from "@jest/globals";
 import { CommunicationAttachmentGrantService } from "../../../packages/shared/src/services/communication-attachment-grant-service.js";
@@ -21,13 +31,12 @@ import { createManageCommunication } from "../../../packages/mcp-server/src/tool
 import { runWithMCPContext } from "../../../packages/mcp-server/src/core/request-context.js";
 
 function createGrantTable(db: Database.Database): void {
-  db.exec(`CREATE TABLE communication_attachment_grant (
-    token_digest TEXT PRIMARY KEY, user_id TEXT NOT NULL, correlation_id TEXT NOT NULL,
-    audience TEXT NOT NULL, purpose TEXT NOT NULL, message TEXT NOT NULL, format TEXT NOT NULL,
-    silent INTEGER NOT NULL, kind TEXT NOT NULL, filename TEXT NOT NULL, mime_type TEXT NOT NULL,
-    declared_size INTEGER NOT NULL, state TEXT NOT NULL, claim_id TEXT, claimed_at INTEGER,
-    completed_at INTEGER, expires_at INTEGER NOT NULL, created_at INTEGER NOT NULL
-  )`);
+  migrate(drizzle(db), {
+    migrationsFolder: resolve(process.cwd(), "packages/web-backend/drizzle"),
+  });
+  db.exec(
+    "INSERT INTO user (id,email,handle,createdAt,updatedAt) VALUES ('user-a','a@example.test','user-a','now','now'),('user-b','b@example.test','user-b','now','now')",
+  );
 }
 
 /** The text of a tool result's first content block, which these assertions always read. */
@@ -51,7 +60,13 @@ function configuredAdapter(
   return {
     id: "test-channel",
     provider: "test-provider",
-    capabilities: { text: true, image: true, document: true, trusted: false },
+    capabilities: {
+      text: true,
+      image: true,
+      document: true,
+      trusted: false,
+      streamingAttachments: true,
+    },
     metadata: {
       title: "Test channel",
       origin: "extension",
@@ -62,9 +77,14 @@ function configuredAdapter(
       return true;
     },
     async deliver(message) {
+      const chunks: Buffer[] = [];
+      if (message.attachment?.source) {
+        for await (const bytes of await message.attachment.source.open())
+          chunks.push(Buffer.from(bytes));
+      } else chunks.push(Buffer.from(message.attachment?.bytes ?? []));
       deliveries.push({
         text: message.text,
-        bytes: Buffer.from(message.attachment?.bytes ?? []),
+        bytes: Buffer.concat(chunks),
       });
       if (fail) throw new Error("ambiguous_provider_failure");
     },
@@ -85,9 +105,25 @@ interface RawResult {
 
 describe("communication delivery boundaries", () => {
   const databases: Database.Database[] = [];
+  const roots: string[] = [];
   afterEach(() => {
     for (const db of databases.splice(0)) db.close();
+    for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
   });
+
+  function transfers(db: Database.Database) {
+    const root = mkdtempSync(join(tmpdir(), "moira-communication-transfer-"));
+    roots.push(root);
+    return new CodespaceTransferService({
+      repository: new CodespaceTransferRepository(db),
+      root,
+      policy: () =>
+        evaluateCodespaceResourcePolicy((name) =>
+          name === "CODESPACE_CODESPACES_ENABLED" ? "true" : undefined,
+        ),
+      now: () => 1_800_000_000_000,
+    });
+  }
 
   function harness(failProvider = false) {
     const db = new Database(":memory:");
@@ -106,6 +142,7 @@ describe("communication delivery boundaries", () => {
       grantService,
       inflight,
       communicationService,
+      transfers: transfers(db),
       createRepository: () => repository,
       audit: (async () => {}) as typeof logAuditEvent,
       logger: { error() {} },
@@ -176,6 +213,7 @@ describe("communication delivery boundaries", () => {
       grantService: new CommunicationAttachmentGrantService(db),
       baseUrl: "https://example.invalid",
       audit: async () => {},
+      transfers: transfers(db),
     });
 
     const result = await runWithMCPContext({ userId: "user-a" }, () =>
@@ -216,6 +254,73 @@ describe("communication delivery boundaries", () => {
     expect(results.map((result) => result.status).sort()).toEqual([200, 401]);
     expect(deliveries).toEqual([{ text: "Report", bytes: Buffer.from("test") }]);
   });
+
+  it.each(["film.bin", 'ролик "версия".mp4'])(
+    "delivers the parent's owned ready %s through the selected channel without consuming it",
+    async (fileName) => {
+      const db = new Database(":memory:");
+      databases.push(db);
+      createGrantTable(db);
+      const store = transfers(db);
+      const file = await store.createDownload("user-a", {
+        fileName,
+        mimeType: "application/octet-stream",
+        bytes: Uint8Array.of(0, 1, 255),
+      });
+      const deliveries: ObservedDelivery[] = [];
+      const other: ObservedDelivery[] = [];
+      let deliveredName: string | undefined;
+      const adapter = configuredAdapter(deliveries);
+      const otherAdapter = {
+        ...configuredAdapter(other),
+        id: "other-channel",
+        provider: "other-provider",
+      };
+      const handler = createManageCommunication({
+        communicationService: new UserCommunicationService([
+          {
+            ...adapter,
+            async deliver(message, configuredRepository, context) {
+              deliveredName = message.attachment?.filename;
+              await adapter.deliver(message, configuredRepository, context);
+            },
+          },
+          otherAdapter,
+        ]),
+        repository,
+        grantService: new CommunicationAttachmentGrantService(db),
+        baseUrl: "https://example.invalid",
+        audit: async () => {},
+        transfers: store,
+      });
+      const input = {
+        action: "deliver-file" as const,
+        message: "Film",
+        referenceId: file.referenceId,
+        kind: "document" as const,
+        channelId: "test-channel",
+      };
+      const foreign = await runWithMCPContext({ userId: "user-b" }, () => handler(input));
+      expect(foreign.isError).toBe(true);
+      expect(JSON.parse(firstText(foreign))).toEqual({
+        status: "rejected",
+        reason: "private_file_unavailable",
+      });
+      expect(deliveries).toEqual([]);
+      const delivered = await runWithMCPContext({ userId: "user-a" }, () => handler(input));
+      expect(JSON.parse(firstText(delivered))).toMatchObject({
+        status: "delivered",
+        deliveredChannels: 1,
+      });
+      expect(deliveries).toEqual([{ text: "Film", bytes: Buffer.from([0, 1, 255]) }]);
+      expect(deliveredName).toBe(fileName);
+      expect(other).toEqual([]);
+      expect((await store.getOwnedSource("user-a", file.referenceId)).source).toMatchObject({
+        size: 3,
+        sha256: file.sha256,
+      });
+    },
+  );
 
   it("keeps a grant terminal after a provider attempt fails", async () => {
     const { mint, invoke, validHeaders, deliveries } = harness(true);
