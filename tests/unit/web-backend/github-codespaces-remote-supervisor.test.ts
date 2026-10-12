@@ -171,6 +171,7 @@ async function transferFixture() {
     dropGetOffset: number | null;
     holdChunk?: Promise<void>;
     beforeFinalize?: () => void;
+    httpFailure?: "http" | "reset" | "overflow";
   } = {
     dropPut: false,
     dropFinalize: false,
@@ -221,6 +222,20 @@ async function transferFixture() {
     { key: readFileSync(key), cert: readFileSync(certificate) },
     async (incoming, response) => {
       try {
+        if (controls.httpFailure === "reset") {
+          response.destroy();
+          return;
+        }
+        if (controls.httpFailure === "http") {
+          response.writeHead(503, { "x-private": "private-header-sentinel" });
+          response.end("private-body-sentinel");
+          return;
+        }
+        if (controls.httpFailure === "overflow") {
+          response.writeHead(200);
+          response.end("private-body-sentinel".repeat(4000));
+          return;
+        }
         const url = new URL(incoming.url!, origin);
         const chunks: Buffer[] = [];
         let length = 0;
@@ -382,7 +397,7 @@ async function transferFixture() {
 function client(
   environment: NodeJS.ProcessEnv,
   args: string[],
-): Promise<{ code: number; lines: any[] }> {
+): Promise<{ code: number; lines: any[]; stderr: string }> {
   return new Promise((done, reject) => {
     const child = spawn(
       process.execPath,
@@ -391,15 +406,23 @@ function client(
     );
     children.add(child);
     let stdout = "";
+    let stderr = "";
     child.stdout.on("data", (chunk) => {
       stdout += chunk.toString();
     });
-    child.stderr.resume();
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk.toString();
+      if (Buffer.byteLength(stderr) > 4096) {
+        child.kill("SIGKILL");
+        reject(new Error("File client diagnostic exceeded its bound"));
+      }
+    });
     child.once("error", reject);
     child.once("close", (code) => {
       children.delete(child);
       done({
         code: code ?? -1,
+        stderr,
         lines: stdout
           .trim()
           .split("\n")
@@ -535,6 +558,46 @@ async function inspectUntilTerminal(
 }
 
 describe("direct Codespace operation supervisor", () => {
+  test.each(["http", "reset", "overflow", "missing-process", "older-curl"] as const)(
+    "installed client preserves uncertainty and emits only safe diagnostics for %s",
+    async (failure) => {
+      const value = await transferFixture();
+      try {
+        value.controls.httpFailure =
+          failure === "older-curl" ? "http" : failure === "missing-process" ? undefined : failure;
+        const environment: NodeJS.ProcessEnv = { ...value.environment };
+        if (failure === "missing-process" || failure === "older-curl") {
+          const bin = join(value.environment.HOME!, "bin");
+          mkdirSync(bin);
+          environment.PATH = bin;
+          if (failure === "older-curl") {
+            const curl = spawnSync("which", ["curl"], { encoding: "utf8" }).stdout.trim();
+            writeFileSync(
+              join(bin, "curl"),
+              `#!${process.execPath}\nconst {spawnSync}=require('node:child_process'),fs=require('node:fs');const args=process.argv.slice(2);process.stderr.write('private-stderr-sentinel '+args.at(-1)+' '+fs.readFileSync(args[args.indexOf('--header')+1].slice(1),'utf8'));if(args.includes('--fail-with-body'))process.exit(2);const result=spawnSync(${JSON.stringify(curl)},args,{stdio:'inherit'});const headers=args[args.indexOf('--dump-header')+1];fs.writeFileSync(headers,['HTTP/1.1 200 Connection Established','X-Private: private-header-sentinel','',''].join(String.fromCharCode(13,10))+fs.readFileSync(headers,'utf8'));process.exit(result.status??1);`,
+              { mode: 0o700 },
+            );
+          }
+        }
+        const result = await client(environment, ["status", randomUUID()]);
+        expect(result.code).toBe(1);
+        expect(result.lines).toEqual([]);
+        const error = JSON.parse(result.stderr).error;
+        expect(error.code).toBe("TRANSFER_OUTCOME_UNKNOWN");
+        expect(error.diagnostic).toEqual(
+          failure === "http" || failure === "older-curl"
+            ? { kind: "http", httpStatus: 503, processExitCode: 22 }
+            : failure === "reset"
+              ? { kind: "transport", processExitCode: 52 }
+              : { kind: failure === "overflow" ? "response_limit" : "process" },
+        );
+        expect(result.stderr).not.toMatch(/private-|127\.0\.0\.1|Bearer|tttttttt|bbbbbbbb/);
+        expect(Object.keys(error)).toEqual(["code", "diagnostic"]);
+      } finally {
+        await value.close();
+      }
+    },
+  );
   test.each(["guard changed", "reply lost"])(
     "guarded native target settles %s without a second effect",
     async (mode) => {

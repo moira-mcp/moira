@@ -1,10 +1,11 @@
-import { afterEach, beforeEach, describe, expect, test } from "@jest/globals";
+import { afterEach, beforeEach, describe, expect, jest, test } from "@jest/globals";
+import { once } from "node:events";
 import { mkdtemp, rm, realpath, writeFile, readFile } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { connect, createServer, type Socket } from "node:net";
+import { connect, createServer, Socket } from "node:net";
 import { PrivateState } from "../../../packages/local/src/private-state.js";
 import { startBroker } from "../../../packages/local/src/broker.js";
 import { startBrokerTunnel, BROKER_PREFACE } from "../../../packages/local/src/broker-tunnel.js";
@@ -25,6 +26,7 @@ beforeEach(async () => {
 afterEach(async () => {
   for (const close of closers.reverse()) await close();
   closers.length = 0;
+  jest.restoreAllMocks();
   await rm(root, { recursive: true, force: true });
 });
 
@@ -58,6 +60,123 @@ async function exitedPid(): Promise<number> {
 }
 
 describe("local broker authority and address boundary", () => {
+  test("verified CONNECT and its fixed tunnel clear only establishment timers and carry a later response", async () => {
+    const fixture = await localFixture(state);
+    const framed = new Set<Socket>();
+    const setTimeout = Socket.prototype.setTimeout;
+    jest.spyOn(Socket.prototype, "setTimeout").mockImplementation(function (
+      this: Socket,
+      milliseconds,
+      callback,
+    ) {
+      if (milliseconds === 5000) framed.add(this);
+      return setTimeout.call(this, milliseconds, callback);
+    });
+    const peers = new Set<Socket>();
+    const remote = createServer((socket) => {
+      peers.add(socket);
+      socket.once("close", () => peers.delete(socket));
+      socket.on("data", (bytes) => socket.write(bytes));
+    });
+    remote.listen(0, "127.0.0.1");
+    await once(remote, "listening");
+    const remotePort = (remote.address() as { port: number }).port;
+    closers.push(
+      () =>
+        new Promise<void>((done) => {
+          for (const peer of peers) peer.destroy();
+          remote.close(() => done());
+        }),
+    );
+    let upstream!: Socket;
+    let pendingTimeout: number | undefined;
+    const broker = await startBroker({
+      authorize: (header) => fixture.records.authorize(header),
+      budget: new NetworkBudget(1),
+      resolve: async () => [{ address: "8.8.8.8", family: 4 }],
+      dial: (target) => {
+        upstream = connect({ host: "127.0.0.1", port: remotePort });
+        Object.defineProperty(upstream, "remoteAddress", { get: () => target.address });
+        upstream.prependOnceListener("connect", () => {
+          pendingTimeout = upstream.timeout;
+        });
+        return upstream;
+      },
+      git: async (_request, response) => {
+        response.end();
+      },
+      onFault: () => {},
+    });
+    closers.push(broker.close);
+    const tunnel = await startBrokerTunnel(broker.port);
+    closers.push(tunnel.close);
+    const client = connect({ host: "127.0.0.1", port: tunnel.port });
+    client.on("error", () => {});
+    try {
+      await once(client, "connect");
+      const established = once(client, "data");
+      client.write(
+        `${BROKER_PREFACE}CONNECT packages.example.com:443 HTTP/1.1\r\nHost: packages.example.com\r\nProxy-Authorization: ${fixture.authorization}\r\n\r\n`,
+      );
+      expect((await established)[0].toString()).toContain("200 Connection Established");
+      expect(pendingTimeout).toBe(15_000);
+      expect({
+        upstream: upstream.timeout,
+        framed: [...framed].map((socket) => socket.timeout),
+      }).toEqual({ upstream: 0, framed: [0] });
+      const reply = once(client, "data");
+      const bytes = Buffer.from([0, 255, 65, 13, 10]);
+      client.write(bytes);
+      expect((await reply)[0]).toEqual(bytes);
+    } finally {
+      client.destroy();
+    }
+  });
+
+  test("a stalled CONNECT retains its finite timeout and releases admission for the next connection", async () => {
+    const fixture = await localFixture(state);
+    let upstream!: Socket;
+    let dialed!: () => void;
+    const admitted = new Promise<void>((done) => {
+      dialed = done;
+    });
+    const budget = new NetworkBudget(1);
+    const broker = await startBroker({
+      authorize: (header) => fixture.records.authorize(header),
+      budget,
+      resolve: async () => [{ address: "8.8.8.8", family: 4 }],
+      dial: () => {
+        upstream = new Socket();
+        dialed();
+        return upstream;
+      },
+      git: async (_request, response) => {
+        response.end("next-admitted");
+      },
+      onFault: () => {},
+    });
+    closers.push(broker.close);
+    const client = connect({ host: "127.0.0.1", port: broker.port });
+    client.on("error", () => {});
+    try {
+      await once(client, "connect");
+      client.write(
+        `CONNECT packages.example.com:443 HTTP/1.1\r\nHost: packages.example.com\r\nProxy-Authorization: ${fixture.authorization}\r\n\r\n`,
+      );
+      await admitted;
+      expect(upstream.timeout).toBe(15_000);
+      const closed = once(client, "close");
+      // Control the timer event, not the admission or actual socket cleanup.
+      upstream.emit("timeout");
+      await closed;
+      expect(upstream.destroyed).toBe(true);
+      const reservation = await budget.reserve(fixture.policy);
+      await reservation.release();
+    } finally {
+      client.destroy();
+      upstream?.destroy();
+    }
+  });
   test("automatic startup reclaims a dead runner and dead guard without replaying retained work", async () => {
     const fixture = await localFixture(state);
     const deadPid = await exitedPid();
@@ -342,70 +461,74 @@ describe("local broker authority and address boundary", () => {
     expect(dials).toBe(0);
   });
 
-  test("the validated address is used once and active access is cut when locally revoked", async () => {
-    const fixture = await localFixture(state);
-    const peers = new Set<Socket>();
-    const remote = createServer((socket) => {
-      peers.add(socket);
-      socket.once("close", () => peers.delete(socket));
-      socket.on("data", (bytes) => socket.write(bytes));
-    });
-    await new Promise<void>((resolve) => remote.listen(0, "127.0.0.1", resolve));
-    const remotePort = (remote.address() as { port: number }).port;
-    closers.push(
-      () =>
-        new Promise<void>((resolve) => {
-          for (const peer of peers) peer.destroy();
-          remote.close(() => resolve());
-        }),
-    );
-    let lookups = 0;
-    const destinations: string[] = [];
-    const broker = await startBroker({
-      authorize: (header) => fixture.records.authorize(header),
-      budget: new NetworkBudget(),
-      resolve: async () => {
-        lookups++;
-        return [{ address: "8.8.8.8", family: 4 }];
-      },
-      // Substitute only the external network endpoint; production still dials the pinned public IP.
-      dial: (target, port) => {
-        destinations.push(`${target.address}:${port}`);
-        const socket = connect({ host: "127.0.0.1", port: remotePort });
-        Object.defineProperty(socket, "remoteAddress", { get: () => target.address });
-        return socket;
-      },
-      git: async (_request, response) => {
-        response.end();
-      },
-      onFault: () => undefined,
-    });
-    closers.push(broker.close);
-    const client = connect({ host: "127.0.0.1", port: broker.port });
-    const received: Buffer[] = [];
-    client.on("data", (chunk) => received.push(chunk));
-    client.on("error", () => undefined);
-    await new Promise<void>((resolve) => client.once("connect", resolve));
-    client.write(
-      `CONNECT packages.example.com:443 HTTP/1.1\r\nHost: packages.example.com\r\nProxy-Authorization: ${fixture.authorization}\r\n\r\n`,
-    );
-    await new Promise<void>((resolve) => client.once("data", () => resolve()));
-    client.write("guest-payload");
-    await new Promise<void>((resolve) => client.once("data", () => resolve()));
-    expect(Buffer.concat(received).toString()).toContain("guest-payload");
-    expect(destinations).toEqual(["8.8.8.8:443"]);
-    expect(lookups).toBe(1);
-    fixture.policy.enabled = false;
-    await state.write("policy.json", fixture.policy);
-    await new Promise<void>((resolve, reject) => {
-      const timer = setTimeout(() => {
-        client.destroy();
-        reject(new Error("Revocation did not close access"));
-      }, 4000);
-      client.once("close", () => {
-        clearTimeout(timer);
-        resolve();
+  test.each(["revoked", "expired"] as const)(
+    "the validated address is used once and active access is cut when locally %s",
+    async (reason) => {
+      const fixture = await localFixture(state);
+      const peers = new Set<Socket>();
+      const remote = createServer((socket) => {
+        peers.add(socket);
+        socket.once("close", () => peers.delete(socket));
+        socket.on("data", (bytes) => socket.write(bytes));
       });
-    });
-  });
+      await new Promise<void>((resolve) => remote.listen(0, "127.0.0.1", resolve));
+      const remotePort = (remote.address() as { port: number }).port;
+      closers.push(
+        () =>
+          new Promise<void>((resolve) => {
+            for (const peer of peers) peer.destroy();
+            remote.close(() => resolve());
+          }),
+      );
+      let lookups = 0;
+      const destinations: string[] = [];
+      const broker = await startBroker({
+        authorize: (header) => fixture.records.authorize(header),
+        budget: new NetworkBudget(),
+        resolve: async () => {
+          lookups++;
+          return [{ address: "8.8.8.8", family: 4 }];
+        },
+        // Substitute only the external network endpoint; production still dials the pinned public IP.
+        dial: (target, port) => {
+          destinations.push(`${target.address}:${port}`);
+          const socket = connect({ host: "127.0.0.1", port: remotePort });
+          Object.defineProperty(socket, "remoteAddress", { get: () => target.address });
+          return socket;
+        },
+        git: async (_request, response) => {
+          response.end();
+        },
+        onFault: () => undefined,
+      });
+      closers.push(broker.close);
+      const client = connect({ host: "127.0.0.1", port: broker.port });
+      const received: Buffer[] = [];
+      client.on("data", (chunk) => received.push(chunk));
+      client.on("error", () => undefined);
+      await new Promise<void>((resolve) => client.once("connect", resolve));
+      client.write(
+        `CONNECT packages.example.com:443 HTTP/1.1\r\nHost: packages.example.com\r\nProxy-Authorization: ${fixture.authorization}\r\n\r\n`,
+      );
+      await new Promise<void>((resolve) => client.once("data", () => resolve()));
+      client.write("guest-payload");
+      await new Promise<void>((resolve) => client.once("data", () => resolve()));
+      expect(Buffer.concat(received).toString()).toContain("guest-payload");
+      expect(destinations).toEqual(["8.8.8.8:443"]);
+      expect(lookups).toBe(1);
+      if (reason === "revoked") fixture.policy.enabled = false;
+      else fixture.policy.leaseUntil = Date.now() - 1;
+      await state.write("policy.json", fixture.policy);
+      await new Promise<void>((resolve, reject) => {
+        const timer = setTimeout(() => {
+          client.destroy();
+          reject(new Error("Revocation did not close access"));
+        }, 4000);
+        client.once("close", () => {
+          clearTimeout(timer);
+          resolve();
+        });
+      });
+    },
+  );
 });

@@ -219,6 +219,8 @@ export async function startBroker(options: BrokerOptions, port = 0) {
               release();
               return;
             }
+            // The dial guard owns establishment, not idle time under the live grant.
+            upstream.setTimeout(0);
             established = true;
             client.write("HTTP/1.1 200 Connection Established\r\n\r\n");
             if (client.destroyed) return;

@@ -334,6 +334,13 @@ private storage, not a committed guest destination. A missing first guest marker
 commit is not proof that a file mutation never happened. Preserve the identity and inspect the
 target before intentionally requesting another effect.
 
+An unconfirmed CLI HTTP exchange exits with code 1 and `TRANSFER_OUTCOME_UNKNOWN`. Its JSON error's optional
+`diagnostic.kind` is `http`, `transport`, `process` or `response_limit`. When available,
+`httpStatus` is an HTTP error status from 400 to 599 and `processExitCode` is an integer from
+1 to 255. The diagnostic contains no raw response body, headers, stderr, URL or credential.
+It does not prove that the transfer had no effect. Inspect `status` with the original UUID,
+then resume the original command with its unchanged bytes and target guard.
+
 Interrupted input preparation or copying resumes the original bound object and checkpoint. If that
 object has been consumed or is unavailable, retry refuses a replacement or another source fetch;
 inspect the operation that used it before intentionally requesting new work. A completed independent
@@ -530,6 +537,9 @@ The proxy authenticates package requests with its installed per-space broker
 permission; package clients need not send a proxy-auth header. The host still enforces the computer's
 lease, repository authority and public-address/computer-network checks. A proxy refusal is not permission to broaden them
 or use a host/GitHub token.
+Local CONNECT timeouts guard establishment. After the fixed broker connection and verified
+upstream connection are established, these guards no longer impose an idle deadline. Current
+leases, revocation, socket closure and broker shutdown still end access.
 Busy connection capacity queues requests in FIFO order; disconnected consumers stop waiting.
 Authority is checked again after the wait. Revocation and lease expiry still refuse access.
 Public destinations are independent of technology; network downloads have no cumulative traffic or

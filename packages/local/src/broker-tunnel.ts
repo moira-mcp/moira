@@ -35,7 +35,8 @@ export async function startBrokerTunnel(targetPort: number, port = 0) {
       upstream.once("error", () => client.destroy());
       client.once("close", () => upstream.destroy());
       upstream.once("connect", () => {
-        client.setTimeout(125_000, () => client.destroy());
+        // Framing and connection are complete; the authenticated broker owns lifetime.
+        client.setTimeout(0);
         const remainder = prefix.subarray(Buffer.byteLength(BROKER_PREFACE));
         if (remainder.length) upstream.write(remainder);
         prefix = Buffer.alloc(0);
