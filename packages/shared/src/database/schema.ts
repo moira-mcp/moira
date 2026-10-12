@@ -491,6 +491,16 @@ export const codespaceTransfer = sqliteTable(
   {
     id: text("id").primaryKey(),
     tokenDigest: text("tokenDigest").notNull().unique(),
+    requestId: text("requestId"),
+    requestDigest: text("requestDigest"),
+    direction: text("direction"),
+    resourceId: text("resourceId"),
+    provider: text("provider"),
+    resourceGeneration: integer("resourceGeneration"),
+    authorizationGeneration: integer("authorizationGeneration"),
+    environmentIdentity: text("environmentIdentity"),
+    expectedSha256: text("expectedSha256"),
+    uploadedBytes: integer("uploadedBytes").notNull().default(0),
     userId: text("userId")
       .notNull()
       .references(() => user.id, { onDelete: "cascade" }),
@@ -517,6 +527,7 @@ export const codespaceTransfer = sqliteTable(
       table.expiresAt,
     ),
     stateExpiryIdx: index("codespace_transfer_state_expiry_idx").on(table.state, table.expiresAt),
+    requestIdx: uniqueIndex("codespace_transfer_request_idx").on(table.userId, table.requestId),
   }),
 );
 

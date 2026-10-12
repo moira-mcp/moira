@@ -9,6 +9,7 @@ import {
   CodespaceOperationRepository,
   CodespaceOperationService,
   CodespaceFileService,
+  type CodespaceFileTransferService,
   CodespaceTransferRepository,
   CodespaceTransferService,
   CodespaceResourceRepository,
@@ -39,6 +40,7 @@ import { existsSync, mkdirSync, readdirSync, renameSync, rmdirSync } from "node:
 import { GitHubCodespacesConnector } from "./github-codespaces-connector.js";
 import { OpenAINativeReferenceFetcher } from "./codespace-native-reference-fetcher.js";
 import { createLocalCodespaceServices } from "./local-codespace-services.js";
+import { createCodespaceFileTransfers } from "./codespace-file-transfers.js";
 import {
   GitHubCodespaceClientError,
   HttpGitHubCodespaceClient,
@@ -50,6 +52,7 @@ interface CodespaceServices {
   resource: CodespaceResourceService | null;
   operation: CodespaceOperationService | null;
   file: CodespaceFileService | null;
+  fileTransfers: CodespaceFileTransferService | null;
   transfer: CodespaceTransferService;
   observability: CodespaceObservabilityService;
   local: ReturnType<typeof createLocalCodespaceServices>;
@@ -57,7 +60,7 @@ interface CodespaceServices {
 
 export type CodespaceProviderServices = Pick<
   CodespaceServices,
-  "resource" | "operation" | "file" | "transfer" | "observability"
+  "resource" | "operation" | "file" | "fileTransfers" | "transfer" | "observability"
 > & {
   provider: string;
   connection: Pick<CodespaceConnectionService, "getStatus" | "refreshGrants">;
@@ -298,6 +301,7 @@ function initializeCodespaceServices(): CodespaceServices {
   let billingClient: HttpGitHubCodespaceClient | null = null;
   let operation: CodespaceOperationService | null = null;
   let file: CodespaceFileService | null = null;
+  let fileTransfers: CodespaceFileTransferService | null = null;
   const connectionRepository = new CodespaceConnectionRepository(getSqliteInstance());
   const connection = new CodespaceConnectionService({
     repository: connectionRepository,
@@ -404,6 +408,7 @@ function initializeCodespaceServices(): CodespaceServices {
       policy: getCodespaceResourcePolicy,
       transfers: transfer,
       nativeFetcher,
+      reconcileFile: (accepted) => file!.recoverNative(accepted),
       lifecycle: {
         ensureRunning: (userId, codespaceId) => resource!.ensureRunning(userId, codespaceId),
       },
@@ -423,10 +428,29 @@ function initializeCodespaceServices(): CodespaceServices {
       policy: getCodespaceResourcePolicy,
       transfers: transfer,
       nativeFetcher,
+      get native() {
+        return fileTransfers ?? undefined;
+      },
       lifecycle: {
         ensureRunning: (userId, codespaceId) => resource!.ensureRunning(userId, codespaceId),
       },
       audit: operationAudit(auditRepository),
+    });
+    fileTransfers = createCodespaceFileTransfers({
+      repository: operationRepository,
+      files: file,
+      transfers: transfer,
+      credentials: {
+        getCredential: async (userId, providerId) => {
+          if (providerId !== CODESPACE_PROVIDER_GITHUB)
+            throw new Error("Codespace credential provider does not match");
+          return connection.getAccessToken(userId);
+        },
+      },
+      transport: connector,
+      policy: getCodespaceResourcePolicy,
+      nativeFetcher,
+      wake: () => operation!.notifyAccepted(),
     });
   }
 
@@ -462,7 +486,16 @@ function initializeCodespaceServices(): CodespaceServices {
     resourceAudit: resourceAudit(auditRepository),
     operationAudit: operationAudit(auditRepository),
   });
-  services = { connection, resource, operation, file, transfer, observability, local };
+  services = {
+    connection,
+    resource,
+    operation,
+    file,
+    fileTransfers,
+    transfer,
+    observability,
+    local,
+  };
   return services;
 }
 

@@ -203,6 +203,15 @@ is actionable but not a stop certificate, unknown preserves the last verified st
 receipt replay after the delivery deadline does not dispatch a second effect. Native guard cases
 independently check SDK/Engine identity, held workers and durable stop generation without launching
 a VM. Verified observation time is tested separately from retry and connector-probe bookkeeping.
+The current native Local cases run the compiled worker/supervisor, installed remote file client and
+real HTTPS byte transfer through that SQL/HTTP/relay/RPC composition. They preserve bounded native
+stdin and separately verify large binary upload/download, original operation and target inode on
+replay, no input refetch, pure transfer status and consumed download bytes. Only the exact fixed
+life/installer requests and host/Linux fixed-path namespace are adapted at the external runtime
+boundary; no transfer result is fabricated. Shared SDK helpers own the isolated TLS server and
+asset installation. These cases do not prove the Linux production pathname or physical VM isolation.
+Ordinary and late relay ACK regressions observe the exact active RPC journal alongside the original
+effect and retained receipt; journal concurrency checks protect its shared serialization boundary.
 See [COVERAGE-MAP.md](COVERAGE-MAP.md#codespace-connections) for each
 suite's responsibility.
 
@@ -226,7 +235,42 @@ and filesystem effects to prove that reads remain independent of a held transact
 releases the kernel-owned lock, and another mutation can proceed. It distinguishes safe recovery
 from externally changed targets: the latter preserves current files, the conflicted journal and
 original backups through result finalization, without replaying the old mutation or blocking unrelated
-work. These host/container checks do not establish physical microVM isolation.
+work. Recovery cases replace partial files, targets and backups with foreign inodes, including
+targets with the same digest, and require their bytes and identities to remain untouched. Owned
+fsynced tails remain resumable; historical journals without ownership proof remain conflicted
+while their existing terminal receipts stay collectible. The same guards cover write, upload and
+patch rollback. These host/container checks do not establish physical microVM isolation.
+
+The same supervisor fixture executes the remote file CLI through real local TLS, holds transfer
+progress, loses chunk/finalization responses and verifies exact resume, pure status, guarded target
+commit recovery and expiry cleanup. The registered MCP SDK fixture separately connects the production
+transfer factory/router, provider codec, measured absolute CLI path and durable private store;
+reopening storage preserves original handles and target identity. Its host life/maintenance
+adaptation is explicit and does not establish a real GitHub VM or production Local owner. A
+deterministic setup case holds execution before its first durable launch record: lookup must remain
+pending, then collect the actual installation through the same request, operation and marker.
+Guest inspection separately distinguishes an unproved legacy outcome from a proved environment
+restart and preserves actual terminal receipts.
+
+Private storage tests observe bounded chunks and physical bytes rather than whole-file JSON/base64
+equivalence. They cover incremental MIME/UTF-8/JSON validation, same-identity offsets/finalization,
+content-identity invalidation, claim progress and quotas, and concurrent cleanup/claim ownership.
+File-lifecycle cases pin original native and CLI input before publication, settle an independent
+ready copy after its original source disappears, and refuse republication after input consumption.
+They also exercise expired terminal quota cleanup and captured publisher ownership: a stale owner
+cannot publish, while fresh recovery settles the same retained checkpoint without another allocation.
+Admission-expiry cases interrupt native upload/download, setup and CLI upload/download after durable
+input attachment but before dispatch. The claimed scheduler settles the original never-dispatched
+operation before reading private intent or delegating file recovery, with retained, expired and
+missing preparation under both provider policies. Assertions preserve original identity, deadline,
+source and target bytes, release active capacity and exclude credentials, guest probes, dispatch,
+refetch and replacement results. Ordinary owned private cleanup remains finite; already-dispatched
+unknown work is not treated as proved nonexecution. Terminal events require a successful
+claim-guarded state transition.
+Communication tests exercise independent source opens, cancellation settlement, retained private
+references and unsupported extension streams. The native Telegram multipart integration uses a real
+HTTP socket and disk parser to verify exact size/hash and UTF-8/quoted filename bytes; it does not
+send to Telegram or certify that service's filename interpretation.
 
 `tests/integration/local/guest-docker.test.ts` requires Docker and the configured pinned
 template image. It runs real Linux descriptor-limit behavior with substituted Docker
@@ -238,7 +282,10 @@ npm run local:verify:guest
 
 This command builds the local package and requires the pinned image already present
 locally. Its network-disabled container checks repository binding, stdin, binary files,
-persistent sessions and cancellation. Container compatibility and `npm run verify:docker`
+persistent sessions and cancellation. It also installs fixed file-client assets, verifies actual
+Linux boot identity and independent asset hashes, executes the returned absolute command and preserves
+repository bytes, named-session state and a retained terminal result. Unsafe installation locks are
+refused. Container compatibility and `npm run verify:docker`
 API/MCP/self-host checks do not establish physical sbx isolation.
 
 ### Real sbx acceptance

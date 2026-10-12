@@ -4,6 +4,7 @@ import { CallToolResultSchema } from "@modelcontextprotocol/sdk/types.js";
 import { createAuthenticatedMCPClient } from "../utils/mcp-auth.js";
 import { getAdminCredentials, getTestBaseUrl } from "../utils/test-config.js";
 import { dockerExecSync } from "../utils/docker-command.js";
+import { createHash } from "node:crypto";
 
 const codespaceId = "00000000-0000-4000-8000-000000000162";
 const operationId = "00000000-0000-4000-8000-000000000163";
@@ -22,6 +23,8 @@ const actions = [
   "stop",
   "delete",
   "exec",
+  "files_setup",
+  "transfer_status",
   "stat",
   "search",
   "read",
@@ -36,7 +39,7 @@ const actions = [
 
 // Run the baked service against its actual database and transfer directory. No
 // capability is written to disk or included in a thrown Docker command error.
-function transferFixtureCommand(action: "seed" | "cleanup", value: string): string {
+function transferFixtureCommand(action: "seed" | "seed-large" | "cleanup", value: string): string {
   const target = new URL(getTestBaseUrl());
   if (
     process.env.REMOTE_DOCKER_CONTEXT ||
@@ -54,15 +57,23 @@ function transferFixtureCommand(action: "seed" | "cleanup", value: string): stri
       repository: new CodespaceTransferRepository(db), policy: getCodespaceResourcePolicy,
       root: join(dirname(getDbPath()), 'codespace-transfers'),
     });
-    if (process.argv[1] === 'seed') {
+    if (process.argv[1].startsWith('seed')) {
       const user = db.prepare('SELECT id FROM user WHERE email = ?').get(process.argv[2]);
       if (!user) throw new Error('Explicit authenticated fixture owner missing');
-      const reservation = service.reserveDownload(user.id, {
-        fileName: 'codespace-http-probe.bin', mimeType: 'application/octet-stream', maxBytes: 6,
+      const large = process.argv[1] === 'seed-large';
+      const size = large ? 5 * 1024 * 1024 + 7 : 6;
+      const handle = await service.ingestStream(user.id, {
+        fileName: 'codespace-http-probe.bin', mimeType: 'application/octet-stream', size,
+        body: (async function* () {
+          if (!large) { yield Buffer.from([0, 255, 1, 128, 10, 42]); return; }
+          const chunk = Buffer.alloc(256 * 1024, 0xa7);
+          for (let offset = 0; offset < size; offset += chunk.length)
+            yield chunk.subarray(0, Math.min(chunk.length, size - offset));
+        })(),
       });
-      const handle = await service.publishDownload(reservation, Buffer.from([0, 255, 1, 128, 10, 42]));
+      const { record } = await service.getOwnedSource(user.id, handle.referenceId);
       process.stdout.write('TRANSFER_FIXTURE:' + JSON.stringify({
-        id: reservation.record.id, referenceId: handle.referenceId,
+        id: record.id, referenceId: handle.referenceId,
       }));
     } else {
       const record = db.prepare('SELECT * FROM codespaceTransfer WHERE id = ?').get(process.argv[2]);
@@ -315,39 +326,63 @@ describe("Codespace MCP HTTP contract on a default-disabled installation", () =>
     await expect(response.json()).resolves.toEqual({ error: "codespace_transfer_not_found" });
   });
 
-  test("should deliver exact private bytes once through the public application origin", async () => {
-    const output = transferFixtureCommand("seed", getAdminCredentials().email);
-    const marker = "TRANSFER_FIXTURE:";
-    if (!output.includes(marker))
-      throw new Error("Codespace transfer fixture did not return a handle");
-    const fixture = JSON.parse(output.slice(output.lastIndexOf(marker) + marker.length)) as {
-      id: string;
-      referenceId: string;
-    };
-    try {
-      // Keep the capability out of assertion diagnostics, logs and test artifacts.
-      const token = fixture.referenceId.slice("codespace-file://".length);
-      const url = `${getTestBaseUrl()}/api/codespaces/transfers/${encodeURIComponent(token)}`;
-      const response = await fetch(url);
-      expect(response.status).toBe(200);
-      expect(Buffer.from(await response.arrayBuffer())).toEqual(
-        Buffer.from([0, 255, 1, 128, 10, 42]),
-      );
-      expect(response.headers.get("content-type")).toBe("application/octet-stream");
-      expect(response.headers.get("content-disposition")).toContain(
-        'attachment; filename="codespace-http-probe.bin"',
-      );
-      expect(response.headers.get("cache-control")).toBe("private, no-store, max-age=0");
-      expect(response.headers.get("x-content-type-options")).toBe("nosniff");
-      expect(response.headers.get("x-robots-tag")).toBe("noindex, nofollow, noarchive");
-      expect(response.headers.get("referrer-policy")).toBe("no-referrer");
-      const replay = await fetch(url);
-      expect(replay.status).toBe(404);
-      await expect(replay.json()).resolves.toEqual({ error: "codespace_transfer_not_found" });
-    } finally {
-      transferFixtureCommand("cleanup", fixture.id);
-    }
-  });
+  test.each(["seed", "seed-large"] as const)(
+    "should deliver exact private bytes once through the public application origin (%s)",
+    async (action) => {
+      const output = transferFixtureCommand(action, getAdminCredentials().email);
+      const marker = "TRANSFER_FIXTURE:";
+      if (!output.includes(marker))
+        throw new Error("Codespace transfer fixture did not return a handle");
+      const fixture = JSON.parse(output.slice(output.lastIndexOf(marker) + marker.length)) as {
+        id: string;
+        referenceId: string;
+      };
+      try {
+        // Keep the capability out of assertion diagnostics, logs and test artifacts.
+        const token = fixture.referenceId.slice("codespace-file://".length);
+        const url = `${getTestBaseUrl()}/api/codespaces/transfers/${encodeURIComponent(token)}`;
+        const response = await fetch(url);
+        expect(response.status).toBe(200);
+        const expected = createHash("sha256");
+        const size = action === "seed-large" ? 5 * 1024 * 1024 + 7 : 6;
+        const chunk =
+          action === "seed-large"
+            ? Buffer.alloc(256 * 1024, 0xa7)
+            : Buffer.from([0, 255, 1, 128, 10, 42]);
+        for (let offset = 0; offset < size; offset += chunk.length)
+          expected.update(chunk.subarray(0, Math.min(chunk.length, size - offset)));
+        const observed = createHash("sha256");
+        let received = 0;
+        if (!response.body) throw new Error("Native download body is missing");
+        const reader = response.body.getReader();
+        try {
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            received += value.byteLength;
+            observed.update(value);
+          }
+        } finally {
+          reader.releaseLock();
+        }
+        expect(received).toBe(size);
+        expect(observed.digest("hex")).toBe(expected.digest("hex"));
+        expect(response.headers.get("content-type")).toBe("application/octet-stream");
+        expect(response.headers.get("content-disposition")).toContain(
+          'attachment; filename="codespace-http-probe.bin"',
+        );
+        expect(response.headers.get("cache-control")).toBe("private, no-store, max-age=0");
+        expect(response.headers.get("x-content-type-options")).toBe("nosniff");
+        expect(response.headers.get("x-robots-tag")).toBe("noindex, nofollow, noarchive");
+        expect(response.headers.get("referrer-policy")).toBe("no-referrer");
+        const replay = await fetch(url);
+        expect(replay.status).toBe(404);
+        await expect(replay.json()).resolves.toEqual({ error: "codespace_transfer_not_found" });
+      } finally {
+        transferFixtureCommand("cleanup", fixture.id);
+      }
+    },
+  );
 
   test.each([
     ["create", { repository_id: "162", ref: "master" }],
@@ -372,6 +407,7 @@ describe("Codespace MCP HTTP contract on a default-disabled installation", () =>
       "upload",
       {
         codespace_id: codespaceId,
+        request_id: requestId,
         path: "input.txt",
         expected: { exists: false },
         file: {
@@ -390,6 +426,8 @@ describe("Codespace MCP HTTP contract on a default-disabled installation", () =>
       },
     ],
     ["get", { codespace_id: codespaceId }],
+    ["files_setup", { codespace_id: codespaceId, request_id: requestId }],
+    ["transfer_status", { codespace_id: codespaceId, request_id: requestId }],
     ["preview_image", { codespace_id: codespaceId, path: "screenshot.png" }],
     [
       "pull_request_create",

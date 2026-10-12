@@ -330,6 +330,109 @@ function data(result: Awaited<ReturnType<typeof executeCodespaceTool>>) {
 }
 
 describe("codespace MCP adapter", () => {
+  it.each([true, false])(
+    "projects the measured setup command only when provisioned=%s",
+    async (provisioned) => {
+      const base = services();
+      const response = await executeCodespaceTool(
+        parseCodespaceToolParams({
+          action: "files_setup",
+          codespace_id: CODESPACE_ID,
+          request_id: REQUEST_ID,
+        }),
+        USER_ID,
+        services({
+          file: {
+            ...base.file!,
+            ensureFileClient: async () => ({
+              operationId: OPERATION_ID,
+              requestId: REQUEST_ID,
+              provisioned,
+              abi: 1,
+              environmentIdentity: "a".repeat(64),
+              command: provisioned ? "/home/agent/.local/bin/moira-files" : null,
+              ...(provisioned
+                ? { cliSha256: "b".repeat(64), executableSha256: "b".repeat(64) }
+                : {}),
+            }),
+          },
+        }),
+      );
+      expect(data(response)).toMatchObject({
+        request_id: REQUEST_ID,
+        operation_id: OPERATION_ID,
+        provisioned,
+        command: provisioned ? "/home/agent/.local/bin/moira-files" : null,
+        ...(provisioned
+          ? { cli_sha256: "b".repeat(64), executable_sha256: "b".repeat(64) }
+          : { pending: true }),
+      });
+      expect(data(response)).not.toHaveProperty("bootstrapCapability");
+      expect(data(response)).not.toHaveProperty("capability");
+    },
+  );
+  it("recovers a private transfer by caller identity without dispatch and exposes its native handle", async () => {
+    const base = services();
+    const dependencies = services({
+      file: {
+        ...base.file!,
+        transferStatus: async (userId, codespaceId, input) => {
+          if (userId !== USER_ID || codespaceId !== CODESPACE_ID || input.requestId !== REQUEST_ID)
+            throw new CodespaceResourceError("CODESPACE_NOT_FOUND", "Foreign transfer");
+          return {
+            operation: operation("download"),
+            transfer: {
+              transferId: OTHER_REQUEST_ID,
+              requestId: REQUEST_ID,
+              requestDigest: "private-transfer-digest",
+              direction: "guest_to_server",
+              state: "ready",
+              offset: 5,
+              size: 5,
+              sha256: "a".repeat(64),
+              expiresAt: 900,
+              handle: {
+                referenceId: `codespace-file://${"x".repeat(43)}`,
+                fileName: "film.mp4",
+                mimeType: "video/mp4",
+                size: 5,
+                sha256: "a".repeat(64),
+                expiresAt: 900,
+              },
+            },
+          };
+        },
+      },
+    });
+    const response = await executeCodespaceTool(
+      parseCodespaceToolParams({
+        action: "transfer_status",
+        codespace_id: CODESPACE_ID,
+        request_id: REQUEST_ID,
+      }),
+      USER_ID,
+      dependencies,
+    );
+    expect(response.content).toEqual([
+      expect.objectContaining({ type: "resource_link", name: "film.mp4" }),
+    ]);
+    expect(data(response)).toMatchObject({
+      request_id: REQUEST_ID,
+      transfer: {
+        transfer_id: OTHER_REQUEST_ID,
+        scope: "private_object",
+        state: "ready",
+        offset: 5,
+      },
+      file: { reference_id: `codespace-file://${"x".repeat(43)}`, size_bytes: 5 },
+    });
+    expect(JSON.stringify(response)).not.toMatch(
+      /private-transfer-digest|secret-provider|remoteMarker/,
+    );
+    expect(dependencies.file!.execute).not.toHaveBeenCalled();
+    expect(dependencies.file!.downloadReference).not.toHaveBeenCalled();
+  });
+
   it("returns caller identity and available command output without private operation data", async () => {
     const response = await executeCodespaceTool(
       parseCodespaceToolParams({
@@ -1333,6 +1436,7 @@ describe("codespace MCP adapter", () => {
         action: "upload",
         codespace_id: CODESPACE_ID,
         path: "input.txt",
+        request_id: REQUEST_ID,
         file: {
           file_id: "sediment://file_00000000000000000000000000000000",
           download_url: "https://oaiusercontent.com/private-token",
@@ -1350,6 +1454,7 @@ describe("codespace MCP adapter", () => {
         action: "download",
         codespace_id: CODESPACE_ID,
         path: "result.txt",
+        request_id: OTHER_REQUEST_ID,
         max_bytes: 1024,
         file_name: "result.txt",
         mime_type: "text/plain",
@@ -1883,10 +1988,11 @@ describe("codespace MCP adapter", () => {
         action: "download",
         codespace_id: CODESPACE_ID,
         path: "dist/app.zip",
+        request_id: REQUEST_ID,
         file_name: "app.zip",
         mime_type: "application/zip",
       }),
-    ).toMatchObject({ action: "download", request: { max_bytes: 4 * 1024 * 1024 } });
+    ).toMatchObject({ action: "download", request: { max_bytes: 20 * 1024 * 1024 } });
   });
 
   it("names the missing or invalid fields of an incomplete request instead of a generic error", async () => {
@@ -2034,6 +2140,7 @@ describe("codespace MCP adapter", () => {
       {
         codespace_id: CODESPACE_ID,
         path: "a.txt",
+        request_id: REQUEST_ID,
         expected: { exists: false },
         file: {
           file_id: "sediment://file_00000000000000000000000000000000",
@@ -2047,6 +2154,7 @@ describe("codespace MCP adapter", () => {
       {
         codespace_id: CODESPACE_ID,
         path: "a.bin",
+        request_id: REQUEST_ID,
         file_name: "a.bin",
         mime_type: "application/octet-stream",
         query: "TODO",
@@ -2131,6 +2239,7 @@ describe("codespace MCP adapter", () => {
       {
         codespace_id: CODESPACE_ID,
         path: "a.txt",
+        request_id: REQUEST_ID,
         expected: { exists: false },
         file: {
           file_id: "sediment://file_00000000000000000000000000000000",
@@ -2143,14 +2252,15 @@ describe("codespace MCP adapter", () => {
     ],
     [
       // `download` and `search` both declare `max_bytes` with different ceilings; the published
-      // object must still accept a download at its own 4 MiB bound.
+      // object must still accept a binary download at its own effective-policy bound.
       "download",
       {
         codespace_id: CODESPACE_ID,
         path: "a.bin",
+        request_id: REQUEST_ID,
         file_name: "a.bin",
         mime_type: "application/octet-stream",
-        max_bytes: 4 * 1024 * 1024,
+        max_bytes: 20 * 1024 * 1024,
       },
     ],
     [

@@ -216,3 +216,46 @@ export const { apiLimiter, authLimiter, artifactViewLimiter, mcpLimiter } = crea
   skipLimits: isTestEnvironment() || isRateLimitDisabled(),
   whitelist: getRateLimitWhitelist(),
 });
+
+/** File chunks have a separate verified owner budget, independent of ordinary UI traffic. */
+export function createCodespaceFileRateLimiter(
+  options: RateLimiterOptions & {
+    authenticate: (
+      request: Request,
+    ) => Promise<{ userId: string; phase: "chunks" | "control"; requestsPerMinute: number } | null>;
+  },
+) {
+  const budgets = new WeakMap<Request, number>();
+  return rateLimit({
+    windowMs: 60_000,
+    skip: (request) =>
+      options.skipLimits ||
+      isWhitelisted(request, options.whitelist) ||
+      hasValidLoadTestHeader(request),
+    keyGenerator: async (request) => {
+      let scope;
+      try {
+        scope = await options.authenticate(request);
+      } catch {
+        scope = null;
+      }
+      if (scope && Number.isSafeInteger(scope.requestsPerMinute) && scope.requestsPerMinute > 0) {
+        budgets.set(request, scope.requestsPerMinute);
+        return `files:owner:${scope.userId}:${scope.phase}`;
+      }
+      budgets.set(request, 100);
+      return `files:invalid:${ipKeyGenerator(request.ip ?? request.socket.remoteAddress ?? "")}`;
+    },
+    limit: (request) => budgets.get(request) ?? 100,
+    standardHeaders: true,
+    legacyHeaders: false,
+    handler: (_request, response) =>
+      response.status(429).json({
+        error: {
+          code: "CODESPACE_POLICY_LIMIT",
+          message:
+            "File request rate exceeded; retain the original request identity and resume later",
+        },
+      }),
+  });
+}

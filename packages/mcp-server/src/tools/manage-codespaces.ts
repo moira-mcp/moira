@@ -200,16 +200,19 @@ export interface CodespaceToolServices {
       > &
         Partial<Pick<CodespaceOperationService, "lookupRequest">>)
     | null;
-  file: Pick<
-    CodespaceFileService,
-    | "execute"
-    | "uploadReference"
-    | "downloadReference"
-    | "reconcile"
-    | "reconcileDownloadReference"
-    | "waitForResult"
-    | "waitForDownloadReference"
-  > | null;
+  file:
+    | (Pick<
+        CodespaceFileService,
+        | "execute"
+        | "uploadReference"
+        | "downloadReference"
+        | "reconcile"
+        | "reconcileDownloadReference"
+        | "waitForResult"
+        | "waitForDownloadReference"
+      > &
+        Partial<Pick<CodespaceFileService, "ensureFileClient" | "transferStatus">>)
+    | null;
 }
 
 const PROVIDER_REFUSAL_CODES: ReadonlySet<string> = new Set([
@@ -589,6 +592,9 @@ function projectFileResult(result: NonNullable<CodespaceFileOperationResponse["r
         path: result.path,
         previous: projectVersion(result.previous),
         current: projectVersion(result.current),
+        ...("transferId" in result
+          ? { transfer_id: result.transferId, size_bytes: result.size, sha256: result.sha256 }
+          : {}),
       };
     case "apply_patch":
       return {
@@ -761,6 +767,7 @@ function resourceLinkResult(transfer: {
   };
   const structuredContent = {
     file: {
+      reference_id: transfer.referenceId,
       name: transfer.fileName,
       mime_type: transfer.mimeType,
       size_bytes: transfer.size,
@@ -1110,6 +1117,60 @@ export async function executeCodespaceTool(
     }
 
     switch (action) {
+      case "files_setup": {
+        const input = params as CodespaceToolParams["files_setup"];
+        if (!services.file.ensureFileClient) return errorResult("CODESPACE_NOT_CONFIGURED");
+        const setup = await services.file.ensureFileClient(userId, input.codespace_id, {
+          requestId: input.request_id,
+        });
+        return jsonResult({
+          request_id: input.request_id,
+          operation_id: setup.operationId,
+          provisioned: setup.provisioned,
+          abi: setup.abi,
+          environment_identity: setup.environmentIdentity,
+          command: setup.command,
+          ...(!setup.provisioned ? { pending: true } : {}),
+          ...(setup.workerSha256 !== undefined ? { worker_sha256: setup.workerSha256 } : {}),
+          ...(setup.cliSha256 !== undefined ? { cli_sha256: setup.cliSha256 } : {}),
+          ...(setup.executableSha256 !== undefined
+            ? { executable_sha256: setup.executableSha256 }
+            : {}),
+        });
+      }
+      case "transfer_status": {
+        const input = params as CodespaceToolParams["transfer_status"];
+        if (!services.file.transferStatus) return errorResult("CODESPACE_NOT_CONFIGURED");
+        const status = await services.file.transferStatus(userId, input.codespace_id, {
+          requestId: input.request_id,
+          ...(input.transfer_id ? { transferId: input.transfer_id } : {}),
+        });
+        const transfer = status.transfer;
+        const metadata = {
+          request_id: input.request_id,
+          ...(status.operation
+            ? { operation: projectOperation({ operation: status.operation, result: null }) }
+            : {}),
+          transfer: transfer
+            ? {
+                transfer_id: transfer.transferId,
+                request_id: transfer.requestId,
+                scope: "private_object",
+                direction: transfer.direction,
+                state: transfer.state,
+                offset: transfer.offset,
+                size_bytes: transfer.size,
+                sha256: transfer.sha256,
+                expires_at: transfer.expiresAt,
+              }
+            : null,
+        };
+        if (transfer?.handle && transfer.direction === "guest_to_server") {
+          const link = resourceLinkResult(transfer.handle);
+          return { ...link, structuredContent: { ...metadata, ...link.structuredContent } };
+        }
+        return jsonResult(metadata);
+      }
       case "preview_image": {
         const input = params as CodespaceNewToolParams<"preview_image">;
         const accepted = await services.file.execute(userId, input.codespace_id, {
@@ -1304,6 +1365,7 @@ export async function executeCodespaceTool(
       case "upload": {
         const input = params as CodespaceNewToolParams<"upload">;
         const accepted = await services.file.uploadReference(userId, input.codespace_id, {
+          requestId: input.request_id,
           path: input.path,
           reference: publicNativeReference(input.file),
           expected: publicExpected(input.expected),
@@ -1318,6 +1380,7 @@ export async function executeCodespaceTool(
       case "download": {
         const input = params as CodespaceNewToolParams<"download">;
         const accepted = await services.file.downloadReference(userId, input.codespace_id, {
+          requestId: input.request_id,
           path: input.path,
           maxBytes: input.max_bytes,
           fileName: input.file_name,

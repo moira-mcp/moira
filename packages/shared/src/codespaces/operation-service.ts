@@ -260,6 +260,8 @@ export class CodespaceOperationService {
           >
         >;
       nativeFetcher?: CodespaceNativeReferenceFetcher;
+      /** Durable file intents use this same claimed recovery pool, with their own receipt decoder. */
+      reconcileFile?: (operation: CodespaceOperationRecord) => Promise<boolean>;
       /**
        * Starts a codespace that is asleep so the work about to reach it does not fail. Absent where
        * no lifecycle authority is wired, in which case a stopped codespace is refused as before.
@@ -1084,6 +1086,16 @@ export class CodespaceOperationService {
   }
 
   async cancel(userId: string, operationId: string): Promise<CodespaceOperationResponse> {
+    const context = this.dependencies.repository.requireAuthority(
+      userId,
+      operationId,
+      this.dependencies.policy(),
+    );
+    if (context.operation.kind !== "exec")
+      throw new CodespaceResourceError(
+        "CODESPACE_NOT_FOUND",
+        "Codespace command operation was not found",
+      );
     const operation = this.dependencies.repository.requestCancel(userId, operationId, this.now());
     if (!operation) {
       throw new CodespaceResourceError("CODESPACE_NOT_FOUND", "Codespace operation was not found");
@@ -1338,6 +1350,41 @@ export class CodespaceOperationService {
     claimId: string,
     policy: CodespaceResourcePolicy,
   ): Promise<boolean> {
+    // Reserved state proves dispatch admission never occurred. Its expiry must
+    // settle independently of the retained input or private preparation lifetime.
+    if (operation.state === "reserved" && operation.deadlineAt <= this.now()) {
+      if (
+        this.dependencies.repository.cancelBeforeDispatch(
+          operation.userId,
+          operation.id,
+          this.now(),
+          "reservation_expired_before_dispatch",
+          claimId,
+        )
+      )
+        await this.emit(
+          "terminal",
+          this.dependencies.repository.getOwned(operation.userId, operation.id)!,
+        );
+      return true;
+    }
+    if (
+      operation.inputReference &&
+      (operation.kind !== "exec" || operation.sessionKey === "moira-file-client") &&
+      this.dependencies.reconcileFile
+    ) {
+      try {
+        if (await this.dependencies.reconcileFile(operation)) return true;
+      } catch {
+        this.dependencies.repository.retainClaim(
+          operation.id,
+          claimId,
+          "file_inspection_required",
+          this.now(),
+        );
+        return true;
+      }
+    }
     const context = this.dependencies.repository.getContext(operation.userId, operation.id);
     if (!context) return true;
     if (operation.state === "reserved") {
@@ -1355,17 +1402,19 @@ export class CodespaceOperationService {
         }
         return true;
       }
-      this.dependencies.repository.cancelBeforeDispatch(
-        operation.userId,
-        operation.id,
-        this.now(),
-        "reservation_expired_before_dispatch",
-        claimId,
-      );
-      await this.emit(
-        "terminal",
-        this.dependencies.repository.getOwned(operation.userId, operation.id)!,
-      );
+      if (
+        this.dependencies.repository.cancelBeforeDispatch(
+          operation.userId,
+          operation.id,
+          this.now(),
+          "reservation_expired_before_dispatch",
+          claimId,
+        )
+      )
+        await this.emit(
+          "terminal",
+          this.dependencies.repository.getOwned(operation.userId, operation.id)!,
+        );
       return true;
     }
     const cleanupOnly = ["succeeded", "failed", "cancelled", "timed_out"].includes(operation.state);
@@ -1392,7 +1441,10 @@ export class CodespaceOperationService {
           context.codespace,
           operation,
         );
-        if ("state" in fileResult && fileResult.state === "running") {
+        if (
+          "state" in fileResult &&
+          (fileResult.state === "running" || fileResult.state === "outcome_unknown")
+        ) {
           this.dependencies.repository.releaseClaim(
             operation.id,
             claimId,
@@ -1400,22 +1452,12 @@ export class CodespaceOperationService {
             this.now(),
           );
         } else if ("state" in fileResult && fileResult.state === "absent") {
-          // Exact-marker inspection proved the remote holds no such operation: terminal,
-          // capacity released, the same way an absent exec result is finalized.
-          const completed = this.dependencies.repository.completeMetadata(
-            operation.userId,
+          this.dependencies.repository.releaseClaim(
             operation.id,
-            0,
-            this.now() + policy.cleanupDeadlineMs,
+            claimId,
+            "file_outcome_unknown",
             this.now(),
-            "failed",
           );
-          if (completed) {
-            await this.emit(
-              "terminal",
-              this.dependencies.repository.getOwned(operation.userId, operation.id)!,
-            );
-          }
         } else {
           const completed = this.dependencies.repository.completeMetadata(
             operation.userId,
@@ -1511,6 +1553,10 @@ export class CodespaceOperationService {
       this.dependencies.policy().reconcileIntervalMs,
     );
     this.timer.unref();
+  }
+
+  notifyAccepted(): void {
+    void this.runScheduledReconcile(true);
   }
 
   private async runScheduledReconcile(queuedOnly = false): Promise<void> {

@@ -6,6 +6,7 @@ import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
   existsSync,
+  createReadStream,
   linkSync,
   mkdtempSync,
   readFileSync,
@@ -13,8 +14,10 @@ import {
   rmSync,
   symlinkSync,
   writeFileSync,
+  cpSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
+import { open } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import {
   CodespaceTransferRepository,
@@ -121,6 +124,971 @@ function fetcher(bytes = Buffer.from([0, 255, 1, 2, 3])): CodespaceNativeReferen
 }
 
 describe("private codespace transfer service", () => {
+  test("cleanup preserves a ready object released after its inspection observed a claim", async () => {
+    const value = fixture();
+    let resume!: () => void;
+    let entered!: () => void;
+    const held = new Promise<void>((resolve) => (resume = resolve));
+    const inspecting = new Promise<void>((resolve) => (entered = resolve));
+    const internal = value.service as unknown as {
+      openVerified: (
+        record: ReturnType<typeof value.repository.listLive>[number],
+      ) => ReturnType<typeof open>;
+      openStream: (
+        record: ReturnType<typeof value.repository.listLive>[number],
+      ) => Promise<import("@mcp-moira/shared").CodespaceVerifiedByteStream>;
+    };
+    const originalOpen = internal.openVerified.bind(value.service);
+    const inspection = jest
+      .spyOn(internal, "openVerified")
+      .mockImplementationOnce(async (record) => {
+        const descriptor = await originalOpen(record);
+        entered();
+        await held;
+        return descriptor;
+      });
+    const originalStream = internal.openStream.bind(value.service);
+    const delivery = jest.spyOn(internal, "openStream").mockImplementationOnce(async (record) => {
+      try {
+        return await originalStream(record);
+      } catch (error) {
+        value.service.release(value.repository.getOwned("user-1", record.id)!);
+        throw error;
+      }
+    });
+    let download: Awaited<ReturnType<CodespaceTransferService["claimDownload"]>> | undefined;
+    try {
+      const bytes = Buffer.from("released successor bytes");
+      const handle = await value.service.createDownload("user-1", {
+        fileName: "keep.bin",
+        mimeType: "application/octet-stream",
+        bytes,
+      });
+      const snapshot = value.repository.listLive()[0];
+      const cleaning = value.service.cleanup();
+      await inspecting;
+      download = await value.service.claimDownload(handle.referenceId);
+      resume();
+      await cleaning;
+      expect(value.repository.getOwned("user-1", snapshot.id)).toEqual(snapshot);
+      const { source } = await value.service.getOwnedSource("user-1", handle.referenceId);
+      const received: Uint8Array[] = [];
+      for await (const chunk of await source.open()) received.push(chunk);
+      expect(Buffer.concat(received)).toEqual(bytes);
+      expect(value.repository.usageForUser("user-1").bytes).toBe(bytes.length);
+    } finally {
+      resume();
+      download?.stream.destroy();
+      inspection.mockRestore();
+      delivery.mockRestore();
+      value.sqlite.close();
+    }
+  });
+
+  test("cleanup inspection cannot delete an object claimed after its ready snapshot", async () => {
+    const value = fixture();
+    let resume!: () => void;
+    let entered!: () => void;
+    const held = new Promise<void>((resolve) => (resume = resolve));
+    const inspecting = new Promise<void>((resolve) => (entered = resolve));
+    const internal = value.service as unknown as {
+      openVerified: (
+        record: ReturnType<typeof value.repository.listLive>[number],
+      ) => ReturnType<typeof open>;
+    };
+    const original = internal.openVerified.bind(value.service);
+    const inspection = jest
+      .spyOn(internal, "openVerified")
+      .mockImplementationOnce(async (record) => {
+        const descriptor = await original(record);
+        entered();
+        await held;
+        return descriptor;
+      });
+    let download: Awaited<ReturnType<CodespaceTransferService["claimDownload"]>> | undefined;
+    try {
+      const bytes = Buffer.from("claimed successor bytes");
+      const handle = await value.service.createDownload("user-1", {
+        fileName: "keep.bin",
+        mimeType: "application/octet-stream",
+        bytes,
+      });
+      const cleaning = value.service.cleanup();
+      await inspecting;
+      download = await value.service.claimDownload(handle.referenceId);
+      const current = value.repository.getOwned("user-1", download.record.id);
+      resume();
+      await cleaning;
+      expect(value.repository.getOwned("user-1", download.record.id)).toEqual(current);
+      const received: Buffer[] = [];
+      for await (const chunk of download.stream) received.push(chunk as Buffer);
+      expect(Buffer.concat(received)).toEqual(bytes);
+      expect(value.repository.usageForUser("user-1").inflightBytes).toBe(bytes.length);
+      await value.service.consume(download.record);
+      expect(value.repository.listLive()).toEqual([]);
+    } finally {
+      resume();
+      download?.stream.destroy();
+      inspection.mockRestore();
+      value.sqlite.close();
+    }
+  });
+
+  test("failed stale claim validation cannot invalidate a released and reclaimed object", async () => {
+    const value = fixture();
+    let resume!: () => void;
+    let entered!: () => void;
+    const held = new Promise<void>((resolve) => (resume = resolve));
+    const inspecting = new Promise<void>((resolve) => (entered = resolve));
+    const internal = value.service as unknown as {
+      openVerified: (
+        record: ReturnType<typeof value.repository.listLive>[number],
+      ) => ReturnType<typeof open>;
+    };
+    const original = internal.openVerified.bind(value.service);
+    const inspection = jest
+      .spyOn(internal, "openVerified")
+      .mockImplementationOnce(async (record) => {
+        const descriptor = await original(record);
+        entered();
+        await held;
+        return descriptor;
+      });
+    let successor: Awaited<ReturnType<CodespaceTransferService["claimDownload"]>> | undefined;
+    try {
+      const bytes = Buffer.from("reclaimed retained bytes");
+      const handle = await value.service.createDownload("user-1", {
+        fileName: "keep.bin",
+        mimeType: "application/octet-stream",
+        bytes,
+      });
+      const pending = value.service.claimDownload(handle.referenceId);
+      const refused = expect(pending).rejects.toThrow(/changed/);
+      await inspecting;
+      const predecessor = value.repository.listLive()[0];
+      value.service.release(predecessor);
+      successor = await value.service.claimDownload(handle.referenceId);
+      const current = value.repository.getOwned("user-1", successor.record.id);
+      await expect(value.service.consume(predecessor)).rejects.toThrow(/no longer current/);
+      await value.service.consume(predecessor, { ignoreLostClaim: true });
+      expect(value.repository.getOwned("user-1", successor.record.id)).toEqual(current);
+      resume();
+      await refused;
+      expect(value.repository.getOwned("user-1", successor.record.id)).toEqual(current);
+      const received: Buffer[] = [];
+      for await (const chunk of successor.stream) received.push(chunk as Buffer);
+      expect(Buffer.concat(received)).toEqual(bytes);
+    } finally {
+      resume();
+      successor?.stream.destroy();
+      inspection.mockRestore();
+      value.sqlite.close();
+    }
+  });
+
+  test("an expired cleanup snapshot cannot discard a claim renewed before deletion", async () => {
+    const value = fixture({ transferTtlMs: 600_000 });
+    let download: Awaited<ReturnType<CodespaceTransferService["claimDownload"]>> | undefined;
+    try {
+      const bytes = Buffer.from("renewed bytes");
+      const handle = await value.service.createDownload("user-1", {
+        fileName: "keep.bin",
+        mimeType: "application/octet-stream",
+        bytes,
+      });
+      download = await value.service.claimDownload(handle.referenceId);
+      const snapshot = value.repository.getOwned("user-1", download.record.id)!;
+      value.advance(30_000);
+      expect(
+        value.repository.renewClaim(
+          snapshot.id,
+          snapshot.claimId!,
+          snapshot.createdAt + 30_000,
+          snapshot.createdAt + 90_000,
+        ),
+      ).toBe(true);
+      value.advance(30_000);
+      const current = value.repository.getOwned("user-1", snapshot.id);
+      await value.service.discard(snapshot);
+      expect(value.repository.getOwned("user-1", snapshot.id)).toEqual(current);
+      const received: Buffer[] = [];
+      for await (const chunk of download.stream) received.push(chunk as Buffer);
+      expect(Buffer.concat(received)).toEqual(bytes);
+    } finally {
+      download?.stream.destroy();
+      value.sqlite.close();
+    }
+  });
+
+  test("control claim inflight admission checks both owner and global capacity independently of native claims", async () => {
+    const overrides = {
+      maxTransferFileBytes: 4,
+      maxTransferBytesPerUser: 20,
+      maxTransferBytesGlobal: 32,
+      maxTransferObjectsPerUser: 4,
+      maxTransferObjectsGlobal: 8,
+      maxTransferInflightBytesPerUser: 4,
+      maxTransferInflightBytesGlobal: 6,
+    };
+    const policy = { ...basePolicy, ...overrides };
+    const value = fixture(overrides);
+    let native: Awaited<ReturnType<CodespaceTransferService["claimDownload"]>> | undefined;
+    try {
+      const handle = await value.service.createDownload("user-1", {
+        fileName: "native.bin",
+        mimeType: "application/octet-stream",
+        bytes: Buffer.alloc(4),
+      });
+      native = await value.service.claimDownload(handle.referenceId);
+      const reserve = (
+        userId: string,
+        purpose: "operation_input" | "operation_result" | "local_relay_input",
+        size: number,
+      ) => {
+        const reservation = value.repository.reserve({
+          userId,
+          purpose,
+          fileName: "relay.bin",
+          mimeType: "application/octet-stream",
+          declaredSize: size,
+          ownerPid: process.pid,
+          ownerStartTime: processStartTime(process.pid),
+          policy,
+          now: 1_800_000_000_000,
+        })!;
+        const bytes = Buffer.alloc(size);
+        writeFileSync(join(value.root, reservation.record.objectKey), bytes);
+        expect(
+          value.repository.markReady(
+            reservation.record.id,
+            size,
+            createHash("sha256").update(bytes).digest("hex"),
+            1_800_000_000_000,
+          ),
+        ).toBe(true);
+        return reservation;
+      };
+      const first = reserve("user-1", "operation_input", 4);
+      const sameOwner = reserve("user-1", "operation_result", 1);
+      const otherOwner = reserve("user-2", "local_relay_input", 3);
+      const claim = (reservation: typeof first) =>
+        value.repository.claim(
+          reservation.token,
+          reservation.record.purpose,
+          1_800_000_000_000,
+          1_800_000_030_000,
+          policy,
+          reservation.record.userId,
+        );
+      const active = claim(first)!;
+      expect(active.state).toBe("claimed");
+      expect(claim(sameOwner)).toBeNull();
+      expect(claim(otherOwner)).toBeNull();
+      expect(value.repository.getOwned("user-2", otherOwner.record.id)?.state).toBe("ready");
+      value.service.release(active);
+      expect(claim(otherOwner)?.state).toBe("claimed");
+      expect(value.repository.getOwned("user-1", native.record.id)?.state).toBe("claimed");
+    } finally {
+      native?.stream.destroy();
+      value.sqlite.close();
+    }
+  });
+
+  test("ready native objects must reserve current inflight capacity atomically before download claims", async () => {
+    const value = fixture({
+      maxTransferFileBytes: 20 * 1024 * 1024,
+      maxTransferBytesPerUser: 100 * 1024 * 1024,
+      maxTransferBytesGlobal: 1024 * 1024 * 1024,
+      maxTransferObjectsPerUser: 10,
+      maxTransferObjectsGlobal: 1000,
+      maxTransferInflightBytesPerUser: 40 * 1024 * 1024,
+      maxTransferInflightBytesGlobal: 256 * 1024 * 1024,
+    });
+    const active: Awaited<ReturnType<CodespaceTransferService["claimDownload"]>>[] = [];
+    try {
+      const bytes = Buffer.alloc(20 * 1024 * 1024, 0x61);
+      const handles = [];
+      for (let index = 0; index < 5; index++)
+        handles.push(
+          await value.service.createDownload("user-1", {
+            fileName: `file-${index}.bin`,
+            mimeType: "application/octet-stream",
+            bytes,
+          }),
+        );
+      active.push(await value.service.claimDownload(handles[0].referenceId));
+      active.push(await value.service.claimDownload(handles[1].referenceId));
+      expect(value.repository.usageForUser("user-1").inflightBytes).toBe(40 * 1024 * 1024);
+      await expect(value.service.claimDownload(handles[2].referenceId)).rejects.toThrow(
+        /unavailable/,
+      );
+      expect(value.repository.usageForUser("user-1").inflightBytes).toBe(40 * 1024 * 1024);
+      active[1].stream.destroy();
+      value.service.release(active[1].record);
+      const retried = await value.service.claimDownload(handles[2].referenceId);
+      active.push(retried);
+      expect(value.repository.usageForUser("user-1").inflightBytes).toBe(40 * 1024 * 1024);
+      expect(value.repository.listLive()).toHaveLength(5);
+    } finally {
+      for (const claimed of active) claimed.stream.destroy();
+      value.sqlite.close();
+    }
+  });
+
+  test("streaming migration preserves an existing ready object's identity, native reference and bytes", async () => {
+    const root = mkdtempSync(join(tmpdir(), "moira-transfer-migration-"));
+    roots.push(root);
+    const beforeFolder = join(root, "before-streaming");
+    cpSync(migrations, beforeFolder, { recursive: true });
+    const journalPath = join(beforeFolder, "meta/_journal.json");
+    const journal = JSON.parse(readFileSync(journalPath, "utf8")) as { entries: { tag: string }[] };
+    const cutoff = journal.entries.findIndex(
+      (entry) => entry.tag === "0059_codespace_transfer_streaming",
+    );
+    expect(cutoff).toBeGreaterThan(0);
+    journal.entries = journal.entries.slice(0, cutoff);
+    writeFileSync(journalPath, JSON.stringify(journal));
+    const sqlite = new Database(":memory:");
+    const bytes = Buffer.from("historical retained bytes");
+    const token = "a".repeat(43);
+    const objectKey = "b".repeat(48);
+    const now = 1_800_000_000_000;
+    try {
+      migrate(drizzle(sqlite), { migrationsFolder: beforeFolder });
+      sqlite.exec(
+        "INSERT INTO user (id,email,handle,createdAt,updatedAt) VALUES ('user-1','old@example.test','old','now','now')",
+      );
+      sqlite
+        .prepare(
+          `INSERT INTO codespaceTransfer (id, tokenDigest, userId, purpose, state, fileName, mimeType,
+        declaredSize, observedSize, sha256, objectKey, ownerPid, ownerStartTime, expiresAt, createdAt, updatedAt)
+        VALUES ('historical-transfer', ?, 'user-1', 'codespace_download', 'ready', 'old.bin', 'application/octet-stream', ?, ?, ?, ?, ?, NULL, ?, ?, ?)`,
+        )
+        .run(
+          createHash("sha256").update(token).digest("hex"),
+          bytes.length,
+          bytes.length,
+          createHash("sha256").update(bytes).digest("hex"),
+          objectKey,
+          process.pid,
+          now + 600_000,
+          now,
+          now,
+        );
+      writeFileSync(join(root, objectKey), bytes);
+      const old = sqlite
+        .prepare("SELECT * FROM codespaceTransfer WHERE id = 'historical-transfer'")
+        .get();
+      migrate(drizzle(sqlite), { migrationsFolder: migrations });
+      const repository = new CodespaceTransferRepository(sqlite);
+      const record = repository.getByToken("user-1", token)!;
+      const {
+        requestId,
+        requestDigest,
+        direction,
+        resourceId,
+        provider,
+        resourceGeneration,
+        authorizationGeneration,
+        environmentIdentity,
+        expectedSha256,
+        uploadedBytes,
+        ...unchanged
+      } = record;
+      expect(unchanged).toEqual(old);
+      expect([
+        requestId,
+        requestDigest,
+        direction,
+        resourceId,
+        provider,
+        resourceGeneration,
+        authorizationGeneration,
+        environmentIdentity,
+        expectedSha256,
+      ]).toEqual(Array(9).fill(null));
+      expect(uploadedBytes).toBe(bytes.length);
+      const service = new CodespaceTransferService({
+        repository,
+        root,
+        policy: () => basePolicy,
+        now: () => now,
+      });
+      const { source } = await service.getOwnedSource("user-1", `codespace-file://${token}`);
+      const opened = await source.open();
+      const parts: Uint8Array[] = [];
+      for await (const part of opened) parts.push(part);
+      expect(Buffer.concat(parts)).toEqual(bytes);
+      expect(repository.getOwned("user-1", record.id)).toEqual(record);
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  test("checked download progress renews only its live claim within object expiry and no-progress cannot revive it", async () => {
+    const value = fixture({
+      maxTransferFileBytes: 1024 * 1024,
+      maxTransferBytesPerUser: 2 * 1024 * 1024,
+      maxTransferBytesGlobal: 4 * 1024 * 1024,
+      maxTransferInflightBytesPerUser: 2 * 1024 * 1024,
+      maxTransferInflightBytesGlobal: 4 * 1024 * 1024,
+      transferTtlMs: 600_000,
+    });
+    try {
+      const bytes = Buffer.alloc(600 * 1024, 0x61);
+      const handle = await value.service.createDownload("user-1", {
+        fileName: "large.bin",
+        mimeType: "application/octet-stream",
+        bytes,
+      });
+      const claimed = await value.service.claimDownload(handle.referenceId);
+      const initialDeadline = claimed.record.claimExpiresAt!;
+      let received = 0;
+      const iterator = claimed.stream[Symbol.asyncIterator]();
+      for (let part = 0; part < 3; part++) {
+        value.advance(40_000);
+        const next = await iterator.next();
+        expect(next.done).toBe(false);
+        received += (next.value as Buffer).length;
+      }
+      expect(received).toBe(bytes.length);
+      expect(
+        value.repository.getOwned("user-1", claimed.record.id)?.claimExpiresAt,
+      ).toBeGreaterThan(initialDeadline);
+      expect(value.repository.getOwned("user-1", claimed.record.id)?.expiresAt).toBe(
+        handle.expiresAt,
+      );
+      expect((await iterator.next()).done).toBe(true);
+      await value.service.consume(claimed.record);
+      await expect(value.service.claimDownload(handle.referenceId)).rejects.toThrow(/unavailable/);
+      const stalled = await value.service.createDownload("user-1", {
+        fileName: "stalled.bin",
+        mimeType: "application/octet-stream",
+        bytes: Buffer.from("stalled"),
+      });
+      const pending = await value.service.claimDownload(stalled.referenceId);
+      const before = value.repository.getOwned("user-1", pending.record.id)!;
+      value.advance(60_000);
+      await expect(pending.stream[Symbol.asyncIterator]().next()).rejects.toThrow(/changed/);
+      expect(value.repository.getOwned("user-1", pending.record.id)?.claimExpiresAt).toBe(
+        before.claimExpiresAt,
+      );
+      expect(
+        value.repository.renewClaim(
+          pending.record.id,
+          pending.record.claimId!,
+          before.claimExpiresAt!,
+          stalled.expiresAt,
+        ),
+      ).toBe(false);
+    } finally {
+      value.sqlite.close();
+    }
+  });
+
+  test("a final publication authority refusal leaves bytes private and reservation uncommitted", async () => {
+    const value = fixture();
+    const authority = {
+      resourceId: "space-1",
+      provider: "local",
+      resourceGeneration: 1,
+      authorizationGeneration: 2,
+      environmentIdentity: "boot-one",
+    };
+    const bytes = Buffer.from("unpublished");
+    try {
+      const transfer = await value.service.reserveResumable("user-1", {
+        requestId: "00000000-0000-7000-8000-000000000006",
+        requestDigest: "f".repeat(64),
+        purpose: "codespace_download",
+        fileName: "clip.bin",
+        mimeType: "application/octet-stream",
+        size: bytes.length,
+        sha256: createHash("sha256").update(bytes).digest("hex"),
+        authority,
+      });
+      await value.service.writeTransferChunk("user-1", transfer.transferId, authority, {
+        offset: 0,
+        bytes,
+        sha256: transfer.sha256,
+      });
+      const authorize = jest.fn(async () => {
+        throw new Error("authority revoked");
+      });
+      await expect(
+        value.service.finalizeTransfer("user-1", transfer.transferId, authority, authorize),
+      ).rejects.toThrow(/revoked/);
+      expect(authorize).toHaveBeenCalledTimes(1);
+      expect(
+        (await value.service.getTransferStatus("user-1", transfer.transferId, authority)).state,
+      ).toBe("reserved");
+      const record = value.repository.getOwned("user-1", transfer.transferId)!;
+      expect(existsSync(join(value.root, record.objectKey))).toBe(false);
+      expect(readFileSync(join(value.root, `${record.objectKey}.partial`))).toEqual(bytes);
+    } finally {
+      value.sqlite.close();
+    }
+  });
+
+  test("range verification seeks to the requested offset and refuses corruption after a previous verified read", async () => {
+    const value = fixture();
+    const authority = {
+      resourceId: "space-1",
+      provider: "local",
+      resourceGeneration: 1,
+      authorizationGeneration: 2,
+      environmentIdentity: "boot-one",
+    };
+    const bytes = Buffer.from("prefix:retained-tail");
+    try {
+      const status = await value.service.reserveResumable("user-1", {
+        requestId: "00000000-0000-7000-8000-000000000005",
+        requestDigest: "f".repeat(64),
+        purpose: "codespace_download",
+        fileName: "clip.bin",
+        mimeType: "application/octet-stream",
+        size: bytes.length,
+        sha256: createHash("sha256").update(bytes).digest("hex"),
+        authority,
+      });
+      await value.service.writeTransferChunk("user-1", status.transferId, authority, {
+        offset: 0,
+        bytes,
+        sha256: createHash("sha256").update(bytes).digest("hex"),
+      });
+      await value.service.finalizeTransfer("user-1", status.transferId, authority);
+      expect(
+        (
+          await value.service.readTransferRange("user-1", status.transferId, authority, {
+            offset: 7,
+            length: 8,
+          })
+        ).bytes,
+      ).toEqual(bytes.subarray(7, 15));
+      const record = value.repository.getOwned("user-1", status.transferId)!;
+      const descriptor = await open(join(value.root, record.objectKey), "r");
+      const prototype = Object.getPrototypeOf(descriptor) as typeof descriptor;
+      await descriptor.close();
+      const reads = jest.spyOn(prototype, "read");
+      try {
+        expect(
+          (
+            await value.service.readTransferRange("user-1", status.transferId, authority, {
+              offset: 7,
+              length: 8,
+            })
+          ).bytes,
+        ).toEqual(bytes.subarray(7, 15));
+        const calls = reads.mock.calls as unknown as [Uint8Array, number, number, number][];
+        expect(calls.map((call) => [call[2], call[3]])).toEqual([[8, 7]]);
+      } finally {
+        reads.mockRestore();
+      }
+      expect(
+        (
+          await value.service.readTransferRange("user-1", status.transferId, authority, {
+            offset: bytes.length,
+            length: 8,
+          })
+        ).bytes,
+      ).toEqual(Buffer.alloc(0));
+      writeFileSync(join(value.root, record.objectKey), Buffer.alloc(bytes.length, 0x7a));
+      await expect(
+        value.service.readTransferRange("user-1", status.transferId, authority, {
+          offset: 7,
+          length: 8,
+        }),
+      ).rejects.toThrow(/digest/);
+    } finally {
+      value.sqlite.close();
+    }
+  });
+
+  test("recovers fsynced-but-uncheckpointed tails and rename-before-ready without changing the transfer receipt", async () => {
+    const value = fixture();
+    const authority = {
+      resourceId: "space-1",
+      provider: "local",
+      resourceGeneration: 1,
+      authorizationGeneration: 2,
+      environmentIdentity: "boot-one",
+    };
+    const bytes = Buffer.from("hello world");
+    try {
+      const status = await value.service.reserveResumable("user-1", {
+        requestId: "00000000-0000-7000-8000-000000000004",
+        requestDigest: "e".repeat(64),
+        purpose: "codespace_download",
+        fileName: "clip.bin",
+        mimeType: "application/octet-stream",
+        size: bytes.length,
+        sha256: createHash("sha256").update(bytes).digest("hex"),
+        authority,
+      });
+      const record = value.repository.getOwned("user-1", status.transferId)!;
+      const originalReceipt = JSON.parse(
+        readFileSync(join(value.root, `${record.objectKey}.receipt`), "utf8"),
+      ) as { token: string };
+      const checkpoint = jest.spyOn(value.repository, "checkpoint").mockImplementationOnce(() => {
+        throw new Error("checkpoint interrupted");
+      });
+      const wrong = Buffer.from("wrong");
+      await expect(
+        value.service.writeTransferChunk("user-1", status.transferId, authority, {
+          offset: 0,
+          bytes: wrong,
+          sha256: createHash("sha256").update(wrong).digest("hex"),
+        }),
+      ).rejects.toThrow(/interrupted/);
+      checkpoint.mockRestore();
+      expect(readFileSync(join(value.root, `${record.objectKey}.partial`))).toEqual(wrong);
+      expect(
+        (await value.service.getTransferStatus("user-1", status.transferId, authority)).offset,
+      ).toBe(0);
+      await value.service.writeTransferChunk("user-1", status.transferId, authority, {
+        offset: 0,
+        bytes,
+        sha256: createHash("sha256").update(bytes).digest("hex"),
+      });
+      const ready = jest.spyOn(value.repository, "markReady").mockReturnValueOnce(false);
+      await expect(
+        value.service.finalizeTransfer("user-1", status.transferId, authority),
+      ).rejects.toThrow(/publication/);
+      ready.mockRestore();
+      expect(existsSync(join(value.root, record.objectKey))).toBe(true);
+      expect(
+        (await value.service.getTransferStatus("user-1", status.transferId, authority)).state,
+      ).toBe("reserved");
+      const handle = await value.service.finalizeTransfer("user-1", status.transferId, authority);
+      expect(handle.referenceId).toBe(`codespace-file://${originalReceipt.token}`);
+      expect(readFileSync(join(value.root, record.objectKey))).toEqual(bytes);
+      const changed = Buffer.from("HELLO");
+      await expect(
+        value.service.writeTransferChunk("user-1", status.transferId, authority, {
+          offset: 0,
+          bytes: changed,
+          sha256: createHash("sha256").update(changed).digest("hex"),
+        }),
+      ).rejects.toThrow(/replay conflict/);
+    } finally {
+      value.sqlite.close();
+    }
+  });
+
+  test("resumes durable chunks and returns the original native receipt after service reopen", async () => {
+    const value = fixture();
+    const authority = {
+      resourceId: "space-1",
+      provider: "local",
+      resourceGeneration: 1,
+      authorizationGeneration: 2,
+      environmentIdentity: "boot-one",
+    };
+    const bytes = Buffer.from("immutable chunks");
+    const sha256 = createHash("sha256").update(bytes).digest("hex");
+    const input = {
+      requestId: "00000000-0000-7000-8000-000000000001",
+      requestDigest: "a".repeat(64),
+      purpose: "codespace_download" as const,
+      fileName: "clip.bin",
+      mimeType: "application/octet-stream",
+      size: bytes.length,
+      sha256,
+      authority,
+    };
+    try {
+      const first = await value.service.reserveResumable("user-1", input);
+      const chunk = bytes.subarray(0, 5);
+      const request = {
+        offset: 0,
+        bytes: chunk,
+        sha256: createHash("sha256").update(chunk).digest("hex"),
+      };
+      expect(
+        (await value.service.writeTransferChunk("user-1", first.transferId, authority, request))
+          .offset,
+      ).toBe(5);
+      expect(
+        (await value.service.writeTransferChunk("user-1", first.transferId, authority, request))
+          .offset,
+      ).toBe(5);
+      await expect(
+        value.service.writeTransferChunk("user-1", first.transferId, authority, {
+          offset: 6,
+          bytes: chunk,
+          sha256: request.sha256,
+        }),
+      ).rejects.toThrow(/offset/);
+      await expect(
+        value.service.reserveResumable("user-1", { ...input, requestDigest: "b".repeat(64) }),
+      ).rejects.toThrow(/conflict/);
+      const reopened = new CodespaceTransferService({
+        repository: value.repository,
+        root: value.root,
+        policy: () => basePolicy,
+        now: () => first.expiresAt - 1000,
+      });
+      expect((await reopened.reserveResumable("user-1", input)).transferId).toBe(first.transferId);
+      const rest = bytes.subarray(5);
+      await reopened.writeTransferChunk("user-1", first.transferId, authority, {
+        offset: 5,
+        bytes: rest,
+        sha256: createHash("sha256").update(rest).digest("hex"),
+      });
+      const handle = await reopened.finalizeTransfer("user-1", first.transferId, authority);
+      expect(
+        (await reopened.writeTransferChunk("user-1", first.transferId, authority, request)).offset,
+      ).toBe(bytes.length);
+      expect(await reopened.finalizeTransfer("user-1", first.transferId, authority)).toEqual(
+        handle,
+      );
+      expect(
+        (await reopened.getTransferStatus("user-1", first.transferId, authority)).handle,
+      ).toEqual(handle);
+      expect(
+        (
+          await reopened.readTransferRange("user-1", first.transferId, authority, {
+            offset: 2,
+            length: 4,
+          })
+        ).bytes,
+      ).toEqual(bytes.subarray(2, 6));
+      await expect(
+        reopened.getTransferStatus("user-2", first.transferId, authority),
+      ).rejects.toThrow(/unavailable/);
+      await expect(
+        reopened.getTransferStatus("user-1", first.transferId, {
+          ...authority,
+          environmentIdentity: "boot-two",
+        }),
+      ).rejects.toThrow(/authority/);
+      const { source } = await reopened.getOwnedSource("user-1", handle.referenceId);
+      const controller = new AbortController();
+      const opened = await source.open(controller.signal);
+      controller.abort();
+      await opened.settled;
+      await opened.close();
+      expect(value.repository.listLive()).toHaveLength(1);
+    } finally {
+      value.sqlite.close();
+    }
+  });
+
+  test("native caller recovery preserves the original ready object and skips another external fetch", async () => {
+    const value = fixture();
+    const authority = {
+      resourceId: "space-1",
+      provider: "local",
+      resourceGeneration: 1,
+      authorizationGeneration: 2,
+      environmentIdentity: "boot-one",
+    };
+    const identity = {
+      requestId: "00000000-0000-8000-8000-000000000002",
+      requestDigest: "c".repeat(64),
+      authority,
+      direction: "server_to_guest" as const,
+    };
+    const native = fetcher();
+    try {
+      const handle = await value.service.ingest("user-1", reference, native, undefined, identity);
+      const reopened = new CodespaceTransferService({
+        repository: value.repository,
+        root: value.root,
+        policy: () => basePolicy,
+        now: () => handle.expiresAt - 1000,
+      });
+      expect(
+        await reopened.ingest(
+          "user-1",
+          { ...reference, downloadUrl: "https://new-authorized.example/file" },
+          native,
+          undefined,
+          identity,
+        ),
+      ).toEqual(handle);
+      expect(native.fetch).toHaveBeenCalledTimes(1);
+      expect(value.repository.listLive()).toHaveLength(1);
+      await expect(
+        reopened.ingest("user-1", reference, native, undefined, {
+          ...identity,
+          requestDigest: "d".repeat(64),
+        }),
+      ).rejects.toThrow(/conflict/);
+    } finally {
+      value.sqlite.close();
+    }
+  });
+
+  test("reclaims a dead native ingestion owner while preserving its private reference and refusing a live owner", async () => {
+    const value = fixture();
+    const authority = {
+      resourceId: "space-1",
+      provider: "local",
+      resourceGeneration: 1,
+      authorizationGeneration: 2,
+      environmentIdentity: "boot-one",
+    };
+    const bytes = Buffer.from([0, 255, 1, 2, 3]);
+    const identity = {
+      requestId: "00000000-0000-7000-8000-000000000003",
+      requestDigest: "d".repeat(64),
+      authority,
+      direction: "server_to_guest" as const,
+    };
+    try {
+      const original = await value.service.reserveResumable("user-1", {
+        ...identity,
+        purpose: "codespace_input",
+        fileName: reference.fileName,
+        mimeType: reference.mimeType,
+        size: bytes.length,
+        sha256: createHash("sha256").update(bytes).digest("hex"),
+      });
+      const native = fetcher(bytes);
+      await expect(
+        value.service.ingest("user-1", reference, native, undefined, identity),
+      ).rejects.toThrow(/pending/);
+      expect(native.fetch).not.toHaveBeenCalled();
+      const dead = spawn(process.execPath, ["-e", "process.exit(0)"]);
+      await new Promise<void>((resolve, reject) => {
+        dead.once("exit", () => resolve());
+        dead.once("error", reject);
+      });
+      value.sqlite
+        .prepare("UPDATE codespaceTransfer SET ownerPid = ?, ownerStartTime = NULL WHERE id = ?")
+        .run(dead.pid, original.transferId);
+      const row = value.repository.getOwned("user-1", original.transferId)!;
+      writeFileSync(join(value.root, `${row.objectKey}.partial`), Buffer.from("crash tail"));
+      const handle = await value.service.ingest("user-1", reference, native, undefined, identity);
+      expect(
+        value.repository.getByToken("user-1", handle.referenceId.slice("codespace-file://".length))
+          ?.id,
+      ).toBe(original.transferId);
+      expect(native.fetch).toHaveBeenCalledTimes(1);
+      expect(readFileSync(join(value.root, row.objectKey))).toEqual(bytes);
+    } finally {
+      value.sqlite.close();
+    }
+  });
+
+  test("validates streamed JSON syntax and UTF8 before publishing without assembling values", async () => {
+    const value = fixture();
+    try {
+      const valid = Buffer.from('{"name":"é","items":[1,true,null]}');
+      const body = (bytes: Buffer) =>
+        (async function* () {
+          for (const byte of bytes) yield Buffer.from([byte]);
+        })();
+      const handle = await value.service.ingestStream("user-1", {
+        fileName: "data.json",
+        mimeType: "application/json",
+        size: valid.length,
+        body: body(valid),
+      });
+      const { source } = await value.service.getOwnedSource("user-1", handle.referenceId);
+      const opened = await source.open();
+      const received: Uint8Array[] = [];
+      for await (const bytes of opened) received.push(bytes);
+      expect(Buffer.concat(received)).toEqual(valid);
+      await value.service.discard(value.repository.listLive()[0]);
+      for (const invalid of [Buffer.from('{"x":1,}'), Buffer.from([0x22, 0xff, 0x22])]) {
+        await expect(
+          value.service.ingestStream("user-1", {
+            fileName: "bad.json",
+            mimeType: "application/json",
+            size: invalid.length,
+            body: body(invalid),
+          }),
+        ).rejects.toThrow(/MIME/);
+        expect(value.repository.listLive()).toHaveLength(0);
+      }
+    } finally {
+      value.sqlite.close();
+    }
+  });
+
+  test("streams a native binary above four MiB without whole-object accumulation", async () => {
+    const size = 5 * 1024 * 1024 + 7;
+    const chunk = Buffer.alloc(256 * 1024, 0x61);
+    const expected = createHash("sha256");
+    for (let offset = 0; offset < size; offset += chunk.length)
+      expected.update(chunk.subarray(0, Math.min(chunk.length, size - offset)));
+    const value = fixture({
+      maxTransferFileBytes: 20 * 1024 * 1024,
+      maxTransferBytesPerUser: 100 * 1024 * 1024,
+      maxTransferBytesGlobal: 1024 * 1024 * 1024,
+      maxTransferInflightBytesPerUser: 40 * 1024 * 1024,
+      maxTransferInflightBytesGlobal: 256 * 1024 * 1024,
+    });
+    const concatenate = Buffer.concat;
+    const concatenation = jest.spyOn(Buffer, "concat").mockImplementation((chunks, length) => {
+      if ((length ?? chunks.reduce((total, bytes) => total + bytes.length, 0)) >= size)
+        throw new Error("Whole transfer bytes accumulated");
+      return concatenate(chunks, length);
+    });
+    try {
+      const handle = await value.service.ingest(
+        "user-1",
+        { ...reference, declaredSize: size },
+        {
+          fetch: async () => ({
+            contentLength: size,
+            mimeType: "application/octet-stream",
+            body: (async function* () {
+              for (let offset = 0; offset < size; offset += chunk.length)
+                yield chunk.subarray(0, Math.min(chunk.length, size - offset));
+            })(),
+          }),
+        },
+      );
+      expect(handle).toMatchObject({ size, sha256: expected.digest("hex") });
+      const stored = value.repository.listLive()[0];
+      let received = 0;
+      const digest = createHash("sha256");
+      for await (const bytes of createReadStream(join(value.root, stored.objectKey))) {
+        received += bytes.length;
+        digest.update(bytes);
+      }
+      expect(received).toBe(size);
+      expect(digest.digest("hex")).toBe(handle.sha256);
+    } finally {
+      concatenation.mockRestore();
+      value.sqlite.close();
+    }
+  });
+
+  test("a checked public download emits bounded chunks instead of a complete retained Buffer", async () => {
+    const value = fixture({
+      maxTransferFileBytes: 1024 * 1024,
+      maxTransferBytesPerUser: 2 * 1024 * 1024,
+      maxTransferBytesGlobal: 4 * 1024 * 1024,
+      maxTransferInflightBytesPerUser: 2 * 1024 * 1024,
+      maxTransferInflightBytesGlobal: 4 * 1024 * 1024,
+    });
+    try {
+      const bytes = Buffer.alloc(1024 * 1024, 0x63);
+      const handle = await value.service.createDownload("user-1", {
+        fileName: "result.bin",
+        mimeType: "application/octet-stream",
+        bytes,
+      });
+      const claimed = await value.service.claimDownload(handle.referenceId);
+      let received = 0;
+      const digest = createHash("sha256");
+      for await (const chunk of claimed.stream) {
+        expect(chunk.length).toBeLessThanOrEqual(256 * 1024);
+        received += chunk.length;
+        digest.update(chunk);
+      }
+      expect(received).toBe(bytes.length);
+      expect(digest.digest("hex")).toBe(handle.sha256);
+      await value.service.consume(claimed.record);
+    } finally {
+      value.sqlite.close();
+    }
+  });
+
   test.each(["native", "relay"] as const)(
     "a full %s byte budget does not consume the other transfer class",
     async (first) => {

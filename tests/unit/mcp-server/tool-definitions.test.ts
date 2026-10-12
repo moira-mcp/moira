@@ -256,17 +256,19 @@ describe("MCP tool definitions", () => {
       "text",
       "timeout_seconds",
       "title",
+      "transfer_id",
     ]);
     const operationId = published.properties.operation_id as { anyOf?: unknown[] };
     const maxBytes = published.properties.max_bytes as { anyOf?: unknown[] };
     expect(operationId.anyOf).toBeUndefined();
-    expect(maxBytes.anyOf).toHaveLength(2);
+    expect(maxBytes.anyOf).toHaveLength(3);
     expect(getToolOperations(definition("codespace")).slice().sort()).toEqual([
       "apply_patch",
       "create",
       "delete",
       "download",
       "exec",
+      "files_setup",
       "get",
       "list",
       "local_devices",
@@ -283,6 +285,7 @@ describe("MCP tool definitions", () => {
       "start",
       "stat",
       "stop",
+      "transfer_status",
       "upload",
       "write",
     ]);

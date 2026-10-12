@@ -1,10 +1,14 @@
 import { afterEach, describe, expect, test } from "@jest/globals";
 import { CODESPACE_CONNECTOR_LIMITS } from "@mcp-moira/shared";
 import { spawn, spawnSync } from "node:child_process";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
+import { createServer } from "node:https";
+import type { ChildProcess } from "node:child_process";
+import type { Duplex } from "node:stream";
 import {
   existsSync,
   closeSync,
+  fsyncSync,
   ftruncateSync,
   linkSync,
   mkdtempSync,
@@ -28,10 +32,22 @@ const supervisorPath = resolve(
   "packages/web-backend/src/services/github-codespaces-remote-supervisor.mjs",
 );
 const directories: string[] = [];
+const children = new Set<ChildProcess>();
+const tlsClosures = new Set<() => Promise<void>>();
 
 function parentIdentity(path: string) {
   const value = statSync(path, { bigint: true });
   return { parentDev: value.dev.toString(), parentIno: value.ino.toString() };
+}
+
+function regularIdentity(path: string) {
+  const value = statSync(path, { bigint: true });
+  return Object.fromEntries(
+    ["dev", "ino", "nlink", "size", "mtimeNs", "ctimeNs", "birthtimeNs"].map((key) => [
+      key,
+      String(value[key as keyof typeof value]),
+    ]),
+  );
 }
 
 function processStartTime(pid: number): string | null {
@@ -40,7 +56,36 @@ function processStartTime(pid: number): string | null {
   return value.slice(value.lastIndexOf(") ") + 2).split(" ")[19] ?? null;
 }
 
-afterEach(() => {
+afterEach(async () => {
+  for (const close of [...tlsClosures]) await close();
+  for (const directory of directories) {
+    const state = join(directory, "state");
+    if (!existsSync(state)) continue;
+    for (const marker of readdirSync(state).filter((name) =>
+      /^moira-op-[a-f0-9]{32}$/.test(name),
+    )) {
+      try {
+        const owner = JSON.parse(readFileSync(join(state, marker, "file-runner-pid"), "utf8"));
+        const belongs =
+          process.platform === "linux"
+            ? owner.startTime !== null && processStartTime(owner.pid) === owner.startTime
+            : spawnSync("ps", ["-p", String(owner.pid), "-o", "command="], {
+                encoding: "utf8",
+              }).stdout.includes(
+                `${join(directory, "home/.local/share/moira-files/client.mjs")} operation ${marker}`,
+              );
+        if (belongs) process.kill(-owner.pid, "SIGKILL");
+      } catch (error) {
+        if (!["ENOENT", "ESRCH"].includes((error as NodeJS.ErrnoException).code ?? "")) throw error;
+      }
+    }
+  }
+  const owned = [...children];
+  const closed = owned.map(
+    (child) => new Promise<void>((done) => child.once("close", () => done())),
+  );
+  for (const child of owned) child.kill("SIGKILL");
+  await Promise.all(closed);
   for (const directory of directories.splice(0)) {
     rmSync(directory, { recursive: true, force: true });
   }
@@ -74,6 +119,326 @@ function fixture() {
   };
 }
 
+async function transferFixture() {
+  const value = fixture();
+  const home = value.environment.HOME!;
+  const directory = join(home, ".local/share/moira-files");
+  mkdirSync(directory, { recursive: true });
+  writeFileSync(
+    join(directory, "client.mjs"),
+    readFileSync(join(process.cwd(), "packages/web-backend/dist/guest-assets/guest-files-cli.js")),
+    { mode: 0o700 },
+  );
+  const certificate = join(directory, "certificate.pem");
+  const key = join(directory, "key.pem");
+  const generated = spawnSync(
+    "openssl",
+    [
+      "req",
+      "-x509",
+      "-newkey",
+      "rsa:2048",
+      "-nodes",
+      "-keyout",
+      key,
+      "-out",
+      certificate,
+      "-days",
+      "1",
+      "-subj",
+      "/CN=localhost",
+      "-addext",
+      "subjectAltName=IP:127.0.0.1",
+    ],
+    { encoding: "utf8" },
+  );
+  if (generated.status !== 0) throw new Error(generated.stderr);
+  const identity = createHash("sha256")
+    .update(
+      process.platform === "linux"
+        ? `${readFileSync("/proc/sys/kernel/random/boot_id", "utf8").trim()}|${processStartTime(1)}`
+        : "override:transfer-life",
+    )
+    .digest("hex");
+  const origin = "https://127.0.0.1:3099";
+  const capability = "t".repeat(43);
+  const bootstrap = "b".repeat(43);
+  const records = new Map<string, any>();
+  let privateBytes: Buffer = Buffer.alloc(0);
+  const controls: {
+    dropPut: boolean;
+    dropFinalize: boolean;
+    dropGetOffset: number | null;
+    holdChunk?: Promise<void>;
+    beforeFinalize?: () => void;
+  } = {
+    dropPut: false,
+    dropFinalize: false,
+    dropGetOffset: null,
+  };
+  let maximumBody = 0;
+  let chunkStarted!: () => void;
+  const firstChunk = new Promise<void>((done) => {
+    chunkStarted = done;
+  });
+  const observedGets: number[] = [];
+  const status = (record: any) => ({
+    transferId: record.descriptor.transferId,
+    requestId: record.descriptor.requestId,
+    state: record.ready ? "ready" : "reserved",
+    offset: record.offset,
+    size: record.descriptor.size,
+    sha256: record.descriptor.sha256,
+    ...(record.receipt ? { receipt: record.receipt } : {}),
+  });
+  const create = (input: any) => {
+    const existing = records.get(input.requestId);
+    if (existing) return existing;
+    const descriptor = {
+      version: 1,
+      transferId: randomUUID(),
+      requestId: input.requestId,
+      direction: input.direction,
+      size: input.size ?? privateBytes.length,
+      sha256: input.sha256 ?? createHash("sha256").update(privateBytes).digest("hex"),
+      mimeType: input.mimeType ?? "application/octet-stream",
+      chunkBytes: 262144,
+      origin,
+      capability,
+      environmentIdentity: identity,
+      expiresAt: Date.now() + 600_000,
+    };
+    const record = {
+      descriptor,
+      offset: input.direction === "server_to_guest" ? descriptor.size : 0,
+      chunks: [] as Buffer[],
+      ready: input.direction === "server_to_guest",
+    };
+    records.set(input.requestId, record);
+    return record;
+  };
+  const server = createServer(
+    { key: readFileSync(key), cert: readFileSync(certificate) },
+    async (incoming, response) => {
+      try {
+        const url = new URL(incoming.url!, origin);
+        const chunks: Buffer[] = [];
+        let length = 0;
+        for await (const chunk of incoming) {
+          length += chunk.length;
+          if (length > 262144) throw new Error("fixture HTTP chunk bound");
+          chunks.push(Buffer.from(chunk));
+        }
+        maximumBody = Math.max(maximumBody, length);
+        const body = Buffer.concat(chunks, length);
+        const json = (result: unknown) => {
+          response.writeHead(200, { "content-type": "application/json" });
+          response.end(JSON.stringify(result));
+        };
+        if (
+          ["/api/public/codespace-files/transfers", "/api/public/codespace-files/lookup"].includes(
+            url.pathname,
+          )
+        ) {
+          if (incoming.headers.authorization !== `Bearer ${bootstrap}`)
+            throw new Error("bootstrap refused");
+          const input = JSON.parse(body.toString("utf8"));
+          if (url.pathname.endsWith("lookup")) return json(status(records.get(input.requestId)));
+          const record = create(input);
+          return json({ descriptor: record.descriptor, status: status(record) });
+        }
+        if (incoming.headers.authorization !== `Bearer ${capability}`)
+          throw new Error("transfer refused");
+        const record: any = [...records.values()].find(
+          (item) => item.descriptor.transferId === url.pathname.split("/")[5],
+        );
+        if (!record) throw new Error("missing transfer");
+        if (url.pathname.endsWith("/chunks")) {
+          chunkStarted();
+          await controls.holdChunk;
+          const offset = Number(url.searchParams.get("offset"));
+          const selectedLength = Number(url.searchParams.get("length"));
+          if (incoming.method === "PUT") {
+            if (
+              offset !== record.offset ||
+              selectedLength !== body.length ||
+              createHash("sha256").update(body).digest("hex") !== incoming.headers["x-chunk-sha256"]
+            )
+              throw new Error("changed chunk");
+            record.chunks.push(body);
+            record.offset += body.length;
+            if (controls.dropPut) {
+              controls.dropPut = false;
+              response.destroy();
+              return;
+            }
+            return json(status(record));
+          }
+          observedGets.push(offset);
+          const selected = privateBytes.subarray(offset, offset + selectedLength);
+          response.writeHead(200, {
+            "content-length": selected.length,
+            "x-chunk-offset": offset,
+            "x-chunk-sha256": createHash("sha256").update(selected).digest("hex"),
+          });
+          if (controls.dropGetOffset === offset) {
+            controls.dropGetOffset = null;
+            response.write(selected.subarray(0, 4));
+            response.destroy();
+            return;
+          }
+          response.end(selected);
+          return;
+        }
+        if (url.pathname.endsWith("/finalize")) {
+          controls.beforeFinalize?.();
+          if (record.descriptor.direction === "guest_to_server")
+            privateBytes = Buffer.concat(record.chunks);
+          if (
+            privateBytes.length !== record.descriptor.size ||
+            createHash("sha256").update(privateBytes).digest("hex") !== record.descriptor.sha256
+          )
+            throw new Error("whole digest");
+          record.ready = true;
+          record.receipt = {
+            transferId: record.descriptor.transferId,
+            state: "ready",
+            referenceId: "private-reference",
+            fileName: "artifact.bin",
+            mimeType: record.descriptor.mimeType,
+            size: privateBytes.length,
+            sha256: record.descriptor.sha256,
+            expiresAt: Date.now() + 600_000,
+          };
+          if (controls.dropFinalize) {
+            controls.dropFinalize = false;
+            response.destroy();
+            return;
+          }
+          return json(record.receipt);
+        }
+        json(status(record));
+      } catch {
+        response.writeHead(400).end();
+      }
+    },
+  );
+  const sockets = new Set<Duplex>();
+  server.on("connection", (socket) => {
+    sockets.add(socket);
+    socket.once("close", () => sockets.delete(socket));
+  });
+  const close = async () => {
+    tlsClosures.delete(close);
+    await new Promise<void>((done) => {
+      server.close(() => done());
+      server.closeAllConnections();
+      for (const socket of sockets) socket.destroy();
+    });
+  };
+  tlsClosures.add(close);
+  await new Promise<void>((done, reject) => {
+    server.once("error", reject);
+    server.listen(3099, "127.0.0.1", done);
+  });
+  writeFileSync(
+    join(directory, "config.json"),
+    JSON.stringify({
+      version: 1,
+      origin,
+      bootstrapCapability: bootstrap,
+      environmentIdentity: identity,
+      resourceId: "11111111-1111-4111-8111-111111111111",
+      repositoryFullName: "owner/repository",
+    }),
+  );
+  return {
+    ...value,
+    environment: {
+      ...value.environment,
+      MOIRA_ENVIRONMENT_ID: "transfer-life",
+      CURL_CA_BUNDLE: certificate,
+      NO_PROXY: "127.0.0.1",
+      no_proxy: "127.0.0.1",
+    },
+    create,
+    records,
+    get privateBytes() {
+      return privateBytes;
+    },
+    set privateBytes(bytes: Buffer) {
+      privateBytes = bytes;
+    },
+    controls,
+    firstChunk,
+    get maximumBody() {
+      return maximumBody;
+    },
+    observedGets,
+    close,
+  };
+}
+
+function client(
+  environment: NodeJS.ProcessEnv,
+  args: string[],
+): Promise<{ code: number; lines: any[] }> {
+  return new Promise((done, reject) => {
+    const child = spawn(
+      process.execPath,
+      [join(process.cwd(), "packages/web-backend/dist/guest-assets/guest-files-cli.js"), ...args],
+      { env: environment, stdio: ["ignore", "pipe", "pipe"] },
+    );
+    children.add(child);
+    let stdout = "";
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk.toString();
+    });
+    child.stderr.resume();
+    child.once("error", reject);
+    child.once("close", (code) => {
+      children.delete(child);
+      done({
+        code: code ?? -1,
+        lines: stdout
+          .trim()
+          .split("\n")
+          .filter(Boolean)
+          .map((line) => JSON.parse(line)),
+      });
+    });
+  });
+}
+
+async function collectFile(environment: NodeJS.ProcessEnv, marker: string, digest?: string) {
+  for (let attempt = 0; attempt < 160; attempt++) {
+    const result = (await request(environment, {
+      action: "file-inspect",
+      version: 1,
+      remoteMarker: marker,
+      ...(digest ? { requestDigest: digest } : {}),
+    })) as any;
+    if (result.state !== "running") return result;
+    await new Promise<void>((done) => setTimeout(done, 25));
+  }
+  throw new Error("file transfer did not settle");
+}
+
+async function waitForFileRunnerExit(stateRoot: string, marker: string) {
+  const path = join(stateRoot, marker, "file-runner-pid");
+  for (let attempt = 0; attempt < 160; attempt++) {
+    const owner = JSON.parse(readFileSync(path, "utf8"));
+    try {
+      process.kill(owner.pid, 0);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ESRCH") return;
+      throw error;
+    }
+    await new Promise<void>((done) => setTimeout(done, 25));
+  }
+  throw new Error("transfer runner did not exit");
+}
+
 /**
  * Make what is stored look as if an earlier life of the environment wrote it.
  *
@@ -99,6 +464,7 @@ function request(
   environment: NodeJS.ProcessEnv,
   value: Record<string, unknown>,
   transformSource?: (source: string) => string,
+  completionBoundMs?: number,
 ): Promise<unknown> {
   const source = readFileSync(supervisorPath, "utf8");
   const supervisor = transformSource ? transformSource(source) : source;
@@ -108,12 +474,28 @@ function request(
       env: environment,
       stdio: ["pipe", "pipe", "pipe"],
     });
+    children.add(child);
     const stdout: Buffer[] = [];
     const stderr: Buffer[] = [];
+    const timer =
+      completionBoundMs === undefined
+        ? undefined
+        : setTimeout(() => {
+            let state = "no receipt";
+            try {
+              state = JSON.parse(Buffer.concat(stdout).toString("utf8")).result.state;
+            } catch {
+              // A missing or partial frame is itself the diagnostic observation.
+            }
+            child.kill("SIGKILL");
+            reject(new Error(`supervisor process did not close after admission: ${state}`));
+          }, completionBoundMs);
     child.stdout.on("data", (chunk) => stdout.push(Buffer.from(chunk)));
     child.stderr.on("data", (chunk) => stderr.push(Buffer.from(chunk)));
     child.once("error", reject);
     child.once("close", (code) => {
+      clearTimeout(timer);
+      children.delete(child);
       if (code !== 0) {
         reject(new Error(Buffer.concat(stderr).toString("utf8")));
         return;
@@ -153,6 +535,196 @@ async function inspectUntilTerminal(
 }
 
 describe("direct Codespace operation supervisor", () => {
+  test.each(["guard changed", "reply lost"])(
+    "guarded native target settles %s without a second effect",
+    async (mode) => {
+      const value = await transferFixture();
+      try {
+        const bytes = Buffer.alloc(512 * 1024 + 3, 70);
+        value.privateBytes = bytes;
+        const record = value.create({ requestId: randomUUID(), direction: "server_to_guest" });
+        const target = join(value.repository, "guarded-transfer.bin");
+        if (mode === "guard changed")
+          value.controls.beforeFinalize = () => {
+            writeFileSync(target, "external winner");
+          };
+        else {
+          const clientPath = join(value.environment.HOME!, ".local/share/moira-files/client.mjs");
+          const source = readFileSync(clientPath, "utf8");
+          const boundary = "await commitStaged([staged], marker, directory);\n      const after";
+          expect(source).toContain(boundary);
+          writeFileSync(
+            clientPath,
+            source.replace(
+              boundary,
+              "await commitStaged([staged], marker, directory);\n      throw Object.assign(new Error('fixture receipt unavailable'), {code:'TRANSFER_OUTCOME_UNKNOWN'});\n      const after",
+            ),
+          );
+        }
+        const marker = `moira-op-${"4".repeat(32)}`;
+        const digest = "b".repeat(64);
+        const original = {
+          action: "file-execute",
+          version: 1,
+          remoteMarker: marker,
+          repositoryFullName: "owner/repository",
+          requestDigest: digest,
+          admissionDeadlineAt: Date.now() + 60_000,
+          request: {
+            action: "upload",
+            path: "guarded-transfer.bin",
+            expected: { exists: false },
+            transfer: record.descriptor,
+          },
+        };
+        expect(await request(value.environment, original)).toMatchObject({ state: "running" });
+        await waitForFileRunnerExit(value.stateRoot, marker);
+        const inode = statSync(target).ino;
+        const observed = value.observedGets.length;
+        const result = await collectFile(value.environment, marker, digest);
+        if (mode === "guard changed") {
+          expect(result).toMatchObject({ state: "failed", value: { reason: "precondition" } });
+          expect(readFileSync(target, "utf8")).toBe("external winner");
+          expect(readdirSync(value.repository).some((name) => name.endsWith(".tmp"))).toBe(false);
+        } else {
+          expect(result).toMatchObject({
+            state: "succeeded",
+            value: {
+              action: "upload",
+              current: { size: bytes.length, sha256: record.descriptor.sha256 },
+            },
+          });
+          expect(readFileSync(target).equals(bytes)).toBe(true);
+          expect(await request(value.environment, original)).toEqual(result);
+        }
+        expect(statSync(target).ino).toBe(inode);
+        expect(value.observedGets.length).toBe(observed);
+      } finally {
+        await value.close();
+      }
+    },
+    15000,
+  );
+
+  test("ambiguous native commit refuses a same-digest foreign target without rolling it back", async () => {
+    const value = await transferFixture();
+    try {
+      value.privateBytes = Buffer.alloc(512 * 1024, 73);
+      const record = value.create({ requestId: randomUUID(), direction: "server_to_guest" });
+      const marker = `moira-op-${"f2".repeat(16)}`;
+      const digest = "c".repeat(64);
+      const operation = {
+        action: "file-execute",
+        version: 1,
+        remoteMarker: marker,
+        repositoryFullName: "owner/repository",
+        requestDigest: digest,
+        admissionDeadlineAt: Date.now() + 60_000,
+        request: {
+          action: "upload",
+          path: "ambiguous.bin",
+          expected: { exists: false },
+          transfer: record.descriptor,
+        },
+      };
+      const cliPath = join(value.environment.HOME!, ".local", "share", "moira-files", "client.mjs");
+      const source = readFileSync(cliPath, "utf8");
+      const changed = source.replace(
+        "await commitStaged([staged], marker, directory);",
+        'await commitStaged([staged], marker, directory); throw Object.assign(new Error("lost commit reply"), {code:"TRANSFER_OUTCOME_UNKNOWN"});',
+      );
+      expect(changed).not.toBe(source);
+      writeFileSync(cliPath, changed);
+      expect(await request(value.environment, operation)).toMatchObject({ state: "running" });
+      await waitForFileRunnerExit(value.stateRoot, marker);
+      const target = join(value.repository, "ambiguous.bin");
+      const ownedInode = statSync(target).ino;
+      renameSync(target, `${target}.pinned`);
+      writeFileSync(target, value.privateBytes);
+      const foreignInode = statSync(target).ino;
+      expect(foreignInode).not.toBe(ownedInode);
+      const observed = value.observedGets.length;
+      await request(value.environment, { ...operation, action: "file-inspect" });
+      await waitForFileRunnerExit(value.stateRoot, marker);
+      expect(statSync(target).ino).toBe(foreignInode);
+      expect(readFileSync(target).equals(value.privateBytes)).toBe(true);
+      expect(value.observedGets.length).toBe(observed);
+    } finally {
+      await value.close();
+    }
+  }, 15000);
+
+  test.each(["foreign inode", "owned fsynced tail"] as const)(
+    "retained pull resumes only its own partial: %s",
+    async (condition) => {
+      const value = await transferFixture();
+      try {
+        value.privateBytes = Buffer.alloc(512 * 1024, 71);
+        const record = value.create({ requestId: randomUUID(), direction: "server_to_guest" });
+        const marker = `moira-op-${"f1".repeat(16)}`;
+        const digest = "b".repeat(64);
+        const operation = {
+          action: "file-execute",
+          version: 1,
+          remoteMarker: marker,
+          repositoryFullName: "owner/repository",
+          requestDigest: digest,
+          admissionDeadlineAt: Date.now() + 60_000,
+          request: {
+            action: "upload",
+            path: "resumed.bin",
+            expected: { exists: false },
+            transfer: record.descriptor,
+          },
+        };
+        value.controls.dropGetOffset = 262144;
+        expect(await request(value.environment, operation)).toMatchObject({ state: "running" });
+        await waitForFileRunnerExit(value.stateRoot, marker);
+        const checkpoint = JSON.parse(
+          readFileSync(join(value.stateRoot, marker, "transfer.json"), "utf8"),
+        );
+        const partial = join(value.repository, checkpoint.temporaryName);
+        const prefix = readFileSync(partial);
+        const originalInode = statSync(partial).ino;
+        if (condition === "foreign inode") {
+          renameSync(partial, `${partial}.pinned`);
+          writeFileSync(partial, Buffer.concat([prefix, Buffer.from("foreign tail")]));
+        } else {
+          const fd = openSync(partial, "a");
+          try {
+            writeSync(fd, Buffer.from("uncheckpointed tail"));
+            fsyncSync(fd);
+          } finally {
+            closeSync(fd);
+          }
+        }
+        const inode = statSync(partial).ino;
+        const retained = readFileSync(partial);
+        expect(inode === originalInode).toBe(condition === "owned fsynced tail");
+        const observed = value.observedGets.length;
+        await request(value.environment, { ...operation, action: "file-inspect" });
+        await waitForFileRunnerExit(value.stateRoot, marker);
+        if (condition === "foreign inode") {
+          expect(existsSync(join(value.repository, "resumed.bin"))).toBe(false);
+          expect(statSync(partial).ino).toBe(inode);
+          expect(readFileSync(partial).equals(retained)).toBe(true);
+          expect(value.observedGets.length).toBe(observed);
+        } else {
+          expect(await collectFile(value.environment, marker, digest)).toMatchObject({
+            state: "succeeded",
+          });
+          expect(
+            readFileSync(join(value.repository, "resumed.bin")).equals(value.privateBytes),
+          ).toBe(true);
+          expect(statSync(join(value.repository, "resumed.bin")).ino).toBe(originalInode);
+        }
+      } finally {
+        await value.close();
+      }
+    },
+    15000,
+  );
+
   test.each([false, true])(
     "cancel before delayed dispatch survives early finalize=%s without launching the accepted effect",
     async (earlyFinalize) => {
@@ -939,6 +1511,465 @@ if(handle.moiraPath===${JSON.stringify(path)}){
       }
     },
   );
+
+  test("a fresh fixed probe observes actual guest life without changing repository content", async () => {
+    const value = fixture();
+    const environment = { ...value.environment, MOIRA_ENVIRONMENT_ID: "probe-life" };
+    writeFileSync(join(value.repository, "preserved.txt"), "preserved");
+    const probe = (await request(environment, {
+      action: "file-execute",
+      version: 1,
+      remoteMarker: `moira-op-${"5".repeat(32)}`,
+      repositoryFullName: "owner/repository",
+      request: { action: "probe" },
+    })) as { state: string; value: { abi: number; environmentIdentity: string } };
+    expect(probe.state).toBe("succeeded");
+    expect(probe.value.abi).toBe(1);
+    const identity =
+      process.platform === "linux"
+        ? `${readFileSync("/proc/sys/kernel/random/boot_id", "utf8").trim()}|${processStartTime(1)}`
+        : "override:probe-life";
+    expect(probe.value.environmentIdentity).toBe(
+      createHash("sha256").update(identity).digest("hex"),
+    );
+    expect(readFileSync(join(value.repository, "preserved.txt"), "utf8")).toBe("preserved");
+  });
+
+  test("fresh file-client probe measures an executable command usable outside the guest PATH", async () => {
+    const value = fixture();
+    const home = value.environment.HOME!;
+    const clientDirectory = join(home, ".local/share/moira-files");
+    const bin = join(home, ".local/bin");
+    mkdirSync(clientDirectory, { recursive: true });
+    mkdirSync(bin, { recursive: true });
+    const bytes = readFileSync(
+      join(process.cwd(), "packages/web-backend/dist/guest-assets/guest-files-cli.js"),
+    );
+    const executable = join(bin, "moira-files");
+    writeFileSync(join(clientDirectory, "client.mjs"), bytes, { mode: 0o700 });
+    writeFileSync(executable, bytes, { mode: 0o700 });
+    const environment: NodeJS.ProcessEnv = {
+      ...value.environment,
+      MOIRA_ENVIRONMENT_ID: "command-path-life",
+    };
+    expect((environment.PATH ?? "").split(":")).not.toContain(bin);
+    const probe = (await request(environment, {
+      action: "file-execute",
+      version: 1,
+      remoteMarker: `moira-op-${"5".repeat(32)}`,
+      repositoryFullName: "owner/repository",
+      request: { action: "probe" },
+    })) as any;
+    expect(probe).toMatchObject({
+      state: "succeeded",
+      value: {
+        command: executable,
+        cliSha256: createHash("sha256").update(bytes).digest("hex"),
+        executableSha256: createHash("sha256").update(bytes).digest("hex"),
+      },
+    });
+    const marker = `moira-op-${"6".repeat(32)}`;
+    let command = (await request(environment, {
+      action: "execute",
+      version: 1,
+      remoteMarker: marker,
+      repositoryFullName: "owner/repository",
+      argv: [probe.value.command, "--help"],
+      stdin: "",
+      timeoutMs: 1000,
+      maxStdoutBytes: 4096,
+      maxStderrBytes: 4096,
+      maxRetainedBytes: 8192,
+    })) as any;
+    for (let attempt = 0; command.state === "running" && attempt < 20; attempt++)
+      command = await request(environment, { action: "inspect", version: 1, remoteMarker: marker });
+    expect(command).toMatchObject({
+      state: "succeeded",
+      exitCode: 0,
+      stdout: expect.stringContaining("moira-files upload PATH"),
+    });
+    writeFileSync(executable, "independent executable bytes");
+    const changed = (await request(environment, {
+      action: "file-inspect",
+      version: 1,
+      remoteMarker: `moira-op-${"5".repeat(32)}`,
+      repositoryFullName: "owner/repository",
+      request: { action: "probe" },
+    })) as any;
+    expect(changed.value.executableSha256).toBe(
+      createHash("sha256").update("independent executable bytes").digest("hex"),
+    );
+    expect(changed.value.executableSha256).not.toBe(changed.value.cliSha256);
+  });
+
+  test("a modern file arriving after admission closes never creates its target", async () => {
+    const value = fixture();
+    const marker = `moira-op-${"4".repeat(32)}`;
+    const digest = "f".repeat(64);
+    const result = await request(value.environment, {
+      action: "file-execute",
+      version: 1,
+      remoteMarker: marker,
+      repositoryFullName: "owner/repository",
+      requestDigest: digest,
+      admissionDeadlineAt: Date.now() - 1,
+      request: {
+        action: "write",
+        path: "late.txt",
+        bytesBase64: Buffer.from("late").toString("base64"),
+        expected: { exists: false },
+      },
+    });
+    expect(result).toMatchObject({ state: "failed", requestDigest: digest, notStarted: true });
+    expect(existsSync(join(value.repository, "late.txt"))).toBe(false);
+    expect(
+      await request(value.environment, {
+        action: "file-inspect",
+        version: 1,
+        remoteMarker: marker,
+        requestDigest: digest,
+      }),
+    ).toEqual(result);
+  });
+
+  test("completed modern file identity refuses changed replay after intent cleanup", async () => {
+    const value = fixture();
+    const marker = `moira-op-${"3".repeat(32)}`;
+    const original = {
+      action: "file-execute",
+      version: 1,
+      remoteMarker: marker,
+      repositoryFullName: "owner/repository",
+      requestDigest: "e".repeat(64),
+      admissionDeadlineAt: Date.now() + 60_000,
+      request: {
+        action: "write",
+        path: "once.txt",
+        bytesBase64: Buffer.from("once").toString("base64"),
+        expected: { exists: false },
+      },
+    };
+    const result = await request(value.environment, original);
+    expect(result).toMatchObject({ state: "succeeded", requestDigest: original.requestDigest });
+    expect(existsSync(join(value.stateRoot, marker, "file-intent.json"))).toBe(false);
+    const inode = statSync(join(value.repository, "once.txt")).ino;
+    expect(
+      await request(value.environment, {
+        action: "finalize",
+        version: 1,
+        remoteMarker: marker,
+        requestDigest: original.requestDigest,
+      }),
+    ).toMatchObject({ state: "outcome_unknown" });
+    expect(await request(value.environment, original)).toEqual(result);
+    expect(statSync(join(value.repository, "once.txt")).ino).toBe(inode);
+    await expect(
+      request(value.environment, {
+        ...original,
+        request: { ...original.request, path: "another.txt" },
+      }),
+    ).rejects.toThrow("file operation immutable proof mismatch");
+    expect(existsSync(join(value.repository, "another.txt"))).toBe(false);
+    expect(readFileSync(join(value.repository, "once.txt"), "utf8")).toBe("once");
+  });
+
+  test("a fixed probe on a terminal maintenance anchor observes fresh life rather than its cached command result", async () => {
+    const value = fixture();
+    const marker = `moira-op-${"2".repeat(32)}`;
+    const environment = { ...value.environment, MOIRA_ENVIRONMENT_ID: "anchor-life" };
+    await request(environment, {
+      action: "execute",
+      version: 1,
+      remoteMarker: marker,
+      repositoryFullName: "owner/repository",
+      argv: [process.execPath, "-e", "process.stdout.write('original')"],
+      cwd: ".",
+      stdin: "",
+      timeoutMs: 10_000,
+      maxStdoutBytes: 1024,
+      maxStderrBytes: 1024,
+      maxRetainedBytes: 4096,
+    });
+    const completed = await inspectUntilTerminal(environment, marker);
+    expect(completed.stdout).toBe("original");
+    const first = await request(environment, {
+      action: "file-inspect",
+      version: 1,
+      remoteMarker: marker,
+      repositoryFullName: "owner/repository",
+      request: { action: "probe" },
+    });
+    const second = await request(
+      { ...environment, MOIRA_ENVIRONMENT_ID: "next-life" },
+      {
+        action: "file-inspect",
+        version: 1,
+        remoteMarker: marker,
+        repositoryFullName: "owner/repository",
+        request: { action: "probe" },
+      },
+    );
+    expect(first).toMatchObject({ state: "succeeded", value: { action: "probe", abi: 1 } });
+    if (process.platform === "linux") expect(second).toEqual(first);
+    else expect(second).not.toEqual(first);
+    expect(
+      await request(environment, { action: "inspect", version: 1, remoteMarker: marker }),
+    ).toEqual(completed);
+  });
+
+  test("detached native transfer recovers lost chunk and publication replies with bounded exact bytes", async () => {
+    const value = await transferFixture();
+    let release!: () => void;
+    value.controls.holdChunk = new Promise<void>((done) => {
+      release = done;
+    });
+    try {
+      const bytes = Buffer.alloc(5 * 1024 * 1024 + 19, 65);
+      writeFileSync(join(value.repository, "artifact.bin"), bytes);
+      const sha256 = createHash("sha256").update(bytes).digest("hex");
+      const record = value.create({
+        requestId: randomUUID(),
+        direction: "guest_to_server",
+        size: bytes.length,
+        sha256,
+      });
+      value.controls.dropPut = true;
+      value.controls.dropFinalize = true;
+      const marker = `moira-op-${"1".repeat(32)}`;
+      const digest = "d".repeat(64);
+      const acknowledgement = await request(
+        value.environment,
+        {
+          action: "file-execute",
+          version: 1,
+          remoteMarker: marker,
+          repositoryFullName: "owner/repository",
+          requestDigest: digest,
+          admissionDeadlineAt: Date.now() + 60_000,
+          request: { action: "download", path: "artifact.bin", transfer: record.descriptor },
+        },
+        undefined,
+        3000,
+      );
+      expect(acknowledgement).toMatchObject({ state: "running", requestDigest: digest });
+      await value.firstChunk;
+      expect(
+        await request(
+          value.environment,
+          { action: "file-inspect", version: 1, remoteMarker: marker, requestDigest: digest },
+          undefined,
+          3000,
+        ),
+      ).toMatchObject({ state: "running", requestDigest: digest });
+      expect(record.offset).toBe(0);
+      expect(
+        await request(
+          value.environment,
+          {
+            action: "file-execute",
+            version: 1,
+            remoteMarker: `moira-op-${"3".repeat(32)}`,
+            repositoryFullName: "owner/repository",
+            request: { action: "stat", path: "artifact.bin" },
+          },
+          undefined,
+          3000,
+        ),
+      ).toMatchObject({
+        state: "succeeded",
+        value: { stat: { size: bytes.length, version: null } },
+      });
+      release();
+      const result = await collectFile(value.environment, marker, digest);
+      expect(result).toMatchObject({
+        state: "succeeded",
+        requestDigest: digest,
+        value: {
+          action: "download",
+          transferId: record.descriptor.transferId,
+          size: bytes.length,
+          sha256,
+          referenceId: "private-reference",
+        },
+      });
+      expect(value.privateBytes.equals(bytes)).toBe(true);
+      expect(value.maximumBody).toBe(262144);
+      expect(JSON.stringify(result)).not.toContain("bytesBase64");
+      expect(readFileSync(join(value.repository, "artifact.bin")).equals(bytes)).toBe(true);
+      const reference = record.receipt;
+      expect(await collectFile(value.environment, marker, digest)).toEqual(result);
+      expect(record.receipt).toBe(reference);
+    } finally {
+      release();
+      await value.close();
+    }
+  }, 15000);
+
+  test("detached native pull resumes retained chunks and commits a guarded large target once", async () => {
+    const value = await transferFixture();
+    try {
+      const bytes = Buffer.alloc(5 * 1024 * 1024 + 31, 66);
+      value.privateBytes = bytes;
+      const sha256 = createHash("sha256").update(bytes).digest("hex");
+      const record = value.create({ requestId: randomUUID(), direction: "server_to_guest" });
+      const marker = `moira-op-${"0".repeat(32)}`;
+      const digest = "c".repeat(64);
+      const original = {
+        action: "file-execute",
+        version: 1,
+        remoteMarker: marker,
+        repositoryFullName: "owner/repository",
+        requestDigest: digest,
+        admissionDeadlineAt: Date.now() + 60_000,
+        request: {
+          action: "upload",
+          path: "received.bin",
+          expected: { exists: false },
+          transfer: record.descriptor,
+        },
+      };
+      value.controls.dropGetOffset = 524288;
+      expect(await request(value.environment, original)).toMatchObject({ state: "running" });
+      await waitForFileRunnerExit(value.stateRoot, marker);
+      expect(existsSync(join(value.repository, "received.bin"))).toBe(false);
+      const checkpoint = JSON.parse(
+        readFileSync(join(value.stateRoot, marker, "transfer.json"), "utf8"),
+      );
+      expect(checkpoint.offset).toBe(524288);
+      const observed = value.observedGets.length;
+      expect(
+        await request(value.environment, { ...original, action: "file-inspect" }),
+      ).toMatchObject({ state: "running" });
+      const result = await collectFile(value.environment, marker, digest);
+      expect(result).toMatchObject({
+        state: "succeeded",
+        value: {
+          action: "upload",
+          transferId: record.descriptor.transferId,
+          previous: null,
+          current: { size: bytes.length, sha256 },
+        },
+      });
+      expect(value.observedGets[observed]).toBe(checkpoint.offset);
+      expect(readFileSync(join(value.repository, "received.bin")).equals(bytes)).toBe(true);
+      const inode = statSync(join(value.repository, "received.bin")).ino;
+      expect(await request(value.environment, original)).toEqual(result);
+      expect(statSync(join(value.repository, "received.bin")).ino).toBe(inode);
+    } finally {
+      await value.close();
+    }
+  }, 15000);
+
+  test.each([false, true])(
+    "expired transfer cleans only its unchanged retained partial (replaced=%s)",
+    async (replaced) => {
+      const value = await transferFixture();
+      try {
+        value.privateBytes = Buffer.alloc(512 * 1024, 68);
+        const record = value.create({ requestId: randomUUID(), direction: "server_to_guest" });
+        const marker = `moira-op-${"2".repeat(32)}`;
+        const digest = "a".repeat(64);
+        value.controls.dropGetOffset = 262144;
+        expect(
+          await request(value.environment, {
+            action: "file-execute",
+            version: 1,
+            remoteMarker: marker,
+            repositoryFullName: "owner/repository",
+            requestDigest: digest,
+            admissionDeadlineAt: Date.now() + 60_000,
+            request: {
+              action: "upload",
+              path: "expired.bin",
+              expected: { exists: false },
+              transfer: record.descriptor,
+            },
+          }),
+        ).toMatchObject({ state: "running" });
+        await waitForFileRunnerExit(value.stateRoot, marker);
+        const checkpoint = JSON.parse(
+          readFileSync(join(value.stateRoot, marker, "transfer.json"), "utf8"),
+        );
+        const partial = join(value.repository, checkpoint.temporaryName);
+        expect(statSync(partial).size).toBe(262144);
+        if (replaced) {
+          rmSync(partial);
+          writeFileSync(partial, "foreign file");
+        }
+        const observed = value.observedGets.length;
+        const inspection = request(
+          value.environment,
+          { action: "file-inspect", version: 1, remoteMarker: marker, requestDigest: digest },
+          (source) => `${source}\nDate.now=()=>${record.descriptor.expiresAt + 1};`,
+        );
+        if (replaced) {
+          await expect(inspection).rejects.toThrow("expired transfer staging changed");
+          expect(readFileSync(partial, "utf8")).toBe("foreign file");
+        } else {
+          expect(await inspection).toMatchObject({
+            state: "failed",
+            requestDigest: digest,
+            value: { reason: "precondition" },
+          });
+          expect(existsSync(partial)).toBe(false);
+        }
+        expect(value.observedGets.length).toBe(observed);
+        expect(existsSync(join(value.repository, "expired.bin"))).toBe(false);
+      } finally {
+        await value.close();
+      }
+    },
+    15000,
+  );
+
+  test("installed moira-files prints recovery identity and uses pure status with exact streamed upload and pull", async () => {
+    const value = await transferFixture();
+    try {
+      const bytes = Buffer.alloc(5 * 1024 * 1024 + 7, 67);
+      writeFileSync(join(value.repository, "cli.bin"), bytes);
+      const requestId = randomUUID();
+      value.controls.dropFinalize = true;
+      const lost = await client(value.environment, [
+        "upload",
+        "cli.bin",
+        "--request-id",
+        requestId.toUpperCase(),
+      ]);
+      expect(lost.code).toBe(1);
+      expect(lost.lines[0]).toEqual({ requestId, state: "request_prepared" });
+      const uploaded = await client(value.environment, [
+        "upload",
+        "cli.bin",
+        "--request-id",
+        requestId,
+      ]);
+      expect(uploaded.code).toBe(0);
+      expect(uploaded.lines.at(-1)).toMatchObject({
+        requestId,
+        referenceId: "private-reference",
+        size: bytes.length,
+      });
+      const record = value.records.get(requestId);
+      const receipt = record.receipt;
+      const snapshot = await client(value.environment, ["status", requestId.toUpperCase()]);
+      expect(snapshot.code).toBe(0);
+      expect(snapshot.lines).toHaveLength(1);
+      expect(snapshot.lines[0]).toMatchObject({ requestId, state: "ready", offset: bytes.length });
+      expect(record.receipt).toBe(receipt);
+      const pulled = await client(value.environment, [
+        "download",
+        "private-reference",
+        "cli-received.bin",
+        "--request-id",
+        randomUUID(),
+      ]);
+      expect(pulled.code).toBe(0);
+      expect(readFileSync(join(value.repository, "cli-received.bin")).equals(bytes)).toBe(true);
+      expect(value.maximumBody).toBe(262144);
+    } finally {
+      await value.close();
+    }
+  }, 15000);
 
   test("performs bounded stat, search, ranges and atomic binary writes without shell paths", async () => {
     const value = fixture();
@@ -1741,6 +2772,128 @@ if (process.env.MOIRA_TEST_HOLD_FILE_RUNNER === "1") {
     expect(readFileSync(target, "utf8")).toBe("second");
   });
 
+  test.each(["write", "upload", "apply_patch"] as const)(
+    "crashed %s recovery preserves substituted target and backup inodes",
+    async (action) => {
+      for (const substituted of ["target", "backup"] as const) {
+        const value = fixture();
+        const marker = `moira-op-${randomUUID().replaceAll("-", "")}`;
+        const target = join(value.repository, "recover.txt");
+        writeFileSync(target, "original");
+        const replacement = Buffer.from("desired").toString("base64");
+        const requestValue =
+          action === "apply_patch"
+            ? {
+                action,
+                summaryMaxBytes: 4096,
+                files: [
+                  {
+                    path: "recover.txt",
+                    expected: { exists: true },
+                    edits: [{ start: 0, end: 8, bytesBase64: replacement }],
+                  },
+                ],
+              }
+            : { action, path: "recover.txt", expected: { exists: true }, bytesBase64: replacement };
+        let injected = false;
+        await expect(
+          request(
+            value.environment,
+            {
+              action: "file-execute",
+              version: 1,
+              remoteMarker: marker,
+              repositoryFullName: "owner/repository",
+              request: requestValue,
+            },
+            (source) => {
+              const changed = source.replace(
+                "await verifyEntryIdentity(item.handle, item.name, item.identity);",
+                "await verifyEntryIdentity(item.handle, item.name, item.identity); process.exit(91);",
+              );
+              injected = changed !== source;
+              return changed;
+            },
+          ),
+        ).rejects.toThrow();
+        expect(injected).toBe(true);
+        const directory = join(value.stateRoot, marker);
+        const [entry] = JSON.parse(readFileSync(join(directory, "file-transaction.json"), "utf8"));
+        const backup = join(value.repository, entry.backup);
+        expect(readFileSync(target, "utf8")).toBe("desired");
+        expect(readFileSync(backup, "utf8")).toBe("original");
+        const foreign = substituted === "target" ? target : backup;
+        const untouched = substituted === "target" ? backup : target;
+        const untouchedInode = statSync(untouched).ino;
+        const untouchedBytes = readFileSync(untouched);
+        const bytes = readFileSync(foreign);
+        const oldInode = statSync(foreign).ino;
+        renameSync(foreign, `${foreign}.pinned`);
+        writeFileSync(foreign, bytes);
+        const foreignInode = statSync(foreign).ino;
+        expect(foreignInode).not.toBe(oldInode);
+        expect(
+          await request(value.environment, {
+            action: "file-inspect",
+            version: 1,
+            remoteMarker: marker,
+          }),
+        ).toMatchObject({ state: "failed", value: { code: "CODESPACE_OPERATION_INTERRUPTED" } });
+        expect(statSync(foreign).ino).toBe(foreignInode);
+        expect(readFileSync(foreign).equals(bytes)).toBe(true);
+        expect(statSync(untouched).ino).toBe(untouchedInode);
+        expect(readFileSync(untouched).equals(untouchedBytes)).toBe(true);
+        expect(existsSync(join(directory, "file-transaction.conflicted.json"))).toBe(true);
+      }
+    },
+  );
+
+  test.each(["target", "backup"] as const)(
+    "live rollback refuses a substituted %s instead of overwriting foreign bytes",
+    async (substituted) => {
+      const value = fixture();
+      const marker = `moira-op-${randomUUID().replaceAll("-", "")}`;
+      const target = join(value.repository, "rollback.txt");
+      const audit = join(value.stateRoot, "foreign-entry.json");
+      writeFileSync(target, "original");
+      let injected = false;
+      const result = await request(
+        value.environment,
+        {
+          action: "file-execute",
+          version: 1,
+          remoteMarker: marker,
+          repositoryFullName: "owner/repository",
+          request: {
+            action: "write",
+            path: "rollback.txt",
+            expected: { exists: true },
+            bytesBase64: Buffer.from("desired").toString("base64"),
+          },
+        },
+        (source) => {
+          const changed = source.replace(
+            "await verifyEntryIdentity(item.handle, item.name, item.identity);",
+            `await verifyEntryIdentity(item.handle, item.name, item.identity);
+const foreign = ${substituted === "target" ? "target" : "backup"};
+const foreignBytes = await readFile(foreign);
+await rename(foreign, foreign + '.pinned');
+await writeFile(foreign, foreignBytes);
+await writeFile(${JSON.stringify(audit)}, JSON.stringify({path:foreign,ino:(await stat(foreign)).ino,bytes:foreignBytes.toString('base64')}));
+fail('injected commit failure');`,
+          );
+          injected = changed !== source;
+          return changed;
+        },
+      ).catch(() => ({ state: "refused" }));
+      expect(injected).toBe(true);
+      expect(["failed", "refused"]).toContain((result as { state: string }).state);
+      const foreign = JSON.parse(readFileSync(audit, "utf8"));
+      expect(statSync(foreign.path).ino).toBe(foreign.ino);
+      expect(readFileSync(foreign.path).toString("base64")).toBe(foreign.bytes);
+    },
+  );
+
   test("preflights every structured patch target before committing any file", async () => {
     const value = fixture();
     writeFileSync(join(value.repository, "one.txt"), "one");
@@ -1917,7 +3070,7 @@ if (process.env.MOIRA_TEST_HOLD_FILE_RUNNER === "1") {
       expect(readFileSync(join(value.repository, file.path), "utf8")).toBe("b");
   });
 
-  test.each(["recoverable", "externally changed"] as const)(
+  test.each(["recoverable", "externally changed", "historical without identities"] as const)(
     "new work proceeds after an abandoned %s commit without replaying or overwriting later edits",
     async (condition) => {
       const value = fixture();
@@ -1963,6 +3116,12 @@ if (process.env.MOIRA_TEST_HOLD_FILE_RUNNER === "1") {
             hadOriginal: true,
             originalSha256: createHash("sha256").update(original).digest("hex"),
             desiredSha256: createHash("sha256").update(desired).digest("hex"),
+            ...(condition === "historical without identities"
+              ? {}
+              : {
+                  originalIdentity: regularIdentity(backup),
+                  desiredIdentity: regularIdentity(target),
+                }),
           },
         ]),
       );
@@ -1997,22 +3156,110 @@ if (process.env.MOIRA_TEST_HOLD_FILE_RUNNER === "1") {
         ),
       ).toEqual(newer);
       expect(readFileSync(target)).toEqual(
-        condition === "recoverable" ? newer : Buffer.from("external edit"),
+        condition === "recoverable"
+          ? newer
+          : condition === "externally changed"
+            ? Buffer.from("external edit")
+            : desired,
       );
-      expect(existsSync(backup)).toBe(condition === "externally changed");
+      expect(existsSync(backup)).toBe(condition !== "recoverable");
       expect(existsSync(join(operationDirectory, "file-transaction.conflicted.json"))).toBe(
-        condition === "externally changed",
+        condition !== "recoverable",
       );
       expect(existsSync(join(operationDirectory, "file-transaction.json"))).toBe(false);
       await expect(
         request(value.environment, { action: "finalize", version: 1, remoteMarker }),
       ).resolves.toEqual({ state: "absent" });
       expect(existsSync(join(operationDirectory, "file-transaction.conflicted.json"))).toBe(
-        condition === "externally changed",
+        condition !== "recoverable",
       );
-      expect(condition === "externally changed" ? readFileSync(backup) : null).toEqual(
-        condition === "externally changed" ? original : null,
+      expect(condition !== "recoverable" ? readFileSync(backup) : null).toEqual(
+        condition !== "recoverable" ? original : null,
       );
+    },
+  );
+
+  test.each([false, true])(
+    "terminal receipt remains collectible while unowned journal entries stay untouched (modern=%s)",
+    async (modern) => {
+      const value = fixture();
+      const marker = `moira-op-${"fa".repeat(16)}`;
+      const directory = join(value.stateRoot, marker);
+      mkdirSync(directory, { recursive: true });
+      const target = join(value.repository, "historical.txt");
+      const backupName = `.moira-${marker}-original.bak`;
+      const backup = join(value.repository, backupName);
+      writeFileSync(target, "desired");
+      writeFileSync(backup, "original");
+      const targetInode = statSync(target).ino;
+      let backupInode = statSync(backup).ino;
+      const operation = {
+        action: "file-execute",
+        version: 1,
+        remoteMarker: marker,
+        repositoryFullName: "owner/repository",
+        request: {
+          action: "write",
+          path: "historical.txt",
+          expected: { exists: true },
+          bytesBase64: Buffer.from("desired").toString("base64"),
+        },
+      };
+      writeFileSync(join(directory, "file-intent.json"), JSON.stringify(operation));
+      writeFileSync(
+        join(directory, "file-transaction.json"),
+        JSON.stringify([
+          {
+            target: "historical.txt",
+            ...parentIdentity(value.repository),
+            temporaryName: `.moira-${marker}-staged.tmp`,
+            backup: backupName,
+            hadOriginal: true,
+            originalSha256: createHash("sha256").update("original").digest("hex"),
+            desiredSha256: createHash("sha256").update("desired").digest("hex"),
+            ...(modern
+              ? {
+                  originalIdentity: regularIdentity(backup),
+                  desiredIdentity: regularIdentity(target),
+                }
+              : {}),
+          },
+        ]),
+      );
+      if (modern) {
+        renameSync(backup, `${backup}.pinned`);
+        writeFileSync(backup, "original");
+        expect(statSync(backup).ino).not.toBe(backupInode);
+        backupInode = statSync(backup).ino;
+      }
+      const terminal = JSON.stringify({
+        kind: "file",
+        state: "succeeded",
+        value: {
+          action: "write",
+          path: "historical.txt",
+          previous: null,
+          current: {
+            size: 7,
+            sha256: createHash("sha256").update("desired").digest("hex"),
+            modifiedAt: 1,
+          },
+        },
+      });
+      writeFileSync(join(directory, "result.json"), terminal);
+      expect(
+        await request(value.environment, {
+          action: "file-inspect",
+          version: 1,
+          remoteMarker: marker,
+        }),
+      ).toMatchObject({ state: "succeeded", value: { action: "write" } });
+      expect(readFileSync(join(directory, "result.json"), "utf8")).toBe(terminal);
+      expect(statSync(target).ino).toBe(targetInode);
+      expect(statSync(backup).ino).toBe(backupInode);
+      expect(readFileSync(target, "utf8")).toBe("desired");
+      expect(readFileSync(backup, "utf8")).toBe("original");
+      expect(existsSync(join(directory, "file-transaction.conflicted.json"))).toBe(true);
     },
   );
 
@@ -2129,6 +3376,8 @@ if (process.env.MOIRA_TEST_HOLD_FILE_RUNNER === "1") {
           hadOriginal: true,
           originalSha256: digest(originalOne),
           desiredSha256: digest(desiredOne),
+          originalIdentity: regularIdentity(backupOne),
+          desiredIdentity: regularIdentity(targetOne),
         },
         {
           target: "two.txt",
@@ -2138,6 +3387,8 @@ if (process.env.MOIRA_TEST_HOLD_FILE_RUNNER === "1") {
           hadOriginal: true,
           originalSha256: digest(originalTwo),
           desiredSha256: digest(desiredTwo),
+          originalIdentity: regularIdentity(targetTwo),
+          desiredIdentity: regularIdentity(temporaryTwo),
         },
       ]),
     );
@@ -2612,7 +3863,7 @@ if (process.env.MOIRA_TEST_HOLD_FILE_RUNNER === "1") {
     });
   });
 
-  test("names a command whose codespace restarted under it, and not one that failed inside this life", async () => {
+  test("distinguishes an unreported command outcome from an actual environment restart", async () => {
     const value = fixture();
     const marker = (character: string) => `moira-op-${character.repeat(32)}`;
     const environment = { ...value.environment, MOIRA_ENVIRONMENT_ID: "life-one" };
@@ -2637,6 +3888,9 @@ if (process.env.MOIRA_TEST_HOLD_FILE_RUNNER === "1") {
     const runner = JSON.parse(readFileSync(join(directory, "runner-pid"), "utf8")) as {
       pid: number;
     };
+    const proof = JSON.parse(readFileSync(join(directory, "execution.json"), "utf8"));
+    expect(proof.launchAttempted).toBe(true);
+    expect(proof.startedAt).toBeGreaterThan(0);
     for (const pid of [identity.pid, runner.pid]) {
       try {
         process.kill(-pid, "SIGKILL");
@@ -2645,16 +3899,14 @@ if (process.env.MOIRA_TEST_HOLD_FILE_RUNNER === "1") {
       }
     }
     await new Promise((resolveWait) => setTimeout(resolveWait, 200));
+    expect(existsSync(join(directory, "result.json"))).toBe(false);
 
     // The required state: the same absence of a result means one thing when the operation belongs to
     // this life and another when it belongs to an earlier one. The recorded life is what separates
     // them, so it is asked about first as it stands and then as a restart would have left it.
     await expect(
       request(environment, { action: "inspect", version: 1, remoteMarker: marker("d") }),
-    ).resolves.toMatchObject({
-      state: "failed",
-      stderr: "operation supervisor exited without a result",
-    });
+    ).resolves.toEqual({ state: "outcome_unknown" });
     storeForeignLife(join(directory, "environment"));
     await expect(
       request(environment, { action: "inspect", version: 1, remoteMarker: marker("d") }),
@@ -2765,7 +4017,7 @@ if (process.env.MOIRA_TEST_HOLD_FILE_RUNNER === "1") {
     expect(readFileSync(effectPath).length).toBe(bytesAfterCancel);
   });
 
-  test("waits for the exact live runner to publish a terminal result after child exit", async () => {
+  test("does not infer a terminal outcome from a disappeared legacy runner marker", async () => {
     const value = fixture();
     const remoteMarker = `moira-op-${"5".repeat(32)}`;
     const operationDirectory = join(value.stateRoot, remoteMarker);
@@ -2787,15 +4039,11 @@ if (process.env.MOIRA_TEST_HOLD_FILE_RUNNER === "1") {
     rmSync(join(operationDirectory, "runner-pid"));
     await expect(
       request(value.environment, { action: "inspect", version: 1, remoteMarker }),
-    ).resolves.toEqual({
-      state: "failed",
-      stdout: "",
-      stderr: "operation supervisor exited without a result",
-      exitCode: null,
-      stdoutBytes: 0,
-      stderrBytes: 0,
-      outputLimitExceeded: false,
-      sessionCaptureDropped: false,
+    ).resolves.toEqual({ state: "outcome_unknown" });
+    expect(existsSync(join(operationDirectory, "result.json"))).toBe(false);
+    expect(JSON.parse(readFileSync(join(operationDirectory, "pid"), "utf8"))).toEqual({
+      pid: 2_147_483_647,
+      startTime: process.platform === "linux" ? "1" : null,
     });
   });
 

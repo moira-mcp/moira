@@ -1,5 +1,7 @@
 import { spawn } from "node:child_process";
-import { createHash, randomBytes } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
+import { parseArgs } from "node:util";
+import { URL } from "node:url";
 import { Buffer } from "node:buffer";
 import { constants } from "node:fs";
 import {
@@ -14,6 +16,7 @@ import {
   rename,
   rm,
   stat,
+  unlink,
   writeFile,
 } from "node:fs/promises";
 import { homedir } from "node:os";
@@ -44,6 +47,8 @@ const REPOSITORY = /^[A-Za-z0-9_.-]{1,100}\/([A-Za-z0-9_.-]{1,100})$/;
 const TERMINAL = new Set(["succeeded", "failed", "cancelled", "timed_out", "not_started"]);
 const MAX_RESULT_PREFIX_BYTES = Math.floor(((MAX_RESULT_BYTES - 64 * 1024) * 3) / 4);
 const FILE_ACTIONS = new Set([
+  "probe",
+  "describe_transfer",
   "stat",
   "search",
   "read",
@@ -53,6 +58,8 @@ const FILE_ACTIONS = new Set([
   "download",
 ]);
 const MAX_FILE_BYTES = 4 * 1024 * 1024;
+const TRANSFER_CHUNK_BYTES = 256 * 1024;
+const TRANSFER_ID = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
 const MAX_FILE_PATH_BYTES = 4096;
 const SEARCH_DEADLINE_MS = 5_000;
 /**
@@ -195,6 +202,847 @@ async function environmentIdentity() {
   }
   const override = process.env.MOIRA_ENVIRONMENT_ID;
   return override ? createHash("sha256").update(`override:${override}`).digest("hex") : null;
+}
+
+async function installedAssetHash(path, { executable = false } = {}) {
+  let handle;
+  try {
+    const before = await lstat(path, { bigint: true });
+    if (!before.isFile() || before.nlink !== 1n || before.size > BigInt(MAX_FILE_BYTES))
+      fail("installed guest asset is unsafe");
+    if (executable) await access(path, constants.X_OK);
+    handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+    const opened = await handle.stat({ bigint: true });
+    if (!sameFileIdentity(fileIdentity(before), fileIdentity(opened)))
+      fail("installed guest asset changed");
+    const sha256 = await hashRegular(handle, Number(opened.size));
+    const after = await handle.stat({ bigint: true });
+    const named = await lstat(path, { bigint: true });
+    if (
+      !sameFileIdentity(fileIdentity(opened), fileIdentity(after)) ||
+      !sameFileIdentity(fileIdentity(opened), fileIdentity(named))
+    )
+      fail("installed guest asset changed");
+    return sha256;
+  } catch (error) {
+    if (error?.code === "ENOENT") return null;
+    throw error;
+  } finally {
+    await handle?.close();
+  }
+}
+
+async function probeFileRuntime(binding) {
+  const identity = await environmentIdentity();
+  if (!identity) fail("guest environment identity is unavailable");
+  const command = join(homedir(), ".local/bin/moira-files");
+  return {
+    action: "probe",
+    abi: 1,
+    environmentIdentity: identity,
+    workerSha256: binding ? await installedAssetHash("/tmp/moira-local-runtime/worker.mjs") : null,
+    cliSha256: await installedAssetHash(join(homedir(), ".local/share/moira-files/client.mjs")),
+    command,
+    executableSha256: await installedAssetHash(command, { executable: true }),
+  };
+}
+
+async function fileClientConfiguration() {
+  const value = await readBoundedJson(
+    join(homedir(), ".local/share/moira-files/config.json"),
+    16384,
+  );
+  const origin = new URL(value.origin);
+  if (
+    Object.keys(value).sort().join(",") !==
+      "bootstrapCapability,environmentIdentity,origin,repositoryFullName,resourceId,version" ||
+    value.version !== 1 ||
+    origin.protocol !== "https:" ||
+    origin.origin !== value.origin ||
+    origin.username ||
+    origin.password ||
+    !TRANSFER_ID.test(value.resourceId) ||
+    !REPOSITORY.test(value.repositoryFullName) ||
+    !/^[a-f0-9]{64}$/.test(value.environmentIdentity) ||
+    typeof value.bootstrapCapability !== "string" ||
+    value.bootstrapCapability.length > 8192 ||
+    !/^[A-Za-z0-9._~-]{20,}$/.test(value.bootstrapCapability)
+  )
+    fail("invalid file client configuration");
+  if ((await environmentIdentity()) !== value.environmentIdentity)
+    fail("file client belongs to a previous guest life");
+  return value;
+}
+
+function transferDescriptor(value, configuration) {
+  if (
+    !value ||
+    value.version !== 1 ||
+    !TRANSFER_ID.test(value.transferId) ||
+    !TRANSFER_ID.test(value.requestId) ||
+    !["guest_to_server", "server_to_guest"].includes(value.direction) ||
+    !Number.isSafeInteger(value.size) ||
+    value.size < 0 ||
+    !/^[a-f0-9]{64}$/.test(value.sha256) ||
+    typeof value.mimeType !== "string" ||
+    value.mimeType.length > 256 ||
+    value.chunkBytes !== TRANSFER_CHUNK_BYTES ||
+    !Number.isSafeInteger(value.expiresAt) ||
+    value.expiresAt <= Date.now() ||
+    value.environmentIdentity !== configuration.environmentIdentity ||
+    value.origin !== configuration.origin ||
+    typeof value.capability !== "string" ||
+    value.capability.length > 8192 ||
+    !/^[A-Za-z0-9._~-]{20,}$/.test(value.capability)
+  )
+    fail("invalid transfer descriptor");
+  return value;
+}
+
+/** Curl owns TLS/proxy handling; each invocation carries only one bounded HTTP body. */
+async function fileHttp(
+  configuration,
+  capability,
+  method,
+  path,
+  bytes,
+  maximum = 65536,
+  json = false,
+) {
+  if ((await environmentIdentity()) !== configuration.environmentIdentity)
+    fail("transfer guest life changed");
+  if (
+    !path.startsWith("/api/public/codespace-files/") ||
+    path.includes("\n") ||
+    path.includes("\r")
+  )
+    fail("invalid file endpoint");
+  const directory = join(STATE_ROOT, "file-http");
+  await mkdir(directory, { recursive: true, mode: 0o700 });
+  const nonce = randomBytes(16).toString("hex");
+  const headersPath = join(directory, `${nonce}.request`);
+  const responsePath = join(directory, `${nonce}.response`);
+  const headers = [`Authorization: Bearer ${capability}`];
+  if (bytes !== undefined) {
+    if (bytes.length > TRANSFER_CHUNK_BYTES) fail("file HTTP body exceeds its bound");
+    headers.push(`Content-Type: ${json ? "application/json" : "application/octet-stream"}`);
+    if (method === "PUT")
+      headers.push(`X-Chunk-SHA256: ${createHash("sha256").update(bytes).digest("hex")}`);
+  }
+  await writeFile(headersPath, headers.join("\n"), { mode: 0o600, flag: "wx" });
+  try {
+    const argv = [
+      "--silent",
+      "--show-error",
+      "--fail-with-body",
+      "--proto",
+      "=https",
+      "--proto-redir",
+      "=https",
+      "--max-redirs",
+      "0",
+      "--connect-timeout",
+      "15",
+      "--max-time",
+      "120",
+      "--request",
+      method,
+      "--header",
+      `@${headersPath}`,
+      "--dump-header",
+      responsePath,
+    ];
+    if (bytes !== undefined) argv.push("--data-binary", "@-");
+    argv.push(configuration.origin + path);
+    const body = await new Promise((done, reject) => {
+      const child = spawn("curl", argv, { stdio: ["pipe", "pipe", "pipe"], env: process.env });
+      const chunks = [];
+      let length = 0;
+      let rejected = false;
+      const refuse = () => {
+        if (rejected) return;
+        rejected = true;
+        child.kill("SIGKILL");
+        const error = new Error("file HTTP operation is unconfirmed");
+        error.code = "TRANSFER_OUTCOME_UNKNOWN";
+        reject(error);
+      };
+      child.stderr.resume();
+      child.stdin.on("error", () => undefined);
+      child.stdout.on("data", (chunk) => {
+        length += chunk.length;
+        if (length > maximum) refuse();
+        else chunks.push(Buffer.from(chunk));
+      });
+      child.once("error", refuse);
+      child.once("close", (code) => {
+        if (rejected) return;
+        if (code !== 0) {
+          const error = new Error("file HTTP operation is unconfirmed");
+          error.code = "TRANSFER_OUTCOME_UNKNOWN";
+          reject(error);
+        } else done(Buffer.concat(chunks, length));
+      });
+      child.stdin.end(bytes);
+    });
+    const headerStat = await lstat(responsePath);
+    if (
+      !headerStat.isFile() ||
+      headerStat.isSymbolicLink() ||
+      headerStat.nlink !== 1 ||
+      headerStat.size > 16384
+    )
+      fail("invalid transfer response headers");
+    const responseHeaders = await readFile(responsePath, "utf8");
+    return { body, headers: responseHeaders };
+  } finally {
+    await rm(headersPath, { force: true });
+    await rm(responsePath, { force: true });
+  }
+}
+
+async function fileHttpJson(configuration, capability, method, path, value) {
+  const body = value === undefined ? undefined : Buffer.from(JSON.stringify(value));
+  const response = await fileHttp(configuration, capability, method, path, body, 65536, true);
+  return JSON.parse(response.body.toString("utf8"));
+}
+
+function transferPath(descriptor, suffix = "") {
+  return `/api/public/codespace-files/transfers/${descriptor.transferId}${suffix}`;
+}
+
+function validateTransferStatus(value, descriptor) {
+  if (
+    !value ||
+    value.transferId !== descriptor.transferId ||
+    value.requestId !== descriptor.requestId ||
+    value.size !== descriptor.size ||
+    value.sha256 !== descriptor.sha256 ||
+    !Number.isSafeInteger(value.offset) ||
+    value.offset < 0 ||
+    value.offset > descriptor.size
+  )
+    fail("transfer status differs from accepted descriptor");
+  return value;
+}
+
+async function transferStatus(configuration, descriptor) {
+  return validateTransferStatus(
+    await fileHttpJson(configuration, descriptor.capability, "GET", transferPath(descriptor)),
+    descriptor,
+  );
+}
+
+function publicationReceipt(value, descriptor) {
+  if (
+    !value ||
+    value.state !== "ready" ||
+    value.transferId !== descriptor.transferId ||
+    value.size !== descriptor.size ||
+    value.sha256 !== descriptor.sha256 ||
+    typeof value.referenceId !== "string" ||
+    !value.referenceId ||
+    value.referenceId.length > 8192
+  )
+    fail("transfer publication receipt is invalid");
+  return value;
+}
+
+async function transferCheckpoint(directory, descriptor, path, expected) {
+  const identity = {
+    transferId: descriptor.transferId,
+    requestId: descriptor.requestId,
+    direction: descriptor.direction,
+    size: descriptor.size,
+    sha256: descriptor.sha256,
+    mimeType: descriptor.mimeType,
+    origin: descriptor.origin,
+    environmentIdentity: descriptor.environmentIdentity,
+    expiresAt: descriptor.expiresAt,
+    capabilitySha256: createHash("sha256").update(descriptor.capability).digest("hex"),
+    path,
+    expected: expected ?? null,
+  };
+  const digest = createHash("sha256").update(JSON.stringify(identity)).digest("hex");
+  let checkpoint;
+  try {
+    checkpoint = await readBoundedJson(join(directory, "transfer.json"), 65536);
+    if (checkpoint.digest !== digest) fail("transfer checkpoint intent changed");
+  } catch (error) {
+    if (error?.code !== "ENOENT") throw error;
+    checkpoint = { digest, offset: 0, state: "streaming", expiresAt: descriptor.expiresAt };
+    await writeDurableJson(directory, "transfer.json", checkpoint);
+  }
+  return checkpoint;
+}
+
+async function pushTransfer(root, path, configuration, descriptor, directory) {
+  const checkpoint = await transferCheckpoint(directory, descriptor, path);
+  if (checkpoint.receipt) return checkpoint.receipt;
+  const status = await transferStatus(configuration, descriptor);
+  if (status.state === "ready" && status.receipt)
+    return publicationReceipt(status.receipt, descriptor);
+  if (status.offset !== descriptor.size && status.offset % TRANSFER_CHUNK_BYTES !== 0)
+    fail("invalid persisted transfer offset");
+  await withRegularFile(
+    root,
+    path,
+    async (handle, size) => {
+      if (size !== descriptor.size) failFile("concurrent_change", "transfer source size changed");
+      const hash = createHash("sha256");
+      const buffer = Buffer.alloc(Math.min(size, TRANSFER_CHUNK_BYTES));
+      for (let offset = 0; offset < size;) {
+        const length = Math.min(buffer.length, size - offset);
+        await readExact(handle, buffer.subarray(0, length), offset);
+        const bytes = buffer.subarray(0, length);
+        hash.update(bytes);
+        if (offset >= status.offset) {
+          let acknowledged;
+          try {
+            const reply = await fileHttp(
+              configuration,
+              descriptor.capability,
+              "PUT",
+              transferPath(descriptor, `/chunks?offset=${offset}&length=${length}`),
+              bytes,
+            );
+            acknowledged = validateTransferStatus(
+              JSON.parse(reply.body.toString("utf8")),
+              descriptor,
+            );
+          } catch (error) {
+            if (error?.code !== "TRANSFER_OUTCOME_UNKNOWN") throw error;
+            acknowledged = await transferStatus(configuration, descriptor);
+          }
+          if (acknowledged.offset !== offset + length) fail("transfer chunk was not confirmed");
+          checkpoint.offset = acknowledged.offset;
+          await writeDurableJson(directory, "transfer.json", checkpoint);
+        }
+        offset += length;
+      }
+      if (hash.digest("hex") !== descriptor.sha256)
+        failFile("concurrent_change", "transfer source digest changed");
+      return {};
+    },
+    { maximum: descriptor.size },
+  );
+  // Publication follows the held descriptor's final path/identity observation.
+  const receipt = publicationReceipt(
+    await fileHttpJson(
+      configuration,
+      descriptor.capability,
+      "POST",
+      transferPath(descriptor, "/finalize"),
+    ),
+    descriptor,
+  );
+  checkpoint.state = "committed";
+  checkpoint.receipt = receipt;
+  await writeDurableJson(directory, "transfer.json", checkpoint);
+  return receipt;
+}
+
+async function pullTransfer(root, path, expected, configuration, descriptor, directory, marker) {
+  let checkpoint = await transferCheckpoint(directory, descriptor, path, expected);
+  if (checkpoint.receipt) return checkpoint.receipt;
+  const location = await parentDirectory(root, path);
+  let current;
+  let handle;
+  let staged;
+  try {
+    const parent = await directoryIdentity(location.handle);
+    if (checkpoint.parent && !sameDirectoryIdentity(parent, checkpoint.parent))
+      failFile("concurrent_change", "transfer target parent changed");
+    current = await currentFile(root, path, { keepOpen: true, stream: true });
+    if (checkpoint.state === "committing") {
+      // A durable staged inode proves our rename; matching bytes alone cannot identify an effect.
+      if (
+        current &&
+        checkpoint.identity &&
+        sameFileIdentity(checkpoint.identity, current.stat.identity, { afterRename: true }) &&
+        version(current.bytes, current.stat).sha256 === descriptor.sha256
+      ) {
+        const receipt = {
+          path,
+          size: descriptor.size,
+          sha256: descriptor.sha256,
+          previous: checkpoint.previous,
+          current: version(current.bytes, current.stat),
+        };
+        checkpoint = { ...checkpoint, state: "committed", receipt };
+        await writeDurableJson(directory, "transfer.json", checkpoint);
+        await cleanupFileTransaction(directory, root);
+        return receipt;
+      }
+      await recoverFileTransaction(directory, root);
+      failFile("concurrent_change", "transfer commit did not settle with its staged inode");
+    }
+    validateExpected(expected, current);
+    const previous = current ? version(current.bytes, current.stat) : null;
+    if (
+      checkpoint.original !== undefined &&
+      JSON.stringify(checkpoint.original) !== JSON.stringify(current?.stat.identity ?? null)
+    )
+      failFile("concurrent_change", "transfer target changed during resume");
+    const temporaryName =
+      checkpoint.temporaryName ?? `.moira-${marker}-${randomBytes(8).toString("hex")}.tmp`;
+    if (!/^\.moira-[a-z0-9-]+\.tmp$/.test(temporaryName)) fail("invalid transfer staging name");
+    handle = await open(
+      descriptorPath(location.handle, temporaryName),
+      constants.O_RDWR |
+        constants.O_NOFOLLOW |
+        (checkpoint.temporaryName ? 0 : constants.O_CREAT | constants.O_EXCL),
+      current?.stat.mode ? current.stat.mode & 0o777 : 0o600,
+    );
+    const partial = await handle.stat();
+    if (
+      !partial.isFile() ||
+      partial.nlink !== 1 ||
+      partial.size < checkpoint.offset ||
+      partial.size > descriptor.size
+    )
+      fail("invalid transfer partial file");
+    const partialIdentity = fileIdentity(await handle.stat({ bigint: true }));
+    if (checkpoint.temporaryName) {
+      const retained = checkpoint.partialIdentity;
+      const unchanged = sameFileIdentity(retained, partialIdentity);
+      const ownedTail =
+        retained &&
+        retained.birthtimeNs &&
+        retained.birthtimeNs !== "0" &&
+        partialIdentity.birthtimeNs !== partialIdentity.ctimeNs &&
+        retained.birthtimeNs === partialIdentity.birthtimeNs &&
+        retained.dev === partialIdentity.dev &&
+        retained.ino === partialIdentity.ino &&
+        retained.nlink === "1" &&
+        partialIdentity.nlink === "1" &&
+        retained.size === String(checkpoint.offset) &&
+        partial.size > checkpoint.offset &&
+        typeof checkpoint.partialSha256 === "string";
+      if (!unchanged && !ownedTail)
+        failFile("concurrent_change", "transfer partial identity changed during resume");
+      if (
+        checkpoint.partialSha256 &&
+        (await hashRegular(handle, checkpoint.offset)) !== checkpoint.partialSha256
+      )
+        failFile("concurrent_change", "transfer partial prefix changed during resume");
+    }
+    if (partial.size > checkpoint.offset) await handle.truncate(checkpoint.offset);
+    const prefixHash = createHash("sha256");
+    const prefixBuffer = Buffer.alloc(Math.min(checkpoint.offset, TRANSFER_CHUNK_BYTES));
+    for (let offset = 0; offset < checkpoint.offset;) {
+      const read = await handle.read(
+        prefixBuffer,
+        0,
+        Math.min(prefixBuffer.length, checkpoint.offset - offset),
+        offset,
+      );
+      if (!read.bytesRead) fail("transfer retained prefix is incomplete");
+      prefixHash.update(prefixBuffer.subarray(0, read.bytesRead));
+      offset += read.bytesRead;
+    }
+    checkpoint = {
+      ...checkpoint,
+      parent,
+      original: current?.stat.identity ?? null,
+      previous,
+      temporaryName,
+      partialIdentity: fileIdentity(await handle.stat({ bigint: true })),
+      partialSha256: prefixHash.copy().digest("hex"),
+    };
+    await writeDurableJson(directory, "transfer.json", checkpoint);
+    for (let offset = checkpoint.offset; offset < descriptor.size;) {
+      const length = Math.min(TRANSFER_CHUNK_BYTES, descriptor.size - offset);
+      const response = await fileHttp(
+        configuration,
+        descriptor.capability,
+        "GET",
+        transferPath(descriptor, `/chunks?offset=${offset}&length=${length}`),
+        undefined,
+        length,
+      );
+      const hashes = [
+        ...response.headers.matchAll(/(?:^|\n)x-chunk-sha256:\s*([a-f0-9]{64})\s*\r?$/gim),
+      ];
+      const offsets = [
+        ...response.headers.matchAll(/(?:^|\n)x-chunk-offset:\s*([0-9]+)\s*\r?$/gim),
+      ];
+      if (
+        response.body.length !== length ||
+        hashes.length !== 1 ||
+        offsets.length !== 1 ||
+        Number(offsets[0][1]) !== offset ||
+        createHash("sha256").update(response.body).digest("hex") !== hashes[0][1]
+      )
+        fail("transfer chunk integrity failed");
+      let written = 0;
+      while (written < length) {
+        const result = await handle.write(
+          response.body,
+          written,
+          length - written,
+          offset + written,
+        );
+        if (!result.bytesWritten) fail("transfer partial write failed");
+        written += result.bytesWritten;
+      }
+      await handle.sync();
+      prefixHash.update(response.body);
+      offset += length;
+      checkpoint.offset = offset;
+      checkpoint.partialIdentity = fileIdentity(await handle.stat({ bigint: true }));
+      checkpoint.partialSha256 = prefixHash.copy().digest("hex");
+      await writeDurableJson(directory, "transfer.json", checkpoint);
+    }
+    if ((await hashRegular(handle, descriptor.size)) !== descriptor.sha256)
+      fail("transfer full digest failed");
+    const identity = fileIdentity(await handle.stat({ bigint: true }));
+    staged = {
+      ...location,
+      root,
+      parentIdentity: parent,
+      temporaryName,
+      current,
+      size: descriptor.size,
+      sha256: descriptor.sha256,
+      identity,
+      stagingHandle: handle,
+      stream: true,
+      closed: false,
+    };
+    handle = undefined;
+    publicationReceipt(
+      await fileHttpJson(
+        configuration,
+        descriptor.capability,
+        "POST",
+        transferPath(descriptor, "/finalize"),
+      ),
+      descriptor,
+    );
+    await withFileCommitLock(async () => {
+      if (
+        Date.now() >= descriptor.expiresAt ||
+        (await environmentIdentity()) !== descriptor.environmentIdentity
+      )
+        fail("transfer commit authority expired or changed");
+      await recoverAbandonedFileCommits(root, configuration.repositoryFullName, directory);
+      checkpoint = { ...checkpoint, state: "committing", identity };
+      await writeDurableJson(directory, "transfer.json", checkpoint);
+      await commitStaged([staged], marker, directory);
+      const after = await currentFile(root, path, { stream: true });
+      try {
+        if (
+          !after ||
+          !sameFileIdentity(identity, after.stat.identity, { afterRename: true }) ||
+          version(after.bytes, after.stat).sha256 !== descriptor.sha256
+        )
+          failFile("concurrent_change", "committed transfer target changed");
+        const receipt = {
+          path,
+          size: descriptor.size,
+          sha256: descriptor.sha256,
+          previous,
+          current: version(after.bytes, after.stat),
+        };
+        checkpoint = { ...checkpoint, state: "committed", receipt };
+        await writeDurableJson(directory, "transfer.json", checkpoint);
+        await cleanupFileTransaction(directory, root);
+      } finally {
+        await after?.handle?.close();
+      }
+    });
+    return checkpoint.receipt;
+  } finally {
+    await handle?.close();
+    if (!staged?.closed) {
+      await staged?.stagingHandle?.close();
+      await current?.handle?.close();
+      await location.handle.close();
+    }
+  }
+}
+
+async function executeTransfer(root, request, directory, marker) {
+  const configuration = await fileClientConfiguration();
+  const descriptor = transferDescriptor(request.transfer, configuration);
+  const path = safeRelativePath(request.path);
+  if (request.action === "download" && descriptor.direction === "guest_to_server") {
+    const receipt = await withTransferLock(descriptor, () =>
+      pushTransfer(root, path, configuration, descriptor, directory),
+    );
+    return {
+      action: "download",
+      transferId: descriptor.transferId,
+      path,
+      size: descriptor.size,
+      sha256: descriptor.sha256,
+      referenceId: receipt.referenceId,
+    };
+  }
+  if (request.action === "upload" && descriptor.direction === "server_to_guest") {
+    const receipt = await withTransferLock(descriptor, () =>
+      pullTransfer(root, path, request.expected, configuration, descriptor, directory, marker),
+    );
+    return { action: "upload", transferId: descriptor.transferId, ...receipt };
+  }
+  fail("transfer direction differs from file operation");
+}
+
+async function discardTransferPartial(root, intent, checkpoint) {
+  if (!checkpoint?.temporaryName) return;
+  const location = await parentDirectory(root, intent.request.path);
+  let held;
+  try {
+    if (!sameDirectoryIdentity(await directoryIdentity(location.handle), checkpoint.parent))
+      failFile("concurrent_change", "expired transfer parent changed");
+    if (!/^\.moira-[a-z0-9-]+\.tmp$/.test(checkpoint.temporaryName))
+      fail("invalid transfer staging name");
+    const path = descriptorPath(location.handle, checkpoint.temporaryName);
+    try {
+      held = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+    } catch (error) {
+      if (error?.code === "ENOENT") return;
+      throw error;
+    }
+    const stat = await held.stat({ bigint: true });
+    if (!stat.isFile() || !sameFileIdentity(fileIdentity(stat), checkpoint.partialIdentity))
+      failFile("concurrent_change", "expired transfer staging changed");
+    await verifyParentIdentity(root, intent.request.path, checkpoint.parent);
+    if (
+      !sameFileIdentity(
+        fileIdentity(await lstat(path, { bigint: true })),
+        checkpoint.partialIdentity,
+      )
+    )
+      failFile("concurrent_change", "expired transfer staging changed");
+    await unlink(path);
+    await location.handle.sync();
+  } finally {
+    await held?.close();
+    await location.handle.close();
+  }
+}
+
+/** Expiry releases only a staged file whose last durable identity still belongs to this transfer. */
+async function expireTransfer(directory, binding) {
+  const intent = await readFileIntent(directory);
+  if (!intent?.request?.transfer || Date.now() < intent.request.transfer.expiresAt) return null;
+  const owner = await readOptionalProcessIdentity(directory, "file-runner-pid");
+  if (owner && (await processExists(owner))) return null;
+  const root = await repositoryRootForFile(intent, binding);
+  return withFileCommitLock(async () => {
+    const result = await readFileOperationResult(directory);
+    if (result) return result;
+    const checkpoint = await readBoundedJson(join(directory, "transfer.json"), 65536);
+    if (checkpoint.state === "committed" && checkpoint.receipt) {
+      const transfer = intent.request.transfer;
+      const value =
+        intent.request.action === "upload"
+          ? { action: "upload", transferId: transfer.transferId, ...checkpoint.receipt }
+          : {
+              action: "download",
+              transferId: transfer.transferId,
+              path: intent.request.path,
+              size: transfer.size,
+              sha256: transfer.sha256,
+              referenceId: checkpoint.receipt.referenceId,
+            };
+      await writeDurableJson(directory, "result.json", { kind: "file", state: "succeeded", value });
+      await cleanupFileTransaction(directory, root);
+      await rm(join(directory, "file-intent.json"), { force: true });
+      return { state: "succeeded", value };
+    }
+    if (checkpoint.state === "committing") {
+      const settled = await settleTransferCommit(directory, root, intent);
+      if (settled) return settled;
+      await recoverFileTransaction(directory, root);
+    } else await discardTransferPartial(root, intent, checkpoint);
+    const terminal = {
+      kind: "file",
+      state: "failed",
+      value: {
+        action: intent.request.action,
+        state: "failed",
+        code: "CODESPACE_FILE_REJECTED",
+        reason: "precondition",
+      },
+    };
+    await writeDurableJson(directory, "result.json", terminal);
+    await rm(join(directory, "file-intent.json"), { force: true });
+    return { state: terminal.state, value: terminal.value };
+  });
+}
+
+async function withTransferLock(descriptor, work) {
+  const directory = join(STATE_ROOT, "transfer-locks");
+  await mkdir(directory, { recursive: true, mode: 0o700 });
+  const lock = await acquireKernelLock(
+    join(directory, `${descriptor.transferId}.lock`),
+    Date.now() + 60_000,
+  );
+  if (!lock) fail("transfer is already in use");
+  try {
+    return await work();
+  } finally {
+    lock.release();
+  }
+}
+
+/** Installed remote client: only scoped files API, never the local workflow engine. */
+export async function runFilesClient(args) {
+  const parsed = parseArgs({
+    args,
+    allowPositionals: true,
+    strict: true,
+    options: {
+      "request-id": { type: "string" },
+      mime: { type: "string" },
+      "replace-sha256": { type: "string" },
+      help: { type: "boolean" },
+    },
+  });
+  const [action, source, destination] = parsed.positionals;
+  if (action === "operation") {
+    if (!MARKER.test(source)) fail("invalid transfer worker marker");
+    const chunks = [];
+    let length = 0;
+    for await (const chunk of process.stdin) {
+      length += chunk.length;
+      if (length > MAX_CONTROL_BYTES) fail("transfer worker input exceeds its bound");
+      chunks.push(Buffer.from(chunk));
+    }
+    const input = JSON.parse(Buffer.concat(chunks, length).toString("utf8"));
+    if (input.request?.remoteMarker !== source || !input.request.request?.transfer)
+      fail("invalid fixed transfer worker intent");
+    return fileExecute(input.request, input.binding, { worker: true });
+  }
+  if (parsed.values.help || !action) {
+    process.stdout.write(
+      "moira-files upload PATH [--request-id UUID] [--mime TYPE]\nmoira-files download REFERENCE PATH [--request-id UUID] [--replace-sha256 SHA256]\nmoira-files status REQUEST_ID\n",
+    );
+    return;
+  }
+  const configuration = await fileClientConfiguration();
+  if (action === "status") {
+    if (!TRANSFER_ID.test(source)) fail("invalid transfer request identity");
+    const status = await fileHttpJson(
+      configuration,
+      configuration.bootstrapCapability,
+      "POST",
+      "/api/public/codespace-files/lookup",
+      { requestId: source.toLowerCase() },
+    );
+    process.stdout.write(`${JSON.stringify(status)}\n`);
+    return;
+  }
+  if (!["upload", "download"].includes(action)) fail("unknown file client operation");
+  const requestId = (parsed.values["request-id"] ?? randomUUID()).toLowerCase();
+  if (!TRANSFER_ID.test(requestId)) fail("invalid transfer request identity");
+  // Printed before the first admission request so a lost reply remains recoverable.
+  process.stdout.write(`${JSON.stringify({ requestId, state: "request_prepared" })}\n`);
+  const name = configuration.repositoryFullName.match(REPOSITORY)[1];
+  let binding;
+  try {
+    binding = await readBoundedJson(
+      join(homedir(), ".local/share/moira-local/repository.json"),
+      16384,
+    );
+    if (
+      binding.repositoryFullName !== configuration.repositoryFullName ||
+      typeof binding.root !== "string" ||
+      typeof binding.origin !== "string" ||
+      !Number.isSafeInteger(binding.dev) ||
+      !Number.isSafeInteger(binding.ino)
+    )
+      fail("file client repository binding changed");
+    const environment = await readBoundedJson(
+      join(homedir(), ".local/share/moira-local/environment.json"),
+      16384,
+    );
+    for (const key of [
+      "HTTP_PROXY",
+      "HTTPS_PROXY",
+      "http_proxy",
+      "https_proxy",
+      "NO_PROXY",
+      "no_proxy",
+    ]) {
+      if (typeof environment[key] !== "string" || environment[key].length > 512)
+        fail("file client proxy binding changed");
+      process.env[key] = environment[key];
+    }
+  } catch (error) {
+    if (error?.code !== "ENOENT") throw error;
+  }
+  const rootPath = await verifyRepository(
+    { repositoryFullName: configuration.repositoryFullName, cwd: "." },
+    name,
+    binding,
+  );
+  const metadata = await lstat(rootPath);
+  const root = { path: rootPath, dev: metadata.dev, ino: metadata.ino };
+  const path = safeRelativePath(action === "upload" ? source : destination);
+  const marker = `moira-op-${createHash("sha256").update(`moira-files|${requestId}`).digest("hex").slice(0, 32)}`;
+  const directory = operationDirectory(marker);
+  if (await expireTransfer(directory, binding)) fail("retained transfer expired");
+  let input;
+  if (action === "upload") {
+    const description = await withRegularFile(root, path, async (handle, size) => ({
+      sha256: await hashRegular(handle, size),
+    }));
+    input = {
+      requestId,
+      direction: "guest_to_server",
+      size: description.stat.size,
+      sha256: description.sha256,
+      fileName: path.split("/").at(-1),
+      mimeType: parsed.values.mime ?? "application/octet-stream",
+    };
+  } else {
+    if (typeof source !== "string" || source.length > 8192)
+      fail("invalid transfer source reference");
+    input = { requestId, direction: "server_to_guest", referenceId: source };
+  }
+  const minted = await fileHttpJson(
+    configuration,
+    configuration.bootstrapCapability,
+    "POST",
+    "/api/public/codespace-files/transfers",
+    input,
+  );
+  const descriptor = transferDescriptor(minted.descriptor, configuration);
+  if (descriptor.requestId !== requestId || descriptor.direction !== input.direction)
+    fail("minted transfer identity changed");
+  await mkdir(directory, { recursive: true, mode: 0o700 });
+  const sha256 = parsed.values["replace-sha256"];
+  if (sha256 !== undefined && !/^[a-f0-9]{64}$/.test(sha256))
+    fail("invalid expected target digest");
+  const expected = sha256 ? { exists: true, sha256 } : { exists: false };
+  const receipt = await withTransferLock(descriptor, async () => {
+    await transferCheckpoint(
+      directory,
+      descriptor,
+      path,
+      action === "download" ? expected : undefined,
+    );
+    const intent = {
+      repositoryFullName: configuration.repositoryFullName,
+      request: {
+        action: action === "upload" ? "download" : "upload",
+        path,
+        transfer: descriptor,
+        ...(action === "download" ? { expected } : {}),
+      },
+    };
+    await writeDurableJson(directory, "file-intent.json", intent);
+    return action === "upload"
+      ? pushTransfer(root, path, configuration, descriptor, directory)
+      : pullTransfer(root, path, expected, configuration, descriptor, directory, marker);
+  });
+  process.stdout.write(
+    `${JSON.stringify({ requestId, transferId: descriptor.transferId, ...receipt })}\n`,
+  );
 }
 
 function sessionPath(name) {
@@ -604,8 +1452,8 @@ async function writeAll(handle, bytes) {
 
 function version(bytes, value) {
   return {
-    size: bytes.length,
-    sha256: createHash("sha256").update(bytes).digest("hex"),
+    size: bytes ? bytes.length : value.size,
+    sha256: value.sha256 ?? createHash("sha256").update(bytes).digest("hex"),
     modifiedAt: Math.trunc(value.mtimeMs),
   };
 }
@@ -635,6 +1483,7 @@ function fileIdentity(value) {
     size: value.size.toString(),
     mtimeNs: value.mtimeNs.toString(),
     ctimeNs: value.ctimeNs.toString(),
+    birthtimeNs: value.birthtimeNs.toString(),
   };
 }
 
@@ -652,6 +1501,7 @@ function sameFileIdentity(left, right, { afterRename = false } = {}) {
     left.nlink === "1" &&
     left.size === right.size &&
     left.mtimeNs === right.mtimeNs &&
+    (!left.birthtimeNs || left.birthtimeNs === right.birthtimeNs) &&
     (afterRename || left.ctimeNs === right.ctimeNs),
   );
 }
@@ -706,6 +1556,15 @@ async function parentDirectory(root, relative) {
 
 async function currentFile(root, relative, options = {}) {
   try {
+    if (options.stream) {
+      const current = await withRegularFile(
+        root,
+        relative,
+        async (handle, size) => ({ sha256: await hashRegular(handle, size) }),
+        { keepOpen: options.keepOpen },
+      );
+      return { ...current, stat: { ...current.stat, sha256: current.sha256 } };
+    }
     return await readRegular(root, relative, MAX_FILE_BYTES, options);
   } catch (error) {
     if (error?.code === "ENOENT") return null;
@@ -719,34 +1578,48 @@ async function stageReplacement(root, relative, bytes, expected, marker) {
   const location = await parentDirectory(root, relative);
   let temporaryName = null;
   let current = null;
+  let stagingHandle;
   try {
     const parentIdentity = await directoryIdentity(location.handle);
     current = await currentFile(root, relative, { keepOpen: true });
     validateExpected(expected, current);
     temporaryName = `.moira-${marker}-${randomBytes(8).toString("hex")}.tmp`;
-    const handle = await open(
+    stagingHandle = await open(
       descriptorPath(location.handle, temporaryName),
-      constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW,
+      constants.O_RDWR | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW,
       current?.stat.mode ? current.stat.mode & 0o777 : 0o600,
     );
-    try {
-      await writeAll(handle, bytes);
-      await handle.sync();
-    } finally {
-      await handle.close();
-    }
+    await writeAll(stagingHandle, bytes);
+    await stagingHandle.sync();
+    const identity = fileIdentity(await stagingHandle.stat({ bigint: true }));
     await syncDirectory(location.handle);
-    return { ...location, root, parentIdentity, temporaryName, current, bytes, closed: false };
+    return {
+      ...location,
+      root,
+      parentIdentity,
+      temporaryName,
+      current,
+      bytes,
+      identity,
+      stagingHandle,
+      closed: false,
+    };
   } catch (error) {
-    if (temporaryName) {
-      await rm(descriptorPath(location.handle, temporaryName), { force: true }).catch(
-        () => undefined,
-      );
-      await syncDirectory(location.handle).catch(() => undefined);
+    let failure = error;
+    if (temporaryName && stagingHandle) {
+      try {
+        const identity = fileIdentity(await stagingHandle.stat({ bigint: true }));
+        await verifyEntryIdentity(location.handle, temporaryName, identity);
+        await rm(descriptorPath(location.handle, temporaryName));
+        await syncDirectory(location.handle);
+      } catch (cleanupError) {
+        if (cleanupError?.code !== "ENOENT") failure = cleanupError;
+      }
     }
     if (current?.handle) await current.handle.close().catch(() => undefined);
+    await stagingHandle?.close().catch(() => undefined);
     await location.handle.close().catch(() => undefined);
-    throw error;
+    throw failure;
   }
 }
 
@@ -755,11 +1628,19 @@ async function cleanupStaged(staged) {
   for (const item of staged) {
     if (item.closed) continue;
     try {
-      await rm(descriptorPath(item.handle, item.temporaryName), { force: true });
+      try {
+        await verifyEntryIdentity(item.handle, item.temporaryName, item.identity);
+        await rm(descriptorPath(item.handle, item.temporaryName));
+      } catch (error) {
+        if (error?.code !== "ENOENT") throw error;
+      }
       await syncDirectory(item.handle);
     } catch (error) {
       cleanupError ??= error;
     } finally {
+      await item.stagingHandle?.close().catch((error) => {
+        cleanupError ??= error;
+      });
       if (item.current?.handle) {
         await item.current.handle.close().catch((error) => {
           cleanupError ??= error;
@@ -801,7 +1682,6 @@ async function writeDurableJson(directory, name, value) {
 }
 
 async function commitStaged(staged, marker, directory) {
-  const committed = [];
   const entries = staged.map((item) => ({
     target: item.relative,
     parentDev: item.parentIdentity.dev,
@@ -809,10 +1689,11 @@ async function commitStaged(staged, marker, directory) {
     temporaryName: item.temporaryName,
     backup: item.current ? `.moira-${marker}-${randomBytes(8).toString("hex")}.bak` : null,
     hadOriginal: Boolean(item.current),
-    originalSha256: item.current
-      ? createHash("sha256").update(item.current.bytes).digest("hex")
-      : null,
-    desiredSha256: createHash("sha256").update(item.bytes).digest("hex"),
+    commitAttempted: false,
+    originalSha256: item.current ? version(item.current.bytes, item.current.stat).sha256 : null,
+    originalIdentity: item.current?.stat.identity ?? null,
+    desiredSha256: item.sha256 ?? createHash("sha256").update(item.bytes).digest("hex"),
+    ...(item.identity ? { desiredIdentity: item.identity } : {}),
   }));
   await writeDurableJson(directory, "file-transaction.json", entries);
   let commitError = null;
@@ -822,12 +1703,35 @@ async function commitStaged(staged, marker, directory) {
       const item = staged[index];
       const entry = entries[index];
       await verifyParentIdentity(item.root, item.relative, item.parentIdentity);
-      const current = await currentFile(item.root, item.relative);
+      {
+        if (
+          !sameFileIdentity(
+            item.identity,
+            fileIdentity(await item.stagingHandle.stat({ bigint: true })),
+          )
+        )
+          failFile("concurrent_change", "held staging inode changed before commit");
+        const temporary = await open(
+          descriptorPath(item.handle, item.temporaryName),
+          constants.O_RDONLY | constants.O_NOFOLLOW,
+        );
+        try {
+          const identity = fileIdentity(await temporary.stat({ bigint: true }));
+          if (
+            !sameFileIdentity(item.identity, identity) ||
+            (await hashRegular(temporary, item.size ?? item.bytes.length)) !== entry.desiredSha256
+          )
+            failFile("concurrent_change", "staged transfer changed before commit");
+        } finally {
+          await temporary.close();
+        }
+      }
+      const current = await currentFile(item.root, item.relative, { stream: item.stream });
       validateExpected(
         item.current
           ? {
               exists: true,
-              size: item.current.bytes.length,
+              size: item.current.stat.size,
               sha256: version(item.current.bytes, item.current.stat).sha256,
             }
           : { exists: false },
@@ -848,40 +1752,23 @@ async function commitStaged(staged, marker, directory) {
       const target = descriptorPath(item.handle, item.name);
       const temporary = descriptorPath(item.handle, item.temporaryName);
       const backup = entry.backup ? descriptorPath(item.handle, entry.backup) : null;
+      // Persist the possibility of a rename before granting that effect. A staged
+      // journal alone does not authorize recovery to touch a changed target.
+      entry.commitAttempted = true;
+      await writeDurableJson(directory, "file-transaction.json", entries);
       if (item.current) {
         await rename(target, backup);
         await syncDirectory(item.handle);
-        try {
-          await verifyEntryIdentity(item.handle, entry.backup, item.current.stat.identity);
-        } catch (error) {
-          await rename(backup, target);
-          await syncDirectory(item.handle);
-          throw error;
-        }
+        await verifyEntryIdentity(item.handle, entry.backup, item.current.stat.identity);
       }
-      try {
-        await rename(temporary, target);
-        await syncDirectory(item.handle);
-      } catch (error) {
-        if (item.current) {
-          await rename(backup, target);
-          await syncDirectory(item.handle);
-        }
-        throw error;
-      }
-      committed.push({ ...item, target, backup });
+      await verifyEntryIdentity(item.handle, item.temporaryName, item.identity);
+      await rename(temporary, target);
+      await syncDirectory(item.handle);
+      await verifyEntryIdentity(item.handle, item.name, item.identity);
     }
   } catch (error) {
     commitError = error;
-    for (const item of committed.reverse()) {
-      await rm(item.target, { force: true });
-      if (item.backup) await rename(item.backup, item.target);
-      await syncDirectory(item.handle);
-    }
-    await rm(join(directory, "file-transaction.json"), { force: true });
-    const stateDirectory = await openDirectory(directory);
-    await syncDirectory(stateDirectory);
-    await stateDirectory.close();
+    await recoverFileTransaction(directory, staged[0].root);
     throw error;
   } finally {
     cleanupError = await cleanupStaged(staged);
@@ -899,6 +1786,7 @@ function validateTransactionEntry(entry, root) {
     !/^[0-9]+$/.test(entry.parentDev) ||
     typeof entry.parentIno !== "string" ||
     !/^[0-9]+$/.test(entry.parentIno) ||
+    (entry.commitAttempted !== undefined && typeof entry.commitAttempted !== "boolean") ||
     typeof entry.temporaryName !== "string" ||
     !entry.temporaryName.startsWith(".moira-") ||
     entry.temporaryName.includes("/") ||
@@ -915,10 +1803,33 @@ function validateTransactionEntry(entry, root) {
   }
 }
 
+async function preserveFileTransactionConflict(directory) {
+  await rename(
+    join(directory, "file-transaction.json"),
+    join(directory, "file-transaction.conflicted.json"),
+  );
+  const stateDirectory = await openDirectory(directory);
+  try {
+    await syncDirectory(stateDirectory);
+  } finally {
+    await stateDirectory.close();
+  }
+}
+
 async function cleanupFileTransaction(directory, root) {
   try {
     const entries = await readBoundedJson(join(directory, "file-transaction.json"), 512 * 1024);
     if (!Array.isArray(entries)) fail("invalid file transaction journal");
+    if (
+      entries.some(
+        (entry) => !entry.desiredIdentity || (entry.hadOriginal && !entry.originalIdentity),
+      )
+    ) {
+      // Historical terminal receipts remain collectible; absent inode proof cannot
+      // authorize disposal of their old pathname entries or manufacture new proof.
+      await preserveFileTransactionConflict(directory);
+      return;
+    }
     for (const entry of entries) {
       validateTransactionEntry(entry, root);
       await verifyParentIdentity(root, entry.target, {
@@ -927,10 +1838,33 @@ async function cleanupFileTransaction(directory, root) {
       });
       const location = await parentDirectory(root, entry.target);
       try {
-        await rm(descriptorPath(location.handle, entry.temporaryName), { force: true });
-        if (entry.backup !== null) {
-          if (typeof entry.backup !== "string") fail("invalid file transaction journal");
-          await rm(descriptorPath(location.handle, entry.backup), { force: true });
+        const temporary = await ownedTransactionEntry(
+          location.handle,
+          entry.temporaryName,
+          entry.desiredIdentity,
+          entry.desiredSha256,
+        );
+        let backup;
+        try {
+          backup = entry.backup
+            ? await ownedTransactionEntry(
+                location.handle,
+                entry.backup,
+                entry.originalIdentity,
+                entry.originalSha256,
+              )
+            : null;
+          if (temporary) {
+            await verifyEntryIdentity(location.handle, entry.temporaryName, entry.desiredIdentity);
+            await rm(descriptorPath(location.handle, entry.temporaryName));
+          }
+          if (backup) {
+            await verifyEntryIdentity(location.handle, entry.backup, entry.originalIdentity);
+            await rm(descriptorPath(location.handle, entry.backup));
+          }
+        } finally {
+          await temporary?.close();
+          await backup?.close();
         }
         await syncDirectory(location.handle);
       } finally {
@@ -942,7 +1876,33 @@ async function cleanupFileTransaction(directory, root) {
     await syncDirectory(stateDirectory);
     await stateDirectory.close();
   } catch (error) {
+    if (error?.fileReason === "concurrent_change" || ["ELOOP", "ENOTDIR"].includes(error?.code)) {
+      await preserveFileTransactionConflict(directory);
+      return;
+    }
     if (error?.code !== "ENOENT") throw error;
+  }
+}
+
+async function ownedTransactionEntry(parent, name, expected, sha256) {
+  let handle;
+  try {
+    handle = await open(
+      descriptorPath(parent, name),
+      constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
+    );
+    const value = await handle.stat({ bigint: true });
+    if (
+      !value.isFile() ||
+      !sameFileIdentity(expected, fileIdentity(value), { afterRename: true }) ||
+      (await hashRegular(handle, Number(value.size))) !== sha256
+    )
+      failFile("concurrent_change", "file transaction entry ownership changed");
+    return handle;
+  } catch (error) {
+    await handle?.close();
+    if (error?.code === "ENOENT") return null;
+    throw error;
   }
 }
 
@@ -955,64 +1915,154 @@ async function recoverFileTransaction(directory, root) {
     throw error;
   }
   if (!Array.isArray(entries)) fail("invalid file transaction journal");
-  for (const entry of [...entries].reverse()) {
-    validateTransactionEntry(entry, root);
-    if (
-      typeof entry.hadOriginal !== "boolean" ||
-      !(
-        entry.originalSha256 === null ||
-        (typeof entry.originalSha256 === "string" && /^[a-f0-9]{64}$/.test(entry.originalSha256))
-      ) ||
-      typeof entry.desiredSha256 !== "string" ||
-      !/^[a-f0-9]{64}$/.test(entry.desiredSha256) ||
-      !(entry.backup === null || typeof entry.backup === "string")
-    ) {
-      fail("invalid file transaction journal");
-    }
-    await verifyParentIdentity(root, entry.target, {
-      dev: entry.parentDev,
-      ino: entry.parentIno,
-    });
-    let targetPresent = false;
-    let targetWasDesired = false;
-    const location = await parentDirectory(root, entry.target);
-    const target = descriptorPath(location.handle, location.name);
-    const temporary = descriptorPath(location.handle, entry.temporaryName);
-    const backup = entry.backup ? descriptorPath(location.handle, entry.backup) : null;
-    try {
-      const current = await readRegular(root, entry.target);
-      targetPresent = true;
-      const digest = createHash("sha256").update(current.bytes).digest("hex");
-      if (digest === entry.desiredSha256) {
-        targetWasDesired = true;
-        await rm(target);
-        await syncDirectory(location.handle);
-      } else if (digest !== entry.originalSha256) {
-        fail("codespace target changed during recovery");
+  const prepared = [];
+  try {
+    for (const entry of [...entries].reverse()) {
+      validateTransactionEntry(entry, root);
+      if (
+        typeof entry.hadOriginal !== "boolean" ||
+        !(
+          entry.originalSha256 === null ||
+          (typeof entry.originalSha256 === "string" && /^[a-f0-9]{64}$/.test(entry.originalSha256))
+        ) ||
+        typeof entry.desiredSha256 !== "string" ||
+        !/^[a-f0-9]{64}$/.test(entry.desiredSha256) ||
+        !(entry.backup === null || typeof entry.backup === "string")
+      ) {
+        fail("invalid file transaction journal");
       }
-    } catch (error) {
-      if (error?.code !== "ENOENT") throw error;
-    }
-    if (entry.hadOriginal && backup && (!targetPresent || targetWasDesired)) {
       try {
-        await rename(backup, target);
-        await syncDirectory(location.handle);
+        await verifyParentIdentity(root, entry.target, {
+          dev: entry.parentDev,
+          ino: entry.parentIno,
+        });
       } catch (error) {
-        if (error?.code === "ENOENT") fail("codespace backup is missing during recovery");
+        if (
+          (["concurrent_change", "unsafe_access"].includes(error?.fileReason) ||
+            ["ELOOP", "ENOTDIR"].includes(error?.code)) &&
+          entries.every((candidate) => candidate.commitAttempted === false)
+        ) {
+          await preserveFileTransactionConflict(directory);
+          return;
+        }
         throw error;
       }
-    } else if (entry.hadOriginal && backup) {
-      await rm(backup, { force: true });
+      if (!entry.desiredIdentity || (entry.hadOriginal && !entry.originalIdentity))
+        failFile("concurrent_change", "file transaction has no retained inode ownership proof");
+      const location = await parentDirectory(root, entry.target);
+      const item = {
+        entry,
+        location,
+        current: null,
+        temporary: null,
+        backup: null,
+        targetWasDesired: false,
+      };
+      prepared.push(item);
+      if (entry.commitAttempted === false) {
+        item.temporary = await ownedTransactionEntry(
+          location.handle,
+          entry.temporaryName,
+          entry.desiredIdentity,
+          entry.desiredSha256,
+        );
+        item.backup = entry.backup
+          ? await ownedTransactionEntry(
+              location.handle,
+              entry.backup,
+              entry.originalIdentity,
+              entry.originalSha256,
+            )
+          : null;
+        if (item.backup)
+          failFile("concurrent_change", "unattempted transaction has an unexpected backup");
+        continue;
+      }
+      item.current = await currentFile(root, entry.target, { stream: true, keepOpen: true });
+      if (item.current) {
+        const identity = item.current.stat.identity;
+        const digest = version(item.current.bytes, item.current.stat).sha256;
+        item.targetWasDesired =
+          sameFileIdentity(entry.desiredIdentity, identity, { afterRename: true }) &&
+          digest === entry.desiredSha256;
+        const original =
+          entry.hadOriginal &&
+          sameFileIdentity(entry.originalIdentity, identity, { afterRename: true }) &&
+          digest === entry.originalSha256;
+        if (!item.targetWasDesired && !original)
+          failFile("concurrent_change", "codespace target ownership changed during recovery");
+      }
+      item.temporary = await ownedTransactionEntry(
+        location.handle,
+        entry.temporaryName,
+        entry.desiredIdentity,
+        entry.desiredSha256,
+      );
+      item.backup = entry.backup
+        ? await ownedTransactionEntry(
+            location.handle,
+            entry.backup,
+            entry.originalIdentity,
+            entry.originalSha256,
+          )
+        : null;
+      if (entry.hadOriginal && (!item.current || item.targetWasDesired) && !item.backup)
+        fail("codespace backup is missing during recovery");
+    }
+    // Validate every retained inode before the first rollback effect; a later foreign
+    // backup must not cause an earlier owned target to be removed.
+    for (const item of prepared) {
+      const { entry, location, current, targetWasDesired } = item;
+      await verifyParentIdentity(root, entry.target, {
+        dev: entry.parentDev,
+        ino: entry.parentIno,
+      });
+      const target = descriptorPath(location.handle, location.name);
+      if (entry.commitAttempted === false) {
+        if (item.temporary) {
+          await verifyEntryIdentity(location.handle, entry.temporaryName, entry.desiredIdentity);
+          await rm(descriptorPath(location.handle, entry.temporaryName));
+          await syncDirectory(location.handle);
+        }
+        continue;
+      }
+      if (current) {
+        const expected = targetWasDesired ? entry.desiredIdentity : entry.originalIdentity;
+        if (
+          !sameFileIdentity(expected, fileIdentity(await current.handle.stat({ bigint: true })), {
+            afterRename: true,
+          })
+        )
+          failFile("concurrent_change", "held recovery target changed");
+        await verifyEntryIdentity(location.handle, location.name, expected);
+      } else if (await currentFile(root, entry.target, { stream: true })) {
+        failFile("concurrent_change", "recovery target appeared");
+      }
+      if (item.backup)
+        await verifyEntryIdentity(location.handle, entry.backup, entry.originalIdentity);
+      if (item.temporary)
+        await verifyEntryIdentity(location.handle, entry.temporaryName, entry.desiredIdentity);
+      if (targetWasDesired) await rm(target);
+      if (item.backup) {
+        if (!current || targetWasDesired)
+          await rename(descriptorPath(location.handle, entry.backup), target);
+        else await rm(descriptorPath(location.handle, entry.backup));
+      }
+      if (item.temporary) await rm(descriptorPath(location.handle, entry.temporaryName));
       await syncDirectory(location.handle);
     }
-    await rm(temporary, { force: true });
-    await syncDirectory(location.handle);
-    await location.handle.close();
+    await rm(join(directory, "file-transaction.json"), { force: true });
+    const stateDirectory = await openDirectory(directory);
+    await syncDirectory(stateDirectory);
+    await stateDirectory.close();
+  } finally {
+    for (const item of prepared) {
+      await item.current?.handle?.close();
+      await item.temporary?.close();
+      await item.backup?.close();
+      await item.location.handle.close();
+    }
   }
-  await rm(join(directory, "file-transaction.json"), { force: true });
-  const stateDirectory = await openDirectory(directory);
-  await syncDirectory(stateDirectory);
-  await stateDirectory.close();
 }
 
 async function readFileIntent(directory) {
@@ -1159,8 +2209,27 @@ function matchRegex(worker, line, limit, deadline) {
   });
 }
 
-async function executeFileRequest(root, request, marker, directory) {
+async function executeFileRequest(root, request, marker, directory, binding) {
   if (!request || !FILE_ACTIONS.has(request.action)) fail("invalid file request");
+  if (request.action === "probe") return probeFileRuntime(binding);
+  if (request.transfer !== undefined) return executeTransfer(root, request, directory, marker);
+  if (request.action === "describe_transfer") {
+    if (!Number.isSafeInteger(request.maxBytes) || request.maxBytes < 0)
+      failFile("size_limit", "invalid transfer size bound");
+    const current = await withRegularFile(
+      root,
+      request.path,
+      async (handle, size) => ({ sha256: await hashRegular(handle, size) }),
+      { maximum: request.maxBytes },
+    );
+    return {
+      action: "describe_transfer",
+      path: current.path,
+      size: current.stat.size,
+      sha256: current.sha256,
+      environmentIdentity: await environmentIdentity(),
+    };
+  }
   if (request.action === "stat") {
     const inspected = await inspectPath(root, request.path, true);
     if (inspected.stat.isDirectory()) {
@@ -1487,6 +2556,41 @@ async function readFileOperationResult(directory) {
   }
 }
 
+async function fileProof(directory, request) {
+  let proof;
+  try {
+    proof = await readBoundedJson(join(directory, "file-proof.json"), 4096);
+  } catch (error) {
+    if (error?.code !== "ENOENT") throw error;
+    return null;
+  }
+  if (
+    !/^[a-f0-9]{64}$/.test(proof.requestDigest) ||
+    !/^[a-f0-9]{64}$/.test(proof.inputSha256) ||
+    !Number.isSafeInteger(proof.admissionDeadlineAt) ||
+    proof.admissionDeadlineAt < 1 ||
+    (request.admissionDeadlineAt !== undefined &&
+      request.admissionDeadlineAt !== proof.admissionDeadlineAt) ||
+    (request.requestDigest !== undefined && request.requestDigest !== proof.requestDigest) ||
+    (request.request !== undefined &&
+      createHash("sha256")
+        .update(JSON.stringify([request.repositoryFullName, request.request]))
+        .digest("hex") !== proof.inputSha256)
+  )
+    fail("file operation immutable proof mismatch");
+  return proof;
+}
+
+function fileReceipt(value, proof) {
+  return proof
+    ? {
+        ...value,
+        requestDigest: proof.requestDigest,
+        ...(proof.notStarted && value.state === "failed" ? { notStarted: true } : {}),
+      }
+    : value;
+}
+
 /** The kernel owns this short commit lock; a dead worker leaves no admission fence. */
 async function withFileCommitLock(work) {
   await mkdir(STATE_ROOT, { recursive: true, mode: 0o700 });
@@ -1535,6 +2639,39 @@ async function withFileCommitLock(work) {
 
 const FILE_MUTATIONS = new Set(["write", "upload", "apply_patch"]);
 
+async function settleTransferCommit(directory, root, intent) {
+  const checkpoint = await readBoundedJson(join(directory, "transfer.json"), 65536);
+  if (checkpoint.state !== "committing" || !checkpoint.identity) return null;
+  const transfer = intent.request.transfer;
+  const current = await currentFile(root, intent.request.path, { stream: true });
+  try {
+    if (
+      !current ||
+      !sameFileIdentity(checkpoint.identity, current.stat.identity, { afterRename: true }) ||
+      version(current.bytes, current.stat).sha256 !== transfer.sha256
+    )
+      return null;
+    const receipt = {
+      path: intent.request.path,
+      size: transfer.size,
+      sha256: transfer.sha256,
+      previous: checkpoint.previous,
+      current: version(current.bytes, current.stat),
+    };
+    await writeDurableJson(directory, "transfer.json", {
+      ...checkpoint,
+      state: "committed",
+      receipt,
+    });
+    const value = { action: "upload", transferId: transfer.transferId, ...receipt };
+    await writeDurableJson(directory, "result.json", { kind: "file", state: "succeeded", value });
+    await cleanupFileTransaction(directory, root);
+    return { state: "succeeded", value };
+  } finally {
+    await current?.handle?.close();
+  }
+}
+
 async function interruptFileCommit(directory, root, action) {
   try {
     await recoverFileTransaction(directory, root);
@@ -1567,14 +2704,46 @@ async function recoverAbandonedFileCommits(root, repositoryFullName, currentDire
     }
     const result = await readFileOperationResult(directory);
     if (result) await cleanupFileTransaction(directory, root);
-    else await interruptFileCommit(directory, root, intent.request.action);
+    else if (intent.request.transfer && (await settleTransferCommit(directory, root, intent))) {
+      // Settlement recognizes our durable staged inode; it does not repeat the replacement.
+    } else await interruptFileCommit(directory, root, intent.request.action);
     await rm(join(directory, "file-intent.json"), { force: true });
   }
 }
 
-async function fileExecute(request, binding) {
+async function launchTransferRunner(request, binding, directory, proof) {
+  const path = join(homedir(), ".local/share/moira-files/client.mjs");
+  if ((await installedAssetHash(path)) === null) fail("fixed transfer client is unavailable");
+  const child = spawn(process.execPath, [path, "operation", request.remoteMarker], {
+    detached: true,
+    stdio: ["pipe", "ignore", "ignore"],
+    env: process.env,
+  });
+  await new Promise((done, reject) => {
+    child.once("spawn", done);
+    child.once("error", reject);
+  });
+  const startTime = process.platform === "linux" ? await linuxStartTime(child.pid) : null;
+  if (process.platform === "linux" && startTime === null)
+    fail("transfer runner identity is unavailable");
+  await writeDurableJson(directory, "file-runner-pid", { pid: child.pid, startTime });
+  child.stdin.on("error", () => undefined);
+  child.stdin.end(JSON.stringify({ request, binding }));
+  child.unref();
+  return fileReceipt({ state: "running" }, proof);
+}
+
+async function fileExecute(request, binding, { worker = false } = {}) {
   const directory = validateBase(request);
+  if (
+    request.requestDigest !== undefined &&
+    (!/^[a-f0-9]{64}$/.test(request.requestDigest) ||
+      !Number.isSafeInteger(request.admissionDeadlineAt) ||
+      request.admissionDeadlineAt < 1)
+  )
+    fail("invalid file admission proof");
   for (;;) {
+    const proof = await fileProof(directory, request);
     const existing = await readFileOperationResult(directory);
     if (existing) {
       const savedIntent = await readFileIntent(directory);
@@ -1582,16 +2751,35 @@ async function fileExecute(request, binding) {
         await cleanupFileTransaction(directory, await repositoryRootForFile(savedIntent, binding));
       }
       await rm(join(directory, "file-intent.json"), { force: true });
-      return existing;
+      return fileReceipt(existing, proof);
     }
     await mkdir(dirname(directory), { recursive: true, mode: 0o700 });
     await mkdir(directory, { mode: 0o700 }).catch((error) => {
       if (error?.code !== "EEXIST") throw error;
     });
+    if (worker) {
+      const owner = await readOptionalProcessIdentity(directory, "file-runner-pid");
+      const startTime = process.platform === "linux" ? await linuxStartTime(process.pid) : null;
+      if (!owner || owner.pid !== process.pid || owner.startTime !== startTime)
+        fail("transfer runner ownership changed");
+      break;
+    }
     const ownership = await claimFileRunner(directory);
-    if (ownership === "busy") return { state: "running" };
+    if (ownership === "busy") return fileReceipt({ state: "running" }, proof);
     if (ownership === "retry") continue;
     break;
+  }
+  let proof = await fileProof(directory, request);
+  if (!proof && request.requestDigest !== undefined) {
+    proof = {
+      requestDigest: request.requestDigest,
+      admissionDeadlineAt: request.admissionDeadlineAt,
+      action: request.request?.action,
+      inputSha256: createHash("sha256")
+        .update(JSON.stringify([request.repositoryFullName, request.request]))
+        .digest("hex"),
+    };
+    await writeDurableJson(directory, "file-proof.json", proof);
   }
   let intent;
   let resumed = true;
@@ -1621,18 +2809,64 @@ async function fileExecute(request, binding) {
     await writeDurableJson(directory, "file-intent.json", intent);
   }
   const root = await repositoryRootForFile(intent, binding);
+  const notStarted = async () => {
+    proof = { ...proof, launchAttempted: false, notStarted: true };
+    await writeDurableJson(directory, "file-proof.json", proof);
+    const negative = {
+      kind: "file",
+      state: "failed",
+      value: { action: intent.request.action, state: "failed", code: "CODESPACE_FILE_REJECTED" },
+    };
+    await writeDurableJson(directory, "result.json", negative);
+    return fileReceipt({ state: negative.state, value: negative.value }, proof);
+  };
   const perform = async () => {
-    if (FILE_MUTATIONS.has(intent.request.action))
+    if (proof && !proof.launchAttempted && Date.now() >= proof.admissionDeadlineAt)
+      return notStarted();
+    if (FILE_MUTATIONS.has(intent.request.action) && !intent.request.transfer)
       await recoverAbandonedFileCommits(root, intent.repositoryFullName, directory);
-    if (resumed && FILE_MUTATIONS.has(intent.request.action))
-      return interruptFileCommit(directory, root, intent.request.action);
-    await recoverFileTransaction(directory, root);
+    if (resumed && FILE_MUTATIONS.has(intent.request.action) && !intent.request.transfer)
+      return fileReceipt(await interruptFileCommit(directory, root, intent.request.action), proof);
+    if (!intent.request.transfer) await recoverFileTransaction(directory, root);
+    if (proof && !proof.launchAttempted) {
+      proof = { ...proof, launchAttempted: true };
+      await writeDurableJson(directory, "file-proof.json", proof);
+      if (Date.now() >= proof.admissionDeadlineAt) return notStarted();
+    }
+    if (intent.request.transfer && !worker)
+      return launchTransferRunner(
+        { ...request, request: intent.request },
+        binding,
+        directory,
+        proof,
+      );
+    if (intent.request.transfer && worker && proof && !proof.transferStarted) {
+      if (Date.now() >= proof.admissionDeadlineAt) return notStarted();
+      proof = { ...proof, transferStarted: true };
+      await writeDurableJson(directory, "file-proof.json", proof);
+    }
     let state = "succeeded";
     let value;
     try {
-      value = await executeFileRequest(root, intent.request, request.remoteMarker, directory);
+      value = await executeFileRequest(
+        root,
+        intent.request,
+        request.remoteMarker,
+        directory,
+        binding,
+      );
     } catch (error) {
+      if (intent.request.transfer && error?.code === "TRANSFER_OUTCOME_UNKNOWN")
+        return fileReceipt({ state: "running" }, proof);
       await recoverFileTransaction(directory, root);
+      if (intent.request.transfer) {
+        try {
+          const checkpoint = await readBoundedJson(join(directory, "transfer.json"), 65536);
+          await discardTransferPartial(root, intent, checkpoint);
+        } catch (cleanupError) {
+          if (cleanupError?.code !== "ENOENT") throw cleanupError;
+        }
+      }
       state = "failed";
       const reason =
         error?.fileReason ??
@@ -1655,14 +2889,30 @@ async function fileExecute(request, binding) {
     await writeDurableJson(directory, "result.json", { kind: "file", state, value });
     await cleanupFileTransaction(directory, root);
     await rm(join(directory, "file-intent.json"), { force: true });
-    return { state, value };
+    return fileReceipt({ state, value }, proof);
   };
-  return FILE_MUTATIONS.has(intent.request.action) ? withFileCommitLock(perform) : perform();
+  return FILE_MUTATIONS.has(intent.request.action) && !intent.request.transfer
+    ? withFileCommitLock(perform)
+    : perform();
 }
 
 async function fileInspect(request, binding) {
   const directory = validateBase(request);
+  if (["probe", "describe_transfer"].includes(request.request?.action)) {
+    const root = await repositoryRootForFile(request, binding);
+    return {
+      state: "succeeded",
+      value: await executeFileRequest(
+        root,
+        request.request,
+        request.remoteMarker,
+        directory,
+        binding,
+      ),
+    };
+  }
   try {
+    const proof = await fileProof(directory, request);
     await access(directory, constants.R_OK);
     const result = await readFileOperationResult(directory);
     if (result) {
@@ -1670,25 +2920,84 @@ async function fileInspect(request, binding) {
       if (intent)
         await cleanupFileTransaction(directory, await repositoryRootForFile(intent, binding));
       await rm(join(directory, "file-intent.json"), { force: true });
-      return result;
+      return fileReceipt(result, proof);
+    }
+    if (proof?.notStarted) {
+      return fileReceipt(
+        {
+          state: "failed",
+          value: { action: proof.action, state: "failed", code: "CODESPACE_FILE_REJECTED" },
+        },
+        proof,
+      );
     }
     const runner = await readOptionalProcessIdentity(directory, "file-runner-pid");
-    if (runner && (await processExists(runner))) return { state: "running" };
+    if (runner && (await processExists(runner))) return fileReceipt({ state: "running" }, proof);
+    const expired = await expireTransfer(directory, binding);
+    if (expired) return fileReceipt(expired, proof);
     try {
       const intent = await readFileIntent(directory);
-      if (!intent) return { state: "absent" };
+      if (!intent) return fileReceipt({ state: "absent" }, proof);
+      if (intent.request?.transfer) {
+        if (request.request?.transfer)
+          return fileExecute(
+            { ...request, action: "file-execute", repositoryFullName: intent.repositoryFullName },
+            binding,
+          );
+        const checkpoint = await readBoundedJson(join(directory, "transfer.json"), 65536);
+        if (!checkpoint.receipt && intent.request.transfer.direction === "guest_to_server") {
+          const configuration = await fileClientConfiguration();
+          const descriptor = transferDescriptor(intent.request.transfer, configuration);
+          const status = await transferStatus(configuration, descriptor);
+          if (status.state === "ready" && status.receipt) {
+            checkpoint.state = "committed";
+            checkpoint.receipt = publicationReceipt(status.receipt, descriptor);
+            await writeDurableJson(directory, "transfer.json", checkpoint);
+          }
+        }
+        if (checkpoint.state === "committing") {
+          const settled = await withFileCommitLock(async () =>
+            settleTransferCommit(directory, await repositoryRootForFile(intent, binding), intent),
+          );
+          if (settled) return fileReceipt(settled, proof);
+        }
+        if (checkpoint.receipt) {
+          const transfer = intent.request.transfer;
+          const value =
+            intent.request.action === "upload"
+              ? { action: "upload", transferId: transfer.transferId, ...checkpoint.receipt }
+              : {
+                  action: "download",
+                  transferId: transfer.transferId,
+                  path: intent.request.path,
+                  size: transfer.size,
+                  sha256: transfer.sha256,
+                  referenceId: checkpoint.receipt.referenceId,
+                };
+          await writeDurableJson(directory, "result.json", {
+            kind: "file",
+            state: "succeeded",
+            value,
+          });
+          return fileReceipt({ state: "succeeded", value }, proof);
+        }
+        return fileReceipt({ state: "running" }, proof);
+      }
       if (FILE_MUTATIONS.has(intent.request?.action)) {
         return withFileCommitLock(async () => {
           const completed = await readFileOperationResult(directory);
-          if (completed) return completed;
-          return interruptFileCommit(
-            directory,
-            await repositoryRootForFile(intent, binding),
-            intent.request.action,
+          if (completed) return fileReceipt(completed, proof);
+          return fileReceipt(
+            await interruptFileCommit(
+              directory,
+              await repositoryRootForFile(intent, binding),
+              intent.request.action,
+            ),
+            proof,
           );
         });
       }
-      return { state: "absent" };
+      return fileReceipt({ state: "absent" }, proof);
     } catch (error) {
       if (error?.code === "ENOENT") return { state: "absent" };
       throw error;
@@ -2299,24 +3608,9 @@ async function inspect(request) {
     if (publishedAfterRunnerExit) return publishedAfterRunnerExit;
     if (await lostWithEnvironment(directory))
       return { state: "interrupted", ...receiptMetadata(proof) };
-    if (
-      proof?.requestDigest !== undefined ||
-      cancellation ||
-      proof?.launchAttempted === false ||
-      (proof?.launchAttempted === true && proof.startedAt === undefined)
-    )
-      return { state: "outcome_unknown", ...receiptMetadata(proof ?? cancellation) };
-    return {
-      state: "failed",
-      stdoutBase64: "",
-      stderrBase64: Buffer.from("operation supervisor exited without a result").toString("base64"),
-      exitCode: null,
-      stdoutBytes: 0,
-      stderrBytes: 0,
-      outputLimitExceeded: false,
-      sessionCaptureDropped: false,
-      ...receiptMetadata(proof),
-    };
+    // A marker can be visible before its accepted runner publishes proof or PID.
+    // Missing publication also cannot determine a historical command's outcome.
+    return { state: "outcome_unknown", ...receiptMetadata(proof ?? cancellation) };
   } catch (error) {
     if (error?.code === "ENOENT")
       return {
@@ -2484,8 +3778,20 @@ async function readOutput(request) {
   }
 }
 
-async function finalize(request) {
+async function finalize(request, binding) {
   const directory = validateBase(request);
+  const file = await fileProof(directory, request);
+  const intent = await readFileIntent(directory);
+  if (intent?.request?.transfer) {
+    const owner = await readOptionalProcessIdentity(directory, "file-runner-pid");
+    if (owner && (await processExists(owner))) fail("operation is still running");
+    if (Date.now() < intent.request.transfer.expiresAt)
+      return fileReceipt({ state: "outcome_unknown" }, file);
+    await expireTransfer(directory, binding);
+  }
+  if (file && file.admissionDeadlineAt > Date.now()) {
+    return { state: "outcome_unknown", requestDigest: file.requestDigest };
+  }
   const current = await inspect(request);
   const proof = await executionMetadata(directory);
   if (current.state === "running") fail("operation is still running");
@@ -2547,7 +3853,7 @@ export async function runRequest(request, binding) {
   if (request.action === "execute") return execute(request, binding);
   if (request.action === "inspect") return inspect(request);
   if (request.action === "cancel") return cancel(request);
-  if (request.action === "finalize") return finalize(request);
+  if (request.action === "finalize") return finalize(request, binding);
   if (request.action === "output") return readOutput(request);
   if (request.action === "file-execute") return fileExecute(request, binding);
   if (request.action === "file-inspect") return fileInspect(request, binding);

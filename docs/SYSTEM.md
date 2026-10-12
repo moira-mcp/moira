@@ -580,13 +580,20 @@ The `communication` MCP tool uses the same authenticated request context as ever
 delivery calls the process-wide `UserCommunicationService` directly. Attachment minting stores only
 a SHA-256 digest of a five-minute grant with its owner, portable message metadata, exact media
 policy, correlation ID, purpose, audience, expiry, and claim state. The raw grant is returned once.
+`deliver-file` separately delivers an owned ready private `referenceId` with its `message`, optionally
+to one configured `channelId`, using the common delivery service. It neither fetches a URL nor publishes or consumes
+the retained object. Streaming adapters open independently checked, reopenable private sources;
+the buffered extension ABI explicitly refuses such sources, without a whole-file fallback.
 
 `POST /api/communication/attachments` runs in the MCP process before the JSON body parser. It first
 authenticates an OAuth or persistent MCP Bearer credential through the shared principal resolver,
 then atomically claims a pending grant for that user. Required length and MIME headers, process-local
-per-user buffer admission, exact byte count, and PNG/JPEG signatures are checked before the common
+per-user byte admission, exact byte count, and PNG/JPEG signatures are checked before the common
 delivery service is invoked. Pre-provider failures release the claim; any provider attempt completes
-it terminally. Accepted bytes exist only in the bounded request buffer and are released on every exit.
+it terminally. Ingress streams into a verified temporary private object rather than a complete
+request buffer; common storage quotas also apply. Source streams are closed and the temporary object
+is discarded on every exit. Telegram streams multipart bytes and checks size/full digest, including
+parent cancellation and source closure. Channels in fan-out open independent sources.
 The nginx `location = /api/communication/attachments` routes raw bodies to this MCP handler with
 request buffering disabled rather than through the web backend's broad `/api/` proxy.
 
@@ -619,6 +626,11 @@ probe, and both processes refresh their codespace gauges on the reconciliation i
 `codespace-services.ts` composes both `github-codespaces` and `local-sandboxes`
 through the existing provider registry, resource, operation, file and transfer
 services. Local services remain available without GitHub App configuration.
+`CodespaceFileTransferService` composes durable operations/private storage with
+`CodespaceFileCapabilities` and fixed guest assets for both providers. The backend factory and
+bounded `/api/public/codespace-files` channel share the purpose-specific HKDF capability constructor;
+issuance and default HTTP verification therefore use the same key and configured-secret refusal.
+The guest receives file-only bootstrap/per-transfer authority, not full MCP or host credentials.
 Repository discovery qualifies local targets by device and repository UUID;
 resource lookup selects the persisted provider after checking the caller's ownership.
 The existing GitHub-named management HTTP prefix serves both providers. MCP keeps
@@ -637,9 +649,31 @@ whole-file digest for a small file and null for a large file; `range_sha256` has
 returned bytes. Retained SHA-only read receipts preserve their whole digest and receive a range
 digest derived from their bounded decoded bytes, without rewriting the receipt. Modern range
 digests are verified against those bytes. Safe-integer sizes, exact result shapes and existing
-byte budgets remain enforced. Download stays complete and bounded to 4 MiB, including empty
-files; image preview requires a nonempty complete validated image. Guarded write/patch and
+byte budgets remain enforced. Native binary upload/download stream complete files in 256 KiB HTTP
+chunks under a separate default 20 MiB ceiling; code/read/inline preview and relay parts remain
+at most 4 MiB. The owner IPC frame and relay-envelope ceilings remain 8 MiB and 24 MiB respectively.
+Empty binary files are valid; image preview requires a nonempty complete validated image. Guarded write/patch and
 search retain their code-size, expected-version and atomic replacement limits.
+
+`files_setup` maintains fixed guest worker/client/config assets without changing repository/session
+state or replacing the host companion. Fresh provisioning probes observe actual guest life and
+measure the absolute executable path and its SHA independently from the client asset; both hashes
+must match expected bytes. A pending setup returns command null. New file effects require that
+observed life to match the accepted setup, even if server generations are unchanged. Boot change
+refuses new work while retained terminal results remain collectible under their authority.
+
+Native upload/download and CLI calls bind caller request UUIDs to immutable owner/resource/input
+digests. Persisted private offsets, full SHA, receipt and guest checkpoints allow matching explicit
+retry after reply loss or restart without another object or target mutation. Pure transfer status
+and operation lookup perform no dispatch, cancellation or publication. Private-object ready/source
+ready is distinct from guarded guest target commit; native input consumption follows confirmed
+target result. Admission, runtime, waiting, object expiry and result retention remain separate.
+Expired/consumed original receipts cannot be republished under the same identity, and cleanup uses
+current claim/inode ownership rather than overwriting ambiguous commits or foreign replacements.
+Accepted input intents bind the original transfer ID before ready publication. Recovery can settle
+a ready copy without its original source, but cannot recopy or refetch a consumed request-bound
+object. Known terminal replay does not allocate a replacement result or another quota reservation.
+See [File operations and native transfer](CODESPACES.md#file-operations-and-native-transfer).
 
 File failures may carry a validated `reason`: `unsafe_access`, `size_limit`, `invalid_range`,
 `concurrent_change` or `precondition`. It names an observed guard failure; unclassified and
@@ -671,6 +705,9 @@ the request identity and durable companion receipt; losing an acknowledgement
 does not authorize another guest effect. Retained results remain readable within
 their retention period and current authority after a lifecycle change. Missing or
 expired output is reported without replaying the original work.
+Ordinary acknowledgement and late retained settlement update the active `LocalRpc` journal through
+that same instance's serialization boundary. Relay does not construct a second journal writer for
+acknowledgement; durable result and request ownership remain coherent with in-flight RPC work.
 
 Command submission returns a durable acceptance response before credential lookup, guest
 delivery or completion. The caller supplies a UUID `request_id`; the operation service
@@ -694,12 +731,21 @@ Admission limits permission to launch, proved guest start begins runtime, collec
 own waiting bound, and terminal output has its own retention. A collection timeout does not
 cancel the command. Guest launch and cancellation share a short marker admission boundary;
 an admitted launch attempt without start or terminal proof remains unknown and cannot be
-executed again. Missing PID or marker information is not proof of no effect. Explicit session
+executed again. Inspection distinguishes a published terminal result, applicable live runner proof,
+explicit no-start cancellation proof and a proved environment interruption. Without that evidence,
+an existing marker remains `outcome_unknown`, including when launch metadata is missing; it is
+not turned into a synthetic terminal failure. Missing PID or marker information is not proof of no effect. Explicit session
 commands serialize context resolution through terminal context publication; distinct sessions
 and stateless commands remain independent. The short new-session capacity lock protects only
 initial context publication, not command lifetime.
 
-Terminal metadata commits with a verified private bounded reply reference. Collection rechecks
+An expired reserved native/setup/CLI admission is settled by the common captured-claim transition
+before private intent access or file recovery. It preserves identity/deadline, releases active
+accounting and needs no result allocation, credential/guest contact or guest cleanup. Ordinary owned
+private retention remains responsible for preparation bytes. A displaced owner cannot emit terminal
+evidence, and already-dispatched unknown work retains its separate reconciliation contract.
+
+Dispatched terminal result metadata commits with a verified private bounded reply reference. Collection rechecks
 current authority and rejects corrupt stored bytes. The prefix carries complete stream byte
 counts; omitted output remains guest-retained and is read by range from the original marker.
 Cleanup may purge full guest output while retaining its immutable admission fence until launch
@@ -1768,21 +1814,12 @@ The `reset` option routes to an expression node that resets the counter, then lo
 
 ### Rate Limiting
 
-```typescript
-// packages/web-backend/src/middleware/rate-limit.ts
-import rateLimit from "express-rate-limit";
-
-const apiLimiter = rateLimit({
-  windowMs: 60 * 1000, // 1 minute
-  max: 100, // 100 requests per window
-  message: { error: "Too many requests" },
-});
-
-const mcpLimiter = rateLimit({
-  windowMs: 60 * 1000,
-  max: 30, // 30 MCP requests per minute
-});
-```
+`packages/web-backend/src/middleware/rate-limit-middleware.ts` supplies the shared rate-limit
+primitive. Ordinary API/auth/MCP budgets are described in [API rate limiting](API.md#rate-limiting).
+The scoped codespace file channel has separate owner chunk/control budgets derived from current
+byte/object quotas. Signed capability and current database authority checks occur before rate
+admission, without remote probing; admitted effect handlers then verify fresh guest life. Invalid
+or foreign scopes retain the IP budget, and file traffic does not consume the ordinary UI budget.
 
 ### Data Size Validation
 

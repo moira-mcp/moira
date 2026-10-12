@@ -43,8 +43,29 @@ limited to 20 MiB; images accept PNG or JPEG and documents reject image MIME typ
 delivery begins, a failed MIME, size, image-signature, or in-flight admission check releases the
 grant for another corrected request until expiry. After any provider attempt, success or failure is
 terminal and replay returns the same non-specific invalid-grant response. Each user may have ten
-live grants and two simultaneous upload buffers totalling at most 40 MiB; the installation accepts
+live grants and two simultaneous upload streams totalling at most 40 MiB; the installation accepts
 one thousand live grants. Expired and completed grants do not consume issuance capacity.
+
+To deliver a ready private file, use its returned `file.reference_id` rather than uploading its bytes
+again:
+
+```javascript
+communication({
+  action: "deliver-file",
+  referenceId: "<file.reference_id>",
+  message: "The requested recording",
+  kind: "document",
+});
+```
+
+An optional `channelId` selects one of the user's configured channels; omission uses ordinary
+configured-channel delivery. Filename, MIME and size come from the owned object, so do not provide
+`filename`, `mimeType` or `sizeBytes` with this action. Delivery does not consume its native download
+reference or extend retention. Safe private basenames retain Unicode and quotes within 255 UTF-8
+bytes; paths, control characters and the names `.` and `..` are refused. Telegram streams checked bytes;
+extension channels whose attachment contract supports only buffered bytes are explicitly unsupported
+for this source. Raw authenticated uploads stream through private storage as temporary objects and
+release those objects only after readers settle. Publishing a private file never sends a message.
 
 ### Workflow discovery and execution
 
@@ -62,8 +83,8 @@ for `exec`). A field that belongs to no action is rejected as an MCP error, as b
 belongs to a _different_ action is rejected at dispatch as `CODESPACE_REQUEST_INVALID`. A default an
 action declares is applied there too, so it no longer appears in the published schema. Where two
 actions accept the same field with different limits — `max_bytes` is 1 MiB for `search` and 4 MiB for
-`download` — the schema shows both forms, and the action you named decides which one your call had to
-match.
+`preview_image` — the action you named decides which bound applies. Native `download` uses the
+separate effective binary-transfer policy.
 
 `start({ action: "prepare" })` resolves and validates an authorized workflow, binds the workflow version and request options, and returns a Start attempt ID that expires after 15 minutes without creating an execution. `parentExecutionId` links a child to an existing parent; use `"none"` for a standalone execution. `skipNotificationCheck` records a policy to bypass only optional ordinary-notification preflight during execute. `skipTelegramCheck` remains a deprecated alias with the same behavior, and conflicting values are rejected.
 
@@ -180,7 +201,8 @@ executing a flow in GitHub or on an approved local computer. Each local codespac
 one repository may have several independent codespaces. A codespace is not shared; collaboration happens
 through version-control branches. Ordinary work uses `codespace`: `action` selects the operation —
 `list`, `repositories`, `setup_help`, `create`, `get`, `start`, `stop`, `delete`, `exec`,
-`stat`, `search`, `read`, `write`, `apply_patch`, `upload` or `download` — and the other fields are
+`stat`, `search`, `read`, `write`, `apply_patch`, `upload`, `download`, `files_setup` or
+`transfer_status` — and the other fields are
 those the chosen action declares. GitHub is connected only on the Moira website; no action starts,
 resumes or polls an authorization. When the connection, installation or server configuration is
 missing, the refusal carries the provider's applicable configured link set. `setup_help` returns the
@@ -371,11 +393,63 @@ file there is still readable by its exact path. A non-text range returns
 `CODESPACE_REQUEST_INVALID` naming the missing or invalid fields. `write` replaces a file atomically
 under an `expected` precondition (`exists`, optional `size_bytes` and `sha256`), and
 `apply_patch` applies ordered byte-offset edits per file with the same preconditions and
-returns old/new versions plus a content-free summary. `upload` writes a native file
-reference to a path; `download` returns the file as an MCP `resource_link` whose one-use
-HTTPS link expires automatically and is never repeated in the JSON result.
-Code writes, patches, complete native downloads and image previews keep their 4 MiB ceiling.
+returns old/new versions plus a content-free summary. Code writes, patches and image previews have
+a 4 MiB upper bound. Stdin uses the effective input limit, at most 4 MiB and 1 MiB by default.
+Binary transfers have a separate effective limit, 20 MiB by default,
+with 256 KiB byte chunks and unchanged aggregate and in-flight quotas.
 A complete empty download is valid; an empty image is not a valid preview.
+
+Choose a UUID `request_id` before native `upload` or `download`. Upload accepts the native attachment
+reference without base64 and replaces the repository target under its `expected` guard. Download
+returns an MCP `resource_link` and `file.reference_id`, size, digest and expiry. Its HTTPS URL is
+one-use and is not duplicated in JSON; consuming it does not authorize another publication. Repeat
+the exact original request after response loss, or collect by the returned `operation_id`. For a
+download collection retain `file_name` and `mime_type`. A pending result is not a complete file or
+proof that target replacement happened.
+
+Provision the remote file client with a stable setup identity:
+
+```javascript
+codespace({ action: "files_setup", codespace_id: "<codespace UUID>", request_id: "<setup UUID>" });
+```
+
+Wait for `provisioned: true` and use the returned absolute `command` with ordinary exec. Pending
+setup returns `command: null`; do not assume `moira-files` is on PATH. Setup reports the measured
+ABI, guest life and worker/client/executable hashes. It refreshes fixed guest assets without VM or
+companion restart, preserves repository/session state and does not upgrade the running host daemon.
+Repeat pending setup with the same `request_id`: it collects the original installation operation.
+An existing operation marker without launch proof or a retained result remains unconfirmed; it is
+not a failed installation or proof that nothing ran. Only verified completion exposes the command.
+
+```bash
+"$command" upload films/demo.mp4 --request-id "$upload_request_id" --mime video/mp4
+"$command" status "$upload_request_id"
+"$command" download "$reference_id" incoming/demo.mp4 --request-id "$download_request_id"
+```
+
+Supply the same UUID on an interrupted CLI transfer. It prints the request identity before network
+admission and resumes only that immutable transfer; changed bytes or target guards are refused.
+A download target must be absent unless `--replace-sha256` supplies its expected whole-file digest.
+`codespace({ action: "transfer_status", codespace_id, request_id })`, with optional `transfer_id`,
+is pure collection, not resume. Its `scope: "private_object"` and `state: "ready"` describe private
+storage, not a committed guest destination. Use the native operation result or CLI completion receipt
+for target replacement. A guest upload publishes only a private object; native download and
+`communication` delivery are separate explicit effects. These narrow file capabilities are bound to
+current owner/provider permissions, resource generations, measured guest life and finite expiry;
+status never renews them. Expired, consumed or revoked references cannot be re-minted by retry.
+
+Interrupted input preparation and private copying retain the original transfer identity before the
+object becomes available to consumers. Resume continues that object's checkpoint; if the bound
+object was consumed or is unavailable, recovery refuses a replacement or another fetch under the
+same request. A completed independent private copy can settle without reopening its original source,
+even if that source was consumed separately. Matching completed retries reuse the retained receipt
+instead of publishing another object or allocating another result. Collection checks current
+permissions; resume never extends the original admission, capability or retention deadlines.
+If admission expires before dispatch was admitted, setup, native transfer or CLI preparation is
+settled as cancelled without execution, even when its private preparation is expired or missing.
+The original identity and deadline remain unchanged. A terminal setup refusal ends waiting and
+exposes no command. Work whose dispatch was already admitted remains uncertain until evidence
+settles its outcome; inspection neither repeats it nor grants a new deadline.
 
 A retained file refusal may include a bounded `reason`: `unsafe_access`, `size_limit`,
 `invalid_range`, `concurrent_change` or `precondition`. It names the actual failed guard without

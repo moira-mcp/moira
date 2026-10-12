@@ -165,7 +165,12 @@ describe("codespace image preview projection", () => {
     "%s mismatch cannot turn file bytes into an image",
     (failure) => {
       const input = response(png);
-      if (!input.result || "state" in input.result || input.result.action !== "download")
+      if (
+        !input.result ||
+        "state" in input.result ||
+        input.result.action !== "download" ||
+        "transferId" in input.result
+      )
         throw new Error("Expected download fixture");
       if (failure === "digest") input.result.sha256 = "0".repeat(64);
       if (failure === "partial-offset") input.result.offset = 1;
@@ -223,5 +228,25 @@ describe("codespace image preview projection", () => {
     input.operation.kind = "read";
     expect(previewImageResult(input).isError).toBe(true);
     expect(previewImageResult({ operation: operation(), result: null }).isError).toBe(true);
+  });
+
+  test("a private transfer receipt cannot be interpreted as inline preview bytes", () => {
+    const projected = previewImageResult({
+      operation: operation(),
+      result: {
+        action: "download",
+        transferId: "00000000-0000-4000-8000-000000000003",
+        path: "image.png",
+        size: png.length,
+        sha256: createHash("sha256").update(png).digest("hex"),
+        referenceId: `codespace-file://${"x".repeat(43)}`,
+      },
+    });
+    expect(projected.isError).toBe(true);
+    expect(projected.structuredContent).toMatchObject({
+      error: { code: "CODESPACE_IMAGE_REJECTED" },
+    });
+    expect(projected.content.every((block) => block.type === "text")).toBe(true);
+    expect(JSON.stringify(projected)).not.toContain("codespace-file://");
   });
 });

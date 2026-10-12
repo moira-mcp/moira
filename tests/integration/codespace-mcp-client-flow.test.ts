@@ -11,7 +11,10 @@ import { createHash, randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
 import {
   closeSync,
+  createReadStream,
+  existsSync,
   ftruncateSync,
+  lstatSync,
   mkdtempSync,
   mkdirSync,
   openSync,
@@ -42,6 +45,9 @@ import {
   type CodespaceProviderAdapter,
   type CodespaceProviderResource,
   type CodespaceResourcePolicy,
+  CodespaceFileCapabilities,
+  type CodespaceFileTransferService,
+  getAccountAccessDenial,
 } from "@mcp-moira/shared";
 import { runWithMCPContext } from "../../packages/mcp-server/src/core/request-context.js";
 import {
@@ -50,11 +56,17 @@ import {
 } from "../../packages/mcp-server/src/tools/manage-codespaces.js";
 import { registerTools } from "../../packages/mcp-server/src/tools/register-tools.js";
 import { GitHubCodespacesConnector } from "../../packages/web-backend/src/services/github-codespaces-connector.js";
+import { createCodespaceFileTransfers } from "../../packages/web-backend/src/services/codespace-file-transfers.js";
+import { loadFileClientAssets } from "../../packages/web-backend/src/services/codespace-file-client-assets.js";
+import { nativeFileTls } from "../helpers/native-file-tls.js";
+import { hostFileClientLife, hostFileClientMaintenance } from "../helpers/host-file-client.js";
 
 const USER_ID = "chatgpt-user";
 const OTHER_USER_ID = "other-user";
 const FILE_ID = "sediment://file_000000000b1c8210a7cb1a2d896b2ee4";
 const nativeBytes = Buffer.from([0, 255, 17, 128, 4]);
+const streamedNativeSize = 5 * 1024 * 1024 + 7;
+const streamedNativeChunk = Buffer.alloc(256 * 1024, 0xa7);
 const initialSource = "export const value = 1;\n";
 const supervisorSource = readFileSync(
   resolve("packages/web-backend/src/services/github-codespaces-remote-supervisor.mjs"),
@@ -165,6 +177,9 @@ class DomainFixture {
   readonly provider = new LifecycleProvider();
   readonly jobs: Array<{ action: string; remoteMarker: string }> = [];
   readonly fetchedReferences: CodespaceNativeFileReference[] = [];
+  readonly receiptShapes: Array<Record<string, unknown>> = [];
+  private intentGate: ((directory: string) => void) | null = null;
+  private releaseIntentGate: (() => void) | null = null;
   loseNextResponse: "execute" | "file-execute" | null = null;
   unavailableMarker: string | null = null;
   sqlite!: Database.Database;
@@ -172,8 +187,13 @@ class DomainFixture {
   services!: CodespaceToolServices;
   connection!: CodespaceConnectionService;
   operation!: CodespaceOperationService;
+  fileTransfers?: CodespaceFileTransferService;
 
-  constructor() {
+  constructor(readonly streaming?: { origin: string; caPath: string }) {
+    if (streaming) {
+      this.environmentId = digest(Buffer.from("emulated-sdk-guest-life"));
+      mkdirSync(join(this.root, "guest-home"), { recursive: true });
+    }
     mkdirSync(this.repositoryPath, { recursive: true });
     for (const args of [
       ["init", "--initial-branch=main", this.repositoryPath],
@@ -194,12 +214,40 @@ class DomainFixture {
           "INSERT INTO user (id, email, handle, createdAt, updatedAt) VALUES (?, ?, ?, 'now', 'now')",
         )
         .run(id, `${id}@example.test`, id);
+      if (streaming)
+        this.sqlite
+          .prepare("UPDATE user SET approvedAt = 'now', emailVerified = 1 WHERE id = ?")
+          .run(id);
     }
   }
 
   git(args: string[]) {
     const result = spawnSync("git", args, { encoding: "utf8" });
     if (result.status !== 0) throw new Error(result.stderr);
+  }
+
+  holdNextMaintenanceIntent() {
+    let directory: string | null = null;
+    let releaseRequested = false;
+    let released = false;
+    let observed!: (directory: string) => void;
+    const held = new Promise<string>((resolveHeld) => {
+      observed = resolveHeld;
+    });
+    const release = () => {
+      releaseRequested = true;
+      if (directory && !released) {
+        writeFileSync(join(directory, "sdk-intent-release"), "release");
+        released = true;
+      }
+    };
+    this.intentGate = (value) => {
+      directory = value;
+      if (releaseRequested) release();
+      observed(value);
+    };
+    this.releaseIntentGate = release;
+    return { held, release };
   }
 
   async authorizeOnWebsite(userId = USER_ID) {
@@ -264,19 +312,30 @@ class DomainFixture {
     const resourceRepository = new CodespaceResourceRepository(this.sqlite);
     const operationRepository = new CodespaceOperationRepository(this.sqlite);
     const connector = new GitHubCodespacesConnector(this.requestImpl);
+    const currentPolicy = () =>
+      this.streaming ? { ...policy, maxTransferFileBytes: 20 * 1024 ** 2 } : policy;
     this.transfers = new CodespaceTransferService({
       repository: new CodespaceTransferRepository(this.sqlite),
       root: join(this.root, "transfers"),
-      policy: () => policy,
+      policy: currentPolicy,
     });
     const nativeFetcher = {
       fetch: async (reference: CodespaceNativeFileReference) => {
         this.fetchedReferences.push(reference);
+        const large = !!this.streaming;
         return {
-          contentLength: nativeBytes.length,
+          contentLength: this.streaming ? streamedNativeSize : nativeBytes.length,
           mimeType: "application/octet-stream",
           body: (async function* () {
-            yield nativeBytes;
+            if (!large) {
+              yield nativeBytes;
+              return;
+            }
+            for (let offset = 0; offset < streamedNativeSize; offset += streamedNativeChunk.length)
+              yield streamedNativeChunk.subarray(
+                0,
+                Math.min(streamedNativeChunk.length, streamedNativeSize - offset),
+              );
           })(),
         };
       },
@@ -288,11 +347,60 @@ class DomainFixture {
       repository: operationRepository,
       transport: connector,
       credentials,
-      policy: () => policy,
+      policy: currentPolicy,
       transfers: this.transfers,
       nativeFetcher,
     };
-    this.operation = new CodespaceOperationService(dependencies);
+    let native: CodespaceFileTransferService | undefined;
+    const file = new CodespaceFileService({
+      ...dependencies,
+      get native() {
+        return native;
+      },
+    });
+    this.operation = new CodespaceOperationService({
+      ...dependencies,
+      reconcileFile: (operation) => file.recoverNative(operation),
+    });
+    if (this.streaming) {
+      // Only Linux life and maintenance are emulated on this host. The registered MCP boundary,
+      // controller/router, installed CLI, provider codec, journal and private bytes are real.
+      native = createCodespaceFileTransfers({
+        ...dependencies,
+        files: file,
+        origin: this.streaming.origin,
+        capabilities: new CodespaceFileCapabilities(
+          "fixture-file-domain-secret-not-a-real-credential",
+        ),
+        requireAccount: (userId) => {
+          const row = this.sqlite
+            .prepare("SELECT blocked, approvedAt, emailVerified FROM user WHERE id = ?")
+            .get(userId) as
+            { blocked: number; approvedAt: string | null; emailVerified: number } | undefined;
+          if (
+            !row ||
+            getAccountAccessDenial(
+              {
+                userId,
+                blocked: !!row.blocked,
+                approvedAt: row.approvedAt,
+                emailVerified: !!row.emailVerified,
+              },
+              { requireEmailVerified: true },
+            )
+          )
+            throw new Error("Fixture account is not admitted");
+        },
+        wake: () => this.operation.notifyAccepted(),
+        assets: loadFileClientAssets,
+        lifeProbe: () => hostFileClientLife(this.environmentId),
+        installer: async (provider, config) => {
+          const assets = await loadFileClientAssets(provider);
+          return hostFileClientMaintenance(assets, config);
+        },
+      });
+    }
+    this.fileTransfers = native;
     this.services = {
       connection: this.connection,
       guidance: (situation) => ({
@@ -304,7 +412,7 @@ class DomainFixture {
       observability: new CodespaceObservabilityService({
         providerId: this.provider.id,
         config: () => config,
-        policy: () => policy,
+        policy: currentPolicy,
         resources: resourceRepository,
         operations: operationRepository,
         transfers: new CodespaceTransferRepository(this.sqlite),
@@ -317,10 +425,10 @@ class DomainFixture {
         credentials,
         providerId: this.provider.id,
         requiredCapabilities: { exactLifecycle: true, personalBillingOnly: true },
-        policy: () => policy,
+        policy: currentPolicy,
       }),
       operation: this.operation,
-      file: new CodespaceFileService(dependencies),
+      file,
     };
   }
 
@@ -344,6 +452,30 @@ class DomainFixture {
             )
               throw new Error("Exact accepted outcome is temporarily unavailable");
             const result = await this.runSupervisor(body.job);
+            if (result && typeof result === "object") {
+              const receipt = result as Record<string, unknown>;
+              if (
+                typeof receipt.stdoutBase64 === "string" &&
+                typeof receipt.stderrBase64 === "string"
+              ) {
+                const bounds = this.sqlite
+                  .prepare(
+                    "SELECT stdoutLimitBytes,stderrLimitBytes FROM codespaceOperation WHERE remoteMarker=?",
+                  )
+                  .get(body.job.remoteMarker) as
+                  { stdoutLimitBytes: number; stderrLimitBytes: number } | undefined;
+                this.receiptShapes.push({
+                  action: body.job.action,
+                  state: receipt.state,
+                  stdoutPrefixBytes: Buffer.from(receipt.stdoutBase64, "base64").length,
+                  stderrPrefixBytes: Buffer.from(receipt.stderrBase64, "base64").length,
+                  stdoutBytes: receipt.stdoutBytes,
+                  stderrBytes: receipt.stderrBytes,
+                  stdoutLimitBytes: bounds?.stdoutLimitBytes,
+                  stderrLimitBytes: bounds?.stderrLimitBytes,
+                });
+              }
+            }
             if (this.loseNextResponse === body.job.action) {
               this.loseNextResponse = null;
               this.unavailableMarker = body.job.remoteMarker;
@@ -363,6 +495,26 @@ class DomainFixture {
   };
 
   private runSupervisor(job: Record<string, unknown>): Promise<unknown> {
+    const setupOperation =
+      job.action === "execute" && this.intentGate
+        ? (this.sqlite
+            .prepare("SELECT sessionKey FROM codespaceOperation WHERE remoteMarker=?")
+            .get(job.remoteMarker as string) as { sessionKey: string } | undefined)
+        : undefined;
+    const gate = setupOperation?.sessionKey === "moira-file-client" ? this.intentGate : null;
+    if (gate) this.intentGate = null;
+    let source = supervisorSource;
+    if (gate) {
+      const signature = "async function writeDurableJson(directory, name, value) {";
+      if (!source.includes(signature)) throw new Error("Execution-intent boundary is unavailable");
+      source =
+        "import {watch as sdkWatch,existsSync as sdkExists} from 'node:fs'; let sdkHeld=false;\n" +
+        source.replace(
+          signature,
+          signature +
+            `\nif(name==='execution.json'&&!sdkHeld){sdkHeld=true;const release=join(directory,'sdk-intent-release');const allowed=new Promise(done=>{const watcher=sdkWatch(directory,()=>{if(sdkExists(release)){watcher.close();done()}});if(sdkExists(release)){watcher.close();done()}});process.stderr.write('SDK_INTENT_HELD\\n');await allowed;}\n`,
+        );
+    }
     return new Promise((resolveResult, reject) => {
       const child = spawn(process.execPath, ["--input-type=module"], {
         env: {
@@ -372,13 +524,23 @@ class DomainFixture {
           // A real Codespace derives its life from the running Linux environment; this host is not
           // one, so the fixture states which life it is emulating.
           MOIRA_ENVIRONMENT_ID: this.environmentId,
+          ...(this.streaming
+            ? { HOME: join(this.root, "guest-home"), CURL_CA_BUNDLE: this.streaming.caPath }
+            : {}),
         },
         stdio: ["pipe", "pipe", "pipe"],
       });
       const stdout: Buffer[] = [];
       const stderr: Buffer[] = [];
       child.stdout.on("data", (chunk: Buffer) => stdout.push(chunk));
-      child.stderr.on("data", (chunk: Buffer) => stderr.push(chunk));
+      let notified = false;
+      child.stderr.on("data", (chunk: Buffer) => {
+        stderr.push(chunk);
+        if (gate && !notified && Buffer.concat(stderr).includes(Buffer.from("SDK_INTENT_HELD\n"))) {
+          notified = true;
+          gate(join(this.root, "remote-state", job.remoteMarker as string));
+        }
+      });
       child.once("error", reject);
       child.once("close", (code) => {
         if (code !== 0) return reject(new Error(Buffer.concat(stderr).toString("utf8")));
@@ -389,11 +551,12 @@ class DomainFixture {
         }
       });
       const encoded = Buffer.from(JSON.stringify(job)).toString("base64");
-      child.stdin.end(`${supervisorSource}\nawait runEncoded("${encoded}");\n`);
+      child.stdin.end(`${source}\nawait runEncoded("${encoded}");\n`);
     });
   }
 
   async close() {
+    this.releaseIntentGate?.();
     this.operation.stop();
     const active = this.sqlite
       .prepare(
@@ -506,8 +669,8 @@ afterEach(async () => {
   for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
 });
 
-async function setup() {
-  const fixture = new DomainFixture();
+async function setup(streaming?: { origin: string; caPath: string }) {
+  const fixture = new DomainFixture(streaming);
   cleanups.push(() => fixture.close());
   await fixture.authorizeOnWebsite();
   await fixture.authorizeOnWebsite(OTHER_USER_ID);
@@ -549,6 +712,205 @@ async function expectDownloadBytes(fixture: DomainFixture, result: CallToolResul
 }
 
 describe("ChatGPT-compatible codespace MCP with real domain services", () => {
+  it("streams large native bytes through the registered SDK and retained controller without republishing after recovery", async () => {
+    const tlsRoot = mkdtempSync(join(tmpdir(), "moira-sdk-native-tls-"));
+    cleanups.push(() => rmSync(tlsRoot, { recursive: true, force: true }));
+    const tls = await nativeFileTls(tlsRoot, () => {
+      if (!fixture.fileTransfers) throw new Error("Native file service is unavailable");
+      return fixture.fileTransfers;
+    });
+    cleanups.push(tls.close);
+    const { fixture, mcp } = await setup(tls);
+    const codespaceId = await createCodespace(mcp);
+    const setupId = randomUUID();
+    let originalSetup!: { id: string; remoteMarker: string };
+    const gate = fixture.holdNextMaintenanceIntent();
+    const firstProvisioning = mcp.call("files_setup", {
+      codespace_id: codespaceId,
+      request_id: setupId,
+    });
+    try {
+      const directory = await gate.held;
+      originalSetup = fixture.sqlite
+        .prepare("SELECT id,remoteMarker FROM codespaceOperation WHERE userId=? AND requestId=?")
+        .get(USER_ID, setupId) as { id: string; remoteMarker: string };
+      expect(directory).toBe(join(fixture.root, "remote-state", originalSetup.remoteMarker));
+      expect(lstatSync(directory).isDirectory()).toBe(true);
+      for (const entry of ["execution.json", "pid", "runner-pid", "result.json"])
+        expect(existsSync(join(directory, entry))).toBe(false);
+      const pending = await mcp.call("files_setup", {
+        codespace_id: codespaceId,
+        request_id: setupId,
+      });
+      if (pending.isError)
+        throw new Error(`Pre-proof provisioning receipt: ${JSON.stringify(fixture.receiptShapes)}`);
+      expect(pending.structuredContent).toMatchObject({
+        request_id: setupId,
+        operation_id: originalSetup.id,
+        provisioned: false,
+        command: null,
+      });
+    } finally {
+      gate.release();
+    }
+    let provisioned = await firstProvisioning;
+    const setupDeadline = Date.now() + 10_000;
+    while (provisioned.structuredContent?.provisioned !== true && !provisioned.isError) {
+      if (Date.now() >= setupDeadline) throw new Error("Guest file provisioning did not settle");
+      await new Promise<void>((done) => setImmediate(done));
+      provisioned = await mcp.call("files_setup", {
+        codespace_id: codespaceId,
+        request_id: setupId,
+      });
+    }
+    if (provisioned.isError) {
+      const outcome = provisioned.structuredContent as
+        { error?: { code?: string; message?: string } } | undefined;
+      throw new Error(
+        `Guest provisioning refused: ${outcome?.error?.code ?? "unknown"}: ${outcome?.error?.message ?? "no public detail"}`,
+      );
+    }
+    expect(provisioned.isError).not.toBe(true);
+    expect(provisioned.structuredContent).toMatchObject({
+      provisioned: true,
+      request_id: setupId,
+      operation_id: originalSetup.id,
+      abi: 1,
+      cli_sha256: expect.stringMatching(/^[a-f0-9]{64}$/),
+    });
+    expect(
+      fixture.sqlite
+        .prepare(
+          "SELECT id,remoteMarker,state,lastOutcome,resultReference IS NOT NULL AS resultRetained FROM codespaceOperation WHERE userId=? AND requestId=?",
+        )
+        .get(USER_ID, setupId),
+    ).toEqual({
+      id: originalSetup.id,
+      remoteMarker: originalSetup.remoteMarker,
+      state: "succeeded",
+      lastOutcome: "file_client_provisioned",
+      resultRetained: 1,
+    });
+    const originalReceipt = JSON.parse(
+      readFileSync(
+        join(fixture.root, "remote-state", originalSetup.remoteMarker, "result.json"),
+        "utf8",
+      ),
+    ) as { state: string; exitCode: number };
+    expect({ state: originalReceipt.state, exitCode: originalReceipt.exitCode }).toEqual({
+      state: "succeeded",
+      exitCode: 0,
+    });
+    expect(provisioned.structuredContent?.executable_sha256).toBe(
+      provisioned.structuredContent?.cli_sha256,
+    );
+    const command = provisioned.structuredContent?.command;
+    expect(command).toBe(join(fixture.root, "guest-home", ".local/bin/moira-files"));
+    const help = await finish(
+      mcp,
+      "exec",
+      codespaceId,
+      await mcp.call("exec", {
+        codespace_id: codespaceId,
+        request_id: randomUUID(),
+        argv: [command, "--help"],
+        timeout_seconds: 10,
+      }),
+    );
+    expect(help.isError).not.toBe(true);
+    expect(help.structuredContent).toMatchObject({
+      exit_code: 0,
+      stdout: expect.stringContaining("moira-files upload PATH"),
+    });
+    const uploadId = randomUUID();
+    const uploadInput = {
+      codespace_id: codespaceId,
+      request_id: uploadId,
+      path: "large.bin",
+      file: { ...fileReference(), size_bytes: streamedNativeSize },
+      expected: { exists: false },
+    };
+    const uploaded = await mcp.call("upload", uploadInput);
+    expect(uploaded.isError).not.toBe(true);
+    expect(uploaded.structuredContent).toMatchObject({ size_bytes: streamedNativeSize });
+    const target = join(fixture.repositoryPath, "large.bin");
+    const initialIdentity = lstatSync(target, { bigint: true });
+    const expected = createHash("sha256");
+    for (let offset = 0; offset < streamedNativeSize; offset += streamedNativeChunk.length)
+      expected.update(
+        streamedNativeChunk.subarray(
+          0,
+          Math.min(streamedNativeChunk.length, streamedNativeSize - offset),
+        ),
+      );
+    const expectedDigest = expected.digest("hex");
+    const actual = createHash("sha256");
+    for await (const bytes of createReadStream(target)) actual.update(bytes);
+    expect(initialIdentity.size).toBe(BigInt(streamedNativeSize));
+    expect(actual.digest("hex")).toBe(expectedDigest);
+
+    // The caller may lose a completed response. Reopen durable state and repeat its known identity.
+    fixture.reopen();
+    const replay = await mcp.call("upload", uploadInput);
+    expect(replay.isError).not.toBe(true);
+    expect(lstatSync(target, { bigint: true }).ino).toBe(initialIdentity.ino);
+    expect(fixture.fetchedReferences).toHaveLength(1);
+    const changed = await mcp.call("upload", { ...uploadInput, path: "different.bin" });
+    expect(changed.isError).toBe(true);
+    expect(lstatSync(target, { bigint: true }).ino).toBe(initialIdentity.ino);
+
+    const downloadId = randomUUID();
+    const downloadInput = {
+      codespace_id: codespaceId,
+      request_id: downloadId,
+      path: "large.bin",
+      max_bytes: streamedNativeSize,
+      file_name: "large.bin",
+      mime_type: "application/octet-stream",
+    };
+    const downloaded = await mcp.call("download", downloadInput);
+    expect(downloaded.isError).not.toBe(true);
+    expect(downloaded.content[0]).toMatchObject({
+      type: "resource_link",
+      size: streamedNativeSize,
+    });
+    const reference = downloaded.structuredContent?.file as {
+      reference_id: string;
+      sha256: string;
+    };
+    expect(reference.sha256).toBe(expectedDigest);
+    const status = await mcp.call("transfer_status", {
+      codespace_id: codespaceId,
+      request_id: downloadId,
+    });
+    expect(status.structuredContent).toMatchObject({
+      transfer: { scope: "private_object", state: "ready", size_bytes: streamedNativeSize },
+    });
+    expect(status.content).toEqual(downloaded.content);
+    const claimed = await fixture.transfers.claimDownload(reference.reference_id);
+    let received = 0;
+    const receivedHash = createHash("sha256");
+    for await (const bytes of claimed.stream) {
+      received += bytes.byteLength;
+      receivedHash.update(bytes);
+    }
+    expect(received).toBe(streamedNativeSize);
+    expect(receivedHash.digest("hex")).toBe(expectedDigest);
+    await fixture.transfers.consume(claimed.record);
+    const before = fixture.sqlite
+      .prepare("SELECT COUNT(*) count FROM codespaceTransfer WHERE purpose = 'codespace_download'")
+      .get();
+    const consumedReplay = await mcp.call("download", downloadInput);
+    expect(consumedReplay.isError).toBe(true);
+    expect(
+      fixture.sqlite
+        .prepare(
+          "SELECT COUNT(*) count FROM codespaceTransfer WHERE purpose = 'codespace_download'",
+        )
+        .get(),
+    ).toEqual(before);
+  });
+
   it("edits and tests actual code, transfers actual binary bytes, and reuses a codespace after restart", async () => {
     const { fixture, mcp } = await setup();
     expect((await mcp.call("list", {})).structuredContent).toMatchObject({
@@ -672,6 +1034,7 @@ describe("ChatGPT-compatible codespace MCP with real domain services", () => {
     });
     const upload = await mcp.call("upload", {
       ...args,
+      request_id: randomUUID(),
       path: "input.bin",
       file: fileReference(),
       expected: { exists: false },
@@ -732,6 +1095,7 @@ describe("ChatGPT-compatible codespace MCP with real domain services", () => {
     });
     const download = await mcp.call("download", {
       ...args,
+      request_id: randomUUID(),
       path: "input.bin",
       max_bytes: 1024,
       file_name: "input.bin",
@@ -1174,6 +1538,7 @@ describe("ChatGPT-compatible codespace MCP with real domain services", () => {
     fixture.loseNextResponse = "file-execute";
     const first = await mcp.call("download", {
       codespace_id: codespaceId,
+      request_id: randomUUID(),
       path: "output.txt",
       max_bytes: 1024,
       file_name: "output.txt",

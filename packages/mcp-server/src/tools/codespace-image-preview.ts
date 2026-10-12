@@ -196,6 +196,7 @@ export function previewImageResult(response: CodespaceFileOperationResponse): Ca
     !result ||
     "state" in result ||
     result.action !== "download" ||
+    "transferId" in result ||
     operation.state !== "succeeded"
   )
     return reject("CODESPACE_IMAGE_REJECTED", "A complete successful image download is required.");

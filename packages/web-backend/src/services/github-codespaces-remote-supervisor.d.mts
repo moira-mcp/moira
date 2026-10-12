@@ -10,3 +10,4 @@ export function runRequest(
   binding?: SupervisorRepositoryBinding,
 ): Promise<unknown>;
 export function runEncoded(encoded: string): Promise<void>;
+export function runFilesClient(args: string[]): Promise<unknown>;

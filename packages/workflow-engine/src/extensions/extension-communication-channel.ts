@@ -149,6 +149,7 @@ export class ExtensionCommunicationChannelAdapter implements CommunicationChanne
     configuration: CommunicationConfigurationResolver,
     signal: AbortSignal,
   ): Promise<void> {
+    if (message.attachment?.source) throw new CommunicationChannelError("streaming_unsupported");
     const resolved = await this.resolveConfiguration(configuration);
     if (!resolved.configured) throw new CommunicationChannelError("configuration_changed");
     if (!this.client.deliverCommunicationChannel) {
@@ -161,7 +162,14 @@ export class ExtensionCommunicationChannelAdapter implements CommunicationChanne
         text: message.text,
         format: message.format,
         silent: message.silent,
-        attachment: message.attachment,
+        attachment: message.attachment
+          ? {
+              kind: message.attachment.kind,
+              bytes: message.attachment.bytes!,
+              filename: message.attachment.filename,
+              mimeType: message.attachment.mimeType,
+            }
+          : undefined,
       },
       ...(Object.keys(resolved.settings).length ? { settings: resolved.settings } : {}),
       ...(Object.keys(resolved.secrets).length ? { secrets: resolved.secrets } : {}),

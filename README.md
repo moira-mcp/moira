@@ -67,8 +67,10 @@ Then open:
 - **Documentation**: http://localhost:8080/docs/
 - **MCP endpoint**: http://localhost:8080/mcp
 
-The image is pulled from the public registry by default. Data (SQLite + execution
-storage) persists in `./data`. See [Self-Hosting](#self-host-recommended) or the in-app docs
+The image is pulled from the public registry by default. Data (SQLite, execution
+storage and private codespace transfer objects) persists in `./data`. Private objects live in
+`data/codespace-transfers`; keep them with their database when backing up retained transfers.
+See [Self-Hosting](#self-host-recommended) or the in-app docs
 at `/docs/` for the full reference.
 
 ### Updating / Upgrading
@@ -157,6 +159,15 @@ for setup, run, stop, recovery and the limits of isolation evidence. Codespace c
 to Moira; review returned code before executing it on your computer. The `moira-local` MCP connection
 name in the examples below is independent of the companion executable.
 
+For file work, agents can use MCP read, search, write and patch actions or provision the scoped
+guest CLI with `codespace` action `files_setup`. Invoke its returned absolute command after setup
+is confirmed. Native binary upload/download default to 20 MiB and stream in 256 KiB chunks;
+code edits, read ranges and inline previews retain their separate 4 MiB ceiling. Matching request
+UUIDs resume retained work, while status only collects it. A ready private object can be sent through
+the separately requested `communication` action `deliver-file`. See
+[File operations and native transfer](docs/CODESPACES.md#file-operations-and-native-transfer)
+for setup, expiry, quotas and guarded target replacement.
+
 ### Testing
 
 The integration/API/E2E suites run against a local Docker container, configured by
@@ -206,8 +217,11 @@ MCP Moira uses Better Auth with OAuth 2.1 for centralized authentication.
 **Protected:**
 
 - All MCP tools require authentication
-- All API routes (/api/_) require authentication (except /api/auth/_)
-- Centralized protection via middleware (no manual checks)
+- Account API routes require authenticated access; public capability routes enforce their own
+  narrower grants
+- The guest file CLI receives file-only, expiring authority for its owner and codespace;
+  it receives no full MCP, GitHub or communication credential
+- Shared middleware and service guards enforce the required account and resource authority
 
 **Testing:**
 
@@ -545,9 +559,11 @@ Husky pre-commit hook automatically runs ESLint and Prettier on staged files.
 
 Protection against spam and DoS attacks with tiered limits:
 
-- **API routes** (`/api/*`): 100 requests/minute
-- **Auth routes** (`/api/auth/*`): 100 requests/minute
-- **MCP endpoint** (`/mcp`): 30 requests/minute
+- **Ordinary API routes**: 100 requests/minute
+- **Auth routes** (`/api/auth/*`): 1000 requests/minute
+- **MCP endpoint** (`/mcp`): 1000 requests/minute
+- **Scoped codespace file channel**: separate owner chunk/control budgets derived from current
+  quotas; invalid scopes remain IP-limited to 100 requests/minute
 
 Exceeded limits return HTTP 429 Too Many Requests.
 

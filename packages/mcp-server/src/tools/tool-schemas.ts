@@ -622,7 +622,7 @@ const communicationMimeType = z
 
 export const communicationSchema = z
   .object({
-    action: z.enum(["send", "attachment-token"]),
+    action: z.enum(["send", "attachment-token", "deliver-file"]),
     message: z.string().min(1).max(4096),
     format: z.enum(["plain", "markdown", "html"]).optional(),
     silent: z.boolean().optional(),
@@ -635,6 +635,19 @@ export const communicationSchema = z
       .min(1)
       .max(20 * 1024 * 1024)
       .optional(),
+    referenceId: z
+      .string()
+      .regex(/^codespace-file:\/\/[A-Za-z0-9_-]{43}$/)
+      .optional()
+      .describe("Owned ready private file reference for explicit deliver-file"),
+    channelId: z
+      .string()
+      .max(128)
+      .regex(/^[a-z0-9][a-z0-9._-]*$/)
+      .optional()
+      .describe(
+        "Deliver-file only: one configured channel, or omit for ordinary configured-channel delivery",
+      ),
   })
   .strict();
 
@@ -686,6 +699,34 @@ export const codespaceNativeFileSchema = z
   })
   .strict()
   .describe("Native ChatGPT file reference; pass the attachment reference without base64");
+
+const codespaceBinaryNativeFileSchema = codespaceNativeFileSchema.extend({
+  size_bytes: z
+    .number()
+    .int()
+    .min(0)
+    .max(Number.MAX_SAFE_INTEGER)
+    .optional()
+    .describe("Binary file size; enforced against the instance's effective transfer policy"),
+});
+
+export const codespaceFilesSetupSchema = z
+  .object({
+    codespace_id: codespaceIdSchema,
+    request_id: z
+      .string()
+      .uuid()
+      .describe("Stable provisioning identity; reuse after a lost response"),
+  })
+  .strict();
+
+export const codespaceTransferStatusSchema = codespaceFilesSetupSchema.extend({
+  transfer_id: z
+    .string()
+    .uuid()
+    .optional()
+    .describe("Known transfer handle; omit to recover by request_id"),
+});
 
 export const codespaceListSchema = z
   .object({
@@ -966,8 +1007,12 @@ export const codespaceUploadRequestSchema = z.union([
   z
     .object({
       codespace_id: codespaceIdSchema,
+      request_id: z
+        .string()
+        .uuid()
+        .describe("Choose before upload; reuse with unchanged input to resume"),
       path: codespacePathSchema,
-      file: codespaceNativeFileSchema,
+      file: codespaceBinaryNativeFileSchema,
       expected: codespaceExpectedSchema,
     })
     .strict(),
@@ -990,7 +1035,19 @@ const codespaceDownloadStartSchema = z
   .strict();
 
 export const codespaceDownloadRequestSchema = z.union([
-  codespaceDownloadStartSchema,
+  codespaceDownloadStartSchema.extend({
+    request_id: z
+      .string()
+      .uuid()
+      .describe("Choose before download; reuse the exact request after a lost reply"),
+    max_bytes: z
+      .number()
+      .int()
+      .min(1)
+      .max(Number.MAX_SAFE_INTEGER)
+      .default(20 * 1024 * 1024)
+      .describe("Binary transfer bound; checked against the instance's effective policy"),
+  }),
   codespaceOperationResumeSchema.extend({
     file_name: codespaceFileNameSchema,
     mime_type: codespaceMimeTypeSchema,
@@ -1027,6 +1084,8 @@ export const codespacePullRequestFindSchema = z
   .strict();
 
 export const CODESPACE_ACTION_REQUEST_SCHEMAS = {
+  files_setup: codespaceFilesSetupSchema,
+  transfer_status: codespaceTransferStatusSchema,
   local_devices: codespaceLocalDevicesSchema,
   repository_add: codespaceRepositoryAddSchema,
   repository_create: codespaceRepositoryCreateSchema,

@@ -6,9 +6,17 @@ All endpoints are protected by rate limiting.
 
 ### Limits
 
-- API endpoints (`/api/*`): 100 requests/minute
+- API endpoints (`/api/*`): 100 requests/minute, except the scoped codespace file channel below
 - Auth endpoints (`/api/auth/*`): 1000 requests/minute
 - MCP endpoint (`/mcp`): 1000 requests/minute
+
+`/api/public/codespace-files` uses separate signed/current-owner chunk and control budgets through
+the common rate-limit middleware. Chunk requests per minute equal twice the number of 256 KiB
+chunks in the smallest effective per-user/global aggregate/inflight byte quota. Control requests
+equal eight times the smaller native object quota. Invalid, expired or foreign scopes remain
+IP-limited to 100 requests/minute. Rate admission performs only credential/current database checks;
+the admitted phase separately verifies fresh guest life before a new effect. Ordinary UI limits
+are unchanged.
 
 ### Response Headers
 
@@ -1989,6 +1997,47 @@ the feature is not configured. Every change is audited as
 
 Authentication: Required (administrator)
 
+## Scoped Codespace File Channel
+
+The backend mounts `/api/public/codespace-files` before general JSON parsing and body logging.
+It accepts only a scoped file Bearer credential installed by `codespace` action `files_setup`,
+or the narrower transfer credential returned by minting. A bootstrap credential permits only
+mint and lookup; a transfer credential fixes object, direction, size, digest and authority.
+These credentials do not grant general API, lifecycle or communication access. All responses use
+`Cache-Control: no-store`.
+
+| Method and suffix                             | Credential               | Request and result                                                                                                                                                                                                                 |
+| --------------------------------------------- | ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `POST /transfers`                             | Bootstrap                | Strict JSON with UUID `requestId` and `direction`. `guest_to_server` also requires `size`, full `sha256`, `fileName`, `mimeType`; `server_to_guest` requires an owned `referenceId`. Returns descriptor and private-object status. |
+| `POST /lookup`                                | Bootstrap                | Strict `{requestId}` JSON; collects existing private status without dispatch or publication.                                                                                                                                       |
+| `GET /transfers/:id`                          | Transfer                 | Collects private-object status.                                                                                                                                                                                                    |
+| `GET /transfers/:id/chunks?offset=…&length=…` | Server-to-guest transfer | Nonnegative safe-integer offset and positive length at most 262144. Returns raw bytes, `X-Chunk-SHA256` and `X-Chunk-Offset`.                                                                                                      |
+| `PUT /transfers/:id/chunks?offset=…`          | Guest-to-server transfer | `application/octet-stream` body at most 262144 bytes, nonnegative safe-integer offset and `X-Chunk-SHA256` full lowercase hex. Returns durable offset/status; exact chunk replay is idempotent.                                    |
+| `POST /transfers/:id/finalize`                | Transfer                 | No body or transfer encoding. Verifies complete size/SHA and publishes or collects the original private receipt. For a pull it also verifies fresh authority for the later guarded guest commit.                                   |
+
+JSON control bodies are limited to 8192 bytes. New minting/chunks/finalization require current
+account/provider ownership and the original accepted provisioning life; generation counters alone
+do not prove guest life. The default route verifier and issuance use the same
+`createCodespaceFileCapabilities()` constructor, deriving a purpose-specific signing key by HKDF
+from the configured authentication secret. This does not increase secret entropy or require
+operator secret rotation; missing authentication configuration remains a refusal.
+
+Descriptors carry finite expiry, request/transfer identity, direction, exact size/full SHA and
+256 KiB chunk capacity. Matching request retry resumes the retained object and original receipt;
+changed identity, expired authority and consumed receipts cannot create replacement objects.
+The original transfer identity is retained before publication. An already ready copy remains
+collectible without reopening its source, while consumption of that request-bound copy refuses
+recopying. Matching mint/finalize replay returns the retained descriptor/status or receipt without
+allocating another terminal result; it still checks current authority and expiry.
+Status/finalize responses with `scope: "private_object"` describe server bytes, not a confirmed
+guest filesystem change. CLI target commit and native operation results have their own proof.
+For limits, provisioning and retention, see
+[File operations and native transfer](CODESPACES.md#file-operations-and-native-transfer).
+
+Domain errors use `{error: {code, message}}`: not found is HTTP 404, authorization required 403,
+expired result 410, other classified refusal 409. Invalid schema/body requests return 400;
+unclassified provider uncertainty returns 503 without claiming nonexecution. Rate refusal is 429.
+
 ## Codespace Transfer Download API
 
 ### GET /api/codespaces/transfers/:token
@@ -1998,7 +2047,7 @@ returns this URL to the agent as an MCP `resource_link`; the token in the path i
 authorization, so the URL must not be logged or shared.
 
 The download is a complete regular file within the effective `transfers.max_file_bytes`
-ceiling, at most 4 MiB. A complete empty file is valid; image preview requires a nonempty,
+ceiling, default 20 MiB subject to configured aggregate/inflight quotas. A complete empty file is valid; image preview requires a nonempty,
 validated PNG or JPEG within its separate byte and dimension bounds. Large-file metadata
 and bounded text ranges use MCP `stat` and `read`, rather than this complete-download route;
 their nullable whole-file digest and separate range digest are described in
@@ -2026,6 +2075,11 @@ disabled. The route is rate-limited.
 
 Authentication: One-use capability token in the path
 
+An owned ready private reference may instead be passed to MCP `communication` action `deliver-file`
+with `referenceId`, `message`, media `kind` and optional `channelId`. That explicitly requested delivery
+uses a verified private source and configured channels; it does not fetch a caller URL or consume
+the retained source. The native download link itself does not send a notification or publish an artifact.
+
 ## Communication Attachment API
 
 ### POST /api/communication/attachments
@@ -2047,7 +2101,7 @@ user that minted the grant. Missing, expired, claimed, completed, random, and fo
 all return the same `401 { "error": "invalid_grant" }` response.
 
 An attachment is limited to 20 MiB. A user may hold at most ten unexpired pending or claimed grants
-and may buffer at most two concurrent uploads totalling 40 MiB. The installation admits at most one
+and may admit at most two concurrent uploads totalling 40 MiB. The installation admits at most one
 thousand outstanding grants. Grant creation prunes expired state before checking those issuance
 quotas.
 
@@ -2060,8 +2114,11 @@ second provider attempt.
 
 Success returns the grant correlation ID and the same sanitized aggregate delivery result as the
 common communication service. A total attempted delivery failure returns 502 with that aggregate;
-full or partial delivery returns 200. The route stores no uploaded bytes and fetches or executes no
-remote content.
+full or partial delivery returns 200. Raw ingress streams into an owner-only verified temporary
+private object under the private-storage and communication quotas. Provider delivery opens checked,
+independently reopenable streams, and the temporary object is discarded on exit. Telegram streams
+multipart bytes with size/digest and cancellation checks; buffered-only extension adapters refuse
+streamed sources rather than loading the complete file. The route fetches or executes no remote content.
 
 Authentication: Required through an OAuth or persistent MCP Bearer credential; the grant alone is
 not authentication.

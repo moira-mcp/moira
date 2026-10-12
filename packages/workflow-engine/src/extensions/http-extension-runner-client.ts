@@ -172,6 +172,12 @@ export class HttpExtensionRunnerClient implements IExtensionRunnerClient {
     request: ExtensionCommunicationChannelRequest,
     signal?: AbortSignal,
   ): Promise<void> {
+    if (request.message.attachment && "source" in request.message.attachment) {
+      throw new ExtensionInvocationError(
+        "invalid-input",
+        "streaming attachments are not supported by this runner ABI",
+      );
+    }
     await this.callCommunicationEndpoint(
       "/channels/deliver",
       {
@@ -182,7 +188,7 @@ export class HttpExtensionRunnerClient implements IExtensionRunnerClient {
             ? {
                 attachment: {
                   kind: request.message.attachment.kind,
-                  data: Buffer.from(request.message.attachment.bytes).toString("base64"),
+                  data: Buffer.from(request.message.attachment.bytes!).toString("base64"),
                   encoding: "base64",
                   filename: request.message.attachment.filename,
                   mimeType: request.message.attachment.mimeType,

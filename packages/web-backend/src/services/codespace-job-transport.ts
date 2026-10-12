@@ -1,10 +1,12 @@
 import { createHash } from "node:crypto";
-import { CODESPACE_FILE_FAILURE_REASONS } from "@mcp-moira/shared";
+import { CODESPACE_FILE_FAILURE_REASONS, isCodespaceFileClientCommand } from "@mcp-moira/shared";
 import type {
   CodespaceExecRequest,
   CodespaceFileRequest,
   CodespaceFileResult,
   CodespaceFileTransport,
+  CodespaceFileRuntimeProbe,
+  CodespaceFileTransferDescription,
   CodespaceOperationOutputRequest,
   CodespaceOperationOutputResult,
   CodespaceOperationRecord,
@@ -53,12 +55,12 @@ function nonnegativeInteger(value: unknown, maximum = Number.MAX_SAFE_INTEGER): 
   return Number.isSafeInteger(value) && Number(value) >= 0 && Number(value) <= maximum;
 }
 
-function decodeFileVersion(value: unknown) {
+function decodeFileVersion(value: unknown, maximum = MAX_FILE_BYTES) {
   if (!value || typeof value !== "object") return null;
   const version = value as Record<string, unknown>;
   if (
     !hasExactKeys(version, ["size", "sha256", "modifiedAt"]) ||
-    !nonnegativeInteger(version.size, MAX_FILE_BYTES) ||
+    !nonnegativeInteger(version.size, maximum) ||
     typeof version.sha256 !== "string" ||
     !/^[a-f0-9]{64}$/.test(version.sha256) ||
     !nonnegativeInteger(version.modifiedAt)
@@ -77,6 +79,94 @@ export abstract class CodespaceJobTransport
   implements CodespaceOperationTransport, CodespaceFileTransport
 {
   constructor(protected readonly jobTimeoutMs = 30_000) {}
+
+  async probeFile(
+    credential: string,
+    codespace: CodespaceResourceRecord,
+    operation: CodespaceOperationRecord,
+  ): Promise<CodespaceFileRuntimeProbe> {
+    const value = await this.fileControlJob(credential, codespace, operation, { action: "probe" });
+    if (
+      !hasExactKeys(value, [
+        "action",
+        "abi",
+        "environmentIdentity",
+        "workerSha256",
+        "cliSha256",
+        "command",
+        "executableSha256",
+      ]) ||
+      value.action !== "probe" ||
+      !nonnegativeInteger(value.abi) ||
+      value.abi !== 1 ||
+      typeof value.environmentIdentity !== "string" ||
+      !/^[a-f0-9]{64}$/.test(value.environmentIdentity) ||
+      !isCodespaceFileClientCommand(value.command) ||
+      [value.workerSha256, value.cliSha256, value.executableSha256].some(
+        (digest) =>
+          digest !== null && (typeof digest !== "string" || !/^[a-f0-9]{64}$/.test(digest)),
+      )
+    )
+      throw new Error("Codespace file runtime probe is invalid");
+    return value as unknown as CodespaceFileRuntimeProbe;
+  }
+
+  async describeTransfer(
+    credential: string,
+    codespace: CodespaceResourceRecord,
+    operation: CodespaceOperationRecord,
+    input: { path: string; maxBytes: number },
+  ): Promise<CodespaceFileTransferDescription> {
+    const value = await this.fileControlJob(credential, codespace, operation, {
+      action: "describe_transfer",
+      ...input,
+    });
+    if (
+      !hasExactKeys(value, ["action", "path", "size", "sha256", "environmentIdentity"]) ||
+      value.action !== "describe_transfer" ||
+      value.path !== input.path ||
+      !validResultPath(value.path) ||
+      !nonnegativeInteger(value.size, input.maxBytes) ||
+      typeof value.sha256 !== "string" ||
+      !/^[a-f0-9]{64}$/.test(value.sha256) ||
+      typeof value.environmentIdentity !== "string" ||
+      !/^[a-f0-9]{64}$/.test(value.environmentIdentity)
+    )
+      throw new Error("Codespace transfer description is invalid");
+    return value as unknown as CodespaceFileTransferDescription;
+  }
+
+  private async fileControlJob(
+    credential: string,
+    codespace: CodespaceResourceRecord,
+    operation: CodespaceOperationRecord,
+    request: Record<string, unknown>,
+  ): Promise<Record<string, unknown>> {
+    if (!codespace.providerResourceName || codespace.id !== operation.resourceId)
+      throw new Error("Invalid codespace file control identity");
+    const reply = await this.sendJob(
+      credential,
+      codespace,
+      operation,
+      {
+        action: "file-inspect",
+        version: 1,
+        remoteMarker: operation.remoteMarker,
+        repositoryFullName: codespace.repositoryFullName,
+        request,
+      },
+      this.jobTimeoutMs + 120_000,
+    );
+    if (
+      !hasExactKeys(reply, ["state", "value"]) ||
+      reply.state !== "succeeded" ||
+      !reply.value ||
+      typeof reply.value !== "object" ||
+      Array.isArray(reply.value)
+    )
+      throw new Error("Codespace file control outcome is unconfirmed");
+    return reply.value as Record<string, unknown>;
+  }
 
   abstract health(): Promise<{ ok: boolean; reason: string | null }>;
 
@@ -260,7 +350,7 @@ export abstract class CodespaceJobTransport
     codespace: CodespaceResourceRecord,
     operation: CodespaceOperationRecord,
     request: CodespaceFileRequest,
-  ): Promise<CodespaceFileResult | { state: "running" }> {
+  ): Promise<CodespaceFileResult | { state: "running" } | { state: "outcome_unknown" }> {
     const result = await this.fileJob(
       credential,
       codespace,
@@ -285,6 +375,12 @@ export abstract class CodespaceJobTransport
       remoteMarker: operation.remoteMarker,
       repositoryFullName: codespace.repositoryFullName,
       request: this.encodeFileRequest(request),
+      ...(operation.requestDigest
+        ? {
+            requestDigest: operation.requestDigest,
+            admissionDeadlineAt: operation.admissionDeadlineAt,
+          }
+        : {}),
     };
   }
 
@@ -292,11 +388,31 @@ export abstract class CodespaceJobTransport
     credential: string,
     codespace: CodespaceResourceRecord,
     operation: CodespaceOperationRecord,
-  ): Promise<CodespaceFileResult | { state: "running" } | { state: "absent" }> {
+  ): Promise<
+    CodespaceFileResult | { state: "running" } | { state: "outcome_unknown" } | { state: "absent" }
+  > {
     return this.fileJob(credential, codespace, operation, {
       action: "file-inspect",
       version: 1,
       remoteMarker: operation.remoteMarker,
+      ...(operation.requestDigest
+        ? {
+            requestDigest: operation.requestDigest,
+            admissionDeadlineAt: operation.admissionDeadlineAt,
+          }
+        : {}),
+    });
+  }
+
+  resumeFile(
+    credential: string,
+    codespace: CodespaceResourceRecord,
+    operation: CodespaceOperationRecord,
+    request: CodespaceFileRequest,
+  ) {
+    return this.fileJob(credential, codespace, operation, {
+      ...this.fileExecuteJob(codespace, operation, request),
+      action: "file-inspect",
     });
   }
 
@@ -305,7 +421,9 @@ export abstract class CodespaceJobTransport
     codespace: CodespaceResourceRecord,
     operation: CodespaceOperationRecord,
     job: Record<string, unknown>,
-  ): Promise<CodespaceFileResult | { state: "running" } | { state: "absent" }> {
+  ): Promise<
+    CodespaceFileResult | { state: "running" } | { state: "outcome_unknown" } | { state: "absent" }
+  > {
     if (!codespace.providerResourceName || codespace.id !== operation.resourceId) {
       throw new Error("Invalid codespace file operation identity");
     }
@@ -316,14 +434,36 @@ export abstract class CodespaceJobTransport
       job,
       this.jobTimeoutMs + 120_000,
     );
-    if (value.state === "running" || value.state === "absent") {
-      if (!hasExactKeys(value, ["state"])) {
+    if (
+      value.state === "running" ||
+      value.state === "outcome_unknown" ||
+      value.state === "absent"
+    ) {
+      if (
+        !hasExactKeys(value, [
+          "state",
+          ...(value.requestDigest !== undefined ? ["requestDigest"] : []),
+        ]) ||
+        (value.requestDigest !== undefined && value.requestDigest !== operation.requestDigest)
+      ) {
         throw new Error("Codespace file transport returned an invalid pending result");
       }
-      return { state: value.state };
+      return value.state === "outcome_unknown"
+        ? { state: "outcome_unknown" }
+        : value.state === "running"
+          ? { state: "running" }
+          : { state: "absent" };
     }
     if (
-      !hasExactKeys(value, ["state", "value"]) ||
+      !hasExactKeys(value, [
+        "state",
+        "value",
+        ...(value.requestDigest !== undefined ? ["requestDigest"] : []),
+        ...(value.notStarted !== undefined ? ["notStarted"] : []),
+      ]) ||
+      (operation.requestDigest != null && value.requestDigest !== operation.requestDigest) ||
+      (value.notStarted !== undefined &&
+        (value.notStarted !== true || value.state !== "failed" || !operation.requestDigest)) ||
       !["succeeded", "failed"].includes(String(value.state)) ||
       !value.value ||
       typeof value.value !== "object"
@@ -333,6 +473,7 @@ export abstract class CodespaceJobTransport
     const result = this.decodeFileResult(
       value.value as Record<string, unknown>,
       operation.stdoutLimitBytes,
+      operation.inputBytes,
     );
     if (
       result.action !== operation.kind ||
@@ -340,10 +481,24 @@ export abstract class CodespaceJobTransport
     ) {
       throw new Error("Codespace file transport returned an inconsistent result");
     }
-    return result;
+    return value.notStarted === true && "state" in result
+      ? { ...result, notStarted: true }
+      : result;
   }
 
   private encodeFileRequest(request: CodespaceFileRequest): Record<string, unknown> {
+    if ((request.action === "upload" || request.action === "download") && request.transfer) {
+      if (request.action === "upload" && request.bytes.byteLength !== 0)
+        throw new Error("Transfer control cannot contain file bytes");
+      return request.action === "upload"
+        ? {
+            action: request.action,
+            path: request.path,
+            expected: request.expected,
+            transfer: request.transfer,
+          }
+        : { ...request };
+    }
     if (request.action === "write" || request.action === "upload") {
       return {
         ...request,
@@ -371,10 +526,45 @@ export abstract class CodespaceJobTransport
   private decodeFileResult(
     value: Record<string, unknown>,
     outputLimitBytes: number,
+    inputLimitBytes = MAX_FILE_BYTES,
   ): CodespaceFileResult {
     const encoded = JSON.stringify(value);
     if (Buffer.byteLength(encoded, "utf8") > Math.ceil(MAX_FILE_BYTES / 3) * 4 + 64 * 1024) {
       throw new Error("Codespace file transport returned an invalid result");
+    }
+    if (
+      (value.action === "upload" || value.action === "download") &&
+      value.transferId !== undefined
+    ) {
+      const upload = value.action === "upload";
+      const keys = [
+        "action",
+        "transferId",
+        "path",
+        "size",
+        "sha256",
+        ...(upload ? ["previous", "current"] : ["referenceId"]),
+      ];
+      const current = upload ? decodeFileVersion(value.current, Number.MAX_SAFE_INTEGER) : null;
+      const previous = upload ? decodeFileVersion(value.previous, Number.MAX_SAFE_INTEGER) : null;
+      if (
+        !hasExactKeys(value, keys) ||
+        typeof value.transferId !== "string" ||
+        !/^[0-9a-f-]{36}$/i.test(value.transferId) ||
+        !validResultPath(value.path) ||
+        !nonnegativeInteger(value.size, upload ? inputLimitBytes : outputLimitBytes) ||
+        typeof value.sha256 !== "string" ||
+        !/^[a-f0-9]{64}$/.test(value.sha256) ||
+        (upload
+          ? !current ||
+            current.size !== value.size ||
+            current.sha256 !== value.sha256 ||
+            (value.previous !== null && !previous)
+          : typeof value.referenceId !== "string" ||
+            !/^codespace-file:\/\/[A-Za-z0-9_-]{43}$/.test(value.referenceId))
+      )
+        throw new Error("Codespace transfer receipt is invalid");
+      return value as unknown as CodespaceFileResult;
     }
     if (
       (value.action === "read" || value.action === "download") &&

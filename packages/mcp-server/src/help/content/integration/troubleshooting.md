@@ -319,9 +319,55 @@ For a small file, the hashed version remains available for guarded edits. A larg
 hashes the whole file, even when only a range is returned. Do not use a range digest as an expected
 whole-file version. Reading at EOF returns an empty range; an offset beyond EOF is refused.
 
-The selected range, code edits and complete `download` remain bounded to 4 MiB, subject to effective
-limits. Metadata access does not authorize a larger native download. Complete downloads include
-empty files; image preview still requires a valid nonempty image.
+The selected range, code edits and image preview have a 4 MiB upper bound. Stdin follows its
+effective input limit, 1 MiB by default and at most 4 MiB. Native `upload`
+and `download` use a separate effective binary limit, 20 MiB by default, with 256 KiB chunks and
+the existing aggregate/in-flight quotas. Large metadata does not bypass those quotas. Complete
+downloads include empty files; image preview still requires a valid nonempty image.
+
+Keep the original UUID `request_id` for native upload/download. After a lost reply, repeat the exact
+request or collect its `operation_id`; a download collection also retains `file_name` and `mime_type`.
+For CLI work, repeat the original command with the same `--request-id` and unchanged bytes/target
+guard to resume. `status UUID` and MCP `transfer_status` only read current metadata; they do not
+resume, refetch input or grant new authority. `scope: "private_object"` and `state: "ready"` describe
+private storage, not a committed guest destination. A missing first guest marker or unconfirmed
+commit is not proof that a file mutation never happened. Preserve the identity and inspect the
+target before intentionally requesting another effect.
+
+Interrupted input preparation or copying resumes the original bound object and checkpoint. If that
+object has been consumed or is unavailable, retry refuses a replacement or another source fetch;
+inspect the operation that used it before intentionally requesting new work. A completed independent
+copy can still settle when its original source was consumed separately, provided the copy remains
+available and current authority permits collection. Matching terminal retries reuse the saved
+receipt without another publication or result allocation. Neither retry nor status extends the
+original admission, capability or retention deadlines.
+
+If the remote client is unavailable, call `files_setup` with a stable setup `request_id` and wait
+for `provisioned: true`. Use its returned absolute `command`; `command: null` is pending and a guest
+PATH change is unnecessary. Setup measures installed executable/client bytes and refreshes fixed
+guest assets without restarting an existing VM or host daemon. It does not upgrade the host daemon's
+journal. New transfer phases still require current owner/provider permission, generations and
+measured guest life. Expired or revoked authority cannot be renewed by status; consumed or expired
+native references cannot be published again by replay.
+Repeat pending setup with the original `request_id`. A marker may exist before launch proof or a
+terminal receipt is saved. When neither a retained result nor a verified live runner establishes
+the outcome, inspection preserves `outcome_unknown` rather than proving failed installation, no
+execution or a VM restart. Continue collecting that setup;
+only verified completion returns `provisioned: true` and its command. A confirmed guest restart and
+an actual retained terminal result are separate observations.
+If the original admission expires before dispatch was admitted, the request is settled as cancelled
+without execution even if its private input or preparation is expired or missing. This applies to
+setup, native upload/download and CLI preparation. A terminal setup refusal ends pending collection;
+request another setup only if new work is intended. The original identity and deadline are preserved.
+This nonexecution outcome does not apply to already-admitted dispatch with an unknown outcome:
+inspect the original operation without repeating its effect or extending its authority.
+
+`communication` `deliver-file` requires an owned ready `file.reference_id` in `referenceId`, with
+an optional configured `channelId`. A foreign, unavailable or expired object is refused before
+provider delivery. Private upload alone sends no message. Delivery preserves native retention;
+channels whose attachment contract cannot stream report unsupported rather than buffering the
+whole file. Safe Unicode/quoted basenames are valid; paths, ASCII controls, `.`/`..` and names
+larger than 255 UTF-8 bytes are not.
 
 A file rejection may include `reason`: `size_limit` means a byte bound was exceeded;
 `invalid_range` means the requested range or bound is invalid; `unsafe_access` means path or file
@@ -330,7 +376,8 @@ type safety checks failed; `concurrent_change` means the file or its path change
 or reread and reconcile a changed version as appropriate. Do not bypass link/type checks or remove
 expected-version guards. Older or unclassified failures may omit `reason`; absence does not identify
 the cause. Server or companion updates do not automatically replace an installed guest worker, so
-an existing guest may still return an older receipt or reject large metadata/ranges.
+an existing guest may still return an older receipt or reject large metadata/ranges. Use the
+supported `files_setup` refresh before relying on the installed file-client contract.
 
 ## Local codespaces
 

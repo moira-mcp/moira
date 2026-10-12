@@ -200,6 +200,8 @@ export interface CodespaceResourcePolicy {
   /** How long a command started in the background may run in the codespace. */
   maxBackgroundOperationMs?: number;
   maxTransferFileBytes?: number;
+  /** Editable files and textual ranges stay independent of native binary transfer size. */
+  maxCodeFileBytes?: number;
   maxTransferBytesPerUser?: number;
   maxTransferBytesGlobal?: number;
   maxTransferObjectsPerUser?: number;
@@ -553,6 +555,38 @@ export interface CodespacePatchSummary {
   truncated: boolean;
 }
 
+export interface CodespaceFileTransferDescriptor {
+  version: 1;
+  transferId: string;
+  requestId: string;
+  direction: "guest_to_server" | "server_to_guest";
+  size: number;
+  sha256: string;
+  mimeType: string;
+  chunkBytes: 262144;
+  origin: string;
+  capability: string;
+  expiresAt: number;
+  environmentIdentity: string;
+}
+
+export interface CodespaceFileRuntimeProbe {
+  abi: number;
+  environmentIdentity: string;
+  workerSha256: string | null;
+  cliSha256: string | null;
+  command: string;
+  executableSha256: string | null;
+}
+
+export interface CodespaceFileTransferDescription {
+  action: "describe_transfer";
+  path: string;
+  size: number;
+  sha256: string;
+  environmentIdentity: string;
+}
+
 export type CodespaceFileRequest =
   | { action: "stat"; path: string }
   | {
@@ -565,10 +599,19 @@ export type CodespaceFileRequest =
     }
   | { action: "read"; path: string; offset: number; length: number }
   | {
-      action: "write" | "upload";
+      action: "write";
       path: string;
       bytes: Uint8Array;
       expected: { exists: boolean; size?: number; sha256?: string };
+      transfer?: never;
+    }
+  | {
+      action: "upload";
+      path: string;
+      bytes: Uint8Array;
+      expected: { exists: boolean; size?: number; sha256?: string };
+      /** Native bytes use HTTPS chunks; the empty control byte field is never a binary payload. */
+      transfer?: CodespaceFileTransferDescriptor;
     }
   | {
       action: "apply_patch";
@@ -578,7 +621,12 @@ export type CodespaceFileRequest =
         edits: readonly { start: number; end: number; bytes: Uint8Array }[];
       }[];
     }
-  | { action: "download"; path: string; maxBytes: number };
+  | {
+      action: "download";
+      path: string;
+      maxBytes: number;
+      transfer?: CodespaceFileTransferDescriptor;
+    };
 
 export const CODESPACE_FILE_FAILURE_REASONS = [
   "unsafe_access",
@@ -596,9 +644,28 @@ export type CodespaceFileResult =
       state: "failed";
       code: "CODESPACE_FILE_REJECTED" | "CODESPACE_OPERATION_INTERRUPTED";
       reason?: CodespaceFileFailureReason;
+      /** Present only with an authenticated guest proof that this admission was fenced. */
+      notStarted?: true;
     }
   | { action: "stat"; stat: CodespaceFileStat }
   | { action: "search"; matches: CodespaceSearchMatch[]; truncated: boolean }
+  | {
+      action: "upload";
+      transferId: string;
+      path: string;
+      size: number;
+      sha256: string;
+      previous: CodespaceFileVersion | null;
+      current: CodespaceFileVersion;
+    }
+  | {
+      action: "download";
+      transferId: string;
+      path: string;
+      size: number;
+      sha256: string;
+      referenceId: string;
+    }
   | {
       action: "read";
       path: string;
@@ -640,6 +707,26 @@ export interface CodespaceFileOperationResponse {
 }
 
 export interface CodespaceFileTransport extends CodespaceTransportAvailability {
+  /** Explicit matching resubmission may resume a transfer; ordinary inspection remains pure. */
+  resumeFile?(
+    credential: string,
+    codespace: CodespaceResourceRecord,
+    operation: CodespaceOperationRecord,
+    request: CodespaceFileRequest,
+  ): Promise<
+    CodespaceFileResult | { state: "running" } | { state: "outcome_unknown" } | { state: "absent" }
+  >;
+  probeFile?(
+    credential: string,
+    codespace: CodespaceResourceRecord,
+    operation: CodespaceOperationRecord,
+  ): Promise<CodespaceFileRuntimeProbe>;
+  describeTransfer?(
+    credential: string,
+    codespace: CodespaceResourceRecord,
+    operation: CodespaceOperationRecord,
+    input: { path: string; maxBytes: number },
+  ): Promise<CodespaceFileTransferDescription>;
   /** Persist materialized native bytes before their original private transfer is consumed. */
   retainFileInput?(
     credential: string,
@@ -652,12 +739,14 @@ export interface CodespaceFileTransport extends CodespaceTransportAvailability {
     codespace: CodespaceResourceRecord,
     operation: CodespaceOperationRecord,
     request: CodespaceFileRequest,
-  ): Promise<CodespaceFileResult | { state: "running" }>;
+  ): Promise<CodespaceFileResult | { state: "running" } | { state: "outcome_unknown" }>;
   inspectFile(
     credential: string,
     codespace: CodespaceResourceRecord,
     operation: CodespaceOperationRecord,
-  ): Promise<CodespaceFileResult | { state: "running" } | { state: "absent" }>;
+  ): Promise<
+    CodespaceFileResult | { state: "running" } | { state: "outcome_unknown" } | { state: "absent" }
+  >;
 }
 
 export interface CodespaceNativeFileReference {
@@ -668,8 +757,64 @@ export interface CodespaceNativeFileReference {
   declaredSize?: number;
 }
 
+/** Each open verifies content before delivery and owns a separate bounded descriptor lifecycle. */
+export interface CodespaceVerifiedByteSource {
+  readonly size: number;
+  readonly sha256: string;
+  open(signal?: AbortSignal): Promise<CodespaceVerifiedByteStream>;
+}
+
+export interface CodespaceVerifiedByteStream extends AsyncIterable<Uint8Array> {
+  readonly settled: Promise<void>;
+  close(): Promise<void>;
+}
+
+export interface CodespaceTransferAuthority {
+  resourceId: string;
+  provider: string;
+  resourceGeneration: number;
+  authorizationGeneration: number;
+  environmentIdentity: string;
+}
+
+export type CodespaceTransferDirection = "guest_to_server" | "server_to_guest";
+
+export type CodespaceTransferStatus = {
+  transferId: string;
+  requestId: string;
+  requestDigest: string;
+  direction: CodespaceTransferDirection;
+  offset: number;
+  size: number;
+  sha256: string;
+  expiresAt: number;
+} & (
+  | { state: "reserved"; handle?: never }
+  | {
+      state: "ready" | "claimed";
+      handle: {
+        referenceId: string;
+        fileName: string;
+        mimeType: string;
+        size: number;
+        sha256: string;
+        expiresAt: number;
+      };
+    }
+);
+
 export interface CodespaceTransferRecord {
   id: string;
+  requestId?: string | null;
+  requestDigest?: string | null;
+  direction?: CodespaceTransferDirection | null;
+  resourceId?: string | null;
+  provider?: string | null;
+  resourceGeneration?: number | null;
+  authorizationGeneration?: number | null;
+  environmentIdentity?: string | null;
+  expectedSha256?: string | null;
+  uploadedBytes?: number;
   userId: string;
   purpose:
     | "codespace_input"

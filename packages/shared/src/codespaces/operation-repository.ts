@@ -57,6 +57,14 @@ export class CodespaceOperationRepository {
     requestDigest?: string;
     runtimeMs?: number;
     sessionKey?: string;
+    prepared?: {
+      operationId: string;
+      inputReference: string;
+      provider: string;
+      resourceGeneration: number;
+      authorizationGeneration: number;
+      providerResourceName: string | null;
+    };
   }): ReserveOperationResult {
     const transaction = this.sqlite.transaction(() => {
       if (input.requestId) {
@@ -64,7 +72,7 @@ export class CodespaceOperationRepository {
         if (previous) {
           if (
             previous.resourceId !== input.resourceId ||
-            previous.requestDigest !== input.requestDigest ||
+            previous.requestDigest !== (input.requestDigest ?? null) ||
             previous.kind !== (input.kind ?? "exec")
           )
             throw new CodespaceResourceError(
@@ -100,6 +108,17 @@ export class CodespaceOperationRepository {
         authorized.id,
       );
       if (!codespace) throw new Error("Authorized codespace disappeared");
+      if (
+        input.prepared &&
+        (input.prepared.provider !== codespace.provider ||
+          input.prepared.resourceGeneration !== codespace.generation ||
+          input.prepared.authorizationGeneration !== codespace.authorizationGeneration ||
+          input.prepared.providerResourceName !== codespace.providerResourceName)
+      )
+        throw new CodespaceResourceError(
+          "CODESPACE_GENERATION_CONFLICT",
+          "Prepared operation authority changed",
+        );
       const disabled = this.sqlite
         .prepare(
           `SELECT 1 FROM codespaceProviderControl
@@ -129,7 +148,7 @@ export class CodespaceOperationRepository {
       }
       // A journal entry is not an execution lock. The guest owns atomic file commits;
       // lost responses and retained results must never block independent work.
-      const id = randomUUID();
+      const id = input.prepared?.operationId ?? randomUUID();
       const remoteMarker = `moira-op-${randomBytes(16).toString("hex")}`;
       this.sqlite
         .prepare(
@@ -137,8 +156,8 @@ export class CodespaceOperationRepository {
            (id, userId, resourceId, resourceGeneration, authorizationGeneration, provider,
             providerResourceName, remoteMarker, kind, state, inputBytes,
             stdoutLimitBytes, stderrLimitBytes, deadlineAt,
-            createdAt, updatedAt, requestId, requestDigest, admissionDeadlineAt, runtimeMs, sessionKey)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'reserved', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            createdAt, updatedAt, requestId, requestDigest, admissionDeadlineAt, runtimeMs, sessionKey, inputReference)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'reserved', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
         .run(
           id,
@@ -161,6 +180,7 @@ export class CodespaceOperationRepository {
           input.requestId ? input.deadlineAt : null,
           input.runtimeMs ?? null,
           input.sessionKey ?? null,
+          input.prepared?.inputReference ?? null,
         );
       // Work reaching the codespace is activity: it holds idle auto-stop off. Completion needs no
       // separate write, because the idle check also reads the operation's own last change.
@@ -191,6 +211,20 @@ export class CodespaceOperationRepository {
     );
   }
 
+  getFileClientAnchor(
+    userId: string,
+    resourceId: string,
+    now: number,
+  ): CodespaceOperationRecord | null {
+    return (
+      (this.sqlite
+        .prepare(
+          "SELECT * FROM codespaceOperation WHERE userId=? AND resourceId=? AND kind='exec' AND state='succeeded' AND lastOutcome='file_client_provisioned' AND resultReference IS NOT NULL AND resultExpiresAt>? ORDER BY updatedAt DESC,id DESC LIMIT 1",
+        )
+        .get(userId, resourceId, now) as CodespaceOperationRecord | undefined) ?? null
+    );
+  }
+
   attachInput(userId: string, operationId: string, reference: string, now: number): boolean {
     return (
       this.sqlite
@@ -212,7 +246,9 @@ export class CodespaceOperationRepository {
     return (
       this.sqlite
         .prepare(
-          "UPDATE codespaceOperation SET inputReference=?,updatedAt=? WHERE id=? AND userId=? AND state='reserved' AND inputReference=? AND claimId=? AND deadlineAt>?",
+          `UPDATE codespaceOperation SET inputReference=?,updatedAt=? WHERE id=? AND userId=?
+           AND (state='reserved' OR (state='reconcile_pending' AND sessionKey='moira-private-file-transfer'))
+           AND inputReference=? AND claimId=? AND deadlineAt>?`,
         )
         .run(reference, now, operationId, userId, previous, claimId, now).changes === 1
     );
@@ -622,6 +658,8 @@ export class CodespaceOperationRepository {
     resultExpiresAt: number,
     now: number,
     state: "succeeded" | "failed" = "succeeded",
+    resultReference?: string,
+    lastOutcome = "remote_terminal",
   ): boolean {
     // Store the observed outcome of this exact operation independently of lifecycle state.
     // Caller-visible bytes are still checked against current authority before and after I/O.
@@ -629,7 +667,7 @@ export class CodespaceOperationRepository {
       this.sqlite
         .prepare(
           `UPDATE codespaceOperation SET state = ?, outputBytes = ?, exitCode = NULL,
-           resultExpiresAt = ?, lastOutcome = 'remote_terminal', claimId = NULL,
+           resultExpiresAt = ?, lastOutcome = ?, resultReference = COALESCE(?,resultReference), claimId = NULL,
            claimExpiresAt = NULL, updatedAt = ?
            WHERE id = ? AND userId = ?
              AND kind <> 'exec'
@@ -649,7 +687,16 @@ export class CodespaceOperationRepository {
                  AND connection.externalAccountId = resource.externalOwnerId
                  AND connection.credentialGeneration = codespaceOperation.authorizationGeneration)`,
         )
-        .run(state, outputBytes, resultExpiresAt, now, operationId, userId).changes === 1
+        .run(
+          state,
+          outputBytes,
+          resultExpiresAt,
+          lastOutcome,
+          resultReference ?? null,
+          now,
+          operationId,
+          userId,
+        ).changes === 1
     );
   }
 
@@ -758,6 +805,18 @@ export class CodespaceOperationRepository {
         .prepare(
           `UPDATE codespaceOperation SET claimId = NULL, claimExpiresAt = NULL,
            lastOutcome = ?, updatedAt = ? WHERE id = ? AND claimId = ?`,
+        )
+        .run(outcome, now, operationId, claimId).changes === 1
+    );
+  }
+
+  /** Keep the existing claim lease as retry backoff after an ambiguous file attempt. */
+  retainClaim(operationId: string, claimId: string, outcome: string, now: number): boolean {
+    return (
+      this.sqlite
+        .prepare(
+          `UPDATE codespaceOperation SET lastOutcome = ?, updatedAt = ?
+      WHERE id = ? AND claimId = ?`,
         )
         .run(outcome, now, operationId, claimId).changes === 1
     );

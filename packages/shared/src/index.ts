@@ -101,6 +101,7 @@ export * from "./errors/index.js";
 // Validation utilities (slug/handle validation)
 export * from "./validation/slug-handle.js";
 export * from "./validation/execution-parent.js";
+export * from "./validation/attachment-filename.js";
 
 // Domain errors (slug/handle specific errors)
 export * from "./errors/domain-errors.js";
@@ -133,6 +134,8 @@ export * from "./codespaces/settle-after-dispatch.js";
 export * from "./codespaces/transfer-repository.js";
 export * from "./codespaces/transfer-service.js";
 export * from "./codespaces/file-service.js";
+export * from "./codespaces/file-transfer-capability.js";
+export * from "./codespaces/file-transfer-service.js";
 export * from "./codespaces/views.js";
 export * from "./codespaces/observability.js";
 

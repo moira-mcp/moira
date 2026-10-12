@@ -213,6 +213,7 @@ describe("result-only Local relay settlement", () => {
   });
   test("reconnect collects an expired admission's cached result after work lease closure without dispatch", async () => {
     const value = await fixture();
+    const acknowledged = jest.spyOn(value.rpc.journal, "acknowledge");
     const relay = new LocalRelay(value.local.records, value.fetch);
     expect(await relay.poll(value.rpc)).toBe(0);
     await relay.drain();
@@ -224,6 +225,7 @@ describe("result-only Local relay settlement", () => {
     expect(JSON.parse(bytes.toString())).toEqual(value.terminal);
     expect(await state.read("effect.json", (item) => item)).toEqual({ count: 1 });
     expect(await value.rpc.retained(value.message)).toBeUndefined();
+    expect(acknowledged).toHaveBeenCalledWith(value.claim.requestId, true);
     expect(await value.rpc.handle(value.message)).toMatchObject({
       ok: false,
       error: { code: "LOCAL_REQUEST_EXPIRED" },

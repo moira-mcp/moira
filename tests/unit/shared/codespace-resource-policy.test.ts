@@ -51,7 +51,8 @@ describe("codespace resource policy", () => {
       maxOperationMs: 900_000,
       maxBackgroundOperationMs: 4 * 60 * 60_000,
       startWaitMs: 180_000,
-      maxTransferFileBytes: 4 * 1024 ** 2,
+      maxTransferFileBytes: 20 * 1024 ** 2,
+      maxCodeFileBytes: 4 * 1024 ** 2,
       maxTransferBytesPerUser: 100 * 1024 ** 2,
       maxTransferBytesGlobal: 1024 * 1024 ** 2,
       maxTransferObjectsPerUser: 10,
@@ -108,7 +109,10 @@ describe("codespace resource policy", () => {
     expect(() =>
       policy({ CODESPACE_MAX_RETAINED_OUTPUT_MB: "1", CODESPACE_MAX_OPERATION_STDOUT_KB: "2048" }),
     ).toThrow(/cannot be lower than a configured response payload bound/);
-    expect(() => policy({ CODESPACE_MAX_TRANSFER_FILE_MB: "5" })).toThrow(/between/);
+    expect(policy({ CODESPACE_MAX_TRANSFER_FILE_MB: "5" }).maxTransferFileBytes).toBe(
+      5 * 1024 ** 2,
+    );
+    expect(() => policy({ CODESPACE_MAX_TRANSFER_FILE_MB: "1025" })).toThrow(/between/);
     expect(() => policy({ CODESPACE_MAX_TRANSFER_OBJECTS_PER_USER: "101" })).toThrow(/between/);
     expect(() => policy({ CODESPACE_TRANSFER_TTL_MINUTES: "61" })).toThrow(/between/);
     expect(() =>
@@ -117,5 +121,17 @@ describe("codespace resource policy", () => {
         CODESPACE_MAX_TRANSFER_TOTAL_MB_PER_USER: "2",
       }),
     ).toThrow(/aggregate limits/);
+  });
+
+  test("binary configuration does not enlarge code, ranges, relay parts or aggregate quotas", () => {
+    const limits = effectiveCodespaceLimits(policy());
+    expect(limits.transfers.maxFileBytes).toBe(20 * 1024 ** 2);
+    expect(limits.transfers.maxChunkBytes).toBe(256 * 1024);
+    expect(limits.files).toEqual({
+      maxCodeFileBytes: 4 * 1024 ** 2,
+      maxReadRangeBytes: 4 * 1024 ** 2,
+    });
+    expect(limits.relayTransfers.maxFileBytes).toBe(4 * 1024 ** 2);
+    expect(limits.transfers.maxBytesPerUser).toBe(100 * 1024 ** 2);
   });
 });

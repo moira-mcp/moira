@@ -1385,6 +1385,7 @@ export class LocalRelay {
   }
 
   private async sendOutcome(
+    rpc: LocalRpc,
     connection: Connection,
     claim: LocalRelayClaim,
     result: LocalReply,
@@ -1474,7 +1475,7 @@ export class LocalRelay {
     if (intent) {
       intent.settled = true;
       await this.records.state.write(key, intent);
-      await new RequestJournal(this.records.state).acknowledge(claim.requestId, true);
+      await rpc.journal.acknowledge(claim.requestId, true);
     }
   }
 
@@ -1544,7 +1545,7 @@ export class LocalRelay {
           !TERMINAL_RECEIPT_STATES.has(result.result.state))
       )
         continue;
-      const delivery = this.sendOutcome(connection, claim, result, 4 * 1024 * 1024, signal)
+      const delivery = this.sendOutcome(rpc, connection, claim, result, 4 * 1024 * 1024, signal)
         .catch((error: unknown) => {
           if (!signal?.aborted && !(error instanceof LocalClaimRefusal)) {
             this.deliveryFailures.push(error);
@@ -1644,7 +1645,7 @@ export class LocalRelay {
             // not a revocation of independent work on sibling resources.
             result = rpc.failure(error);
           }
-          await this.sendOutcome(connection, claim, result, data.maxPartBytes, scope);
+          await this.sendOutcome(rpc, connection, claim, result, data.maxPartBytes, scope);
         },
         signal,
       );

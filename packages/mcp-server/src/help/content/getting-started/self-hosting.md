@@ -390,7 +390,8 @@ Choose a UUID `request_id` before `codespace` exec or `codespace_process` start.
 durable acceptance with its `operation_id` or `process_id`, without waiting for execution to finish.
 `accepted` and `phase` distinguish input preparation, accepted work, confirmed running work and an
 unknown or terminal outcome. Acceptance is not proof of guest start; `started_at: null` means no
-start has been confirmed, not that no effect happened. File actions still wait for their result.
+start has been confirmed, not that no effect happened. Code file actions wait for their result;
+native transfers can return an incomplete operation to collect by its original identity.
 Use `codespace_process` for background start/get/read/stop in that VM. Recover a lost first command
 reply with exec containing only `codespace_id` and the original `request_id`, or process get with
 those fields. Repeating the exact submission with the same UUID returns the same operation;
@@ -416,6 +417,40 @@ returns a repository PNG/JPEG as native MCP image content: pass `codespace_id`, 
 `max_bytes` up to 4 MiB, or resume with only `codespace_id` and `operation_id`. Header/container
 checks cap dimensions at 8192 per edge and 16 million pixels; they do not fully decode pixels.
 Inspect the image before treating a screenshot as visual evidence.
+
+Native `upload` and `download` require a UUID `request_id`, kept unchanged after a lost reply.
+Their binary limit is separate from code edits, read ranges, stdin and previews: 20 MiB by default
+with 256 KiB chunks. Code/range/preview bounds are at most 4 MiB; stdin uses its effective input limit,
+1 MiB by default and at most 4 MiB. Aggregate and in-flight quotas still
+apply. A download returns a private one-use resource link and `file.reference_id`; exact recovery
+preserves the original reference, and consuming it does not authorize republication.
+`communication({ action: "deliver-file", referenceId, message })` is a separate delivery of that
+owned ready object, optionally to one configured `channelId`. It does not consume the native
+reference or send to a guest-selected recipient.
+
+Use `codespace({ action: "files_setup", codespace_id, request_id })` to provision the remote file
+client. When `provisioned` is true, invoke the returned absolute `command` through ordinary exec;
+pending setup returns `command: null`. The returned hashes measure the installed client and
+executable. Fixed-asset refresh preserves a running guest's life, repository and sessions without
+VM or daemon restart; it does not replace the host daemon's journal. The client supports
+`upload PATH --request-id UUID`, `download REFERENCE PATH --request-id UUID` and `status UUID`.
+Reuse the UUID and original bytes/target guard to resume. CLI status and MCP `transfer_status`
+only collect: `scope: "private_object"` with `state: "ready"` confirms private storage, not a guest
+target commit. New or resumed work requires current provider/owner permissions and the same measured
+guest life within finite capability and object retention. Full commands and target guards are in
+[the tools reference](/docs/reference/tools/#development-codespaces).
+
+Pending setup, including an operation without confirmed launch or a saved result, is collected with
+the same setup UUID; it does not authorize another installation. Interrupted input preparation and
+private copying resume the original object and checkpoint. A consumed or unavailable bound input
+cannot be replaced or fetched again under that request. An already ready independent copy remains
+settleable without its original source, subject to current authority and its own retention.
+Completed retries return the retained receipt without another publication or result allocation;
+resume never extends the original deadlines.
+Expiry before dispatch admission settles setup, native transfer and CLI preparation as cancelled
+without execution independently of whether private preparation is still available. Keep the
+original identity and deadline; a terminal setup refusal ends waiting without exposing a command.
+Already-admitted dispatch with an unknown outcome remains uncertain and is not repeated by inspection.
 
 In **Settings → Development → Local computers**, open the connected computer's codespaces and
 choose its approved repository to create a VM, or discover

@@ -72,6 +72,17 @@ function expectedRowsAfterRename(table: string, storedRows: StoredRow[]): Stored
     }
     if (table === "workspaceTransfer") {
       expected.purpose = String(expected.purpose).replace("workspace_", "codespace_");
+      // Existing transfer rows retain their identity without invented streaming authority.
+      expected.requestId = null;
+      expected.requestDigest = null;
+      expected.direction = null;
+      expected.resourceId = null;
+      expected.provider = null;
+      expected.resourceGeneration = null;
+      expected.authorizationGeneration = null;
+      expected.environmentIdentity = null;
+      expected.expectedSha256 = null;
+      expected.uploadedBytes = stored.observedSize ?? 0;
     }
     return expected;
   });
@@ -263,6 +274,13 @@ describe("codespace rename migration", () => {
           {
             table: "codespaceOperation",
             name: "codespace_operation_request_idx",
+            unique: 1,
+            partial: 0,
+            columns: ["userId", "requestId"],
+          },
+          {
+            table: "codespaceTransfer",
+            name: "codespace_transfer_request_idx",
             unique: 1,
             partial: 0,
             columns: ["userId", "requestId"],

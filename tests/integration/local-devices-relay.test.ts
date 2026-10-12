@@ -18,6 +18,7 @@ import {
   CodespaceOperationRepository,
   CodespaceOperationService,
   CodespaceFileService,
+  CodespaceResourceError,
   CodespaceTransferRepository,
   CodespaceTransferService,
   canonicalJson,
@@ -1408,9 +1409,13 @@ describe("Durable local device enrollment and relay", () => {
       }
     },
   );
-  test.each(["exec", "upload"] as const)(
-    "a failed native %s retention keeps original private bytes available for recovery",
-    async (mode) => {
+  test.each([
+    ["exec", "generic"],
+    ["upload", "generic"],
+    ["upload", "typed-unknown"],
+  ] as const)(
+    "a failed native %s %s retention keeps original private bytes available for recovery",
+    async (mode, failure) => {
       const { device } = enroll(),
         resourceId = bind(device),
         repository = new CodespaceOperationRepository(sqlite);
@@ -1442,15 +1447,33 @@ describe("Durable local device enrollment and relay", () => {
           })(),
         }),
       };
-      const refuse = async () => {
+      let acceptedOperationId = "";
+      const refuse = async (
+        _credential: string,
+        _space: CodespaceResourceRecord,
+        operation: CodespaceOperationRecord,
+      ) => {
+        acceptedOperationId = operation.id;
+        if (failure === "typed-unknown")
+          throw new CodespaceResourceError(
+            "CODESPACE_PROVIDER_UNAVAILABLE",
+            "Private relay capacity unavailable",
+          );
         throw new Error("Private relay capacity unavailable");
       };
+      const effect = path.join(directory, "guest-execute-effect");
       const transport: CodespaceOperationTransport & CodespaceFileTransport = {
         health: async () => ({ ok: true, reason: null }),
         retainExecuteInput: refuse,
         retainFileInput: refuse,
-        execute: async () => ({ state: "running" }),
-        executeFile: async () => ({ state: "running" }),
+        execute: async () => {
+          fs.appendFileSync(effect, "exec\n");
+          return { state: "running" };
+        },
+        executeFile: async () => {
+          fs.appendFileSync(effect, "upload\n");
+          return { state: "running" };
+        },
         inspect: async () => ({ state: "absent" }),
         cancel: async () => ({ state: "absent" }),
         finalize: async () => undefined,
@@ -1467,26 +1490,45 @@ describe("Durable local device enrollment and relay", () => {
           transfers,
           nativeFetcher,
         };
-        const result =
+        const pending =
           mode === "exec"
-            ? await new CodespaceOperationService(common).executeNativeReference(
+            ? new CodespaceOperationService(common).executeNativeReference(
                 "user-a",
                 resourceId,
                 { argv: ["cat"] },
                 reference,
               )
-            : await new CodespaceFileService(common).uploadReference("user-a", resourceId, {
+            : new CodespaceFileService(common).uploadReference("user-a", resourceId, {
                 path: "file.bin",
                 reference,
                 expected: { exists: false },
               });
-        expect(result.operation.state).toBe("reconcile_pending");
-        expect(result.result).toBeNull();
+        if (failure === "typed-unknown") {
+          const error = await pending.then(
+            () => null,
+            (error: unknown) => error,
+          );
+          expect(error).toBeInstanceOf(CodespaceResourceError);
+          expect(error).toMatchObject({
+            code: "CODESPACE_PROVIDER_UNAVAILABLE",
+            confirmedRefusal: false,
+            operationId: acceptedOperationId,
+          });
+        } else {
+          const result = await pending;
+          expect(result.operation.id).toBe(acceptedOperationId);
+          expect(result.operation.state).toBe("reconcile_pending");
+          expect(result.result).toBeNull();
+        }
+        expect(repository.listOwned("user-a", resourceId)).toEqual([
+          expect.objectContaining({ id: acceptedOperationId, state: "reconcile_pending" }),
+        ]);
+        expect(fs.existsSync(effect)).toBe(false);
         const original = sqlite
           .prepare("SELECT objectKey,state FROM codespaceTransfer WHERE purpose='codespace_input'")
-          .get() as { objectKey: string; state: string };
-        expect(original.state).toBe("ready");
-        expect(fs.readFileSync(path.join(directory, original.objectKey))).toEqual(bytes);
+          .get() as { objectKey: string; state: string } | undefined;
+        expect(original).toEqual(expect.objectContaining({ state: "ready" }));
+        expect(fs.readFileSync(path.join(directory, original!.objectKey))).toEqual(bytes);
       } finally {
         fs.rmSync(directory, { recursive: true, force: true });
       }

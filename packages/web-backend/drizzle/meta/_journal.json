@@ -421,6 +421,13 @@
       "when": 1791745200000,
       "tag": "0058_codespace_operation_acceptance",
       "breakpoints": true
+    },
+    {
+      "idx": 60,
+      "version": "7",
+      "when": 1791831600000,
+      "tag": "0059_codespace_transfer_streaming",
+      "breakpoints": true
     }
   ]
 }

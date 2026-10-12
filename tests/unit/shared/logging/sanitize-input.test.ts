@@ -68,8 +68,7 @@ describe("sanitizeInput", () => {
     it("removes session fields", () => {
       const input = { sessionId: "xxx", sessionToken: "yyy", data: "test" };
       const { inputData } = sanitizeInput(input);
-      // sessionId ends with Id so it's extracted as resourceId
-      // sessionToken contains both session and token - removed
+      // Both session identifiers and tokens are sensitive.
       expect(inputData).toEqual({ data: "test" });
     });
 
@@ -265,6 +264,31 @@ describe("sanitizeInput", () => {
   });
 
   describe("resource ID extraction", () => {
+    it("keeps private file references and credential IDs out of both log fields", () => {
+      const input = {
+        action: "deliver-file",
+        referenceId: `codespace-file://${"a".repeat(43)}`,
+        reference_id: `codespace-file://${"b".repeat(43)}`,
+        capability: "private-capability",
+        grantId: "private-grant",
+        tokenId: "private-token",
+        passwordId: "private-password",
+        pinId: "private-pin",
+        sessionId: "private-session",
+        correlationId: "correlation-123",
+        channelId: "channel-123",
+      };
+
+      expect(sanitizeInput(input)).toEqual({
+        inputData: { action: "deliver-file" },
+        resourceIds: { correlationId: "correlation-123", channelId: "channel-123" },
+      });
+      expect(extractResourceIds(input)).toEqual({
+        correlationId: "correlation-123",
+        channelId: "channel-123",
+      });
+    });
+
     it("extracts fields ending with Id", () => {
       const input = {
         workflowId: "wf-123",
