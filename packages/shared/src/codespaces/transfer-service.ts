@@ -605,7 +605,13 @@ export class CodespaceTransferService {
         if (input.offset < offset || record.state !== "reserved") {
           if (input.offset + input.bytes.byteLength > offset)
             throw new Error("Transfer chunk overlap");
-          const previous = Buffer.alloc(Math.min(256 * 1024, input.bytes.length));
+          const byteLength = input.bytes.byteLength;
+          if (byteLength > 256 * 1024)
+            throw new CodespaceResourceError(
+              "CODESPACE_RESOURCE_INVALID",
+              "Invalid transfer chunk",
+            );
+          const previous = Buffer.alloc(byteLength);
           if (
             readSync(fd, previous, 0, previous.length, input.offset) !== previous.length ||
             createHash("sha256").update(previous).digest("hex") !== input.sha256

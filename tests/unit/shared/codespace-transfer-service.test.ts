@@ -798,7 +798,9 @@ describe("private codespace transfer service", () => {
     };
     try {
       const first = await value.service.reserveResumable("user-1", input);
-      const chunk = bytes.subarray(0, 5);
+      const backing = new Uint8Array(7).fill(0xff);
+      backing.set(bytes.subarray(0, 5), 1);
+      const chunk = backing.subarray(1, 6);
       const request = {
         offset: 0,
         bytes: chunk,
@@ -836,6 +838,21 @@ describe("private codespace transfer service", () => {
         sha256: createHash("sha256").update(rest).digest("hex"),
       });
       const handle = await reopened.finalizeTransfer("user-1", first.transferId, authority);
+      const stored = value.repository.getOwned("user-1", first.transferId)!;
+      const objectPath = join(value.root, stored.objectKey);
+      const receiptPath = join(value.root, `${stored.objectKey}.receipt`);
+      const receipt = readFileSync(receiptPath);
+      const status = await reopened.getTransferStatus("user-1", first.transferId, authority);
+      expect(
+        await reopened.writeTransferChunk("user-1", first.transferId, authority, {
+          offset: bytes.length,
+          bytes: backing.subarray(1, 1),
+          sha256: createHash("sha256").digest("hex"),
+        }),
+      ).toEqual(status);
+      expect(value.repository.getOwned("user-1", first.transferId)).toEqual(stored);
+      expect(readFileSync(objectPath)).toEqual(bytes);
+      expect(readFileSync(receiptPath)).toEqual(receipt);
       expect(
         (await reopened.writeTransferChunk("user-1", first.transferId, authority, request)).offset,
       ).toBe(bytes.length);
