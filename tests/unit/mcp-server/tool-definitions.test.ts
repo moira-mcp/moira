@@ -22,8 +22,11 @@ import {
   type McpToolName,
 } from "../../../packages/mcp-server/src/tools/tool-definitions.js";
 import {
+  CODESPACE_ACTION_REQUEST_SCHEMAS,
+  CODESPACE_PROCESS_ACTION_REQUEST_SCHEMAS,
   codespaceDownloadRequestSchema,
   codespaceExecRequestSchema,
+  startRequestSchema,
 } from "../../../packages/mcp-server/src/tools/tool-schemas.js";
 import {
   registerTools,
@@ -482,6 +485,26 @@ describe("MCP tool definitions", () => {
       expect(definition.examples.length).toBeGreaterThan(0);
       for (const example of definition.examples) {
         expect(definition.schema.safeParse(example).success).toBe(true);
+        let schema: z.ZodTypeAny = definition.schema;
+        let request: Readonly<Record<string, unknown>> = example;
+        if (definition.name === "codespace") {
+          const { action, ...params } = example;
+          schema =
+            CODESPACE_ACTION_REQUEST_SCHEMAS[
+              action as keyof typeof CODESPACE_ACTION_REQUEST_SCHEMAS
+            ];
+          request = params;
+        } else if (definition.name === "codespace_process") {
+          const { action, ...params } = example;
+          schema =
+            CODESPACE_PROCESS_ACTION_REQUEST_SCHEMAS[
+              action as keyof typeof CODESPACE_PROCESS_ACTION_REQUEST_SCHEMAS
+            ];
+          request = params;
+        } else if (definition.name === "start") {
+          schema = startRequestSchema;
+        }
+        expect(schema.safeParse(request)).toMatchObject({ success: true });
       }
     }
 
@@ -1025,13 +1048,15 @@ describe("MCP tool definitions", () => {
     expect(russian).toContain("### Схема входа");
     expect(russian).toContain('"set-visibility"');
 
-    for (const [index, definition] of TOOL_DEFINITIONS.entries()) {
-      const next = TOOL_DEFINITIONS[index + 1];
-      const start = english.indexOf(`## \`${definition.name}\``);
-      const end = next ? english.indexOf(`## \`${next.name}\``, start) : english.length;
-      const block = english.slice(start, end);
-      for (const example of definition.examples) {
-        expect(block).toContain(JSON.stringify(example, null, 2));
+    for (const reference of [english, russian]) {
+      for (const [index, definition] of TOOL_DEFINITIONS.entries()) {
+        const next = TOOL_DEFINITIONS[index + 1];
+        const start = reference.indexOf(`## \`${definition.name}\``);
+        const end = next ? reference.indexOf(`## \`${next.name}\``, start) : reference.length;
+        const block = reference.slice(start, end);
+        for (const example of definition.examples) {
+          expect(block).toContain(JSON.stringify(example, null, 2));
+        }
       }
     }
   });

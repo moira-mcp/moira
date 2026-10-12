@@ -442,6 +442,7 @@ export const TOOL_DEFINITIONS = [
       {
         action: "download",
         codespace_id: "00000000-0000-4000-8000-000000000000",
+        request_id: "11111111-1111-4111-8111-111111111111",
         path: "result.pdf",
         max_bytes: 4194304,
         file_name: "result.pdf",
