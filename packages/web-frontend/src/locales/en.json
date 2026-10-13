@@ -919,17 +919,10 @@
           "helpHeld": "A codespace counts against your limit until it is deleted — stopping it keeps its files and its slot. Delete one you no longer need to free a slot.",
           "helpBilling": "GitHub bills your personal account. Its monthly usage is shown above when the GitHub App can read it; these limits control Moira's local capacity.",
           "held": "Codespaces held",
-          "commands": "Commands running",
-          "transfers": "File transfers",
           "ofMax": "{{used}} of {{max}}",
           "more": "All limits",
           "machine": "Largest machine",
           "machineValue": "{{cpu}} cores · {{memory}} RAM · {{storage}} storage",
-          "commandDuration": "Longest command",
-          "backgroundDuration": "Longest background command",
-          "commandInput": "Command input",
-          "commandOutput": "Kept command output",
-          "fileSize": "Largest file transfer",
           "retention": "Stopped codespaces kept",
           "createInterval": "Time between creations",
           "instance": "Codespaces on this instance",
@@ -958,17 +951,17 @@
         },
         "autoPause": {
           "title": "Automatic pause",
-          "description": "Stop codespaces agents are not using, so they do not keep running up your GitHub bill.",
+          "description": "Choose GitHub's idle timeout for new Codespaces created through Moira.",
           "helpTitle": "What counts as activity",
-          "helpCounts": "Only what agents do through Moira: commands, file reads and writes, uploads and downloads. Moira does not see you working in a codespace directly in the browser, an editor or over SSH.",
+          "helpCounts": "GitHub detects activity in the editor, browser and terminal input/output. A command that runs silently can be interrupted by GitHub's idle shutdown.",
           "helpResume": "A paused codespace keeps its files. The next command an agent sends starts it again automatically.",
           "enable": "Pause idle codespaces",
-          "enableDescription": "Stop a codespace after no agent has used it through Moira for the time below.",
+          "enableDescription": "Use the timeout below for new Codespaces. When off, Moira requests GitHub's maximum of 240 minutes, not unlimited running time.",
           "timeout": "Pause after",
-          "timeoutDescription": "How long a codespace may stay unused before it is paused.",
+          "timeoutDescription": "How long GitHub may observe no activity before stopping a new Codespace.",
           "minutes_one": "{{count}} minute",
           "minutes_other": "{{count}} minutes",
-          "note": "Only agent activity through Moira counts; direct use in the browser or an editor is not seen. If you work in your codespaces directly, turn this off. Either way, GitHub stops a codespace after at most 240 minutes without activity.",
+          "note": "These settings apply at creation. Existing Codespaces keep their provider settings. Local codespaces follow their computer owner's policy instead.",
           "saved": "Automatic pause setting saved",
           "saveFailed": "Failed to save the automatic pause setting"
         }
@@ -2576,11 +2569,8 @@
         "resources": "Codespace creation",
         "connector": "Credential connector",
         "reconciliation": "Reconciliation backlog",
-        "activeResources": "Active codespaces / limit",
-        "activeOperations": "Active operations / limit",
-        "transferBytes": "Live transfer bytes / limit"
+        "activeResources": "Active codespaces / limit"
       },
-      "reconciliationValue": "{{resources}} codespaces, {{operations}} operations, oldest {{age}}",
       "controlsTitle": "Emergency controls",
       "controlsDescription": "Disabling a control refuses new codespace creation, start and agent operations and stops running codespaces. Repository data is preserved; nothing is deleted.",
       "scopes": {
@@ -3278,10 +3268,7 @@
       "CODESPACE_PROVIDER_DISABLED": "Cloud codespace operations are turned off on this instance.",
       "CODESPACE_PROVIDER_UNAVAILABLE": "GitHub Codespaces is not answering right now. Try again shortly.",
       "CODESPACE_POLICY_LIMIT": "A codespace limit was reached. See Your limits for what you hold and what is allowed.",
-      "CODESPACE_SESSION_UNAVAILABLE": "The command session is no longer available in this codespace.",
-      "CODESPACE_OPERATION_BUSY": "Too many codespace operations are running. Try again later.",
       "CODESPACE_AUTHORIZATION_REQUIRED": "Moira no longer has access to this repository. Reconnect GitHub above.",
-      "CODESPACE_RESULT_EXPIRED": "That result is no longer available.",
       "CODESPACE_CREATE_REJECTED": "GitHub refused to create the codespace. Check the repository's Codespaces settings on GitHub.",
       "CODESPACE_BILLING_UNSUPPORTED": "GitHub would bill an organization for this repository. Moira supports only personally billed Codespaces.",
       "CODESPACE_CREATE_PENDING": "A codespace is still being created or cleaned up. Wait a moment and try again.",
@@ -3769,7 +3756,7 @@
         },
         "autopause": {
           "title": "Pause idle codespaces",
-          "body": "Moira stops a codespace no agent has used through Moira for the time you choose, so it does not keep running up your GitHub bill. The next command starts it again."
+          "body": "Choose GitHub's idle timeout for new Codespaces. GitHub detects editor, browser and terminal input/output activity; a silent command can be interrupted. Turning this off requests 240 minutes, not unlimited time. Existing Codespaces keep their provider settings; Local codespaces follow their computer owner's policy."
         }
       }
     },

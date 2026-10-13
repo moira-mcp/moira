@@ -11,7 +11,8 @@ export interface LocalVmObservation {
   status: "running" | "stopped" | "starting" | "stopping" | "created" | "error" | "unknown";
   failure?: string;
 }
-export type FixedGuestEntrypoint = "installer" | "worker";
+export type FixedGuestEntrypoint =
+  "install" | "probe" | "bootstrap" | "configure" | "start-service" | "health";
 export interface LocalVmDispatchAdmission {
   expectedNetworkDigest: string;
   /** Recheck durable owner generation and local grants after backend verification awaits. */
@@ -37,7 +38,7 @@ export interface LocalVmRuntime {
   runFixedGuest(
     identity: LocalVmIdentity,
     entrypoint: FixedGuestEntrypoint,
-    input?: Uint8Array,
+    input?: Uint8Array | AsyncIterable<Uint8Array>,
     timeoutMs?: number,
     signal?: AbortSignal,
     admission?: LocalVmDispatchAdmission,

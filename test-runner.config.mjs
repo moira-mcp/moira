@@ -4,7 +4,7 @@ import { resolve } from "path";
 import process from "node:process";
 import { config as dotenvConfig } from "dotenv";
 import { guardSuccessfulFrameworkRun } from "./scripts/test-runner-result-guard.mjs";
-import { buildGuestAssets } from "./scripts/build-guest-assets.js";
+import { buildWorkspaceService } from "./scripts/build-workspace-service.js";
 
 // Load .env.test for all suites (test-specific environment, separate from .env.local)
 dotenvConfig({ path: ".env.test" });
@@ -112,7 +112,7 @@ export default defineConfig({
   hooks: {
     afterSuite: guardSuccessfulFrameworkRun,
     beforeSuite: async (suite) => {
-      if (suite.name === "unit") await buildGuestAssets();
+      if (suite.name === "unit") await buildWorkspaceService();
 
       // MCP Tools: set MCP_SERVER_URL = TEST_BASE_URL + /mcp
       if (suite.name === "mcp-tools") {

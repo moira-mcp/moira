@@ -5,7 +5,6 @@ import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { CodespaceOperationRepository } from "../../packages/shared/src/codespaces/operation-repository.js";
 
 const migrations = path.resolve(process.cwd(), "packages/web-backend/drizzle");
 
@@ -199,10 +198,13 @@ describe("persistent codespace operation migration", () => {
 
       migrate(drizzle(sqlite), { migrationsFolder: migrations });
 
-      const repository = new CodespaceOperationRepository(sqlite);
       expect(historical).toHaveLength(2);
       for (const row of historical as Array<{ id: string }>) {
-        expect(repository.getOwned("user-1", row.id)).toEqual({
+        expect(
+          sqlite
+            .prepare("SELECT * FROM codespaceOperation WHERE userId=? AND id=?")
+            .get("user-1", row.id),
+        ).toEqual({
           ...row,
           requestId: null,
           requestDigest: null,
@@ -213,7 +215,11 @@ describe("persistent codespace operation migration", () => {
           startedAt: null,
           sessionKey: null,
         });
-        expect(repository.getOwned("other-user", row.id)).toBeNull();
+        expect(
+          sqlite
+            .prepare("SELECT * FROM codespaceOperation WHERE userId=? AND id=?")
+            .get("other-user", row.id),
+        ).toBeUndefined();
       }
       expect(sqlite.prepare("SELECT * FROM codespaceLocalRelay ORDER BY requestId").all()).toEqual(
         (relays as Array<{ claimId: string | null }>).map((row) => ({

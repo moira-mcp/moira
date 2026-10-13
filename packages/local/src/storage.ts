@@ -6,8 +6,18 @@ import { PrivateState } from "./private-state.js";
 import { runProcess, type RunProcess } from "./process.js";
 
 const ownerSchema = z
-  .object({ deviceId: z.string().uuid(), capacityBytes: z.number().int().positive() })
+  .object({ deviceId: z.string().uuid(), capacityBytes: z.number().int().safe().positive() })
   .strict();
+
+/** hdiutil accepts whole 512-byte sectors, unlike diskutil's byte suffix. */
+function hdiutilSectors(bytes: number): string {
+  if (!Number.isSafeInteger(bytes) || bytes <= 0 || bytes % 512 !== 0)
+    throw new LocalRefusal(
+      "LOCAL_STORAGE_SIZE",
+      "Choose an image size represented exactly in whole 512-byte sectors.",
+    );
+  return String(bytes / 512);
+}
 
 /** Native socket paths must stay short even when the private image is stored under a long path. */
 export function defaultStorageMount(
@@ -231,15 +241,10 @@ export async function initializeStorage(
   run: RunProcess = runProcess,
 ): Promise<string> {
   z.string().uuid().parse(deviceId);
-  if (
-    !Number.isSafeInteger(capacityBytes) ||
-    capacityBytes < 8 * GiB ||
-    capacityBytes > 1024 * GiB ||
-    capacityBytes % GiB !== 0
-  ) {
+  if (!Number.isSafeInteger(capacityBytes) || capacityBytes <= 0) {
     throw new LocalRefusal(
       "LOCAL_STORAGE_SIZE",
-      "Choose an integral storage size between 8 and 1024 GiB.",
+      "Choose a positive storage size represented exactly in bytes.",
     );
   }
   const root = suppliedMount ?? defaultStorageMount(state.root, deviceId, process.platform);
@@ -250,6 +255,7 @@ export async function initializeStorage(
         "On Linux, supply a newly mounted private bounded filesystem with --storage-root.",
       );
     }
+    const sectors = hdiutilSectors(capacityBytes);
     const image = join(state.root, "storage.sparsebundle");
     const existing = await lstat(image).catch((error: NodeJS.ErrnoException) => {
       if (error.code !== "ENOENT") throw error;
@@ -271,8 +277,8 @@ export async function initializeStorage(
     for (const argv of [
       [
         "create",
-        "-size",
-        `${capacityBytes / GiB}g`,
+        "-sectors",
+        sectors,
         "-type",
         "SPARSEBUNDLE",
         "-fs",
@@ -334,10 +340,10 @@ export async function initializeStorage(
 const resizeSchema = z
   .object({
     deviceId: z.string().uuid(),
-    fromBytes: z.number().int().positive(),
-    toBytes: z.number().int().positive(),
+    fromBytes: z.number().int().safe().positive(),
+    toBytes: z.number().int().safe().positive(),
     volumeUUID: z.string().uuid(),
-    overheadBytes: z.number().int().positive().max(GiB),
+    overheadBytes: z.number().int().safe().positive(),
   })
   .strict();
 
@@ -356,16 +362,15 @@ export async function resizeStorage(
   }
   if (
     !Number.isSafeInteger(requestedBytes) ||
-    requestedBytes < 8 * GiB ||
-    requestedBytes > 1024 * GiB ||
-    requestedBytes % GiB !== 0 ||
-    requestedBytes < policy.runtime.dockerBytes + GiB
+    requestedBytes <= 0 ||
+    requestedBytes <= policy.runtime.dockerBytes
   ) {
     throw new LocalRefusal(
       "LOCAL_STORAGE_SIZE",
-      "Choose an integral size of 8–1024 GiB and leave one GiB beyond the Docker budget.",
+      "Choose a positive storage size represented exactly in bytes beyond the Docker budget.",
     );
   }
+  const sectors = hdiutilSectors(requestedBytes);
   const image = join(state.root, "storage.sparsebundle");
   const root = policy.runtime.storageRoot;
   if (root !== defaultStorageMount(state.root, policy.deviceId, "darwin")) {
@@ -615,13 +620,7 @@ export async function resizeStorage(
   }
   if (current.imageBytes !== requestedBytes) {
     await command("/usr/bin/hdiutil", ["detach", root]);
-    await command("/usr/bin/hdiutil", [
-      "resize",
-      "-imageonly",
-      "-size",
-      `${requestedBytes / GiB}g`,
-      image,
-    ]);
+    await command("/usr/bin/hdiutil", ["resize", "-imageonly", "-sectors", sectors, image]);
     await command("/usr/bin/hdiutil", ["attach", "-nobrowse", "-mountpoint", root, image]);
     await chmod(root, 0o700);
     current = await binding(journal.volumeUUID);

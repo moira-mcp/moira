@@ -1,11 +1,6 @@
 import { createHash, randomBytes } from "node:crypto";
 import { z } from "zod";
-import {
-  localPublicPolicySchema,
-  localRelayPayloadReferenceSchema,
-  type LocalRelayClaim,
-  type LocalRelayPayloadReference,
-} from "../../shared/src/codespaces/local-device-types.js";
+import { localPublicPolicySchema } from "../../shared/src/codespaces/local-device-types.js";
 import { LocalRecords } from "./space-record.js";
 import { LocalRefusal, MAX_MESSAGE_BYTES, publicPolicy, requireLocalGrant } from "./policy.js";
 import { LocalRpc, localEnvelopeSchema, type LocalReply } from "./rpc.js";
@@ -59,12 +54,13 @@ const claimSchema = z
     resourceGeneration: z.number().int().positive(),
     authority: z.literal("owner-delete").optional(),
     digest: z.string().regex(/^[a-f0-9]{64}$/),
-    payloadReference: localRelayPayloadReferenceSchema,
+    payload: z.unknown(),
     deadlineAt: z.number().int().positive(),
     claimId: uuid,
     claimExpiresAt: z.number().int().positive(),
   })
   .strict();
+type LocalRelayClaim = z.infer<typeof claimSchema>;
 const hash = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex");
 const resourceSnapshot = (value: unknown, spaceId: string | null) => {
   const snapshot = z
@@ -80,17 +76,6 @@ const resourceSnapshot = (value: unknown, spaceId: string | null) => {
 // Reconnect instances share the same admitted records. A binding observation cannot
 // overtake a creation between its durable intent and the manager's native admission.
 const resourceGates = new WeakMap<LocalRecords, Map<string, Promise<unknown>>>();
-const TERMINAL_RECEIPT_STATES = new Set([
-  "succeeded",
-  "failed",
-  "cancelled",
-  "timed_out",
-  "not_started",
-  "interrupted",
-  "session_ended",
-  "session_unavailable",
-  "session_limit",
-]);
 const bindingSchema = z
   .object({
     resourceId: uuid,
@@ -119,7 +104,6 @@ const intentSchema = z
     authority: z.literal("owner-delete").optional(),
     sourceMessage: localEnvelopeSchema.optional(),
     settlementClaim: claimSchema.optional(),
-    outcomeReference: localRelayPayloadReferenceSchema.optional(),
     outcomeStatus: z.enum(["completed", "refused"]).optional(),
     settled: z.boolean().optional(),
   })
@@ -217,7 +201,7 @@ export class LocalRelay {
         throw new LocalRefusal("LOCAL_IDENTITY_CHANGED", "Git resource authority changed.");
       if (space.phase === "creating") {
         const intent = await this.records.state.read(
-          `relay-request-${binding.createRequestId}.json`,
+          `lifecycle-request-${binding.createRequestId}.json`,
           intentSchema.parse,
         );
         const request = intent?.message.request;
@@ -291,6 +275,40 @@ export class LocalRelay {
       })
       .passthrough()
       .parse(JSON.parse(bytes.toString("utf8"))).data;
+  }
+
+  /** A resource credential is the only cloud authority installed inside its VM. */
+  async workspaceCredential(
+    spaceId: string,
+    repositoryId: string,
+    environmentIdentity: string,
+    signal?: AbortSignal,
+  ) {
+    const authority = await this.gitAuthority(spaceId, repositoryId, signal);
+    const connection = await this.records.state.read("connection.json", connectionSchema.parse);
+    if (!connection) throw new LocalRefusal("LOCAL_NOT_ENROLLED", "Pair this device first.");
+    return z
+      .object({
+        version: z.literal(1),
+        origin: z.literal(relayOrigin(authority.origin)),
+        resourceId: z.literal(authority.resourceId),
+        resourceGeneration: z.number().int().positive(),
+        authorizationGeneration: z.number().int().positive(),
+        environmentIdentity: z.literal(environmentIdentity),
+        credential: deviceSecret,
+      })
+      .strict()
+      .parse(
+        await this.json(
+          connection,
+          "/workspaces/bootstrap",
+          {
+            resourceId: authority.resourceId,
+            environmentIdentity,
+          },
+          signal,
+        ),
+      );
   }
 
   private async request(
@@ -383,8 +401,7 @@ export class LocalRelay {
       }
       await response.body?.cancel().catch(() => undefined);
       const Refusal =
-        response.status < 500 &&
-        /^\/relay\/(?:[a-f0-9-]{36}\/(?:renew|result-part|payload\/\d+)(?:\?|$)|ack$)/.test(path)
+        response.status < 500 && /^\/relay\/(?:[a-f0-9-]{36}\/renew(?:\?|$)|ack$)/.test(path)
           ? LocalClaimRefusal
           : LocalRefusal;
       throw new Refusal(
@@ -585,58 +602,13 @@ export class LocalRelay {
     return connection;
   }
 
-  private async payload(
-    connection: Connection,
-    claim: LocalRelayClaim,
-    signal?: AbortSignal,
-  ): Promise<Buffer> {
-    if (claim.payloadReference.size > MAX_MESSAGE_BYTES)
-      throw new LocalRefusal(
-        "LOCAL_REQUEST_TOO_LARGE",
-        "The requested local operation exceeds its message bound.",
-      );
-    const parts: Buffer[] = [];
-    for (const [index, part] of claim.payloadReference.parts.entries()) {
-      const chunks: Buffer[] = [];
-      for (let offset = 0; offset < part.size; offset += 256 * 1024) {
-        const length = Math.min(256 * 1024, part.size - offset);
-        const bytes = await this.request(
-          connection,
-          `/relay/${claim.requestId}/payload/${index}?offset=${offset}&length=${length}`,
-          { claim: claim.claimId, signal, limit: length },
-        );
-        if (bytes.length !== length)
-          throw new LocalRefusal("LOCAL_PAYLOAD_CHANGED", "A relay payload part is incomplete.");
-        chunks.push(bytes);
-      }
-      const bytes = Buffer.concat(chunks);
-      if (hash(bytes) !== part.sha256)
-        throw new LocalRefusal(
-          "LOCAL_PAYLOAD_CHANGED",
-          "A relay payload part differs from its digest.",
-        );
-      parts.push(bytes);
-    }
-    const bytes = Buffer.concat(parts);
-    if (
-      bytes.length !== claim.payloadReference.size ||
-      hash(bytes) !== claim.payloadReference.sha256 ||
-      hash(bytes) !== claim.digest
-    )
-      throw new LocalRefusal(
-        "LOCAL_PAYLOAD_CHANGED",
-        "The complete relay payload differs from its digest.",
-      );
-    return bytes;
-  }
-
   private async retainedOutcome(rpc: LocalRpc, claim: LocalRelayClaim) {
     const binding = await this.records.state.read(
       `relay-space-${claim.resourceId}.json`,
       bindingSchema.parse,
     );
     const intent = await this.records.state.read(
-      `relay-request-${claim.requestId}.json`,
+      `lifecycle-request-${claim.requestId}.json`,
       intentSchema.parse,
     );
     if (!binding || !intent) return undefined;
@@ -844,7 +816,7 @@ export class LocalRelay {
     const sourceMessage = message;
     const key = `relay-space-${claim.resourceId}.json`;
     let binding = await this.records.state.read(key, bindingSchema.parse);
-    const intentKey = `relay-request-${claim.requestId}.json`;
+    const intentKey = `lifecycle-request-${claim.requestId}.json`;
     let intent = await this.records.state.read(intentKey, intentSchema.parse);
     let cleanupGeneration: number | undefined;
     let readonlyIncompleteSnapshot = false;
@@ -877,62 +849,6 @@ export class LocalRelay {
       return result.ok
         ? { ...result, result: resourceSnapshot(result.result, binding.localSpaceId) }
         : result;
-    }
-    if (message.request.action === "operation") {
-      if (!binding?.localSpaceId || claim.authority)
-        throw new LocalRefusal(
-          "LOCAL_CREATE_UNKNOWN",
-          "The codespace has no confirmed local identity.",
-        );
-      await this.requireRequestAuthority(claim, binding, message);
-      const space = await this.records.get(binding.localSpaceId);
-      if (
-        !space ||
-        !space.runtimeId ||
-        space.repositoryId !== binding.repositoryId ||
-        space.operationMarker !== binding.createMarker ||
-        (message.request.spaceId !== binding.localSpaceId &&
-          message.request.spaceId !== claim.resourceId)
-      )
-        throw new LocalRefusal("LOCAL_IDENTITY_CHANGED", "The codespace identity changed.");
-      if (space.desiredState !== "running" || space.phase !== "usable")
-        throw new LocalRefusal(
-          "LOCAL_NOT_RUNNING",
-          "The codespace is stopped or not ready for development.",
-        );
-      if (intent) {
-        if (
-          intent.digest !== claim.digest ||
-          intent.resourceId !== claim.resourceId ||
-          intent.deviceGeneration !== claim.deviceGeneration ||
-          intent.connectionId !== claim.connectionId ||
-          intent.authority !== undefined ||
-          intent.message.id !== claim.requestId ||
-          intent.message.expiresAt !== claim.deadlineAt ||
-          hash(Buffer.from(canonicalJson(intent.sourceMessage ?? intent.message))) !== claim.digest
-        )
-          throw new LocalRefusal(
-            "LOCAL_REPLAY_CONFLICT",
-            "The accepted operation cannot change its request.",
-          );
-        message = intent.message;
-      } else {
-        message = { ...message, request: { ...message.request, spaceId: binding.localSpaceId } };
-        intent = intentSchema.parse({
-          digest: claim.digest,
-          resourceId: claim.resourceId,
-          deviceGeneration: claim.deviceGeneration,
-          connectionId: claim.connectionId,
-          serverGeneration: claim.resourceGeneration,
-          message,
-          sourceMessage,
-          settlementClaim: claim,
-        });
-        await this.records.state.write(intentKey, intent);
-      }
-      onAdmitted();
-      signal?.throwIfAborted();
-      return rpc.handle(message, onAdmitted, undefined, signal);
     }
     if (binding && claim.resourceGeneration < binding.serverGeneration)
       throw new LocalRefusal(
@@ -1059,11 +975,6 @@ export class LocalRelay {
       const request = message.request;
       if (request.action === "create") {
         const keys = await this.records.state.keys("relay-space-");
-        if (!binding && keys.length >= 128)
-          throw new LocalRefusal(
-            "LOCAL_RESOURCE_LIMIT",
-            "Retained local resource binding capacity is exhausted.",
-          );
         for (const previousKey of keys) {
           const previous = await this.records.state.read(previousKey, bindingSchema.parse);
           if (
@@ -1158,11 +1069,6 @@ export class LocalRelay {
             },
           };
       }
-      if ((await this.records.state.keys("relay-request-")).length >= 1024)
-        throw new LocalRefusal(
-          "LOCAL_REQUEST_CAPACITY",
-          "Retained relay authority capacity is exhausted.",
-        );
       intent = intentSchema.parse({
         digest: claim.digest,
         resourceId: claim.resourceId,
@@ -1188,10 +1094,13 @@ export class LocalRelay {
         if (
           requestId !== claim.requestId &&
           active.resourceId === claim.resourceId &&
-          (!active.action || active.action === "operation")
+          (!active.action || active.action === "create" || active.action === "start")
         )
           active.controller.abort(
-            new LocalRefusal("LOCAL_CANCELLED", "This operation was cancelled by codespace stop."),
+            new LocalRefusal(
+              "LOCAL_CANCELLED",
+              "This lifecycle preparation was cancelled by codespace stop.",
+            ),
           );
     const result = await rpc.handle(
       message.request.action === "snapshot"
@@ -1340,7 +1249,7 @@ export class LocalRelay {
           next.userId !== claim.userId ||
           next.deadlineAt !== claim.deadlineAt ||
           next.authority !== claim.authority ||
-          JSON.stringify(next.payloadReference) !== JSON.stringify(claim.payloadReference) ||
+          canonicalJson(next.payload) !== canonicalJson(claim.payload) ||
           next.claimExpiresAt <= Date.now()
         )
           throw new LocalRefusal(
@@ -1389,77 +1298,11 @@ export class LocalRelay {
     connection: Connection,
     claim: LocalRelayClaim,
     result: LocalReply,
-    maxPartBytes: number,
     signal?: AbortSignal,
   ): Promise<void> {
-    const bytes = Buffer.from(JSON.stringify(result));
-    if (bytes.length > MAX_MESSAGE_BYTES || Math.ceil(bytes.length / maxPartBytes) > 32)
-      throw new LocalRefusal(
-        "LOCAL_OUTPUT_LIMIT",
-        "The result exceeds the relay's bounded capacity.",
-      );
-    const key = `relay-request-${claim.requestId}.json`;
+    const key = `lifecycle-request-${claim.requestId}.json`;
     const intent = await this.records.state.read(key, intentSchema.parse);
     const status = result.ok ? "completed" : "refused";
-    // A fresh dispatch claim repeats its live authority checks. Only an uncertain
-    // delivery of the same claim must reuse the exact previously uploaded receipt.
-    let reference =
-      !intent?.settled && intent?.settlementClaim?.claimId === claim.claimId
-        ? intent.outcomeReference
-        : undefined;
-    if (intent && intent.settlementClaim?.claimId !== claim.claimId) {
-      // A live reclaim fences the old claim even if the next upload loses its
-      // response. Persist that fence before transport so later collection uses
-      // the latest admitted claim rather than a displaced historical one.
-      intent.settlementClaim = claim;
-      delete intent.outcomeReference;
-      delete intent.outcomeStatus;
-      intent.settled = false;
-      await this.records.state.write(key, intent);
-    }
-    if (reference) {
-      if (
-        reference.size !== bytes.length ||
-        reference.sha256 !== hash(bytes) ||
-        intent?.outcomeStatus !== status
-      )
-        throw new LocalRefusal(
-          "LOCAL_REPLAY_CONFLICT",
-          "A retained receipt cannot change its outcome.",
-        );
-    } else {
-      const parts: LocalRelayPayloadReference["parts"] = [];
-      for (let offset = 0; offset < bytes.length; offset += maxPartBytes) {
-        const part = bytes.subarray(offset, offset + maxPartBytes);
-        const response = await this.request(connection, `/relay/${claim.requestId}/result-part`, {
-          binary: part,
-          claim: claim.claimId,
-          signal,
-          limit: 8192,
-        });
-        const uploaded = z
-          .object({
-            success: z.literal(true),
-            data: localRelayPayloadReferenceSchema.innerType().shape.parts.element,
-          })
-          .passthrough()
-          .parse(JSON.parse(response.toString("utf8"))).data;
-        if (uploaded.size !== part.length || uploaded.sha256 !== hash(part))
-          throw new LocalRefusal(
-            "LOCAL_PAYLOAD_CHANGED",
-            "The uploaded result part differs from its digest.",
-          );
-        parts.push(uploaded);
-      }
-      reference = { parts, size: bytes.length, sha256: hash(bytes) };
-      if (intent) {
-        intent.settlementClaim = claim;
-        intent.outcomeReference = reference;
-        intent.outcomeStatus = status;
-        intent.settled = false;
-        await this.records.state.write(key, intent);
-      }
-    }
     await this.json(
       connection,
       "/relay/ack",
@@ -1468,7 +1311,7 @@ export class LocalRelay {
         claimId: claim.claimId,
         digest: claim.digest,
         status,
-        outcomeReference: reference,
+        outcome: result,
       },
       signal,
     );
@@ -1479,91 +1322,10 @@ export class LocalRelay {
     }
   }
 
-  /** Reconnect can publish a cached receipt, but cannot renew, fetch input or execute a request. */
-  private async settleReceipts(
-    rpc: LocalRpc,
-    connection: Connection,
-    signal?: AbortSignal,
-  ): Promise<void> {
-    for (const key of await this.records.state.keys("relay-request-")) {
-      const intent = await this.records.state.read(key, intentSchema.parse);
-      const claim = intent?.settlementClaim;
-      if (
-        !intent ||
-        !claim ||
-        intent.settled ||
-        intent.message.request.action !== "operation" ||
-        this.deliveries.has(claim.requestId)
-      )
-        continue;
-      if (
-        intent.message.expiresAt > Date.now() ||
-        intent.message.expiresAt + LOCAL_RESULT_SETTLEMENT_RETENTION_MS <= Date.now()
-      )
-        continue;
-      if (
-        claim.deviceId !== connection.deviceId ||
-        claim.userId !== connection.userId ||
-        claim.connectionId !== connection.connectionId ||
-        claim.deviceGeneration !== connection.deviceGeneration ||
-        claim.requestId !== intent.message.id ||
-        claim.digest !== intent.digest ||
-        claim.resourceId !== intent.resourceId ||
-        claim.deadlineAt !== intent.message.expiresAt ||
-        intent.authority !== undefined ||
-        hash(Buffer.from(canonicalJson(intent.sourceMessage ?? intent.message))) !== intent.digest
-      )
-        continue;
-      const binding = await this.records.state.read(
-        `relay-space-${claim.resourceId}.json`,
-        bindingSchema.parse,
-      );
-      const policy = await this.records.policy();
-      if (
-        !binding ||
-        binding.deviceId !== claim.deviceId ||
-        binding.userId !== claim.userId ||
-        binding.connectionId !== claim.connectionId ||
-        binding.deviceGeneration !== claim.deviceGeneration ||
-        !policy.repositories.some((repo) => repo.id === binding.repositoryId)
-      )
-        continue;
-      const result = await rpc.retained(intent.message);
-      if (result === undefined) continue;
-      // A completed RPC admission may still contain an intermediate guest state.
-      // Late collection cannot turn that observation into a terminal settlement.
-      if (!result.ok) continue;
-      const job = intent.message.request.job;
-      const outputRead =
-        typeof job === "object" && job !== null && "action" in job && job.action === "output";
-      if (
-        !outputRead &&
-        (typeof result.result !== "object" ||
-          result.result === null ||
-          !("state" in result.result) ||
-          typeof result.result.state !== "string" ||
-          !TERMINAL_RECEIPT_STATES.has(result.result.state))
-      )
-        continue;
-      const delivery = this.sendOutcome(rpc, connection, claim, result, 4 * 1024 * 1024, signal)
-        .catch((error: unknown) => {
-          if (!signal?.aborted && !(error instanceof LocalClaimRefusal)) {
-            this.deliveryFailures.push(error);
-            this.polling?.abort();
-          }
-        })
-        .finally(() => {
-          if (this.deliveries.get(claim.requestId) === delivery)
-            this.deliveries.delete(claim.requestId);
-        });
-      this.deliveries.set(claim.requestId, delivery);
-    }
-  }
-
   async poll(rpc: LocalRpc, signal?: AbortSignal, background = false): Promise<number> {
     if (this.deliveryFailures.length) throw this.deliveryFailures.shift();
     const connection = await this.confirmed(signal);
-    for (const key of await this.records.state.keys("relay-request-")) {
+    for (const key of await this.records.state.keys("lifecycle-request-")) {
       const entry = await this.records.state.read(key, intentSchema.parse);
       if (
         entry &&
@@ -1572,18 +1334,12 @@ export class LocalRelay {
       )
         await this.records.state.remove(key);
     }
-    await this.settleReceipts(rpc, connection, signal);
     const wake = new AbortController();
     this.polling = wake;
     const pollingSignal = signal ? AbortSignal.any([signal, wake.signal]) : wake.signal;
     const data = z
       .object({
         requests: z.array(claimSchema).max(8),
-        maxPartBytes: z
-          .number()
-          .int()
-          .min(1)
-          .max(4 * 1024 * 1024),
       })
       .strict()
       .parse(
@@ -1619,8 +1375,12 @@ export class LocalRelay {
           try {
             result = await this.retainedOutcome(rpc, claim);
             if (result === undefined) {
-              const payload = await this.payload(connection, claim, scope);
-              const message = localEnvelopeSchema.parse(JSON.parse(payload.toString("utf8")));
+              const message = localEnvelopeSchema.parse(claim.payload);
+              if (hash(Buffer.from(canonicalJson(message))) !== claim.digest)
+                throw new LocalRefusal(
+                  "LOCAL_PAYLOAD_CHANGED",
+                  "The lifecycle payload digest changed.",
+                );
               const active = this.activeClaims.get(claim.requestId);
               if (active) active.action = message.request.action;
               if (
@@ -1645,7 +1405,7 @@ export class LocalRelay {
             // not a revocation of independent work on sibling resources.
             result = rpc.failure(error);
           }
-          await this.sendOutcome(rpc, connection, claim, result, data.maxPartBytes, scope);
+          await this.sendOutcome(rpc, connection, claim, result, scope);
         },
         signal,
       );

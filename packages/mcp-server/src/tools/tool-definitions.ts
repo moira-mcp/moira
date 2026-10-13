@@ -393,17 +393,12 @@ export const TOOL_DEFINITIONS = [
         codespace_id: "00000000-0000-4000-8000-000000000000",
         path: "screenshots/app.png",
       },
-      {
-        action: "preview_image",
-        codespace_id: "00000000-0000-4000-8000-000000000000",
-        operation_id: "11111111-1111-4111-8111-111111111111",
-      },
       { action: "create", repository_id: "123456", ref: "main" },
       { action: "get", codespace_id: "00000000-0000-4000-8000-000000000000" },
       {
         action: "exec",
         codespace_id: "00000000-0000-4000-8000-000000000000",
-        request_id: "11111111-1111-4111-8111-111111111111",
+        request_id: "ws1-11111111-1111-4111-8111-111111111111",
         argv: ["git", "status", "--short"],
         cwd: ".",
         timeout_seconds: 60,
@@ -411,7 +406,7 @@ export const TOOL_DEFINITIONS = [
       {
         action: "exec",
         codespace_id: "00000000-0000-4000-8000-000000000000",
-        request_id: "11111111-1111-4111-8111-111111111111",
+        request_id: "ws1-11111111-1111-4111-8111-111111111111",
       },
       {
         action: "read",
@@ -435,6 +430,7 @@ export const TOOL_DEFINITIONS = [
       {
         action: "write",
         codespace_id: "00000000-0000-4000-8000-000000000000",
+        request_id: "ws1-11111111-1111-4111-8111-111111111111",
         path: "notes.txt",
         text: "done\n",
         expected: { exists: false },
@@ -442,17 +438,7 @@ export const TOOL_DEFINITIONS = [
       {
         action: "download",
         codespace_id: "00000000-0000-4000-8000-000000000000",
-        request_id: "11111111-1111-4111-8111-111111111111",
         path: "result.pdf",
-        max_bytes: 4194304,
-        file_name: "result.pdf",
-        mime_type: "application/pdf",
-      },
-      {
-        // Resuming a pending download: the identity and the output metadata, without `path`.
-        action: "download",
-        codespace_id: "00000000-0000-4000-8000-000000000000",
-        operation_id: "11111111-1111-4111-8111-111111111111",
         file_name: "result.pdf",
         mime_type: "application/pdf",
       },
@@ -462,13 +448,13 @@ export const TOOL_DEFINITIONS = [
         summary:
           "Work in a persistent GitHub or local Docker Sandboxes codespace: lifecycle, commands and files, by action.",
         result:
-          "Compact discovery, confirmed lifecycle state, durable command acceptance with request_id/operation_id and phase, available stdout/stderr/exit_code, file results, a native download link or PNG/JPEG ImageContent. Collect a command by its original request_id without command fields, or by operation_id; lookup never cancels or repeats it. Background commands use codespace_process.",
+          "Discovery, lifecycle state, workspace-owned command state and output, guarded file results, a private download link or PNG/JPEG preview. Choose a fresh ws1-<lowercase UUID> request_id for commands and file mutations; legacy UUIDs cannot execute. Collect the original request_id without command fields; collection never repeats the command. Background commands use codespace_process.",
       },
       ru: {
         summary:
           "Работа в постоянном codespace GitHub или локальной Docker Sandboxes VM: жизненный цикл, команды и файлы, по action.",
         result:
-          "Краткое обнаружение, подтверждённое состояние, долговечное принятие команды с request_id/operation_id и фазой, доступные stdout/stderr/exit_code, результаты работы с файлами, нативная ссылка или PNG/JPEG ImageContent. Получайте команду по исходному request_id без полей команды либо по operation_id; чтение состояния не отменяет и не повторяет её. Фоновые команды используют codespace_process.",
+          "Обнаружение сред, состояние жизненного цикла, состояние команды и вывод, защищённые изменения файлов, приватная ссылка или PNG/JPEG preview. Для команды или изменения файла выберите новый request_id вида ws1-<UUID в нижнем регистре>; старые UUID не выполняются. Получайте результат по исходному request_id без полей команды; чтение не повторяет запуск. Для фоновых команд используйте codespace_process.",
       },
     },
   }),
@@ -481,23 +467,23 @@ export const TOOL_DEFINITIONS = [
       {
         action: "start",
         codespace_id: "00000000-0000-4000-8000-000000000000",
-        request_id: "11111111-1111-4111-8111-111111111111",
+        request_id: "ws1-11111111-1111-4111-8111-111111111111",
         argv: ["npm", "run", "dev"],
       },
       {
         action: "get",
         codespace_id: "00000000-0000-4000-8000-000000000000",
-        process_id: "11111111-1111-4111-8111-111111111111",
+        process_id: "ws1-11111111-1111-4111-8111-111111111111",
       },
       {
         action: "get",
         codespace_id: "00000000-0000-4000-8000-000000000000",
-        request_id: "11111111-1111-4111-8111-111111111111",
+        request_id: "ws1-11111111-1111-4111-8111-111111111111",
       },
       {
         action: "read",
         codespace_id: "00000000-0000-4000-8000-000000000000",
-        process_id: "11111111-1111-4111-8111-111111111111",
+        process_id: "ws1-11111111-1111-4111-8111-111111111111",
         stream: "stdout",
         offset: 0,
         length: 65536,
@@ -505,19 +491,19 @@ export const TOOL_DEFINITIONS = [
       {
         action: "stop",
         codespace_id: "00000000-0000-4000-8000-000000000000",
-        process_id: "11111111-1111-4111-8111-111111111111",
+        process_id: "ws1-11111111-1111-4111-8111-111111111111",
       },
     ],
     documentation: {
       en: {
         summary: "Start, inspect, read and stop a background command in an owned codespace.",
         result:
-          "Durable acceptance with request_id/process_id, phase and admission/runtime/result deadlines, available command output or a bounded output range. Recover a lost start response through get with the original request_id; stop is explicit cancellation, and lookup does not cancel or launch work.",
+          "Workspace-owned process state with request_id/process_id and readable output ranges. Recover a lost start reply through get with the original identity; stop explicitly cancels that process. A caller-selected deadline is optional.",
       },
       ru: {
         summary: "Запускает, проверяет, читает и останавливает фоновую команду в своём кодспейсе.",
         result:
-          "Долговечное принятие с request_id/process_id, фазой и сроками допуска, выполнения и хранения результата, доступный вывод либо его диапазон. После потери ответа start используйте get с исходным request_id; stop явно отменяет работу, а чтение состояния не отменяет и не запускает её.",
+          "Состояние процесса в рабочей среде с request_id/process_id и диапазонами вывода. После потери ответа start используйте get с исходным идентификатором; stop отменяет этот процесс. Срок выполнения задаётся только явно.",
       },
     },
   }),

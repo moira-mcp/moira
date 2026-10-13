@@ -60,6 +60,44 @@ async function exitedPid(): Promise<number> {
 }
 
 describe("local broker authority and address boundary", () => {
+  test("fixed tunnel carries simultaneous streams beyond the former socket ceiling", async () => {
+    const peers = new Set<Socket>();
+    const clients: Socket[] = [];
+    const remote = createServer((socket) => {
+      peers.add(socket);
+      socket.once("close", () => peers.delete(socket));
+      socket.on("data", (bytes) => socket.write(bytes));
+    });
+    remote.listen(0, "127.0.0.1");
+    await once(remote, "listening");
+    closers.push(async () => {
+      for (const socket of [...clients, ...peers]) socket.destroy();
+      await new Promise<void>((resolve, reject) =>
+        remote.close((error) => (error ? reject(error) : resolve())),
+      );
+    });
+    const address = remote.address();
+    if (!address || typeof address === "string") throw new Error("Remote did not bind");
+    const tunnel = await startBrokerTunnel(address.port);
+    closers.push(tunnel.close);
+    const responses = await Promise.all(
+      Array.from(
+        { length: 129 },
+        () =>
+          new Promise<string>((resolve, reject) => {
+            const client = connect({ host: "127.0.0.1", port: tunnel.port });
+            clients.push(client);
+            client.once("error", reject);
+            client.once("close", () => reject(new Error("Tunnel closed before its reply")));
+            client.once("connect", () => client.write(`${BROKER_PREFACE}echo`));
+            client.once("data", (bytes) => resolve(bytes.toString()));
+          }),
+      ),
+    );
+    expect(responses).toEqual(Array(129).fill("echo"));
+    expect(peers.size).toBe(129);
+    expect(clients.every((socket) => !socket.destroyed)).toBe(true);
+  });
   test("verified CONNECT and its fixed tunnel clear only establishment timers and carry a later response", async () => {
     const fixture = await localFixture(state);
     const framed = new Set<Socket>();
@@ -92,7 +130,7 @@ describe("local broker authority and address boundary", () => {
     let pendingTimeout: number | undefined;
     const broker = await startBroker({
       authorize: (header) => fixture.records.authorize(header),
-      budget: new NetworkBudget(1),
+      budget: new NetworkBudget(),
       resolve: async () => [{ address: "8.8.8.8", family: 4 }],
       dial: (target) => {
         upstream = connect({ host: "127.0.0.1", port: remotePort });
@@ -140,7 +178,7 @@ describe("local broker authority and address boundary", () => {
     const admitted = new Promise<void>((done) => {
       dialed = done;
     });
-    const budget = new NetworkBudget(1);
+    const budget = new NetworkBudget();
     const broker = await startBroker({
       authorize: (header) => fixture.records.authorize(header),
       budget,

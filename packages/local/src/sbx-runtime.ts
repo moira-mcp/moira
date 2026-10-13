@@ -2,13 +2,17 @@ import { lstat, mkdir, realpath } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { basename, dirname, isAbsolute, join, sep } from "node:path";
 import { z } from "zod";
-import { LocalRefusal, SUPPORTED_SBX_VERSION, type LocalPolicy } from "./policy.js";
+import {
+  LocalRefusal,
+  MAX_MESSAGE_BYTES,
+  SUPPORTED_SBX_VERSION,
+  type LocalPolicy,
+} from "./policy.js";
 import { runProcess, type RunProcess, type ProcessResult } from "./process.js";
 import {
   keychainAsset,
   runtimeApiAsset,
-  GUEST_INSTALL_COMMAND,
-  GUEST_WORKER_COMMAND,
+  GUEST_COMMANDS,
   VERIFIED_GUEST_FAILURE_EXIT,
 } from "./assets.js";
 import { prepareKeychain } from "./keychain.js";
@@ -21,7 +25,7 @@ const sandboxSchema = z
     status: z.enum(["running", "stopped", "starting", "stopping", "created", "error"]),
   })
   .passthrough();
-const inventorySchema = z.object({ sandboxes: z.array(sandboxSchema).max(128) }).passthrough();
+const inventorySchema = z.object({ sandboxes: z.array(sandboxSchema) }).passthrough();
 export type SandboxObservation = z.infer<typeof sandboxSchema>;
 import type { LocalVmIdentity as SandboxIdentity } from "./local-vm-runtime.js";
 import type { FixedGuestEntrypoint, LocalVmDispatchAdmission } from "./local-vm-runtime.js";
@@ -106,7 +110,8 @@ export class SbxRuntime {
       env: this.environment,
       stdin,
       timeoutMs,
-      maxBytes: 8 * 1024 * 1024,
+      maxBytes:
+        argv.length === 2 && argv[0] === "ls" && argv[1] === "--json" ? null : MAX_MESSAGE_BYTES,
       signal,
     });
     if (result.exitCode !== 0) {
@@ -759,14 +764,11 @@ export class SbxRuntime {
     timeoutMs = 30_000,
     signal?: AbortSignal,
   ): Promise<Buffer> {
-    const mode =
-      argv.length === GUEST_INSTALL_COMMAND.length &&
-      argv.every((value, index) => value === GUEST_INSTALL_COMMAND[index])
-        ? "installer"
-        : argv.length === GUEST_WORKER_COMMAND.length &&
-            argv.every((value, index) => value === GUEST_WORKER_COMMAND[index])
-          ? "worker"
-          : undefined;
+    const mode = (Object.keys(GUEST_COMMANDS) as FixedGuestEntrypoint[]).find(
+      (key) =>
+        argv.length === GUEST_COMMANDS[key].length &&
+        argv.every((value, index) => value === GUEST_COMMANDS[key][index]),
+    );
     if (!mode)
       throw new LocalRefusal(
         "LOCAL_GUEST_COMMAND_INVALID",
@@ -788,12 +790,12 @@ export class SbxRuntime {
   async runFixedGuest(
     identity: SandboxIdentity,
     entrypoint: FixedGuestEntrypoint,
-    stdin?: Uint8Array,
+    stdin?: Uint8Array | AsyncIterable<Uint8Array>,
     timeoutMs = 30_000,
     signal?: AbortSignal,
     admission?: LocalVmDispatchAdmission,
   ): Promise<Buffer> {
-    if (entrypoint !== "installer" && entrypoint !== "worker")
+    if (!Object.hasOwn(GUEST_COMMANDS, entrypoint))
       throw new LocalRefusal("LOCAL_GUEST_COMMAND_INVALID", "Unknown fixed guest entrypoint.");
     await this.verifySettings();
     const observed = await this.exact(identity);
@@ -818,8 +820,8 @@ export class SbxRuntime {
 
   private async attachGuest(
     identity: SandboxIdentity,
-    mode: "installer" | "worker",
-    stdin: Uint8Array | undefined,
+    mode: FixedGuestEntrypoint,
+    stdin: Uint8Array | AsyncIterable<Uint8Array> | undefined,
     timeoutMs: number,
     signal?: AbortSignal,
   ): Promise<Buffer> {
@@ -836,7 +838,9 @@ export class SbxRuntime {
         ],
         cwd: this.home,
         env: this.environment,
-        stdin,
+        ...(stdin && Symbol.asyncIterator in stdin
+          ? { input: stdin }
+          : { stdin: stdin as Uint8Array | undefined }),
         timeoutMs,
         maxBytes: 8 * 1024 * 1024,
         signal,

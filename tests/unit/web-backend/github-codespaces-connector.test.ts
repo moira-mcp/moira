@@ -1,7 +1,6 @@
 import { describe, expect, test } from "@jest/globals";
 import { spawn as spawnProcess } from "node:child_process";
 import { EventEmitter } from "node:events";
-import { createHash } from "node:crypto";
 import { resolve } from "node:path";
 import type { ClientRequest, IncomingMessage, RequestOptions } from "node:http";
 import { GitHubCodespacesConnector } from "../../../packages/web-backend/src/services/github-codespaces-connector.js";
@@ -12,7 +11,6 @@ import {
   encodeConnectorResponse,
   validateCodespaceSshConfig,
 } from "../../../packages/web-backend/src/services/github-codespaces-connector-protocol.mjs";
-import type { CodespaceOperationRecord, CodespaceResourceRecord } from "@mcp-moira/shared";
 
 function requestHarness(responder: (body: unknown, options: RequestOptions) => unknown) {
   const calls: Array<{ options: RequestOptions; body: string; timeoutMs: number | null }> = [];
@@ -47,29 +45,6 @@ function requestHarness(responder: (body: unknown, options: RequestOptions) => u
   return { calls, requestImpl };
 }
 
-const codespace = {
-  id: "codespace-1",
-  userId: "user-1",
-  provider: "github-codespaces",
-  providerResourceName: "silver-space-123",
-  repositoryFullName: "owner/repository",
-} as CodespaceResourceRecord;
-const operation = {
-  id: "operation-1",
-  userId: "user-1",
-  resourceId: "codespace-1",
-  remoteMarker: "moira-op-0123456789abcdef0123456789abcdef",
-  stdoutLimitBytes: 4096,
-  stderrLimitBytes: 4096,
-} as CodespaceOperationRecord;
-const version = { size: 3, sha256: "a".repeat(64), modifiedAt: 1 };
-
-function fileOperation(kind: CodespaceOperationRecord["kind"]): CodespaceOperationRecord {
-  return { ...operation, kind };
-}
-
-const sha256 = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex");
-
 describe("GitHub Codespaces connector boundary", () => {
   test("passes credentials only in the Unix-socket request body", async () => {
     const harness = requestHarness(() => ({
@@ -84,7 +59,7 @@ describe("GitHub Codespaces connector boundary", () => {
     expect(harness.calls).toHaveLength(1);
     expect(harness.calls[0].options).toMatchObject({
       socketPath: "/run/test/connector.sock",
-      path: "/job",
+      path: "/bootstrap",
       method: "POST",
     });
     expect(JSON.parse(harness.calls[0].body)).toEqual({
@@ -102,654 +77,6 @@ describe("GitHub Codespaces connector boundary", () => {
     expect(harness.calls[0].options).toMatchObject({ path: "/health", method: "GET" });
   });
 
-  test("preserves argv boundaries, stdin bytes and exact nonzero results", async () => {
-    const harness = requestHarness(() => ({
-      value: JSON.stringify({
-        state: "failed",
-        stdoutBase64: Buffer.from("partial").toString("base64"),
-        stderrBase64: Buffer.from("expected").toString("base64"),
-        exitCode: 23,
-        stdoutBytes: 90_000,
-        stderrBytes: 8,
-        outputLimitExceeded: false,
-        sessionCaptureDropped: false,
-      }),
-    }));
-    const connector = new GitHubCodespacesConnector(harness.requestImpl);
-    await expect(
-      connector.execute("ghu_topsecret", codespace, operation, {
-        argv: ["printf", "%s", "a value;$(false)"],
-        cwd: ".",
-        stdin: { kind: "inline", bytes: new TextEncoder().encode("input") },
-        timeoutMs: 5_000,
-        maxStdoutBytes: 4096,
-        maxStderrBytes: 4096,
-        maxRetainedBytes: 64 * 1024 * 1024,
-      }),
-    ).resolves.toEqual({
-      state: "failed",
-      stdout: "partial",
-      stderr: "expected",
-      exitCode: 23,
-      // The payload is a prefix; the complete size travels with it so a caller knows what is left.
-      stdoutTotalBytes: 90_000,
-      stderrTotalBytes: 8,
-      outputLimitExceeded: false,
-      sessionCaptureDropped: false,
-    });
-    const body = JSON.parse(harness.calls[0].body);
-    expect(body.job.argv).toEqual(["printf", "%s", "a value;$(false)"]);
-    expect(Buffer.from(body.job.stdin, "base64").toString("utf8")).toBe("input");
-    expect(JSON.stringify(harness.calls[0].options)).not.toContain("ghu_topsecret");
-  });
-
-  test("carries contract-max stdin and independent output streams inside wire envelopes", async () => {
-    const harness = requestHarness(() => ({ value: JSON.stringify({ state: "running" }) }));
-    const connector = new GitHubCodespacesConnector(harness.requestImpl);
-    await connector.execute("ghu_topsecret", codespace, operation, {
-      argv: ["true"],
-      cwd: ".",
-      stdin: { kind: "inline", bytes: Buffer.alloc(4 * 1024 * 1024, "a") },
-      timeoutMs: 5_000,
-      maxStdoutBytes: 8 * 1024 * 1024,
-      maxStderrBytes: 8 * 1024 * 1024,
-    });
-    expect(Buffer.byteLength(harness.calls[0].body)).toBeLessThanOrEqual(
-      CONNECTOR_MAX_REQUEST_BYTES,
-    );
-    expect(Buffer.byteLength(harness.calls[0].body)).toBeGreaterThan(4 * 1024 * 1024);
-
-    const remoteWireResult = encodeConnectorResponse({
-      state: "failed",
-      stdoutBase64: Buffer.alloc(8 * 1024 * 1024).toString("base64"),
-      stderrBase64: Buffer.alloc(8 * 1024 * 1024).toString("base64"),
-      exitCode: 23,
-      stdoutBytes: 8 * 1024 * 1024,
-      stderrBytes: 8 * 1024 * 1024,
-      outputLimitExceeded: false,
-      sessionCaptureDropped: false,
-    });
-    const maximumWireResult = encodeConnectorResponse({
-      value: remoteWireResult.toString("utf8"),
-    });
-    expect(maximumWireResult.length).toBeLessThanOrEqual(CONNECTOR_MAX_RESPONSE_BYTES);
-    expect(() =>
-      encodeConnectorRequest({ padding: "x".repeat(CONNECTOR_MAX_REQUEST_BYTES) }),
-    ).toThrow(/exceeded its bound/);
-  });
-
-  test("sends an explicit remote finalize operation", async () => {
-    const harness = requestHarness(() => ({ value: JSON.stringify({ state: "absent" }) }));
-    const connector = new GitHubCodespacesConnector(harness.requestImpl);
-    await expect(
-      connector.finalize("ghu_topsecret", codespace, operation),
-    ).resolves.toBeUndefined();
-    expect(JSON.parse(harness.calls[0].body).job).toMatchObject({
-      action: "finalize",
-      remoteMarker: operation.remoteMarker,
-    });
-  });
-
-  test("transports typed binary file requests and results without shell reinterpretation", async () => {
-    const output = Buffer.from([9, 0, 255]);
-    const harness = requestHarness(() => ({
-      value: JSON.stringify({
-        state: "succeeded",
-        value: {
-          action: "read",
-          path: "src/a value;$(false).bin",
-          offset: 0,
-          totalSize: output.length,
-          bytesBase64: output.toString("base64"),
-          sha256: "a".repeat(64),
-        },
-      }),
-    }));
-    const connector = new GitHubCodespacesConnector(harness.requestImpl);
-    await expect(
-      connector.executeFile("ghu_topsecret", codespace, fileOperation("read"), {
-        action: "read",
-        path: "src/a value;$(false).bin",
-        offset: 0,
-        length: 3,
-      }),
-    ).resolves.toEqual({
-      action: "read",
-      path: "src/a value;$(false).bin",
-      offset: 0,
-      totalSize: 3,
-      bytes: output,
-      sha256: "a".repeat(64),
-      rangeSha256: sha256(output),
-    });
-    const job = JSON.parse(harness.calls[0].body).job;
-    expect(job.action).toBe("file-execute");
-    expect(job.request).toEqual({
-      action: "read",
-      path: "src/a value;$(false).bin",
-      offset: 0,
-      length: 3,
-    });
-  });
-
-  test("collects large stat and bounded range metadata without confusing whole and range digests", async () => {
-    const bytes = Buffer.from("selected bytes");
-    const totalSize = 9 * 1024 ** 3;
-    const stat = {
-      action: "stat",
-      stat: {
-        path: "large.bin",
-        type: "file",
-        size: totalSize,
-        mode: 0o600,
-        modifiedAt: 1,
-        version: null,
-      },
-    };
-    const read = {
-      action: "read",
-      path: "large.bin",
-      offset: totalSize - bytes.length,
-      totalSize,
-      bytesBase64: bytes.toString("base64"),
-      sha256: null,
-      rangeSha256: sha256(bytes),
-    };
-    const harness = requestHarness((body) => ({
-      value: JSON.stringify({
-        state: "succeeded",
-        value:
-          (body as { job: { remoteMarker: string } }).job.remoteMarker === "stat-marker"
-            ? stat
-            : read,
-      }),
-    }));
-    const connector = new GitHubCodespacesConnector(harness.requestImpl);
-    await expect(
-      connector.inspectFile("ghu_topsecret", codespace, {
-        ...fileOperation("stat"),
-        remoteMarker: "stat-marker",
-      }),
-    ).resolves.toEqual(stat);
-    await expect(
-      connector.inspectFile("ghu_topsecret", codespace, fileOperation("read")),
-    ).resolves.toEqual({
-      action: "read",
-      path: read.path,
-      offset: read.offset,
-      totalSize,
-      bytes,
-      sha256: null,
-      rangeSha256: sha256(bytes),
-    });
-  });
-
-  test("preserves a retained legacy whole digest while deriving its actual partial-range digest", async () => {
-    const full = Buffer.from("before selected after");
-    const bytes = Buffer.from("selected");
-    const whole = sha256(full);
-    const harness = requestHarness(() => ({
-      value: JSON.stringify({
-        state: "succeeded",
-        value: {
-          action: "read",
-          path: "small.txt",
-          offset: 7,
-          totalSize: full.length,
-          bytesBase64: bytes.toString("base64"),
-          sha256: whole,
-        },
-      }),
-    }));
-    const connector = new GitHubCodespacesConnector(harness.requestImpl);
-    await expect(
-      connector.inspectFile("ghu_topsecret", codespace, fileOperation("read")),
-    ).resolves.toMatchObject({
-      sha256: whole,
-      rangeSha256: sha256(bytes),
-      bytes,
-    });
-    expect(whole).not.toBe(sha256(bytes));
-  });
-
-  test.each([0, 3])("collects verified small and EOF ranges at offset %s", async (offset) => {
-    const full = Buffer.from("abc");
-    const bytes = full.subarray(offset, offset + 1);
-    const value = {
-      action: "read",
-      path: "small.txt",
-      offset,
-      totalSize: full.length,
-      bytesBase64: bytes.toString("base64"),
-      sha256: sha256(full),
-      rangeSha256: sha256(bytes),
-    };
-    const harness = requestHarness(() => ({
-      value: JSON.stringify({ state: "succeeded", value }),
-    }));
-    const connector = new GitHubCodespacesConnector(harness.requestImpl);
-    await expect(
-      connector.inspectFile("ghu_topsecret", codespace, fileOperation("read")),
-    ).resolves.toMatchObject({
-      offset,
-      bytes,
-      sha256: sha256(full),
-      rangeSha256: sha256(bytes),
-    });
-  });
-
-  test.each([
-    [
-      "wrong range digest",
-      {
-        action: "read",
-        path: "large.bin",
-        offset: 0,
-        totalSize: 8 * 1024 ** 2,
-        bytesBase64: "YQ==",
-        sha256: null,
-        rangeSha256: "a".repeat(64),
-      },
-    ],
-    [
-      "legacy unavailable whole digest",
-      {
-        action: "read",
-        path: "large.bin",
-        offset: 0,
-        totalSize: 8 * 1024 ** 2,
-        bytesBase64: "YQ==",
-        sha256: null,
-      },
-    ],
-    [
-      "small unavailable whole digest",
-      {
-        action: "read",
-        path: "small.bin",
-        offset: 0,
-        totalSize: 1,
-        bytesBase64: "YQ==",
-        sha256: null,
-        rangeSha256: sha256(Buffer.from("a")),
-      },
-    ],
-    [
-      "unsafe large size",
-      {
-        action: "stat",
-        stat: {
-          path: "large.bin",
-          type: "file",
-          size: Number.MAX_SAFE_INTEGER + 1,
-          mode: 0o600,
-          modifiedAt: 1,
-          version: null,
-        },
-      },
-    ],
-    [
-      "oversized download",
-      {
-        action: "download",
-        path: "large.bin",
-        offset: 0,
-        totalSize: 8 * 1024 ** 2,
-        bytesBase64: "YQ==",
-        sha256: "a".repeat(64),
-      },
-    ],
-    [
-      "unbounded failure reason",
-      {
-        action: "read",
-        state: "failed",
-        code: "CODESPACE_FILE_REJECTED",
-        reason: "/host/private/file",
-      },
-    ],
-  ] as const)("refuses malformed range/stat/failure metadata: %s", async (_name, value) => {
-    const harness = requestHarness(() => ({
-      value: JSON.stringify({ state: "state" in value ? "failed" : "succeeded", value }),
-    }));
-    const connector = new GitHubCodespacesConnector(harness.requestImpl);
-    await expect(
-      connector.inspectFile("ghu_topsecret", codespace, fileOperation(value.action)),
-    ).rejects.toThrow(/invalid/);
-  });
-
-  test("collects bounded guard reasons without exposing provider diagnostics", async () => {
-    const value = {
-      action: "read",
-      state: "failed",
-      code: "CODESPACE_FILE_REJECTED",
-      reason: "concurrent_change",
-    };
-    const harness = requestHarness(() => ({ value: JSON.stringify({ state: "failed", value }) }));
-    const connector = new GitHubCodespacesConnector(harness.requestImpl);
-    await expect(
-      connector.inspectFile("ghu_topsecret", codespace, fileOperation("read")),
-    ).resolves.toEqual(value);
-  });
-
-  test("returns all binary bytes at the supported four MiB file boundary", async () => {
-    const bytes = Buffer.alloc(4 * 1024 * 1024);
-    for (let index = 0; index < bytes.length; index++) bytes[index] = index % 256;
-    const harness = requestHarness(() => ({
-      value: JSON.stringify({
-        state: "succeeded",
-        value: {
-          action: "download",
-          path: "binary.dat",
-          offset: 0,
-          totalSize: bytes.length,
-          bytesBase64: bytes.toString("base64"),
-          sha256: "a".repeat(64),
-        },
-      }),
-    }));
-    const connector = new GitHubCodespacesConnector(harness.requestImpl);
-    const result = await connector.executeFile(
-      "ghu_topsecret",
-      codespace,
-      { ...fileOperation("download"), stdoutLimitBytes: bytes.length },
-      { action: "download", path: "binary.dat", maxBytes: bytes.length },
-    );
-    expect(result).toMatchObject({ action: "download", totalSize: bytes.length });
-    expect("bytes" in result && Buffer.from(result.bytes).equals(bytes)).toBe(true);
-  });
-
-  test("owns and transmits the remote patch-summary byte budget", async () => {
-    const harness = requestHarness(() => ({ value: JSON.stringify({ state: "running" }) }));
-    const connector = new GitHubCodespacesConnector(harness.requestImpl);
-    await expect(
-      connector.executeFile("ghu_topsecret", codespace, fileOperation("apply_patch"), {
-        action: "apply_patch",
-        files: [
-          {
-            path: "file.bin",
-            expected: { exists: true },
-            edits: [{ start: 0, end: 1, bytes: Buffer.from("b") }],
-          },
-        ],
-      }),
-    ).resolves.toEqual({ state: "running" });
-    expect(JSON.parse(harness.calls[0].body).job.request).toMatchObject({
-      action: "apply_patch",
-      summaryMaxBytes: 4096,
-      files: [
-        {
-          path: "file.bin",
-          edits: [{ start: 0, end: 1, bytesBase64: Buffer.from("b").toString("base64") }],
-        },
-      ],
-    });
-  });
-
-  test.each([
-    [
-      "negative read offset",
-      "read",
-      {
-        state: "succeeded",
-        value: {
-          action: "read",
-          path: "file.bin",
-          offset: -1,
-          totalSize: 3,
-          bytesBase64: Buffer.from("abc").toString("base64"),
-          sha256: "a".repeat(64),
-        },
-      },
-    ],
-    [
-      "read range beyond total size",
-      "read",
-      {
-        state: "succeeded",
-        value: {
-          action: "read",
-          path: "file.bin",
-          offset: 2,
-          totalSize: 3,
-          bytesBase64: Buffer.from("ab").toString("base64"),
-          sha256: "a".repeat(64),
-        },
-      },
-    ],
-    [
-      "file stat without a version",
-      "stat",
-      {
-        state: "succeeded",
-        value: {
-          action: "stat",
-          stat: {
-            path: "file.bin",
-            type: "file",
-            size: 3,
-            mode: 0o600,
-            modifiedAt: 1,
-            version: null,
-          },
-        },
-      },
-    ],
-    [
-      "directory stat with file metadata",
-      "stat",
-      {
-        state: "succeeded",
-        value: {
-          action: "stat",
-          stat: { path: "src", type: "directory", size: 3, mode: 0o755, modifiedAt: 1, version },
-        },
-      },
-    ],
-    [
-      "search noncanonical traversal path",
-      "search",
-      {
-        state: "succeeded",
-        value: {
-          action: "search",
-          matches: [{ path: "..\\secret", line: 1, column: 1, preview: "secret" }],
-          truncated: false,
-        },
-      },
-    ],
-    [
-      "nonpositive search coordinate",
-      "search",
-      {
-        state: "succeeded",
-        value: {
-          action: "search",
-          matches: [{ path: "file.txt", line: 0, column: 1, preview: "text" }],
-          truncated: false,
-        },
-      },
-    ],
-    [
-      "write with malformed previous version",
-      "write",
-      {
-        state: "succeeded",
-        value: {
-          action: "write",
-          path: "file.bin",
-          previous: { ...version, sha256: "invalid" },
-          current: version,
-        },
-      },
-    ],
-    [
-      "patch with duplicate paths",
-      "apply_patch",
-      {
-        state: "succeeded",
-        value: {
-          action: "apply_patch",
-          files: [
-            { path: "file.bin", previous: version, current: version },
-            { path: "file.bin", previous: version, current: version },
-          ],
-          summary: {
-            filesChanged: 2,
-            editsApplied: 2,
-            insertedBytes: 2,
-            deletedBytes: 2,
-            entries: [
-              { path: "file.bin", edits: 1, insertedBytes: 1, deletedBytes: 1 },
-              { path: "file.bin", edits: 1, insertedBytes: 1, deletedBytes: 1 },
-            ],
-            truncated: false,
-          },
-        },
-      },
-    ],
-    [
-      "patch with inconsistent summary",
-      "apply_patch",
-      {
-        state: "succeeded",
-        value: {
-          action: "apply_patch",
-          files: [{ path: "file.bin", previous: version, current: version }],
-          summary: {
-            filesChanged: 1,
-            editsApplied: 2,
-            insertedBytes: 2,
-            deletedBytes: 2,
-            entries: [{ path: "file.bin", edits: 1, insertedBytes: 1, deletedBytes: 1 }],
-            truncated: false,
-          },
-        },
-      },
-    ],
-    [
-      "successful envelope with failure value",
-      "write",
-      {
-        state: "succeeded",
-        value: { action: "write", state: "failed", code: "CODESPACE_FILE_REJECTED" },
-      },
-    ],
-    [
-      "failed envelope with success value",
-      "write",
-      {
-        state: "failed",
-        value: { action: "write", path: "file.bin", previous: null, current: version },
-      },
-    ],
-    [
-      "operation/result action mismatch",
-      "write",
-      {
-        state: "succeeded",
-        value: { action: "upload", path: "file.bin", previous: null, current: version },
-      },
-    ],
-    [
-      "unexpected result field",
-      "write",
-      {
-        state: "succeeded",
-        value: { action: "write", path: "file.bin", previous: null, current: version, secret: "x" },
-      },
-    ],
-  ] as const)("rejects malformed file result: %s", async (_name, kind, envelope) => {
-    const harness = requestHarness(() => ({ value: JSON.stringify(envelope) }));
-    const connector = new GitHubCodespacesConnector(harness.requestImpl);
-    await expect(
-      connector.inspectFile("ghu_topsecret", codespace, fileOperation(kind)),
-    ).rejects.toThrow(/invalid|inconsistent/);
-  });
-
-  test.each([
-    ["WORKSPACE_FILE_REJECTED", "CODESPACE_FILE_REJECTED"],
-    ["CODESPACE_FILE_REJECTED", "CODESPACE_FILE_REJECTED"],
-    ["CODESPACE_OPERATION_INTERRUPTED", "CODESPACE_OPERATION_INTERRUPTED"],
-  ] as const)("preserves the file failure contract for %s", async (remoteCode, expectedCode) => {
-    const harness = requestHarness(() => ({
-      value: JSON.stringify({
-        state: "failed",
-        value: { action: "write", state: "failed", code: remoteCode },
-      }),
-    }));
-    const connector = new GitHubCodespacesConnector(harness.requestImpl);
-
-    await expect(
-      connector.inspectFile("ghu_topsecret", codespace, fileOperation("write")),
-    ).resolves.toEqual({
-      action: "write",
-      state: "failed",
-      code: expectedCode,
-    });
-  });
-
-  test("accepts a complete bounded patch result from the remote trust boundary", async () => {
-    const patchResult = {
-      action: "apply_patch",
-      files: [{ path: "file.bin", previous: version, current: version }],
-      summary: {
-        filesChanged: 1,
-        editsApplied: 1,
-        insertedBytes: 3,
-        deletedBytes: 3,
-        entries: [{ path: "file.bin", edits: 1, insertedBytes: 3, deletedBytes: 3 }],
-        truncated: false,
-      },
-    } as const;
-    const harness = requestHarness(() => ({
-      value: JSON.stringify({ state: "succeeded", value: patchResult }),
-    }));
-    const connector = new GitHubCodespacesConnector(harness.requestImpl);
-    await expect(
-      connector.inspectFile("ghu_topsecret", codespace, fileOperation("apply_patch")),
-    ).resolves.toEqual(patchResult);
-  });
-
-  test("accepts truncated patch entries when aggregate totals remain complete", async () => {
-    const patchResult = {
-      action: "apply_patch",
-      files: [
-        { path: "one.bin", previous: version, current: version },
-        { path: "two.bin", previous: version, current: version },
-      ],
-      summary: {
-        filesChanged: 2,
-        editsApplied: 2,
-        insertedBytes: 6,
-        deletedBytes: 6,
-        entries: [{ path: "one.bin", edits: 1, insertedBytes: 3, deletedBytes: 3 }],
-        truncated: true,
-      },
-    } as const;
-    const harness = requestHarness(() => ({
-      value: JSON.stringify({ state: "succeeded", value: patchResult }),
-    }));
-    const connector = new GitHubCodespacesConnector(harness.requestImpl);
-    await expect(
-      connector.inspectFile("ghu_topsecret", codespace, fileOperation("apply_patch")),
-    ).resolves.toEqual(patchResult);
-  });
-
-  test("accepts the repository root as a directory stat result", async () => {
-    const statResult = {
-      action: "stat",
-      stat: { path: ".", type: "directory", size: 0, mode: 0o755, modifiedAt: 1, version: null },
-    } as const;
-    const harness = requestHarness(() => ({
-      value: JSON.stringify({ state: "succeeded", value: statResult }),
-    }));
-    const connector = new GitHubCodespacesConnector(harness.requestImpl);
-    await expect(
-      connector.inspectFile("ghu_topsecret", codespace, fileOperation("stat")),
-    ).resolves.toEqual(statResult);
-  });
-
   test("fails closed when the sidecar returns token-bearing output", async () => {
     const harness = requestHarness(() => ({ value: "ProxyCommand ghu_topsecret" }));
     const connector = new GitHubCodespacesConnector(harness.requestImpl);
@@ -758,178 +85,76 @@ describe("GitHub Codespaces connector boundary", () => {
     ).rejects.toThrow(/Codespace/);
   });
 
-  test("reads a retained output range and refuses one the remote did not answer exactly", async () => {
+  test("fixed bootstrap carries measured guest identity and resource credential only inside its private body", async () => {
+    const life = "e".repeat(64),
+      release = "a".repeat(64);
+    const rootBase64 = Buffer.from("/workspaces/repository").toString("base64");
+    const configuration = {
+      version: 1,
+      repositoryFullName: "owner/repository",
+      root: "/workspaces/repository",
+      remote: { environmentIdentity: life, credential: "s".repeat(43) },
+    };
     const harness = requestHarness((body) => ({
       value: JSON.stringify(
-        (body as { job: { action: string } }).job.action === "output"
-          ? {
-              action: "output",
-              stream: "stdout",
-              offset: 128,
-              totalBytes: 5_000,
-              bytesBase64: Buffer.from("tail bytes").toString("base64"),
-            }
-          : { state: "running" },
+        (body as { action: string }).action === "probe"
+          ? { environmentIdentity: life, architecture: "x86_64", rootBase64 }
+          : {
+              version: 1,
+              repositoryFullName: "owner/repository",
+              environmentIdentity: life,
+              releaseIdentity: release,
+            },
       ),
     }));
     const connector = new GitHubCodespacesConnector(harness.requestImpl);
-    await expect(
-      connector.readOutput("ghu_topsecret", codespace, operation, {
-        stream: "stdout",
-        offset: 128,
-        length: 64,
-      }),
-    ).resolves.toEqual({
-      stream: "stdout",
-      offset: 128,
-      totalBytes: 5_000,
-      bytes: Buffer.from("tail bytes"),
+    expect(await connector.probeWorkspace("ghu_topsecret", "silver-space-123")).toEqual({
+      environmentIdentity: life,
+      architecture: "x86_64",
+      rootBase64,
     });
-    expect(JSON.parse(harness.calls[0].body).job).toMatchObject({
-      action: "output",
-      stream: "stdout",
-      offset: 128,
-      length: 64,
+    expect(
+      await connector.bootstrapWorkspace("ghu_topsecret", "silver-space-123", configuration),
+    ).toMatchObject({ environmentIdentity: life, releaseIdentity: release });
+    expect(JSON.parse(harness.calls[1].body)).toEqual({
+      action: "install",
+      token: "ghu_topsecret",
+      resourceName: "silver-space-123",
+      configuration,
     });
-    // Every operation job is framed alike, so the caller waits at least as long as the sidecar,
-    // which must still open a session into the Codespace before it can answer.
-    await connector.inspect("ghu_topsecret", codespace, operation);
-    expect(harness.calls[0].timeoutMs).toBe(harness.calls[1].timeoutMs);
-    expect(harness.calls[0].timeoutMs).toBeGreaterThanOrEqual(120_000);
-    expect(JSON.stringify(harness.calls[0].options)).not.toContain("ghu_topsecret");
-
-    // A range that begins past the end of the stream is an answer, not a failure.
-    const pastEnd = new GitHubCodespacesConnector(
-      requestHarness(() => ({
-        value: JSON.stringify({
-          action: "output",
-          stream: "stdout",
-          offset: 9_000,
-          totalBytes: 5_000,
-          bytesBase64: "",
-        }),
-      })).requestImpl,
+    expect(JSON.stringify(harness.calls.map((call) => call.options))).not.toContain(
+      "ghu_topsecret",
     );
-    await expect(
-      pastEnd.readOutput("ghu_topsecret", codespace, operation, {
-        stream: "stdout",
-        offset: 9_000,
-        length: 64,
-      }),
-    ).resolves.toMatchObject({ totalBytes: 5_000, bytes: Buffer.alloc(0) });
-
-    const mismatched = new GitHubCodespacesConnector(
-      requestHarness(() => ({
-        value: JSON.stringify({
-          action: "output",
-          stream: "stderr",
-          offset: 128,
-          totalBytes: 5_000,
-          bytesBase64: "",
-        }),
-      })).requestImpl,
-    );
-    await expect(
-      mismatched.readOutput("ghu_topsecret", codespace, operation, {
-        stream: "stdout",
-        offset: 128,
-        length: 64,
-      }),
-    ).rejects.toThrow(/invalid output range/);
+    expect(JSON.stringify(harness.calls.map((call) => call.options))).not.toContain("s".repeat(43));
+    expect(connector).not.toHaveProperty("execute");
+    expect(connector).not.toHaveProperty("executeFile");
   });
 
-  test("maps the remote session answers to their transport shapes", async () => {
-    for (const [remote, expected] of [
-      [{ state: "session_unavailable" }, { state: "session_unavailable" }],
-      [
-        { state: "session_limit", limit: "sessions" },
-        { state: "session_limit", limit: "sessions" },
-      ],
-      [{ state: "session_limit" }, { state: "session_limit", limit: "context" }],
-      [
-        { state: "session_ended" },
-        {
-          state: "succeeded",
-          stdout: "",
-          stderr: "",
-          exitCode: 0,
-          stdoutTotalBytes: 0,
-          stderrTotalBytes: 0,
-          outputLimitExceeded: false,
-          sessionCaptureDropped: false,
-        },
-      ],
-    ] as const) {
+  test.each(["invalid-life", "unsupported-architecture", "token-output"])(
+    "probe refuses %s before fixed installation",
+    async (reason) => {
+      const observation = {
+        environmentIdentity: reason === "invalid-life" ? "bad" : "e".repeat(64),
+        architecture: reason === "unsupported-architecture" ? "mips" : "aarch64",
+        rootBase64: Buffer.from("/workspaces/repository").toString("base64"),
+        ...(reason === "token-output" ? { token: "ghu_topsecret" } : {}),
+      };
       const connector = new GitHubCodespacesConnector(
-        requestHarness(() => ({ value: JSON.stringify(remote) })).requestImpl,
+        requestHarness(() => ({ value: JSON.stringify(observation) })).requestImpl,
       );
-      await expect(
-        connector.execute("ghu_topsecret", codespace, operation, {
-          argv: ["true"],
-          cwd: ".",
-          stdin: { kind: "inline", bytes: new Uint8Array() },
-          timeoutMs: 5_000,
-          maxStdoutBytes: 4096,
-          maxStderrBytes: 4096,
-          maxRetainedBytes: 1024 * 1024,
-          session: "build",
-        }),
-      ).resolves.toEqual(expected);
-    }
-  });
+      await expect(connector.probeWorkspace("ghu_topsecret", "silver-space-123")).rejects.toThrow(
+        "Invalid workspace",
+      );
+    },
+  );
 
-  test("carries an operation lost to a restart as its own state and refuses it on dispatch", async () => {
-    const connector = new GitHubCodespacesConnector(
-      requestHarness(() => ({ value: JSON.stringify({ state: "interrupted" }) })).requestImpl,
-    );
-
-    // An inspection may legitimately learn that the codespace restarted under the command.
-    await expect(connector.inspect("ghu_topsecret", codespace, operation)).resolves.toEqual({
-      state: "interrupted",
-    });
-    await expect(connector.cancel("ghu_topsecret", codespace, operation)).resolves.toEqual({
-      state: "interrupted",
-    });
-
-    // A dispatch cannot: an operation that was just created cannot belong to an earlier life, so
-    // that answer is a broken remote side rather than a state the caller should see.
-    await expect(
-      connector.execute("ghu_topsecret", codespace, operation, {
-        argv: ["true"],
-        cwd: ".",
-        stdin: { kind: "inline", bytes: new Uint8Array() },
-        timeoutMs: 5_000,
-        maxStdoutBytes: 4096,
-        maxStderrBytes: 4096,
-        maxRetainedBytes: 1024 * 1024,
-      }),
-    ).rejects.toThrow(/was not created/);
-  });
-
-  test("rejects a malformed remote terminal envelope", async () => {
-    const harness = requestHarness(() => ({
-      value: JSON.stringify({
-        state: "succeeded",
-        stdoutBase64: "not-base64",
-        stderrBase64: "",
-        exitCode: 0,
-        stdoutBytes: 10,
-        stderrBytes: 0,
-        outputLimitExceeded: false,
-        sessionCaptureDropped: false,
-      }),
-    }));
-    const connector = new GitHubCodespacesConnector(harness.requestImpl);
-    await expect(
-      connector.execute("ghu_topsecret", codespace, operation, {
-        argv: ["true"],
-        cwd: ".",
-        stdin: { kind: "inline", bytes: new Uint8Array() },
-        timeoutMs: 5_000,
-        maxStdoutBytes: 4096,
-        maxStderrBytes: 4096,
-      }),
-    ).rejects.toThrow(/result contract/);
+  test("bootstrap metadata codecs cannot buffer ordinary file or output payloads", () => {
+    expect(() =>
+      encodeConnectorRequest({ padding: "x".repeat(CONNECTOR_MAX_REQUEST_BYTES) }),
+    ).toThrow(/exceeded/);
+    expect(() =>
+      encodeConnectorResponse({ padding: "x".repeat(CONNECTOR_MAX_RESPONSE_BYTES) }),
+    ).toThrow(/exceeded/);
   });
 
   test("the reviewed worker rejects oversized stdin without echoing credential bytes", async () => {
@@ -949,6 +174,9 @@ describe("GitHub Codespaces connector boundary", () => {
         child.stdout.on("data", (chunk) => stdout.push(Buffer.from(chunk)));
         child.stderr.on("data", (chunk) => stderr.push(Buffer.from(chunk)));
         child.once("error", reject);
+        child.stdin.on("error", (error: NodeJS.ErrnoException) => {
+          if (error.code !== "EPIPE") reject(error);
+        });
         child.once("close", (code) =>
           resolveResult({
             code,
@@ -958,7 +186,7 @@ describe("GitHub Codespaces connector boundary", () => {
         );
         child.stdin.end(
           JSON.stringify({
-            token: `ghu_${"secret".repeat(700_000)}`,
+            token: `ghu_${"secret".repeat(Math.ceil(CONNECTOR_MAX_REQUEST_BYTES / 6) + 1)}`,
             home: "/tmp/moira-codespaces-connector-oversized",
           }),
         );

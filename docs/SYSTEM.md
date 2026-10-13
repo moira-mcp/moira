@@ -536,7 +536,7 @@ which keeps the complete catalog discoverable in MCP clients that do not support
 uses a flat public object schema and then validates the exact `prepare` or `execute` branch with its
 strict discriminated request schema, and the `codespace` tool publishes one flat object carrying
 `action` plus every action's fields (only `action` required), then applies that action's own strict
-request contract at dispatch, so a mixed stdin form, a partial resume call or a field belonging to
+request contract at dispatch, so a mixed stdin form, a malformed request identity or a field belonging to
 another action is rejected there as `CODESPACE_REQUEST_INVALID`. A default declared by an action is
 applied by that contract and is deliberately absent from the published object, which would otherwise
 inject every action's defaults into every request. Where two actions declare the same field name with
@@ -591,7 +591,7 @@ then atomically claims a pending grant for that user. Required length and MIME h
 per-user byte admission, exact byte count, and PNG/JPEG signatures are checked before the common
 delivery service is invoked. Pre-provider failures release the claim; any provider attempt completes
 it terminally. Ingress streams into a verified temporary private object rather than a complete
-request buffer; common storage quotas also apply. Source streams are closed and the temporary object
+request buffer; communication admission remains independent of workspace execution. Source streams are closed and the temporary object
 is discarded on every exit. Telegram streams multipart bytes and checks size/full digest, including
 parent cancellation and source closure. Channels in fan-out open independent sources.
 The nginx `location = /api/communication/attachments` routes raw bodies to this MCP handler with
@@ -612,8 +612,8 @@ which participates in `MCP_TOOLS_REVISION`. The MCP process and the tools share 
 `CodespaceTransferService` from that composition; `GET /api/codespaces/transfers/:token` delivers a
 published download once, and both nginx variants proxy `location ^~ /api/codespaces/transfers/` to
 the MCP process unbuffered with access and error logging disabled because the path carries the
-capability. Request-context logging for this tool records only the requested action and UUID-validated
-codespace/operation IDs; an absent or malformed action reads as `unknown`, because the record is
+capability. Request-context logging records the requested action and validated opaque
+identities; an absent or malformed action reads as `unknown`, because the record is
 written before the action is validated. The shared `CodespaceObservabilityService` computes one readiness
 decision for the website, administration, backend health, MCP health and the `codespace` tool's
 `list` action;
@@ -623,172 +623,68 @@ probe, and both processes refresh their codespace gauges on the reconciliation i
 
 ### Local codespace composition and ownership
 
-`codespace-services.ts` composes both `github-codespaces` and `local-sandboxes`
-through the existing provider registry, resource, operation, file and transfer
-services. Local services remain available without GitHub App configuration.
-`CodespaceFileTransferService` composes durable operations/private storage with
-`CodespaceFileCapabilities` and fixed guest assets for both providers. The backend factory and
-bounded `/api/public/codespace-files` channel share the purpose-specific HKDF capability constructor;
-issuance and default HTTP verification therefore use the same key and configured-secret refusal.
-The guest receives file-only bootstrap/per-transfer authority, not full MCP or host credentials.
-Repository discovery qualifies local targets by device and repository UUID;
-resource lookup selects the persisted provider after checking the caller's ownership.
-The existing GitHub-named management HTTP prefix serves both providers. MCP keeps
-the same lifecycle, command, session, file and native-file actions; local transport
-uses the shared `CodespaceJobTransport` codec rather than a second executor.
+Connection/resource services retain provider lifecycle, billing, grants and identity.
+Local services work without GitHub configuration; the GitHub enabled flag does not
+replace the computer owner's device/grant/lease authority.
 
-Regular-file metadata and range access share the guest's confined descriptor lifecycle. A file
-larger than 4 MiB returns `stat.version: null` without content reads; small editable files retain
-their whole-file hashed version. Large reads allocate and read only the requested bounded range.
-Small reads hash the whole file in bounded chunks while retaining only the selected bytes.
-The descriptor's device, inode, size, timestamps and link count must remain unchanged, and the
-repository path is resolved again before returning to detect replacement of its parent.
+`packages/workspace-service/` owns commands, sessions, input/output and guarded files
+inside each workspace. Its service and `moira-workspace` CLI share private Unix HTTP
+and durable journals. Fixed bootstrap installs the same owned payload/runtime in Local
+and GitHub. GitHub SSH performs fixed bootstrap/readiness, not command dispatch.
+Local relay carries inline lifecycle metadata, never command/file parts.
 
-The common decoder separates range reads from complete downloads. MCP `read.sha256` is the
-whole-file digest for a small file and null for a large file; `range_sha256` hashes exactly the
-returned bytes. Retained SHA-only read receipts preserve their whole digest and receive a range
-digest derived from their bounded decoded bytes, without rewriting the receipt. Modern range
-digests are verified against those bytes. Safe-integer sizes, exact result shapes and existing
-byte budgets remain enforced. Native binary upload/download stream complete files in 256 KiB HTTP
-chunks under a separate default 20 MiB ceiling; code/read/inline preview and relay parts remain
-at most 4 MiB. The owner IPC frame and relay-envelope ceilings remain 8 MiB and 24 MiB respectively.
-Empty binary files are valid; image preview requires a nonempty complete validated image. Guarded write/patch and
-search retain their code-size, expected-version and atomic replacement limits.
+Mutation IDs use `ws1-<lowercase UUID>`, bound to immutable input. Bare historical UUIDs,
+SQL operation rows and old host receipts are non-runnable archives: no import, automatic
+translation, replay or active-command accounting. Commands, output and file transaction
+receipts belong to workspace storage, not a cloud queue/result store.
 
-`files_setup` maintains fixed guest worker/client/config assets without changing repository/session
-state or replacing the host companion. Fresh provisioning probes observe actual guest life and
-measure the absolute executable path and its SHA independently from the client asset; both hashes
-must match expected bytes. A pending setup returns command null. New file effects require that
-observed life to match the accepted setup, even if server generations are unchanged. Boot change
-refuses new work while retained terminal results remain collectible under their authority.
+The backend router holds ephemeral authenticated CONTROL/DATA connections. The remote
+adapter opens outbound HTTPS Upgrade CONTROL with bounded call IDs; per-call DATA pipes
+raw HTTP to the private Unix service using backpressure. MCP calls
+`getWorkspaceClient()` through a protected cloud Unix socket. Scoped credential digests
+bind user/resource, authorization/resource generations and measured guest life. Fixed
+provider probes establish life before issuance; the adapter verifies its local service.
+Current account/provider/resource and Local device/grant/lease authority are rechecked.
+Server-owned revalidation and exact expiry close CONTROL/all DATA independently of
+peer heartbeats, without command cancellation or replay.
 
-Native upload/download and CLI calls bind caller request UUIDs to immutable owner/resource/input
-digests. Persisted private offsets, full SHA, receipt and guest checkpoints allow matching explicit
-retry after reply loss or restart without another object or target mutation. Pure transfer status
-and operation lookup perform no dispatch, cancellation or publication. Private-object ready/source
-ready is distinct from guarded guest target commit; native input consumption follows confirmed
-target result. Admission, runtime, waiting, object expiry and result retention remain separate.
-Expired/consumed original receipts cannot be republished under the same identity, and cleanup uses
-current claim/inode ownership rather than overwriting ambiguous commits or foreign replacements.
-Accepted input intents bind the original transfer ID before ready publication. Recovery can settle
-a ready copy without its original source, but cannot recopy or refetch a consumed request-bound
-object. Known terminal replay does not allocate a replacement result or another quota reservation.
-See [File operations and native transfer](CODESPACES.md#file-operations-and-native-transfer).
+Before-dispatch loss is a known refusal; after-dispatch loss may be unknown. Collect
+the original request explicitly. Admission may return starting while a session owner
+waits; missing witnesses cannot manufacture terminal cancellation. Detached runners
+retain actual results across observer/service disconnect. Explicit command timeouts and
+addressed cancellation remain separate from collection windows.
 
-File failures may carry a validated `reason`: `unsafe_access`, `size_limit`, `invalid_range`,
-`concurrent_change` or `precondition`. It names an observed guard failure; unclassified and
-retained older failures may omit it. Ordinary file results and image-preview refusals preserve
-the reason and operation identity without returning host paths or provider exception text.
+There are no aggregate Moira command/session/input/output/file quotas or implicit runtime
+deadlines. Safe representation, filesystem/process failures, caller response windows and
+provider/owner lifetime still apply. GitHub idle is selected for new Codespaces: off
+requests 240 minutes, not infinite running. Existing resources retain provider parameters
+and silent commands may stop; Local lifetime follows finite owner authorization.
 
-`LocalDeviceService` separates browser confirmation from companion authentication.
-Each device has its own credential digest, connection identity, generation and
-locally approved public policy. Resource bindings retain that exact device tuple.
-The companion makes outbound HTTPS requests to its pinned application origin;
-there is no public host listener, inbound SSH or forwarded Docker API. Browser
-management and companion wire contracts are documented in
-[API](API.md#local-device-enrollment-and-relay-api).
+Files retain confined no-follow descriptors and target/parent/link identity. Input,
+write, read and output stream without whole transport buffers. Writes/patches stage
+bytes before guarded publication and retain original inode/backup ownership. Recovery
+does not replay effects or overwrite a same-content foreign inode; conflict preserves
+the uncertain transaction.
 
-`LocalCodespaceRelay` durably reserves request metadata and private transfer parts
-before dispatch. Current account, device, connection and repository authority,
-live delivery claims and complete payload hashes gate new work. Result-only settlement
-uses the retained original request, digest and latest accepted claim after delivery expiry,
-within its separate retention boundary and current authority; it cannot fetch input or
-authorize another execution. An acknowledged completed/refused claim can be returned by
-renewal read-only, with its original deadlines and stored row unchanged. Expired nonterminal
-claims cannot renew work.
-Lifecycle counters do not authorize ordinary commands, files, Git or retained
-results; the exact resource and native VM identities remain required. Private
-objects use the common byte, object, in-flight and expiry quotas. Internal operation input,
-bounded results and relay parts share the bounded control-object group; native files retain
-their separate object accounting and existing byte/in-flight bounds. Reconnect reuses
-the request identity and durable companion receipt; losing an acknowledgement
-does not authorize another guest effect. Retained results remain readable within
-their retention period and current authority after a lifecycle change. Missing or
-expired output is reported without replaying the original work.
-Ordinary acknowledgement and late retained settlement update the active `LocalRpc` journal through
-that same instance's serialization boundary. Relay does not construct a second journal writer for
-acknowledgement; durable result and request ownership remain coherent with in-flight RPC work.
+Native upload streams directly to the workspace. Download performs one complete read,
+then separately publishes a private attachment; caller bounds refuse oversized full
+files before publication rather than publishing prefixes. The private transfer service
+owns checked sources, finite attachment retention and one-use browser claims, not cloud
+file capabilities or workspace inputs. Explicit communication deliver-file sends an
+owned retained reference separately; unsupported extension streams have no buffer fallback.
 
-Command submission returns a durable acceptance response before credential lookup, guest
-delivery or completion. The caller supplies a UUID `request_id`; the operation service
-normalizes its spelling and binds it to the authenticated owner, codespace and immutable
-semantic request digest. Matching concurrent retries recover one operation and marker;
-changed command or input identity is refused. The immutable input intent is published in verified
-private storage before acknowledgement, and dispatch recovers through the existing claimed
-outbox after server restart. Native stdin is retained before its source is consumed.
-SQLite keeps only identity, authority, byte counts and private references, not command or
-stream content.
-
-`codespace` exec and `codespace_process` start/get share the acceptance projection:
-`request_id`, `accepted`, `phase`, `admission_deadline_at`, `started_at`, `runtime_ms` and
-`result_expires_at`. Acceptance is distinct from confirmed running. Caller-identity lookup
-contains no command fields and performs no dispatch or cancellation; existing operation/process
-IDs remain collectible without inventing caller identities or start timestamps.
-File actions retain their bounded completion contract. `codespace_process` owns explicitly
-managed background work and addressed cancellation.
-
-Admission limits permission to launch, proved guest start begins runtime, collection has its
-own waiting bound, and terminal output has its own retention. A collection timeout does not
-cancel the command. Guest launch and cancellation share a short marker admission boundary;
-an admitted launch attempt without start or terminal proof remains unknown and cannot be
-executed again. Inspection distinguishes a published terminal result, applicable live runner proof,
-explicit no-start cancellation proof and a proved environment interruption. Without that evidence,
-an existing marker remains `outcome_unknown`, including when launch metadata is missing; it is
-not turned into a synthetic terminal failure. Missing PID or marker information is not proof of no effect. Explicit session
-commands serialize context resolution through terminal context publication; distinct sessions
-and stateless commands remain independent. The short new-session capacity lock protects only
-initial context publication, not command lifetime.
-
-An expired reserved native/setup/CLI admission is settled by the common captured-claim transition
-before private intent access or file recovery. It preserves identity/deadline, releases active
-accounting and needs no result allocation, credential/guest contact or guest cleanup. Ordinary owned
-private retention remains responsible for preparation bytes. A displaced owner cannot emit terminal
-evidence, and already-dispatched unknown work retains its separate reconciliation contract.
-
-Dispatched terminal result metadata commits with a verified private bounded reply reference. Collection rechecks
-current authority and rejects corrupt stored bytes. The prefix carries complete stream byte
-counts; omitted output remains guest-retained and is read by range from the original marker.
-Cleanup may purge full guest output while retaining its immutable admission fence until launch
-authority closes. An ambiguous launch fence is not removed to make redispatch possible.
-Recovery uses a bounded pool of existing transactional claims; a held inspection does not stop
-ready independent work. While a live owner awaits a command, file or cleanup contact, claim
-selection excludes that pending operation identity even if its persisted lease expires. Every
-return or failure releases the live exclusion; a replacement owner can reclaim the expired
-persisted claim after owner loss. Stale claim holders cannot cancel or replace reclaimed input after an
-asynchronous boundary. Backlog observation uses the same runnable-work predicate as dispatch.
-
-Guest contacts run independently of the
-lifecycle lane, and an unresolved operation journal does not lock new Local work.
-File preconditions and a short guest kernel lock protect actual commit and recovery;
-the lock is released when its holder exits. Conflicting recovery preserves backups
-and external changes while allowing unrelated writes. An unknown write outcome
-must be inspected by its operation identity before repeating that effect.
-
-Explicit stop revokes undelivered execute/file-execute requests. First relay
-insertion checks the exact operation's cancellation state in its SQL transaction,
-including when payload retention finishes after stop/start. Confirmed cancellation
-before any delivery returns `CODESPACE_OPERATION_CANCELLED`, records a terminal
-cancelled operation and requires no guest cleanup. A delivered marker instead requires actual
-guest negative or terminal proof; absence alone leaves cancellation pending. Guest no-start
-fences remain until the original launch authority closes. Restart cannot admit that old work.
-Confirmed native `NOT_RUNNING` refreshes only the affected resource observation;
-the next ordinary call uses start-on-use. Configuration readiness and cached usable
-state do not certify successful guest I/O.
-
-Late reconnect settles a cached proved terminal receipt or completed output read, never a
-running, unknown, absent or generic RPC error. Receipt replay does not execute the request.
-The host owner's cached-receipt and job-ledger behavior belongs to its installed bundle;
-updating guest assets alone does not replace a running owner. An owner without retained late
-receipt replay remains recoverable by a fresh server inspection of the original guest marker.
-Heartbeat and web-control edition changes follow the coordinated update contract in
-[Codespaces](CODESPACES.md#owner-web-control-and-bundle-updates).
+Local device services separate browser pairing from companion credentials, signed
+repository/machine policy and finite leases. Outbound contact opens no host command
+listener or Docker API. Inline lifecycle relay preserves request/claim/ACK identity;
+ordinary/late acknowledgement uses the same active RPC journal serialization boundary.
+See [API](API.md#workspace-streaming-transport) and [Codespaces](CODESPACES.md).
 
 `LocalWebControl` applies owner-requested settings only within a separately pinned
 local approval. The browser sends device-generation and revision guards; the
 server stores requested settings separately from the companion's applied policy.
 Heartbeats publish applied/rejected revisions, while offline contact cannot certify
 application. `LocalCompanion` continues management polling after disable or lease
-expiry without opening a VM owner or claiming jobs, so an approved owner can renew
+expiry without opening a VM owner or claiming lifecycle work, so an approved owner can renew
 a finite lease of up to seven days from the website.
 
 Applying settings first settles owned work under the runner lock. Durable control
@@ -809,8 +705,8 @@ resetting storage.
 
 `packages/local` owns the host policy and SDK profile. A local
 finite lease, repository grants, machine/storage ceilings and explicit permissions
-bound remote work. Each codespace has a persistent mountless VM. The shared guest
-supervisor verifies the provider-owned repository root and binding; both providers
+bound remote work. Each codespace has a persistent mountless VM. The common workspace
+service verifies the provider-owned repository root and binding; both providers
 reuse its command/session/file behavior. SDK creation, start and guest attachment
 use fixed local API operations that avoid automatic MCP gateway creation and
 verify the fresh VM boundary before guest work. Host environment and credential
@@ -1816,10 +1712,10 @@ The `reset` option routes to an expression node that resets the counter, then lo
 
 `packages/web-backend/src/middleware/rate-limit-middleware.ts` supplies the shared rate-limit
 primitive. Ordinary API/auth/MCP budgets are described in [API rate limiting](API.md#rate-limiting).
-The scoped codespace file channel has separate owner chunk/control budgets derived from current
-byte/object quotas. Signed capability and current database authority checks occur before rate
-admission, without remote probing; admitted effect handlers then verify fresh guest life. Invalid
-or foreign scopes retain the IP budget, and file traffic does not consume the ordinary UI budget.
+Workspace Upgrade streams authenticate scoped credentials separately from ordinary
+Express API admission. CONTROL metadata has bounded framing; raw DATA uses backpressure
+without a workspace execution quota. Authority expiry is not a command deadline.
+See [Workspace streaming transport](API.md#workspace-streaming-transport).
 
 ### Data Size Validation
 
@@ -1953,13 +1849,10 @@ export const auditActionsTotal: Counter; // moira_audit_actions_total{action, re
 // Cloud codespaces (closed labels only; never user/codespace/operation IDs)
 export const codespaceConnectionEventsTotal: Counter; // moira_codespace_connection_events_total{provider, action}
 export const codespaceLifecycleEventsTotal: Counter; // moira_codespace_lifecycle_events_total{provider, action, state}
-export const codespaceOperationEventsTotal: Counter; // moira_codespace_operation_events_total{provider, kind, action, state}
-export const codespaceOperationDurationSeconds: Histogram; // moira_codespace_operation_duration_seconds{kind, state}
 export const codespaceRejectionsTotal: Counter; // moira_codespace_rejections_total{code}
-export const codespaceReconciliationDueGauge: Gauge; // moira_codespace_reconciliation_due{kind}
+export const codespaceReconciliationDueGauge: Gauge; // moira_codespace_reconciliation_due{kind=resource}
 export const codespaceReconciliationOldestDueAgeSeconds: Gauge; // moira_codespace_reconciliation_oldest_due_age_seconds{kind}
-export const codespaceActiveGauge: Gauge; // moira_codespace_active{kind}
-export const codespaceTransferLiveBytesGauge: Gauge; // moira_codespace_transfer_live_bytes
+export const codespaceActiveGauge: Gauge; // moira_codespace_active{kind=resource}
 export const codespaceConnectorAvailableGauge: Gauge; // moira_codespace_connector_available{provider}
 export const codespaceReadyGauge: Gauge; // moira_codespace_ready{provider}
 ```

@@ -25,6 +25,7 @@ import { gitBroker } from "./git-broker.js";
 import { cloudGitBroker } from "./cloud-git-broker.js";
 import { LocalRelay } from "./relay.js";
 import { NetworkBudget } from "./network-budget.js";
+import { guestAssets } from "./assets.js";
 
 export interface ManagerDependencies {
   brokerPorts?: { http: number; tunnel: number };
@@ -325,17 +326,6 @@ export class LocalManager {
     }
   }
 
-  async operation(id: string, request: unknown, signal?: AbortSignal): Promise<Buffer> {
-    signal?.throwIfAborted();
-    let guard = this.guards.get(id);
-    if (!guard?.active) {
-      guard = await (await this.owner()).space(id);
-      this.guards.set(id, guard);
-    }
-    signal?.throwIfAborted();
-    return guard.operation(request);
-  }
-
   async boundary(space: LocalSpace, runtime: LocalVmRuntime): Promise<void> {
     if (!space.networkPolicy) {
       throw new LocalRefusal(
@@ -346,60 +336,23 @@ export class LocalManager {
     await runtime.boundary.verify(this.identity(space), space.networkPolicy);
   }
 
-  /** Admit against current identity; independent guest contacts do not hold the lifecycle lane. */
-  async dispatchGuest<T>(
+  async start(
     id: string,
-    dispatch: (space: LocalSpace, policy: LocalPolicy) => Promise<T>,
-    signal?: AbortSignal,
-  ): Promise<T> {
-    signal?.throwIfAborted();
-    const admitted = await this.serial(`space:${id}`, async () => {
-      signal?.throwIfAborted();
-      const space = await this.require(id);
-      const policy = await this.records.policy();
-      requireLocalGrant(policy, space.repositoryId, this.now());
-      if (space.desiredState !== "running" || space.phase !== "usable") {
-        throw new LocalRefusal(
-          "LOCAL_NOT_RUNNING",
-          "Start this local sandbox before requesting work.",
-        );
-      }
-      if (this.dependencies.runtime) {
-        const runtime = this.runtime(policyForSpace(policy, space));
-        if ((await runtime.inspectExact(this.identity(space)))?.status !== "running")
-          throw new LocalRefusal("LOCAL_NOT_RUNNING", "The owned sandbox is stopped.");
-        await this.boundary(space, runtime);
-      } else {
-        let guard = this.guards.get(id);
-        if (!guard?.active) {
-          guard = await (await this.owner()).space(id);
-          this.guards.set(id, guard);
-        }
-        // Fixed guest dispatch performs the backend proof after these local metadata checks.
-      }
-      // Local configuration and the independent guard can change while runtime checks await.
-      const current = await this.require(id);
-      if (
-        current.desiredState !== "running" ||
-        current.phase !== "usable" ||
-        current.runtimeId !== space.runtimeId
-      )
-        throw new LocalRefusal("LOCAL_NOT_RUNNING", "The local sandbox changed before dispatch.");
-      const currentPolicy = await this.records.policy();
-      requireLocalGrant(currentPolicy, current.repositoryId, this.now());
-      if (JSON.stringify(currentPolicy.runtime) !== JSON.stringify(policy.runtime))
-        throw new LocalRefusal("LOCAL_RUNTIME_CHANGED", "The locally approved runtime changed.");
-      return { space: current, policy: currentPolicy };
-    });
-    signal?.throwIfAborted();
-    return dispatch(admitted.space, admitted.policy);
-  }
-
-  async start(id: string, onAdmitted?: () => void): Promise<LocalSpace> {
+    onAdmitted?: () => void,
+    workspaceReleases?: { x64: string; arm64: string },
+  ): Promise<LocalSpace> {
     return this.serial(`space:${id}`, async () => {
       const space = await this.require(id);
       const policy = await this.records.policy();
       requireLocalGrant(policy, space.repositoryId, this.now());
+      if (workspaceReleases) {
+        const assets = await guestAssets();
+        if (workspaceReleases[assets.payload.architecture] !== assets.payload.release)
+          throw new LocalRefusal(
+            "LOCAL_WORKSPACE_RELEASE_MISMATCH",
+            "Update the Local companion to the server's workspace release before bootstrap.",
+          );
+      }
       if (space.failure === "LOCAL_SETUP_INCOMPLETE" || space.lastStartedAt === null)
         throw new LocalRefusal(
           "LOCAL_SETUP_INCOMPLETE",
@@ -421,7 +374,8 @@ export class LocalManager {
           );
         try {
           await guard.validate();
-          return space;
+          await guard.prepare();
+          return this.require(id);
         } catch (error) {
           if (!(error instanceof LocalRefusal) || error.code !== "LOCAL_NOT_RUNNING") throw error;
           // An admitted guard can outlive a physically stopped VM. Prepare the

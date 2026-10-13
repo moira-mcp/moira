@@ -7,12 +7,10 @@ import {
   CODESPACE_PROVIDER_CONTRACT_VERSION,
   CODESPACE_PROVIDER_GITHUB,
   CodespaceObservabilityService,
-  CodespaceOperationRepository,
   CodespaceProviderRegistry,
   CodespaceResourceError,
   CodespaceResourceRepository,
   CodespaceResourceService,
-  CodespaceTransferRepository,
   type CodespaceControlAuditEvent,
   type CodespaceGitHubConfigStatus,
   type CodespaceProviderAdapter,
@@ -35,7 +33,6 @@ const policy: CodespaceResourcePolicy = {
   claimLeaseMs: 5_000,
   reconcileIntervalMs: 60_000,
   startWaitMs: 60_000,
-  maxConcurrentOperationsGlobal: 20,
 };
 const config: CodespaceGitHubConfigStatus = {
   state: "available",
@@ -175,8 +172,6 @@ function fixture() {
     config: () => config,
     policy: () => policy,
     resources: repository,
-    operations: new CodespaceOperationRepository(sqlite),
-    transfers: new CodespaceTransferRepository(sqlite),
     transport: { health: async () => ({ ok: connectorOk, reason: connectorOk ? null : "down" }) },
     now: () => currentTime,
   });
@@ -230,7 +225,7 @@ describe("codespace kill switches and shared readiness over real SQLite", () => 
       await expect(value.observability.readiness()).resolves.toMatchObject({
         state: "control_disabled",
         reason: "global",
-        reconciliation: { due_resources: 1, due_operations: 0, oldest_due_age_ms: 9_000 },
+        reconciliation: { due_resources: 1, oldest_due_age_ms: 9_000 },
       });
 
       await expect(value.service.create("user-1", "301", "main")).rejects.toMatchObject({

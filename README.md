@@ -9,7 +9,7 @@ See [docs/VISION.md](docs/VISION.md) for product vision and design principles.
 ## Two ways to run Moira
 
 - **Self-host (this repository, Apache-2.0)** — run the full engine + Web UI + MCP
-  server in a single Docker container on your own infrastructure. Free and open
+  server and its ingress through Docker Compose on your own infrastructure. Free and open
   source; your data stays with you. Start in the [Quick Start](#self-host-recommended)
   below.
 - **Moira Cloud (managed)** — a hosted instance with nothing to operate, at
@@ -40,6 +40,7 @@ consent, email verification, and the broader multi-user administration surface.
 - **packages/extension-sdk/** - Typed authoring contract for custom nodes and communication channels
 - **packages/extension-runner/** - Isolated companion service for installed extension bundles
 - **packages/local/** - User-owned Docker Sandboxes companion for local codespaces
+- **packages/workspace-service/** - Common guest command, file and session service with its Unix-socket CLI
 - **packages/mcp-server/** - MCP protocol HTTP server with tools
 - **packages/web-backend/** - Express API for workflow management
 - **packages/web-frontend/** - React UI for workflow visualization
@@ -66,6 +67,13 @@ Then open:
 - **Web UI**: http://localhost:8080
 - **Documentation**: http://localhost:8080/docs/
 - **MCP endpoint**: http://localhost:8080/mcp
+
+Compose starts the application and static Traefik ingress on the same public port. Keep
+`config/traefik-self-host.yml` with the Compose file; the [Self-Hosting guide](packages/mcp-server/src/help/content/getting-started/self-hosting.md)
+includes the three-file download procedure. The ingress forwards `/api/workspaces/` HTTP/1.1 Upgrade
+directly to backend port 3001 and ordinary traffic to nginx 80, without Docker socket access.
+Its application `TRUST_PROXY` default is 2; configure explicit trusted proxy addresses for another
+ingress topology. A standalone frontend-port mapping is not the supported workspace stream route.
 
 The image is pulled from the public registry by default. Data (SQLite, execution
 storage and private codespace transfer objects) persists in `./data`. Private objects live in
@@ -159,14 +167,21 @@ for setup, run, stop, recovery and the limits of isolation evidence. Codespace c
 to Moira; review returned code before executing it on your computer. The `moira-local` MCP connection
 name in the examples below is independent of the companion executable.
 
-For file work, agents can use MCP read, search, write and patch actions or provision the scoped
-guest CLI with `codespace` action `files_setup`. Invoke its returned absolute command after setup
-is confirmed. Native binary upload/download default to 20 MiB and stream in 256 KiB chunks;
-code edits, read ranges and inline previews retain their separate 4 MiB ceiling. Matching request
-UUIDs resume retained work, while status only collects it. A ready private object can be sent through
+The same workspace service owns commands, files, sessions and output in Local and GitHub guests.
+The provider installs it in place with its own Node.js 24.21.0 and ripgrep 15.2.0, independent of
+project Node/PATH. Inside a prepared workspace, `~/.local/bin/moira-workspace --help` exposes the
+direct Unix-socket CLI. Choose `ws1-<lowercase UUID>` for command and mutation requests; plain UUIDs
+remain repository-admission identities. Inspect the original identity after a lost reply before
+repeating an effect. Command output and file bytes stream without Moira byte/concurrency/runtime
+quotas; explicit observation/deadline options, real storage capacity and repository/owner guards
+remain. A ready published attachment can be sent through
 the separately requested `communication` action `deliver-file`. See
 [File operations and native transfer](docs/CODESPACES.md#file-operations-and-native-transfer)
-for setup, expiry, quotas and guarded target replacement.
+for current authority, link expiry and guarded target replacement. The common OCI image is
+`ghcr.io/moira-mcp/moira-workspace-service`; a project keeping its own Linux Dev Container can use
+the optional `ghcr.io/moira-mcp/features/workspace-service` Feature with a published release tag.
+Host `moira-local create`, `start` and raw `request` are unsupported; creation/start belong to the
+paired Moira account, while host `stop`, `remove` and `recover` remain custody tools.
 
 ### Testing
 
@@ -219,8 +234,8 @@ MCP Moira uses Better Auth with OAuth 2.1 for centralized authentication.
 - All MCP tools require authentication
 - Account API routes require authenticated access; public capability routes enforce their own
   narrower grants
-- The guest file CLI receives file-only, expiring authority for its owner and codespace;
-  it receives no full MCP, GitHub or communication credential
+- The guest workspace's outbound connection receives authority for that resource and measured
+  environment only; it receives no full MCP, GitHub or communication credential
 - Shared middleware and service guards enforce the required account and resource authority
 
 **Testing:**
@@ -562,8 +577,8 @@ Protection against spam and DoS attacks with tiered limits:
 - **Ordinary API routes**: 100 requests/minute
 - **Auth routes** (`/api/auth/*`): 1000 requests/minute
 - **MCP endpoint** (`/mcp`): 1000 requests/minute
-- **Scoped codespace file channel**: separate owner chunk/control budgets derived from current
-  quotas; invalid scopes remain IP-limited to 100 requests/minute
+- **Workspace channel**: resource-scoped authorization is checked separately; binary streams do not
+  pass through the ordinary JSON API body parser or its rate-limit queue
 
 Exceeded limits return HTTP 429 Too Many Requests.
 

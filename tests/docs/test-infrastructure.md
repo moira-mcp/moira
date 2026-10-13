@@ -12,12 +12,12 @@ All test suites are managed by **testfold** — a unified test runner configured
 4. The configured `afterSuite` hook verifies apparent framework success before reporting
 5. Built-in reporters generate console output, JSON summary, failure reports, timing stats
 
-The unit suite's `beforeSuite` hook builds the fixed guest worker and file CLI through
-`scripts/build-guest-assets.js`, including filtered runs. Integration global setup runs
+The unit suite's `beforeSuite` hook builds the common workspace daemon, CLI, local bootstrap
+and guest proxy through `scripts/build-workspace-service.js`, including filtered runs. Integration global setup runs
 `npm run local:build` for the companion bundles and native helpers before preparing its
 database. A failed build stops preparation before test execution.
 
-The guest asset builder compiles each program in memory, writes an exclusively created
+The workspace builder compiles each program in memory, writes and syncs an exclusively created
 sibling temporary file, closes it and atomically renames it to the final path. Held file
 descriptors retain their complete original generation. Compilation or rename failure
 preserves existing output and removes only the builder's own temporary file. Publication
@@ -123,7 +123,7 @@ timing.json                 # Timing data for all suites
 
 ## Artifact Cleanup
 
-testfold cleans per-suite artifacts before each run. Running a single suite only cleans that suite's artifacts — previous runs of other suites are preserved.
+testfold cleans per-suite artifacts before each run. Running a single suite only cleans that suite's artifacts — previous runs of other suites are preserved. Independent runner processes sharing the artifacts directory are serialized by a whole-run lock. Preserve relevant JSON and logs before another run of the same suite; summaries and timing files describe the latest invocation.
 
 ---
 
@@ -184,13 +184,13 @@ SQLite writer lock. Tests inside a file still exercise WAL read/write behavior w
 
 ## Database Usage
 
-| Test Type   | Database                     | Notes              |
-| ----------- | ---------------------------- | ------------------ |
-| Unit        | in-memory                    | No file            |
-| Integration | `./data/test-integration.db` | Direct code access |
-| API         | `./data/moira.db`            | Docker container   |
-| MCP         | `./data/moira.db`            | Docker container   |
-| E2E         | `./data/moira.db`            | Docker container   |
+| Test Type   | Database                     | Notes                                                            |
+| ----------- | ---------------------------- | ---------------------------------------------------------------- |
+| Unit        | usually in-memory            | Owned temporary filesystem/component fixtures are also supported |
+| Integration | `./data/test-integration.db` | Direct code access                                               |
+| API         | `./data/moira.db`            | Docker container                                                 |
+| MCP         | `./data/moira.db`            | Docker container                                                 |
+| E2E         | `./data/moira.db`            | Docker container                                                 |
 
 **Important:** API, MCP, E2E tests run against Docker container using production DB. Integration tests use separate test DB with direct code access.
 

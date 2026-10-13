@@ -289,7 +289,6 @@ export async function prepareLocalCredentialRecovery(records: LocalRecords): Pro
 export interface SpaceGuard {
   readonly active: boolean;
   prepare(): Promise<void>;
-  operation(request: unknown): Promise<Buffer>;
   validate(): Promise<void>;
   stop(): Promise<void>;
 }
@@ -317,7 +316,6 @@ const callSchema = z.discriminatedUnion("action", [
   z.object({ ...scope, action: z.literal("start-space") }).strict(),
   z.object({ ...admittedScope, action: z.literal("prepare") }).strict(),
   z.object({ ...admittedScope, action: z.literal("validate") }).strict(),
-  z.object({ ...scope, action: z.literal("operation"), request: z.unknown() }).strict(),
   z.object({ ...admittedScope, action: z.literal("stop-space") }).strict(),
   z.object({ ...admittedScope, action: z.literal("retire-space") }).strict(),
   z.object({ ...admittedScope, action: z.literal("recover-space") }).strict(),
@@ -382,7 +380,6 @@ export const startGuard: StartGuard = (root, mode = "work") =>
         | "start-space"
         | "prepare"
         | "validate"
-        | "operation"
         | "stop-space"
         | "observe"
         | "retire-space"
@@ -403,11 +400,9 @@ export const startGuard: StartGuard = (root, mode = "work") =>
             ? { id, action, ...(spaceId ? { spaceId } : {}) }
             : action === "remove-space"
               ? { id, action, spaceId, generation, localApproval: value }
-              : action === "operation"
-                ? { id, action, spaceId, request: value }
-                : action === "admit" || action === "start-space"
-                  ? { id, action, spaceId }
-                  : { id, action, spaceId, generation };
+              : action === "admit" || action === "start-space"
+                ? { id, action, spaceId }
+                : { id, action, spaceId, generation };
         child.send(message, (error) => {
           if (error) {
             pending.delete(id);
@@ -500,12 +495,6 @@ export const startGuard: StartGuard = (root, mode = "work") =>
                 if (stopped) throw unavailable();
                 await request(spaceId, "prepare", undefined, generation);
               },
-              operation: async (value) => {
-                if (stopped) throw unavailable();
-                const result = await request(spaceId, "operation", value, generation);
-                if (!Buffer.isBuffer(result)) throw unavailable();
-                return result;
-              },
               validate: async () => {
                 await request(spaceId, "validate", undefined, generation);
               },
@@ -588,7 +577,7 @@ export async function withLocalRuntimeOwner(
       child.on("message", (value: unknown) => {
         const parsed = z
           .object({
-            localResult: z.object({ sandboxes: z.number().int().min(0).max(128) }).strict(),
+            localResult: z.object({ sandboxes: z.number().int().safe().nonnegative() }).strict(),
           })
           .strict()
           .safeParse(value);
@@ -762,12 +751,32 @@ async function runGuard(
     if (stopping || !process.connected) return;
     const serialized = JSON.stringify(value);
     if (typeof serialized !== "string" || Buffer.byteLength(serialized) > MAX_MESSAGE_BYTES) {
-      emergency();
+      if (
+        typeof value === "object" &&
+        value !== null &&
+        "id" in value &&
+        Number.isSafeInteger(value.id)
+      )
+        reply(
+          value.id as number,
+          null,
+          new LocalRefusal("LOCAL_REQUEST_INVALID", "Lifecycle IPC input was refused."),
+        );
       return;
     }
     const parsed = callSchema.safeParse(value);
     if (!parsed.success) {
-      emergency();
+      if (
+        typeof value === "object" &&
+        value !== null &&
+        "id" in value &&
+        Number.isSafeInteger(value.id)
+      )
+        reply(
+          value.id as number,
+          null,
+          new LocalRefusal("LOCAL_REQUEST_INVALID", "Lifecycle IPC input was refused."),
+        );
       return;
     }
     const call = parsed.data;
@@ -859,7 +868,6 @@ async function runGuard(
           "This space has no independent local admission.",
         );
       if (
-        call.action !== "operation" &&
         call.generation !== owner.generation &&
         (call.action !== "stop-space" || call.generation !== owner.admittedGeneration)
       )
@@ -867,11 +875,9 @@ async function runGuard(
           "LOCAL_GENERATION_CONFLICT",
           "The independent space admission changed.",
         );
-      if (call.action === "prepare" || call.action === "operation") {
+      if (call.action === "prepare") {
         try {
-          return call.action === "prepare"
-            ? await control.prepareSpace(call.spaceId, call.generation, () => owner.prepare())
-            : await owner.operation(call.request);
+          return await control.prepareSpace(call.spaceId, call.generation, () => owner.prepare());
         } catch (error) {
           if (
             call.action === "prepare" &&

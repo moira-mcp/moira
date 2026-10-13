@@ -28,6 +28,10 @@ mcp-moira/
 │   │   └── tests/                    # Backend tests
 │   ├── shared/                        # Shared library (@mcp-moira/shared)
 │   │   └── src/                      # Config, types, services, MCP client data
+│   ├── local/                        # Companion, VM custody, grants and provider bootstrap
+│   │   └── src/                      # Host runtime and lifecycle boundaries
+│   ├── workspace-service/            # Shared Local/GitHub guest owner
+│   │   └── src/                      # Commands, sessions, guarded files, HTTP and CLI
 │   └── web-frontend/                 # React Web UI
 │       ├── src/                      # Frontend source code
 │       │   ├── components/           # React components
@@ -71,3 +75,11 @@ Express API server for workflow visualization and management.
 ### web-frontend
 
 React UI for workflow visualization using Ant Design and React Flow.
+
+### local and workspace-service
+
+The companion owns Local VM lifecycle, repository grants and finite work authority.
+`workspace-service` owns commands, sessions, guarded file operations and durable results inside
+both Local VMs and GitHub Codespaces. The direct `moira-workspace` CLI uses its private Unix socket;
+remote MCP calls use authenticated live routing. Build the common programs with
+`npm run workspace:build` and the canonical owned-runtime payload with `npm run workspace:package`.

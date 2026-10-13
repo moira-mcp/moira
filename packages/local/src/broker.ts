@@ -4,7 +4,7 @@ import { connect, type Socket } from "node:net";
 import type { Duplex } from "node:stream";
 import type { LocalPolicy, LocalRepository } from "./policy.js";
 import { resolvePublicTarget, type ResolveHost, type ResolvedTarget } from "./network.js";
-import { NetworkBudget, MAX_BROKER_CONNECTIONS, type NetworkAdmission } from "./network-budget.js";
+import { NetworkBudget, type NetworkAdmission } from "./network-budget.js";
 import { LocalRefusal } from "./policy.js";
 
 export interface BrokerGrant {
@@ -79,7 +79,7 @@ export async function startBroker(options: BrokerOptions, port = 0) {
         ? "403 Forbidden"
         : "502 Bad Gateway";
   const server = createServer(
-    { maxHeaderSize: 8192, requestTimeout: 120_000, headersTimeout: 5000 },
+    { maxHeaderSize: 8192, requestTimeout: 0, headersTimeout: 5000 },
     (request, response) => {
       track(
         (async () => {
@@ -134,8 +134,6 @@ export async function startBroker(options: BrokerOptions, port = 0) {
     },
   );
   server.keepAliveTimeout = 1000;
-  server.maxRequestsPerSocket = 16;
-  server.maxConnections = MAX_BROKER_CONNECTIONS;
   server.on("connection", (socket) => {
     sockets.add(socket);
     socket.once("close", () => sockets.delete(socket));

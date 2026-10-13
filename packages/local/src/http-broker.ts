@@ -92,6 +92,9 @@ export function httpBroker(
           reply.pipe(response);
         },
       );
+      upstream.once("socket", (socket) => {
+        socket.once("connect", () => upstream.setTimeout(0));
+      });
       const timer = setTimeout(
         () => upstream.destroy(),
         Math.max(1, grant.policy.leaseUntil - Date.now()),

@@ -367,6 +367,22 @@ export const codespaceResource = sqliteTable(
   }),
 );
 
+/** The one current outbound workspace credential; clear credentials never enter SQL. */
+export const workspaceAgentCredential = sqliteTable("workspaceAgentCredential", {
+  resourceId: text("resourceId")
+    .primaryKey()
+    .references(() => codespaceResource.id, { onDelete: "cascade" }),
+  userId: text("userId")
+    .notNull()
+    .references(() => user.id, { onDelete: "cascade" }),
+  credentialDigest: text("credentialDigest").notNull().unique(),
+  resourceGeneration: integer("resourceGeneration").notNull(),
+  authorizationGeneration: integer("authorizationGeneration").notNull(),
+  environmentIdentity: text("environmentIdentity").notNull(),
+  expiresAt: integer("expiresAt", { mode: "timestamp_ms" }),
+  createdAt: integer("createdAt", { mode: "timestamp_ms" }).notNull(),
+});
+
 /** Non-transferable lifecycle authority; only its digest is persisted. */
 export const codespaceLifecycleCapability = sqliteTable("codespaceLifecycleCapability", {
   resourceId: text("resourceId")

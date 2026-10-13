@@ -1,6 +1,7 @@
 import { describe, expect, it, jest } from "@jest/globals";
 import { Readable, Writable } from "node:stream";
 import { finished } from "node:stream/promises";
+import { EventEmitter } from "node:events";
 import type { IncomingMessage, ServerResponse, ClientRequest } from "node:http";
 import type { request as httpsRequest } from "node:https";
 import { cloudGitBroker } from "../../../packages/local/src/cloud-git-broker.js";
@@ -284,6 +285,7 @@ describe("cloud Git broker", () => {
     let destination = "";
     let authorization = "";
     let released = false;
+    const timeoutChanges: number[] = [];
     const requestHttps = ((
       url: URL,
       options: { headers: { authorization: string } },
@@ -296,6 +298,19 @@ describe("cloud Git broker", () => {
           forwarded.push(Buffer.from(chunk));
           done();
         },
+      });
+      Object.assign(upstream, {
+        setTimeout: (milliseconds: number) => {
+          timeoutChanges.push(milliseconds);
+          return upstream;
+        },
+      });
+      upstream.once("pipe", () => {
+        const socket = new EventEmitter();
+        upstream.emit("socket", socket);
+        socket.emit("connect");
+        expect(timeoutChanges).toEqual([]);
+        socket.emit("secureConnect");
       });
       upstream.once("finish", () =>
         callback(
@@ -344,6 +359,7 @@ describe("cloud Git broker", () => {
     );
     expect(authorization).toBe("Bearer device-secret");
     expect(released).toBe(true);
+    expect(timeoutChanges).toEqual([0]);
   });
   it.each([
     "other.git/git-receive-pack",

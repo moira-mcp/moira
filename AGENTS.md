@@ -31,6 +31,7 @@ packages/
 ├── web-frontend/      # React UI for workflow visualization
 ├── shared/            # Database (Drizzle), Better Auth, logging, config
 ├── local/             # User-owned companion and isolated Docker Sandboxes runtime
+├── workspace-service/ # Shared guest command/file owner and direct terminal CLI
 └── docs/              # Astro 5 + Starlight documentation site (EN + RU)
 workflows/             # Bundled workflow catalog (workflows/production/public/)
 config/                # Dockerfile, nginx, supervisord, prompts
@@ -43,7 +44,9 @@ For where each topic is documented, see the **Documentation Map** in `README.md`
 
 ## Build & Run (fresh clone)
 
-The app runs as a single Docker container built from a **baked image** — there is no
+The application components run in a Docker container built from a **baked image**. The supported
+self-host Compose also runs the ingress service configured by `config/traefik-self-host.yml`,
+which routes workspace streams directly to the backend on the same public port. There is no
 live-source mode. Code changes (engine, MCP server, backend, frontend, bundled
 workflow catalog) reach a running instance only by rebuilding the image and
 recreating the container; `docker restart` keeps the old build. Check which commit an
@@ -137,7 +140,7 @@ Two things have repeatedly turned a finished change into a red CI run:
   selects the CI environment explicitly instead of overwriting yours.
 - **CI runs on Linux; your machine probably does not.** A test that reaches the host — `/proc`, file
   modes, path case, a platform-specific branch in the code it drives — can pass locally and fail
-  there. The codespace supervisor's environment identity is the live example: on Linux it comes from
+  there. On Linux, the workspace engine's environment identity comes from
   the kernel and the `MOIRA_ENVIRONMENT_ID` override is deliberately ignored, so a test that changed
   that variable to simulate a restart passed on macOS and failed in CI. Drive such behaviour through
   state the code reads on every platform, or run the check in a Linux container before pushing.
@@ -315,11 +318,16 @@ for the registrations.
 
 ### Local codespaces
 
-The local provider uses the existing resource, operation, file and private-transfer
-services and shared guest supervisor. The companion runs on the user's machine;
-the server communicates through its authenticated outbound relay and cannot choose
-host commands or expand local repository grants and work leases. GitHub and local
-resources retain their provider identity for subsequent lifecycle calls.
+Local VMs and GitHub Codespaces run the same `workspace-service` payload with its own runtime.
+Commands, sessions, guarded file mutations and durable results belong to that guest service;
+`moira-workspace` reaches it through a private Unix socket. Authenticated MCP calls reach the same
+owner through live streaming routing. Cloud Moira owns authorization and provider lifecycle,
+while attachment publication has its separate storage owner. Archived uncertain receipts are
+not dispatched or replayed.
+
+The companion runs on the user's machine and retains physical VM custody, local repository
+grants and finite work leases. The server cannot choose host commands or expand those grants.
+GitHub and Local resources retain their provider identity for subsequent lifecycle calls.
 
 Build the companion with `npm run local:build`; invoke it through `npm run local --`
 from this checkout. The package is private and has no published global installer.

@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
 import { connect } from "node:net";
-import type { SupervisorRepositoryBinding } from "../../web-backend/src/services/github-codespaces-remote-supervisor.mjs";
+import type { WorkspaceRepositoryBinding } from "../../workspace-service/src/server.mjs";
 import {
   localGitAuthorSchema,
   type LocalGitAuthor,
@@ -72,7 +72,7 @@ export async function checkoutGuestRepository(
 /** Records the repository the local bootstrap owns; job messages cannot select this binding. */
 export async function bindGuestRepository(
   input: Pick<GuestBootstrap, "repository" | "spaceId" | "brokerToken">,
-): Promise<SupervisorRepositoryBinding> {
+): Promise<WorkspaceRepositoryBinding> {
   if (
     !/^[A-Za-z0-9][A-Za-z0-9_.-]{0,99}\/[A-Za-z0-9][A-Za-z0-9_.-]{0,99}$/.test(input.repository) ||
     !/^[a-f0-9-]{36}$/.test(input.spaceId) ||
@@ -85,7 +85,7 @@ export async function bindGuestRepository(
   if (
     !metadata.isDirectory() ||
     metadata.isSymbolicLink() ||
-    metadata.uid === 0 ||
+    metadata.uid !== process.getuid?.() ||
     (await realpath(root)) !== root
   )
     throw new Error("Invalid local repository root");
@@ -112,9 +112,21 @@ export async function bindGuestRepository(
 
 /** This module is shipped as data and evaluated only by node inside the owned VM. */
 export async function bootstrap(input: GuestBootstrap) {
-  if (Number(process.versions.node.split(".")[0]) < 22)
-    throw new Error("The sandbox template must contain Node.js 22 or newer.");
   const directory = join(homedir(), ".local", "share", "moira-local");
+  if (!input.clone) {
+    const ready = await new Promise<boolean>((resolve) => {
+      const socket = connect({ host: "127.0.0.1", port: 3437 });
+      socket.once("connect", () => {
+        socket.destroy();
+        resolve(true);
+      });
+      socket.once("error", () => resolve(false));
+    });
+    if (ready) {
+      await bindGuestRepository(input);
+      return { repositoryRoot: `/workspaces/${input.repository.split("/")[1]}`, proxyReady: true };
+    }
+  }
   await mkdir(directory, { recursive: true, mode: 0o700 });
   const proxyPath = join(directory, "proxy.mjs");
   const pidPath = join(directory, "proxy.pid");

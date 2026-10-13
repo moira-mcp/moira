@@ -110,6 +110,9 @@ export class OpenAINativeReferenceFetcher implements CodespaceNativeReferenceFet
           reject(new Error("Native file content type is invalid"));
           return;
         }
+        // Header admission is bounded; accepted body bytes then belong to their
+        // stream consumer, which may legitimately pause them through backpressure.
+        request.setTimeout(0);
         resolve({
           contentLength,
           mimeType: contentType,

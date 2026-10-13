@@ -127,16 +127,11 @@ export * from "./codespaces/provider-registry.js";
 export * from "./codespaces/resource-repository.js";
 export * from "./codespaces/resource-service.js";
 export * from "./codespaces/resource-policy.js";
-export * from "./codespaces/operation-repository.js";
-export * from "./codespaces/operation-service.js";
-export * from "./codespaces/start-on-use.js";
-export * from "./codespaces/settle-after-dispatch.js";
 export * from "./codespaces/transfer-repository.js";
 export * from "./codespaces/transfer-service.js";
-export * from "./codespaces/file-service.js";
-export * from "./codespaces/file-transfer-capability.js";
-export * from "./codespaces/file-transfer-service.js";
 export * from "./codespaces/views.js";
 export * from "./codespaces/observability.js";
+export * from "./codespaces/workspace-auth-repository.js";
+export * from "./codespaces/workspace-request-id.js";
 
 export * from "./authorization/index.js";

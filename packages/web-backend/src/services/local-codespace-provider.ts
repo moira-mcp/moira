@@ -7,7 +7,6 @@ import {
   canonicalJson,
   localRepositoryTargetId,
   localResourceSnapshotSchema,
-  LOCAL_WORKER_REQUEST_TIMEOUT_MS,
   parseLocalRepositoryTargetId,
   type CodespaceProviderAdapter,
   type CodespaceProviderResource,
@@ -16,10 +15,7 @@ import {
   type CodespaceMachine,
   type CodespaceRepositoryTarget,
 } from "@mcp-moira/shared";
-import { CodespaceJobTransport } from "./codespace-job-transport.js";
 import { LocalCodespaceRelay } from "./local-codespace-relay.js";
-
-const LOCAL_JOB_DELIVERY_TIMEOUT_MS = LOCAL_WORKER_REQUEST_TIMEOUT_MS + 120_000;
 
 /** Internal credentials identify the already authenticated caller; they never leave this server. */
 export function localCodespaceCredential(userId: string): string {
@@ -324,6 +320,18 @@ export class LocalCodespaceProvider implements CodespaceProviderAdapter {
   startExact(credential: string, name: string) {
     return this.lifecycle(credential, name, "start");
   }
+  async bootstrapWorkspace(
+    credential: string,
+    name: string,
+    workspaceReleases: { x64: string; arm64: string },
+  ): Promise<void> {
+    const record = await this.exactRecord(credential, name);
+    await this.relay.send(
+      record,
+      { action: "start", spaceId: name, workspaceReleases },
+      { mutation: false },
+    );
+  }
   stopExact(credential: string, name: string) {
     return this.lifecycle(credential, name, "stop");
   }
@@ -403,120 +411,5 @@ export class LocalCodespaceProvider implements CodespaceProviderAdapter {
         ready: "Run moira-local run on the selected computer with a current local work lease.",
       },
     };
-  }
-}
-
-export class LocalCodespaceJobTransport extends CodespaceJobTransport {
-  constructor(
-    private readonly relay: LocalCodespaceRelay,
-    private readonly refreshStoppedResource?: (
-      userId: string,
-      codespaceId: string,
-    ) => Promise<unknown>,
-  ) {
-    super();
-  }
-  async health() {
-    return { ok: true, reason: null };
-  }
-  async retainExecuteInput(
-    credential: string,
-    codespace: CodespaceResourceRecord,
-    operation: import("@mcp-moira/shared").CodespaceOperationRecord,
-    request: import("@mcp-moira/shared").CodespaceExecRequest,
-  ): Promise<void> {
-    this.requireOperation(credential, codespace, operation);
-    await this.relay.retain(
-      codespace,
-      {
-        action: "operation",
-        spaceId: codespace.providerResourceName,
-        job: this.executeJob(codespace, operation, request),
-      },
-      { mutation: true, waitMs: LOCAL_JOB_DELIVERY_TIMEOUT_MS },
-    );
-  }
-  async retainFileInput(
-    credential: string,
-    codespace: CodespaceResourceRecord,
-    operation: import("@mcp-moira/shared").CodespaceOperationRecord,
-    request: import("@mcp-moira/shared").CodespaceFileRequest,
-  ): Promise<void> {
-    this.requireOperation(credential, codespace, operation);
-    await this.relay.retain(
-      codespace,
-      {
-        action: "operation",
-        spaceId: codespace.providerResourceName,
-        job: this.fileExecuteJob(codespace, operation, request),
-      },
-      { mutation: true, waitMs: LOCAL_JOB_DELIVERY_TIMEOUT_MS },
-    );
-  }
-  private requireOperation(
-    credential: string,
-    codespace: CodespaceResourceRecord,
-    operation: import("@mcp-moira/shared").CodespaceOperationRecord,
-  ): void {
-    if (
-      userFromCredential(credential) !== codespace.userId ||
-      operation.userId !== codespace.userId ||
-      codespace.provider !== CODESPACE_PROVIDER_LOCAL ||
-      operation.provider !== codespace.provider ||
-      operation.resourceId !== codespace.id ||
-      operation.providerResourceName !== codespace.providerResourceName ||
-      operation.authorizationGeneration !== codespace.authorizationGeneration ||
-      !codespace.providerResourceName
-    ) {
-      throw new CodespaceResourceError(
-        "CODESPACE_AUTHORIZATION_REQUIRED",
-        "Local operation authority changed",
-        undefined,
-        true,
-      );
-    }
-  }
-  protected async sendJob(
-    credential: string,
-    codespace: CodespaceResourceRecord,
-    operation: import("@mcp-moira/shared").CodespaceOperationRecord,
-    job: Record<string, unknown>,
-    timeoutMs: number,
-  ) {
-    this.requireOperation(credential, codespace, operation);
-    const result = await this.relay
-      .send(
-        codespace,
-        {
-          action: "operation",
-          spaceId: codespace.providerResourceName,
-          job,
-        },
-        {
-          mutation: job.action === "execute" || job.action === "file-execute",
-          // The guest supervisor detaches commands; this call waits for its bounded worker,
-          // not the command's separate retained execution deadline.
-          waitMs: Math.min(timeoutMs, LOCAL_JOB_DELIVERY_TIMEOUT_MS),
-        },
-      )
-      .catch(async (error: unknown) => {
-        if (
-          error instanceof CodespaceResourceError &&
-          error.confirmedRefusal &&
-          error.code === "CODESPACE_NOT_RUNNING"
-        ) {
-          // Refresh only this owned resource; the refused operation is never replayed here.
-          // A failed observation must preserve the authenticated original refusal.
-          try {
-            await this.refreshStoppedResource?.(codespace.userId, codespace.id);
-          } catch {
-            // Observation failure cannot replace the confirmed execution refusal.
-          }
-        }
-        throw error;
-      });
-    if (!result || typeof result !== "object" || Array.isArray(result))
-      throw new Error("Local guest returned an invalid job result");
-    return result as Record<string, unknown>;
   }
 }

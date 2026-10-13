@@ -176,6 +176,46 @@ function exchange(port: number, path: string, authorization?: string, body?: Buf
 }
 
 describe("guest HTTP forwarding through the fixed broker tunnel", () => {
+  test("129 concurrent guest CONNECT streams carry bytes through every authenticated proxy boundary", async () => {
+    const local = await fixture(true);
+    expect(proxyServer.requestTimeout).toBe(0);
+    const clients: net.Socket[] = [];
+    closers.push(async () => {
+      for (const socket of clients) socket.destroy();
+    });
+    const echoes = await Promise.all(
+      Array.from(
+        { length: 129 },
+        () =>
+          new Promise<string>((resolve, reject) => {
+            const request = http.request({
+              host: "127.0.0.1",
+              port: local.port,
+              path: "packages.example.com:443",
+              method: "CONNECT",
+              agent: false,
+            });
+            request.once("error", reject);
+            request.once("connect", (response, socket) => {
+              clients.push(socket);
+              if (response.statusCode !== 200) {
+                socket.destroy();
+                reject(new Error(`CONNECT refused ${response.statusCode}`));
+                return;
+              }
+              socket.once("error", reject);
+              socket.once("close", () => reject(new Error("CONNECT closed before echo")));
+              socket.once("data", (bytes) => resolve(bytes.toString()));
+              socket.write("echo");
+            });
+            request.end();
+          }),
+      ),
+    );
+    expect(echoes).toEqual(Array(129).fill("echo"));
+    expect(clients.every((socket) => !socket.destroyed)).toBe(true);
+    expect(local.authorizations.every((value) => value === local.authorization)).toBe(true);
+  });
   test.each([undefined, foreignAuthorization])(
     "CONNECT uses the installed space authority instead of client authorization %s",
     async (supplied) => {

@@ -54,6 +54,7 @@ COPY packages/web-backend/package.json ./packages/web-backend/
 COPY packages/web-frontend/package.json ./packages/web-frontend/
 COPY packages/shared/package.json ./packages/shared/
 COPY packages/docs/package.json ./packages/docs/
+COPY packages/workspace-service/package.json ./packages/workspace-service/
 
 # Install dependencies with BuildKit cache mount. `npm ci` reproduces the lock
 # file exactly, so an unchanged lock yields an identical layer and the build
@@ -110,8 +111,11 @@ FROM base AS backend-build
 COPY packages/web-backend/ ./packages/web-backend/
 COPY packages/mcp-server/ ./packages/mcp-server/
 COPY packages/local/src/ ./packages/local/src/
-COPY scripts/build-guest-assets.js ./scripts/build-guest-assets.js
-RUN node scripts/build-guest-assets.js
+COPY packages/workspace-service/ ./packages/workspace-service/
+COPY scripts/build-workspace-service.js scripts/package-workspace-service.js ./scripts/
+ARG GIT_COMMIT=unknown
+RUN WORKSPACE_SOURCE_COMMIT=${GIT_COMMIT} node scripts/package-workspace-service.js --arch x64 && \
+    WORKSPACE_SOURCE_COMMIT=${GIT_COMMIT} node scripts/package-workspace-service.js --arch arm64
 RUN npx tsc --noEmit --project packages/mcp-server/tsconfig.json
 
 RUN npx tsc --noEmit --project packages/web-backend/tsconfig.json
@@ -133,6 +137,7 @@ COPY packages/web-backend/package.json ./packages/web-backend/
 COPY packages/web-frontend/package.json ./packages/web-frontend/
 COPY packages/shared/package.json ./packages/shared/
 COPY packages/docs/package.json ./packages/docs/
+COPY packages/workspace-service/package.json ./packages/workspace-service/
 
 RUN --mount=type=cache,target=/root/.npm \
     npm ci --omit=dev \
@@ -162,6 +167,7 @@ COPY --from=base /app/packages/shared ./packages/shared
 COPY --from=base /app/packages/workflow-engine ./packages/workflow-engine
 COPY --from=backend-build /app/packages/mcp-server ./packages/mcp-server
 COPY --from=backend-build /app/packages/web-backend ./packages/web-backend
+COPY --from=backend-build /app/packages/workspace-service ./packages/workspace-service
 RUN rm -rf packages/*/node_modules
 COPY --from=runtime-deps /app/packages/ ./packages/
 

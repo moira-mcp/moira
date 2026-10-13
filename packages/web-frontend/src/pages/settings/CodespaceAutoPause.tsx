@@ -1,7 +1,7 @@
 /**
  * The two per-user auto-pause settings as a switch and a choice of timeout, saved as soon as they
- * change through the ordinary settings API. The note says exactly what counts as activity, because
- * the setting would otherwise promise more than it does: Moira sees only what agents do through it.
+ * change through the ordinary settings API. GitHub receives this preference when a new Codespace
+ * is created and owns its activity detection; existing resources keep their provider parameters.
  */
 
 import React, { useState } from "react";

@@ -3,6 +3,7 @@ import type { LocalVmRuntime } from "./local-vm-runtime.js";
 import { LocalRefusal, type LocalPolicy } from "./policy.js";
 import { SbxRuntime } from "./sbx-runtime.js";
 import { runProcess, type RunProcess } from "./process.js";
+import { GUEST_COMMANDS } from "./assets.js";
 
 /** Adapt the verified backend without leaking its native control API into VM consumers. */
 export function adaptSbxRuntime(runtime: SbxRuntime): LocalVmRuntime {
@@ -32,7 +33,7 @@ export function adaptSbxRuntime(runtime: SbxRuntime): LocalVmRuntime {
     stop: (identity) => runtime.stop(identity),
     remove: (identity) => runtime.remove(identity),
     runFixedGuest: async (identity, entrypoint, input, timeoutMs, signal, admission) => {
-      if (entrypoint !== "installer" && entrypoint !== "worker")
+      if (!Object.hasOwn(GUEST_COMMANDS, entrypoint))
         throw new LocalRefusal("LOCAL_GUEST_COMMAND_INVALID", "Unknown fixed guest entrypoint.");
       return runtime.runFixedGuest(identity, entrypoint, input, timeoutMs, signal, admission);
     },

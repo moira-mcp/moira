@@ -205,8 +205,6 @@ export class LocalPrivateRepositoryCreationService {
     } catch (error) {
       if (!(error instanceof LocalDeviceError) && !(error instanceof GitHubCodespaceClientError))
         throw error;
-      if (error instanceof LocalDeviceError && error.code === "LOCAL_CAPACITY")
-        return this.result(input, record, "rejected", "LOCAL_CAPACITY");
       return this.result(
         input,
         record,

@@ -111,22 +111,18 @@ else if(args[0]==='initial-worker')process.exit(current().status==='running'?0:1
 else if(args[0]==='api-guest'){
   const bytes=f.readFileSync(0);const name=args[1];
   const finish=result=>{f.writeFileSync(path+'.guest-exit.'+name,'0');if(result!==undefined)process.stdout.write(JSON.stringify({ok:true,result}));};
-  if(args[2]==='installer')finish();
-  else {
+  if(args[2]==='bootstrap'){
     const body=JSON.parse(bytes.toString());
-    if(body.kind==='bootstrap'){
+    if(!body.repository||typeof body.brokerToken!=='string')process.exit(2);
       if(f.existsSync(path+'.bootstrap-wait')){
-        f.writeFileSync(path,JSON.stringify({status:'starting',engineState:'running'}));
+        if(name===${JSON.stringify(local.space.name)})f.writeFileSync(path,JSON.stringify({status:'starting',engineState:'running'}));
         f.writeFileSync(pending,JSON.stringify({pid:process.pid}));
-        const timer=setInterval(()=>{if(f.existsSync(release)){clearInterval(timer);f.writeFileSync(path,JSON.stringify({status:'running'}));finish({});}},10);
+        f.writeFileSync(pending+'.'+name,JSON.stringify({pid:process.pid}));
+        const timer=setInterval(()=>{if(f.existsSync(release)){clearInterval(timer);if(name===${JSON.stringify(local.space.name)})f.writeFileSync(path,JSON.stringify({status:'running'}));finish({});}},10);
       }else finish({});
-    }
-    else {
-      f.writeFileSync(pending,JSON.stringify({pid:process.pid}));f.writeFileSync(pending+'.'+name,JSON.stringify({pid:process.pid}));
-      if(f.existsSync(path+'.guest-unknown'))process.exit(1);
-      const timer=setInterval(()=>{if(f.existsSync(release)){clearInterval(timer);f.writeFileSync(sentinel,'late side effect');finish({state:'complete',exitCode:0});}},10);
-    }
-  }
+  }else if(args[2]==='probe')process.stdout.write(JSON.stringify({environmentIdentity:'e'.repeat(64),architecture:'aarch64'})),finish();
+  else if(args[2]==='health')process.stdout.write(JSON.stringify({environmentIdentity:'e'.repeat(64),releaseIdentity:'f'.repeat(64)})),finish();
+  else finish();
 }
 else if(args[0]==='api-start'){
   if(args[1]===${JSON.stringify(local.space.name)})f.writeFileSync(path,JSON.stringify({status:'running'}));
@@ -220,8 +216,8 @@ int main(int argc,char **argv){
   signal(SIGTERM,stop);puts("ready");fflush(stdout);
   if(!vm){char *initial[]={argv[0],"initial-worker",0};if(!command(2,initial))ensure_worker(argv[0],path,${JSON.stringify(local.space.name)});}
   while(!stopped){if(!vm)reconcile_workers();struct pollfd p[2]={{.fd=fd,.events=POLLIN},{.fd=docker,.events=POLLIN}};if(poll(p,vm?1:2,100)>0&&!vm){int c=accept((p[0].revents&POLLIN)?fd:docker,0,0);if(c>=0){
-    struct pollfd client={.fd=c,.events=POLLIN};if(poll(&client,1,1000)>0){char request[4096];ssize_t n=read_request(c,request,sizeof(request));if(n>0){request[n]=0;
-      if(!strncmp(request,"POST /sandbox/",14)&&strstr(request,"/exec/attach ")){char name[39]={0};memcpy(name,request+14,38);char *args[]={argv[0],"worker-id",name,0};if(!command(3,args)){char id[65]={0};FILE *record=fopen(${JSON.stringify(observation + ".worker-id")},"r");if(record){fread(id,1,64,record);fclose(record);}pid_t child=fork();if(!child){close(fd);close(docker);attach_guest(c,argv[0],name,strstr(request,"/tmp/moira-local-runtime/worker.mjs")?"worker":"installer");close(c);_exit(0);}if(child>0){guests[guest_count]=child;strcpy(guest_ids[guest_count++],id);}}}
+    struct pollfd client={.fd=c,.events=POLLIN};if(poll(&client,1,1000)>0){char request[32768];ssize_t n=read_request(c,request,sizeof(request));if(n>0){request[n]=0;
+      if(!strncmp(request,"POST /sandbox/",14)&&strstr(request,"/exec/attach ")){char name[39]={0};memcpy(name,request+14,38);char *args[]={argv[0],"worker-id",name,0};if(!command(3,args)){char id[65]={0};FILE *record=fopen(${JSON.stringify(observation + ".worker-id")},"r");if(record){fread(id,1,64,record);fclose(record);}pid_t child=fork();if(!child){close(fd);close(docker);attach_guest(c,argv[0],name,strstr(request,"/service/local-bootstrap.mjs")?"bootstrap":strstr(request,"kernel/random/boot_id")?"probe":strstr(request,"--configure")?"configure":strstr(request,"--health")?"health":strstr(request,"--stop")?"start-service":"install");close(c);_exit(0);}if(child>0){guests[guest_count]=child;strcpy(guest_ids[guest_count++],id);}}}
       else if(!strncmp(request,"GET /sandbox/",13)&&strstr(request,"/exec/")){char name[39]={0},file[1024];memcpy(name,request+13,38);snprintf(file,sizeof(file),"%s.guest-exit.%s",${JSON.stringify(observation)},name);FILE *exit=fopen(file,"r");if(exit){fclose(exit);reply(c,200,"{\\"id\\":\\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\\",\\"running\\":false,\\"exit_code\\":0}");}else reply(c,500,"");}
       else if(!strncmp(request,"POST /sandbox/",14)&&strstr(request,"/start ")){char name[39]={0};memcpy(name,request+14,38);char *args[]={argv[0],"api-start",name,0};int status=command(3,args);if(!status)ensure_worker(argv[0],path,name);reply(c,status?500:200,"");}
       else if(!strncmp(request,"POST /sandbox ",14)){char *body=strstr(request,"\\r\\n\\r\\n");char *args[]={argv[0],"api-create",body?body+4:"",0};int status=command(3,args);if(!status){ensure_worker(argv[0],path,${JSON.stringify(local.space.name)});body_reply(c,201,${JSON.stringify(observation + ".create-response")});}else reply(c,500,"");}
@@ -287,6 +283,18 @@ int main(int argc,char **argv){
       {
         name: "isolated-guard-credentials",
         setup(builder) {
+          builder.onLoad({ filter: /[/\\]relay\.ts$/ }, (args) => ({
+            loader: "ts",
+            resolveDir: dirname(args.path),
+            // Workspace credential issuance is the external cloud boundary. Native
+            // guest bootstrap and its request settlement remain real in this fixture.
+            contents: `export const relayOrigin=()=> 'https://workspace.invalid';
+            export class LocalDeviceAuthorityFailure extends Error {}
+            export class LocalRelay {
+              async workspaceCredential(){return {origin:'https://workspace.invalid',credential:'fixture-workspace-credential'};}
+              async gitIdentity(){return {name:'Fixture',email:'fixture@example.invalid'};}
+            }`,
+          }));
           builder.onLoad({ filter: /[/\\]keychain\.ts$/ }, (args) => ({
             loader: "ts",
             resolveDir: dirname(args.path),
@@ -309,9 +317,26 @@ int main(int argc,char **argv){
     "packages/local/dist/runtime-control-helper",
     join(root, "runtime-control-helper"),
   );
-  await copyFile("packages/local/dist/guest-worker.js", join(root, "guest-worker.js"));
   await copyFile("packages/local/dist/guest-proxy.js", join(root, "guest-proxy.js"));
   await copyFile("packages/local/dist/runtime-api.js", join(root, "runtime-api.js"));
+  const payload = join(root, "workspace-payload");
+  await mkdir(join(payload, "service"), { recursive: true, mode: 0o700 });
+  const archive = Buffer.from("controlled SDK payload");
+  const fileName = `moira-workspace-linux-${process.arch}.tar.gz`;
+  await writeFile(join(payload, fileName), archive);
+  await writeFile(
+    join(payload, `payload-${process.arch}.json`),
+    JSON.stringify({
+      version: 1,
+      architecture: process.arch,
+      libc: "glibc",
+      release: "f".repeat(64),
+      archiveSha256: createHash("sha256").update(archive).digest("hex"),
+      fileName,
+      size: archive.length,
+    }),
+  );
+  await copyFile("packages/local/dist/guest-proxy.js", join(payload, "service/guest-proxy.mjs"));
   await state.write("broker.json", { port: 42500 });
   return { ...local, state, observation, pending, release, sentinel };
 }
@@ -410,17 +435,6 @@ function driver(local: Awaited<ReturnType<typeof fixture>>) {
     });
   `;
 }
-const job = () => ({
-  action: "execute",
-  repositoryFullName: "owner/project",
-  remoteMarker: `moira-op-${"a".repeat(32)}`,
-  argv: ["true"],
-  stdin: "",
-  timeoutMs: 1000,
-  maxStdoutBytes: 1024,
-  maxStderrBytes: 1024,
-  maxRetainedBytes: 1024,
-});
 
 async function addPeer(local: Awaited<ReturnType<typeof fixture>>) {
   const id = randomUUID();
@@ -826,7 +840,7 @@ supportedGuard("independent guard with a real subprocess SDK substitute", () => 
         try {
           await Promise.race([wait(),preparing.then(()=>{throw new Error('Preparation completed before native starting barrier');})]);
           const calls=(await f.readFile(${JSON.stringify(local.observation + ".calls")},'utf8')).trim().split(String.fromCharCode(10)).map(line=>JSON.parse(line));
-          if(!calls.some(argv=>argv[0]==='api-guest'&&argv[1]===${JSON.stringify(local.space.name)}&&argv[2]==='worker'))throw new Error('Live bootstrap exec was not invoked');
+          if(!calls.some(argv=>argv[0]==='api-guest'&&argv[1]===${JSON.stringify(local.space.name)}&&argv[2]==='bootstrap'))throw new Error('Live bootstrap exec was not invoked');
           const pending=JSON.parse(await f.readFile(${JSON.stringify(local.pending)},'utf8'));process.kill(pending.pid,0);
           const rows=await device.observe();
           if(!rows.some(row=>row.name===${JSON.stringify(local.space.name)}&&row.status==='starting'))throw new Error('Transient native state was not observed');
@@ -1538,7 +1552,7 @@ supportedGuard("independent guard with a real subprocess SDK substitute", () => 
       const policy=JSON.parse(await f.readFile(${JSON.stringify(join(local.state.root, "policy.json"))},'utf8'));
       await new SbxRuntime(policy).call(['daemon','stop']).then(()=>{throw new Error('Credentialful shutdown incorrectly succeeded');},()=>{});
       process.kill(${daemons[0].pid},0);
-      await guard.operation(${JSON.stringify(job())}).then(()=>{throw new Error('Unsafe credentials admitted work');},()=>{});
+      await guard.validate().then(()=>{throw new Error('Unsafe credentials admitted work');},()=>{});
       await device.stop();
     `,
     ]);
@@ -1568,50 +1582,9 @@ supportedGuard("independent guard with a real subprocess SDK substitute", () => 
   });
 
   vmTest(
-    "an unknown guest response preserves own and peer admission and a fresh command can execute",
-    async () => {
-      const local = await fixture();
-      const peer = await addPeer(local);
-      await writeFile(local.observation + ".guest-unknown", "unknown");
-      await execute(process.execPath, [
-        "--input-type=module",
-        "-e",
-        driver(local) +
-          `
-      const other=await device.space(${JSON.stringify(peer.id)});
-      try {
-        await guard.operation(${JSON.stringify(job())}).then(()=>{throw new Error('Unknown guest incorrectly succeeded');},error=>{if(error.code!=='LOCAL_GUEST_SETTLEMENT_UNKNOWN')throw error;});
-        const own=JSON.parse(await f.readFile(spacePath,'utf8'));
-        if(own.phase!=='usable'||own.desiredState!=='running'||own.failure!==null||own.generation!==1)throw new Error('An ordinary unknown response changed VM admission');
-        await guard.validate();
-        await other.validate();
-        const row=JSON.parse(await f.readFile(${JSON.stringify(local.observation + ".peers")},'utf8'))[0];
-        if(row.status!=='running')throw new Error('Unknown guest stopped a sibling VM');
-        const before=(await f.readFile(${JSON.stringify(local.observation + ".calls")},'utf8')).trim().split(String.fromCharCode(10)).map(line=>JSON.parse(line));
-        if(before.some(argv=>argv[0]==='stop'))throw new Error('Unknown response stopped a native VM');
-        await f.unlink(${JSON.stringify(local.observation + ".guest-unknown")});
-        await f.writeFile(${JSON.stringify(local.release)},'finish fresh command');
-        const next={...${JSON.stringify(job())},remoteMarker:'moira-op-'+ 'b'.repeat(32)};
-        const result=JSON.parse((await guard.operation(next)).toString());
-        if(result.result?.state!=='complete'||result.result?.exitCode!==0)throw new Error('Fresh independent work failed after unknown response');
-      }finally{await device.stop();}
-    `,
-      ]);
-      expect(await local.records.get(local.space.id)).toMatchObject({
-        phase: "stopped",
-        desiredState: "stopped",
-        failure: null,
-        generation: 2,
-      });
-      expect(await local.records.get(peer.id)).toMatchObject({ phase: "stopped", generation: 2 });
-    },
-  );
-
-  vmTest(
     "explicit stop and local recovery retain unknown job markers without replaying work",
     async () => {
       const local = await fixture();
-      await writeFile(local.observation + ".guest-unknown", "unknown");
       const marker = `job-${"b".repeat(64)}.json`;
       const journal = { unknown: true, terminal: false, marker: "moira-op-" + "b".repeat(32) };
       await local.state.write(marker, journal);
@@ -1621,14 +1594,12 @@ supportedGuard("independent guard with a real subprocess SDK substitute", () => 
         driver(local) +
           `
       try {
-        await guard.operation(${JSON.stringify(job())}).then(()=>{throw new Error('Unknown guest incorrectly succeeded');},error=>{if(error.code!=='LOCAL_GUEST_SETTLEMENT_UNKNOWN')throw error;});
         await guard.validate();
         await guard.stop();
         const generation=await device.recover(${JSON.stringify(local.space.id)},2);
         if(generation!==3)throw new Error('Recovery did not open a new local generation');
         const recovered=JSON.parse(await f.readFile(spacePath,'utf8'));
         if(recovered.phase!=='stopped'||recovered.failure!==null||recovered.generation!==3||recovered.recoveryGeneration!==3)throw new Error('Recovery lost its local acknowledgement');
-        await f.unlink(${JSON.stringify(local.observation + ".guest-unknown")});
         const next=await device.space(${JSON.stringify(local.space.id)},true);
         await next.prepare();await next.validate();
       }finally{await device.stop();}
@@ -1737,14 +1708,14 @@ supportedGuard("independent guard with a real subprocess SDK substitute", () => 
     await expect(readFile(local.pending)).rejects.toMatchObject({ code: "ENOENT" });
   });
 
-  test("IPC shutdown kills an outstanding native exec before it can auto-start the stopped sandbox", async () => {
+  test("IPC shutdown settles an outstanding guest bootstrap before stopping the sandbox", async () => {
     const local = await fixture();
     await execute(process.execPath, [
       "--input-type=module",
       "-e",
       driver(local) +
         `
-      const work=guard.operation(${JSON.stringify(job())});
+      await f.writeFile(${JSON.stringify(local.observation + ".bootstrap-wait")},'wait');const work=guard.prepare();
       try{await Promise.race([wait(),work.then(()=>{throw new Error('Operation completed before barrier');})]);}
       catch(error){await guard.stop();await device.stop();throw error;}
       const settled=work.then(()=>false,()=>true);
@@ -1758,14 +1729,14 @@ supportedGuard("independent guard with a real subprocess SDK substitute", () => 
     expect(JSON.parse(await readFile(local.observation, "utf8"))).toEqual({ status: "stopped" });
   });
 
-  test("parent death shuts down the outstanding native exec and closes its durable admission", async () => {
+  test("parent death settles outstanding guest bootstrap and closes lifecycle admission", async () => {
     const local = await fixture();
     await execute(process.execPath, [
       "--input-type=module",
       "-e",
       driver(local) +
         `
-      const work=guard.operation(${JSON.stringify(job())});
+      await f.writeFile(${JSON.stringify(local.observation + ".bootstrap-wait")},'wait');const work=guard.prepare();
       try{await Promise.race([wait(),work.then(()=>{throw new Error('Operation completed before barrier');})]);}
       catch(error){await guard.stop();await device.stop();throw error;}
       process.exit(0);
@@ -1812,14 +1783,14 @@ supportedGuard("independent guard with a real subprocess SDK substitute", () => 
     expect(JSON.parse(await readFile(local.observation, "utf8"))).toEqual({ status: "stopped" });
   });
 
-  test("lease expiry cancels an admitted native exec and prevents later work without parent cooperation", async () => {
+  test("lease expiry cancels guest bootstrap and prevents later admission without parent cooperation", async () => {
     const local = await fixture();
     await execute(process.execPath, [
       "--input-type=module",
       "-e",
       driver(local) +
         `
-      const work=guard.operation(${JSON.stringify(job())});
+      await f.writeFile(${JSON.stringify(local.observation + ".bootstrap-wait")},'wait');const work=guard.prepare();
       try{await Promise.race([wait(),work.then(()=>{throw new Error('Operation completed before barrier');})]);}
       catch(error){await guard.stop();await device.stop();throw error;}
       const policyPath=${JSON.stringify(join(local.state.root, "policy.json"))};
@@ -1827,7 +1798,7 @@ supportedGuard("independent guard with a real subprocess SDK substitute", () => 
       await f.writeFile(policyPath,JSON.stringify(policy));
       await work.then(()=>{throw new Error('Expired native operation succeeded');},()=>{});
       await guard.stop();
-      await guard.operation(${JSON.stringify(job())}).then(()=>{throw new Error('Expired owner accepted new work');},()=>{});
+      await guard.validate().then(()=>{throw new Error('Expired owner accepted new work');},()=>{});
     `,
     ]);
     const { pid } = JSON.parse(await readFile(local.pending, "utf8"));
@@ -1847,7 +1818,7 @@ supportedGuard("independent guard with a real subprocess SDK substitute", () => 
       "-e",
       driver(local) +
         `
-      const work=guard.operation(${JSON.stringify(job())});const settled=work.catch(()=>{});
+      await f.writeFile(${JSON.stringify(local.observation + ".bootstrap-wait")},'wait');const work=guard.prepare();const settled=work.catch(()=>{});
       try{await Promise.race([wait(),work]);
         const home=${JSON.stringify(join(local.policy.runtime.storageRoot, "runtime"))};
         if(process.platform==='darwin')await f.writeFile(home+'/keychain-current.json','{}');
@@ -1865,10 +1836,10 @@ supportedGuard("independent guard with a real subprocess SDK substitute", () => 
     });
     expect(await local.records.get(local.space.id)).toMatchObject({
       desiredState: "stopped",
-      // Guest initialization remains recorded; failed physical observation is not an
-      // ordinary-operation failure or a certificate that native stop completed.
-      phase: "usable",
-      failure: null,
+      // This is interrupted fixed bootstrap, not command delivery. Retain its
+      // unknown admission and do not claim physical stop without fresh SDK proof.
+      phase: "failed",
+      failure: "LOCAL_GUEST_SETTLEMENT_UNKNOWN",
       generation: 2,
     });
     expect((await local.records.get(local.space.id))?.recoveryGeneration).toBe(
@@ -1879,7 +1850,7 @@ supportedGuard("independent guard with a real subprocess SDK substitute", () => 
     await expect(readFile(local.sentinel)).rejects.toMatchObject({ code: "ENOENT" });
   });
 
-  test("stopping one space preserves an admitted peer's native exec until device shutdown", async () => {
+  test("stopping one space preserves a peer's guest bootstrap until device shutdown", async () => {
     const local = await fixture();
     const peer = await addPeer(local);
     await execute(process.execPath, [
@@ -1888,7 +1859,7 @@ supportedGuard("independent guard with a real subprocess SDK substitute", () => 
       driver(local) +
         `
       const other=await device.space(${JSON.stringify(peer.id)});
-      const work=other.operation(${JSON.stringify(job())});
+      await f.writeFile(${JSON.stringify(local.observation + ".bootstrap-wait")},'wait');const work=other.prepare();
       const settled=work.catch(()=>{});
       try{await Promise.race([wait(),work]);await guard.stop();
         const {pid}=JSON.parse(await f.readFile(${JSON.stringify(local.pending + "." + peer.name)},'utf8'));process.kill(pid,0);
@@ -1915,7 +1886,7 @@ supportedGuard("independent guard with a real subprocess SDK substitute", () => 
       driver(local) +
         `
       const other=await device.space(${JSON.stringify(peer.id)});
-      const peerWork=other.operation(${JSON.stringify(job())});const peerSettled=peerWork.catch(()=>{});
+      await f.writeFile(${JSON.stringify(local.observation + ".bootstrap-wait")},'wait');const peerWork=other.prepare();const peerSettled=peerWork.catch(()=>{});
       await Promise.race([wait(),peerWork]);
       await f.unlink(${JSON.stringify(local.pending)});
       const creating=guard.prepare();const settled=creating.catch(()=>{});
@@ -1951,7 +1922,7 @@ supportedGuard("independent guard with a real subprocess SDK substitute", () => 
       import {stopLocalDevice} from ${JSON.stringify(`file://${join(root, "guard.js")}`)};
       import {PrivateState} from ${JSON.stringify(`file://${join(root, "private-state.js")}`)};
       import {LocalRecords} from ${JSON.stringify(`file://${join(root, "space-record.js")}`)};
-      const work=guard.operation(${JSON.stringify(job())});const settled=work.catch(()=>{});
+      await f.writeFile(${JSON.stringify(local.observation + ".bootstrap-wait")},'wait');const work=guard.prepare();const settled=work.catch(()=>{});
       try{await Promise.race([wait(),work]);
         const records=new LocalRecords(await PrivateState.open(${JSON.stringify(local.state.root)}));
         const policy=await records.policy();policy.enabled=false;await records.state.write('policy.json',policy);
@@ -1982,7 +1953,7 @@ supportedGuard("independent guard with a real subprocess SDK substitute", () => 
       try{await guard.stop();
         const fresh=await device.space(${JSON.stringify(local.space.id)},true);
         await fresh.prepare();
-        await guard.operation(${JSON.stringify(job())}).then(()=>{throw new Error('Prior admission executed after restart');},()=>{});
+        await guard.validate().then(()=>{throw new Error('Prior admission executed after restart');},()=>{});
         const current=JSON.parse(await f.readFile(spacePath,'utf8'));
         if(current.generation!==3||current.desiredState!=='running'||current.phase!=='usable')throw new Error('Owner activation lost the authoritative generation');
       }finally{await device.stop();}

@@ -76,7 +76,6 @@ export async function resolvePublicTarget(
   const local = networks();
   if (
     answers.length === 0 ||
-    answers.length > 64 ||
     answers.some(
       ({ address, family }) =>
         !publicAddress(address) ||

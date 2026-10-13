@@ -6,6 +6,7 @@ import { connect } from "node:net";
 import { PrivateState } from "../../../packages/local/src/private-state.js";
 import { NetworkBudget } from "../../../packages/local/src/network-budget.js";
 import { startBroker } from "../../../packages/local/src/broker.js";
+import { resolvePublicTarget } from "../../../packages/local/src/network.js";
 import { localFixture } from "./fixtures.js";
 
 let directory: string;
@@ -25,78 +26,77 @@ afterEach(async () => {
 async function fixture() {
   const local = await localFixture(state);
   await state.write("policy.json", local.policy);
-  const budget = new NetworkBudget(1);
+  const budget = new NetworkBudget();
   budgets.push(budget);
   return { ...local, budget };
 }
 const turn = () => new Promise<void>((resolve) => setImmediate(resolve));
 
-describe("network scheduling independent of VM lifetime", () => {
-  test("a busy connection waits in FIFO order instead of returning a security refusal", async () => {
-    const f = await fixture();
-    const held = await f.budget.reserve(f.policy);
-    const order: number[] = [];
-    const second = f.budget.reserve(f.policy).then((reservation) => {
-      order.push(2);
-      return reservation;
-    });
-    const third = f.budget.reserve(f.policy).then((reservation) => {
-      order.push(3);
-      return reservation;
-    });
-    await turn();
-    expect(order).toEqual([]);
-    await held.release();
-    const next = await second;
-    expect(order).toEqual([2]);
-    await next.release();
-    await (await third).release();
-    expect(order).toEqual([2, 3]);
-    expect(await state.read("network-budget.json", (value) => value)).toBeNull();
-  });
-
-  test("a disconnected queued consumer does not hold credit or block the next connection", async () => {
-    const f = await fixture();
-    const held = await f.budget.reserve(f.policy);
-    const controller = new AbortController();
-    const cancelled = expect(
-      f.budget.reserve(f.policy, { signal: controller.signal }),
-    ).rejects.toMatchObject({ code: "LOCAL_NETWORK_CANCELLED" });
-    const next = f.budget.reserve(f.policy);
-    controller.abort();
-    await cancelled;
-    await held.release();
-    await (await next).release();
-    expect(await state.read("network-budget.json", (value) => value)).toBeNull();
-  });
-
-  test("authority is checked after waiting and revoked permission cannot consume credit", async () => {
-    const f = await fixture();
-    const held = await f.budget.reserve(f.policy);
-    const waiting = expect(
-      f.budget.reserve(f.policy, { refreshPolicy: () => f.records.policy() }),
+describe("network admission independent of workload quotas", () => {
+  test("DNS answer cardinality does not replace checking every public destination", async () => {
+    const answers = Array.from({ length: 129 }, (_, index) => ({
+      address: `93.184.216.${index + 1}`,
+      family: 4 as const,
+    }));
+    await expect(resolvePublicTarget("packages.example.com", async () => answers)).resolves.toEqual(
+      answers[0],
+    );
+    await expect(
+      resolvePublicTarget("packages.example.com", async () => [
+        ...answers,
+        { address: "10.0.0.1", family: 4 as const },
+      ]),
     ).rejects.toMatchObject({ code: "LOCAL_NETWORK_DENIED" });
+  });
+  test("more than the former socket capacity admits independently without reservations or a traffic ledger", async () => {
+    const f = await fixture();
+    const reservations = await Promise.all(
+      Array.from({ length: 256 }, () => f.budget.reserve(f.policy)),
+    );
+    expect(reservations).toHaveLength(256);
+    await Promise.all(reservations.map((reservation) => reservation.release()));
+    expect(await state.read("network-budget.json", (value) => value)).toBeNull();
+  });
+  test.each(["consumer", "shutdown"] as const)(
+    "%s cancellation settles a held authority read without blocking independent admission",
+    async (cause) => {
+      const f = await fixture();
+      let enter!: () => void, release!: () => void;
+      const entered = new Promise<void>((done) => {
+        enter = done;
+      });
+      const held = new Promise<void>((done) => {
+        release = done;
+      });
+      const controller = new AbortController();
+      const pending = f.budget.reserve(f.policy, {
+        signal: controller.signal,
+        refreshPolicy: async () => {
+          enter();
+          await held;
+          return f.policy;
+        },
+      });
+      const outcome = expect(pending).rejects.toMatchObject({ code: "LOCAL_NETWORK_CANCELLED" });
+      await entered;
+      expect(await f.budget.reserve(f.policy)).toHaveProperty("release");
+      if (cause === "consumer") controller.abort();
+      else f.budget.closeAdmission();
+      await outcome;
+      await f.budget.settle();
+      release();
+    },
+  );
+  test("fresh bound policy is checked immediately before network authority returns", async () => {
+    const f = await fixture();
     f.policy.enabled = false;
     await state.write("policy.json", f.policy);
-    await held.release();
-    await waiting;
-    expect(await state.read("network-budget.json", (value) => value)).toBeNull();
-  });
-
-  test("shutdown cancels waiting consumers and settles their accounting", async () => {
-    const f = await fixture();
-    const held = await f.budget.reserve(f.policy);
-    const waiting = expect(f.budget.reserve(f.policy)).rejects.toMatchObject({
-      code: "LOCAL_NETWORK_CANCELLED",
-    });
-    f.budget.closeAdmission();
-    await waiting;
-    await held.release();
-    await f.budget.settle();
-    await expect(f.budget.reserve(f.policy)).rejects.toMatchObject({
-      code: "LOCAL_NETWORK_CANCELLED",
-    });
-    expect(await state.read("network-budget.json", (value) => value)).toBeNull();
+    await expect(
+      f.budget.reserve({ ...f.policy, enabled: true }, { refreshPolicy: () => f.records.policy() }),
+    ).rejects.toMatchObject({ code: "LOCAL_NETWORK_DENIED" });
+    await expect(
+      f.budget.reserve({ ...f.policy, enabled: true, leaseUntil: Date.now() - 1 }),
+    ).rejects.toMatchObject({ code: "LOCAL_NETWORK_DENIED" });
   });
 
   test("an exhausted old traffic ledger cannot block development downloads", async () => {
@@ -115,39 +115,25 @@ describe("network scheduling independent of VM lifetime", () => {
     });
   });
 
-  test("releasing twice cannot admit more sockets than the broker can hold", async () => {
+  test("held authenticated CONNECT cannot dial after its bound authority is revoked", async () => {
     const f = await fixture();
-    const held = await f.budget.reserve(f.policy);
-    const next = f.budget.reserve(f.policy);
-    await held.release();
-    const second = await next;
-    await held.release();
-    let admitted = false;
-    const third = f.budget.reserve(f.policy).then((reservation) => {
-      admitted = true;
-      return reservation;
-    });
-    await turn();
-    expect(admitted).toBe(false);
-    await second.release();
-    await (await third).release();
-    expect(admitted).toBe(true);
-  });
-
-  test("queued authenticated CONNECT cannot dial after its bound authority is revoked", async () => {
-    const f = await fixture();
-    const held = await f.budget.reserve(f.policy);
     let refreshed!: () => void;
     const queued = new Promise<void>((resolve) => {
       refreshed = resolve;
+    });
+    let release!: () => void;
+    const authorityGate = new Promise<void>((done) => {
+      release = done;
     });
     let authorizations = 0;
     let lookups = 0;
     const broker = await startBroker({
       authorize: async (credential) => {
-        const grant = await f.records.authorize(credential);
-        if (++authorizations === 2) refreshed();
-        return grant;
+        if (++authorizations === 2) {
+          refreshed();
+          await authorityGate;
+        }
+        return f.records.authorize(credential);
       },
       budget: f.budget,
       resolve: async () => {
@@ -176,13 +162,13 @@ describe("network scheduling independent of VM lifetime", () => {
       expect(bytes).toBe("");
       f.policy.enabled = false;
       await state.write("policy.json", f.policy);
-      await held.release();
+      release();
       await closed;
       expect(bytes).toContain("403 Forbidden");
       expect(lookups).toBe(0);
     } finally {
       client.destroy();
-      await held.release();
+      release();
       await broker.close();
     }
   });

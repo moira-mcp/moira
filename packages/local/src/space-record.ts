@@ -72,7 +72,6 @@ export class LocalRecords {
   }
   async list(): Promise<LocalSpace[]> {
     const keys = await this.state.keys("space-");
-    if (keys.length > 128) throw new Error("Local inventory capacity exceeded");
     const values = await Promise.all(keys.map((key) => this.state.read(key, spaceSchema.parse)));
     return values.filter((value): value is LocalSpace => value !== null);
   }

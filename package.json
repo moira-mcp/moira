@@ -14,7 +14,10 @@
   "scripts": {
     "local": "node packages/local/dist/cli.js",
     "local:build": "node scripts/build-local.js",
-    "local:verify:guest": "npm run local:build && node scripts/verify-local-guest.js",
+    "workspace:build": "node scripts/build-workspace-service.js",
+    "workspace:package": "node scripts/package-workspace-service.js",
+    "workspace:verify:guest": "npm run local:build && npm run workspace:package && node scripts/verify-workspace-service-guest.js",
+    "local:verify:guest": "npm run local:build && npm run workspace:package && node scripts/verify-workspace-service-guest.js",
     "typecheck:local": "tsc --noEmit -p packages/local/tsconfig.json",
     "test": "testfold unit workflow integration api e2e mcp-tools -e local",
     "test:unit": "testfold unit",

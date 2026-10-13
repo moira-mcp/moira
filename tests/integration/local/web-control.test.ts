@@ -438,7 +438,7 @@ describe("Locally pinned owner web control", () => {
       }
       if (String(url).endsWith("/relay/claim")) {
         claims++;
-        return Response.json({ success: true, data: { requests: [], maxPartBytes: 4096 } });
+        return Response.json({ success: true, data: { requests: [] } });
       }
       throw new Error("unexpected fixture route");
     };
@@ -566,7 +566,7 @@ describe("Locally pinned owner web control", () => {
       createRequestId: requestId,
       createDigest: digest,
     });
-    await f.state.write(`relay-request-${requestId}.json`, {
+    await f.state.write(`lifecycle-request-${requestId}.json`, {
       digest,
       resourceId,
       deviceGeneration: 1,
@@ -596,7 +596,7 @@ describe("Locally pinned owner web control", () => {
     }
     f.space.runtimeId = "known-fixture-runtime";
     await f.records.put(f.space);
-    await f.state.remove(`relay-request-${requestId}.json`);
+    await f.state.remove(`lifecycle-request-${requestId}.json`);
     await expect(relay.gitAuthority(f.space.id, f.space.repositoryId)).rejects.toMatchObject({
       code: "LOCAL_CREATE_UNKNOWN",
     });

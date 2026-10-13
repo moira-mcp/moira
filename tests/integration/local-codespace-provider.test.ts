@@ -4,12 +4,10 @@ import request from "supertest";
 import Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import { migrate } from "drizzle-orm/better-sqlite3/migrator";
-import { mkdtemp, realpath, rm, readFile, writeFile, mkdir } from "node:fs/promises";
+import { mkdtemp, realpath, rm, mkdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { createHash, randomUUID } from "node:crypto";
-import { spawn, spawnSync } from "node:child_process";
-import { lstatSync, readFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { setTimeout as delay } from "node:timers/promises";
 import {
@@ -19,7 +17,7 @@ import {
   projectCodespaceSummary,
   localCodespaceFailureGuidance,
   LOCAL_REQUEST_MAX_WINDOW_MS,
-  getSqliteInstance,
+  getCodespaceResourcePolicy,
   type CodespaceResourcePolicy,
   type CodespaceResourceRecord,
   type LocalRelayAcknowledgement,
@@ -28,7 +26,6 @@ import { createLocalCodespaceServices } from "../../packages/web-backend/src/ser
 import {
   createLocalDeviceRoutes,
   createLocalDeviceManagementRoutes,
-  createLocalDeviceBinaryRoutes,
 } from "../../packages/web-backend/src/routes/local-devices.js";
 import { PrivateState } from "../../packages/local/src/private-state.js";
 import { LocalManager } from "../../packages/local/src/manager.js";
@@ -40,18 +37,7 @@ import type { LocalVmIdentity as SandboxIdentity } from "../../packages/local/sr
 import { adaptSbxRuntime } from "../../packages/local/src/local-vm-runtime-factory.js";
 import { LocalRefusal, requireLocalGrant } from "../../packages/local/src/policy.js";
 import { localFixture } from "./local/fixtures.js";
-import {
-  LocalCodespaceJobTransport,
-  localCodespaceCredential,
-} from "../../packages/web-backend/src/services/local-codespace-provider.js";
-import { LocalCodespaceRelay } from "../../packages/web-backend/src/services/local-codespace-relay.js";
-import {
-  buildFileClientLifeProbe,
-  buildFileClientMaintenance,
-  loadFileClientAssets,
-} from "../../packages/web-backend/src/services/codespace-file-client-assets.js";
-import { hostFileClientLife, hostFileClientMaintenance } from "../helpers/host-file-client.js";
-import { nativeFileTls } from "../helpers/native-file-tls.js";
+import { localCodespaceCredential } from "../../packages/web-backend/src/services/local-codespace-provider.js";
 
 let root: string, sqlite: Database.Database;
 let fixtureCleanups: (() => Promise<void>)[];
@@ -77,14 +63,9 @@ afterEach(async () => {
 const boundaryBytes = Buffer.from("controlled external-runtime boundary");
 const hash = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex");
 
-async function fixture(
-  partLimit = 4 * 1024 * 1024,
-  maxObjects = 512,
-  nativeSize = 5,
-  nativeGuest?: { origin: string; caPath: string },
-) {
+async function fixture(useDefaultPolicy = false) {
   const clock = { now: Date.now() };
-  const now = () => (nativeGuest ? Date.now() : clock.now);
+  const now = () => clock.now;
   const state = await PrivateState.open(join(root, "companion"));
   const local = await localFixture(state);
   local.policy.leaseUntil = Date.now() + 3600_000;
@@ -106,98 +87,7 @@ async function fixture(
     cleanupDeadlineMs: 60_000,
     claimLeaseMs: 30_000,
     reconcileIntervalMs: 30_000,
-    maxOperationMs: nativeGuest ? 60_000 : 10_000,
-    maxOperationStdoutBytes: 1024,
-    maxOperationStderrBytes: 1024,
-    maxRetainedOutputBytes: 1024 * 1024,
-    maxTransferFileBytes: partLimit,
-    maxTransferObjectsPerUser: maxObjects,
   };
-  const nativeBytes = Buffer.alloc(nativeSize),
-    pattern = [0, 255, 65, 10, 128];
-  for (let index = 0; index < nativeBytes.length; index++)
-    nativeBytes[index] = pattern[index % pattern.length];
-  const guestHome = join(root, "guest-home");
-  const workerPath = join(root, "guest-runtime", "worker.mjs");
-  const driverPath = join(root, "guest-runtime", "namespace-worker.mjs");
-  const environmentId = "local-native-fixture-life";
-  const largeNativeBytes = Buffer.alloc(5 * 1024 ** 2 + 7, 0xa7);
-  let nativeFetches = 0;
-  if (nativeGuest) {
-    const global = getSqliteInstance();
-    const databases = global.pragma("database_list") as { name: string; file: string }[];
-    if (
-      databases.find((database) => database.name === "main")?.file !==
-      resolve("data/test-integration.db")
-    )
-      throw new Error("Native fixture account database is not the integration database");
-    const existing = global
-      .prepare("SELECT email,approvedAt,emailVerified,blocked FROM user WHERE id='user-a'")
-      .get() as
-      | { email: string; approvedAt: string | null; emailVerified: number; blocked: number }
-      | undefined;
-    if (existing) {
-      if (
-        existing.email !== "user-a@example.test" ||
-        !existing.approvedAt ||
-        !existing.emailVerified ||
-        existing.blocked
-      )
-        throw new Error("Native fixture account conflicts with an existing account");
-    } else {
-      global
-        .prepare(
-          "INSERT INTO user(id,email,handle,createdAt,updatedAt,approvedAt,emailVerified) VALUES('user-a','user-a@example.test','user-a','before','before','approved',1)",
-        )
-        .run();
-      fixtureCleanups.push(async () => {
-        global.prepare("DELETE FROM user WHERE id='user-a'").run();
-      });
-    }
-    await mkdir(join(guestHome, ".local/share/moira-local"), { recursive: true });
-    await mkdir(join(root, "guest-runtime"), { recursive: true });
-    const origin = `http://device:${"a".repeat(64)}@127.0.0.1:3437/git/owner/project.git`;
-    for (const args of [
-      ["init", "--initial-branch=main", guestRoot],
-      ["-C", guestRoot, "remote", "add", "origin", origin],
-    ]) {
-      const result = spawnSync("git", args, { encoding: "utf8" });
-      if (result.status !== 0) throw new Error(result.stderr);
-    }
-    const metadata = lstatSync(guestRoot);
-    await writeFile(
-      join(guestHome, ".local/share/moira-local/repository.json"),
-      JSON.stringify({
-        repositoryFullName: "owner/project",
-        root: guestRoot,
-        origin,
-        dev: metadata.dev,
-        ino: metadata.ino,
-      }),
-    );
-    await writeFile(
-      join(guestHome, ".local/share/moira-local/environment.json"),
-      JSON.stringify({
-        HTTP_PROXY: "",
-        HTTPS_PROXY: "",
-        http_proxy: "",
-        https_proxy: "",
-        NO_PROXY: "127.0.0.1",
-        no_proxy: "127.0.0.1",
-      }),
-    );
-    // Only the external guest filesystem namespace is mapped; the measured worker stays byte-identical.
-    const worker = readFileSync(
-      resolve("packages/web-backend/dist/guest-assets/guest-worker.js"),
-      "utf8",
-    );
-    if (!worker.includes("/tmp/moira-local-runtime/worker.mjs"))
-      throw new Error("Fixed worker namespace is missing");
-    await writeFile(
-      driverPath,
-      worker.replaceAll("/tmp/moira-local-runtime/worker.mjs", workerPath),
-    );
-  }
   const transfer = new CodespaceTransferService({
     repository: new CodespaceTransferRepository(sqlite),
     root: join(root, "private-transfers"),
@@ -207,24 +97,9 @@ async function fixture(
   const services = createLocalCodespaceServices(transfer, {
     sqlite,
     now,
-    policy: () => policy,
+    ...(useDefaultPolicy ? {} : { policy: () => policy }),
     settingsUrl: "https://moira.example/app/settings",
     resourceAudit: () => undefined,
-    operationAudit: () => undefined,
-    nativeFetcher: {
-      fetch: async (reference) => {
-        nativeFetches++;
-        const bytes = reference.fileId === "file_localLarge" ? largeNativeBytes : nativeBytes;
-        return {
-          contentLength: bytes.length,
-          mimeType: "application/octet-stream",
-          body: (async function* () {
-            for (let offset = 0; offset < bytes.length; offset += 256 * 1024)
-              yield bytes.subarray(offset, offset + 256 * 1024);
-          })(),
-        };
-      },
-    },
   });
   const app = express();
   const server = createServer(app);
@@ -241,14 +116,7 @@ async function fixture(
     });
     next();
   });
-  app.use(
-    "/api/local-devices",
-    createLocalDeviceBinaryRoutes(services.devices, transfer, "https://moira.example"),
-  );
-  app.use(
-    "/api/local-devices",
-    createLocalDeviceRoutes(services.devices, transfer, "https://moira.example"),
-  );
+  app.use("/api/local-devices", createLocalDeviceRoutes(services.devices, "https://moira.example"));
   app.use(
     "/api/integrations/local",
     (req, _res, next) => {
@@ -260,25 +128,18 @@ async function fixture(
   const faults = {
     dropNextAck: false,
     lostAcknowledgements: 0,
-    holdOperations: false,
-    detachExecution: false,
     createRefusal: null as string | null,
     removeRefusal: null as string | null,
     beforeAck: null as ((requestId: string) => Promise<void>) | null,
-    beforePayload: null as
-      ((requestId: string, signal: AbortSignal | null) => Promise<void>) | null,
     afterAck: null as ((requestId: string) => Promise<void>) | null,
     afterRenew: null as (() => void) | null,
     afterCreateAdmitted: null as (() => Promise<void>) | null,
     beforeCreateReady: null as (() => Promise<void>) | null,
-    fileResult: null as Record<string, unknown> | null,
   };
   const removal = { completed: 0 };
   const physical = new Map<string, SandboxObservation["status"]>();
   const lifecycle = { stopSettles: true, stopEffects: 0, unknown: false };
   const unknownSpaces = new Set<string>();
-  const guestActions: string[] = [];
-  const retainedResults = new Map<string, unknown>();
   let transportRefusal:
     | {
         status: number;
@@ -293,13 +154,6 @@ async function fixture(
     const url = new URL(String(input));
     expect(url.origin).toBe("https://moira.example");
     options?.signal?.throwIfAborted();
-    const payloadRequestId = url.pathname.match(
-      /^\/api\/local-devices\/relay\/([a-f0-9-]{36})\/payload\/\d+$/,
-    )?.[1];
-    if (payloadRequestId) {
-      await faults.beforePayload?.(payloadRequestId, options?.signal ?? null);
-      options?.signal?.throwIfAborted();
-    }
     const requestTrace = randomUUID();
     let call =
       options?.method === "POST"
@@ -484,149 +338,6 @@ async function fixture(
         ) ?? null
       );
     }
-    override async guest(_identity: SandboxIdentity, argv: readonly string[], input?: Uint8Array) {
-      expect(argv).toEqual(["node", "/tmp/moira-local-runtime/worker.mjs"]);
-      const envelope = JSON.parse(Buffer.from(input!).toString("utf8"));
-      expect(envelope.kind).toBe("operation");
-      const job = envelope.request as Record<string, unknown>;
-      guestActions.push(String(job.action));
-      if (nativeGuest) {
-        let adapted = job;
-        if (job.action === "execute" && Array.isArray(job.argv)) {
-          const life = buildFileClientLifeProbe();
-          if (JSON.stringify(job.argv) === JSON.stringify(life.argv)) {
-            const host = hostFileClientLife(environmentId);
-            adapted = { ...job, argv: host.argv };
-          } else {
-            const assets = await loadFileClientAssets("local-sandboxes");
-            const maintenance = buildFileClientMaintenance(
-              assets,
-              {
-                version: 1,
-                origin: nativeGuest.origin,
-                bootstrapCapability: "fixture",
-                environmentIdentity: "a".repeat(64),
-                resourceId: "fixture",
-                repositoryFullName: "owner/project",
-              },
-              Date.now() + 10_000,
-            );
-            if (JSON.stringify(job.argv) === JSON.stringify(maintenance.argv)) {
-              const input = JSON.parse(Buffer.from(String(job.stdin), "base64").toString("utf8"));
-              const host = hostFileClientMaintenance(assets, input.config, workerPath);
-              adapted = {
-                ...job,
-                argv: host.argv,
-                stdin: Buffer.from(host.stdin).toString("base64"),
-              };
-            }
-          }
-        }
-        if (job.action === "execute")
-          await state.write(`effect-${job.remoteMarker}.json`, {
-            argv: job.argv,
-            stdin: job.stdin,
-          });
-        return new Promise<Buffer>((done, fail) => {
-          const child = spawn(process.execPath, [driverPath], {
-            env: {
-              ...process.env,
-              HOME: guestHome,
-              MOIRA_OPERATION_STATE_DIR: join(root, "guest-state"),
-              MOIRA_ENVIRONMENT_ID: environmentId,
-              CURL_CA_BUNDLE: nativeGuest.caPath,
-            },
-            stdio: ["pipe", "pipe", "pipe"],
-          });
-          const stdout: Buffer[] = [],
-            stderr: Buffer[] = [];
-          child.stdout.on("data", (chunk: Buffer) => stdout.push(chunk));
-          child.stderr.on("data", (chunk: Buffer) => stderr.push(chunk));
-          child.once("error", fail);
-          child.once("close", (code) =>
-            code === 0
-              ? done(Buffer.concat(stdout))
-              : fail(new Error(`Actual guest refused: ${Buffer.concat(stderr).toString("utf8")}`)),
-          );
-          child.stdin.end(JSON.stringify({ kind: "operation", request: adapted }));
-        });
-      }
-      let result: unknown;
-      if (job.action === "execute") {
-        await state.write(`effect-${job.remoteMarker}.json`, { argv: job.argv, stdin: job.stdin });
-        const stdout = Buffer.from(
-          Array.isArray(job.argv) && job.argv[0] === "echo"
-            ? String(job.argv[1])
-            : "controlled guest result",
-        );
-        result = {
-          state: "succeeded",
-          stdoutBase64: stdout.toString("base64"),
-          stderrBase64: "",
-          stdoutBytes: stdout.length,
-          stderrBytes: 0,
-          exitCode: 0,
-          outputLimitExceeded: false,
-          sessionCaptureDropped: false,
-        };
-      } else if (job.action === "file-execute") {
-        const file = job.request as {
-          action: string;
-          path: string;
-          bytesBase64?: string;
-          offset?: number;
-          length?: number;
-        };
-        if (faults.fileResult) result = faults.fileResult;
-        else if (file.action === "upload" || file.action === "write") {
-          const bytes = Buffer.from(file.bytesBase64!, "base64");
-          await writeFile(join(guestRoot, file.path), bytes, { mode: 0o600 });
-          result = {
-            state: "succeeded",
-            value: {
-              action: file.action,
-              path: file.path,
-              previous: null,
-              current: { size: bytes.length, sha256: hash(bytes), modifiedAt: Date.now() },
-            },
-          };
-        } else if (file.action === "read") {
-          const bytes = await readFile(join(guestRoot, "payload.bin"));
-          result = {
-            state: "succeeded",
-            value: {
-              action: "read",
-              path: file.path,
-              offset: file.offset,
-              totalSize: bytes.length,
-              bytesBase64: bytes
-                .subarray(file.offset!, file.offset! + file.length!)
-                .toString("base64"),
-              sha256: hash(bytes),
-            },
-          };
-        } else throw new Error("Unexpected controlled file request");
-      } else if (job.action === "inspect") {
-        result = faults.holdOperations
-          ? { state: "running" }
-          : (retainedResults.get(String(job.remoteMarker)) ?? { state: "absent" });
-      } else if (job.action === "cancel") {
-        result = faults.holdOperations
-          ? { state: "running" }
-          : (retainedResults.get(String(job.remoteMarker)) ?? { state: "absent" });
-      } else if (job.action === "file-inspect") {
-        result = faults.holdOperations
-          ? { state: "running" }
-          : (retainedResults.get(String(job.remoteMarker)) ?? { state: "absent" });
-      } else if (job.action === "finalize") result = { state: "absent" };
-      else throw new Error("Unexpected controlled operation request");
-      if (job.action === "execute" || job.action === "file-execute") {
-        retainedResults.set(String(job.remoteMarker), result);
-        if (faults.holdOperations || (faults.detachExecution && job.action === "execute"))
-          result = { state: "running" };
-      }
-      return Buffer.from(JSON.stringify({ ok: true, result }));
-    }
   }
   const runtime = new ExternalRuntime(local.policy);
   const manager = new LocalManager(local.records, {
@@ -660,15 +371,6 @@ async function fixture(
             });
           },
           validate: async () => {},
-          operation: async (job) => {
-            const space = await local.records.get(id);
-            if (!space?.runtimeId) throw new Error("Controlled sandbox absent");
-            return runtime.guest(
-              { name: space.name, runtimeId: space.runtimeId },
-              ["node", "/tmp/moira-local-runtime/worker.mjs"],
-              Buffer.from(JSON.stringify({ kind: "operation", request: job })),
-            );
-          },
           stop: async () => {
             const space = await local.records.get(id);
             if (space) {
@@ -737,57 +439,6 @@ async function fixture(
   };
   const rpc = new LocalRpc(manager),
     relay = new LocalRelay(local.records, fetch);
-  const rpcTrace: Array<Record<string, unknown>> = [];
-  if (nativeGuest) {
-    const active = new Set<string>();
-    const observe = (path: string, value: unknown, code: string, wasActive: boolean) => {
-      const envelope = value as {
-        id: string;
-        request: { action: string; job?: { action?: string } };
-      };
-      const entries = JSON.parse(readFileSync(join(state.root, "requests.json"), "utf8")) as Array<{
-        id: string;
-        state: string;
-        expiresAt: number;
-        reservedBytes: number;
-      }>;
-      const entry = entries.find((item) => item.id === envelope.id);
-      const row = sqlite
-        .prepare(
-          "SELECT deadlineAt,claimExpiresAt,status FROM codespaceLocalRelay WHERE requestId=?",
-        )
-        .get(envelope.id);
-      rpcTrace.push({
-        path,
-        code,
-        action: envelope.request.job?.action ?? envelope.request.action,
-        wasActive,
-        journalState: entry?.state,
-        journalBytes: entry?.reservedBytes,
-        remainingMs: entry ? entry.expiresAt - Date.now() : null,
-        relay: row,
-      });
-    };
-    const handle = rpc.handle.bind(rpc);
-    rpc.handle = async (value, ...args) => {
-      const id = (value as { id: string }).id;
-      active.add(id);
-      try {
-        const result = await handle(value, ...args);
-        if (!result.ok) observe("handle", value, result.error.code, true);
-        return result;
-      } finally {
-        active.delete(id);
-      }
-    };
-    const replay = rpc.replay.bind(rpc);
-    rpc.replay = async (value) => {
-      const wasActive = active.has((value as { id: string }).id);
-      const result = await replay(value);
-      if (!result.ok) observe("replay", value, result.error.code, wasActive);
-      return result;
-    };
-  }
   fixtureCleanups.push(async () => {
     deliveryAbort.abort();
     await relay.drain();
@@ -878,11 +529,6 @@ async function fixture(
     state,
     app,
     drive,
-    nativeBytes,
-    largeNativeBytes,
-    nativeFetches: () => nativeFetches,
-    rpcTrace: () => rpcTrace.slice(-3),
-    guestHome,
     guestRoot,
     faults,
     removal,
@@ -898,47 +544,39 @@ async function fixture(
     },
     clock,
     policy,
-    guestActions,
     target: localRepositoryTargetId(local.policy.deviceId, local.policy.repositories[0].id),
   };
 }
 
-async function nativeFixture(partLimit = 1024 * 1024, nativeSize = 1024 * 1024) {
-  let actual: Awaited<ReturnType<typeof fixture>>;
-  const tls = await nativeFileTls(root, () => actual.services.fileTransfers);
-  fixtureCleanups.push(tls.close);
-  const previousHost = process.env.MOIRA_HOST;
-  try {
-    process.env.MOIRA_HOST = new URL(tls.origin).host;
-    actual = await fixture(partLimit, 10, nativeSize, tls);
-  } finally {
-    if (previousHost === undefined) delete process.env.MOIRA_HOST;
-    else process.env.MOIRA_HOST = previousHost;
-  }
-  const created = await actual.drive(
-    actual.services.resource.create("user-a", actual.target, "main"),
-  );
-  const setupId = randomUUID();
-  const provisioned = await actual.drive(
-    (async () => {
-      const deadline = Date.now() + 10_000;
-      while (true) {
-        const result = await actual.services.file.ensureFileClient("user-a", created.resource.id, {
-          requestId: setupId,
-        });
-        if (result.provisioned) return result;
-        if (Date.now() >= deadline) throw new Error("Local file client did not settle");
-        await new Promise<void>((done) => setImmediate(done));
-      }
-    })(),
-    true,
-  );
-  expect(provisioned.command).toBe(join(actual.guestHome, ".local/bin/moira-files"));
-  expect(provisioned.executableSha256).toBe(provisioned.cliSha256);
-  return { actual, created, provisioned };
-}
-
 describe("actual local-only service composition and outbound relay", () => {
+  test("default Local composition creates and restarts the same owned VM when GitHub is disabled", async () => {
+    const previous = process.env.CODESPACE_CODESPACES_ENABLED;
+    process.env.CODESPACE_CODESPACES_ENABLED = "false";
+    try {
+      expect(getCodespaceResourcePolicy().enabled).toBe(false);
+      const actual = await fixture(true);
+      const created = await actual.drive(
+        actual.services.resource.create("user-a", actual.target, "main"),
+      );
+      const localId = await actual.localSpaceId(created.resource);
+      expect(created.resource.state).toBe("usable");
+      await actual.drive(actual.services.resource.stopCodespace("user-a", created.resource.id));
+      expect(actual.physical.get(localId)).toBe("stopped");
+      actual.manager.dependencies.brokerPorts = { http: 0, tunnel: 0 };
+      await actual.manager.open();
+      const restarted = await actual.drive(
+        actual.services.resource.startCodespace("user-a", created.resource.id),
+      );
+      expect(restarted).toMatchObject({ id: created.resource.id, state: "usable" });
+      expect(await actual.localSpaceId(restarted)).toBe(localId);
+      expect(await actual.local.records.list()).toHaveLength(1);
+      expect(actual.physical.get(localId)).toBe("running");
+    } finally {
+      if (previous === undefined) delete process.env.CODESPACE_CODESPACES_ENABLED;
+      else process.env.CODESPACE_CODESPACES_ENABLED = previous;
+    }
+  });
+
   test.each([-5000, 5000])(
     "fresh full-window creation becomes usable when the server clock offset is %s ms",
     async (serverOffsetMs) => {
@@ -1047,244 +685,7 @@ describe("actual local-only service composition and outbound relay", () => {
     }
   });
 
-  test.each(["exec", "write"] as const)(
-    "explicit stop cancels %s held before relay enqueue without blocking fresh work or prior results",
-    async (kind) => {
-      const actual = await fixture();
-      const created = await actual.drive(
-        actual.services.resource.create("user-a", actual.target, "main"),
-      );
-      const retained = await actual.drive(
-        actual.services.operation.execute("user-a", created.resource.id, {
-          argv: ["echo", "prior result"],
-          stdin: { kind: "inline", bytes: new Uint8Array() },
-        }),
-      );
-      actual.manager.dependencies.brokerPorts = { http: 0, tunnel: 0 };
-      await actual.manager.open();
-      let releaseInput!: () => void, observeInput!: () => void;
-      const inputHeld = new Promise<void>((resolve) => {
-        observeInput = resolve;
-      });
-      const allowInput = new Promise<void>((resolve) => {
-        releaseInput = resolve;
-      });
-      const retainPayload = actual.services.transfer.retainRelayPayload.bind(
-        actual.services.transfer,
-      );
-      let heldIntent: { requestId: string; remoteMarker: string } | null = null;
-      actual.services.transfer.retainRelayPayload = async (userId, purpose, bytes) => {
-        if (purpose === "local_relay_input" && heldIntent === null) {
-          const envelope = JSON.parse(Buffer.from(bytes).toString("utf8")) as {
-            id: string;
-            request: { action: string; job?: { action: string; remoteMarker: string } };
-          };
-          if (
-            envelope.request.action === "operation" &&
-            envelope.request.job?.action === (kind === "exec" ? "execute" : "file-execute")
-          ) {
-            heldIntent = {
-              requestId: envelope.id,
-              remoteMarker: envelope.request.job.remoteMarker,
-            };
-            observeInput();
-            await allowInput;
-          }
-        }
-        return retainPayload(userId, purpose, bytes);
-      };
-      const submitted =
-        kind === "exec"
-          ? actual.services.operation.execute("user-a", created.resource.id, {
-              argv: ["echo", "must not execute"],
-              stdin: { kind: "inline", bytes: new Uint8Array() },
-            })
-          : actual.services.file.execute("user-a", created.resource.id, {
-              action: "write",
-              path: "must-not-exist.txt",
-              bytes: Buffer.from("never delivered"),
-              expected: { exists: false },
-            });
-      const outcome = submitted.then(
-        (value) => ({ value }),
-        (error: unknown) => ({ error }),
-      );
-      try {
-        await inputHeld;
-        const intent = heldIntent!;
-        expect(actual.services.devices.getRequest("user-a", intent.requestId)).toBeNull();
-        const oldOperation = sqlite
-          .prepare("SELECT id,state FROM codespaceOperation WHERE remoteMarker=?")
-          .get(intent.remoteMarker) as { id: string; state: string };
-        expect(oldOperation.state).toBe("reconcile_pending");
-        expect(
-          await actual.drive(actual.services.resource.stopCodespace("user-a", created.resource.id)),
-        ).toMatchObject({ state: "stopped" });
-        expect(
-          await actual.drive(
-            actual.services.resource.startCodespace("user-a", created.resource.id),
-          ),
-        ).toMatchObject({ state: "usable" });
-        expect(actual.services.devices.getRequest("user-a", intent.requestId)).toBeNull();
-        expect(actual.services.operation.get("user-a", oldOperation.id)).toMatchObject({
-          state: "cancel_pending",
-        });
-        releaseInput();
-        expect(await actual.drive(outcome)).toMatchObject({
-          error: {
-            code: "CODESPACE_OPERATION_CANCELLED",
-            operationId: oldOperation.id,
-          },
-        });
-        expect(actual.services.operation.get("user-a", oldOperation.id)).toMatchObject({
-          state: "cancelled",
-          remoteCleanupPending: 0,
-        });
-        expect(actual.guestActions.filter((action) => action === "execute")).toHaveLength(1);
-        expect(actual.guestActions.filter((action) => action === "file-execute")).toHaveLength(0);
-        expect(
-          await actual.state.read(`effect-${intent.remoteMarker}.json`, (value) => value),
-        ).toBeNull();
-        await expect(readFile(join(actual.guestRoot, "must-not-exist.txt"))).rejects.toMatchObject({
-          code: "ENOENT",
-        });
-        const fresh = await actual.drive(
-          actual.services.operation.execute("user-a", created.resource.id, {
-            argv: ["echo", "fresh result"],
-            stdin: { kind: "inline", bytes: new Uint8Array() },
-          }),
-        );
-        expect(fresh.result).toMatchObject({ state: "succeeded", stdout: "fresh result" });
-        await expect(
-          actual.drive(actual.services.operation.reconcile("user-a", retained.operation.id)),
-        ).resolves.toMatchObject({ state: "succeeded", stdout: "prior result" });
-        expect(actual.guestActions.filter((action) => action === "execute")).toHaveLength(2);
-        expect(actual.guestActions.filter((action) => action === "file-execute")).toHaveLength(0);
-      } finally {
-        releaseInput();
-        actual.services.transfer.retainRelayPayload = retainPayload;
-        await actual.drive(outcome);
-      }
-    },
-  );
-
-  test("cleanup retries an already finalized marker after a lost server commit without replaying execution", async () => {
-    const actual = await fixture();
-    const created = await actual.drive(
-      actual.services.resource.create("user-a", actual.target, "main"),
-    );
-    const completed = await actual.drive(
-      actual.services.operation.execute("user-a", created.resource.id, {
-        argv: ["echo", "retained until cleanup"],
-        stdin: { kind: "inline", bytes: new Uint8Array() },
-      }),
-    );
-    actual.clock.now += actual.policy.cleanupDeadlineMs + 1;
-    expect(await actual.drive(actual.services.operation.reconcileOnce("user-a"))).toBe(true);
-    expect(actual.services.operation.get("user-a", completed.operation.id)).toMatchObject({
-      state: "succeeded",
-      remoteCleanupPending: 0,
-    });
-    // The remote finalization completed, but the server's final flag was lost.
-    sqlite
-      .prepare("UPDATE codespaceOperation SET remoteCleanupPending=1 WHERE id=?")
-      .run(completed.operation.id);
-    actual.clock.now++;
-    expect(await actual.drive(actual.services.operation.reconcileOnce("user-a"))).toBe(true);
-    expect(actual.services.operation.get("user-a", completed.operation.id)).toMatchObject({
-      state: "succeeded",
-      remoteCleanupPending: 0,
-    });
-    expect(actual.guestActions.filter((action) => action === "execute")).toHaveLength(1);
-  });
-
-  test.each(["exec", "write"] as const)(
-    "explicit stop cancels undelivered %s so restart admits only fresh work and preserves prior results",
-    async (kind) => {
-      const actual = await fixture();
-      const created = await actual.drive(
-        actual.services.resource.create("user-a", actual.target, "main"),
-      );
-      const retained = await actual.drive(
-        actual.services.operation.execute("user-a", created.resource.id, {
-          argv: ["echo", "prior result"],
-          stdin: { kind: "inline", bytes: new Uint8Array() },
-        }),
-      );
-      actual.manager.dependencies.brokerPorts = { http: 0, tunnel: 0 };
-      await actual.manager.open();
-      let releaseInput!: () => void, observeInput!: () => void;
-      const inputHeld = new Promise<void>((resolve) => {
-        observeInput = resolve;
-      });
-      const allowInput = new Promise<void>((resolve) => {
-        releaseInput = resolve;
-      });
-      actual.faults.beforePayload = async (_requestId, signal) => {
-        actual.faults.beforePayload = null;
-        observeInput();
-        await Promise.race([
-          allowInput,
-          new Promise<never>((_resolve, reject) => {
-            if (signal?.aborted) reject(signal.reason);
-            else signal?.addEventListener("abort", () => reject(signal.reason), { once: true });
-          }),
-        ]);
-      };
-      const submitted =
-        kind === "exec"
-          ? actual.services.operation.execute("user-a", created.resource.id, {
-              argv: ["echo", "must not execute"],
-              background: true,
-              stdin: { kind: "inline", bytes: new Uint8Array() },
-            })
-          : actual.services.file.execute("user-a", created.resource.id, {
-              action: "write",
-              path: "must-not-exist.txt",
-              bytes: Buffer.from("never delivered"),
-              expected: { exists: false },
-            });
-      const old = actual.drive<unknown>(submitted, true).then(
-        (value) => ({ value }),
-        (error: unknown) => ({ error }),
-      );
-      try {
-        await inputHeld;
-        await actual.drive(
-          actual.services.resource.stopCodespace("user-a", created.resource.id),
-          true,
-        );
-        await actual.drive(
-          actual.services.resource.startCodespace("user-a", created.resource.id),
-          true,
-        );
-        releaseInput();
-        const oldOutcome = await old;
-        expect(oldOutcome).toMatchObject({
-          error: { code: "CODESPACE_PROVIDER_UNAVAILABLE", operationId: expect.any(String) },
-        });
-        expect(actual.guestActions.filter((action) => action === "execute")).toHaveLength(1);
-        expect(actual.guestActions.filter((action) => action === "file-execute")).toHaveLength(0);
-        const fresh = await actual.drive(
-          actual.services.operation.execute("user-a", created.resource.id, {
-            argv: ["echo", "fresh result"],
-            stdin: { kind: "inline", bytes: new Uint8Array() },
-          }),
-        );
-        expect(fresh.result).toMatchObject({ state: "succeeded", stdout: "fresh result" });
-        await expect(
-          actual.drive(actual.services.operation.reconcile("user-a", retained.operation.id)),
-        ).resolves.toMatchObject({ state: "succeeded", stdout: "prior result" });
-        expect(actual.guestActions.filter((action) => action === "execute")).toHaveLength(2);
-        expect(actual.guestActions.filter((action) => action === "file-execute")).toHaveLength(0);
-      } finally {
-        releaseInput();
-        await old;
-      }
-    },
-  );
-
-  test("a stopped native VM refreshes only its stale server row and the next command starts it without replaying the refused write", async () => {
+  test("a stopped native VM refreshes only its stale server row and ordinary lifecycle starts the same VM", async () => {
     const actual = await fixture();
     const created = await actual.drive(
       actual.services.resource.create("user-a", actual.target, "main"),
@@ -1306,16 +707,11 @@ describe("actual local-only service composition and outbound relay", () => {
     });
     actual.physical.set(localId, "stopped");
     actual.clock.now += 1000;
-    await expect(
-      actual.drive(
-        actual.services.file.execute("user-a", created.resource.id, {
-          action: "write",
-          path: "never-written.txt",
-          bytes: Buffer.from("not replayed"),
-          expected: { exists: false },
-        }),
-      ),
-    ).rejects.toMatchObject({ code: "CODESPACE_NOT_RUNNING" });
+    await actual.drive(
+      actual.services.resource.refreshProviderState("user-a", {
+        codespaceId: created.resource.id,
+      }),
+    );
     expect(actual.services.resource.getCodespace("user-a", created.resource.id)).toMatchObject({
       observedState: "stopped",
       observedAt: actual.clock.now,
@@ -1323,20 +719,10 @@ describe("actual local-only service composition and outbound relay", () => {
     expect(actual.services.resource.getCodespace("user-a", peer.resource.id)).toEqual(
       peer.resource,
     );
-    expect(actual.guestActions.filter((action) => action === "file-execute")).toHaveLength(0);
     const restarted = await actual.drive(
-      actual.services.operation.execute("user-a", created.resource.id, {
-        argv: ["echo", "recovered normally"],
-        stdin: { kind: "inline", bytes: new Uint8Array() },
-      }),
+      actual.services.resource.ensureRunning("user-a", created.resource.id),
     );
-    expect(restarted.result).toMatchObject({
-      state: "succeeded",
-      stdout: "recovered normally",
-      exitCode: 0,
-    });
-    expect(actual.guestActions.filter((action) => action === "file-execute")).toHaveLength(0);
-    expect(actual.guestActions.filter((action) => action === "execute")).toHaveLength(1);
+    expect(restarted.state).toBe("usable");
     expect(actual.physical.get(localId)).toBe("running");
     expect(actual.services.resource.getCodespace("user-a", peer.resource.id)).toEqual(
       peer.resource,
@@ -1519,7 +905,6 @@ describe("actual local-only service composition and outbound relay", () => {
       code: "CODESPACE_LOCAL_RUNTIME_ERROR",
     });
     expect(actual.lifecycle.stopEffects).toBe(0);
-    expect(actual.guestActions).toEqual([]);
     expect(actual.physical.get(localId)).toBe("stopped");
   });
 
@@ -1806,7 +1191,7 @@ describe("actual local-only service composition and outbound relay", () => {
       claimId: row.claimId,
       digest: row.digest,
       status: row.status,
-      outcomeReference: JSON.parse(row.outputReference),
+      outcome: JSON.parse(row.outputReference),
     };
     actual.clock.now = row.deadlineAt + 1;
     const before = sqlite
@@ -1929,7 +1314,7 @@ describe("actual local-only service composition and outbound relay", () => {
         .get(pending.id) as { requestId: string; claimId: string };
       expect(actual.services.devices.getResult("user-a", accepted.requestId)).toMatchObject({
         status: "claimed",
-        outcomeReference: null,
+        outcome: null,
       });
       // Only the server's creation claim expires. Device delivery/lease clocks stay unchanged.
       sqlite
@@ -2078,13 +1463,14 @@ describe("actual local-only service composition and outbound relay", () => {
     sqlite
       .prepare("UPDATE codespaceResource SET providerResourceName=? WHERE id=?")
       .run(retainedName, created.resource.id);
-    const executed = await actual.drive(
-      actual.services.operation.execute("user-a", created.resource.id, {
-        argv: ["echo", "retained identity"],
-        stdin: { kind: "inline", bytes: new Uint8Array() },
+    await actual.drive(
+      actual.services.resource.refreshProviderState("user-a", {
+        codespaceId: created.resource.id,
       }),
     );
-    expect(executed.result?.stdout).toBe("retained identity");
+    expect(
+      (await actual.services.resource.ensureRunning("user-a", created.resource.id)).state,
+    ).toBe("usable");
     expect(
       actual.services.resource.getCodespace("user-a", created.resource.id).providerResourceName,
     ).toBe(retainedName);
@@ -2115,13 +1501,9 @@ describe("actual local-only service composition and outbound relay", () => {
       lastOutcome: "CODESPACE_LOCAL_CREATION_UNKNOWN",
     });
     expect(actual.physical.get(peerId)).toBe("running");
-    const healthy = await actual.drive(
-      actual.services.operation.execute("user-a", peer.resource.id, {
-        argv: ["echo", "peer survives unknown stop"],
-        stdin: { kind: "inline", bytes: new Uint8Array() },
-      }),
+    expect((await actual.services.resource.ensureRunning("user-a", peer.resource.id)).state).toBe(
+      "usable",
     );
-    expect(healthy.result?.stdout).toBe("peer survives unknown stop");
     actual.unknownSpaces.delete(localId);
     sqlite
       .prepare("UPDATE codespaceResource SET claimExpiresAt=NULL WHERE id=?")
@@ -2163,52 +1545,10 @@ describe("actual local-only service composition and outbound relay", () => {
     await expect(
       actual.services.resource.ensureRunning("user-a", first.resource.id),
     ).rejects.toMatchObject({ code: "CODESPACE_LOCAL_CREATION_UNKNOWN" });
-    const healthy = await actual.drive(
-      actual.services.operation.execute("user-a", second.resource.id, {
-        argv: ["echo", "peer remains usable"],
-        stdin: { kind: "inline", bytes: new Uint8Array() },
-      }),
+    expect((await actual.services.resource.ensureRunning("user-a", second.resource.id)).state).toBe(
+      "usable",
     );
-    expect(healthy.result?.stdout).toBe("peer remains usable");
   });
-
-  test.each([false, true])(
-    "a detached long command (background=%s) keeps its full execution budget and is collected without redispatch",
-    async (background) => {
-      const actual = await fixture();
-      actual.policy.maxOperationMs = 15 * 60_000;
-      actual.faults.detachExecution = true;
-      const created = await actual.drive(
-        actual.services.resource.create("user-a", actual.target, "main"),
-      );
-      const submitted = await actual.drive(
-        actual.services.operation.execute("user-a", created.resource.id, {
-          argv: ["echo", "long command result"],
-          stdin: { kind: "inline", bytes: new Uint8Array() },
-          timeoutMs: 10 * 60_000,
-          background,
-        }),
-      );
-      expect(submitted.operation.deadlineAt - actual.clock.now).toBe(10 * 60_000);
-      const completed = background
-        ? await actual.drive(actual.services.operation.reconcile("user-a", submitted.operation.id))
-        : submitted.result;
-      expect(completed).toMatchObject({ state: "succeeded", stdout: "long command result" });
-      expect(actual.guestActions.filter((action) => action === "execute")).toHaveLength(1);
-      expect(
-        await actual.state.read(
-          `effect-${submitted.operation.remoteMarker}.json`,
-          (value) => value,
-        ),
-      ).toEqual({ argv: ["echo", "long command result"], stdin: "" });
-      const delivery = sqlite
-        .prepare(
-          "SELECT MAX(deadlineAt-createdAt) AS budget FROM codespaceLocalRelay WHERE resourceId=? AND requestId IN (SELECT requestId FROM codespaceLocalRelay WHERE inputReference IS NOT NULL)",
-        )
-        .get(created.resource.id) as { budget: number };
-      expect(delivery.budget).toBeLessThanOrEqual(150_000);
-    },
-  );
 
   test("an unresolved older creation does not block a neighboring codespace and can be deleted without a VM", async () => {
     const actual = await fixture();
@@ -2353,13 +1693,7 @@ describe("actual local-only service composition and outbound relay", () => {
         "SELECT outputReference FROM codespaceLocalRelay WHERE resourceId=? AND status='completed' AND outputReference IS NOT NULL",
       )
       .all(created.resource.id) as { outputReference: string }[];
-    expect(
-      saved.some((row) =>
-        sqlite
-          .prepare("SELECT 1 FROM codespaceTransfer WHERE id=?")
-          .get(JSON.parse(row.outputReference).parts[0].transferId),
-      ),
-    ).toBe(true);
+    expect(saved.some((row) => JSON.parse(row.outputReference).ok === true)).toBe(true);
     actual.physical.set(spaceId, "stopped");
     const stopped = await actual.drive(
       actual.services.resource.stopCodespace("user-a", created.resource.id),
@@ -2459,175 +1793,7 @@ describe("actual local-only service composition and outbound relay", () => {
     expect(actual.lifecycle.stopEffects).toBe(1);
   });
 
-  test("a full native file quota leaves authenticated local lifecycle and commands operational", async () => {
-    const actual = await fixture(4 * 1024 * 1024, 1);
-    const fullBytes = 4 * 1024 * 1024;
-    actual.policy.maxTransferBytesPerUser = fullBytes;
-    actual.policy.maxTransferBytesGlobal = fullBytes;
-    actual.policy.maxTransferInflightBytesPerUser = fullBytes;
-    actual.policy.maxTransferInflightBytesGlobal = fullBytes;
-    const native = await actual.services.transfer.createDownload("user-a", {
-      fileName: "held.bin",
-      mimeType: "application/octet-stream",
-      bytes: Buffer.alloc(fullBytes),
-    });
-    await expect(
-      actual.services.transfer.createDownload("user-a", {
-        fileName: "excess.bin",
-        mimeType: "application/octet-stream",
-        bytes: Buffer.from("x"),
-      }),
-    ).rejects.toMatchObject({ code: "CODESPACE_POLICY_LIMIT" });
-    const created = await actual.drive(
-      actual.services.resource.create("user-a", actual.target, "main"),
-    );
-    expect(created.resource.state).toBe("usable");
-    const executed = await actual.drive(
-      actual.services.operation.execute("user-a", created.resource.id, {
-        argv: ["echo", "control remains usable"],
-        stdin: { kind: "inline", bytes: new Uint8Array() },
-      }),
-    );
-    expect(executed.operation.state).toBe("succeeded");
-    expect(executed.result?.stdout).toBe("control remains usable");
-    expect(new CodespaceTransferRepository(sqlite).usageForUser("user-a")).toEqual({
-      objects: 1,
-      bytes: fullBytes,
-      inflightBytes: 0,
-    });
-    const claimed = await actual.services.transfer.claimDownload(native.referenceId);
-    expect(claimed.record.observedSize).toBe(fullBytes);
-    await actual.services.transfer.consume(claimed.record);
-    expect(new CodespaceTransferRepository(sqlite).usageForUser("user-a")).toEqual({
-      objects: 0,
-      bytes: 0,
-      inflightBytes: 0,
-    });
-  });
-
-  test.each(["exec", "read"] as const)(
-    "settles an old %s marker after the server generation advances without redispatch",
-    async (kind) => {
-      const actual = await fixture();
-      const created = await actual.drive(
-        actual.services.resource.create("user-a", actual.target, "main"),
-      );
-      actual.faults.holdOperations = true;
-      await writeFile(join(actual.guestRoot, "payload.bin"), Buffer.from("retained file"));
-      const pending =
-        kind === "exec"
-          ? await actual.drive(
-              actual.services.operation.execute("user-a", created.resource.id, {
-                argv: ["echo", "old command"],
-                stdin: { kind: "inline", bytes: new Uint8Array() },
-                background: true,
-                timeoutMs: 5000,
-              }),
-            )
-          : await actual.drive(
-              actual.services.file.execute("user-a", created.resource.id, {
-                action: "read",
-                path: "payload.bin",
-                offset: 0,
-                length: 13,
-              }),
-            );
-      expect(pending.operation.state).toBe("running");
-      const originalGeneration = pending.operation.resourceGeneration;
-      sqlite
-        .prepare("UPDATE codespaceResource SET generation=generation+2 WHERE id=?")
-        .run(created.resource.id);
-      sqlite
-        .prepare(
-          "UPDATE codespaceOperation SET state='cancel_pending',claimId=NULL,claimExpiresAt=NULL WHERE id=?",
-        )
-        .run(pending.operation.id);
-      actual.faults.holdOperations = false;
-      expect(await actual.drive(actual.services.operation.reconcileOnce("user-a"))).toBe(true);
-      const settled = actual.services.operation.get("user-a", pending.operation.id)!;
-      // The substitute already completed the effect; cancellation observes that exact
-      // terminal proof rather than inventing cancellation from an absent PID/marker.
-      expect(settled.state).toBe("succeeded");
-      expect(settled.resourceGeneration).toBe(originalGeneration);
-      expect(
-        actual.guestActions.filter(
-          (action) => action === (kind === "exec" ? "execute" : "file-execute"),
-        ),
-      ).toHaveLength(1);
-      const fresh = await actual.drive(
-        actual.services.operation.execute("user-a", created.resource.id, {
-          argv: ["echo", "fresh"],
-          stdin: { kind: "inline", bytes: new Uint8Array() },
-        }),
-      );
-      expect(fresh.operation.state).toBe("succeeded");
-      expect(fresh.result?.stdout).toBe("fresh");
-    },
-  );
-
-  test.each(["name", "provider", "owner", "authorization"])(
-    "old operation recovery refuses changed %s before contacting relay",
-    async (change) => {
-      const actual = await fixture();
-      const created = await actual.drive(
-        actual.services.resource.create("user-a", actual.target, "main"),
-      );
-      const executed = await actual.drive(
-        actual.services.operation.execute("user-a", created.resource.id, {
-          argv: ["true"],
-          stdin: { kind: "inline", bytes: new Uint8Array() },
-        }),
-      );
-      const resource = { ...created.resource, generation: created.resource.generation + 1 };
-      const operation = { ...executed.operation };
-      let sends = 0;
-      class NoGuestRelay extends LocalCodespaceRelay {
-        override async send() {
-          sends++;
-          return { state: "absent" };
-        }
-      }
-      const transport = new LocalCodespaceJobTransport(
-        new NoGuestRelay(actual.services.devices, actual.services.transfer),
-      );
-      if (change === "name") operation.providerResourceName = "another-owned-space";
-      if (change === "provider") operation.provider = "github-codespaces";
-      if (change === "owner") operation.userId = "user-b";
-      if (change === "authorization") operation.authorizationGeneration++;
-      await expect(
-        transport.cancel(localCodespaceCredential("user-a"), resource, operation),
-      ).rejects.toMatchObject({ code: "CODESPACE_AUTHORIZATION_REQUIRED" });
-      expect(sends).toBe(0);
-    },
-  );
-  test.each([-2, 2])(
-    "ordinary local operations use stable identity despite a lifecycle snapshot offset %s",
-    async (offset) => {
-      const actual = await fixture();
-      const created = await actual.drive(
-        actual.services.resource.create("user-a", actual.target, "main"),
-      );
-      const first = await actual.drive(
-        actual.services.operation.execute("user-a", created.resource.id, {
-          argv: ["echo", "retained"],
-          stdin: { kind: "inline", bytes: new Uint8Array() },
-        }),
-      );
-      const operation = {
-        ...first.operation,
-        resourceGeneration: created.resource.generation + offset,
-      };
-      const transport = new LocalCodespaceJobTransport(
-        new LocalCodespaceRelay(actual.services.devices, actual.services.transfer),
-      );
-      const result = await actual.drive(
-        transport.inspect(localCodespaceCredential("user-a"), created.resource, operation),
-      );
-      expect(result).toMatchObject({ state: "succeeded", stdout: "retained", exitCode: 0 });
-      expect(actual.guestActions.filter((action) => action === "execute")).toHaveLength(1);
-    },
-  );
-  test("creates and adopts a local resource through owned SQL, private blobs, HTTP and actual RPC without GitHub OAuth", async () => {
+  test("creates and adopts a local resource through owned SQL, inline HTTP lifecycle and actual RPC without GitHub OAuth", async () => {
     const actual = await fixture();
     expect(actual.services.connection.getStatus("user-a").state).toBe("connected");
     expect(
@@ -2648,408 +1814,6 @@ describe("actual local-only service composition and outbound relay", () => {
     expect(created.resource.providerResourceName).toBe(created.resource.id);
     expect(spaces[0].operationMarker).toBe(created.resource.operationMarker);
   });
-  test("uses the adopted generation for native stdin and native binary upload/read through the actual relay", async () => {
-    const { actual, created } = await nativeFixture();
-    const reference = {
-      fileId: "file_localNative",
-      downloadUrl: "https://native.example.test/object",
-      mimeType: "application/octet-stream",
-      declaredSize: actual.nativeBytes.length,
-    };
-    const argv = [
-      process.execPath,
-      "-e",
-      "const {createHash}=require('node:crypto'); const h=createHash('sha256');process.stdin.on('data',b=>h.update(b));process.stdin.on('end',()=>process.stdout.write(h.digest('hex')));",
-      "private-argv-canary",
-    ];
-    const executed = await actual.drive(
-      actual.services.operation.executeNativeReference(
-        "user-a",
-        created.resource.id,
-        { argv },
-        reference,
-      ),
-    );
-    if (executed.operation.state !== "succeeded") {
-      const rows = sqlite
-        .prepare("SELECT requestId FROM codespaceLocalRelay WHERE status='refused'")
-        .all() as { requestId: string }[];
-      const errors = [];
-      for (const row of rows) {
-        const result = actual.services.devices.getResult("user-a", row.requestId)!;
-        if (result.outcomeReference) {
-          const bytes = await actual.services.transfer.readRelayPayload(
-            "user-a",
-            "local_relay_output",
-            result.outcomeReference,
-          );
-          errors.push(JSON.parse(bytes.toString()).error);
-        }
-      }
-      throw new Error(`Native execution ${executed.operation.state}: ${JSON.stringify(errors)}`);
-    }
-    expect(executed.operation.state).toBe("succeeded");
-    expect(executed.result?.stdout).toBe(hash(actual.nativeBytes));
-    const effect = await actual.state.read(
-      `effect-${executed.operation.remoteMarker}.json`,
-      (value) => value,
-    );
-    expect(effect).toEqual({
-      argv,
-      stdin: actual.nativeBytes.toString("base64"),
-    });
-    const uploaded = await actual.drive(
-      actual.services.file
-        .uploadReference("user-a", created.resource.id, {
-          requestId: randomUUID(),
-          path: "payload.bin",
-          reference,
-          expected: { exists: false },
-        })
-        .then((response) => actual.services.file.waitForResult("user-a", response.operation.id)),
-    );
-    expect(uploaded.operation.state).toBe("succeeded");
-    expect(await readFile(join(actual.guestRoot, "payload.bin"))).toEqual(actual.nativeBytes);
-    const read = await actual.drive(
-      actual.services.file.execute("user-a", created.resource.id, {
-        action: "read",
-        path: "payload.bin",
-        offset: 0,
-        length: actual.nativeBytes.length,
-      }),
-    );
-    expect(read.operation.state).toBe("succeeded");
-    expect(read.result).toMatchObject({
-      action: "read",
-      path: "payload.bin",
-      sha256: hash(actual.nativeBytes),
-      rangeSha256: hash(actual.nativeBytes),
-    });
-    expect(read.result && "bytes" in read.result ? Buffer.from(read.result.bytes) : null).toEqual(
-      actual.nativeBytes,
-    );
-    expect(sqlite.serialize().includes(Buffer.from("private-argv-canary"))).toBe(false);
-    const readRows = sqlite
-      .prepare(
-        "SELECT requestId FROM codespaceLocalRelay WHERE status='completed' AND json_array_length(outputReference,'$.parts')>1",
-      )
-      .all() as { requestId: string }[];
-    expect(readRows.length).toBeGreaterThanOrEqual(1);
-    for (const row of readRows) {
-      const reference = actual.services.devices.getResult(
-        "user-a",
-        row.requestId,
-      )!.outcomeReference!;
-      expect(reference.parts.length).toBeGreaterThan(1);
-      expect(reference.parts.every((part) => part.size <= 1024 * 1024)).toBe(true);
-    }
-    expect(
-      sqlite
-        .prepare("SELECT COUNT(*) count FROM codespaceLocalRelay WHERE status='completed'")
-        .get(),
-    ).toMatchObject({ count: expect.any(Number) });
-  });
-  test("streams large native files through the actual Local relay and retains the original committed identity", async () => {
-    const { actual, created } = await nativeFixture(20 * 1024 ** 2, 5);
-    const reference = {
-      fileId: "file_localLarge",
-      downloadUrl: "https://native.example.test/object",
-      mimeType: "application/octet-stream",
-    };
-    const largeRequestId = randomUUID();
-    const largeRequest = {
-      requestId: largeRequestId,
-      path: "large.bin",
-      reference: {
-        ...reference,
-        fileId: "file_localLarge",
-        declaredSize: actual.largeNativeBytes.length,
-      },
-      expected: { exists: false as const },
-    };
-    const largeUpload = await actual.drive(
-      actual.services.file
-        .uploadReference("user-a", created.resource.id, largeRequest)
-        .then(async (response) => {
-          try {
-            return await actual.services.file.waitForResult("user-a", response.operation.id);
-          } catch {
-            const current = sqlite
-              .prepare(
-                "SELECT state,createdAt,deadlineAt,remoteMarker FROM codespaceOperation WHERE id=?",
-              )
-              .get(response.operation.id) as {
-              state: string;
-              createdAt: number;
-              deadlineAt: number;
-              remoteMarker: string;
-            };
-            const progress = await readFile(
-              join(root, "guest-state", current.remoteMarker, "transfer.json"),
-              "utf8",
-            )
-              .then((text) => JSON.parse(text) as { offset: number; state: string })
-              .catch(() => null);
-            const proof = await readFile(
-              join(root, "guest-state", current.remoteMarker, "file-proof.json"),
-              "utf8",
-            )
-              .then(
-                (text) =>
-                  JSON.parse(text) as {
-                    startedAt?: number;
-                    admissionDeadlineAt?: number;
-                    notStarted?: boolean;
-                  },
-              )
-              .catch(() => null);
-            throw new Error(
-              `Local native wait unconfirmed: phase=${current.state}, elapsed=${Date.now() - current.createdAt}, budget=${current.deadlineAt - current.createdAt}, offset=${progress?.offset ?? "none"}, progress=${progress?.state ?? "none"}, started=${proof?.startedAt !== undefined}, negative=${proof?.notStarted === true}, guestContacts=${actual.guestActions.length}`,
-            );
-          }
-        }),
-      true,
-    );
-    if (largeUpload.operation.state !== "succeeded") {
-      const receipt = JSON.parse(
-        await readFile(
-          join(root, "guest-state", largeUpload.operation.remoteMarker, "result.json"),
-          "utf8",
-        ),
-      ) as { state?: string; exitCode?: number; stderrBase64?: string };
-      const diagnostic = Buffer.from(receipt.stderrBase64 ?? "", "base64").toString("utf8");
-      const safeCode =
-        diagnostic.match(/\b(?:CODESPACE|TRANSFER)_[A-Z_]+\b/)?.[0] ?? "unclassified";
-      throw new Error(
-        `Local native transfer failed: state=${receipt.state}, exit=${receipt.exitCode}, code=${safeCode}`,
-      );
-    }
-    expect(largeUpload.operation.state).toBe("succeeded");
-    const target = join(actual.guestRoot, "large.bin");
-    expect(lstatSync(target).size).toBe(actual.largeNativeBytes.length);
-    expect(hash(await readFile(target))).toBe(hash(actual.largeNativeBytes));
-    const identity = lstatSync(target, { bigint: true });
-    const fetched = actual.nativeFetches();
-    const replay = await actual.drive(
-      actual.services.file.uploadReference("user-a", created.resource.id, largeRequest),
-      true,
-    );
-    expect(replay.operation.id).toBe(largeUpload.operation.id);
-    expect(lstatSync(target, { bigint: true }).ino).toBe(identity.ino);
-    expect(actual.nativeFetches()).toBe(fetched);
-    const largeRange = await actual.drive(
-      actual.services.file.execute("user-a", created.resource.id, {
-        action: "read",
-        path: "large.bin",
-        offset: 0,
-        length: 4 * 1024 ** 2,
-      }),
-      true,
-    );
-    expect(largeRange.result).toMatchObject({
-      action: "read",
-      sha256: null,
-      rangeSha256: hash(actual.largeNativeBytes.subarray(0, 4 * 1024 ** 2)),
-    });
-    const downloadId = randomUUID();
-    const downloaded = await actual.drive(
-      actual.services.file
-        .downloadReference("user-a", created.resource.id, {
-          requestId: downloadId,
-          path: "large.bin",
-          maxBytes: actual.largeNativeBytes.length,
-          fileName: "large.bin",
-          mimeType: "application/octet-stream",
-        })
-        .then((response) =>
-          actual.services.file.waitForDownloadReference("user-a", response.operation.id, {
-            fileName: "large.bin",
-            mimeType: "application/octet-stream",
-          }),
-        )
-        .catch((cause: unknown) => {
-          throw new Error(
-            `Local download collection refused: ${JSON.stringify(actual.rpcTrace())}`,
-            { cause },
-          );
-        }),
-      true,
-    );
-    expect(downloaded.transfer?.sha256).toBe(hash(actual.largeNativeBytes));
-    const beforeStatus = actual.guestActions.length;
-    const status = await actual.services.file.transferStatus("user-a", created.resource.id, {
-      requestId: downloadId,
-    });
-    expect(status).toMatchObject({
-      transfer: { state: "ready", size: actual.largeNativeBytes.length },
-    });
-    expect(actual.guestActions).toHaveLength(beforeStatus);
-    const claimed = await actual.services.transfer.claimDownload(downloaded.transfer!.referenceId);
-    const received = createHash("sha256");
-    let size = 0;
-    for await (const chunk of claimed.stream) {
-      size += chunk.byteLength;
-      received.update(chunk);
-    }
-    expect(size).toBe(actual.largeNativeBytes.length);
-    expect(received.digest("hex")).toBe(hash(actual.largeNativeBytes));
-    await actual.services.transfer.consume(claimed.record);
-  });
-
-  test("collects large metadata and retained range bytes through the actual Local relay", async () => {
-    const actual = await fixture();
-    const created = await actual.drive(
-      actual.services.resource.create("user-a", actual.target, "main"),
-    );
-    const totalSize = 8 * 1024 ** 2;
-    const stat = {
-      action: "stat",
-      stat: {
-        path: "large.bin",
-        type: "file",
-        size: totalSize,
-        mode: 0o600,
-        modifiedAt: 1,
-        version: null,
-      },
-    };
-    actual.faults.fileResult = { state: "succeeded", value: stat };
-    const observed = await actual.drive(
-      actual.services.file.execute("user-a", created.resource.id, {
-        action: "stat",
-        path: "large.bin",
-      }),
-    );
-    expect(observed.operation.state).toBe("succeeded");
-    expect(observed.result).toEqual(stat);
-    const bytes = Buffer.from("selected range");
-    const offset = totalSize - bytes.length;
-    actual.faults.fileResult = {
-      state: "succeeded",
-      value: {
-        action: "read",
-        path: "large.bin",
-        offset,
-        totalSize,
-        bytesBase64: bytes.toString("base64"),
-        sha256: null,
-        rangeSha256: hash(bytes),
-      },
-    };
-    actual.faults.holdOperations = true;
-    const pending = await actual.drive(
-      actual.services.file.execute("user-a", created.resource.id, {
-        action: "read",
-        path: "large.bin",
-        offset,
-        length: bytes.length,
-      }),
-    );
-    expect(pending.operation.state).toBe("running");
-    expect(pending.result).toBeNull();
-    actual.faults.holdOperations = false;
-    actual.faults.fileResult = null;
-    const collected = await actual.drive(
-      actual.services.file.reconcile("user-a", pending.operation.id),
-    );
-    expect(collected.operation).toMatchObject({
-      id: pending.operation.id,
-      state: "succeeded",
-      outputBytes: bytes.length,
-    });
-    expect(collected.result).toEqual({
-      action: "read",
-      path: "large.bin",
-      offset,
-      totalSize,
-      bytes,
-      sha256: null,
-      rangeSha256: hash(bytes),
-    });
-    expect(actual.guestActions.filter((action) => action === "file-execute")).toHaveLength(2);
-  });
-
-  test("collects a retained legacy partial read through Local without relabeling its whole hash", async () => {
-    const actual = await fixture();
-    const created = await actual.drive(
-      actual.services.resource.create("user-a", actual.target, "main"),
-    );
-    const full = Buffer.from("before selected after");
-    const bytes = Buffer.from("selected");
-    await writeFile(join(actual.guestRoot, "payload.bin"), full);
-    actual.faults.holdOperations = true;
-    const pending = await actual.drive(
-      actual.services.file.execute("user-a", created.resource.id, {
-        action: "read",
-        path: "payload.bin",
-        offset: 7,
-        length: bytes.length,
-      }),
-    );
-    expect(pending.operation.state).toBe("running");
-    actual.faults.holdOperations = false;
-    const collected = await actual.drive(
-      actual.services.file.reconcile("user-a", pending.operation.id),
-    );
-    expect(collected.operation.state).toBe("succeeded");
-    expect(collected.result).toMatchObject({
-      action: "read",
-      bytes,
-      sha256: hash(full),
-      rangeSha256: hash(bytes),
-    });
-    expect(hash(full)).not.toBe(hash(bytes));
-    expect(actual.guestActions.filter((action) => action === "file-execute")).toHaveLength(1);
-    const contacts = actual.guestActions.length;
-    await expect(
-      actual.services.file.reconcile("user-b", pending.operation.id),
-    ).rejects.toMatchObject({ code: "CODESPACE_NOT_FOUND" });
-    expect(actual.guestActions).toHaveLength(contacts);
-  });
-
-  test("acknowledges ordinary relay effects through the active RPC journal", async () => {
-    const actual = await fixture();
-    const acknowledged = jest.spyOn(actual.rpc.journal, "acknowledge");
-    const created = await actual.drive(
-      actual.services.resource.create("user-a", actual.target, "main"),
-    );
-    acknowledged.mockClear();
-    const executed = await actual.drive(
-      actual.services.operation.execute("user-a", created.resource.id, {
-        argv: ["echo", "one retained effect"],
-        stdin: { kind: "inline", bytes: new Uint8Array() },
-      }),
-    );
-    await actual.relay.drain();
-    expect(executed.result).toMatchObject({ state: "succeeded", stdout: "one retained effect" });
-    expect(actual.guestActions.filter((action) => action === "execute")).toHaveLength(1);
-    const requests = [];
-    for (const key of await actual.state.keys("relay-request-")) {
-      const intent = await actual.state.read(
-        key,
-        (value) =>
-          value as {
-            message: { id: string; request: { job?: { action?: string; remoteMarker?: string } } };
-          },
-      );
-      if (
-        intent?.message.request.job?.action === "execute" &&
-        intent.message.request.job.remoteMarker === executed.operation.remoteMarker
-      )
-        requests.push(intent.message.id);
-    }
-    expect(requests).toHaveLength(1);
-    expect(acknowledged).toHaveBeenCalledWith(requests[0], true);
-    const entries = await actual.state.read(
-      "requests.json",
-      (value) => value as Array<{ id: string; state: string; settled?: boolean }>,
-    );
-    for (const [id] of acknowledged.mock.calls)
-      expect(entries?.find((entry) => entry.id === id)).toMatchObject({
-        state: "complete",
-        settled: true,
-      });
-  });
 
   test("recovers a lost acknowledged create response without creating a second local sandbox", async () => {
     const actual = await fixture();
@@ -3062,19 +1826,14 @@ describe("actual local-only service composition and outbound relay", () => {
     expect(await actual.local.records.list()).toHaveLength(1);
     const requests = sqlite
       .prepare(
-        `SELECT requestId FROM codespaceLocalRelay r WHERE status='completed'
-      AND EXISTS(SELECT 1 FROM codespaceTransfer t WHERE t.id=json_extract(r.inputReference,'$.parts[0].transferId'))`,
+        `SELECT requestId FROM codespaceLocalRelay WHERE status='completed'
+         AND json_extract(inputReference,'$.request.action')='create'`,
       )
       .all() as { requestId: string }[];
     const creates = [];
     for (const row of requests) {
       const entry = actual.services.devices.getRequest("user-a", row.requestId)!;
-      const bytes = await actual.services.transfer.readRelayPayload(
-        "user-a",
-        "local_relay_input",
-        entry.payloadReference,
-      );
-      if (JSON.parse(bytes.toString()).request.action === "create") creates.push(entry);
+      if (entry.payload.request.action === "create") creates.push(entry);
     }
     expect(creates).toHaveLength(1);
   });
@@ -3105,51 +1864,5 @@ describe("actual local-only service composition and outbound relay", () => {
     await expect(actual.relay.poll(actual.rpc)).rejects.toMatchObject({
       code: "LOCAL_UNAUTHORIZED",
     });
-  });
-  test("collects transient relay payloads while durable command results retain their own bounded control accounting", async () => {
-    const actual = await fixture(4 * 1024 * 1024, 10);
-    const created = await actual.drive(
-      actual.services.resource.create("user-a", actual.target, "main"),
-    );
-    for (let index = 0; index < 12; index++) {
-      const text = `guest-output-${index}`;
-      const executed = await actual.drive(
-        actual.services.operation.execute("user-a", created.resource.id, {
-          argv: ["echo", text],
-          stdin: { kind: "inline", bytes: new Uint8Array() },
-        }),
-      );
-      expect(executed.operation.state).toBe("succeeded");
-      expect(executed.result?.stdout).toBe(text);
-      const transient = sqlite
-        .prepare(
-          "SELECT COUNT(*) count FROM codespaceTransfer WHERE userId='user-a' AND purpose IN ('local_relay_input','local_relay_output')",
-        )
-        .get() as { count: number };
-      expect(transient.count).toBeLessThanOrEqual(2);
-      expect(
-        sqlite
-          .prepare(
-            "SELECT COUNT(*) count FROM codespaceTransfer WHERE userId='user-a' AND purpose='operation_result'",
-          )
-          .get(),
-      ).toEqual({ count: index + 1 });
-      expect(new CodespaceTransferRepository(sqlite).usageForUser("user-a")).toEqual({
-        objects: 0,
-        bytes: 0,
-        inflightBytes: 0,
-      });
-    }
-    expect(
-      sqlite.prepare("SELECT COUNT(*) count FROM codespaceOperation WHERE state='succeeded'").get(),
-    ).toEqual({ count: 12 });
-    const expires = sqlite
-      .prepare("SELECT MAX(expiresAt) expiresAt FROM codespaceTransfer WHERE userId='user-a'")
-      .get() as { expiresAt: number };
-    actual.clock.now = expires.expiresAt + 1;
-    await actual.services.transfer.cleanup();
-    expect(
-      sqlite.prepare("SELECT COUNT(*) count FROM codespaceTransfer WHERE userId='user-a'").get(),
-    ).toEqual({ count: 0 });
   });
 });

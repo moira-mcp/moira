@@ -3,17 +3,12 @@ import {
   codespaceConnectionEventsTotal,
   codespaceConnectorAvailableGauge,
   codespaceLifecycleEventsTotal,
-  codespaceOperationDurationSeconds,
-  codespaceOperationEventsTotal,
   codespaceReadyGauge,
   codespaceReconciliationDueGauge,
   codespaceReconciliationOldestDueAgeSeconds,
   codespaceRejectionsTotal,
-  codespaceTransferLiveBytesGauge,
 } from "../metrics/index.js";
 import type { CodespaceConnectionAuditEvent } from "./connection-service.js";
-import type { CodespaceOperationRepository } from "./operation-repository.js";
-import type { CodespaceOperationAuditEvent } from "./operation-service.js";
 import type { CodespaceResourceRepository } from "./resource-repository.js";
 import type { CodespaceResourceAuditEvent } from "./resource-service.js";
 import type {
@@ -21,9 +16,7 @@ import type {
   CodespaceResourcePolicy,
   CodespaceTransportAvailability,
 } from "./resource-types.js";
-import type { CodespaceTransferRepository } from "./transfer-repository.js";
 import { CODESPACE_IDLE_TIMEOUT_MINUTES } from "./resource-repository.js";
-import { effectiveCodespaceLimits } from "./resource-policy.js";
 import { CODESPACE_PROVIDER_LOCAL } from "./local-device-types.js";
 import { LOCAL_CODESPACE_FAILURE_GUIDANCE } from "./local-failure-guidance.js";
 import {
@@ -32,8 +25,6 @@ import {
   type CodespaceProviderBillingView,
   type CodespaceReadinessView,
 } from "./views.js";
-
-const TERMINAL_OPERATION_STATES = new Set(["succeeded", "failed", "cancelled", "timed_out"]);
 
 /** Count a provider connection audit event (start/complete/refresh_failed/disconnect). */
 export function recordCodespaceConnectionEvent(event: CodespaceConnectionAuditEvent): void {
@@ -49,30 +40,6 @@ export function recordCodespaceResourceEvent(event: CodespaceResourceAuditEvent)
   });
 }
 
-/**
- * Count a codespace operation audit event and, for terminal outcomes, observe the
- * reservation-to-terminal duration.
- */
-export function recordCodespaceOperationEvent(
-  event: CodespaceOperationAuditEvent,
-  durationMs?: number,
-): void {
-  codespaceOperationEventsTotal.inc({
-    provider: event.provider,
-    kind: event.kind,
-    action: event.action,
-    state: event.state,
-  });
-  if (event.action === "terminal" && TERMINAL_OPERATION_STATES.has(event.state)) {
-    if (durationMs !== undefined && durationMs >= 0) {
-      codespaceOperationDurationSeconds.observe(
-        { kind: event.kind, state: event.state },
-        durationMs / 1000,
-      );
-    }
-  }
-}
-
 /** Resource error codes plus the MCP-layer schema refusal, all bounded pre-provider labels. */
 const REJECTION_CODES: ReadonlySet<string> = new Set<
   CodespaceResourceErrorCode | "CODESPACE_REQUEST_INVALID"
@@ -80,8 +47,6 @@ const REJECTION_CODES: ReadonlySet<string> = new Set<
   "CODESPACE_PROVIDER_DISABLED",
   "CODESPACE_PROVIDER_UNAVAILABLE",
   "CODESPACE_POLICY_LIMIT",
-  "CODESPACE_SESSION_UNAVAILABLE",
-  "CODESPACE_OPERATION_BUSY",
   "CODESPACE_AUTHORIZATION_REQUIRED",
   "CODESPACE_NOT_RUNNING",
   "CODESPACE_START_TIMEOUT",
@@ -104,11 +69,6 @@ export interface CodespaceObservabilityDependencies {
     CodespaceResourceRepository,
     "listControls" | "countActive" | "dueSummary" | "countHeld" | "idlePolicy"
   >;
-  operations: Pick<
-    CodespaceOperationRepository,
-    "countActive" | "dueSummary" | "countActiveForUser"
-  >;
-  transfers: Pick<CodespaceTransferRepository, "listLive" | "usageForUser">;
   /** Present only when the provider composition exists; absent while configuration is missing. */
   transport: CodespaceTransportAvailability | null;
   /** Optional provider usage reader; local limits remain available when it fails. */
@@ -201,8 +161,6 @@ export class CodespaceObservabilityService {
       policy: this.dependencies.policy(),
       held: this.dependencies.resources.countHeld(userId, provider),
       instanceHeld: this.dependencies.resources.countActive(provider),
-      activeOperations: this.dependencies.operations.countActiveForUser(userId, provider),
-      transfers: this.dependencies.transfers.usageForUser(userId),
       idle: this.dependencies.resources.idlePolicy(userId),
       providerIdleMaxMinutes: CODESPACE_IDLE_TIMEOUT_MINUTES.maximum,
     });
@@ -228,7 +186,6 @@ export class CodespaceObservabilityService {
     const provider = this.dependencies.providerId;
     const config = this.dependencies.config();
     const policy = this.dependencies.policy();
-    const limits = effectiveCodespaceLimits(policy);
     const controls = this.dependencies.resources.listControls(provider).map((control) => ({
       scope: control.scope,
       disabled: control.disabled,
@@ -236,14 +193,6 @@ export class CodespaceObservabilityService {
       updated_at: control.updatedAt,
     }));
     const resourceDue = this.dependencies.resources.dueSummary(now);
-    const operationDue = this.dependencies.operations.dueSummary(now);
-    const oldest = [resourceDue.oldestUpdatedAt, operationDue.oldestUpdatedAt].filter(
-      (value): value is number => value !== null,
-    );
-    const transferLiveBytes = this.dependencies.transfers
-      .listLive()
-      .reduce((sum, record) => sum + (record.observedSize ?? record.declaredSize), 0);
-
     let connector: CodespaceReadinessView["connector"] = {
       state: "not_applicable",
       reason: null,
@@ -287,32 +236,23 @@ export class CodespaceObservabilityService {
       connector,
       reconciliation: {
         due_resources: resourceDue.count,
-        due_operations: operationDue.count,
-        oldest_due_age_ms: oldest.length > 0 ? Math.max(0, now - Math.min(...oldest)) : null,
+        oldest_due_age_ms:
+          resourceDue.oldestUpdatedAt === null
+            ? null
+            : Math.max(0, now - resourceDue.oldestUpdatedAt),
       },
       usage: {
         active_resources: this.dependencies.resources.countActive(provider),
         max_active_resources: provider === CODESPACE_PROVIDER_LOCAL ? null : policy.maxActiveGlobal,
-        active_operations: this.dependencies.operations.countActive(provider),
-        // The ceilings enforcement applies, from the one limits source, not the raw policy value.
-        max_active_operations:
-          provider === CODESPACE_PROVIDER_LOCAL ? null : limits.operations.maxConcurrentGlobal,
-        transfer_live_bytes: transferLiveBytes,
-        max_transfer_live_bytes:
-          limits.transfers.maxBytesGlobal + limits.relayTransfers.maxBytesGlobal,
       },
       checked_at: now,
     };
-    this.project(view, resourceDue.oldestUpdatedAt, operationDue.oldestUpdatedAt);
+    this.project(view, resourceDue.oldestUpdatedAt);
     this.last = view;
     return view;
   }
 
-  private project(
-    view: CodespaceReadinessView,
-    oldestResource: number | null,
-    oldestOperation: number | null,
-  ): void {
+  private project(view: CodespaceReadinessView, oldestResource: number | null): void {
     const now = view.checked_at;
     codespaceReadyGauge.set({ provider: view.provider }, view.state === "ready" ? 1 : 0);
     codespaceConnectorAvailableGauge.set(
@@ -320,18 +260,11 @@ export class CodespaceObservabilityService {
       view.connector.state === "available" ? 1 : 0,
     );
     codespaceReconciliationDueGauge.set({ kind: "resource" }, view.reconciliation.due_resources);
-    codespaceReconciliationDueGauge.set({ kind: "operation" }, view.reconciliation.due_operations);
     codespaceReconciliationOldestDueAgeSeconds.set(
       { kind: "resource" },
       oldestResource === null ? 0 : Math.max(0, now - oldestResource) / 1000,
     );
-    codespaceReconciliationOldestDueAgeSeconds.set(
-      { kind: "operation" },
-      oldestOperation === null ? 0 : Math.max(0, now - oldestOperation) / 1000,
-    );
     codespaceActiveGauge.set({ kind: "resource" }, view.usage.active_resources);
-    codespaceActiveGauge.set({ kind: "operation" }, view.usage.active_operations);
-    codespaceTransferLiveBytesGauge.set(view.usage.transfer_live_bytes);
   }
 
   /** Refresh the gauges periodically so `/metrics` stays current without a request. */

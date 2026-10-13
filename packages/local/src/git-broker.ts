@@ -114,6 +114,9 @@ export function gitBroker(
           reply.pipe(response);
         },
       );
+      upstream.once("socket", (socket) => {
+        socket.once("secureConnect", () => upstream.setTimeout(0));
+      });
       const lifetime = setTimeout(
         () => upstream.destroy(),
         Math.max(1, grant.policy.leaseUntil - Date.now()),

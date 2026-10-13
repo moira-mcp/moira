@@ -21,6 +21,8 @@
     "./git-ref": "./src/codespaces/git-ref.ts",
     "./local-management-types": "./src/codespaces/local-management-types.ts",
     "./local-device-types": "./src/codespaces/local-device-types.ts",
+    "./workspace-request-id": "./src/codespaces/workspace-request-id.ts",
+    "./workspace-transport": "./src/codespaces/workspace-transport.ts",
     "./execution-management": "./src/types/execution-management.ts",
     "./logging/logger": "./src/logging/logger.ts",
     "./config/env": "./src/config/env.ts",

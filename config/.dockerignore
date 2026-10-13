@@ -123,6 +123,8 @@ temp/
 *.nvim
 
 # Local development artifacts
+**/agent_temp_files_local/
+**/.moira-local-runtime/
 http-final/
 test-workflows*/
 *.local

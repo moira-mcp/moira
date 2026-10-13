@@ -45,6 +45,8 @@ data/
 Thumbs.db
 
 # Temporary
+**/agent_temp_files_local/
+**/.moira-local-runtime/
 claude-temp-files/
 tmp/
 temp/

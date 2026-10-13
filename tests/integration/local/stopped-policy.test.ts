@@ -6,12 +6,33 @@ import { createHash, randomUUID } from "node:crypto";
 import { PrivateState } from "../../../packages/local/src/private-state.js";
 import { replaceStoppedPolicy } from "../../../packages/local/src/guard.js";
 import { localFixture } from "./fixtures.js";
+import { localPolicySchema, GiB } from "../../../packages/local/src/policy.js";
 let directory: string;
 beforeEach(async () => {
   directory = await realpath(await mkdtemp(join(tmpdir(), "ml-policy-")));
 });
 afterEach(async () => {
   await rm(directory, { recursive: true, force: true });
+});
+test("owner-selected machine values have exact numeric representation without arbitrary absolute ceilings", async () => {
+  const f = await localFixture(await PrivateState.open(directory));
+  const policy = {
+    ...f.policy,
+    runtime: {
+      ...f.policy.runtime,
+      cpuCores: 33,
+      memoryBytes: 65 * GiB + 1024 * 1024,
+      maxStorageBytes: 2048 * GiB + 1024 * 1024,
+      dockerBytes: 129 * GiB + 1024 * 1024,
+    },
+  };
+  expect(localPolicySchema.parse(policy)).toEqual(policy);
+  for (const value of [0, -1, 1.5, Number.MAX_SAFE_INTEGER + 1, Number.POSITIVE_INFINITY])
+    for (const key of ["cpuCores", "memoryBytes", "maxStorageBytes", "dockerBytes"])
+      expect(
+        localPolicySchema.safeParse({ ...policy, runtime: { ...policy.runtime, [key]: value } })
+          .success,
+      ).toBe(false);
 });
 test("a stopped policy transition resumes after policy write before owner receipt without reopening unknown work", async () => {
   const f = await localFixture(await PrivateState.open(directory));

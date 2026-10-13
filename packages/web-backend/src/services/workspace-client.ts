@@ -1,0 +1,54 @@
+import { connect } from "node:net";
+import type { WorkspaceClient, WorkspaceRequest } from "./workspace-router.js";
+import { jsonResponse, sendHttp } from "./workspace-router.js";
+
+export const WORKSPACE_ROUTER_SOCKET = "/tmp/moira-workspace-router/router.sock";
+
+export function createWorkspaceClient(socketPath = WORKSPACE_ROUTER_SOCKET): WorkspaceClient {
+  const request: WorkspaceClient["request"] = (userId, resourceId, input, signal) => {
+    const outgoing: WorkspaceRequest = {
+      ...input,
+      headers: { ...input.headers, "x-moira-user-id": userId, "x-moira-resource-id": resourceId },
+    };
+    return sendHttp(outgoing, signal, (ready) => {
+      const socket = connect({ path: socketPath });
+      const failed = (error: Error) => {
+        socket.off("connect", connected);
+        ready(error, socket);
+      };
+      const connected = () => {
+        socket.off("error", failed);
+        ready(null, socket);
+      };
+      socket.once("error", failed);
+      socket.once("connect", connected);
+    });
+  };
+  return {
+    request,
+    async json(userId, resourceId, input, signal) {
+      const body = input.body === undefined ? undefined : Buffer.from(JSON.stringify(input.body));
+      return jsonResponse(
+        await request(
+          userId,
+          resourceId,
+          {
+            ...input,
+            body,
+            headers: {
+              ...input.headers,
+              "content-type": "application/json",
+              ...(body ? { "content-length": String(body.length) } : {}),
+            },
+          },
+          signal,
+        ),
+      );
+    },
+  };
+}
+
+let client: WorkspaceClient | undefined;
+export function getWorkspaceClient(): WorkspaceClient {
+  return (client ??= createWorkspaceClient());
+}

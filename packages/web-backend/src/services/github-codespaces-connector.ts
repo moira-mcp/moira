@@ -1,12 +1,10 @@
 import { request as httpRequest, type RequestOptions } from "node:http";
-import type { CodespaceResourceRecord, CodespaceOperationRecord } from "@mcp-moira/shared";
 import {
   CONNECTOR_MAX_RESPONSE_BYTES,
   decodeConnectorResponse,
   encodeConnectorRequest,
   validGitHubUserCredential,
 } from "./github-codespaces-connector-protocol.mjs";
-import { CodespaceJobTransport } from "./codespace-job-transport.js";
 
 const SOCKET_PATH = "/run/moira-codespace-connector/connector.sock";
 const RESOURCE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
@@ -15,16 +13,14 @@ type RequestFunction = (
   callback: (response: import("node:http").IncomingMessage) => void,
 ) => import("node:http").ClientRequest;
 
-export class GitHubCodespacesConnector extends CodespaceJobTransport {
+export class GitHubCodespacesConnector {
   constructor(
     private readonly requestImpl: RequestFunction = httpRequest,
     private readonly socketPath = SOCKET_PATH,
     private readonly requestTimeoutMs = 30_000,
-  ) {
-    super(requestTimeoutMs);
-  }
+  ) {}
 
-  private call(path: "/health" | "/job", body?: unknown, timeoutMs = this.requestTimeoutMs) {
+  private call(path: "/health" | "/bootstrap", body?: unknown, timeoutMs = this.requestTimeoutMs) {
     return new Promise<unknown>((resolve, reject) => {
       const payload = body === undefined ? null : encodeConnectorRequest(body);
       const request = this.requestImpl(
@@ -56,6 +52,7 @@ export class GitHubCodespacesConnector extends CodespaceJobTransport {
               reject(new Error("Connector sidecar returned an invalid response"));
             }
           });
+          response.once("error", reject);
         },
       );
       request.setTimeout(timeoutMs, () =>
@@ -79,7 +76,7 @@ export class GitHubCodespacesConnector extends CodespaceJobTransport {
 
   async probeSshConfiguration(accessToken: string, resourceName: string): Promise<void> {
     this.validateCredentialAndResource(accessToken, resourceName);
-    const result = (await this.call("/job", {
+    const result = (await this.call("/bootstrap", {
       action: "ssh-config",
       token: accessToken,
       resourceName,
@@ -93,39 +90,65 @@ export class GitHubCodespacesConnector extends CodespaceJobTransport {
     }
   }
 
-  protected async sendJob(
-    credential: string,
-    codespace: CodespaceResourceRecord,
-    operation: CodespaceOperationRecord,
-    job: Record<string, unknown>,
-    timeoutMs: number,
-  ): Promise<Record<string, unknown>> {
-    if (!codespace.providerResourceName || codespace.id !== operation.resourceId) {
-      throw new Error("Invalid codespace operation identity");
-    }
-    this.validateCredentialAndResource(credential, codespace.providerResourceName);
-    const response = (await this.call(
-      "/job",
-      {
-        action: "operation",
-        token: credential,
-        resourceName: codespace.providerResourceName,
-        job,
-      },
-      timeoutMs,
-    )) as { value?: unknown };
+  async probeWorkspace(
+    accessToken: string,
+    resourceName: string,
+  ): Promise<{ environmentIdentity: string; architecture: string; rootBase64: string }> {
+    this.validateCredentialAndResource(accessToken, resourceName);
+    const response = (await this.call("/bootstrap", {
+      action: "probe",
+      token: accessToken,
+      resourceName,
+    })) as { value?: string };
+    if (typeof response.value !== "string" || response.value.includes(accessToken))
+      throw new Error("Invalid workspace bootstrap observation");
+    const value = JSON.parse(String(response.value)) as {
+      environmentIdentity: string;
+      architecture: string;
+      rootBase64: string;
+    };
     if (
-      typeof response.value !== "string" ||
-      response.value.includes(credential) ||
-      (String(job.action).startsWith("file-") && response.value.includes("ghu_"))
-    ) {
-      throw new Error("Codespace operation transport is unavailable");
-    }
-    const value: unknown = JSON.parse(response.value);
-    if (!value || typeof value !== "object" || Array.isArray(value)) {
-      throw new Error("Codespace operation transport returned an invalid envelope");
-    }
-    return value as Record<string, unknown>;
+      !/^[a-f0-9]{64}$/.test(value.environmentIdentity) ||
+      !["x86_64", "aarch64"].includes(value.architecture) ||
+      !/^[A-Za-z0-9+/]+=*$/.test(value.rootBase64)
+    )
+      throw new Error("Invalid workspace bootstrap observation");
+    return {
+      environmentIdentity: value.environmentIdentity,
+      architecture: value.architecture,
+      rootBase64: value.rootBase64,
+    };
+  }
+
+  async bootstrapWorkspace(
+    accessToken: string,
+    resourceName: string,
+    configuration: Record<string, unknown>,
+  ): Promise<Record<string, unknown>> {
+    this.validateCredentialAndResource(accessToken, resourceName);
+    const response = (await this.call(
+      "/bootstrap",
+      { action: "install", token: accessToken, resourceName, configuration },
+      300_000,
+    )) as { value?: string };
+    if (typeof response.value !== "string" || response.value.includes(accessToken))
+      throw new Error("Invalid workspace bootstrap readiness");
+    const value = JSON.parse(response.value) as Record<string, unknown>;
+    if (
+      value.version !== 1 ||
+      value.repositoryFullName !== configuration.repositoryFullName ||
+      value.environmentIdentity !==
+        (configuration.remote as { environmentIdentity?: unknown })?.environmentIdentity ||
+      typeof value.releaseIdentity !== "string" ||
+      !/^[a-f0-9]{64}$/.test(value.releaseIdentity)
+    )
+      throw new Error("Invalid workspace bootstrap readiness");
+    return {
+      version: 1,
+      repositoryFullName: value.repositoryFullName,
+      environmentIdentity: value.environmentIdentity,
+      releaseIdentity: value.releaseIdentity,
+    };
   }
 
   private validateCredentialAndResource(accessToken: string, resourceName: string): void {

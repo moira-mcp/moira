@@ -5,10 +5,11 @@ import { createAuthenticatedMCPClient } from "../utils/mcp-auth.js";
 import { getAdminCredentials, getTestBaseUrl } from "../utils/test-config.js";
 import { dockerExecSync } from "../utils/docker-command.js";
 import { createHash } from "node:crypto";
+import { createWorkspaceRequestId } from "@mcp-moira/shared/workspace-request-id";
 
 const codespaceId = "00000000-0000-4000-8000-000000000162";
-const operationId = "00000000-0000-4000-8000-000000000163";
-const requestId = "00000000-0000-4000-8000-000000000164";
+const processId = createWorkspaceRequestId();
+const requestId = createWorkspaceRequestId();
 const actions = [
   "create",
   "list",
@@ -23,8 +24,6 @@ const actions = [
   "stop",
   "delete",
   "exec",
-  "files_setup",
-  "transfer_status",
   "stat",
   "search",
   "read",
@@ -108,7 +107,7 @@ function expectSettingsLink(value: unknown) {
   expect(url.password).toBe("");
 }
 
-describe("Codespace MCP HTTP contract on a default-disabled installation", () => {
+describe("Codespace MCP HTTP contract without configured GitHub or paired Local", () => {
   let client: Client;
   let cleanup: (() => Promise<void>) | undefined;
 
@@ -134,7 +133,7 @@ describe("Codespace MCP HTTP contract on a default-disabled installation", () =>
     });
     expect(process.inputSchema.properties?.request_id).toMatchObject({
       type: "string",
-      format: "uuid",
+      pattern: "^ws1-[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$",
     });
     expect(process._meta).toEqual({ "openai/fileParams": ["stdin_file"] });
     const codespace = catalog.tools.find((tool) => tool.name === "codespace")!;
@@ -174,14 +173,21 @@ describe("Codespace MCP HTTP contract on a default-disabled installation", () =>
         timeout_seconds: expect.any(Object),
         stdin_text: { type: "string" },
         stdin_file: expect.any(Object),
-        operation_id: expect.any(Object),
-        request_id: expect.objectContaining({ type: "string", format: "uuid" }),
+        request_id: expect.objectContaining({
+          anyOf: expect.arrayContaining([
+            expect.objectContaining({ type: "string", format: "uuid" }),
+            expect.objectContaining({
+              type: "string",
+              pattern: "^ws1-[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$",
+            }),
+          ]),
+        }),
         // The session form reaches the agent through the published catalog, not only through the
         // in-process schema: a projection that dropped these would leave an agent unable to ask
         // for a session while every in-process check still passed.
         session: expect.objectContaining({
           type: "string",
-          pattern: "^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$",
+          pattern: "^[A-Za-z0-9][A-Za-z0-9_-]*$",
         }),
         session_start: expect.objectContaining({ type: "boolean" }),
         session_end: expect.objectContaining({ type: "boolean" }),
@@ -202,6 +208,7 @@ describe("Codespace MCP HTTP contract on a default-disabled installation", () =>
       }),
     });
     expect(codespace.inputSchema).not.toHaveProperty("anyOf");
+    expect(codespace.inputSchema.properties).not.toHaveProperty("operation_id");
   });
 
   test("should list only compact codespaces without provisioning or exposing credentials", async () => {
@@ -243,9 +250,9 @@ describe("Codespace MCP HTTP contract on a default-disabled installation", () =>
 
   test.each([
     ["start", { request_id: requestId, argv: ["pwd"] }],
-    ["get", { process_id: operationId }],
-    ["read", { process_id: operationId, stream: "stdout", offset: 0, length: 1024 }],
-    ["stop", { process_id: operationId }],
+    ["get", { process_id: processId }],
+    ["read", { process_id: processId, stream: "stdout", offset: 0, length: 1024 }],
+    ["stop", { process_id: processId }],
   ])("should refuse process %s for a missing owned codespace", async (action, input) => {
     const result = CallToolResultSchema.parse(
       await client.callTool({
@@ -254,7 +261,10 @@ describe("Codespace MCP HTTP contract on a default-disabled installation", () =>
       }),
     );
     expect(result.isError).toBe(true);
-    expect(result.structuredContent).toMatchObject({ error: { code: "CODESPACE_NOT_FOUND" } });
+    expect(result.structuredContent).toMatchObject({
+      error: { code: "CODESPACE_AUTHORIZATION_REQUIRED" },
+      process_id: action === "start" ? requestId : processId,
+    });
     expect(JSON.stringify(result)).not.toMatch(/accessToken|refreshToken|clientSecret|vaultKey/);
   });
 
@@ -283,16 +293,16 @@ describe("Codespace MCP HTTP contract on a default-disabled installation", () =>
     );
   });
 
-  test("should explain local enrollment and the disabled instance policy when no provider is selected", async () => {
+  test("should explain local enrollment independently of the unconfigured GitHub provider", async () => {
     const result = CallToolResultSchema.parse(
       await client.callTool({ name: "codespace", arguments: { action: "setup_help" } }),
     );
     expect(result.isError).not.toBe(true);
     expect(result.structuredContent).toMatchObject({
       provider: "local-sandboxes",
-      situation: "instance_disabled",
+      situation: "connection_required",
       reason: "LOCAL_DEVICE_REQUIRED",
-      instruction: expect.stringMatching(/administrator.*enable.*Connect Moira Local/),
+      instruction: expect.stringMatching(/Connect Moira Local.*approve the pairing/),
     });
     const links = result.structuredContent?.links as Array<{ id: string; url: string }>;
     const settings = new URL(links.find((link) => link.id === "settings")!.url);
@@ -420,14 +430,12 @@ describe("Codespace MCP HTTP contract on a default-disabled installation", () =>
       "download",
       {
         codespace_id: codespaceId,
-        operation_id: operationId,
+        path: "result.txt",
         file_name: "result.txt",
         mime_type: "text/plain",
       },
     ],
     ["get", { codespace_id: codespaceId }],
-    ["files_setup", { codespace_id: codespaceId, request_id: requestId }],
-    ["transfer_status", { codespace_id: codespaceId, request_id: requestId }],
     ["preview_image", { codespace_id: codespaceId, path: "screenshot.png" }],
     [
       "pull_request_create",
@@ -441,11 +449,21 @@ describe("Codespace MCP HTTP contract on a default-disabled installation", () =>
     ["stat", { codespace_id: codespaceId, path: "package.json" }],
     ["search", { codespace_id: codespaceId, path: ".", query: "TODO" }],
     ["read", { codespace_id: codespaceId, path: "package.json" }],
-    ["write", { codespace_id: codespaceId, path: "a.txt", text: "x", expected: { exists: false } }],
+    [
+      "write",
+      {
+        codespace_id: codespaceId,
+        request_id: requestId,
+        path: "a.txt",
+        text: "x",
+        expected: { exists: false },
+      },
+    ],
     [
       "apply_patch",
       {
         codespace_id: codespaceId,
+        request_id: requestId,
         files: [
           {
             path: "a.txt",

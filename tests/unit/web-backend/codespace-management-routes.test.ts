@@ -25,14 +25,10 @@ const readiness: CodespaceReadinessView = {
   resources_enabled: true,
   controls: [],
   connector: { state: "available", reason: null },
-  reconciliation: { due_resources: 0, due_operations: 0, oldest_due_age_ms: null },
+  reconciliation: { due_resources: 0, oldest_due_age_ms: null },
   usage: {
     active_resources: 1,
     max_active_resources: 4,
-    active_operations: 0,
-    max_active_operations: 20,
-    transfer_live_bytes: 0,
-    max_transfer_live_bytes: 1024 ** 3,
   },
   checked_at: 1,
 };
@@ -120,9 +116,6 @@ function services(
         codespace({ state: "delete_pending", desiredState: "deleted", generation: 4 }),
       ),
     },
-    operation: {
-      list: () => [],
-    },
     ...overrides,
   };
 }
@@ -144,8 +137,6 @@ const LIMITS = projectCodespaceLimits({
   policy: evaluateCodespaceResourcePolicy(() => undefined),
   held: 2,
   instanceHeld: 5,
-  activeOperations: 1,
-  transfers: { objects: 1, bytes: 2048, inflightBytes: 1024 },
   idle: { autoStopEnabled: true, idleTimeoutMinutes: 30 },
   providerIdleMaxMinutes: 240,
 });
@@ -190,7 +181,6 @@ describe("website codespace management routes", () => {
       const selected = services({
         provider: "github-codespaces",
         resource: null,
-        operation: null,
         connection: {
           ...base.connection,
           getStatus: () => ({
@@ -204,7 +194,6 @@ describe("website codespace management routes", () => {
       const app = appWith(
         services({
           resource: null,
-          operation: null,
           providers: [selected, local],
           select: () => selected,
         }),
@@ -250,7 +239,6 @@ describe("website codespace management routes", () => {
     const app = appWith(
       services({
         resource: null,
-        operation: null,
         providers: [local],
         connection: {
           ...base.connection,
@@ -403,7 +391,6 @@ describe("website codespace management routes", () => {
   test("fails closed with the same-origin Settings link when the feature is not configured", async () => {
     const disabled = services({
       resource: null,
-      operation: null,
       observability: {
         readiness: async () => ({ ...readiness, state: "disabled", reason: "NOT_CONFIGURED" }),
         limitsWithBilling: async () => LIMITS,
@@ -587,45 +574,13 @@ describe("website codespace management routes", () => {
     expect(limited.body.error.message).toContain("ceiling of 16 held codespaces");
   });
 
-  test("returns a codespace with its recent metadata-only operations", async () => {
-    const dependencies = services({
-      operation: {
-        list: () => [
-          {
-            id: "00000000-0000-4000-8000-000000000002",
-            userId: "user-a",
-            resourceId: CODESPACE_ID,
-            resourceGeneration: 3,
-            authorizationGeneration: 7,
-            provider: "github-codespaces",
-            providerResourceName: "secret-provider-name",
-            remoteMarker: "secret-operation-marker",
-            kind: "exec",
-            state: "succeeded",
-            inputBytes: 0,
-            stdoutLimitBytes: 1024,
-            stderrLimitBytes: 1024,
-            outputBytes: 12,
-            exitCode: 0,
-            remoteCleanupPending: 0,
-            resultExpiresAt: 500,
-            deadlineAt: 400,
-            claimId: null,
-            claimExpiresAt: null,
-            lastOutcome: "remote_result_recorded",
-            createdAt: 30,
-            updatedAt: 40,
-          },
-        ],
-      },
-    });
-    const response = await request(appWith(dependencies)).get(
+  test("returns owned lifecycle metadata without a cloud command archive", async () => {
+    const response = await request(appWith(services())).get(
       `/api/integrations/github/codespaces/${CODESPACE_ID}`,
     );
     expect(response.status).toBe(200);
-    expect(response.body.data.operations).toEqual([
-      expect.objectContaining({ kind: "exec", state: "succeeded", exit_code: 0 }),
-    ]);
-    expect(response.text).not.toMatch(/secret-operation-marker|remote_result_recorded/);
+    expect(response.body.data.codespace.codespace_id).toBe(CODESPACE_ID);
+    expect(response.body.data).not.toHaveProperty("operations");
+    expect(response.text).not.toContain("secret-marker");
   });
 });

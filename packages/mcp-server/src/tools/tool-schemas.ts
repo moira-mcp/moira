@@ -3,6 +3,7 @@ import { gitBranchSchema } from "@mcp-moira/shared/git-ref";
 import { zodToJsonSchema } from "zod-to-json-schema";
 import { AWAITING_USER_LIMITS } from "@mcp-moira/workflow-engine/awaiting-user";
 import { EXECUTION_TASK_TITLE_LIMIT } from "@mcp-moira/shared/execution-task-identity";
+import { WORKSPACE_REQUEST_ID_PATTERN } from "@mcp-moira/shared/workspace-request-id";
 import { progressAuthoringSchema } from "../schemas/progress-authoring.js";
 
 export const listWorkflowsSchema = z.object({
@@ -690,12 +691,7 @@ export const codespaceNativeFileSchema = z
     download_url: z.string().url(),
     file_name: codespaceFileNameSchema.optional(),
     mime_type: codespaceMimeTypeSchema.optional(),
-    size_bytes: z
-      .number()
-      .int()
-      .min(0)
-      .max(4 * 1024 * 1024)
-      .optional(),
+    size_bytes: z.number().int().min(0).optional(),
   })
   .strict()
   .describe("Native ChatGPT file reference; pass the attachment reference without base64");
@@ -707,25 +703,7 @@ const codespaceBinaryNativeFileSchema = codespaceNativeFileSchema.extend({
     .min(0)
     .max(Number.MAX_SAFE_INTEGER)
     .optional()
-    .describe("Binary file size; enforced against the instance's effective transfer policy"),
-});
-
-export const codespaceFilesSetupSchema = z
-  .object({
-    codespace_id: codespaceIdSchema,
-    request_id: z
-      .string()
-      .uuid()
-      .describe("Stable provisioning identity; reuse after a lost response"),
-  })
-  .strict();
-
-export const codespaceTransferStatusSchema = codespaceFilesSetupSchema.extend({
-  transfer_id: z
-    .string()
-    .uuid()
-    .optional()
-    .describe("Known transfer handle; omit to recover by request_id"),
+    .describe("Declared binary file size; bytes are streamed to the workspace"),
 });
 
 export const codespaceListSchema = z
@@ -805,36 +783,24 @@ export const codespaceDeleteSchema = z
   })
   .strict();
 
-const codespaceOperationResumeSchema = z
-  .object({
-    codespace_id: codespaceIdSchema,
-    operation_id: z.string().uuid().describe("Pending operation ID returned by this tool"),
-  })
-  .strict();
+const workspaceRequestIdSchema = z
+  .string()
+  .regex(WORKSPACE_REQUEST_ID_PATTERN)
+  .describe("Active workspace identity in ws1-<lowercase UUID> form; legacy UUIDs are archived");
 
 const codespaceExecStartSchema = z
   .object({
     codespace_id: codespaceIdSchema,
-    request_id: z
-      .string()
-      .uuid()
-      .describe(
-        "Choose before submission; reuse this identity with the exact request after any lost reply",
-      ),
+    request_id: workspaceRequestIdSchema.describe(
+      "Choose before submission; after a lost reply inspect this identity without resubmitting the command",
+    ),
     argv: z
-      .array(
-        z
-          .string()
-          .min(1)
-          .max(16 * 1024),
-      )
+      .array(z.string().refine((value) => !value.includes("\0")))
       .min(1)
-      .max(128)
       .optional(),
     script: z
       .string()
       .min(1)
-      .max(64 * 1024)
       .optional()
       .describe("Shell script run inside a session; what it leaves behind is carried forward"),
     session_end: z
@@ -845,7 +811,7 @@ const codespaceExecStartSchema = z
     cwd: z.string().max(4096).optional(),
     session: z
       .string()
-      .regex(/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/)
+      .regex(/^[A-Za-z0-9][A-Za-z0-9_-]*$/)
       .optional()
       .describe("Continue the working directory and variables of this named session"),
     session_start: z
@@ -853,30 +819,13 @@ const codespaceExecStartSchema = z
       .default(false)
       .describe("Open the named session instead of continuing it"),
     env: z
-      .record(z.string().regex(/^[A-Za-z_][A-Za-z0-9_]{0,127}$/), z.string().max(4096))
+      .record(z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/), z.string())
       .optional()
       .describe("Variables for this command, and for later commands in the same session"),
-    // Absent means the mode's own default: an ordinary bounded duration, or the whole background
-    // ceiling. The upper value is that ceiling; a bounded command is refused above its own, smaller
-    // one with a message naming it.
-    timeout_seconds: z
-      .number()
-      .int()
-      .min(1)
-      .max(24 * 60 * 60)
-      .optional(),
-    max_stdout_bytes: z
-      .number()
-      .int()
-      .min(1)
-      .max(8 * 1024 * 1024)
-      .optional(),
-    max_stderr_bytes: z
-      .number()
-      .int()
-      .min(1)
-      .max(8 * 1024 * 1024)
-      .optional(),
+    // Only an explicit execution deadline stops a command. Observation windows do not stop it.
+    timeout_seconds: z.number().int().min(1).optional(),
+    max_stdout_bytes: z.number().int().min(1).optional(),
+    max_stderr_bytes: z.number().int().min(1).optional(),
   })
   .strict();
 
@@ -903,35 +852,28 @@ const codespaceCommandRequests = [
 ] as const;
 
 export const codespaceExecRequestSchema = z.union([
-  z.object({ codespace_id: codespaceIdSchema, request_id: z.string().uuid() }).strict(),
+  z.object({ codespace_id: codespaceIdSchema, request_id: workspaceRequestIdSchema }).strict(),
   ...codespaceCommandRequests,
-  // Only exceptional recovery after an unknown outcome uses this saved identity.
-  codespaceOperationResumeSchema,
 ]);
 
-export const codespaceStatRequestSchema = z.union([
-  z.object({ codespace_id: codespaceIdSchema, path: codespacePathSchema }).strict(),
-  codespaceOperationResumeSchema,
-]);
+export const codespaceStatRequestSchema = z
+  .object({ codespace_id: codespaceIdSchema, path: codespacePathSchema })
+  .strict();
 
-export const codespaceSearchRequestSchema = z.union([
-  z
-    .object({
-      codespace_id: codespaceIdSchema,
-      path: codespacePathSchema,
-      query: z.string().min(1).max(4096),
-      mode: z.enum(["literal", "regex"]).default("literal"),
-      max_matches: z.number().int().min(1).max(1000).default(100),
-      max_bytes: z
-        .number()
-        .int()
-        .min(1)
-        .max(1024 * 1024)
-        .default(64 * 1024),
-    })
-    .strict(),
-  codespaceOperationResumeSchema,
-]);
+export const codespaceSearchRequestSchema = z
+  .object({
+    codespace_id: codespaceIdSchema,
+    path: codespacePathSchema,
+    query: z.string().min(1),
+    mode: z.enum(["literal", "regex"]).default("literal"),
+    max_matches: z.number().int().min(1).default(100),
+    max_bytes: z
+      .number()
+      .int()
+      .min(1)
+      .default(64 * 1024),
+  })
+  .strict();
 
 const codespaceReadRangeSchema = z.object({
   offset: z.number().int().min(0).default(0),
@@ -939,7 +881,6 @@ const codespaceReadRangeSchema = z.object({
     .number()
     .int()
     .min(1)
-    .max(4 * 1024 * 1024)
     .default(64 * 1024),
 });
 
@@ -952,112 +893,88 @@ export const codespaceReadRequestSchema = z.union([
   codespaceReadRangeSchema
     .extend({
       codespace_id: codespaceIdSchema,
-      operation_id: z.string().uuid().describe("Command operation whose retained output is read"),
+      request_id: workspaceRequestIdSchema.describe(
+        "Original command request whose retained output is read",
+      ),
       stream: z.enum(["stdout", "stderr"]),
     })
     .strict(),
-  codespaceOperationResumeSchema,
 ]);
 
-export const codespaceWriteRequestSchema = z.union([
-  z
-    .object({
-      codespace_id: codespaceIdSchema,
-      path: codespacePathSchema,
-      text: z.string(),
-      expected: codespaceExpectedSchema,
-    })
-    .strict(),
-  codespaceOperationResumeSchema,
-]);
+export const codespaceWriteRequestSchema = z
+  .object({
+    codespace_id: codespaceIdSchema,
+    request_id: workspaceRequestIdSchema.describe("Stable workspace mutation identity"),
+    path: codespacePathSchema,
+    text: z.string(),
+    expected: codespaceExpectedSchema,
+  })
+  .strict();
 
-export const codespaceApplyPatchRequestSchema = z.union([
-  z
-    .object({
-      codespace_id: codespaceIdSchema,
-      files: z
-        .array(
-          z
-            .object({
-              path: codespacePathSchema,
-              expected: codespaceExpectedSchema,
-              edits: z
-                .array(
-                  z
-                    .object({
-                      start: z.number().int().min(0),
-                      end: z.number().int().min(0),
-                      text: z.string(),
-                    })
-                    .strict(),
-                )
-                .min(1)
-                .max(4096),
-            })
-            .strict(),
-        )
-        .min(1)
-        .max(64),
-    })
-    .strict(),
-  codespaceOperationResumeSchema,
-]);
+export const codespaceApplyPatchRequestSchema = z
+  .object({
+    codespace_id: codespaceIdSchema,
+    request_id: workspaceRequestIdSchema.describe("Stable workspace mutation identity"),
+    files: z
+      .array(
+        z
+          .object({
+            path: codespacePathSchema,
+            expected: codespaceExpectedSchema,
+            edits: z
+              .array(
+                z
+                  .object({
+                    start: z.number().int().min(0),
+                    end: z.number().int().min(0),
+                    text: z.string(),
+                  })
+                  .strict(),
+              )
+              .min(1),
+          })
+          .strict(),
+      )
+      .min(1),
+  })
+  .strict();
 
-export const codespaceUploadRequestSchema = z.union([
-  z
-    .object({
-      codespace_id: codespaceIdSchema,
-      request_id: z
-        .string()
-        .uuid()
-        .describe("Choose before upload; reuse with unchanged input to resume"),
-      path: codespacePathSchema,
-      file: codespaceBinaryNativeFileSchema,
-      expected: codespaceExpectedSchema,
-    })
-    .strict(),
-  codespaceOperationResumeSchema,
-]);
+export const codespaceUploadRequestSchema = z
+  .object({
+    codespace_id: codespaceIdSchema,
+    request_id: workspaceRequestIdSchema.describe(
+      "Choose before upload; reuse with unchanged input to resume",
+    ),
+    path: codespacePathSchema,
+    file: codespaceBinaryNativeFileSchema,
+    expected: codespaceExpectedSchema,
+  })
+  .strict();
 
 const codespaceDownloadStartSchema = z
   .object({
     codespace_id: codespaceIdSchema,
     path: codespacePathSchema,
-    max_bytes: z
-      .number()
-      .int()
-      .min(1)
-      .max(4 * 1024 * 1024)
-      .default(4 * 1024 * 1024),
+    max_bytes: z.number().int().min(1).optional(),
     file_name: codespaceFileNameSchema,
     mime_type: codespaceMimeTypeSchema,
   })
   .strict();
 
-export const codespaceDownloadRequestSchema = z.union([
-  codespaceDownloadStartSchema.extend({
-    request_id: z
-      .string()
-      .uuid()
-      .describe("Choose before download; reuse the exact request after a lost reply"),
-    max_bytes: z
-      .number()
-      .int()
-      .min(1)
-      .max(Number.MAX_SAFE_INTEGER)
-      .default(20 * 1024 * 1024)
-      .describe("Binary transfer bound; checked against the instance's effective policy"),
-  }),
-  codespaceOperationResumeSchema.extend({
-    file_name: codespaceFileNameSchema,
-    mime_type: codespaceMimeTypeSchema,
-  }),
-]);
+export const codespaceDownloadRequestSchema = codespaceDownloadStartSchema.extend({
+  max_bytes: z
+    .number()
+    .int()
+    .min(1)
+    .max(Number.MAX_SAFE_INTEGER)
+    .optional()
+    .describe("Optional caller-selected download bound; the workspace streams the file"),
+});
 
-export const codespacePreviewImageRequestSchema = z.union([
-  codespaceDownloadStartSchema.omit({ file_name: true, mime_type: true }),
-  codespaceOperationResumeSchema,
-]);
+export const codespacePreviewImageRequestSchema = codespaceDownloadStartSchema.omit({
+  file_name: true,
+  mime_type: true,
+});
 
 export const codespacePullRequestCreateSchema = z
   .object({
@@ -1084,8 +1001,6 @@ export const codespacePullRequestFindSchema = z
   .strict();
 
 export const CODESPACE_ACTION_REQUEST_SCHEMAS = {
-  files_setup: codespaceFilesSetupSchema,
-  transfer_status: codespaceTransferStatusSchema,
   local_devices: codespaceLocalDevicesSchema,
   repository_add: codespaceRepositoryAddSchema,
   repository_create: codespaceRepositoryCreateSchema,
@@ -1207,7 +1122,7 @@ export const codespaceSchema = flatActionSchema(
 const codespaceProcessIdentitySchema = z
   .object({
     codespace_id: codespaceIdSchema,
-    process_id: z.string().uuid().describe("Background process ID returned by start"),
+    process_id: workspaceRequestIdSchema.describe("Background process ID returned by start"),
   })
   .strict();
 
@@ -1215,7 +1130,7 @@ export const CODESPACE_PROCESS_ACTION_REQUEST_SCHEMAS = {
   start: z.union(codespaceCommandRequests),
   get: z.union([
     codespaceProcessIdentitySchema,
-    z.object({ codespace_id: codespaceIdSchema, request_id: z.string().uuid() }).strict(),
+    z.object({ codespace_id: codespaceIdSchema, request_id: workspaceRequestIdSchema }).strict(),
   ]),
   read: codespaceProcessIdentitySchema.extend({
     stream: z.enum(["stdout", "stderr"]),

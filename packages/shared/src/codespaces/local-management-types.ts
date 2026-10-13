@@ -1,7 +1,6 @@
 import { z } from "zod";
 
 export const MAX_LOCAL_WORK_LEASE_MS = 7 * 24 * 60 * 60_000;
-const GiB = 1024 ** 3;
 const integer = (min: number, max: number) => z.number().int().min(min).max(max);
 const text = (maximum: number) =>
   z
@@ -52,24 +51,18 @@ export const localDeviceSettingsSchema = z
     label: text(80),
     enabled: z.boolean(),
     leaseUntil: integer(0, Number.MAX_SAFE_INTEGER),
-    cpuCores: integer(1, 32),
-    memoryBytes: integer(GiB, 64 * GiB),
-    storageBytes: integer(8 * GiB, 1024 * GiB),
-    dockerBytes: integer(GiB, 128 * GiB),
+    cpuCores: integer(1, Number.MAX_SAFE_INTEGER),
+    memoryBytes: integer(1, Number.MAX_SAFE_INTEGER),
+    storageBytes: integer(1, Number.MAX_SAFE_INTEGER),
+    dockerBytes: integer(1, Number.MAX_SAFE_INTEGER),
     repositories: z.array(localManagementRepositorySchema),
     gitAuthor: localGitAuthorSchema.nullable(),
     agentRepositoryManagement: agentRepositoryManagementSchema.nullable().default(null),
   })
   .strict()
   .superRefine((value, ctx) => {
-    if (value.dockerBytes + GiB > value.storageBytes)
+    if (value.dockerBytes >= value.storageBytes)
       ctx.addIssue({ code: "custom", message: "Storage must also hold the guest root filesystem" });
-    if (
-      value.storageBytes % GiB !== 0 ||
-      value.memoryBytes % GiB !== 0 ||
-      value.dockerBytes % GiB !== 0
-    )
-      ctx.addIssue({ code: "custom", message: "Storage and memory sizes must be integral GiB" });
     if (
       new Set(value.repositories.map((r) => r.id)).size !== value.repositories.length ||
       new Set(value.repositories.map((r) => r.fullName.toLowerCase())).size !==
@@ -80,10 +73,10 @@ export const localDeviceSettingsSchema = z
 export type LocalDeviceSettingsValue = z.infer<typeof localDeviceSettingsSchema>;
 export const localControlCeilingSchema = z
   .object({
-    cpuCores: integer(1, 32),
-    memoryBytes: integer(GiB, 64 * GiB),
-    storageBytes: integer(8 * GiB, 1024 * GiB),
-    dockerBytes: integer(GiB, 128 * GiB),
+    cpuCores: integer(1, Number.MAX_SAFE_INTEGER),
+    memoryBytes: integer(1, Number.MAX_SAFE_INTEGER),
+    storageBytes: integer(1, Number.MAX_SAFE_INTEGER),
+    dockerBytes: integer(1, Number.MAX_SAFE_INTEGER),
     maxLeaseMs: integer(1, MAX_LOCAL_WORK_LEASE_MS),
   })
   .strict();

@@ -75,26 +75,7 @@ export function CodespaceLimitsPanel({
 }): React.JSX.Element {
   const { t, i18n } = useTranslation();
   const bytes = (value: number) => formatBytes(value, i18n.language);
-  const minutes = (seconds: number) => Math.round(seconds / 60);
   const facts: Array<[string, string]> = [
-    [
-      t("pages.settings.codespaces.limits.commandDuration"),
-      t("pages.settings.codespaces.limits.minutes", {
-        count: minutes(limits.operations.max_duration_seconds),
-      }),
-    ],
-    [
-      t("pages.settings.codespaces.limits.backgroundDuration"),
-      t("pages.settings.codespaces.limits.minutes", {
-        count: minutes(limits.operations.max_background_seconds),
-      }),
-    ],
-    [t("pages.settings.codespaces.limits.commandInput"), bytes(limits.operations.max_input_bytes)],
-    [
-      t("pages.settings.codespaces.limits.commandOutput"),
-      bytes(limits.operations.max_retained_output_bytes),
-    ],
-    [t("pages.settings.codespaces.limits.fileSize"), bytes(limits.transfers.max_file_bytes)],
     [
       t("pages.settings.codespaces.limits.retention"),
       t("pages.settings.codespaces.limits.days", { count: limits.lifecycle.retention_days }),
@@ -268,30 +249,6 @@ export function CodespaceLimitsPanel({
                       })
                 }
                 testId="codespace-limit-held"
-              />
-              <Meter
-                label={t("pages.settings.codespaces.limits.commands")}
-                used={limits.operations.active}
-                max={limits.operations.max_concurrent_per_user}
-                display={
-                  limits.operations.max_concurrent_per_user === null
-                    ? String(limits.operations.active)
-                    : t("pages.settings.codespaces.limits.ofMax", {
-                        used: limits.operations.active,
-                        max: limits.operations.max_concurrent_per_user,
-                      })
-                }
-                testId="codespace-limit-commands"
-              />
-              <Meter
-                label={t("pages.settings.codespaces.limits.transfers")}
-                used={limits.transfers.used_bytes}
-                max={limits.transfers.max_bytes_per_user}
-                display={t("pages.settings.codespaces.limits.ofMax", {
-                  used: bytes(limits.transfers.used_bytes),
-                  max: bytes(limits.transfers.max_bytes_per_user),
-                })}
-                testId="codespace-limit-transfers"
               />
             </div>
             <Collapsible>

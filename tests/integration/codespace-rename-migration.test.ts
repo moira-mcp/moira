@@ -267,7 +267,12 @@ describe("codespace rename migration", () => {
           .all() as Array<{ name: string }>
       ).map(({ name }) => name);
       for (const oldName of oldTables) expect(currentNames).not.toContain(oldName);
-      expect(currentNames.filter((name) => /^workspace(?:_|[A-Z])/.test(name))).toEqual([]);
+      // Only the new agent's scoped authentication state uses this namespace;
+      // none of the historical workspace tables or their rows are adopted as it.
+      expect(currentNames.filter((name) => /^workspace(?:_|[A-Z])/.test(name))).toEqual([
+        "workspaceAgentCredential",
+      ]);
+      expect(rows(sqlite, "workspaceAgentCredential")).toEqual([]);
       expect(indexProjection(sqlite, newTables, false)).toEqual(
         [
           ...storedIndexes,

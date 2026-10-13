@@ -11,14 +11,11 @@ import type { TFunction } from "i18next";
 
 /** Every code a codespace route can answer with, each with a message under `common.codespaceErrors`. */
 export const CODESPACE_ERROR_CODES = [
-  // Resource and operation refusals (CodespaceResourceErrorCode).
+  // Provider lifecycle refusals (CodespaceResourceErrorCode).
   "CODESPACE_PROVIDER_DISABLED",
   "CODESPACE_PROVIDER_UNAVAILABLE",
   "CODESPACE_POLICY_LIMIT",
-  "CODESPACE_SESSION_UNAVAILABLE",
-  "CODESPACE_OPERATION_BUSY",
   "CODESPACE_AUTHORIZATION_REQUIRED",
-  "CODESPACE_RESULT_EXPIRED",
   "CODESPACE_CREATE_REJECTED",
   "CODESPACE_BILLING_UNSUPPORTED",
   "CODESPACE_CREATE_PENDING",

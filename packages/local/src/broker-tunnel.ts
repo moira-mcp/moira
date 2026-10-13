@@ -47,7 +47,6 @@ export async function startBrokerTunnel(targetPort: number, port = 0) {
     };
     client.on("data", initial);
   });
-  server.maxConnections = 128;
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);
     server.listen(port, "127.0.0.1", resolve);

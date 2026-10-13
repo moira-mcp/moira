@@ -9,7 +9,7 @@ image from the registry — no source checkout or local build needed.
 ## Prerequisites
 
 - Docker with the Compose plugin (`docker compose`)
-- The public `docker-compose.yml` and `.env.example`; no source build, private repository,
+- The public `docker-compose.yml`, `.env.example` and `config/traefik-self-host.yml`; no source build, private repository,
   host SQLite CLI, or separate upgrade script is required for the normal path
 
 ## Quick Start
@@ -20,6 +20,8 @@ Download the current public self-host files:
 MOIRA_FILES=https://raw.githubusercontent.com/moira-mcp/moira/master
 curl -fLO "$MOIRA_FILES/docker-compose.yml"
 curl -fLo .env.example "$MOIRA_FILES/.env.example"
+mkdir -p config
+curl -fLo config/traefik-self-host.yml "$MOIRA_FILES/config/traefik-self-host.yml"
 ```
 
 1.  **Create your config**
@@ -30,14 +32,14 @@ curl -fLo .env.example "$MOIRA_FILES/.env.example"
 
     For a `localhost` run, the defaults work unchanged.
 
-2.  **Start the container**
+2.  **Start the services**
 
     ```bash
     docker compose up -d
     ```
 
-    Compose pulls `ghcr.io/moira-mcp/moira:latest`, the current public release, and starts
-    the container.
+    Compose starts the application and its static Traefik ingress on the same public port.
+    The ingress needs no Docker socket. Keep its configuration beside the Compose file.
 
 3.  **Open the Web UI**
 
@@ -179,19 +181,31 @@ Moira keys rate limits, the `RATE_LIMIT_WHITELIST` exemption, audit records and 
 the client address. It takes that address from `X-Forwarded-For` only through the proxies named in
 `TRUST_PROXY`; entries a client writes itself are never used.
 
-- Unset (the default) trusts only the nginx inside the container. Use it when clients connect to the
-  container's published port directly.
-- Behind one more reverse proxy — Traefik, Caddy, a load balancer — set the number of proxy hops, or
-  that proxy's address or subnet:
+- The supplied Compose sets `TRUST_PROXY=2`: ordinary requests pass through Traefik and nginx;
+  workspace streams pass directly through Traefik to the backend. Traefik discards untrusted
+  client-supplied forwarding headers.
+- With an additional reverse proxy, configure that proxy to replace untrusted forwarding headers
+  and explicitly set the trusted addresses/subnets for the complete topology. Workspace and
+  ordinary routes have different hop counts, so do not add a blanket hop count without checking both.
+
+If that external proxy supplies client addresses, add
+`--entrypoints.web.forwardedheaders.trustedips=<its IP or CIDR>` to the supplied ingress command;
+trust only that proxy's actual source addresses. Do not enable insecure forwarded-header trust.
 
 ```bash
-TRUST_PROXY=2                            # your proxy, then the nginx inside the container
-TRUST_PROXY=loopback,172.18.0.0/16       # or: loopback plus the proxy's Docker network
+TRUST_PROXY=loopback,172.18.0.0/16       # example: trust only your actual proxy network and nginx
 ```
 
 Without it, every client behind your proxy shares the proxy's address and one rate-limit budget.
 `TRUST_PROXY=true` is refused, and an invalid value stops startup with an error that lists the
 accepted forms.
+
+The public `/api/workspaces/` path requires HTTP/1.1 Upgrade forwarded directly to the application
+backend on port 3001. The supplied ingress provides this route and leaves established streams
+without an idle or transfer-duration deadline. Keep TLS and the same application origin at an
+external ingress. A generic route through nginx 80, or the standalone application container's
+frontend port alone, is not the supported workspace stream path. The application's global proxy
+default remains `loopback`; the supplied Compose overrides it for its own topology.
 
 ### Auto-generated secrets
 
@@ -221,7 +235,8 @@ public repository reads and basic local work do not require the GitHub App or se
 vault. Enrolled private-repository access, push and PR operations require the server's GitHub App
 OAuth connection and vault configuration. Local work does not require the GitHub connector
 Compose profile below.
-Server work still requires `CODESPACE_CODESPACES_ENABLED=true` and enabled instance controls.
+Local work requires the applied computer grants and lease and enabled global/local-provider controls;
+the GitHub `CODESPACE_CODESPACES_ENABLED` switch does not gate Local.
 The companion makes outbound HTTPS requests and exposes no public listening port.
 
 Use Node.js 24 and macOS on Apple silicon with the pinned Docker Sandboxes `sbx` 0.46.0
@@ -259,11 +274,9 @@ local file, and sleep/interval auto-lock is disabled only for that SDK store, no
 
 Repository permissions are granted on the computer. `approve OWNER/REPO` allows read access.
 Add `--private`, `--push` or `--delete` only for those rights.
-For standalone work without enrollment, a private repository can use a GitHub token supplied on
-stdin to `npm run local -- git-token OWNER/REPO`; never put it in arguments or shell history.
-That repository token stays local and is separate from the device credential. An enrolled
-companion serving Moira uses server OAuth authorization for private access and push and never
-falls back to this local token.
+The host `git-token OWNER/REPO` utility accepts a repository token only on stdin. It does not
+authorize standalone environment creation. Paired Moira work uses the server's approved GitHub
+authorization for private access and push and never falls back to that local token.
 The finite work lease defaults to 8 hours and cannot exceed seven days. Renew it locally with
 `enable --hours N`. The browser can change these settings only after you explicitly approve web
 control on this computer, as described below.
@@ -281,8 +294,12 @@ Strict heartbeat/approval schemas refuse mixed editions even with delegation off
 CLI does not update a live guard. Before updating, use the companion's ordinary owner-managed
 shutdown and confirm settlement of its owned work and guards. While both sides are stopped,
 back up the server database, the complete private companion state and its SDK backing storage,
-including VM disks. Keep the matching server and companion bundles with that backup. Update server and local checkout
-together, run `npm ci` and `npm run local:build`, then restart normally. Preserve the same state,
+including VM disks. Keep the matching server and companion bundles with that backup. Build with
+`npm ci` and `npm run local:build`, then install the complete executable release in an immutable
+owner-only directory, which may be outside the source checkout. Point the host launcher at that
+release's `cli.js`; copy the CLI, guard, runtime API, configuration bundle, native helpers and
+workspace payload together. Rebuilding mutable checkout assets does not replace a running owner.
+Restart with the same state,
 disks, SDK profile, credentials and connection. Management and running jobs may be interrupted;
 there is no uninterrupted mixed-edition rolling upgrade. Live repository append within the matched
 edition separately preserves existing VMs.
@@ -334,7 +351,8 @@ npm run local -- run
 In **Local computers**, edit the device name, enabled state, expiry, CPU/RAM, bounded disk and
 guest Docker capacity, repository permissions and commit author. **Allow seven days** sets
 a finite expiry within the locally approved ceiling; it does not renew automatically.
-Commands carry bounded request timeouts and output sizes, without separate owner-set operation quotas.
+Commands and file streams have no Moira concurrency, byte, output-retention or runtime quotas.
+An explicitly requested command deadline and real machine/storage capacity still apply.
 **Request settings change** records a request, not effective permission. Pending requests wait
 for the computer; applied and rejected revisions identify what the companion accepted. Read the
 effective permissions above the editor before starting work. Errors preserve the draft; updates
@@ -386,71 +404,78 @@ OAuth stays on the server. Live App permissions and provider compatibility requi
 
 Each codespace has its own VM; a repository can have multiple codespaces.
 Local VMs and operations do not consume cloud Codespaces slots or use its machine ceiling.
-Choose a UUID `request_id` before `codespace` exec or `codespace_process` start. The command returns
-durable acceptance with its `operation_id` or `process_id`, without waiting for execution to finish.
-`accepted` and `phase` distinguish input preparation, accepted work, confirmed running work and an
-unknown or terminal outcome. Acceptance is not proof of guest start; `started_at: null` means no
-start has been confirmed, not that no effect happened. Code file actions wait for their result;
-native transfers can return an incomplete operation to collect by its original identity.
-Use `codespace_process` for background start/get/read/stop in that VM. Recover a lost first command
-reply with exec containing only `codespace_id` and the original `request_id`, or process get with
-those fields. Repeating the exact submission with the same UUID returns the same operation;
-changing its payload is refused. Collect a returned `operation_id` through exec, or `process_id`
-through process get. Collection and bounded waiting never cancel or repeat the command; process
-stop requests cancellation explicitly, and a pending stop is not confirmed cancellation.
-Backend, frontend and browser checks share guest localhost. Admission expiry bounds guest launch;
-`timeout_seconds` bounds runtime from confirmed guest start. Client waiting and result retention
-have separate deadlines. After an unknown file outcome, inspect its returned `operation_id` rather
-than repeat the edit. Commands, reads and writes are independent; a pending journal entry does not lock new work. File edits retain
-their expected-content checks and serialize only the guest file commit and recovery. Ordinary
-execution and retained results do not depend on lifecycle counters; current repository/device
-rights and the exact VM identity still apply. A restart can interrupt a process without discarding
-an already saved result. The bounded terminal stdout/stderr reply is kept in private server storage
-within result retention. Complete streams remain in the guest; reading them requires available
-guest bytes and can fail after cleanup even while the stored reply remains readable. Public package registries and other public
-DNS destinations are available independently of the language or framework, with public-address and
-computer-network checks on every connection. Network downloads have no cumulative traffic budget or
-per-download byte quota; bounded socket capacity provides backpressure. Host, LAN and service
-addresses remain denied. Browser/system-library installation uses guest commands and compatible
-guest privileges; network access does not certify browser compatibility. `preview_image`
-returns a repository PNG/JPEG as native MCP image content: pass `codespace_id`, `path` and optional
-`max_bytes` up to 4 MiB, or resume with only `codespace_id` and `operation_id`. Header/container
-checks cap dimensions at 8192 per edge and 16 million pixels; they do not fully decode pixels.
-Inspect the image before treating a screenshot as visual evidence.
+The same guest workspace service owns commands, files, sessions and retained output in both
+providers. Choose a fresh `ws1-<lowercase UUID>` `request_id` before a command, write, patch or
+upload. Plain UUIDs belong to repository admission and cannot be used as active workspace identities.
+Ordinary exec observes the command for a short window; an unfinished result can be collected with
+only `codespace_id` and its original `request_id`. Background start returns that same identity as
+`process_id`; use process get/read/stop to inspect output or request cancellation. A lost reply
+does not prove that work did not start. Inspection never resubmits the effect, and pending cancellation
+does not prove physical termination. Keep the original identity and inspect the result and affected
+files before intentionally repeating an uncertain mutation.
 
-Native `upload` and `download` require a UUID `request_id`, kept unchanged after a lost reply.
-Their binary limit is separate from code edits, read ranges, stdin and previews: 20 MiB by default
-with 256 KiB chunks. Code/range/preview bounds are at most 4 MiB; stdin uses its effective input limit,
-1 MiB by default and at most 4 MiB. Aggregate and in-flight quotas still
-apply. A download returns a private one-use resource link and `file.reference_id`; exact recovery
-preserves the original reference, and consuming it does not authorize republication.
+The guest retains results and complete stdout/stderr on its own disk. The cloud routes live
+authorized requests; it does not queue commands or keep a separate command-result copy. A lost
+cloud connection leaves guest commands running; stopping the provider can interrupt them. Saved
+terminal results remain inspectable while the workspace data exists and current authority permits
+access. Commands and reads are independent; file commit/recovery uses a transaction lock and
+expected-content checks. `timeout_seconds` stops a command only when explicitly requested.
+
+`upload` streams a native attachment into its guarded target using its workspace `request_id`.
+`download` reads the current `path` and publishes an owned, one-use resource link and
+`file.reference_id`. There is no workspace byte quota; optional `max_bytes` bounds the caller's
+download or preview request. Link publication has its own finite lifetime. A consumed link does
+not authorize republication under an old recovery handle.
 `communication({ action: "deliver-file", referenceId, message })` is a separate delivery of that
 owned ready object, optionally to one configured `channelId`. It does not consume the native
 reference or send to a guest-selected recipient.
 
-Use `codespace({ action: "files_setup", codespace_id, request_id })` to provision the remote file
-client. When `provisioned` is true, invoke the returned absolute `command` through ordinary exec;
-pending setup returns `command: null`. The returned hashes measure the installed client and
-executable. Fixed-asset refresh preserves a running guest's life, repository and sessions without
-VM or daemon restart; it does not replace the host daemon's journal. The client supports
-`upload PATH --request-id UUID`, `download REFERENCE PATH --request-id UUID` and `status UUID`.
-Reuse the UUID and original bytes/target guard to resume. CLI status and MCP `transfer_status`
-only collect: `scope: "private_object"` with `state: "ready"` confirms private storage, not a guest
-target commit. New or resumed work requires current provider/owner permissions and the same measured
-guest life within finite capability and object retention. Full commands and target guards are in
-[the tools reference](/docs/reference/tools/#development-codespaces).
+The fixed provider bootstrap installs the service and `~/.local/bin/moira-workspace` CLI in place,
+including on an existing Codespace, without recreating its disk. The CLI talks to the same private
+Unix socket as the service; it works inside an authorized running workspace even when the cloud
+connection is unavailable. It supplies its own verified Node.js 24.21.0 and ripgrep 15.2.0, independent
+of the project's Node version or PATH. Project runtimes remain the project's responsibility.
 
-Pending setup, including an operation without confirmed launch or a saved result, is collected with
-the same setup UUID; it does not authorize another installation. Interrupted input preparation and
-private copying resume the original object and checkpoint. A consumed or unavailable bound input
-cannot be replaced or fetched again under that request. An already ready independent copy remains
-settleable without its original source, subject to current authority and its own retention.
-Completed retries return the retained receipt without another publication or result allocation;
-resume never extends the original deadlines.
-Expiry before dispatch admission settles setup, native transfer and CLI preparation as cancelled
-without execution independently of whether private preparation is still available. Keep the
-original identity and deadline; a terminal setup refusal ends waiting without exposing a command.
-Already-admitted dispatch with an unknown outcome remains uncertain and is not repeated by inspection.
+```bash
+~/.local/bin/moira-workspace --help
+~/.local/bin/moira-workspace exec -- pwd
+~/.local/bin/moira-workspace stat package.json
+~/.local/bin/moira-workspace search . TODO
+```
+
+For retries, pass the original `--request-id ws1-<lowercase UUID>`; `status`, `cancel` and `output`
+address that identity. File `read`, `write`, `upload`, `download` and `patch` use the same repository
+guards. The public image is `ghcr.io/moira-mcp/moira-workspace-service`; the optional Dev Container
+Feature is published under `ghcr.io/moira-mcp/features/workspace-service`. Select a published release
+tag. The image includes the runtime; the Feature adds the same payload to a project's own Linux
+Dev Container. Both support glibc x64/arm64 and a repository owned by the service user, including
+an explicitly configured root user. Adding the Feature during a container rebuild is optional;
+Moira's fixed bootstrap upgrades an existing environment without requiring that rebuild.
+
+To add the Feature to a project's `.devcontainer/devcontainer.json`, merge this entry into
+its existing `features` object and replace `RELEASE_TAG` with an available published tag:
+
+```json
+{
+  "features": {
+    "ghcr.io/moira-mcp/features/workspace-service:RELEASE_TAG": {}
+  }
+}
+```
+
+Alternatively select `ghcr.io/moira-mcp/moira-workspace-service:RELEASE_TAG` as the Dev Container
+image and set `overrideCommand: true` so the container can start before paired bootstrap prepares
+the service. These assets install the runtime; they do not grant cloud or repository authority.
+
+Public package registries and public DNS destinations use approved brokered egress. There is no
+socket-count or transfer-duration quota; streaming backpressure, public-address checks, finite
+owner lease and revocation remain. Host/LAN/service destinations stay denied. Browser compatibility
+requires the project's guest packages. `preview_image` reads a current repository PNG/JPEG and
+checks its container before returning native image content; inspect it before treating it as
+visual evidence. Inline preview has a separate 4 MiB ceiling, 8192 pixels per edge and
+16 million pixels overall; a smaller `max_bytes` can reduce the caller's bound. It validates
+framing, not decoded pixels. Use `download` for an original outside these preview bounds.
+See [the tools reference](/docs/reference/tools/#development-codespaces).
 
 In **Settings → Development → Local computers**, open the connected computer's codespaces and
 choose its approved repository to create a VM, or discover
@@ -499,12 +524,15 @@ unobserved until a verified read. Follow the coordinated shutdown and backup pro
 rollback restores the matching server database, complete local state, SDK storage and bundles
 together. Convert unsupported saved policy/control formats only while both sides are stopped.
 Updating the server or rebuilding the CLI does not replace an already running daemon's journal and
-replay code or the guest's installed worker. A receipt without start proof leaves that start
+installed executable release. Fixed guest bootstrap refreshes the common service in place.
+A receipt without start proof leaves that start
 unconfirmed. Inspect the original operation instead of
 restarting the companion to recover a lost reply. Companion shutdown stops its owned VM processes.
 
-Manager-backed CLI create/start/exec commands are one-shot and stop owned VM processes on exit;
-persistent server work uses `run`. Stop it before another command needs the same runner lock.
+Host CLI `create`, `start` and raw `request` are unsupported and refused before opening state or
+contacting the VM. Create/start through your paired Moira account. Host `stop`, `remove` and
+`recover` remain custody tools; ordinary work uses the guest `moira-workspace` CLI or MCP.
+Persistent paired lifecycle work uses `run`. Stop it before another command needs the same runner lock.
 After a crash or computer reboot, start `run` with the same state directory. It automatically
 reclaims a stale runner marker only under the system lock and after proving both previous host
 owners absent. Saved policy, VM records and unknown operations are retained without replay.
@@ -608,11 +636,14 @@ choosing the operation with `action`: `list` shows compact existing codespaces, 
 shows approved targets and refreshes stale grants, `setup_help` returns the current user-owned setup step and
 the provider's exact links, `create` provisions a persistent personal-billed Codespace for an approved repository,
 and `exec`, `stat`, `search`, `read`, `write`, `apply_patch`, `upload` and `download` work inside it
-by `codespace_id`. Create/start wait for a usable environment, stop for confirmed shutdown while
-keeping data, and delete for confirmed absence with explicit confirmation. Exec requires a stable
-UUID `request_id` and returns acceptance plus `operation_id`; collect its result with that ID, or
-recover a lost first reply with only `codespace_id` and `request_id`. Successful file calls return
-their useful result without an operation journal. Use `codespace_process` with a stable `request_id`
+by `codespace_id`. Create/start observe readiness within the configured lifecycle wait window;
+provider creation may remain pending or unconfirmed. A pending resource or unresolved lifecycle
+reply does not certify guest readiness or physical completion: inspect the same `codespace_id`
+before requesting new work. Stop waits for confirmed shutdown while keeping data, and delete for
+confirmed absence with explicit confirmation. Exec requires a stable
+`ws1-<lowercase UUID>` `request_id`; collect its result or recover a lost first reply with only
+`codespace_id` and `request_id`. Successful file calls return
+their useful result directly; mutations retain their guest receipt. Use `codespace_process` with a stable `request_id`
 for background start and its returned `process_id` for get/read/stop. Different chats and clients may reuse the same
 codespace; nothing is deleted when a command finishes or a client disconnects.
 
@@ -626,15 +657,16 @@ personal rather than shared; collaboration happens through version-control branc
 
 Users manage the same codespaces from the **Development environments** card in **Settings →
 Development → GitHub Codespaces**: create one for an approved repository, start or stop it (stop keeps the repository
-data) and delete it after an explicit confirmation. Each user's idle codespaces pause on their own:
+data) and delete it after an explicit confirmation. GitHub owns idle activity detection:
 the **Automatic pause** card in the same section sets `codespaces.auto_stop_enabled` (on by default)
-and `codespaces.idle_timeout_minutes` (30 by default, 5 to 240), which decide when Moira stops a
-codespace no agent has used through Moira, and the next agent operation starts it again. The **Your
-limits** card beside it shows the user's codespace, command and transfer limits against current
-use. Direct use in a browser, an editor or over SSH is not seen, so
-users who work in their codespaces directly should turn pausing off. Administrators open
+and `codespaces.idle_timeout_minutes` (30 by default, 5 to 240) are sent when a new Codespace is
+created. Turning the preference off requests GitHub's maximum 240 minutes, not unlimited runtime.
+Existing Codespaces retain their provider settings. GitHub observes editor, browser and terminal
+input/output; a silent command can be interrupted by its idle shutdown. Local follows its computer
+owner's lease and policy. The **Your limits** card shows held resources, machine/creation/retention
+policy and provider billing, without command or transfer quotas. Administrators open
 **Admin → Settings → Codespaces** to see the instance readiness (configuration, connector,
-reconciliation backlog, active codespaces and operations against their limits) and to pause work with the global or provider kill switch; pausing refuses new
+resource reconciliation backlog and held codespaces against their limits) and to pause work with the global or provider kill switch; pausing refuses new
 codespaces, starts and agent operations and stops running codespaces without deleting anything.
 
 For monitoring, `GET /api/health` and the MCP `/health` endpoint report the readiness state
@@ -645,7 +677,7 @@ connector probe is bounded to two seconds, so a stalled connector cannot hang th
 `moira_codespace_ready` stays at 0 with `CODESPACE_CODESPACES_ENABLED=true`, when
 `moira_codespace_connector_available` is 0, when
 `moira_codespace_reconciliation_oldest_due_age_seconds` exceeds several reconcile intervals, or when
-`moira_codespace_rejections_total` grows for quota or busy codes.
+`moira_codespace_rejections_total` grows for resource-policy or authority refusals.
 
 Disconnect disables local use before GitHub revocation. If GitHub is temporarily unavailable, the
 page shows a revocation-pending state and **Disconnect** retries the exact encrypted capability;

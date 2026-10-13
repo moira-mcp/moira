@@ -6,10 +6,6 @@ import {
   CodespaceConnectionRepository,
   CodespaceConnectionService,
   CodespaceProviderRegistry,
-  CodespaceOperationRepository,
-  CodespaceOperationService,
-  CodespaceFileService,
-  type CodespaceFileTransferService,
   CodespaceTransferRepository,
   CodespaceTransferService,
   CodespaceResourceRepository,
@@ -17,7 +13,6 @@ import {
   CodespaceResourceError,
   CodespaceObservabilityService,
   recordCodespaceConnectionEvent,
-  recordCodespaceOperationEvent,
   recordCodespaceResourceEvent,
   getDatabase,
   getSqliteInstance,
@@ -29,18 +24,23 @@ import {
   createLogger,
   type CodespaceConnectionAuditEvent,
   type CodespaceResourceAuditEvent,
-  type CodespaceOperationAuditEvent,
   type CodespaceGuidanceSituation,
   type CodespaceAvailableBillingView,
   type CodespaceProviderBillingView,
 } from "@mcp-moira/shared";
 import { dirname, join } from "node:path";
 import { existsSync, mkdirSync, readdirSync, renameSync, rmdirSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import {
+  loadWorkspacePayload,
+  WORKSPACE_PAYLOAD_DIRECTORY,
+} from "../../../workspace-service/src/bootstrap.mjs";
 
 import { GitHubCodespacesConnector } from "./github-codespaces-connector.js";
 import { OpenAINativeReferenceFetcher } from "./codespace-native-reference-fetcher.js";
 import { createLocalCodespaceServices } from "./local-codespace-services.js";
-import { createCodespaceFileTransfers } from "./codespace-file-transfers.js";
+import { getWorkspaceClient } from "./workspace-client.js";
+import type { WorkspaceClient } from "./workspace-router.js";
 import {
   GitHubCodespaceClientError,
   HttpGitHubCodespaceClient,
@@ -50,9 +50,7 @@ import {
 interface CodespaceServices {
   connection: CodespaceConnectionService;
   resource: CodespaceResourceService | null;
-  operation: CodespaceOperationService | null;
-  file: CodespaceFileService | null;
-  fileTransfers: CodespaceFileTransferService | null;
+  workspace: WorkspaceClient;
   transfer: CodespaceTransferService;
   observability: CodespaceObservabilityService;
   local: ReturnType<typeof createLocalCodespaceServices>;
@@ -60,7 +58,7 @@ interface CodespaceServices {
 
 export type CodespaceProviderServices = Pick<
   CodespaceServices,
-  "resource" | "operation" | "file" | "fileTransfers" | "transfer" | "observability"
+  "resource" | "workspace" | "transfer" | "observability"
 > & {
   provider: string;
   connection: Pick<CodespaceConnectionService, "getStatus" | "refreshGrants">;
@@ -197,29 +195,6 @@ function resourceAudit(
   };
 }
 
-function operationAudit(
-  auditRepository: AuditRepository,
-): (event: CodespaceOperationAuditEvent) => Promise<void> {
-  return async (event) => {
-    recordCodespaceOperationEvent(event, event.updatedAt - event.createdAt);
-    await logAuditEventDirect(auditRepository, {
-      userId: event.userId,
-      action: operationAuditAction(event),
-      resource: "codespace_operation",
-      resourceId: event.operationId,
-      metadata: {
-        codespaceId: event.codespaceId,
-        provider: event.provider,
-        state: event.state,
-        kind: event.kind,
-        inputBytes: event.inputBytes,
-        outputBytes: event.outputBytes,
-        exitCode: event.exitCode,
-      },
-    });
-  };
-}
-
 let services: CodespaceServices | null = null;
 
 function codespaceTransferRoot(): string {
@@ -281,17 +256,6 @@ function resourceAuditAction(event: CodespaceResourceAuditEvent): AuditAction {
   }
 }
 
-function operationAuditAction(event: CodespaceOperationAuditEvent): AuditAction {
-  switch (event.action) {
-    case "reserve":
-      return AuditAction.CODESPACE_OPERATION_RESERVE;
-    case "reconcile":
-      return AuditAction.CODESPACE_OPERATION_RECONCILE;
-    case "terminal":
-      return AuditAction.CODESPACE_OPERATION_TERMINAL;
-  }
-}
-
 function initializeCodespaceServices(): CodespaceServices {
   if (services) return services;
   const codespaceLogger = createLogger({ component: "CodespaceTransfer" });
@@ -299,9 +263,6 @@ function initializeCodespaceServices(): CodespaceServices {
   const config = getCodespaceGitHubConfig();
   let resource: CodespaceResourceService | null = null;
   let billingClient: HttpGitHubCodespaceClient | null = null;
-  let operation: CodespaceOperationService | null = null;
-  let file: CodespaceFileService | null = null;
-  let fileTransfers: CodespaceFileTransferService | null = null;
   const connectionRepository = new CodespaceConnectionRepository(getSqliteInstance());
   const connection = new CodespaceConnectionService({
     repository: connectionRepository,
@@ -335,7 +296,6 @@ function initializeCodespaceServices(): CodespaceServices {
   transfer.start();
 
   const resourceRepository = new CodespaceResourceRepository(getSqliteInstance());
-  const operationRepository = new CodespaceOperationRepository(getSqliteInstance());
   let connector: GitHubCodespacesConnector | null = null;
 
   if (config.state === "available") {
@@ -392,66 +352,6 @@ function initializeCodespaceServices(): CodespaceServices {
         });
       },
     });
-    const nativeFetcher = new OpenAINativeReferenceFetcher();
-    operation = new CodespaceOperationService({
-      providerId: CODESPACE_PROVIDER_GITHUB,
-      repository: operationRepository,
-      credentials: {
-        getCredential: async (userId, providerId) => {
-          if (providerId !== CODESPACE_PROVIDER_GITHUB) {
-            throw new Error("Codespace credential provider does not match the service binding");
-          }
-          return connection.getAccessToken(userId);
-        },
-      },
-      transport: connector,
-      policy: getCodespaceResourcePolicy,
-      transfers: transfer,
-      nativeFetcher,
-      reconcileFile: (accepted) => file!.recoverNative(accepted),
-      lifecycle: {
-        ensureRunning: (userId, codespaceId) => resource!.ensureRunning(userId, codespaceId),
-      },
-      audit: operationAudit(auditRepository),
-    });
-    file = new CodespaceFileService({
-      repository: operationRepository,
-      credentials: {
-        getCredential: async (userId, providerId) => {
-          if (providerId !== CODESPACE_PROVIDER_GITHUB) {
-            throw new Error("Codespace credential provider does not match the service binding");
-          }
-          return connection.getAccessToken(userId);
-        },
-      },
-      transport: connector,
-      policy: getCodespaceResourcePolicy,
-      transfers: transfer,
-      nativeFetcher,
-      get native() {
-        return fileTransfers ?? undefined;
-      },
-      lifecycle: {
-        ensureRunning: (userId, codespaceId) => resource!.ensureRunning(userId, codespaceId),
-      },
-      audit: operationAudit(auditRepository),
-    });
-    fileTransfers = createCodespaceFileTransfers({
-      repository: operationRepository,
-      files: file,
-      transfers: transfer,
-      credentials: {
-        getCredential: async (userId, providerId) => {
-          if (providerId !== CODESPACE_PROVIDER_GITHUB)
-            throw new Error("Codespace credential provider does not match");
-          return connection.getAccessToken(userId);
-        },
-      },
-      transport: connector,
-      policy: getCodespaceResourcePolicy,
-      nativeFetcher,
-      wake: () => operation!.notifyAccepted(),
-    });
   }
 
   const readBilling = createCodespaceBillingReader({
@@ -474,8 +374,6 @@ function initializeCodespaceServices(): CodespaceServices {
     config: getCodespaceGitHubConfig,
     policy: getCodespaceResourcePolicy,
     resources: resourceRepository,
-    operations: operationRepository,
-    transfers: new CodespaceTransferRepository(getSqliteInstance()),
     transport: connector,
     providerBilling: readBilling,
     probeTimeoutMs: 2_000,
@@ -484,14 +382,11 @@ function initializeCodespaceServices(): CodespaceServices {
 
   const local = createLocalCodespaceServices(transfer, {
     resourceAudit: resourceAudit(auditRepository),
-    operationAudit: operationAudit(auditRepository),
   });
   services = {
     connection,
     resource,
-    operation,
-    file,
-    fileTransfers,
+    workspace: getWorkspaceClient(),
     transfer,
     observability,
     local,
@@ -511,12 +406,8 @@ export function getCodespaceResourceService(): CodespaceResourceService | null {
   return initializeCodespaceServices().resource;
 }
 
-export function getCodespaceOperationService(): CodespaceOperationService | null {
-  return initializeCodespaceServices().operation;
-}
-
-export function getCodespaceFileService(): CodespaceFileService | null {
-  return initializeCodespaceServices().file;
+export function getCodespaceNativeReferenceFetcher(): OpenAINativeReferenceFetcher {
+  return new OpenAINativeReferenceFetcher();
 }
 
 export function getCodespaceTransferService(): CodespaceTransferService {
@@ -525,6 +416,24 @@ export function getCodespaceTransferService(): CodespaceTransferService {
 
 export function getLocalDeviceService() {
   return initializeCodespaceServices().local.devices;
+}
+export async function bootstrapLocalWorkspace(userId: string, resourceId: string): Promise<void> {
+  const current = initializeCodespaceServices();
+  const resource = new CodespaceResourceRepository(getSqliteInstance()).getOwned(
+    userId,
+    resourceId,
+  );
+  if (!resource || resource.provider !== CODESPACE_PROVIDER_LOCAL || !resource.providerResourceName)
+    throw new Error("Workspace binding unavailable");
+  const [x64, arm64] = await Promise.all([
+    loadWorkspacePayload(fileURLToPath(WORKSPACE_PAYLOAD_DIRECTORY), "x64"),
+    loadWorkspacePayload(fileURLToPath(WORKSPACE_PAYLOAD_DIRECTORY), "arm64"),
+  ]);
+  await current.local.provider.bootstrapWorkspace(
+    `local-user:${userId}`,
+    resource.providerResourceName,
+    { x64: x64.release, arm64: arm64.release },
+  );
 }
 
 export function getCodespaceProviderServices(provider: string): CodespaceProviderServices {
@@ -571,14 +480,12 @@ export function selectCodespaceProviderServices(
 export function startCodespaceProviderServices(): void {
   for (const bundle of getCodespaceProviderBundles()) {
     bundle.resource?.start();
-    bundle.operation?.start();
   }
 }
 
 export function stopCodespaceProviderServices(): void {
   for (const bundle of getCodespaceProviderBundles()) {
     bundle.resource?.stop();
-    bundle.operation?.stop();
   }
 }
 

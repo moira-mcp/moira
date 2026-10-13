@@ -3,16 +3,10 @@ import express, { type Application } from "express";
 import request from "supertest";
 import { randomUUID } from "node:crypto";
 import { eq, inArray } from "drizzle-orm";
-import {
-  CODESPACE_PROVIDER_LOCAL,
-  getDatabase,
-  resetFeatureResolver,
-  WorkflowRepository,
-} from "@mcp-moira/shared";
+import { getDatabase, resetFeatureResolver, WorkflowRepository } from "@mcp-moira/shared";
 import * as schema from "../../packages/shared/src/database/schema.js";
 import { auth } from "../../packages/web-backend/src/auth.js";
 import * as rateLimits from "../../packages/web-backend/src/middleware/rate-limit-middleware.js";
-import { createCodespaceFileCapabilities } from "../../packages/web-backend/src/services/codespace-file-transfers.js";
 
 // Use the production limiter with its usual test bypass explicitly disabled.
 const limiters = rateLimits.createRateLimiters({ skipLimits: false, whitelist: [] });
@@ -24,62 +18,6 @@ const { MoiraApiServer } = await import("../../packages/web-backend/src/server.j
 const { userProfileRoutes } = await import("../../packages/web-backend/src/routes/user-profile.js");
 const { default: userOAuthSessionsRoutes } =
   await import("../../packages/web-backend/src/routes/user-oauth-sessions.js");
-
-test("mounted file route verifies factory-issued capabilities before checking owned operations", async () => {
-  const app = (new MoiraApiServer() as unknown as { app: Application }).app;
-  const db = getDatabase();
-  const registered = await auth.handler(
-    new Request("http://localhost/api/auth/sign-up/email", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        email: `mounted-file-${randomUUID()}@example.test`,
-        name: "File Reader",
-        password: "ReadProtocol123!",
-        acceptedTermsAt: new Date().toISOString(),
-        acceptedNotRussianResidentAt: new Date().toISOString(),
-      }),
-    }),
-  );
-  expect(registered.status).toBe(200);
-  const userId = ((await registered.json()) as { user: { id: string } }).user.id;
-  try {
-    await db
-      .update(schema.user)
-      .set({ approvedAt: new Date().toISOString(), emailVerified: true })
-      .where(eq(schema.user.id, userId));
-    const claims = {
-      kind: "bootstrap" as const,
-      userId,
-      resourceId: randomUUID(),
-      provider: CODESPACE_PROVIDER_LOCAL,
-      resourceGeneration: 1,
-      authorizationGeneration: 1,
-      environmentIdentity: "a".repeat(64),
-      operationId: randomUUID(),
-      expiresAt: Date.now() + 60_000,
-    };
-    const token = createCodespaceFileCapabilities().issue(claims);
-    const lookup = (credential: string) =>
-      request(app)
-        .post("/api/public/codespace-files/lookup")
-        .set("Authorization", `Bearer ${credential}`)
-        .send({ requestId: randomUUID() });
-    const missing = await lookup(token);
-    expect(missing.status).toBe(404);
-    expect(missing.body.error.code).toBe("CODESPACE_NOT_FOUND");
-    const parts = token.split(".");
-    parts[2] = (parts[2][0] === "A" ? "B" : "A") + parts[2].slice(1);
-    const tampered = await lookup(parts.join("."));
-    expect(tampered.status).toBe(403);
-    expect(tampered.body.error.code).toBe("CODESPACE_AUTHORIZATION_REQUIRED");
-    const expired = createCodespaceFileCapabilities(() => 1).issue({ ...claims, expiresAt: 2 });
-    expect((await lookup(expired)).status).toBe(403);
-  } finally {
-    await db.delete(schema.auditLog).where(eq(schema.auditLog.userId, userId));
-    await db.delete(schema.user).where(eq(schema.user.id, userId));
-  }
-});
 
 test("mounted workflow list and sharing aliases consume one admission and one API quota while retaining denial", async () => {
   const app = (new MoiraApiServer() as unknown as { app: Application }).app;

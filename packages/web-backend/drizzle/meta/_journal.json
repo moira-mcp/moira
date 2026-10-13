@@ -428,6 +428,13 @@
       "when": 1791831600000,
       "tag": "0059_codespace_transfer_streaming",
       "breakpoints": true
+    },
+    {
+      "idx": 61,
+      "version": "7",
+      "when": 1791918000000,
+      "tag": "0060_workspace_agent_auth",
+      "breakpoints": true
     }
   ]
 }

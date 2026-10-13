@@ -7,7 +7,6 @@ import {
   CODESPACE_PROVIDER_GITHUB,
   CODESPACE_PROVIDER_LOCAL,
   CODESPACE_PROVIDER_CONTRACT_VERSION,
-  CodespaceOperationRepository,
   CodespaceProviderRegistry,
   CodespaceResourceRepository,
   CodespaceResourceService,
@@ -23,8 +22,6 @@ const policy = {
   enabled: true,
   maxActivePerUser: 1,
   maxActiveGlobal: 1,
-  maxConcurrentOperationsPerUser: 1,
-  maxConcurrentOperationsGlobal: 1,
 };
 beforeEach(() => {
   sqlite = new Database(":memory:");
@@ -78,30 +75,6 @@ function reserveSpace(provider: string) {
     now,
   });
 }
-function runningSpace(provider: string) {
-  const reserved = reserveSpace(provider);
-  if (reserved.outcome !== "reserved") throw new Error("Expected reservation");
-  sqlite
-    .prepare(
-      `UPDATE codespaceResource SET state='usable', providerResourceName=?,
-    externalOwnerId='101', observedState='running' WHERE id=?`,
-    )
-    .run(reserved.resource.id, reserved.resource.id);
-  return reserved.resource.id;
-}
-function operation(resourceId: string, kind: "exec" | "write" = "exec") {
-  return new CodespaceOperationRepository(sqlite).reserve({
-    userId: "owner",
-    resourceId,
-    inputBytes: 0,
-    stdoutLimitBytes: 1024,
-    stderrLimitBytes: 1024,
-    deadlineAt: now + 60_000,
-    policy,
-    now,
-    kind,
-  });
-}
 
 test("local VM reservations ignore cloud ceilings and throttle, cloud reservations still enforce them", () => {
   for (let index = 0; index < 6; index++)
@@ -110,24 +83,11 @@ test("local VM reservations ignore cloud ceilings and throttle, cloud reservatio
   expect(reserveSpace(CODESPACE_PROVIDER_GITHUB).outcome).toBe("limit");
 });
 
-test("local jobs and writes remain independent while cloud concurrency remains bounded", () => {
-  const local = runningSpace(CODESPACE_PROVIDER_LOCAL);
-  for (let index = 0; index < 10; index++) expect(operation(local).outcome).toBe("reserved");
-  const cloud = runningSpace(CODESPACE_PROVIDER_GITHUB);
-  expect(operation(cloud).outcome).toBe("reserved");
-  expect(operation(cloud).outcome).toBe("busy");
-  expect(operation(local, "write").outcome).toBe("reserved");
-  expect(operation(local, "write").outcome).toBe("reserved");
-  expect(operation(local).outcome).toBe("reserved");
-});
-
 test("local limits report absence of count quotas instead of cloud values", () => {
   const input = {
     policy,
     held: 10,
     instanceHeld: 10,
-    activeOperations: 10,
-    transfers: { objects: 0, bytes: 0, inflightBytes: 0 },
     idle: { autoStopEnabled: true, idleTimeoutMinutes: 30 },
     providerIdleMaxMinutes: 240,
   };
@@ -135,7 +95,6 @@ test("local limits report absence of count quotas instead of cloud values", () =
   expect(local.codespaces.max_per_user).toBeNull();
   expect(local.codespaces.max_instance).toBeNull();
   expect(local.codespaces.create_throttle_seconds).toBeNull();
-  expect(local.operations.max_concurrent_per_user).toBeNull();
   expect(local.machine_ceiling).toBeNull();
   expect(
     projectCodespaceLimits({ ...input, provider: CODESPACE_PROVIDER_GITHUB }).codespaces

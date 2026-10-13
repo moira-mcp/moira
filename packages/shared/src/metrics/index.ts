@@ -322,21 +322,6 @@ export const codespaceLifecycleEventsTotal = new promClient.Counter({
   registers: [metricsRegistry],
 });
 
-export const codespaceOperationEventsTotal = new promClient.Counter({
-  name: "moira_codespace_operation_events_total",
-  help: "Codespace operation audit events by provider, kind, action and state",
-  labelNames: ["provider", "kind", "action", "state"],
-  registers: [metricsRegistry],
-});
-
-export const codespaceOperationDurationSeconds = new promClient.Histogram({
-  name: "moira_codespace_operation_duration_seconds",
-  help: "Seconds from operation reservation to its terminal state",
-  labelNames: ["kind", "state"],
-  buckets: [0.5, 1, 2.5, 5, 10, 30, 60, 120, 300, 600, 900],
-  registers: [metricsRegistry],
-});
-
 export const codespaceRejectionsTotal = new promClient.Counter({
   name: "moira_codespace_rejections_total",
   help: "Codespace requests refused before provider contact by bounded error code",
@@ -360,14 +345,8 @@ export const codespaceReconciliationOldestDueAgeSeconds = new promClient.Gauge({
 
 export const codespaceActiveGauge = new promClient.Gauge({
   name: "moira_codespace_active",
-  help: "Active codespace resources and operations across the instance",
+  help: "Active codespace resources across the instance",
   labelNames: ["kind"],
-  registers: [metricsRegistry],
-});
-
-export const codespaceTransferLiveBytesGauge = new promClient.Gauge({
-  name: "moira_codespace_transfer_live_bytes",
-  help: "Bytes currently reserved or held by private codespace transfers",
   registers: [metricsRegistry],
 });
 

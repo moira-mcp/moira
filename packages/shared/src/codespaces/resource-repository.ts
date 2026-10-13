@@ -30,9 +30,6 @@ export const CODESPACE_AUTO_STOP_SETTING = "codespaces.auto_stop_enabled";
 /** The per-user idle timeout in minutes. */
 export const CODESPACE_IDLE_TIMEOUT_SETTING = "codespaces.idle_timeout_minutes";
 
-/** Operation states that mean something is still running in, or about to reach, the codespace. */
-const ACTIVE_OPERATION_STATES = "'reserved', 'running', 'cancel_pending', 'reconcile_pending'";
-
 /** The stored authorization still reaches this record's provider account and repository. */
 const CURRENT_AUTHORIZATION_PREDICATE = `EXISTS (
   SELECT 1 FROM codespaceConnection c
@@ -71,30 +68,6 @@ function idleTimeoutMinutesSql(user: string): string {
   return `(CASE WHEN ${value} BETWEEN ${minimum} AND ${maximum} THEN ${value}
     ELSE ${CODESPACE_IDLE_TIMEOUT_MINUTES.default} END)`;
 }
-
-/**
- * The one definition of "idle enough to stop", over the `codespaceResource` row in scope, with the
- * current time as its only parameter. A persistent codespace that is usable and meant to run, whose
- * owner has auto-stop on, with no operation still running or pending, and whose latest agent
- * activity through Moira is older than the owner's timeout. That activity is the later of the
- * record's own (adoption, a completed start) and any operation's last change — commands, file
- * operations and transfers all run as operations, so this covers their reservation and completion —
- * or the record's creation. Use outside Moira (browser, editor, SSH) is not visible here, and the
- * provider's last start time is deliberately not an input: it says when the codespace started, not
- * that anyone used it.
- */
-const IDLE_STOP_PREDICATE = `codespaceResource.retentionPolicy = 'persistent'
-  AND codespaceResource.state = 'usable' AND codespaceResource.desiredState = 'running'
-  AND codespaceResource.providerResourceName IS NOT NULL
-  AND ${autoStopEnabledSql("codespaceResource.userId")}
-  AND NOT EXISTS (SELECT 1 FROM codespaceOperation activeOperation
-    WHERE activeOperation.resourceId = codespaceResource.id
-      AND activeOperation.state IN (${ACTIVE_OPERATION_STATES}))
-  AND MAX(codespaceResource.createdAt,
-          COALESCE(codespaceResource.lastActivityAt, 0),
-          COALESCE((SELECT MAX(operation.updatedAt) FROM codespaceOperation operation
-                    WHERE operation.resourceId = codespaceResource.id), 0))
-      + ${idleTimeoutMinutesSql("codespaceResource.userId")} * 60000 <= ?`;
 
 function placeholders(values: readonly unknown[]): string {
   return values.map(() => "?").join(", ");
@@ -572,61 +545,6 @@ export class CodespaceResourceRepository {
     };
   }
 
-  /** Codespaces idle long enough to stop now, in one bounded query. */
-  listIdleStopCandidates(
-    provider: string,
-    now: number,
-    limit: number,
-    excludeIds: readonly string[] = [],
-  ): Array<{ id: string; userId: string; generation: number }> {
-    return this.sqlite
-      .prepare(
-        `SELECT id, userId, generation FROM codespaceResource
-         WHERE provider = ? AND ${IDLE_STOP_PREDICATE}
-           ${excludeIds.length > 0 ? `AND id NOT IN (${placeholders(excludeIds)})` : ""}
-         ORDER BY updatedAt, id LIMIT ?`,
-      )
-      .all(provider, now, ...excludeIds, limit) as Array<{
-      id: string;
-      userId: string;
-      generation: number;
-    }>;
-  }
-
-  /**
-   * Requests a stop because the codespace is idle, re-checking the whole idle condition in the same
-   * statement. A reservation or any other activity that landed after the scan makes the condition
-   * false, so a racing operation always wins and nothing is stopped under it.
-   */
-  requestIdleStop(
-    resourceId: string,
-    generation: number,
-    now: number,
-  ): CodespaceResourceRecord | null {
-    const transaction = this.sqlite.transaction(() => {
-      const current = this.requireById(resourceId);
-      const changed = this.sqlite
-        .prepare(
-          `UPDATE codespaceResource SET desiredState = 'stopped', state = 'stop_pending',
-           generation = generation + 1, lastOutcome = 'idle_stop_requested', claimId = NULL,
-           claimExpiresAt = NULL, reconcileFailures = 0, updatedAt = ?
-           WHERE id = ? AND generation = ? AND ${IDLE_STOP_PREDICATE}`,
-        )
-        .run(now, resourceId, generation, now).changes;
-      if (changed !== 1) return null;
-      this.recordLifecycleMutation(
-        resourceId,
-        current.userId,
-        current.provider,
-        generation + 1,
-        "stop",
-        now,
-      );
-      return this.requireById(resourceId);
-    });
-    return transaction.immediate();
-  }
-
   /**
    * Takes the right to list up to `limit` users' codespaces from the provider now: users with a
    * persistent running or stopped codespace whose last listing is at least `intervalMs` old,
@@ -681,8 +599,7 @@ export class CodespaceResourceRepository {
   /**
    * Records that the provider already stopped a codespace Moira held as running — GitHub's own idle
    * timeout, or a user stopping it outside Moira. No provider call is involved: the codespace is
-   * already where a stop would take it. The desired state follows so the next use starts it again;
-   * accepted operations are inspected by their markers to establish their real outcomes.
+   * already where a stop would take it. The desired state follows so the next use starts it again.
    */
   markObservedStopped(resourceId: string, generation: number, now: number): boolean {
     const transaction = this.sqlite.transaction(() => {
@@ -697,7 +614,6 @@ export class CodespaceResourceRepository {
         )
         .run(now, resourceId, generation).changes;
       if (changed !== 1) return false;
-      this.requestOperationCancellation(resourceId, now, "provider_observed_stopped");
       return true;
     });
     return transaction.immediate();
@@ -766,21 +682,6 @@ export class CodespaceResourceRepository {
           input.authorizationGeneration,
         ).changes;
       if (changed !== 1) return false;
-      this.sqlite
-        .prepare(
-          `UPDATE codespaceOperation SET authorizationGeneration = ?, updatedAt = ?
-           WHERE resourceId = ? AND userId = ? AND authorizationGeneration = ?
-             AND (state IN ('reserved', 'running', 'cancel_pending', 'reconcile_pending')
-               OR (remoteCleanupPending = 1
-                 AND state IN ('succeeded', 'failed', 'cancelled', 'timed_out')))`,
-        )
-        .run(
-          input.authorizationGeneration,
-          input.now,
-          input.resourceId,
-          input.userId,
-          input.expectedAuthorizationGeneration,
-        );
       return true;
     });
     return transaction.immediate();
@@ -1139,7 +1040,6 @@ export class CodespaceResourceRepository {
         )
         .run(now, resourceId, userId, current.generation).changes;
       if (changed !== 1) return null;
-      this.requestOperationCancellation(resourceId, now, "codespace_stop_requested");
       this.recordLifecycleMutation(
         resourceId,
         userId,
@@ -1241,7 +1141,6 @@ export class CodespaceResourceRepository {
         )
         .run(now, resourceId, userId, current.generation).changes;
       if (changed !== 1) return null;
-      this.requestOperationCancellation(resourceId, now, "codespace_delete_requested");
       this.recordLifecycleMutation(
         resourceId,
         userId,
@@ -1287,25 +1186,6 @@ export class CodespaceResourceRepository {
           input.desiredState,
         ).changes;
       if (changed !== 1) return false;
-      if (input.desiredState !== "running") {
-        this.sqlite
-          .prepare(
-            `UPDATE codespaceOperation SET state = 'cancelled',
-             lastOutcome = 'exact_codespace_stopped', claimId = NULL,
-             claimExpiresAt = NULL, updatedAt = ? WHERE resourceId = ?
-             AND (? = 'deleted' AND state IN ('reserved', 'running', 'cancel_pending', 'reconcile_pending')
-               OR state = 'reserved')`,
-          )
-          .run(input.now, input.resourceId, input.desiredState);
-        if (input.desiredState === "deleted") {
-          this.sqlite
-            .prepare(
-              `UPDATE codespaceOperation SET remoteCleanupPending = 0, updatedAt = ?
-               WHERE resourceId = ? AND remoteCleanupPending = 1`,
-            )
-            .run(input.now, input.resourceId);
-        }
-      }
       return true;
     });
     return transaction.immediate();
@@ -1342,20 +1222,6 @@ export class CodespaceResourceRepository {
           confirmedObservation?.state ?? null,
         ).changes;
       if (changed !== 1) return false;
-      this.sqlite
-        .prepare(
-          `UPDATE codespaceOperation SET state = 'cancelled', remoteCleanupPending = 0,
-           lastOutcome = 'exact_codespace_absent', claimId = NULL,
-           claimExpiresAt = NULL, updatedAt = ? WHERE resourceId = ?
-             AND state IN ('reserved', 'running', 'cancel_pending', 'reconcile_pending')`,
-        )
-        .run(now, resourceId);
-      this.sqlite
-        .prepare(
-          `UPDATE codespaceOperation SET remoteCleanupPending = 0, updatedAt = ?
-           WHERE resourceId = ? AND remoteCleanupPending = 1`,
-        )
-        .run(now, resourceId);
       return true;
     });
     return transaction.immediate();
@@ -1481,7 +1347,6 @@ export class CodespaceResourceRepository {
           .run(now, row.id, row.generation);
         if (result.changes === 1) {
           changed++;
-          this.requestOperationCancellation(row.id, now, "disconnect_stop_requested");
           this.recordLifecycleMutation(
             row.id,
             userId,
@@ -1523,47 +1388,6 @@ export class CodespaceResourceRepository {
          updatedAt = excluded.updatedAt`,
       )
       .run(userId, provider, utcDay(now), required ? 1 : 0, now);
-  }
-
-  private requestOperationCancellation(resourceId: string, now: number, outcome: string): void {
-    const resource = this.requireById(resourceId);
-    if (resource.provider === CODESPACE_PROVIDER_LOCAL) {
-      const pending = this.sqlite
-        .prepare(
-          `SELECT kind, remoteMarker, providerResourceName FROM codespaceOperation
-           WHERE resourceId = ? AND state IN (${ACTIVE_OPERATION_STATES})`,
-        )
-        .all(resourceId) as Array<{
-        kind: string;
-        remoteMarker: string;
-        providerResourceName: string;
-      }>;
-      const revoke = this.sqlite.prepare(
-        `UPDATE codespaceLocalRelay SET status = 'revoked', claimExpiresAt = NULL, updatedAt = ?
-         WHERE resourceId = ? AND requestId = ? AND status IN ('queued', 'claimed')`,
-      );
-      for (const operation of pending) {
-        // Cancel only new work, not its result inspection or the lifecycle's own receipts.
-        const requestId = localRelayMutationId(resource, {
-          action: "operation",
-          spaceId: operation.providerResourceName,
-          job: {
-            action: operation.kind === "exec" ? "execute" : "file-execute",
-            remoteMarker: operation.remoteMarker,
-          },
-        });
-        revoke.run(now, resourceId, requestId);
-      }
-    }
-    this.sqlite
-      .prepare(
-        `UPDATE codespaceOperation SET state = CASE WHEN state = 'reserved' THEN 'cancelled' ELSE 'cancel_pending' END,
-         remoteCleanupPending = CASE WHEN state = 'reserved' THEN 0 ELSE remoteCleanupPending END,
-         lastOutcome = ?, updatedAt = ?
-         WHERE resourceId = ?
-           AND state IN ('reserved', 'running', 'reconcile_pending')`,
-      )
-      .run(outcome, now, resourceId);
   }
 
   requestAllCleanupForUser(
@@ -1869,7 +1693,6 @@ export class CodespaceResourceRepository {
           .run(input.now, row.id, row.generation);
         if (stopped.changes === 1) {
           persistentChanged++;
-          this.requestOperationCancellation(row.id, input.now, "provider_disabled_stop_requested");
           this.recordLifecycleMutation(
             row.id,
             row.userId,

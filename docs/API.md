@@ -2,21 +2,19 @@
 
 ## Rate Limiting
 
-All endpoints are protected by rate limiting.
+Matched ordinary API, auth and MCP handlers use their configured rate limiters.
+Workspace HTTP Upgrade streams use scoped transport authentication, separately from
+ordinary Express request admission.
 
 ### Limits
 
-- API endpoints (`/api/*`): 100 requests/minute, except the scoped codespace file channel below
+- Ordinary API endpoints (`/api/*`): 100 requests/minute
 - Auth endpoints (`/api/auth/*`): 1000 requests/minute
 - MCP endpoint (`/mcp`): 1000 requests/minute
 
-`/api/public/codespace-files` uses separate signed/current-owner chunk and control budgets through
-the common rate-limit middleware. Chunk requests per minute equal twice the number of 256 KiB
-chunks in the smallest effective per-user/global aggregate/inflight byte quota. Control requests
-equal eight times the smaller native object quota. Invalid, expired or foreign scopes remain
-IP-limited to 100 requests/minute. Rate admission performs only credential/current database checks;
-the admitted phase separately verifies fresh guest life before a new effect. Ordinary UI limits
-are unchanged.
+Workspace CONTROL frames contain bounded metadata; DATA streams are raw HTTP with
+backpressure. Authentication/expiry checks protect live streams without imposing a
+binary-byte or command-duration quota. See [Workspace streaming transport](#workspace-streaming-transport).
 
 ### Response Headers
 
@@ -1609,7 +1607,7 @@ Timestamps are epoch milliseconds.
 
 The version-1 public policy includes device identity and label, `enabled`,
 `leaseUntil`, approved repositories (`id`, `fullName`, `private`, `allowPush`,
-`allowDelete`, optional `allowPullRequests`, `domains`), machine defaults and `maxSandboxes`. It has no host paths,
+`allowDelete`, optional `allowPullRequests`), owner-selected machine defaults and storage policy. It has no host paths,
 repository tokens, SDK credentials or executable selection. Browser confirmation
 does not itself grant web control. Server revocation fences requests;
 an offline machine's physical stop still depends on its independent local lease
@@ -1638,13 +1636,13 @@ interface LocalDeviceControlView {
 `LocalDeviceSettingsValue` and `LocalControlCeiling` are defined by
 `packages/shared/src/codespaces/local-management-types.ts`. Settings contain
 `label`, `enabled`, epoch-ms `leaseUntil`, `cpuCores`, `memoryBytes`, `storageBytes`,
-`dockerBytes`, `maxSandboxes`, `maxOperationMs`, `maxOutputBytes`, `maxConcurrent`,
-`maxNetworkBytes`, `maxNetworkConnections`, repository grants and nullable
+`dockerBytes`, repository grants and nullable
 `gitAuthor:{name,email}`. Repository grants carry UUID `id`, `fullName`, `private`,
-`allowPush`, `allowDelete`, optional `allowPullRequests` and allowed `domains`.
-The ceiling bounds numeric settings and `maxLeaseMs`; leases are finite and at
-most seven days. Storage is integral GiB, at least 8 GiB and at least Docker bytes
-plus 1 GiB. Requested settings cannot exceed the locally approved envelope.
+`allowPush`, `allowDelete`, optional `allowPullRequests`.
+The ceiling bounds owner-selected numeric settings and `maxLeaseMs`; leases are finite
+and at most seven days. Numeric resources must be positive safe integers and storage
+must exceed Docker bytes. Requested settings cannot exceed the locally approved envelope;
+actual disk alignment, capacity and native SDK failures remain enforced.
 
 The device's `policy` remains its reported applied policy. The control view holds
 the latest requested settings and applied/rejected state; `lastSeenAt` separately
@@ -1666,76 +1664,44 @@ Authentication resolves current account admission, device identity and generatio
 The companion pins the locally chosen HTTPS application URL and refuses redirects;
 server responses cannot choose another origin. There is no HTTP-origin bypass flag.
 
-| Method and path relative to `/api/local-devices` | Input                                                            | Returned `data`                               |
-| ------------------------------------------------ | ---------------------------------------------------------------- | --------------------------------------------- |
-| `POST /heartbeat`                                | `{policy,control?}`                                              | Current `LocalDeviceView`                     |
-| `POST /relay/claim`                              | Optional `limit` (1–8, default 1), `waitMs` (0–25000, default 0) | `{requests: LocalRelayClaim[], maxPartBytes}` |
-| `POST /relay/:requestId/renew`                   | Empty object and `X-Moira-Claim-Id`                              | Renewed `LocalRelayClaim`                     |
-| `GET /relay/:requestId/payload/:partIndex`       | `offset` ≥ 0; `length` 0–262144, plus `X-Moira-Claim-Id`         | Raw `application/octet-stream` bytes          |
-| `POST /relay/:requestId/result-part`             | Raw `application/octet-stream` and `X-Moira-Claim-Id`            | `201`: `{transferId,sha256,size}`             |
-| `POST /relay/ack`                                | `{requestId,digest,claimId,status,outcomeReference}`             | `LocalRelayResult`                            |
+| Method and path relative to `/api/local-devices` | Input                                                     | Returned `data`                      |
+| ------------------------------------------------ | --------------------------------------------------------- | ------------------------------------ |
+| `POST /heartbeat`                                | `{policy,control?}`                                       | Current `LocalDeviceView`            |
+| `POST /relay/claim`                              | Optional `limit` (1–8), `waitMs` (0–25000)                | `{requests: LocalRelayClaim[]}`      |
+| `POST /relay/:requestId/renew`                   | Empty object, `X-Moira-Claim-Id`                          | Current claim                        |
+| `POST /relay/ack`                                | `{requestId,digest,claimId,status,outcome}`               | `LocalRelayResult`                   |
+| `POST /workspaces/bootstrap`                     | Exact resource binding and measured `environmentIdentity` | Scoped workspace agent configuration |
 
-The optional heartbeat control report contains `ceiling`, applied `settings`,
-`appliedRevision` and optional `rejectedRevision`/`error`. Acknowledgements cannot
-advance beyond the requested revision or report different settings as applied.
-Management polling remains authenticated while work is disabled or expired;
-ordinary relay work and Git operations require enabled, unexpired work authority.
-An owner-confirmed local deletion permits only its exact snapshot and delete requests while
-the account, active device, connection/resource binding and local web-control approval remain
-valid. This cleanup does not change work policy or agent repository grants.
+The heartbeat reports the current policy and optional control ceiling/settings,
+applied revision or rejection. Reports cannot claim unapplied requested settings.
+Management polling remains authenticated while work is disabled/expired; new lifecycle
+work and Git require current enabled lease/grants. Owner-confirmed deletion permits
+only its exact cleanup under the active device/account/resource/control binding.
 
-Request, claim and transfer IDs are UUIDs. A claim carries `userId`, `deviceId`,
-`deviceGeneration`, `connectionId`, `resourceId`, `resourceGeneration`, `requestId`,
-payload `digest`, `payloadReference`, `deadlineAt`, `claimId` and `claimExpiresAt`.
-Owner cleanup additionally carries optional `authority: "owner-delete"` in the claim and request
-envelope. The server derives it from the existing durable owner-delete mutation; it must match
-the retained payload and local journal. It is internal relay authority, not a public caller option.
-The claim lease lasts at most thirty seconds and cannot exceed the request deadline; ordinary
-work is also capped by the local work lease. Owner cleanup retains a bounded request deadline
-without that work-lease cap. Renewal extends the same current claim within those bounds.
-Reclaiming an expired claim changes the claim ID, not the request identity.
-For a request already acknowledged as `completed` or `refused`, renewal returns the
-original terminal claim without changing its lease, deadline or stored row, including after
-delivery expiry. It still requires current owner, device, connection, resource and repository
-authority and the exact claim ID. This read-only replay grants neither payload access nor work.
+A claim carries user/device/connection/resource identities and generations, request ID,
+digest, inline `payload`, deadline, claim ID and claim expiry. The strict lifecycle
+envelope permits only create/start/stop/delete/snapshot metadata; ordinary command/file
+bytes never pass through relay. Lifecycle mutations use their own protocol domain.
+Old operation-reference rows and receipts are archival and never dispatched.
 
-Payload references contain `parts:[{transferId,sha256,size}]` and the complete
-`sha256` and `size`. They allow at most 32 unique parts and 24 MiB in total; part
-sizes must sum to the total. Result uploads must respect the advertised positive
-`maxPartBytes`, which is at most 4 MiB and can be smaller under installation policy.
-Private transfer byte, object, in-flight and TTL limits also apply. These references
-are claim-bound private objects, not public download tokens or arbitrary blob access.
-Authority is checked before and after payload reads and output retention.
+The current claim lease is bounded by the original request deadline and applicable
+owner work lease. Reclaim changes claim ID rather than request identity. Completed/refused
+renewal returns the original claim read-only without changing deadlines or granting new
+work. Exact terminal acknowledgement replay returns its retained receipt; changed digest,
+outcome or authority is refused. Retained late settlement remains authenticated and cannot
+renew dispatch authority. Companion acknowledgement uses the same active RPC journal
+serialization boundary as receipt publication.
 
-Acknowledgement status is `completed` or `refused`; `outcomeReference` identifies
-the retained complete response. Repeating the same acknowledged claim and result
-metadata is accepted after a lost response. Changed request digest, result or
-authority is refused. An actually claimed request retains result-only settlement authority
-for its original request identity, digest and latest accepted claim until sixty minutes after
-`deadlineAt`. Result-part upload and acknowledgement may settle it after the delivery or
-ordinary work lease expires, under current authenticated account, device, connection,
-resource binding and repository authority. A never-claimed request has no such authority.
-Settlement cannot renew a nonterminal work claim, fetch its input, change the original result
-or dispatch an effect. Result-part uploads and first settlement refuse revoked authority or
-expired settlement retention; identical committed acknowledgements remain read-only while
-their request metadata and current authority are retained.
-Companion reconnect publishes only cached proved terminal outcomes or completed output-range
-reads; running, unknown, absent and generic RPC errors cannot be published as terminal receipts.
-An uncertain acknowledgement reuses the exact retained outcome reference.
-Companion durable request receipts prevent redispatch of
-effects after reconnect; an unknown outcome is retained as unknown, not retried as
-a new command. Server resource generations and local VM generations are separate:
-a newer server observation cannot erase an unverified local lifetime change or an
-unknown-outcome fence. A confirmed stop of the same owned VM supplies a durable
-stopped-generation proof for reconnect. A resource-bound snapshot may reconcile
-that proof at the retained server generation; a new mutation requires a newer
-server generation. Retained pre-stop requests cannot authorize another effect.
+Bootstrap is device-authenticated and requires the exact current Local resource/device,
+repository grant and measured provider life. It issues resource/generation/life-scoped
+credentials, not general Moira or device credentials. The host compares the expected
+packaged architecture release before preparation; stale installed assets are refused.
 
 Errors use `{success:false,error:{code,message}}`: `LOCAL_INVALID` → 400,
-`LOCAL_UNAUTHORIZED` → 401, `LOCAL_CONFLICT` → 409, `LOCAL_EXPIRED` → 410 and
-`LOCAL_CAPACITY` → 429. An unacceptable Origin returns 403. Oversized parser
-input returns 413 without echoing the body. Companion routes precede global body
-logging, so device secrets and binary content do not enter request-context logs.
+`LOCAL_UNAUTHORIZED` → 401, `LOCAL_CONFLICT` → 409 and `LOCAL_EXPIRED` → 410.
+Unacceptable Origin is 403; oversized management parser input is 413. Device secrets
+and payloads are excluded from request-context logging. There are no relay part/chunk
+upload or download endpoints.
 
 ### Repository-scoped Git and pull requests
 
@@ -1820,8 +1786,8 @@ readiness, connection and limits come from the first connected provider, or the
 first provider when neither is connected; use `providers` for provider-specific
 facts. Stale flags aggregate the providers. Local connection facts use active
 enrolled devices and their public repository policies; no GitHub App is required
-for a local-only account. Local stream response limits are capped at 1 MiB each
-for stdout and stderr, even when the installation's ceiling is higher.
+for a local-only account. Workspace response windows are caller-selected rather than
+cloud command/output quotas.
 
 For GitHub, the route refreshes grants behind the normal TTL and lists stored codespaces.
 It does not observe provider resources; `resources_stale` is `false` on this read.
@@ -1850,32 +1816,12 @@ route bypasses that cache. Billing availability does not affect the local limits
 interface CodespaceLimitsView {
   codespaces: {
     held: number; // stopped codespaces and ones still being created or cleaned up count
-    max_per_user: number;
+    max_per_user: number | null; // null for Local
     instance_held: number;
-    max_instance: number;
-    create_throttle_seconds: number;
+    max_instance: number | null;
+    create_throttle_seconds: number | null;
   };
-  machine_ceiling: { cpu_cores: number; memory_bytes: number; storage_bytes: number };
-  operations: {
-    active: number;
-    max_concurrent_per_user: number;
-    max_input_bytes: number;
-    max_stdout_bytes: number;
-    max_stderr_bytes: number;
-    max_retained_output_bytes: number;
-    max_duration_seconds: number;
-    max_background_seconds: number;
-  };
-  transfers: {
-    used_bytes: number;
-    objects: number;
-    inflight_bytes: number; // bytes of transfers still reserved or claimed
-    max_bytes_per_user: number;
-    max_inflight_bytes_per_user: number;
-    max_objects_per_user: number;
-    max_file_bytes: number;
-    ttl_seconds: number;
-  };
+  machine_ceiling: { cpu_cores: number; memory_bytes: number; storage_bytes: number } | null;
   lifecycle: {
     retention_days: number;
     start_wait_seconds: number;
@@ -1922,9 +1868,8 @@ machine enlargement or another device. `400` for malformed input; `503`
 
 ### GET /api/integrations/github/codespaces/:codespaceId
 
-Returns one owned codespace and up to twenty recent metadata-only operations
-(`operation_id`, kind, state, byte counts, exit code, deadline, result expiry,
-timestamps). Unknown, malformed and foreign IDs return `404 CODESPACE_NOT_FOUND`.
+Returns one owned sanitized codespace. Command state and output belong to the workspace,
+not this management resource projection. Unknown, malformed and foreign IDs return `404 CODESPACE_NOT_FOUND`.
 
 ### POST /api/integrations/github/codespaces/:codespaceId/start | /stop
 
@@ -1951,11 +1896,9 @@ an existing destructive dispatch with an unknown outcome keeps its original iden
 
 Domain errors handled by these routes map as follows: `CODESPACE_NOT_FOUND` → 404;
 `CODESPACE_GENERATION_CONFLICT`, `CODESPACE_NOT_RUNNING`,
-`CODESPACE_CREATE_PENDING`, `CODESPACE_AUTHORIZATION_REQUIRED` and
-`CODESPACE_SESSION_UNAVAILABLE` → 409; `CODESPACE_RESULT_EXPIRED` → 410;
+`CODESPACE_CREATE_PENDING` and `CODESPACE_AUTHORIZATION_REQUIRED` → 409;
 `CODESPACE_CREATE_REJECTED` and `CODESPACE_BILLING_UNSUPPORTED` → 422;
-`CODESPACE_POLICY_LIMIT` and
-`CODESPACE_OPERATION_BUSY` → 429; `CODESPACE_PROVIDER_DISABLED` and
+`CODESPACE_POLICY_LIMIT` → 429; `CODESPACE_PROVIDER_DISABLED` and
 `CODESPACE_PROVIDER_UNAVAILABLE` → 503; `CODESPACE_START_TIMEOUT` → 504; and
 `CODESPACE_RESOURCE_INVALID` → 400. A message
 is the code's fixed safe text, followed by the error's bounded detail when it carries
@@ -1997,46 +1940,39 @@ the feature is not configured. Every change is audited as
 
 Authentication: Required (administrator)
 
-## Scoped Codespace File Channel
+## Workspace streaming transport
 
-The backend mounts `/api/public/codespace-files` before general JSON parsing and body logging.
-It accepts only a scoped file Bearer credential installed by `codespace` action `files_setup`,
-or the narrower transfer credential returned by minting. A bootstrap credential permits only
-mint and lookup; a transfer credential fixes object, direction, size, digest and authority.
-These credentials do not grant general API, lifecycle or communication access. All responses use
-`Cache-Control: no-store`.
+The backend owns `/api/workspaces/connect` and `/api/workspaces/calls/:callId`
+as authenticated HTTP/1.1 Upgrade endpoints using `moira-workspace/1`.
+These are not browser management or public file-capability APIs. Fixed provider bootstrap
+issues an opaque credential whose digest is stored with user/resource, generation and
+measured guest-life bindings. Local authority additionally retains device/repository
+grants and finite owner lease.
 
-| Method and suffix                             | Credential               | Request and result                                                                                                                                                                                                                 |
-| --------------------------------------------- | ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `POST /transfers`                             | Bootstrap                | Strict JSON with UUID `requestId` and `direction`. `guest_to_server` also requires `size`, full `sha256`, `fileName`, `mimeType`; `server_to_guest` requires an owned `referenceId`. Returns descriptor and private-object status. |
-| `POST /lookup`                                | Bootstrap                | Strict `{requestId}` JSON; collects existing private status without dispatch or publication.                                                                                                                                       |
-| `GET /transfers/:id`                          | Transfer                 | Collects private-object status.                                                                                                                                                                                                    |
-| `GET /transfers/:id/chunks?offset=…&length=…` | Server-to-guest transfer | Nonnegative safe-integer offset and positive length at most 262144. Returns raw bytes, `X-Chunk-SHA256` and `X-Chunk-Offset`.                                                                                                      |
-| `PUT /transfers/:id/chunks?offset=…`          | Guest-to-server transfer | `application/octet-stream` body at most 262144 bytes, nonnegative safe-integer offset and `X-Chunk-SHA256` full lowercase hex. Returns durable offset/status; exact chunk replay is idempotent.                                    |
-| `POST /transfers/:id/finalize`                | Transfer                 | No body or transfer encoding. Verifies complete size/SHA and publishes or collects the original private receipt. For a pull it also verifies fresh authority for the later guarded guest commit.                                   |
+The guest opens outbound HTTPS CONTROL carrying bounded call identities. For each call it
+opens an authenticated DATA tunnel scoped to that live control connection and random call
+identity. Raw HTTP request/response bytes are forwarded to the same private Unix service
+used by the terminal CLI. Native stream backpressure avoids whole binary body buffering.
+The supported ingress routes this namespace directly to the backend through Traefik.
 
-JSON control bodies are limited to 8192 bytes. New minting/chunks/finalization require current
-account/provider ownership and the original accepted provisioning life; generation counters alone
-do not prove guest life. The default route verifier and issuance use the same
-`createCodespaceFileCapabilities()` constructor, deriving a purpose-specific signing key by HKDF
-from the configured authentication secret. This does not increase secret entropy or require
-operator secret rotation; missing authentication configuration remains a refusal.
+Backend/MCP processes use the protected cloud Unix socket through `getWorkspaceClient()`;
+trusted filesystem access supplies user/resource headers, and routing rechecks current
+authority. Server-owned revalidation and exact expiry close CONTROL and all DATA on
+revocation, generation/life change or lease expiry independently of peer heartbeats.
+Closing observer streams does not cancel/replay the workspace command.
 
-Descriptors carry finite expiry, request/transfer identity, direction, exact size/full SHA and
-256 KiB chunk capacity. Matching request retry resumes the retained object and original receipt;
-changed identity, expired authority and consumed receipts cannot create replacement objects.
-The original transfer identity is retained before publication. An already ready copy remains
-collectible without reopening its source, while consumption of that request-bound copy refuses
-recopying. Matching mint/finalize replay returns the retained descriptor/status or receipt without
-allocating another terminal result; it still checks current authority and expiry.
-Status/finalize responses with `scope: "private_object"` describe server bytes, not a confirmed
-guest filesystem change. CLI target commit and native operation results have their own proof.
-For limits, provisioning and retention, see
-[File operations and native transfer](CODESPACES.md#file-operations-and-native-transfer).
+The service exposes exec, operation collection/cancel/output, raw input, stat/search/read
+and guarded write/patch through its Unix HTTP API. Mutations require
+`ws1-<lowercase UUID>`; bare legacy IDs are not translated or dispatched. Accepted
+immutable input and receipts remain in the workspace. Cloud has no command queue/result
+journal. Known pre-dispatch refusal is distinct from lost post-dispatch outcome; after
+reply loss explicitly collect the original request without command resubmission.
 
-Domain errors use `{error: {code, message}}`: not found is HTTP 404, authorization required 403,
-expired result 410, other classified refusal 409. Invalid schema/body requests return 400;
-unclassified provider uncertainty returns 503 without claiming nonexecution. Rate refusal is 429.
+Commands have no implicit Moira runtime deadline. Explicit execution timeouts,
+caller-selected response windows, filesystem safeguards and provider/owner lifetime
+constraints remain distinct. Established raw data streams have no inherited request-body
+timeout. There is no scoped file setup/mint/chunk/status protocol; native attachments
+stream directly to/from the common owner, with download publication separately below.
 
 ## Codespace Transfer Download API
 
@@ -2046,12 +1982,11 @@ Deliver one private codespace file published by the MCP `codespace` tool's `down
 returns this URL to the agent as an MCP `resource_link`; the token in the path is the only
 authorization, so the URL must not be logged or shared.
 
-The download is a complete regular file within the effective `transfers.max_file_bytes`
-ceiling, default 20 MiB subject to configured aggregate/inflight quotas. A complete empty file is valid; image preview requires a nonempty,
-validated PNG or JPEG within its separate byte and dimension bounds. Large-file metadata
-and bounded text ranges use MCP `stat` and `read`, rather than this complete-download route;
-their nullable whole-file digest and separate range digest are described in
-[File operations and native transfer](CODESPACES.md#file-operations-and-native-transfer).
+The download is a complete regular file streamed from the workspace and separately
+published in private storage. An optional caller `max_bytes` rejects an oversized
+complete file before publication; it never publishes a prefix as a complete attachment.
+Empty files are valid. Image preview retains its own nonempty format/dimension validation.
+Workspace file reads and publication are separate from command/file mutation receipts.
 
 Success returns the exact stored bytes as an attachment with the published MIME type and file
 name and these headers:
@@ -2066,8 +2001,8 @@ Referrer-Policy: no-referrer
 The capability is consumed after complete or interrupted delivery, so a second request, an
 expired capability, a malformed token and an unknown token all return
 `404 { "error": "codespace_transfer_not_found" }`. Objects expire after
-`CODESPACE_TRANSFER_TTL_MINUTES` and are limited by the transfer quotas described in
-`docs/CODESPACES.md`.
+`CODESPACE_TRANSFER_TTL_MINUTES`. Publication retains checked private filesystem
+ownership, size/digest and one-use claim semantics; it imposes no workspace binary quota.
 
 The route runs in the MCP process; both nginx variants proxy the `/api/codespaces/transfers/`
 prefix directly to it without buffering or temporary files and with access/error logging
@@ -2115,7 +2050,7 @@ second provider attempt.
 Success returns the grant correlation ID and the same sanitized aggregate delivery result as the
 common communication service. A total attempted delivery failure returns 502 with that aggregate;
 full or partial delivery returns 200. Raw ingress streams into an owner-only verified temporary
-private object under the private-storage and communication quotas. Provider delivery opens checked,
+private object under the communication admission limits and private filesystem guards. Provider delivery opens checked,
 independently reopenable streams, and the temporary object is discarded on exit. Telegram streams
 multipart bytes with size/digest and cancellation checks; buffered-only extension adapters refuse
 streamed sources rather than loading the complete file. The route fetches or executes no remote content.
