@@ -14,8 +14,6 @@ import {
 
 const SOCKET_PATH = "/run/moira-codespace-connector/connector.sock";
 const WORKER_PATH = "/app/packages/web-backend/src/services/github-codespaces-connector-worker.ts";
-const SUPERVISOR_PATH =
-  "/app/packages/web-backend/src/services/github-codespaces-remote-supervisor.mjs";
 const WORKER_UID = 1000;
 const WORKER_GID = 1000;
 const RESOURCE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
@@ -26,10 +24,10 @@ let ready = false;
 const WORKER_DIAGNOSTIC_BYTES = 4096;
 
 interface ConnectorRequest {
-  action: "ssh-config" | "operation";
+  action: "ssh-config" | "probe" | "install";
   resourceName: string;
   token: string;
-  job?: Record<string, unknown>;
+  configuration?: Record<string, unknown>;
 }
 
 function respond(response: ServerResponse, status: number, value: unknown): void {
@@ -53,7 +51,7 @@ async function readJson(request: IncomingMessage): Promise<ConnectorRequest> {
   }
   const value = decodeConnectorRequest(Buffer.concat(chunks)) as Partial<ConnectorRequest>;
   if (
-    !["ssh-config", "operation"].includes(value.action ?? "") ||
+    !["ssh-config", "probe", "install"].includes(value.action ?? "") ||
     !RESOURCE.test(value.resourceName ?? "") ||
     !validGitHubUserCredential(value.token)
   ) {
@@ -164,13 +162,10 @@ async function runWorker(input: ConnectorRequest): Promise<string> {
           child.kill("SIGKILL");
         }
       };
-      const timeout = setTimeout(
-        () => {
-          killGroup();
-          finish(new Error("worker timeout"));
-        },
-        Math.min(17 * 60_000, Number(input.job?.timeoutMs ?? 30_000) + 120_000),
-      );
+      const timeout = setTimeout(() => {
+        killGroup();
+        finish(new Error("worker timeout"));
+      }, 300_000);
       timeout.unref();
       child.stdout.on("data", (chunk: Buffer) => {
         bytes += chunk.length;
@@ -214,8 +209,7 @@ async function runWorker(input: ConnectorRequest): Promise<string> {
         encodeConnectorRequest({
           token: input.token,
           home,
-          supervisorPath: SUPERVISOR_PATH,
-          job: input.job,
+          configuration: input.configuration,
         }),
       );
     });
@@ -233,7 +227,7 @@ async function route(request: IncomingMessage, response: ServerResponse): Promis
     });
     return;
   }
-  if (!ready || request.method !== "POST" || request.url !== "/job") {
+  if (!ready || request.method !== "POST" || request.url !== "/bootstrap") {
     respond(response, ready ? 404 : 503, {
       error: ready ? "not found" : "connector starting",
     });

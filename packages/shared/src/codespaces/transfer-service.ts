@@ -1,24 +1,10 @@
 import { createHash } from "node:crypto";
-import {
-  constants,
-  readFileSync,
-  openSync,
-  closeSync,
-  writeSync,
-  fsyncSync,
-  fstatSync,
-  ftruncateSync,
-  readSync,
-  lstatSync,
-  renameSync,
-  unlinkSync,
-} from "node:fs";
-import { lstat, mkdir, open, readdir, rename, rm } from "node:fs/promises";
+import { constants, readFileSync, openSync, closeSync, fsyncSync, unlinkSync } from "node:fs";
+import { lstat, mkdir, open, readdir, rename } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { Readable } from "node:stream";
 import { once } from "node:events";
 import verifier from "stream-json/utils/verifier.js";
-import { z } from "zod";
 import { isSafeAttachmentFilename } from "../validation/attachment-filename.js";
 import type {
   CodespaceNativeFileReference,
@@ -26,21 +12,12 @@ import type {
   CodespaceTransferRecord,
   CodespaceVerifiedByteSource,
   CodespaceVerifiedByteStream,
-  CodespaceTransferAuthority,
-  CodespaceTransferStatus,
 } from "./resource-types.js";
-import { effectiveCodespaceLimits } from "./resource-policy.js";
 import { CodespaceResourceError } from "./resource-types.js";
+import { effectiveCodespaceLimits } from "./resource-policy.js";
 import { CodespaceTransferRepository } from "./transfer-repository.js";
-import {
-  LOCAL_RELAY_MAX_PARTS,
-  localRelayPayloadReferenceSchema,
-  type LocalRelayPayloadReference,
-} from "./local-device-types.js";
-
 const TOKEN = /^[A-Za-z0-9_-]{43}$/;
 const OBJECT = /^[a-f0-9]{48}$/;
-const FILE_ID = /^(?:sediment:\/\/)?file_[A-Za-z0-9]+$/;
 const MIME = /^[a-z0-9][a-z0-9!#$&^_.+-]{0,126}\/[a-z0-9][a-z0-9!#$&^_.+-]{0,126}$/;
 const BINARY_MIME_TYPES = new Set([
   "application/octet-stream",
@@ -224,151 +201,6 @@ export class CodespaceTransferService {
     }
   }
 
-  async ingest(
-    userId: string,
-    reference: CodespaceNativeFileReference,
-    fetcher: CodespaceNativeReferenceFetcher,
-    maxBytes?: number,
-    identity?: {
-      requestId: string;
-      requestDigest: string;
-      authority: CodespaceTransferAuthority;
-      direction: "server_to_guest";
-      beforePublish?: (transferId: string) => Promise<void>;
-    },
-  ): Promise<CodespaceTransferHandle> {
-    const maximumBytes = effectiveCodespaceLimits(this.dependencies.policy()).transfers
-      .maxFileBytes;
-    if (
-      maxBytes !== undefined &&
-      (!Number.isSafeInteger(maxBytes) || maxBytes < 0 || maxBytes > maximumBytes)
-    ) {
-      throw new CodespaceResourceError("CODESPACE_RESOURCE_INVALID", "Invalid native file bound");
-    }
-    const bound = maxBytes ?? maximumBytes;
-    const fileName = reference.fileName ?? "attachment.bin";
-    const reservedMime = reference.mimeType ?? "application/octet-stream";
-    this.validateReference(reference);
-    const reservedBytes = reference.declaredSize ?? bound;
-    if (reservedBytes > bound) {
-      throw new CodespaceResourceError("CODESPACE_POLICY_LIMIT", "Native file exceeds its limit");
-    }
-    let recovered: CodespaceTransferReservation | undefined;
-    if (identity) {
-      this.validateIdentity(identity.requestId, identity.requestDigest, identity.authority);
-      const existing = this.getByRequest(userId, identity.requestId);
-      if (existing) {
-        this.checkAuthority(existing, identity.authority);
-        if (
-          existing.requestDigest !== identity.requestDigest ||
-          existing.direction !== identity.direction ||
-          existing.purpose !== "codespace_input" ||
-          existing.fileName !== fileName ||
-          (reference.mimeType !== undefined && existing.mimeType !== reservedMime) ||
-          existing.declaredSize > bound ||
-          (reference.declaredSize !== undefined && existing.declaredSize !== reference.declaredSize)
-        ) {
-          throw new CodespaceResourceError(
-            "CODESPACE_RESOURCE_INVALID",
-            "Transfer identity conflict",
-          );
-        }
-        if (existing.state === "reserved") {
-          this.dependencies.repository.mutate(userId, existing.id, (current) => {
-            this.checkAuthority(current, identity.authority);
-            if (current.state !== "reserved" || transferOwnerAlive(current)) {
-              throw new CodespaceResourceError(
-                "CODESPACE_RESOURCE_INVALID",
-                "Native ingestion is pending",
-              );
-            }
-            this.dependencies.repository.replaceIngestionOwner(
-              current.id,
-              this.ownerPid,
-              this.ownerStartTime,
-              this.now(),
-            );
-          });
-          recovered = {
-            record: this.dependencies.repository.getOwned(userId, existing.id)!,
-            token: await this.receiptToken(existing),
-          };
-          await rm(this.path(existing.objectKey, ".partial"), { force: true });
-        } else {
-          const opened = await this.source(existing).open();
-          await opened.close();
-          await identity.beforePublish?.(existing.id);
-          return this.handle(await this.receiptToken(existing), existing, existing.sha256!);
-        }
-      }
-    }
-    if (identity) await mkdir(this.root, { recursive: true, mode: 0o700 });
-    const reserved =
-      recovered ??
-      (identity
-        ? this.dependencies.repository.reserve({
-            userId,
-            purpose: "codespace_input",
-            fileName,
-            mimeType: reservedMime,
-            declaredSize: reservedBytes,
-            ownerPid: this.ownerPid,
-            ownerStartTime: this.ownerStartTime,
-            policy: this.dependencies.policy(),
-            now: this.now(),
-            binding: {
-              ...identity.authority,
-              requestId: identity.requestId.toLowerCase(),
-              requestDigest: identity.requestDigest,
-              direction: identity.direction,
-              expectedSha256: null,
-            },
-            persist: (token, record) => this.persistReceipt(token, record),
-          })
-        : this.reserve(userId, "codespace_input", fileName, reservedMime, reservedBytes));
-    if (!reserved)
-      throw new CodespaceResourceError("CODESPACE_POLICY_LIMIT", "Transfer quota exceeded");
-    if (identity && !reserved.token)
-      throw new CodespaceResourceError("CODESPACE_RESOURCE_INVALID", "Native ingestion is pending");
-    let response: CodespaceNativeReferenceResponse | undefined;
-    try {
-      await mkdir(this.root, { recursive: true, mode: 0o700 });
-      response = await fetcher.fetch(reference);
-      const responseMime = response.mimeType.toLowerCase().split(";", 1)[0].trim();
-      const mimeType = reference.mimeType ?? responseMime;
-      if (
-        !supportedCodespaceTransferMime(responseMime) ||
-        (reference.mimeType !== undefined && responseMime !== reference.mimeType) ||
-        (response.contentLength !== null &&
-          (!Number.isSafeInteger(response.contentLength) ||
-            response.contentLength < 0 ||
-            (reference.declaredSize !== undefined &&
-              response.contentLength !== reference.declaredSize)))
-      ) {
-        throw new CodespaceResourceError(
-          "CODESPACE_RESOURCE_INVALID",
-          "Native file metadata mismatch",
-        );
-      }
-      if (response.contentLength !== null && response.contentLength > reservedBytes) {
-        throw new CodespaceResourceError("CODESPACE_POLICY_LIMIT", "Native file exceeds its limit");
-      }
-      return await this.publishStream(
-        reserved,
-        response.body,
-        mimeType,
-        reference.declaredSize ?? response.contentLength ?? undefined,
-        undefined,
-        identity?.beforePublish,
-      );
-    } catch (error) {
-      await this.discard(reserved.record);
-      throw error;
-    } finally {
-      response?.cancel?.();
-    }
-  }
-
   async createDownload(
     userId: string,
     input: { fileName: string; mimeType: string; bytes: Uint8Array },
@@ -422,8 +254,6 @@ export class CodespaceTransferService {
       try {
         for await (const chunk of body) {
           signal?.throwIfAborted();
-          if (this.now() >= reserved.record.expiresAt)
-            throw new CodespaceResourceError("CODESPACE_POLICY_LIMIT", "Transfer fetch expired");
           if (size + chunk.byteLength > reserved.record.declaredSize) {
             throw new CodespaceResourceError(
               "CODESPACE_POLICY_LIMIT",
@@ -461,480 +291,22 @@ export class CodespaceTransferService {
           sha256,
           this.now(),
           mimeType,
+          this.now() + effectiveCodespaceLimits(this.dependencies.policy()).transfers.ttlMs,
         )
       ) {
         throw new Error("Transfer expired before publication");
       }
-      return this.handle(
-        reserved.token,
-        { ...reserved.record, declaredSize: size, mimeType },
-        sha256,
+      const published = this.dependencies.repository.getOwned(
+        reserved.record.userId,
+        reserved.record.id,
       );
+      if (!published) throw new Error("Published attachment record is unavailable");
+      return this.handle(reserved.token, published, sha256);
     } catch (error) {
       await this.discard(reserved.record);
       throw error;
     } finally {
       validator.destroy();
-    }
-  }
-
-  getOwnedTransfer(userId: string, id: string): CodespaceTransferRecord | null {
-    return id.startsWith("codespace-file://")
-      ? this.dependencies.repository.getByToken(userId, this.token(id))
-      : this.dependencies.repository.getOwned(userId, id);
-  }
-
-  getByRequest(userId: string, requestId: string): CodespaceTransferRecord | null {
-    return this.dependencies.repository.getByRequest(userId, requestId.toLowerCase());
-  }
-
-  async openOwnedSource(
-    userId: string,
-    id: string,
-    authority?: CodespaceTransferAuthority,
-  ): Promise<CodespaceVerifiedByteSource> {
-    const record = this.getOwnedTransfer(userId, id);
-    if (!record || !["ready", "claimed"].includes(record.state) || record.expiresAt <= this.now()) {
-      throw new CodespaceResourceError("CODESPACE_NOT_FOUND", "Transfer is unavailable");
-    }
-    if (authority) this.checkAuthority(record, authority);
-    return this.source(record);
-  }
-
-  async reserveResumable(
-    userId: string,
-    input: {
-      requestId: string;
-      requestDigest: string;
-      purpose: "codespace_input" | "codespace_download";
-      fileName: string;
-      mimeType: string;
-      size: number;
-      sha256: string;
-      authority: CodespaceTransferAuthority;
-    },
-  ): Promise<CodespaceTransferStatus> {
-    this.validateFileMetadata(input.fileName, input.mimeType, input.size);
-    if (!["codespace_input", "codespace_download"].includes(input.purpose)) {
-      throw new CodespaceResourceError("CODESPACE_RESOURCE_INVALID", "Invalid transfer purpose");
-    }
-    this.validateIdentity(input.requestId, input.requestDigest, input.authority);
-    if (!/^[a-f0-9]{64}$/.test(input.sha256)) {
-      throw new CodespaceResourceError("CODESPACE_RESOURCE_INVALID", "Invalid transfer identity");
-    }
-    await mkdir(this.root, { recursive: true, mode: 0o700 });
-    const reserved = this.dependencies.repository.reserve({
-      userId,
-      purpose: input.purpose,
-      fileName: input.fileName,
-      mimeType: input.mimeType,
-      declaredSize: input.size,
-      ownerPid: this.ownerPid,
-      ownerStartTime: this.ownerStartTime,
-      policy: this.dependencies.policy(),
-      now: this.now(),
-      binding: {
-        ...input.authority,
-        requestId: input.requestId.toLowerCase(),
-        requestDigest: input.requestDigest,
-        direction: input.purpose === "codespace_download" ? "guest_to_server" : "server_to_guest",
-        expectedSha256: input.sha256,
-      },
-      persist: (token, record) => this.persistReceipt(token, record),
-    });
-    if (!reserved)
-      throw new CodespaceResourceError("CODESPACE_POLICY_LIMIT", "Transfer quota exceeded");
-    const record = reserved.record;
-    this.checkAuthority(record, input.authority);
-    if (
-      record.requestDigest !== input.requestDigest ||
-      record.purpose !== input.purpose ||
-      record.fileName !== input.fileName ||
-      record.mimeType !== input.mimeType ||
-      record.declaredSize !== input.size ||
-      record.expectedSha256 !== input.sha256
-    ) {
-      throw new CodespaceResourceError("CODESPACE_RESOURCE_INVALID", "Transfer identity conflict");
-    }
-    return this.status(record);
-  }
-
-  async getTransferStatus(
-    userId: string,
-    id: string,
-    authority: CodespaceTransferAuthority,
-  ): Promise<CodespaceTransferStatus> {
-    return this.status(this.requireTransfer(userId, id, authority));
-  }
-
-  async writeTransferChunk(
-    userId: string,
-    id: string,
-    authority: CodespaceTransferAuthority,
-    input: { offset: number; bytes: Uint8Array; sha256: string },
-  ): Promise<CodespaceTransferStatus> {
-    if (
-      !Number.isSafeInteger(input.offset) ||
-      input.offset < 0 ||
-      input.bytes.byteLength > 256 * 1024 ||
-      !/^[a-f0-9]{64}$/.test(input.sha256) ||
-      createHash("sha256").update(input.bytes).digest("hex") !== input.sha256
-    ) {
-      throw new CodespaceResourceError("CODESPACE_RESOURCE_INVALID", "Invalid transfer chunk");
-    }
-    this.dependencies.repository.mutate(userId, id, (record) => {
-      this.checkAuthority(record, authority);
-      const offset = record.uploadedBytes ?? 0;
-      if (input.offset > offset || input.offset + input.bytes.byteLength > record.declaredSize) {
-        throw new CodespaceResourceError(
-          "CODESPACE_RESOURCE_INVALID",
-          "Transfer chunk offset conflict",
-        );
-      }
-      const fd = openSync(
-        this.path(record.objectKey, record.state === "reserved" ? ".partial" : ""),
-        record.state === "reserved"
-          ? constants.O_RDWR | constants.O_CREAT | constants.O_NOFOLLOW
-          : constants.O_RDONLY | constants.O_NOFOLLOW,
-        0o600,
-      );
-      try {
-        const stat = fstatSync(fd);
-        if (!stat.isFile() || stat.nlink !== 1 || stat.size < offset)
-          throw new Error("Transfer partial changed");
-        if (input.offset < offset || record.state !== "reserved") {
-          if (input.offset + input.bytes.byteLength > offset)
-            throw new Error("Transfer chunk overlap");
-          const byteLength = input.bytes.byteLength;
-          if (byteLength > 256 * 1024)
-            throw new CodespaceResourceError(
-              "CODESPACE_RESOURCE_INVALID",
-              "Invalid transfer chunk",
-            );
-          const previous = Buffer.alloc(byteLength);
-          if (
-            readSync(fd, previous, 0, previous.length, input.offset) !== previous.length ||
-            createHash("sha256").update(previous).digest("hex") !== input.sha256
-          )
-            throw new Error("Transfer chunk replay conflict");
-          const after = fstatSync(fd);
-          const path = lstatSync(
-            this.path(record.objectKey, record.state === "reserved" ? ".partial" : ""),
-          );
-          if (
-            path.dev !== after.dev ||
-            path.ino !== after.ino ||
-            after.nlink !== 1 ||
-            after.size !== stat.size ||
-            after.mtimeMs !== stat.mtimeMs ||
-            after.ctimeMs !== stat.ctimeMs
-          ) {
-            throw new Error("Transfer chunk changed during replay");
-          }
-          return;
-        }
-        if (stat.size !== offset) ftruncateSync(fd, offset);
-        let written = 0;
-        while (written < input.bytes.byteLength) {
-          const count = writeSync(
-            fd,
-            input.bytes,
-            written,
-            input.bytes.byteLength - written,
-            offset + written,
-          );
-          if (!count) throw new Error("Transfer write made no progress");
-          written += count;
-        }
-        fsyncSync(fd);
-        const after = fstatSync(fd);
-        const path = lstatSync(this.path(record.objectKey, ".partial"));
-        if (path.dev !== after.dev || path.ino !== after.ino || after.nlink !== 1)
-          throw new Error("Transfer partial changed");
-        this.dependencies.repository.checkpoint(id, offset + written, this.now());
-      } finally {
-        closeSync(fd);
-      }
-    });
-    return this.status(this.requireTransfer(userId, id, authority));
-  }
-
-  async finalizeTransfer(
-    userId: string,
-    id: string,
-    authority: CodespaceTransferAuthority,
-    authorize?: () => Promise<void>,
-  ): Promise<CodespaceTransferHandle> {
-    let record = this.requireTransfer(userId, id, authority);
-    if (record.state !== "reserved") {
-      const source = await this.source(record).open();
-      await source.close();
-      return this.handle(await this.receiptToken(record), record, record.sha256!);
-    }
-    if ((record.uploadedBytes ?? 0) !== record.declaredSize)
-      throw new CodespaceResourceError("CODESPACE_RESOURCE_INVALID", "Transfer is incomplete");
-    await mkdir(this.root, { recursive: true, mode: 0o700 });
-    let filePath = this.path(record.objectKey, ".partial");
-    let file;
-    try {
-      file = await open(filePath, constants.O_RDWR | constants.O_NOFOLLOW);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-      try {
-        filePath = this.path(record.objectKey);
-        file = await open(filePath, constants.O_RDONLY | constants.O_NOFOLLOW);
-      } catch (missing) {
-        if (record.declaredSize !== 0 || (missing as NodeJS.ErrnoException).code !== "ENOENT")
-          throw missing;
-        filePath = this.path(record.objectKey, ".partial");
-        file = await open(filePath, "wx", 0o600);
-      }
-    }
-    const validator = new TransferMimeValidator(record.mimeType);
-    try {
-      const before = await file.stat({ bigint: true });
-      if (!before.isFile() || before.nlink !== 1n || before.size !== BigInt(record.declaredSize))
-        throw new Error("Transfer object changed");
-      const hash = createHash("sha256");
-      for (let offset = 0; offset < record.declaredSize;) {
-        const bytes = Buffer.alloc(Math.min(256 * 1024, record.declaredSize - offset));
-        const read = await file.read(bytes, 0, bytes.length, offset);
-        if (!read.bytesRead) throw new Error("Transfer object changed");
-        const chunk = bytes.subarray(0, read.bytesRead);
-        hash.update(chunk);
-        await validator.write(chunk);
-        offset += read.bytesRead;
-      }
-      await validator.finish();
-      const sha256 = hash.digest("hex");
-      if (sha256 !== record.expectedSha256)
-        throw new CodespaceResourceError("CODESPACE_RESOURCE_INVALID", "Transfer digest mismatch");
-      await file.sync();
-      await authorize?.();
-      this.dependencies.repository.mutate(userId, id, (current) => {
-        this.checkAuthority(current, authority);
-        if (current.state !== "reserved") return;
-        if (
-          (current.uploadedBytes ?? 0) !== current.declaredSize ||
-          current.expectedSha256 !== sha256
-        )
-          throw new Error("Transfer checkpoint changed");
-        const after = fstatSync(file.fd, { bigint: true });
-        const path = lstatSync(filePath, { bigint: true });
-        if (
-          after.nlink !== 1n ||
-          path.nlink !== 1n ||
-          after.dev !== before.dev ||
-          after.ino !== before.ino ||
-          path.dev !== before.dev ||
-          path.ino !== before.ino ||
-          after.size !== before.size ||
-          after.mtimeNs !== before.mtimeNs ||
-          after.ctimeNs !== before.ctimeNs ||
-          path.mtimeNs !== before.mtimeNs ||
-          path.ctimeNs !== before.ctimeNs
-        )
-          throw new Error("Transfer object changed during publication");
-        if (filePath !== this.path(current.objectKey))
-          renameSync(filePath, this.path(current.objectKey));
-        const directory = openSync(this.root, constants.O_RDONLY | constants.O_DIRECTORY);
-        try {
-          fsyncSync(directory);
-        } finally {
-          closeSync(directory);
-        }
-        if (!this.dependencies.repository.markReady(id, current.declaredSize, sha256, this.now()))
-          throw new Error("Transfer publication lost authority");
-      });
-    } finally {
-      validator.destroy();
-      await file.close();
-    }
-    record = this.requireTransfer(userId, id, authority);
-    return this.handle(await this.receiptToken(record), record, record.sha256!);
-  }
-
-  async readTransferRange(
-    userId: string,
-    id: string,
-    authority: CodespaceTransferAuthority,
-    input: { offset: number; length: number },
-  ): Promise<{ bytes: Buffer; sha256: string }> {
-    const record = this.requireTransfer(userId, id, authority);
-    if (
-      record.state === "reserved" ||
-      !Number.isSafeInteger(input.offset) ||
-      input.offset < 0 ||
-      input.offset > record.declaredSize ||
-      !Number.isSafeInteger(input.length) ||
-      input.length < 0 ||
-      input.length > 256 * 1024
-    ) {
-      throw new CodespaceResourceError("CODESPACE_RESOURCE_INVALID", "Invalid transfer byte range");
-    }
-    const opened = await this.openStream(record, undefined, input);
-    try {
-      const wanted = Math.min(input.length, record.declaredSize - input.offset);
-      const bytes = Buffer.alloc(wanted);
-      let copied = 0;
-      for await (const chunk of opened) {
-        bytes.set(chunk, copied);
-        copied += chunk.byteLength;
-      }
-      if (copied !== wanted) throw new Error("Transfer range changed");
-      return { bytes, sha256: createHash("sha256").update(bytes).digest("hex") };
-    } finally {
-      await opened.close();
-    }
-  }
-
-  private checkAuthority(
-    record: CodespaceTransferRecord,
-    authority: CodespaceTransferAuthority,
-  ): void {
-    if (
-      record.expiresAt <= this.now() ||
-      record.state === "consumed" ||
-      record.resourceId !== authority.resourceId ||
-      record.provider !== authority.provider ||
-      record.resourceGeneration !== authority.resourceGeneration ||
-      record.authorizationGeneration !== authority.authorizationGeneration ||
-      record.environmentIdentity !== authority.environmentIdentity
-    ) {
-      throw new CodespaceResourceError(
-        "CODESPACE_RESOURCE_INVALID",
-        "Transfer authority is unavailable",
-      );
-    }
-  }
-
-  private validateIdentity(
-    requestId: string,
-    requestDigest: string,
-    authority: CodespaceTransferAuthority,
-  ): void {
-    if (
-      !z.string().uuid().safeParse(requestId).success ||
-      !/^[a-f0-9]{64}$/.test(requestDigest) ||
-      !authority.resourceId ||
-      !authority.provider ||
-      !authority.environmentIdentity ||
-      !Number.isSafeInteger(authority.resourceGeneration) ||
-      authority.resourceGeneration < 0 ||
-      !Number.isSafeInteger(authority.authorizationGeneration) ||
-      authority.authorizationGeneration < 0
-    ) {
-      throw new CodespaceResourceError("CODESPACE_RESOURCE_INVALID", "Invalid transfer identity");
-    }
-  }
-
-  private requireTransfer(
-    userId: string,
-    id: string,
-    authority: CodespaceTransferAuthority,
-  ): CodespaceTransferRecord {
-    const record = this.dependencies.repository.getOwned(userId, id);
-    if (!record || !record.requestId || !record.expectedSha256)
-      throw new CodespaceResourceError("CODESPACE_NOT_FOUND", "Transfer is unavailable");
-    this.checkAuthority(record, authority);
-    return record;
-  }
-
-  private async status(record: CodespaceTransferRecord): Promise<CodespaceTransferStatus> {
-    if (
-      !record.requestId ||
-      !record.requestDigest ||
-      !record.direction ||
-      !record.expectedSha256 ||
-      record.state === "consumed"
-    ) {
-      throw new CodespaceResourceError(
-        "CODESPACE_RESOURCE_INVALID",
-        "Transfer status is unavailable",
-      );
-    }
-    const result = {
-      transferId: record.id,
-      requestId: record.requestId,
-      requestDigest: record.requestDigest,
-      direction: record.direction,
-      offset: record.uploadedBytes ?? 0,
-      size: record.declaredSize,
-      sha256: record.expectedSha256,
-      expiresAt: record.expiresAt,
-    };
-    return record.state === "reserved"
-      ? { ...result, state: "reserved" }
-      : {
-          ...result,
-          state: record.state,
-          handle: this.handle(await this.receiptToken(record), record, record.sha256!),
-        };
-  }
-
-  private persistReceipt(token: string, record: CodespaceTransferRecord): void {
-    const fd = openSync(
-      this.path(record.objectKey, ".receipt"),
-      constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW,
-      0o600,
-    );
-    try {
-      const bytes = Buffer.from(JSON.stringify({ token, id: record.id }));
-      let offset = 0;
-      while (offset < bytes.length) {
-        const count = writeSync(fd, bytes, offset, bytes.length - offset);
-        if (!count) throw new Error("Transfer receipt write made no progress");
-        offset += count;
-      }
-      fsyncSync(fd);
-    } finally {
-      closeSync(fd);
-    }
-    const directory = openSync(this.root, constants.O_RDONLY | constants.O_DIRECTORY);
-    try {
-      fsyncSync(directory);
-    } finally {
-      closeSync(directory);
-    }
-  }
-
-  private async receiptToken(record: CodespaceTransferRecord): Promise<string> {
-    const handle = await open(
-      this.path(record.objectKey, ".receipt"),
-      constants.O_RDONLY | constants.O_NOFOLLOW,
-    );
-    try {
-      const stat = await handle.stat();
-      if (!stat.isFile() || stat.nlink !== 1 || stat.size > 512)
-        throw new Error("Transfer receipt is invalid");
-      const bytes = Buffer.alloc(stat.size);
-      let offset = 0;
-      while (offset < bytes.length) {
-        const read = await handle.read(bytes, offset, bytes.length - offset, offset);
-        if (!read.bytesRead) throw new Error("Transfer receipt changed");
-        offset += read.bytesRead;
-      }
-      const after = await handle.stat();
-      const path = await lstat(this.path(record.objectKey, ".receipt"));
-      if (
-        after.nlink !== 1 ||
-        path.nlink !== 1 ||
-        after.size !== stat.size ||
-        after.dev !== stat.dev ||
-        after.ino !== stat.ino ||
-        path.dev !== stat.dev ||
-        path.ino !== stat.ino ||
-        after.mtimeMs !== stat.mtimeMs ||
-        after.ctimeMs !== stat.ctimeMs
-      )
-        throw new Error("Transfer receipt changed");
-      const receipt = JSON.parse(bytes.toString("utf8")) as { token: string; id: string };
-      const owned = this.dependencies.repository.getByToken(record.userId, receipt.token);
-      if (receipt.id !== record.id || !TOKEN.test(receipt.token) || owned?.id !== record.id)
-        throw new Error("Transfer receipt is invalid");
-      return receipt.token;
-    } finally {
-      await handle.close();
     }
   }
 
@@ -976,202 +348,6 @@ export class CodespaceTransferService {
       reserved.record.mimeType,
       input.byteLength,
     );
-  }
-
-  /** Internal relay objects are never published as downloadable bearer references. */
-  relayPartLimit(): number {
-    return effectiveCodespaceLimits(this.dependencies.policy()).relayTransfers.maxFileBytes;
-  }
-
-  async retainRelayPart(
-    userId: string,
-    purpose: "local_relay_input" | "local_relay_output" | "operation_input" | "operation_result",
-    bytes: Uint8Array,
-    expiresAt?: number,
-  ): Promise<LocalRelayPayloadReference["parts"][number]> {
-    if (
-      !["local_relay_input", "local_relay_output", "operation_input", "operation_result"].includes(
-        purpose,
-      )
-    ) {
-      throw new CodespaceResourceError("CODESPACE_RESOURCE_INVALID", "Invalid relay purpose");
-    }
-    const reserved = this.reserve(
-      userId,
-      purpose,
-      "relay.bin",
-      "application/octet-stream",
-      bytes.byteLength,
-      expiresAt,
-    );
-    const handle = await this.publishObject(reserved, bytes);
-    return { transferId: reserved.record.id, sha256: handle.sha256, size: handle.size };
-  }
-
-  async retainRelayPayload(
-    userId: string,
-    purpose: "local_relay_input" | "local_relay_output" | "operation_input" | "operation_result",
-    input: Uint8Array,
-    expiresAt?: number,
-  ): Promise<LocalRelayPayloadReference> {
-    if (input.byteLength > 24 * 1024 * 1024) {
-      throw new CodespaceResourceError("CODESPACE_POLICY_LIMIT", "Relay payload exceeds its limit");
-    }
-    const bytes = Buffer.from(input);
-    const partSize = this.relayPartLimit();
-    const reference: LocalRelayPayloadReference = {
-      parts: [],
-      size: bytes.length,
-      sha256: createHash("sha256").update(bytes).digest("hex"),
-    };
-    try {
-      for (
-        let offset = 0;
-        offset < bytes.length || reference.parts.length === 0;
-        offset += partSize
-      ) {
-        if (reference.parts.length >= LOCAL_RELAY_MAX_PARTS) {
-          throw new CodespaceResourceError(
-            "CODESPACE_POLICY_LIMIT",
-            "Relay payload has too many parts",
-          );
-        }
-        reference.parts.push(
-          await this.retainRelayPart(
-            userId,
-            purpose,
-            bytes.subarray(offset, offset + partSize),
-            expiresAt,
-          ),
-        );
-      }
-      return localRelayPayloadReferenceSchema.parse(reference);
-    } catch (error) {
-      await this.discardRelayPayload(userId, purpose, reference);
-      throw error;
-    }
-  }
-
-  async readRelayChunk(
-    userId: string,
-    purpose: "local_relay_input" | "local_relay_output" | "operation_input" | "operation_result",
-    reference: LocalRelayPayloadReference,
-    partIndex: number,
-    offset: number,
-    length: number,
-  ): Promise<Buffer> {
-    const valid = localRelayPayloadReferenceSchema.parse(reference);
-    if (
-      !Number.isSafeInteger(partIndex) ||
-      partIndex < 0 ||
-      partIndex >= valid.parts.length ||
-      !Number.isSafeInteger(offset) ||
-      offset < 0 ||
-      !Number.isSafeInteger(length) ||
-      length < 0 ||
-      length > 256 * 1024
-    ) {
-      throw new CodespaceResourceError("CODESPACE_RESOURCE_INVALID", "Invalid relay byte range");
-    }
-    const part = valid.parts[partIndex];
-    const record = this.relayPart(userId, purpose, part);
-    if (offset > part.size) {
-      throw new CodespaceResourceError("CODESPACE_RESOURCE_INVALID", "Invalid relay byte range");
-    }
-    const bytes = await this.readVerified(record);
-    return bytes.subarray(offset, Math.min(part.size, offset + length));
-  }
-
-  async readRelayPayload(
-    userId: string,
-    purpose: "local_relay_input" | "local_relay_output" | "operation_input" | "operation_result",
-    reference: LocalRelayPayloadReference,
-  ): Promise<Buffer> {
-    const valid = localRelayPayloadReferenceSchema.parse(reference);
-    const chunks: Buffer[] = [];
-    const hash = createHash("sha256");
-    for (const part of valid.parts) {
-      const bytes = await this.readVerified(this.relayPart(userId, purpose, part));
-      hash.update(bytes);
-      chunks.push(bytes);
-    }
-    if (hash.digest("hex") !== valid.sha256) {
-      throw new CodespaceResourceError(
-        "CODESPACE_RESOURCE_INVALID",
-        "Relay payload digest mismatch",
-      );
-    }
-    return Buffer.concat(chunks, valid.size);
-  }
-
-  async discardRelayPayload(
-    userId: string,
-    purpose: "local_relay_input" | "local_relay_output" | "operation_input" | "operation_result",
-    reference: LocalRelayPayloadReference,
-  ): Promise<void> {
-    for (const part of reference.parts) {
-      const record = this.dependencies.repository.getReadyOwned(
-        part.transferId,
-        userId,
-        purpose,
-        this.now(),
-      );
-      if (record && record.sha256 === part.sha256 && record.observedSize === part.size)
-        await this.discard(record);
-    }
-  }
-
-  private relayPart(
-    userId: string,
-    purpose: "local_relay_input" | "local_relay_output" | "operation_input" | "operation_result",
-    part: LocalRelayPayloadReference["parts"][number],
-  ): CodespaceTransferRecord {
-    const record = this.dependencies.repository.getReadyOwned(
-      part.transferId,
-      userId,
-      purpose,
-      this.now(),
-    );
-    if (!record || record.sha256 !== part.sha256 || record.observedSize !== part.size) {
-      throw new CodespaceResourceError(
-        "CODESPACE_RESOURCE_INVALID",
-        "Relay payload is unavailable",
-      );
-    }
-    return record;
-  }
-
-  async claimInput(
-    userId: string,
-    referenceId: string,
-  ): Promise<{ record: CodespaceTransferRecord; bytes: Buffer }> {
-    const token = this.token(referenceId);
-    const now = this.now();
-    const record = this.dependencies.repository.claim(
-      token,
-      "codespace_input",
-      now,
-      Math.min(now + 60_000, now + (this.dependencies.policy().claimLeaseMs ?? 30_000)),
-      this.dependencies.policy(),
-      userId,
-    );
-    if (!record) {
-      throw new CodespaceResourceError(
-        "CODESPACE_RESOURCE_INVALID",
-        "Native file reference is unavailable",
-      );
-    }
-    if ((record.observedSize ?? 0) > 4 * 1024 * 1024) {
-      this.release(record);
-      throw new CodespaceResourceError("CODESPACE_POLICY_LIMIT", "Bounded input exceeds its limit");
-    }
-    try {
-      const bytes = await this.readVerified(record);
-      return { record, bytes };
-    } catch (error) {
-      await this.invalidate(record);
-      throw error;
-    }
   }
 
   release(record: CodespaceTransferRecord): void {
@@ -1226,15 +402,13 @@ export class CodespaceTransferService {
   async cleanup(includeReserved = false): Promise<void> {
     await mkdir(this.root, { recursive: true, mode: 0o700 });
     for (const record of this.dependencies.repository.listCleanup(this.now(), includeReserved)) {
-      if (
-        record.state === "reserved" &&
-        record.expiresAt > this.now() &&
-        (record.requestId || transferOwnerAlive(record))
-      )
-        continue;
+      // Historical workspace inputs/results and bound receipts are archival evidence, never jobs.
+      if (record.purpose !== "codespace_download" || record.requestId) continue;
+      if (record.state === "reserved" && transferOwnerAlive(record)) continue;
       await this.discard(record);
     }
     for (const record of this.dependencies.repository.listLive()) {
+      if (record.purpose !== "codespace_download" || record.requestId) continue;
       if (record.state === "reserved") continue;
       try {
         const opened = await this.source(record).open();
@@ -1249,6 +423,7 @@ export class CodespaceTransferService {
         entry.endsWith(".partial") || entry.endsWith(".receipt") ? entry.slice(0, -8) : entry;
       if (!OBJECT.test(key)) continue;
       this.dependencies.repository.mutateByObjectKey(key, (current) => {
+        if (current && (current.purpose !== "codespace_download" || current.requestId)) return;
         const live = current && ["reserved", "ready", "claimed"].includes(current.state);
         const keep = entry.endsWith(".partial") ? current?.state === "reserved" : live;
         if (!keep) {
@@ -1320,7 +495,6 @@ export class CodespaceTransferService {
     fileName: string,
     mimeType: string,
     size: number,
-    expiresAt?: number,
   ) {
     this.validateFileMetadata(fileName, mimeType, size);
     const value = this.dependencies.repository.reserve({
@@ -1333,25 +507,8 @@ export class CodespaceTransferService {
       ownerStartTime: this.ownerStartTime,
       policy: this.dependencies.policy(),
       now: this.now(),
-      expiresAt,
     });
-    if (!value)
-      throw new CodespaceResourceError("CODESPACE_POLICY_LIMIT", "Transfer quota exceeded");
     return value;
-  }
-
-  private validateReference(reference: CodespaceNativeFileReference): void {
-    if (!FILE_ID.test(reference.fileId) || reference.fileId.length > 256) {
-      throw new CodespaceResourceError(
-        "CODESPACE_RESOURCE_INVALID",
-        "Invalid native file identifier",
-      );
-    }
-    this.validateFileMetadata(
-      reference.fileName ?? "attachment.bin",
-      reference.mimeType ?? "application/octet-stream",
-      reference.declaredSize ?? 0,
-    );
   }
 
   private validateFileMetadata(fileName: string, mimeType: string, size: number): void {
@@ -1359,8 +516,7 @@ export class CodespaceTransferService {
       !isSafeAttachmentFilename(fileName) ||
       !supportedCodespaceTransferMime(mimeType) ||
       !Number.isSafeInteger(size) ||
-      size < 0 ||
-      size > effectiveCodespaceLimits(this.dependencies.policy()).transfers.maxFileBytes
+      size < 0
     ) {
       throw new CodespaceResourceError("CODESPACE_RESOURCE_INVALID", "Invalid transfer metadata");
     }
@@ -1379,28 +535,6 @@ export class CodespaceTransferService {
   private path(objectKey: string, suffix = ""): string {
     if (!OBJECT.test(objectKey)) throw new Error("Invalid codespace transfer object key");
     return join(this.root, `${objectKey}${suffix}`);
-  }
-
-  private async readVerified(record: CodespaceTransferRecord): Promise<Buffer> {
-    if ((record.observedSize ?? 0) > 4 * 1024 * 1024) {
-      throw new CodespaceResourceError(
-        "CODESPACE_POLICY_LIMIT",
-        "Bounded control object exceeds its limit",
-      );
-    }
-    const stream = await this.source(record).open();
-    try {
-      const bytes = Buffer.alloc(record.observedSize!);
-      let offset = 0;
-      for await (const chunk of stream) {
-        bytes.set(chunk, offset);
-        offset += chunk.byteLength;
-      }
-      if (offset !== bytes.length) throw new Error("Codespace transfer object changed");
-      return bytes;
-    } finally {
-      await stream.close();
-    }
   }
 
   private async openVerified(record: CodespaceTransferRecord) {
@@ -1444,7 +578,7 @@ export class CodespaceTransferService {
     const record = this.dependencies.repository.getByToken(userId, this.token(referenceId));
     if (
       !record ||
-      !["codespace_input", "codespace_download"].includes(record.purpose) ||
+      record.purpose !== "codespace_download" ||
       !["ready", "claimed"].includes(record.state) ||
       record.expiresAt <= this.now()
     ) {
@@ -1498,7 +632,7 @@ export class CodespaceTransferService {
       const stored = this.dependencies.repository.getOwned(record.userId, record.id);
       if (
         !stored ||
-        stored.expiresAt <= this.now() ||
+        (record.state !== "claimed" && stored.expiresAt <= this.now()) ||
         stored.state !== record.state ||
         stored.sha256 !== sha256 ||
         stored.observedSize !== size ||
@@ -1531,6 +665,21 @@ export class CodespaceTransferService {
     };
     let closed = false;
     let closePromise: Promise<void> | null = null;
+    // Link expiry controls admission. A live admitted download owns its claim until closure.
+    const renewal =
+      record.state === "claimed" && record.claimId
+        ? setInterval(
+            () =>
+              this.dependencies.repository.renewClaim(
+                record.id,
+                record.claimId!,
+                this.now(),
+                this.now() + 60_000,
+              ),
+            10_000,
+          )
+        : undefined;
+    renewal?.unref();
     let settle!: () => void;
     const settled = new Promise<void>((resolve) => {
       settle = resolve;
@@ -1538,6 +687,7 @@ export class CodespaceTransferService {
     const close = () => {
       if (!closePromise) {
         closed = true;
+        if (renewal) clearInterval(renewal);
         signal?.removeEventListener("abort", aborted);
         closePromise = handle.close().finally(settle);
       }
@@ -1593,18 +743,9 @@ export class CodespaceTransferService {
           position += read.bytesRead;
           await check();
           if (record.state === "claimed" && record.claimId) {
-            const leaseMs =
-              record.purpose === "codespace_download"
-                ? 60_000
-                : Math.min(60_000, this.dependencies.policy().claimLeaseMs ?? 30_000);
             const now = this.now();
             if (
-              !this.dependencies.repository.renewClaim(
-                record.id,
-                record.claimId,
-                now,
-                Math.min(record.expiresAt, now + leaseMs),
-              )
+              !this.dependencies.repository.renewClaim(record.id, record.claimId, now, now + 60_000)
             ) {
               throw new CodespaceResourceError("CODESPACE_NOT_FOUND", "Transfer claim expired");
             }

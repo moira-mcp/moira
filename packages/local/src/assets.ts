@@ -1,9 +1,20 @@
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import type { LocalVmRuntime, LocalVmIdentity } from "./local-vm-runtime.js";
+import {
+  WORKSPACE_INSTALL_SCRIPT,
+  WORKSPACE_PROBE_SCRIPT,
+  WORKSPACE_LOCAL_BOOTSTRAP_SCRIPT,
+  WORKSPACE_CONFIGURE_SCRIPT,
+  WORKSPACE_START_SCRIPT,
+  WORKSPACE_HEALTH_SCRIPT,
+  loadWorkspacePayload,
+  workspaceInstallInput,
+  type WorkspacePayload,
+} from "../../workspace-service/src/bootstrap.mjs";
 
 export interface GuestAssets {
-  worker: Buffer;
+  payload: WorkspacePayload;
   proxy: string;
 }
 
@@ -28,17 +39,24 @@ export function runtimeApiAsset(): string {
 
 /** Assets come from the installed release, never a server response. */
 export async function guestAssets(): Promise<GuestAssets> {
-  const [worker, proxy] = await Promise.all([
-    readFile(new URL("guest-worker.js", import.meta.url)),
-    readFile(new URL("guest-proxy.js", import.meta.url), "utf8"),
+  const [payload, proxy] = await Promise.all([
+    loadWorkspacePayload(
+      fileURLToPath(new URL("workspace-payload/", import.meta.url)),
+      process.arch,
+    ),
+    readFile(new URL("workspace-payload/service/guest-proxy.mjs", import.meta.url), "utf8"),
   ]);
-  return { worker, proxy };
+  return { payload, proxy };
 }
 
-const INSTALL =
-  "const f=require('node:fs');const p='/tmp/moira-local-runtime';f.mkdirSync(p,{recursive:true,mode:448});f.writeFileSync(p+'/worker.mjs',f.readFileSync(0),{mode:384});";
-export const GUEST_INSTALL_COMMAND = ["node", "-e", INSTALL] as const;
-export const GUEST_WORKER_COMMAND = ["node", "/tmp/moira-local-runtime/worker.mjs"] as const;
+export const GUEST_COMMANDS = {
+  install: ["/bin/sh", "-c", WORKSPACE_INSTALL_SCRIPT],
+  probe: ["/bin/sh", "-c", WORKSPACE_PROBE_SCRIPT],
+  bootstrap: ["/bin/sh", "-c", WORKSPACE_LOCAL_BOOTSTRAP_SCRIPT],
+  configure: ["/bin/sh", "-c", WORKSPACE_CONFIGURE_SCRIPT],
+  "start-service": ["/bin/sh", "-c", WORKSPACE_START_SCRIPT],
+  health: ["/bin/sh", "-c", WORKSPACE_HEALTH_SCRIPT],
+} as const;
 export const VERIFIED_GUEST_FAILURE_EXIT = 200;
 
 export async function installGuest(
@@ -46,6 +64,5 @@ export async function installGuest(
   identity: LocalVmIdentity,
   assets: GuestAssets,
 ): Promise<void> {
-  // This fixed installer runs inside the VM. Workload requests are delivered separately as JSON.
-  await runtime.runFixedGuest(identity, "installer", assets.worker);
+  await runtime.runFixedGuest(identity, "install", workspaceInstallInput(assets.payload));
 }

@@ -2,11 +2,7 @@ import {
   CODESPACE_PROVIDER_LOCAL,
   CodespaceConnectionRepository,
   CodespaceResourceRepository,
-  CodespaceOperationRepository,
   CodespaceResourceService,
-  CodespaceOperationService,
-  CodespaceFileService,
-  CodespaceTransferRepository,
   CodespaceObservabilityService,
   CodespaceProviderRegistry,
   LocalDeviceRepository,
@@ -16,24 +12,16 @@ import {
   codespaceGitHubSettingsPath,
   getSqliteInstance,
   getCodespaceResourcePolicy,
-  recordCodespaceOperationEvent,
   recordCodespaceResourceEvent,
   type CodespaceConnectionView,
   type CodespaceConnectionService,
   type CodespaceTransferService,
   type CodespaceResourcePolicy,
-  type CodespaceNativeReferenceFetcher,
   type CodespaceResourceAuditEvent,
-  type CodespaceOperationAuditEvent,
 } from "@mcp-moira/shared";
 import { LocalCodespaceRelay } from "./local-codespace-relay.js";
-import {
-  LocalCodespaceJobTransport,
-  LocalCodespaceProvider,
-  localCodespaceCredential,
-} from "./local-codespace-provider.js";
-import { OpenAINativeReferenceFetcher } from "./codespace-native-reference-fetcher.js";
-import { createCodespaceFileTransfers } from "./codespace-file-transfers.js";
+import { LocalCodespaceProvider, localCodespaceCredential } from "./local-codespace-provider.js";
+import { getWorkspaceClient } from "./workspace-client.js";
 
 export function localCodespaceSettingsUrl(baseUrl = getBaseUrl(), appPrefix?: string): string {
   const url = new URL(codespaceGitHubSettingsPath(appPrefix), baseUrl);
@@ -42,12 +30,7 @@ export function localCodespaceSettingsUrl(baseUrl = getBaseUrl(), appPrefix?: st
 }
 
 export function localCodespacePolicy() {
-  const policy = getCodespaceResourcePolicy();
-  return {
-    ...policy,
-    maxOperationStdoutBytes: Math.min(policy.maxOperationStdoutBytes ?? 1024 * 1024, 1024 * 1024),
-    maxOperationStderrBytes: Math.min(policy.maxOperationStderrBytes ?? 1024 * 1024, 1024 * 1024),
-  };
+  return { ...getCodespaceResourcePolicy(), enabled: true };
 }
 
 export function createLocalCodespaceServices(
@@ -57,9 +40,7 @@ export function createLocalCodespaceServices(
     now?: () => number;
     policy?: () => CodespaceResourcePolicy;
     settingsUrl?: string;
-    nativeFetcher?: CodespaceNativeReferenceFetcher;
     resourceAudit?: (event: CodespaceResourceAuditEvent) => Promise<void> | void;
-    operationAudit?: (event: CodespaceOperationAuditEvent) => Promise<void> | void;
   } = {},
 ) {
   const sqlite = context.sqlite ?? getSqliteInstance();
@@ -67,10 +48,9 @@ export function createLocalCodespaceServices(
   const policy = context.policy ?? localCodespacePolicy;
   const devices = new LocalDeviceService(new LocalDeviceRepository(sqlite), now);
   const resources = new CodespaceResourceRepository(sqlite);
-  const operations = new CodespaceOperationRepository(sqlite);
   const connections = new CodespaceConnectionRepository(sqlite);
   const settingsUrl = context.settingsUrl ?? localCodespaceSettingsUrl();
-  const relay = new LocalCodespaceRelay(devices, transfer, now);
+  const relay = new LocalCodespaceRelay(devices, now);
   const provider = new LocalCodespaceProvider(relay, resources, settingsUrl, now);
   const registry = new CodespaceProviderRegistry();
   registry.register(provider);
@@ -97,61 +77,18 @@ export function createLocalCodespaceServices(
     },
     audit: context.resourceAudit ?? recordCodespaceResourceEvent,
   });
-  const transport = new LocalCodespaceJobTransport(relay, (userId, codespaceId) =>
-    resource.refreshProviderState(userId, { codespaceId }),
-  );
-  const nativeFetcher = context.nativeFetcher ?? new OpenAINativeReferenceFetcher();
-  const operation = new CodespaceOperationService({
-    repository: operations,
-    credentials,
-    transport,
-    providerId: CODESPACE_PROVIDER_LOCAL,
-    policy,
-    now,
-    transfers: transfer,
-    nativeFetcher,
-    reconcileFile: (accepted) => file.recoverNative(accepted),
-    lifecycle: { ensureRunning: (userId, id) => resource.ensureRunning(userId, id) },
-    audit:
-      context.operationAudit ??
-      ((event) => recordCodespaceOperationEvent(event, event.updatedAt - event.createdAt)),
-  });
-  const file = new CodespaceFileService({
-    repository: operations,
-    credentials,
-    transport,
-    policy,
-    now,
-    transfers: transfer,
-    nativeFetcher,
-    get native() {
-      return fileTransfers;
-    },
-    lifecycle: { ensureRunning: (userId, id) => resource.ensureRunning(userId, id) },
-    audit:
-      context.operationAudit ??
-      ((event) => recordCodespaceOperationEvent(event, event.updatedAt - event.createdAt)),
-  });
-  const fileTransfers = createCodespaceFileTransfers({
-    repository: operations,
-    files: file,
-    transfers: transfer,
-    credentials,
-    transport,
-    policy,
-    now,
-    nativeFetcher,
-    wake: () => operation.notifyAccepted(),
-  });
   const observability = new CodespaceObservabilityService({
     providerId: CODESPACE_PROVIDER_LOCAL,
     config: () => ({ state: "available" }),
     policy,
     now,
     resources,
-    operations,
-    transfers: new CodespaceTransferRepository(sqlite),
-    transport,
+    transport: {
+      async health() {
+        const current = await provider.health();
+        return { ok: current.state === "available", reason: current.reason };
+      },
+    },
   });
   const connection: Pick<CodespaceConnectionService, "getStatus" | "refreshGrants"> = {
     getStatus(userId): CodespaceConnectionView {
@@ -188,9 +125,7 @@ export function createLocalCodespaceServices(
   return {
     connection,
     resource,
-    operation,
-    file,
-    fileTransfers,
+    workspace: getWorkspaceClient(),
     observability,
     devices,
     relay,

@@ -8,7 +8,6 @@ import { runProcess } from "./process.js";
 import { runtimeControlAsset } from "./assets.js";
 
 const KEY = /^[a-z][a-z0-9-]{0,127}\.json$/;
-const MAX_STATE_BYTES = 16 * 1024 * 1024;
 // All instances of this module share ownership of each canonical document target.
 const documentLanes = new Map<string, Promise<unknown>>();
 const busy = () =>
@@ -119,7 +118,6 @@ export class PrivateState {
           !metadata.isFile() ||
           metadata.nlink !== 1 ||
           (metadata.mode & 0o077) !== 0 ||
-          metadata.size > MAX_STATE_BYTES ||
           (process.getuid && metadata.uid !== process.getuid())
         ) {
           throw new LocalRefusal("LOCAL_STATE_UNSAFE", "Unsafe local state file.");
@@ -148,8 +146,6 @@ export class PrivateState {
   async write(key: string, value: unknown): Promise<void> {
     const target = this.path(key);
     const bytes = Buffer.from(JSON.stringify(value));
-    if (bytes.length > MAX_STATE_BYTES)
-      throw new LocalRefusal("LOCAL_STATE_FULL", "Local state limit reached.");
     await this.serial(target, async () => {
       const temporary = join(this.root, `.write-${randomBytes(16).toString("hex")}`);
       // Only a successful exclusive open establishes ownership for cleanup.

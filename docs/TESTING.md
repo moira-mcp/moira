@@ -4,7 +4,9 @@
 
 ### NO Hardcoded URLs or Ports
 
-**RULE:** All integration and E2E tests MUST use `getTestBaseUrl()` utility.
+**RULE:** Tests targeting the deployed Moira HTTP server MUST use `getTestBaseUrl()`.
+Owned component fixtures may instead use their private Unix socket or an explicitly
+assigned loopback listener. They do not inherit the deployed server's URL.
 
 **Rationale:**
 
@@ -71,8 +73,8 @@ TEST_BASE_URL=https://example.com npm test
 ### Integration Tests (Jest)
 
 **Location:** `tests/integration/`
-**Target:** Docker local build by default
-**Utility:** Use `getTestBaseUrl()` for all HTTP requests
+**Target:** Real components with controlled external dependencies; deployed-server tests use Docker by default
+**Utility:** Use `getTestBaseUrl()` for deployed-server HTTP requests. Component fixtures own their socket, listener and cleanup.
 
 **Example:**
 
@@ -208,8 +210,8 @@ Default `autoAcceptBeta=true` handles beta agreement modal automatically.
 ### Unit Tests (Jest)
 
 **Location:** `tests/unit/`
-**Target:** No HTTP requests, no BASE_URL needed
-**Focus:** Pure functions, business logic, utilities
+**Target:** Isolated components, including owned filesystem, subprocess and Unix HTTP fixtures
+**Focus:** Pure functions, business logic and observable component contracts; no deployed server is required
 
 ### Workflow Scenario Tests (Jest)
 
@@ -313,7 +315,7 @@ npm run test:e2e              # E2E browser tests
 ### No Docker Dependency
 
 ```bash
-npm run test:unit             # Unit tests (in-memory)
+npm run test:unit             # Unit and isolated component fixtures
 npm run test:integration      # Integration (test-integration.db)
 ```
 
@@ -327,7 +329,7 @@ TEST_BASE_URL=https://your-instance.example.com npm test   # run against a deplo
 
 ## Test File Header Template
 
-**All integration/E2E tests MUST include this header:**
+**Tests targeting the deployed server MUST include this header:**
 
 ```typescript
 /**
@@ -378,12 +380,9 @@ const BASE_URL = getTestBaseUrl();
 ### Checklist
 
 - [ ] Name test file semantically (what it verifies, not step number)
-- [ ] Import `getTestBaseUrl()` from `tests/utils/test-config.ts`
-- [ ] Use `const BASE_URL = getTestBaseUrl()` at module level
-- [ ] Replace all URLs with `${BASE_URL}/path`
-- [ ] NO hardcoded localhost:port ANYWHERE
-- [ ] Add header comment about Docker default and TEST_BASE_URL override
-- [ ] Verify test runs on Docker: `npm run test:e2e` or `npm run test:integration`
+- [ ] For deployed-server tests, import `getTestBaseUrl()` from `tests/utils/test-config.ts`, use `${BASE_URL}/path`, and explain Docker/TEST_BASE_URL routing in the header
+- [ ] For component fixtures, own the private socket or assigned listener and release it even when an assertion fails
+- [ ] Verify through the relevant root npm runner with `--file <test-path>`
 
 ### Example New Test
 

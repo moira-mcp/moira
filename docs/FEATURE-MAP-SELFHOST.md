@@ -55,6 +55,13 @@ GitHub integration; local resources use an explicitly approved Moira Local devic
 GitHub OAuth on the server. Local work still requires the instance runtime policy and the device's
 own repository grants and finite lease. See [Codespaces](CODESPACES.md) for setup and provider limits.
 
+Both providers use the same guest workspace service and direct Unix-socket CLI for commands,
+files and sessions. The cloud routes live authorized streams; it does not own an offline command
+queue or command/file quotas. The Local host companion owns lifecycle only. GitHub's configured
+resource/billing policy is separate from the Local device's owner-approved allocations and lease.
+Supported self-host Compose includes a static Traefik ingress routing workspace HTTP/1.1 Upgrade
+directly to backend 3001 on the same public host port.
+
 Email delivery has a separate runtime status returned by `GET /api/features`:
 
 - `real`: SMTP or Brevo can deliver messages;

@@ -1,11 +1,6 @@
 import { createHash } from "node:crypto";
 import { crc32 } from "node:zlib";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
-import {
-  projectCodespaceOperationSummary,
-  type CodespaceFileFailureReason,
-  type CodespaceFileOperationResponse,
-} from "@mcp-moira/shared";
 
 const MAX_BYTES = 4 * 1024 * 1024;
 const MAX_PIXELS = 16_000_000;
@@ -155,73 +150,27 @@ function jpeg(bytes: Buffer): ImageHeader | null {
   return null;
 }
 
-/** Caller owns tenant/generation checks; this is only a projection of existing download bytes. */
-export function previewImageResult(response: CodespaceFileOperationResponse): CallToolResult {
-  const operation = projectCodespaceOperationSummary(response.operation);
-  const json = (data: Record<string, unknown>): CallToolResult => ({
-    content: [{ type: "text", text: JSON.stringify(data) }],
-    structuredContent: data,
-  });
-  const reject = (
-    code: string,
-    message: string,
-    reason?: CodespaceFileFailureReason,
-  ): CallToolResult => ({
+/** The byte-stream caller owns resource authorization; previewing has its own bounded image budget. */
+export function previewImageBytes(bytes: Buffer): CallToolResult {
+  const reject = (message: string): CallToolResult => ({
     isError: true,
-    ...json({
-      operation_id: response.operation.id,
-      ...(reason ? { reason } : {}),
-      error: { code, message },
-    }),
+    content: [
+      {
+        type: "text",
+        text: JSON.stringify({ error: { code: "CODESPACE_IMAGE_REJECTED", message } }),
+      },
+    ],
   });
-  if (response.operation.kind !== "download")
-    return reject("CODESPACE_IMAGE_REJECTED", "Image preview requires a file download operation.");
-  if (["failed", "cancelled", "timed_out"].includes(operation.state))
+  if (bytes.length === 0 || bytes.length > MAX_BYTES)
     return reject(
-      operation.state === "failed"
-        ? "CODESPACE_FILE_REJECTED"
-        : operation.state === "cancelled"
-          ? "CODESPACE_OPERATION_CANCELLED"
-          : "CODESPACE_OPERATION_TIMED_OUT",
-      "The image file operation did not succeed.",
-      response.result && "state" in response.result ? response.result.reason : undefined,
+      "Image preview requires a complete PNG or JPEG within its preview budget. Use download for the original file.",
     );
-  if (!response.result && operation.state !== "succeeded")
-    return reject(
-      "CODESPACE_PROVIDER_UNAVAILABLE",
-      "The image download could not be confirmed; recover this operation without repeating it.",
-    );
-  const result = response.result;
-  if (
-    !result ||
-    "state" in result ||
-    result.action !== "download" ||
-    "transferId" in result ||
-    operation.state !== "succeeded"
-  )
-    return reject("CODESPACE_IMAGE_REJECTED", "A complete successful image download is required.");
-  if (
-    result.bytes.byteLength === 0 ||
-    result.bytes.byteLength > MAX_BYTES ||
-    result.bytes.byteLength > response.operation.stdoutLimitBytes ||
-    result.offset !== 0 ||
-    result.totalSize !== result.bytes.byteLength
-  )
-    return reject(
-      "CODESPACE_IMAGE_REJECTED",
-      "Image preview requires a complete file of at most 4 MiB.",
-    );
-  const bytes = Buffer.from(result.bytes);
-  const sha256 = createHash("sha256").update(bytes).digest("hex");
   const header = png(bytes) ?? jpeg(bytes);
-  if (!header || result.sha256 !== sha256)
-    return reject(
-      "CODESPACE_IMAGE_REJECTED",
-      "Image preview requires valid bounded PNG or JPEG framing and dimensions.",
-    );
+  if (!header) return reject("The image framing or dimensions are invalid for preview.");
   const metadata = {
     ...header,
     size_bytes: bytes.length,
+    sha256: createHash("sha256").update(bytes).digest("hex"),
   };
   return {
     structuredContent: metadata,

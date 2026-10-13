@@ -5,12 +5,11 @@ import {
   CodespaceResourceError,
   LocalDeviceError,
   canonicalJson,
-  localManagementOutcomeSchema,
+  localLifecycleReplySchema,
+  localLifecycleEnvelopeSchema,
   localRelayMutationId as mutationId,
   LOCAL_REQUEST_MAX_WINDOW_MS,
-  LOCAL_RESULT_SETTLEMENT_RETENTION_MS,
   type CodespaceResourceRecord,
-  type CodespaceTransferService,
   type LocalDeviceService,
   type LocalRelayRequest,
 } from "@mcp-moira/shared";
@@ -18,39 +17,14 @@ import {
 // Leave room for independent clocks inside the companion's unchanged admission ceiling.
 const LOCAL_REQUEST_ISSUANCE_WINDOW_MS = LOCAL_REQUEST_MAX_WINDOW_MS - 30_000;
 
-const replySchema = z.discriminatedUnion("ok", [
-  z.object({ ok: z.literal(true), result: z.unknown() }).strict(),
-  z
-    .object({
-      ok: z.literal(false),
-      error: z
-        .object({
-          code: z.string().regex(/^LOCAL_[A-Z0-9_]{1,80}$/),
-          message: z.string().max(500),
-          management: localManagementOutcomeSchema.optional(),
-        })
-        .strict(),
-    })
-    .strict(),
-]);
+const replySchema = localLifecycleReplySchema;
 
-function refuseLocalReply(code: string, ordinaryOperation = false): never {
+function refuseLocalReply(code: string): never {
   if (code === "LOCAL_GUEST_SETTLEMENT_UNKNOWN" || code === "LOCAL_OUTCOME_UNKNOWN")
     throw new CodespaceResourceError(
       "CODESPACE_PROVIDER_UNAVAILABLE",
-      "The connection ended before the operation result was confirmed",
-      "Check the result of this operation; do not repeat a write until its outcome is known.",
-    );
-  if (ordinaryOperation && /(?:IDENTITY|GENERATION|REPLAY)/.test(code))
-    throw new CodespaceResourceError(
-      code === "LOCAL_REPLAY_CONFLICT"
-        ? "CODESPACE_RESOURCE_INVALID"
-        : "CODESPACE_LOCAL_RUNTIME_ERROR",
-      `The codespace refused the operation (${code})`,
-      code === "LOCAL_REPLAY_CONFLICT"
-        ? "An accepted operation cannot change its request."
-        : "The codespace identity changed; check its current state.",
-      true,
+      "The connection ended before the lifecycle result was confirmed",
+      "Inspect this codespace's current lifecycle state before repeating a mutation.",
     );
   throw new CodespaceResourceError(
     code === "LOCAL_DELETE_APPROVAL_REQUIRED"
@@ -78,11 +52,10 @@ function refuseLocalReply(code: string, ordinaryOperation = false): never {
   );
 }
 
-/** Durable metadata and private transfer objects own dispatch before any delivery can happen. */
+/** Inline lifecycle intent and receipts retain exact owned VM mutation identity. */
 export class LocalCodespaceRelay {
   constructor(
     readonly devices: LocalDeviceService,
-    readonly transfers: CodespaceTransferService,
     private readonly now: () => number = Date.now,
   ) {}
 
@@ -145,7 +118,7 @@ export class LocalCodespaceRelay {
         "Local creation receipt digest changed",
       );
     }
-    if (!["completed", "refused"].includes(result.status) || !result.outcomeReference) return null;
+    if (!["completed", "refused"].includes(result.status) || !result.outcome) return null;
     const active = this.devices.getActiveDevice(queued.userId, queued.deviceId);
     if (active.deviceGeneration !== queued.deviceGeneration) {
       throw new CodespaceResourceError(
@@ -153,14 +126,7 @@ export class LocalCodespaceRelay {
         "Local device authority changed",
       );
     }
-    const bytes = await this.transfers.readRelayPayload(
-      resource.userId,
-      "local_relay_output",
-      result.outcomeReference,
-    );
-    const reply = replySchema.parse(
-      JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes)),
-    );
+    const reply = replySchema.parse(result.outcome);
     if (!reply.ok) refuseLocalReply(reply.error.code);
     if (result.status !== "completed") {
       throw new CodespaceResourceError(
@@ -233,7 +199,7 @@ export class LocalCodespaceRelay {
           ...(authority ? { authority } : {}),
         }),
       );
-      if (bytes.length > 8 * 1024 * 1024) {
+      if (bytes.length > 64 * 1024) {
         throw new CodespaceResourceError(
           "CODESPACE_POLICY_LIMIT",
           "Local request exceeds its advertised envelope limit",
@@ -243,44 +209,21 @@ export class LocalCodespaceRelay {
       if (previous && previous.digest !== digest) {
         throw new LocalDeviceError("LOCAL_CONFLICT", "Local request digest changed.");
       }
-      const reference =
-        previous?.payloadReference ??
-        (await this.transfers.retainRelayPayload(
-          resource.userId,
-          "local_relay_input",
-          bytes,
-          deadlineAt + LOCAL_RESULT_SETTLEMENT_RETENTION_MS,
-        ));
-      try {
-        const envelope: LocalRelayRequest = {
-          userId: binding.userId,
-          deviceId: binding.deviceId,
-          deviceGeneration: binding.deviceGeneration,
-          connectionId: binding.connectionId,
-          resourceId: resource.id,
-          requestId,
-          resourceGeneration: previous?.resourceGeneration ?? resource.generation,
-          digest,
-          payloadReference: reference,
-          deadlineAt,
-          ...(authority ? { authority } : {}),
-        };
-        const job =
-          request.action === "operation" && typeof request.job === "object" && request.job !== null
-            ? (request.job as Record<string, unknown>)
-            : null;
-        this.devices.enqueue(
-          envelope,
-          job?.action === "execute" || job?.action === "file-execute"
-            ? String(job.remoteMarker)
-            : undefined,
-        );
-        return envelope;
-      } catch (error) {
-        if (!previous)
-          await this.transfers.discardRelayPayload(resource.userId, "local_relay_input", reference);
-        throw error;
-      }
+      const envelope: LocalRelayRequest = {
+        userId: binding.userId,
+        deviceId: binding.deviceId,
+        deviceGeneration: binding.deviceGeneration,
+        connectionId: binding.connectionId,
+        resourceId: resource.id,
+        requestId,
+        resourceGeneration: previous?.resourceGeneration ?? resource.generation,
+        digest,
+        payload: localLifecycleEnvelopeSchema.parse(JSON.parse(bytes.toString("utf8"))),
+        deadlineAt,
+        ...(authority ? { authority } : {}),
+      };
+      this.devices.enqueue(envelope);
+      return envelope;
     } catch (error) {
       return this.failure(error);
     }
@@ -314,42 +257,11 @@ export class LocalCodespaceRelay {
           throw new LocalDeviceError("LOCAL_CONFLICT", "Local relay identity changed.");
         }
         if (result.status === "completed" || result.status === "refused") {
-          if (!result.outcomeReference)
+          if (!result.outcome)
             throw new LocalDeviceError("LOCAL_INVALID", "Local outcome is missing.");
-          let payload: Buffer;
-          try {
-            payload = await this.transfers.readRelayPayload(
-              resource.userId,
-              "local_relay_output",
-              result.outcomeReference,
-            );
-          } catch {
-            throw new CodespaceResourceError(
-              "CODESPACE_RESULT_EXPIRED",
-              "The short-lived relay reply is unavailable; inspect the existing operation",
-            );
-          }
-          // Core has already persisted dispatch intent. If it crashes after receiving this reply,
-          // its normal reconciliation inspects the durable guest marker instead of executing again.
-          // Lifecycle retries address the same durable mutation identity. Retain its receipt until
-          // the existing transfer expiry, including when its first observation did not converge.
-          if (!["create", "start", "stop", "delete"].includes(String(request.action))) {
-            await this.transfers.discardRelayPayload(
-              resource.userId,
-              "local_relay_input",
-              queued.payloadReference,
-            );
-            await this.transfers.discardRelayPayload(
-              resource.userId,
-              "local_relay_output",
-              result.outcomeReference,
-            );
-          }
-          const reply = replySchema.parse(
-            JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(payload)),
-          );
+          const reply = replySchema.parse(result.outcome);
           if (!reply.ok) {
-            refuseLocalReply(reply.error.code, request.action === "operation");
+            refuseLocalReply(reply.error.code);
           }
           if (result.status !== "completed")
             throw new LocalDeviceError("LOCAL_INVALID", "Local outcome status disagrees.");
@@ -387,11 +299,9 @@ export class LocalCodespaceRelay {
       throw new CodespaceResourceError(
         error.code === "LOCAL_UNAUTHORIZED"
           ? "CODESPACE_AUTHORIZATION_REQUIRED"
-          : error.code === "LOCAL_CAPACITY"
-            ? "CODESPACE_POLICY_LIMIT"
-            : error.code === "LOCAL_CONFLICT"
-              ? "CODESPACE_GENERATION_CONFLICT"
-              : "CODESPACE_PROVIDER_UNAVAILABLE",
+          : error.code === "LOCAL_CONFLICT"
+            ? "CODESPACE_GENERATION_CONFLICT"
+            : "CODESPACE_PROVIDER_UNAVAILABLE",
         error.message,
       );
     }

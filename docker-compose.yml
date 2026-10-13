@@ -5,11 +5,40 @@
 #   docker compose up -d
 #   open http://localhost:8080
 #
-# This compose runs Moira on a single port with direct port-mapping — no Traefik,
-# no reverse proxy, no external networks. To serve it on a public domain, put your
+# This compose runs Moira on a single port through its static Traefik ingress,
+# without Docker API access or external networks. To serve it on a public domain, put your
 # own reverse proxy (Traefik, Caddy, nginx, …) with TLS in front of this container.
 
 services:
+  moira-ingress:
+    image: traefik:v2.11.58
+    restart: "on-failure:3"
+    user: "65532:65532"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    command:
+      - --entrypoints.web.address=:8080
+      - --entrypoints.web.transport.respondingtimeouts.readtimeout=0s
+      - --entrypoints.web.transport.respondingtimeouts.writetimeout=0s
+      - --entrypoints.web.transport.respondingtimeouts.idletimeout=0s
+      - --providers.file.filename=/etc/traefik/moira.yml
+      - --providers.file.watch=false
+      - --ping=true
+      - --ping.entrypoint=web
+    ports:
+      - "${MOIRA_PORT:-8080}:8080"
+    volumes:
+      - ./config/traefik-self-host.yml:/etc/traefik/moira.yml:ro
+    depends_on:
+      moira:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "traefik", "healthcheck", "--ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+
   moira:
     container_name: moira
 
@@ -50,6 +79,7 @@ services:
       - WORKFLOWS_DIR=./workflows/production
       - METRICS_PORT=9090
       - LOG_LEVEL=${LOG_LEVEL:-info}
+      - TRUST_PROXY=${TRUST_PROXY:-2}
       # GitHub codespace connection is fail-closed unless every value is supplied
       # by the operator's untracked .env or deployment secret manager.
       - CODESPACE_GITHUB_APP_CLIENT_ID=${CODESPACE_GITHUB_APP_CLIENT_ID:-}
@@ -71,21 +101,6 @@ services:
       - CODESPACE_CLAIM_LEASE_SECONDS=${CODESPACE_CLAIM_LEASE_SECONDS:-30}
       - CODESPACE_RECONCILE_INTERVAL_SECONDS=${CODESPACE_RECONCILE_INTERVAL_SECONDS:-30}
       - CODESPACE_START_WAIT_SECONDS=${CODESPACE_START_WAIT_SECONDS:-180}
-      - CODESPACE_MAX_CONCURRENT_OPERATIONS_PER_USER=${CODESPACE_MAX_CONCURRENT_OPERATIONS_PER_USER:-8}
-      - CODESPACE_MAX_CONCURRENT_OPERATIONS_GLOBAL=${CODESPACE_MAX_CONCURRENT_OPERATIONS_GLOBAL:-32}
-      - CODESPACE_MAX_OPERATION_INPUT_KB=${CODESPACE_MAX_OPERATION_INPUT_KB:-1024}
-      - CODESPACE_MAX_OPERATION_STDOUT_KB=${CODESPACE_MAX_OPERATION_STDOUT_KB:-1024}
-      - CODESPACE_MAX_OPERATION_STDERR_KB=${CODESPACE_MAX_OPERATION_STDERR_KB:-256}
-      - CODESPACE_MAX_RETAINED_OUTPUT_MB=${CODESPACE_MAX_RETAINED_OUTPUT_MB:-64}
-      - CODESPACE_MAX_OPERATION_SECONDS=${CODESPACE_MAX_OPERATION_SECONDS:-900}
-      - CODESPACE_MAX_BACKGROUND_OPERATION_HOURS=${CODESPACE_MAX_BACKGROUND_OPERATION_HOURS:-4}
-      - CODESPACE_MAX_TRANSFER_FILE_MB=${CODESPACE_MAX_TRANSFER_FILE_MB:-20}
-      - CODESPACE_MAX_TRANSFER_TOTAL_MB_PER_USER=${CODESPACE_MAX_TRANSFER_TOTAL_MB_PER_USER:-100}
-      - CODESPACE_MAX_TRANSFER_TOTAL_MB_GLOBAL=${CODESPACE_MAX_TRANSFER_TOTAL_MB_GLOBAL:-1024}
-      - CODESPACE_MAX_TRANSFER_OBJECTS_PER_USER=${CODESPACE_MAX_TRANSFER_OBJECTS_PER_USER:-10}
-      - CODESPACE_MAX_TRANSFER_OBJECTS_GLOBAL=${CODESPACE_MAX_TRANSFER_OBJECTS_GLOBAL:-1000}
-      - CODESPACE_MAX_TRANSFER_INFLIGHT_MB_PER_USER=${CODESPACE_MAX_TRANSFER_INFLIGHT_MB_PER_USER:-40}
-      - CODESPACE_MAX_TRANSFER_INFLIGHT_MB_GLOBAL=${CODESPACE_MAX_TRANSFER_INFLIGHT_MB_GLOBAL:-256}
       - CODESPACE_TRANSFER_TTL_MINUTES=${CODESPACE_TRANSFER_TTL_MINUTES:-10}
       # Empty keeps extensions disabled. When the optional profile is enabled, point this at the
       # runner service over the Compose network.
@@ -101,10 +116,8 @@ services:
         condition: service_healthy
         required: false
 
-    # Host port (left) → container nginx port 80 (right). Change MOIRA_PORT in .env
-    # to use a different host port. Keep it consistent with MOIRA_HOST.
-    ports:
-      - "${MOIRA_PORT:-8080}:80"
+    # Ingress forwards ordinary routes to nginx and workspace Upgrade streams
+    # directly to the backend; the application has no separate published port.
 
     # SQLite database + execution storage persist on the host. Survives rebuilds.
     volumes:

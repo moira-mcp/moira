@@ -101,8 +101,7 @@ describe("codespace management and controls on a default-disabled installation",
       'moira_codespace_connector_available{provider="github-codespaces"} 0',
     );
     expect(metrics).toMatch(/moira_codespace_reconciliation_due\{kind="resource"\} \d+/);
-    expect(metrics).toMatch(/moira_codespace_active\{kind="operation"\} \d+/);
-    expect(metrics).toMatch(/moira_codespace_transfer_live_bytes \d+/);
+    expect(metrics).toMatch(/moira_codespace_active\{kind="resource"\} \d+/);
   });
 
   test("keeps kill switches administrator-only and fail-closed while unconfigured", async () => {

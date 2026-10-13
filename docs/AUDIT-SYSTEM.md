@@ -14,9 +14,9 @@ Persistent audit trail for:
 
 **1. AuditAction Enum** (`packages/shared/src/audit/actions.ts`)
 
-- Type-safe action types covering all state-changing operations
+- Type-safe action types for audited cloud state changes
 - Type-safe, with autocomplete and compile-time checks
-- Action types cover all state-changing operations and MCP read operations
+- Cloud lifecycle and MCP call audit are distinct from workspace-owned execution receipts
 
 **2. AuditRepository** (`packages/shared/src/database/repositories/audit-repository.ts`)
 
@@ -31,7 +31,6 @@ Persistent audit trail for:
 - `SettingsService` - database-backed settings management with automatic audit
 - `CodespaceConnectionService` - website-owned GitHub connection, refresh and revocation audit
 - `CodespaceResourceService` - persistent codespace creation, lifecycle and reconciliation audit
-- `CodespaceOperationService` - direct-operation reservation, reconciliation and terminal audit
 - `DatabaseRepository` - routes manifest-declared extension settings to their separate value store and writes equivalent audit events without recording secret plaintext
 - Services obtain the source from the AsyncLocalStorage context automatically
 
@@ -171,7 +170,6 @@ Route/Tool → Repository → Database (audit lost!)
 | WorkflowSharingService     | `getWorkflowSharingService()`     | createInvite, acceptInvite, revokeInvite, revokeAccess             |
 | CodespaceConnectionService | `getCodespaceConnectionService()` | start/complete authorization, refresh failure, disconnect/recovery |
 | CodespaceResourceService   | `getCodespaceResourceService()`   | create, reconcile, start, stop, delete                             |
-| CodespaceOperationService  | `getCodespaceOperationService()`  | execute, reconcile, cancel, finalize                               |
 
 ### Code Example
 
@@ -245,13 +243,10 @@ Persistent resource actions:
 
 **Logged via:** `CodespaceResourceService`
 
-Direct-operation actions:
-
-- `CODESPACE_OPERATION_RESERVE` - operation capacity and byte/time limits were reserved
-- `CODESPACE_OPERATION_RECONCILE` - an uncertain remote outcome requires inspection
-- `CODESPACE_OPERATION_TERMINAL` - operation reached a terminal state
-
-**Logged via:** `CodespaceOperationService`
+Workspace command/file receipts belong to the common service inside the workspace.
+Cloud MCP call audit records the authenticated tool boundary, not a durable command
+queue or execution outcome. The retained `CODESPACE_OPERATION_*` vocabulary is for
+historical audit rows; it has no active producer.
 
 Administrator control actions:
 
@@ -263,8 +258,7 @@ Connection metadata is limited to provider and outcome. Resource metadata adds
 state, selected machine limits and, for a refusal, the refusing HTTP status as its
 outcome together with a bounded reason: the connector's own failure, or the
 provider's own message reduced to one line and dropped whole if anything in it
-looks like a credential. Operation metadata contains only the opaque
-codespace ID, provider, state, input/output byte counts and exit code. Actors and
+looks like a credential. Actors and
 opaque resource IDs use the ordinary audit fields. OAuth code/state, web-session
 tokens, repositories or source content, argv, cwd, stdin, stdout, stderr,
 provider credentials, SSH configuration, client secrets and vault material are
@@ -1088,19 +1082,20 @@ GET /api/admin/audit-log
 
 ### Route Protection
 
-| Route Pattern             | Protection        | Description                     |
-| ------------------------- | ----------------- | ------------------------------- |
-| `/api/health`             | Public            | Health check                    |
-| `/api/startup-ready`      | Public            | Startup readiness check         |
-| `/api/auth/*`             | Public            | Authentication endpoints        |
-| `/api/public/workflows/*` | Token-based       | Public workflow upload/download |
-| `/api/workflows/*`        | requireAuth       | User workflow operations        |
-| `/api/executions/*`       | requireAuth       | User execution operations       |
-| `/api/user/*`             | requireAuth       | User profile operations         |
-| `/api/settings/*`         | requireAuth       | User settings                   |
-| `/api/integrations/*`     | requireAuth       | User-owned provider connections |
-| `/api/admin/*`            | requireAuth+Admin | Admin operations                |
-| `/api/stats/*`            | requireAuth       | User statistics                 |
+| Route Pattern             | Protection        | Description                        |
+| ------------------------- | ----------------- | ---------------------------------- |
+| `/api/health`             | Public            | Health check                       |
+| `/api/startup-ready`      | Public            | Startup readiness check            |
+| `/api/auth/*`             | Public            | Authentication endpoints           |
+| `/api/public/workflows/*` | Token-based       | Public workflow upload/download    |
+| `/api/workflows/*`        | requireAuth       | User workflow operations           |
+| `/api/executions/*`       | requireAuth       | User execution operations          |
+| `/api/user/*`             | requireAuth       | User profile operations            |
+| `/api/settings/*`         | requireAuth       | User settings                      |
+| `/api/integrations/*`     | requireAuth       | User-owned provider connections    |
+| `/api/workspaces/*`       | Scoped credential | Authenticated HTTP Upgrade streams |
+| `/api/admin/*`            | requireAuth+Admin | Admin operations                   |
+| `/api/stats/*`            | requireAuth       | User statistics                    |
 
 ### Public Routes Justification
 
@@ -1146,7 +1141,8 @@ API authorization is verified by tests:
 ## AuditAction Coverage Status
 
 The full set of `AuditAction` types is defined in `packages/shared/src/audit/actions.ts`.
-Every action type has call sites in the codebase, logged via the source noted below:
+Active categories are logged through the sources below. Historical codespace-operation
+action values remain readable but are not emitted by the workspace router.
 
 | Category              | Logged via                                  |
 | --------------------- | ------------------------------------------- |
@@ -1155,7 +1151,6 @@ Every action type has call sites in the codebase, logged via the source noted be
 | OAuth consent         | ✅ Via REST API                             |
 | Codespace connection  | ✅ Via CodespaceConnectionService           |
 | Codespace resources   | ✅ Via CodespaceResourceService             |
-| Codespace operations  | ✅ Via CodespaceOperationService            |
 | Workflow              | ✅ Via WorkflowService                      |
 | Workflow sharing      | ✅ Via WorkflowSharingService               |
 | Execution             | ✅ Via ExecutionService + MCPEngine         |

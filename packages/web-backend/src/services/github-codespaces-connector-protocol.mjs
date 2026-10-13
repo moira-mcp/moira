@@ -1,7 +1,7 @@
 import { Buffer } from "node:buffer";
 
-export const CONNECTOR_MAX_REQUEST_BYTES = 24 * 1024 * 1024;
-export const CONNECTOR_MAX_RESPONSE_BYTES = 24 * 1024 * 1024;
+export const CONNECTOR_MAX_REQUEST_BYTES = 64 * 1024;
+export const CONNECTOR_MAX_RESPONSE_BYTES = 64 * 1024;
 export const CONNECTOR_MAX_CONTROL_OUTPUT_BYTES = 64 * 1024;
 export const CONNECTOR_MAX_CREDENTIAL_BYTES = 512;
 

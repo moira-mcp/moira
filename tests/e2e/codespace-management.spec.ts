@@ -1,4 +1,4 @@
-import { test, expect, type Page } from "./fixtures.js";
+import { test, expect } from "./fixtures.js";
 import type {
   CodespaceConnectionView,
   CodespaceLimitsView,
@@ -36,14 +36,10 @@ const readiness: CodespaceReadinessView = {
     { scope: "provider:github-codespaces", disabled: false, reason: null, updated_at: null },
   ],
   connector: { state: "available", reason: null },
-  reconciliation: { due_resources: 0, due_operations: 0, oldest_due_age_ms: null },
+  reconciliation: { due_resources: 0, oldest_due_age_ms: null },
   usage: {
     active_resources: 1,
     max_active_resources: 4,
-    active_operations: 0,
-    max_active_operations: 20,
-    transfer_live_bytes: 0,
-    max_transfer_live_bytes: 1024 ** 3,
   },
   checked_at: Date.now(),
 };
@@ -58,27 +54,6 @@ const limits: CodespaceLimitsView = {
     create_throttle_seconds: 60,
   },
   machine_ceiling: { cpu_cores: 4, memory_bytes: 8 * 1024 ** 3, storage_bytes: 32 * 1024 ** 3 },
-  operations: {
-    active: 1,
-    max_concurrent_per_user: 8,
-    max_input_bytes: 1024 ** 2,
-    max_stdout_bytes: 1024 ** 2,
-    max_stderr_bytes: 256 * 1024,
-    max_retained_output_bytes: 64 * 1024 ** 2,
-    max_duration_seconds: 900,
-    max_background_seconds: 14_400,
-  },
-  transfers: {
-    // A long value ("12 MB of 100 MB") beside the short ones is what once made the meters uneven.
-    used_bytes: 12 * 1024 ** 2,
-    objects: 0,
-    inflight_bytes: 0,
-    max_bytes_per_user: 100 * 1024 ** 2,
-    max_inflight_bytes_per_user: 40 * 1024 ** 2,
-    max_objects_per_user: 10,
-    max_file_bytes: 4 * 1024 ** 2,
-    ttl_seconds: 600,
-  },
   lifecycle: {
     retention_days: 30,
     start_wait_seconds: 180,
@@ -114,25 +89,6 @@ function codespace(overrides: Partial<CodespaceSummaryView> = {}): CodespaceSumm
     lifecycle_error: null,
     ...overrides,
   };
-}
-
-/** The three usage meters share one layout: equal height, value on the same line in each. */
-async function expectEvenMeters(page: Page) {
-  const meters = ["held", "commands", "transfers"].map((name) =>
-    page.getByTestId(`codespace-limit-${name}`),
-  );
-  const boxes = await Promise.all(meters.map((meter) => meter.boundingBox()));
-  const heights = boxes.map((box) => Math.round(box!.height));
-  expect(new Set(heights).size, `meter heights ${heights.join(", ")}`).toBe(1);
-  const valueOffsets = await Promise.all(
-    meters.map((meter) =>
-      meter.evaluate((element) => {
-        const value = element.children[1] as HTMLElement;
-        return Math.round(value.getBoundingClientRect().top - element.getBoundingClientRect().top);
-      }),
-    ),
-  );
-  expect(new Set(valueOffsets).size, `value offsets ${valueOffsets.join(", ")}`).toBe(1);
 }
 
 test("codespaces are created, stopped and deleted with confirmation from Settings", async ({
@@ -239,9 +195,7 @@ test("codespaces are created, stopped and deleted with confirmation from Setting
     "You hold 2 of 4 codespaces",
   );
   await expect(page.getByTestId("codespace-limit-held")).toContainText("2 of 4");
-  await expect(page.getByTestId("codespace-limit-transfers")).toContainText("12 MB of 100 MB");
   await page.setViewportSize({ width: 1440, height: 900 });
-  await expectEvenMeters(page);
   // Technical details stay folded until asked for.
   await expect(page.getByTestId(`github-codespace-details-${CODESPACE_ID}`)).toHaveCount(0);
   await page.getByTestId(`github-codespace-details-toggle-${CODESPACE_ID}`).click();
@@ -287,7 +241,6 @@ test("codespaces are created, stopped and deleted with confirmation from Setting
   expect(requests).toContain(`DELETE /api/integrations/github/codespaces/${CODESPACE_ID}`);
 
   await page.setViewportSize({ width: 390, height: 844 });
-  await expectEvenMeters(page);
   await management.scrollIntoViewIfNeeded();
   const narrow = await page.screenshot({ fullPage: true });
   await testInfo.attach("codespace-management-narrow", { body: narrow, contentType: "image/png" });

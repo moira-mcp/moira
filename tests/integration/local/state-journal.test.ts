@@ -20,6 +20,7 @@ import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
 import { PrivateState } from "../../../packages/local/src/private-state.js";
 import { RequestJournal } from "../../../packages/local/src/journal.js";
+import { LocalRecords } from "../../../packages/local/src/space-record.js";
 import { localFixture } from "./fixtures.js";
 
 const execute = promisify(execFile);
@@ -220,7 +221,7 @@ describe("private local state", () => {
     }
   });
   test("persists complete large documents atomically without following links", async () => {
-    const value = { data: "x".repeat(1024 * 1024) };
+    const value = { data: "x".repeat(16 * 1024 * 1024 + 1) };
     await state.write("large.json", value);
     expect(await state.read("large.json", (item) => item)).toEqual(value);
     await writeFile(join(root, "outside"), "host-data", { mode: 0o600 });
@@ -400,19 +401,29 @@ describe("private local state", () => {
       }),
     ).toBeNull();
   });
-  test.each(["hardlink", "oversized", "invalid-json"] as const)(
+  test("inventory retains every owned resource beyond the former count ceiling", async () => {
+    const local = await localFixture(state);
+    const records = new LocalRecords(state);
+    const ids = Array.from({ length: 129 }, () => randomUUID());
+    await Promise.all(
+      ids.map((id) =>
+        records.put({
+          ...local.space,
+          id,
+          name: `moira-${id.replaceAll("-", "")}`,
+          runtimeId: `external-${id}`,
+          operationMarker: `moira-${id.replaceAll("-", "").slice(0, 24)}`,
+        }),
+      ),
+    );
+    const inventory = await records.list();
+    expect(new Set(inventory.map((space) => space.id))).toEqual(new Set([local.space.id, ...ids]));
+  });
+  test.each(["hardlink", "invalid-json"] as const)(
     "an unsafe %s read refuses its bytes and releases the target for later work",
     async (kind) => {
       const path = join(root, "unsafe.json");
-      await writeFile(
-        path,
-        kind === "oversized"
-          ? Buffer.alloc(16 * 1024 * 1024 + 1, 32)
-          : kind === "invalid-json"
-            ? "{"
-            : "{}",
-        { mode: 0o600 },
-      );
+      await writeFile(path, kind === "invalid-json" ? "{" : "{}", { mode: 0o600 });
       if (kind === "hardlink") await link(path, join(root, "foreign-link"));
       const before = await readFile(path);
       await expect(state.read("unsafe.json", (value) => value)).rejects.toThrow(
@@ -454,7 +465,7 @@ describe("replay and result lifetime", () => {
     ).resolves.toEqual({ ok: true });
     now = 2000;
     await journal.expire();
-    expect(await state.read(`result-${id}.json`, (value) => value)).toBeNull();
+    expect(await state.read(`lifecycle-result-${id}.json`, (value) => value)).toBeNull();
     expect(await journal.retained(id, 2000, input)).toBeUndefined();
   });
   test("an expired admission retains its completed receipt for collection without admitting another effect", async () => {
@@ -467,7 +478,7 @@ describe("replay and result lifetime", () => {
     });
     now = 2001;
     await journal.expire();
-    expect(await state.read(`result-${id}.json`, (value) => value)).toEqual({
+    expect(await state.read(`lifecycle-result-${id}.json`, (value) => value)).toEqual({
       ok: true,
       value: "completed",
     });
@@ -484,7 +495,6 @@ describe("replay and result lifetime", () => {
   });
   test.each([
     ["at expiration", 1000],
-    ["beyond the maximum future window", 901001],
     ["with a malformed expiration", Number.NaN],
   ])("refuses a request %s before any durable effect", async (_condition, expiresAt) => {
     const journal = new RequestJournal(state, () => 1000);
@@ -496,6 +506,26 @@ describe("replay and result lifetime", () => {
     ).rejects.toThrow("expired or outside its time window");
     expect(await state.read("effect.json", (value) => value)).toBeNull();
   });
+  test("new lifecycle admissions preserve legacy unknown archives and do not reserve command output", async () => {
+    const legacy = [{ id: randomUUID(), state: "accepted", reservedBytes: 8388608 }];
+    await state.write("requests.json", legacy);
+    await state.write("result-legacy.json", { unknown: true });
+    const before = await readFile(join(root, "requests.json"));
+    const journal = new RequestJournal(state, () => 1000);
+    const id = randomUUID();
+    expect(
+      await journal.run(id, 900000000, { action: "snapshot" }, async () => ({ ok: true })),
+    ).toEqual({ ok: true });
+    expect((await readFile(join(root, "requests.json"))).equals(before)).toBe(true);
+    expect(await state.read("result-legacy.json", (value) => value)).toEqual({ unknown: true });
+    const entries = (await state.read("lifecycle-receipts.json", (value) => value)) as Record<
+      string,
+      unknown
+    >[];
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).not.toHaveProperty("reservedBytes");
+  });
+
   test("coalesces concurrent requests and returns the durable result after restart", async () => {
     const journal = new RequestJournal(state, () => 1000);
     const id = randomUUID();
@@ -530,7 +560,7 @@ describe("replay and result lifetime", () => {
     await expect(restarted.run(id, 2000, { action: "write" }, action)).rejects.toThrow(
       "acknowledged and removed",
     );
-    expect(await state.keys("result-")).toEqual([]);
+    expect(await state.keys("lifecycle-result-")).toEqual([]);
   });
   test("an accepted request with unknown outcome is never redispatched after a crash", async () => {
     const journal = new RequestJournal(state, () => 1000);
@@ -558,10 +588,10 @@ describe("replay and result lifetime", () => {
       ids.map((id, index) => journal.run(id, 2000, { index }, async () => ({ index }))),
     );
     expect(results).toEqual([{ index: 0 }, { index: 1 }, { index: 2 }, { index: 3 }]);
-    expect(await state.keys("result-")).toHaveLength(4);
+    expect(await state.keys("lifecycle-result-")).toHaveLength(4);
     now = 2000 + 60 * 60_000;
     await journal.expire();
-    expect(await state.keys("result-")).toEqual([]);
+    expect(await state.keys("lifecycle-result-")).toEqual([]);
     await expect(journal.run(ids[0], 2000, {}, async () => null)).rejects.toThrow("expired");
   });
 });

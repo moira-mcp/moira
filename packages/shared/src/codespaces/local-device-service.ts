@@ -1,4 +1,6 @@
-import { randomBytes } from "node:crypto";
+import { randomBytes, createHash } from "node:crypto";
+import { canonicalJson } from "../utils/canonical-json.js";
+import { localLifecycleEnvelopeSchema, localLifecycleReplySchema } from "./local-protocol.js";
 import { z } from "zod";
 import { LocalDeviceRepository, digestLocalSecret } from "./local-device-repository.js";
 import {
@@ -10,7 +12,6 @@ import {
 import {
   LocalDeviceError,
   localPublicPolicySchema,
-  localRelayPayloadReferenceSchema,
   type LocalDeviceAuth,
   type LocalPublicPolicy,
   type LocalRelayAcknowledgement,
@@ -35,7 +36,7 @@ export const localAcknowledgementSchema = z
     digest: z.string().regex(/^[a-f0-9]{64}$/),
     claimId: id,
     status: z.enum(["completed", "refused"]),
-    outcomeReference: localRelayPayloadReferenceSchema,
+    outcome: localLifecycleReplySchema,
   })
   .strict();
 const relayRequestSchema = z
@@ -49,7 +50,7 @@ const relayRequestSchema = z
     resourceGeneration: generation,
     authority: z.literal("owner-delete").optional(),
     digest: z.string().regex(/^[a-f0-9]{64}$/),
-    payloadReference: localRelayPayloadReferenceSchema,
+    payload: localLifecycleEnvelopeSchema,
     deadlineAt: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
   })
   .strict();
@@ -185,11 +186,15 @@ export class LocalDeviceService {
   getBinding(userId: string, resourceId: string) {
     return this.repository.getBinding(userId, resourceId);
   }
-  enqueue(request: LocalRelayRequest, operationMarker?: string) {
+  enqueue(request: LocalRelayRequest) {
     const input = relayRequestSchema.parse(request) as LocalRelayRequest;
-    if (input.digest !== input.payloadReference.sha256)
+    if (
+      input.digest !== createHash("sha256").update(canonicalJson(input.payload)).digest("hex") ||
+      input.payload.id !== input.requestId ||
+      input.payload.expiresAt !== input.deadlineAt
+    )
       throw new LocalDeviceError("LOCAL_INVALID", "Payload digest differs from relay identity.");
-    return this.repository.enqueue(input, this.now(), operationMarker);
+    return this.repository.enqueue(input, this.now());
   }
   claim(auth: LocalDeviceAuth, limit = 1) {
     return this.repository.claim(auth, z.number().int().min(1).max(8).parse(limit), this.now());
@@ -220,20 +225,6 @@ export class LocalDeviceService {
       auth,
       id.parse(requestId),
       id.parse(claimId),
-      this.now(),
-    );
-  }
-  registerOutputPart(
-    auth: LocalDeviceAuth,
-    requestId: string,
-    claimId: string,
-    part: LocalRelayRequest["payloadReference"]["parts"][number],
-  ) {
-    return this.repository.registerOutputPart(
-      auth,
-      id.parse(requestId),
-      id.parse(claimId),
-      part,
       this.now(),
     );
   }

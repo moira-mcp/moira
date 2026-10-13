@@ -15,12 +15,6 @@ import {
   CodespaceResourceRepository,
   CodespaceResourceService,
   CodespaceProviderRegistry,
-  CodespaceOperationRepository,
-  CodespaceOperationService,
-  CodespaceFileService,
-  CodespaceResourceError,
-  CodespaceTransferRepository,
-  CodespaceTransferService,
   canonicalJson,
   LOCAL_REQUEST_MAX_WINDOW_MS,
   getFeatureResolver,
@@ -28,24 +22,18 @@ import {
   ModeFeatureResolver,
   type LocalPublicPolicy,
   type LocalDeviceView,
-  type LocalRelayPayloadReference,
-  type CodespaceOperationTransport,
-  type CodespaceFileTransport,
+  type LocalLifecycleEnvelope,
+  type LocalRelayRequest,
   type CodespaceResourcePolicy,
-  type CodespaceResourceRecord,
-  type CodespaceOperationRecord,
-  type CodespaceNativeFileReference,
 } from "@mcp-moira/shared";
 import {
   createLocalDeviceManagementRoutes,
   createLocalDeviceRoutes,
-  createLocalDeviceBinaryRoutes,
 } from "../../packages/web-backend/src/routes/local-devices.js";
 import { LocalCodespaceRelay } from "../../packages/web-backend/src/services/local-codespace-relay.js";
 
 let sqlite: Database.Database, service: LocalDeviceService, now: number;
 const repositoryId = "b4ba0360-a0bf-4b80-a739-8a62671c403a";
-const digest = "a".repeat(64);
 const serverPolicy: CodespaceResourcePolicy = {
   enabled: true,
   maxCpuCores: 4,
@@ -116,7 +104,7 @@ function bind(device: LocalDeviceView) {
       device.userId,
       device.connectionId,
       localRepositoryTargetId(device.deviceId, repositoryId),
-      `marker-${resourceId}`,
+      `moira-${randomBytes(12).toString("hex")}`,
       4 * 1024 ** 3,
       8 * 1024 ** 3,
       now + 60_000,
@@ -127,28 +115,42 @@ function bind(device: LocalDeviceView) {
   service.bindResource({ ...device, resourceId, repositoryId, profileId: "local-approved" });
   return resourceId;
 }
-function payload(userId = "user-a", purpose = "local_relay_input"): LocalRelayPayloadReference {
-  const transferId = randomUUID();
-  sqlite
-    .prepare(
-      `INSERT INTO codespaceTransfer(id,tokenDigest,userId,purpose,state,fileName,mimeType,declaredSize,observedSize,sha256,
-    objectKey,ownerPid,expiresAt,createdAt,updatedAt) VALUES(?,?,?,?,'ready','relay.bin','application/octet-stream',7,7,?,?,1,?,?,?)`,
-    )
-    .run(transferId, randomUUID(), userId, purpose, digest, randomUUID(), now + 3600_000, now, now);
-  return { parts: [{ transferId, sha256: digest, size: 7 }], sha256: digest, size: 7 };
+function payload(): LocalLifecycleEnvelope {
+  return {
+    version: 1,
+    id: randomUUID(),
+    expiresAt: now + 300_000,
+    request: { action: "snapshot" },
+  };
 }
-function queue(device: LocalDeviceView, resourceId: string, reference = payload(device.userId)) {
+function digestOf(value: unknown): string {
+  return createHash("sha256").update(canonicalJson(value)).digest("hex");
+}
+function newRequest(
+  original: LocalRelayRequest,
+  deadlineAt = original.deadlineAt,
+): LocalRelayRequest {
+  const envelope = { ...original.payload, id: randomUUID(), expiresAt: deadlineAt };
+  return {
+    ...original,
+    requestId: envelope.id,
+    deadlineAt,
+    payload: envelope,
+    digest: digestOf(envelope),
+  };
+}
+function queue(device: LocalDeviceView, resourceId: string, envelope = payload()) {
   const request = {
     userId: device.userId,
     deviceId: device.deviceId,
     deviceGeneration: device.deviceGeneration,
     connectionId: device.connectionId,
-    requestId: randomUUID(),
+    requestId: envelope.id,
     resourceId,
     resourceGeneration: 1,
-    digest,
-    payloadReference: reference,
-    deadlineAt: now + 300_000,
+    digest: digestOf(envelope),
+    payload: envelope,
+    deadlineAt: envelope.expiresAt,
   };
   service.enqueue(request);
   return request;
@@ -195,65 +197,123 @@ afterEach(() => {
 });
 
 describe("Durable local device enrollment and relay", () => {
-  test("an accepted append result settles after160 seconds without restoring expired work authority", async () => {
+  test("enrollment and settings retain the exact owner budget without Moira hardware ceilings", () => {
+    const approved = policy();
+    approved.machine = {
+      ...approved.machine,
+      cpuCores: 64,
+      memoryBytes: 128 * 1024 ** 3,
+      storageBytes: 2 * 1024 ** 4,
+    };
+    const { device, credential } = enroll("user-a", approved);
+    expect(device.policy.machine).toEqual(approved.machine);
+    expect(service.getActiveDevice("user-a", device.deviceId).policy.machine).toEqual(
+      approved.machine,
+    );
+    const settings = {
+      label: approved.label,
+      enabled: approved.enabled,
+      leaseUntil: approved.leaseUntil,
+      cpuCores: approved.machine.cpuCores,
+      memoryBytes: approved.machine.memoryBytes,
+      storageBytes: approved.machine.storageBytes,
+      dockerBytes: 256 * 1024 ** 3,
+      repositories: approved.repositories,
+      gitAuthor: null,
+      agentRepositoryManagement: null,
+    };
+    const ceiling = {
+      cpuCores: 64,
+      memoryBytes: 256 * 1024 ** 3,
+      storageBytes: 3 * 1024 ** 4,
+      dockerBytes: 512 * 1024 ** 3,
+      maxLeaseMs: 3600_000,
+    };
+    service.heartbeat(service.authenticateDevice(credential), approved, {
+      settings,
+      ceiling,
+      appliedRevision: 0,
+    });
+    const next = { ...settings, cpuCores: 48, memoryBytes: 192 * 1024 ** 3 + 512 * 1024 ** 2 };
+    const accepted = service.requestSettings("user-a", device.deviceId, {
+      expectedGeneration: device.deviceGeneration,
+      expectedRevision: 0,
+      settings: next,
+    });
+    expect(accepted.control).toMatchObject({
+      revision: 1,
+      status: "pending",
+      settings: next,
+      ceiling,
+    });
+    expect(accepted.policy).toEqual(approved);
+    expect(() =>
+      service.requestSettings("user-a", device.deviceId, {
+        expectedGeneration: device.deviceGeneration,
+        expectedRevision: 1,
+        settings: { ...next, cpuCores: ceiling.cpuCores + 1 },
+      }),
+    ).toThrow("locally approved envelope");
+    expect(service.getActiveDevice("user-a", device.deviceId)).toEqual(accepted);
+  });
+  test("legacy private-part relay archives are neither replayed nor pruned by inline lifecycle", () => {
+    const { device, credential } = enroll();
+    const resourceId = bind(device);
+    const current = queue(device, resourceId);
+    const archivedId = randomUUID();
+    const archive = {
+      parts: [{ transferId: randomUUID(), sha256: "a".repeat(64), size: 7 }],
+      size: 7,
+      sha256: "a".repeat(64),
+    };
+    sqlite
+      .prepare(
+        `INSERT INTO codespaceLocalRelay(requestId,userId,deviceId,deviceGeneration,connectionId,resourceId,resourceGeneration,digest,inputReference,status,deadlineAt,createdAt,updatedAt)
+      SELECT ?,userId,deviceId,deviceGeneration,connectionId,resourceId,resourceGeneration,digest,?,'queued',?,?,? FROM codespaceLocalRelay WHERE requestId=?`,
+      )
+      .run(
+        archivedId,
+        canonicalJson(archive),
+        now - 1,
+        now - 7200_000,
+        now - 7200_000,
+        current.requestId,
+      );
+    const before = sqlite
+      .prepare("SELECT * FROM codespaceLocalRelay WHERE requestId=?")
+      .get(archivedId);
+    service.listOwned("user-a");
+    expect(
+      service.claim(service.authenticateDevice(credential), 8).map((entry) => entry.requestId),
+    ).toEqual([current.requestId]);
+    expect(service.getRequest("user-a", archivedId)).toBeNull();
+    expect(
+      sqlite.prepare("SELECT * FROM codespaceLocalRelay WHERE requestId=?").get(archivedId),
+    ).toEqual(before);
+  });
+  test("an accepted lifecycle receipt settles after160 seconds without restoring expired work authority", async () => {
     const { device, credential } = enroll();
     const resourceId = bind(device);
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "moira-late-append-receipt-"));
-    const transfers = new CodespaceTransferService({
-      repository: new CodespaceTransferRepository(sqlite),
-      root,
-      policy: () => serverPolicy,
-      now: () => now,
-    });
-    const request = {
-      ...queue(device, resourceId),
-      requestId: randomUUID(),
-      deadlineAt: now + 150_000,
-    };
-    service.enqueue(request);
+    const request = queue(device, resourceId, { ...payload(), expiresAt: now + 150_000 });
     const auth = service.authenticateDevice(credential);
     const claim = service.claim(auth, 2).find((entry) => entry.requestId === request.requestId)!;
     const effect = path.join(root, "actual-append.txt");
     fs.appendFileSync(effect, "one actual effect\n");
-    const receipt = Buffer.from(
-      JSON.stringify({
-        ok: true,
-        result: { state: "succeeded", stdout: fs.readFileSync(effect, "utf8"), exitCode: 0 },
-      }),
-    );
+    const receipt = { ok: true as const, result: { observation: fs.readFileSync(effect, "utf8") } };
     const app = express();
-    app.use(
-      "/api/local-devices",
-      createLocalDeviceBinaryRoutes(service, transfers, "https://moira.example"),
-    );
-    app.use(
-      "/api/local-devices",
-      createLocalDeviceRoutes(service, transfers, "https://moira.example"),
-    );
+    app.use("/api/local-devices", createLocalDeviceRoutes(service, "https://moira.example"));
     try {
       now += 160_000;
       service.listOwned("user-a");
       expect(service.getResult("user-a", request.requestId)?.status).toBe("expired");
       expect(() => service.renewClaim(auth, request.requestId, claim.claimId)).toThrow();
-      const uploaded = await httpRequest(app)
-        .post(`/api/local-devices/relay/${request.requestId}/result-part`)
-        .set("Authorization", `Bearer ${credential}`)
-        .set("X-Moira-Claim-Id", claim.claimId)
-        .set("Content-Type", "application/octet-stream")
-        .send(receipt);
-      expect(uploaded.status).toBe(201);
-      const part = uploaded.body.data;
-      const reference = {
-        parts: [part],
-        size: receipt.length,
-        sha256: createHash("sha256").update(receipt).digest("hex"),
-      };
       const ack = {
         requestId: request.requestId,
         claimId: claim.claimId,
         digest: request.digest,
         status: "completed",
-        outcomeReference: reference,
+        outcome: receipt,
       };
       const response = await httpRequest(app)
         .post("/api/local-devices/relay/ack")
@@ -261,9 +321,7 @@ describe("Durable local device enrollment and relay", () => {
         .send(ack);
       expect(response.status).toBe(200);
       expect(response.body.data.status).toBe("completed");
-      expect(await transfers.readRelayPayload("user-a", "local_relay_output", reference)).toEqual(
-        receipt,
-      );
+      expect(service.getResult("user-a", request.requestId)?.outcome).toEqual(receipt);
       expect(fs.readFileSync(effect, "utf8")).toBe("one actual effect\n");
       expect(() => service.authorizePayload(auth, request.requestId, claim.claimId)).toThrow();
       const terminalRow = sqlite
@@ -317,36 +375,19 @@ describe("Durable local device enrollment and relay", () => {
         .run(now + LOCAL_REQUEST_MAX_WINDOW_MS, resourceId);
       const resource = new CodespaceResourceRepository(sqlite).getOwned("user-a", resourceId)!;
       const directory = fs.mkdtempSync(path.join(os.tmpdir(), "moira-relay-clock-window-"));
-      const transfers = new CodespaceTransferService({
-        repository: new CodespaceTransferRepository(sqlite),
-        root: directory,
-        policy: () => serverPolicy,
-        now: () => now,
-      });
       try {
-        const relay = new LocalCodespaceRelay(service, transfers, () => now);
+        const relay = new LocalCodespaceRelay(service, () => now);
         const input =
           action === "create"
             ? { action, repositoryId, ref: "main", operationMarker: resource.operationMarker }
             : { action };
         const options = { mutation: true, waitMs: LOCAL_REQUEST_MAX_WINDOW_MS };
         const queued = await relay.retain(resource, input, options);
-        const bytes = await transfers.readRelayPayload(
-          "user-a",
-          "local_relay_input",
-          queued.payloadReference,
-        );
-        expect(JSON.parse(bytes.toString("utf8")).expiresAt).toBe(now + 870_000);
+        expect(queued.payload.expiresAt).toBe(now + 870_000);
         now += 5000;
         const repeated = await relay.retain(resource, input, options);
         expect(repeated).toEqual(queued);
-        expect(
-          await transfers.readRelayPayload(
-            "user-a",
-            "local_relay_input",
-            repeated.payloadReference,
-          ),
-        ).toEqual(bytes);
+        expect(repeated.payload).toEqual(queued.payload);
       } finally {
         fs.rmSync(directory, { recursive: true, force: true });
       }
@@ -365,12 +406,6 @@ describe("Durable local device enrollment and relay", () => {
         .run(createDeadline, resourceId);
       const resource = new CodespaceResourceRepository(sqlite).getOwned("user-a", resourceId)!;
       const directory = fs.mkdtempSync(path.join(os.tmpdir(), "moira-relay-short-window-"));
-      const transfers = new CodespaceTransferService({
-        repository: new CodespaceTransferRepository(sqlite),
-        root: directory,
-        policy: () => serverPolicy,
-        now: () => now,
-      });
       try {
         const input =
           boundary === "resource deadline"
@@ -381,23 +416,16 @@ describe("Durable local device enrollment and relay", () => {
                 operationMarker: resource.operationMarker,
               }
             : { action: "snapshot" };
-        const queued = await new LocalCodespaceRelay(service, transfers, () => now).retain(
-          resource,
-          input,
-          { waitMs: boundary === "short request" ? 2000 : LOCAL_REQUEST_MAX_WINDOW_MS },
-        );
+        const queued = await new LocalCodespaceRelay(service, () => now).retain(resource, input, {
+          waitMs: boundary === "short request" ? 2000 : LOCAL_REQUEST_MAX_WINDOW_MS,
+        });
         const expectedDeadline =
           boundary === "short request"
             ? now + 2000
             : boundary === "resource deadline"
               ? createDeadline
               : approved.leaseUntil;
-        const bytes = await transfers.readRelayPayload(
-          "user-a",
-          "local_relay_input",
-          queued.payloadReference,
-        );
-        expect(JSON.parse(bytes.toString("utf8")).expiresAt).toBe(expectedDeadline);
+        expect(queued.payload.expiresAt).toBe(expectedDeadline);
       } finally {
         fs.rmSync(directory, { recursive: true, force: true });
       }
@@ -418,14 +446,8 @@ describe("Durable local device enrollment and relay", () => {
         now,
       );
       const directory = fs.mkdtempSync(path.join(os.tmpdir(), "moira-owner-recovery-"));
-      const transfers = new CodespaceTransferService({
-        repository: new CodespaceTransferRepository(sqlite),
-        root: directory,
-        policy: () => serverPolicy,
-        now: () => now,
-      });
       try {
-        const relay = new LocalCodespaceRelay(service, transfers, () => now);
+        const relay = new LocalCodespaceRelay(service, () => now);
         const queued = await relay.retain(
           pending,
           scope === "snapshot-only"
@@ -434,22 +456,12 @@ describe("Durable local device enrollment and relay", () => {
           { mutation: scope === "accepted-delete", waitMs: LOCAL_REQUEST_MAX_WINDOW_MS },
         );
         if (scope === "snapshot-only") {
-          const output = await transfers.retainRelayPayload(
-            "user-a",
-            "local_relay_output",
-            Buffer.from("saved scoped observation"),
-          );
+          const output = { ok: true, result: { observation: "saved scoped observation" } };
           sqlite
             .prepare(
               "UPDATE codespaceLocalRelay SET status='completed',outputReference=? WHERE requestId=?",
             )
             .run(canonicalJson(output), queued.requestId);
-          await transfers.discardRelayPayload(
-            "user-a",
-            "local_relay_input",
-            queued.payloadReference,
-          );
-          await transfers.discardRelayPayload("user-a", "local_relay_output", output);
         } else
           expect(service.claim(service.authenticateDevice(credential))[0].requestId).toBe(
             queued.requestId,
@@ -499,12 +511,7 @@ describe("Durable local device enrollment and relay", () => {
           { action: "delete", spaceId: recovered.id, generation: recovered.generation },
           { mutation: true, waitMs: LOCAL_REQUEST_MAX_WINDOW_MS },
         );
-        const cleanupBytes = await transfers.readRelayPayload(
-          "user-a",
-          "local_relay_input",
-          cleanup.payloadReference,
-        );
-        expect(JSON.parse(cleanupBytes.toString("utf8")).expiresAt).toBe(now + 870_000);
+        expect(cleanup.payload.expiresAt).toBe(now + 870_000);
         expect(cleanup.authority).toBe(scope === "snapshot-only" ? "owner-delete" : undefined);
       } finally {
         fs.rmSync(directory, { recursive: true, force: true });
@@ -580,9 +587,9 @@ describe("Durable local device enrollment and relay", () => {
       state: "usable",
     });
     const ordinary = queue(device, resourceId);
-    expect(() =>
-      service.enqueue({ ...ordinary, requestId: randomUUID(), authority: "owner-delete" }),
-    ).toThrow("Relay authority does not match its mutation");
+    expect(() => service.enqueue({ ...newRequest(ordinary), authority: "owner-delete" })).toThrow(
+      "Relay authority does not match its mutation",
+    );
     expect(service.getRequest("user-a", ordinary.requestId)).not.toHaveProperty("authority");
     const settings = {
       label: device.label,
@@ -612,19 +619,24 @@ describe("Durable local device enrollment and relay", () => {
     expect(requested).toMatchObject({ generation: 2, state: "delete_pending" });
     now = device.policy.leaseUntil + 1;
     expect(service.claim(service.authenticateDevice(credential))).toEqual([]);
-    const reference = payload();
+    const reference: LocalLifecycleEnvelope = {
+      ...payload(),
+      expiresAt: now + 120_000,
+      authority: "owner-delete",
+      request: { action: "delete", spaceId: resourceId, generation: 2 },
+    };
     const request = {
       userId: device.userId,
       deviceId: device.deviceId,
       deviceGeneration: device.deviceGeneration,
       connectionId: device.connectionId,
-      requestId: randomUUID(),
+      requestId: reference.id,
       resourceId,
       resourceGeneration: 2,
       authority: "owner-delete" as const,
-      digest,
-      payloadReference: reference,
-      deadlineAt: now + 120_000,
+      digest: digestOf(reference),
+      payload: reference,
+      deadlineAt: reference.expiresAt,
     };
     service.enqueue(request);
     service = new LocalDeviceService(new LocalDeviceRepository(sqlite), () => now);
@@ -638,14 +650,13 @@ describe("Durable local device enrollment and relay", () => {
     expect(service.renewClaim(auth, request.requestId, claim.claimId).claimExpiresAt).toBe(
       now + 30_000,
     );
-    const output = payload("user-a", "local_relay_output");
-    service.registerOutputPart(auth, request.requestId, claim.claimId, output.parts[0]);
+    const output = { ok: true as const, result: { removed: resourceId } };
     const ack = {
       requestId: request.requestId,
-      digest,
+      digest: request.digest,
       claimId: claim.claimId,
       status: "completed" as const,
-      outcomeReference: output,
+      outcome: output,
     };
     expect(service.acknowledge(auth, ack).status).toBe("completed");
     now = request.deadlineAt + 1;
@@ -713,7 +724,7 @@ describe("Durable local device enrollment and relay", () => {
         .get(second.device.connectionId),
     ).toEqual({ credentialGeneration: 1 });
   });
-  test("rejects resource rebinding and cross-user payload references before inserting a request", () => {
+  test("rejects resource rebinding and cross-user lifecycle requests before inserting a request", () => {
     const first = enroll(),
       second = enroll(),
       resource = bind(first.device);
@@ -728,9 +739,7 @@ describe("Durable local device enrollment and relay", () => {
         profileId: "local-approved",
       }),
     ).toThrow();
-    expect(() => queue(first.device, resource, payload("user-b"))).toThrow(
-      "Private payload ownership denied",
-    );
+    expect(() => queue(enroll("user-b").device, resource)).toThrow();
     expect(sqlite.prepare("SELECT COUNT(*) count FROM codespaceLocalRelay").get()).toEqual({
       count: 0,
     });
@@ -742,9 +751,10 @@ describe("Durable local device enrollment and relay", () => {
     expect(service.enqueue(request).status).toBe("queued");
     expect(service.getRequest("user-a", request.requestId)).toEqual(request);
     expect(service.getRequest("user-b", request.requestId)).toBeNull();
-    expect(() => service.enqueue({ ...request, payloadReference: payload() })).toThrow(
-      "Relay request identity changed",
-    );
+    const changed = { ...request.payload, request: { action: "stop" as const, spaceId: resource } };
+    expect(() =>
+      service.enqueue({ ...request, payload: changed, digest: digestOf(changed) }),
+    ).toThrow("Relay request identity changed");
     expect(sqlite.prepare("SELECT COUNT(*) count FROM codespaceLocalRelay").get()).toEqual({
       count: 1,
     });
@@ -754,106 +764,6 @@ describe("Durable local device enrollment and relay", () => {
     expect(columns).not.toEqual(
       expect.arrayContaining(["argv", "stdin", "payload", "stdout", "credential"]),
     );
-  });
-  test("bounds retained replay metadata without evicting live work or fresh receipts", () => {
-    const approved = policy();
-    approved.leaseUntil = now + 24 * 60 * 60_000;
-    const { device, credential } = enroll("user-a", approved),
-      resource = bind(device),
-      auth = service.authenticateDevice(credential);
-    const receipt = queue(device, resource),
-      claim = service.claim(auth)[0],
-      output = payload("user-a", "local_relay_output");
-    service.registerOutputPart(auth, receipt.requestId, claim.claimId, output.parts[0]);
-    service.acknowledge(auth, {
-      requestId: receipt.requestId,
-      digest,
-      claimId: claim.claimId,
-      status: "completed",
-      outcomeReference: output,
-    });
-    const live = { ...receipt, requestId: randomUUID(), deadlineAt: now + 3 * 60 * 60_000 };
-    service.enqueue(live);
-    const clone =
-      sqlite.prepare(`INSERT INTO codespaceLocalRelay(requestId,userId,deviceId,deviceGeneration,connectionId,resourceId,resourceGeneration,
-      digest,inputReference,status,claimId,claimExpiresAt,outputReference,deadlineAt,createdAt,updatedAt)
-      SELECT ?,userId,deviceId,deviceGeneration,connectionId,resourceId,resourceGeneration,digest,inputReference,status,claimId,claimExpiresAt,
-      outputReference,deadlineAt,createdAt,updatedAt FROM codespaceLocalRelay WHERE requestId=?`);
-    sqlite.transaction(() => {
-      for (let index = 0; index < 2046; index++) clone.run(randomUUID(), receipt.requestId);
-    })();
-    expect(() => service.enqueue({ ...receipt, requestId: randomUUID() })).toThrow(
-      "Retained device relay metadata is full",
-    );
-    expect(service.getResult("user-a", receipt.requestId)?.status).toBe("completed");
-    expect(service.getResult("user-a", live.requestId)?.status).toBe("queued");
-    now += 65 * 60_000 + 1;
-    service.listOwned("user-a");
-    expect(service.getRequest("user-a", receipt.requestId)).toBeNull();
-    expect(service.getResult("user-a", live.requestId)?.status).toBe("queued");
-    expect(sqlite.prepare("SELECT COUNT(*) count FROM codespaceLocalRelay").get()).toEqual({
-      count: 1,
-    });
-    const plan = sqlite
-      .prepare(
-        "EXPLAIN QUERY PLAN SELECT requestId FROM codespaceLocalRelay WHERE userId=? AND deadlineAt<? AND status NOT IN ('queued','claimed')",
-      )
-      .all("user-a", now) as { detail: string }[];
-    expect(
-      plan.some((row) => row.detail.includes("codespace_local_relay_owner_deadline_idx")),
-    ).toBe(true);
-    const fresh = {
-      ...receipt,
-      requestId: randomUUID(),
-      payloadReference: payload(),
-      deadlineAt: now + 300_000,
-    };
-    service.enqueue(fresh);
-    expect(service.getResult("user-a", fresh.requestId)?.status).toBe("queued");
-  });
-  test("new device identities cannot evade the owner metadata cap or block another owner", () => {
-    const first = enroll(),
-      resource = bind(first.device),
-      auth = service.authenticateDevice(first.credential);
-    const receipt = queue(first.device, resource),
-      claim = service.claim(auth)[0],
-      output = payload("user-a", "local_relay_output");
-    service.registerOutputPart(auth, receipt.requestId, claim.claimId, output.parts[0]);
-    service.acknowledge(auth, {
-      requestId: receipt.requestId,
-      digest,
-      claimId: claim.claimId,
-      status: "completed",
-      outcomeReference: output,
-    });
-    const devices = [
-      { device: first.device, resource },
-      ...Array.from({ length: 3 }, () => {
-        const { device } = enroll();
-        return { device, resource: bind(device) };
-      }),
-    ];
-    const clone =
-      sqlite.prepare(`INSERT INTO codespaceLocalRelay(requestId,userId,deviceId,deviceGeneration,connectionId,resourceId,resourceGeneration,
-      digest,inputReference,status,claimId,claimExpiresAt,outputReference,deadlineAt,createdAt,updatedAt)
-      SELECT ?,userId,?,deviceGeneration,connectionId,?,resourceGeneration,digest,inputReference,status,claimId,claimExpiresAt,
-      outputReference,deadlineAt,createdAt,updatedAt FROM codespaceLocalRelay WHERE requestId=?`);
-    sqlite.transaction(() => {
-      for (const [index, entry] of devices.entries())
-        for (let row = 0; row < 2048 - (index === 0 ? 1 : 0); row++)
-          clone.run(randomUUID(), entry.device.deviceId, entry.resource, receipt.requestId);
-    })();
-    const fifth = enroll(),
-      fifthResource = bind(fifth.device);
-    expect(() => queue(fifth.device, fifthResource)).toThrow(
-      "Retained device relay metadata is full",
-    );
-    expect(
-      sqlite.prepare("SELECT COUNT(*) count FROM codespaceLocalRelay WHERE userId='user-a'").get(),
-    ).toEqual({ count: 8192 });
-    const other = enroll("user-b"),
-      otherRequest = queue(other.device, bind(other.device));
-    expect(service.getResult("user-b", otherRequest.requestId)?.status).toBe("queued");
   });
   test("renews one claim and fences stale acknowledgements after redelivery", () => {
     const { device, credential } = enroll(),
@@ -869,29 +779,28 @@ describe("Durable local device enrollment and relay", () => {
     now += 31_000;
     const second = service.claim(auth)[0];
     expect(second.claimId).not.toBe(first.claimId);
-    const output = payload("user-a", "local_relay_output");
-    service.registerOutputPart(auth, request.requestId, second.claimId, output.parts[0]);
+    const output = { ok: true as const, result: { observed: true } };
     expect(() =>
       service.acknowledge(auth, {
         requestId: request.requestId,
-        digest,
+        digest: request.digest,
         claimId: first.claimId,
         status: "completed",
-        outcomeReference: output,
+        outcome: output,
       }),
     ).toThrow("acknowledgement changed");
     const ack = {
       requestId: request.requestId,
-      digest,
+      digest: request.digest,
       claimId: second.claimId,
       status: "completed" as const,
-      outcomeReference: output,
+      outcome: output,
     };
     expect(service.acknowledge(auth, ack).status).toBe("completed");
-    expect(service.acknowledge(auth, ack).outcomeReference).toEqual(output);
+    expect(service.acknowledge(auth, ack).outcome).toEqual(output);
     expect(service.claim(auth)).toEqual([]);
   });
-  test("rejects result parts from another request and stops a revoked in-flight acknowledgement", () => {
+  test("rejects another request's digest and stops a revoked in-flight acknowledgement", () => {
     const { device, credential } = enroll(),
       resource = bind(device),
       auth = service.authenticateDevice(credential);
@@ -900,25 +809,24 @@ describe("Durable local device enrollment and relay", () => {
       claims = service.claim(auth, 2);
     const firstClaim = claims.find((c) => c.requestId === first.requestId)!,
       secondClaim = claims.find((c) => c.requestId === second.requestId)!;
-    const output = payload("user-a", "local_relay_output");
-    service.registerOutputPart(auth, first.requestId, firstClaim.claimId, output.parts[0]);
+    const output = { ok: true as const, result: { observed: true } };
     expect(() =>
       service.acknowledge(auth, {
         requestId: second.requestId,
-        digest,
+        digest: first.digest,
         claimId: secondClaim.claimId,
         status: "completed",
-        outcomeReference: output,
+        outcome: output,
       }),
-    ).toThrow("another relay claim");
+    ).toThrow();
     service.revokeOwned("user-a", device.deviceId, 1);
     expect(() =>
       service.acknowledge(auth, {
         requestId: first.requestId,
-        digest,
+        digest: first.digest,
         claimId: firstClaim.claimId,
         status: "completed",
-        outcomeReference: output,
+        outcome: output,
       }),
     ).toThrow("generation is no longer active");
     expect(service.getResult("user-a", first.requestId)?.status).toBe("revoked");
@@ -1003,14 +911,7 @@ describe("Durable local device enrollment and relay", () => {
       "/api/integrations/local",
       createLocalDeviceManagementRoutes(service, "https://moira.example"),
     );
-    app.use(
-      "/api/local-devices",
-      createLocalDeviceRoutes(
-        service,
-        { relayPartLimit: () => 4 * 1024 * 1024 } as CodespaceTransferService,
-        "https://moira.example",
-      ),
-    );
+    app.use("/api/local-devices", createLocalDeviceRoutes(service, "https://moira.example"));
     const denied = await httpRequest(app)
       .post("/api/integrations/local/pairings")
       .set("Origin", "https://attacker.example")
@@ -1044,51 +945,8 @@ describe("Durable local device enrollment and relay", () => {
       .set("Authorization", `Bearer ${credential}`)
       .send({});
     expect(authenticated.status).toBe(200);
-    expect(authenticated.body.data).toEqual({ requests: [], maxPartBytes: 4 * 1024 * 1024 });
+    expect(authenticated.body.data).toEqual({ requests: [] });
     expect(JSON.stringify(confirmed.body)).not.toContain(credential);
-  });
-  test("binary relay rejects a sibling device before private reads and binds uploaded output to its claim", async () => {
-    const first = enroll(),
-      second = enroll(),
-      resource = bind(first.device),
-      job = queue(first.device, resource);
-    const claim = service.claim(service.authenticateDevice(first.credential))[0];
-    const bytes = Buffer.from("private");
-    const transfers = {
-      readRelayChunk: async () => bytes,
-      retainRelayPart: async () => payload("user-a", "local_relay_output").parts[0],
-      discardRelayPayload: async () => undefined,
-    } as unknown as CodespaceTransferService;
-    const app = express();
-    app.use(
-      "/api/local-devices",
-      createLocalDeviceBinaryRoutes(service, transfers, "https://moira.example"),
-    );
-    const url = `/api/local-devices/relay/${job.requestId}/payload/0?offset=0&length=7`;
-    const denied = await httpRequest(app)
-      .get(url)
-      .set("Authorization", `Bearer ${second.credential}`)
-      .set("X-Moira-Claim-Id", claim.claimId);
-    expect(denied.status).toBe(401);
-    expect(denied.text).not.toContain("private");
-    const accepted = await httpRequest(app)
-      .get(url)
-      .set("Authorization", `Bearer ${first.credential}`)
-      .set("X-Moira-Claim-Id", claim.claimId);
-    expect(accepted.status).toBe(200);
-    expect(accepted.body).toEqual(bytes);
-    const uploaded = await httpRequest(app)
-      .post(`/api/local-devices/relay/${job.requestId}/result-part`)
-      .set("Authorization", `Bearer ${first.credential}`)
-      .set("X-Moira-Claim-Id", claim.claimId)
-      .set("Content-Type", "application/octet-stream")
-      .send(bytes);
-    expect(uploaded.status).toBe(201);
-    expect(
-      sqlite
-        .prepare("SELECT requestId,claimId FROM codespaceLocalRelayPart WHERE transferId=?")
-        .get(uploaded.body.data.transferId),
-    ).toEqual({ requestId: job.requestId, claimId: claim.claimId });
   });
   test("a provider resource reconciler claims only its provider even when another provider is older", async () => {
     const { device } = enroll(),
@@ -1118,50 +976,6 @@ describe("Durable local device enrollment and relay", () => {
     expect(await resourceService.reconcileOnce()).toBe(true);
     expect(repository.getOwned("user-a", githubId)?.state).toBe("rejected");
     expect(repository.getOwned("user-a", localId)?.state).toBe("create_pending");
-  });
-  test("a provider operation reconciler leaves another provider reservation unclaimed", async () => {
-    const { device } = enroll(),
-      localId = bind(device),
-      githubId = githubResource(localId);
-    const operationIds = [randomUUID(), randomUUID()];
-    for (const [index, resourceId, provider] of [
-      [0, localId, "local-sandboxes"],
-      [1, githubId, "github-codespaces"],
-    ] as const)
-      sqlite
-        .prepare(
-          `INSERT INTO codespaceOperation(id,userId,resourceId,resourceGeneration,authorizationGeneration,provider,providerResourceName,remoteMarker,kind,state,
-        inputBytes,stdoutLimitBytes,stderrLimitBytes,deadlineAt,createdAt,updatedAt)
-        VALUES(?,'user-a',?,1,1,?,?,?,'exec','reserved',0,10,10,?,?,?)`,
-        )
-        .run(
-          operationIds[index],
-          resourceId,
-          provider,
-          resourceId,
-          `marker-${operationIds[index]}`,
-          now - 1,
-          now,
-          now + index,
-        );
-    const repository = new CodespaceOperationRepository(sqlite);
-    expect(
-      repository.claimDue("github-operation", now, now + 30_000, undefined, "github-codespaces")
-        ?.id,
-    ).toBe(operationIds[1]);
-    expect(repository.getOwned("user-a", operationIds[0])?.claimId).toBeNull();
-    repository.releaseClaim(operationIds[1], "github-operation", "retry", now);
-    const operationService = new CodespaceOperationService({
-      repository,
-      providerId: "github-codespaces",
-      credentials: { getCredential: async () => "unused" },
-      transport: {} as CodespaceOperationTransport,
-      policy: () => serverPolicy,
-      now: () => now,
-    });
-    expect(await operationService.reconcileOnce()).toBe(true);
-    expect(repository.getOwned("user-a", operationIds[1])?.state).toBe("cancelled");
-    expect(repository.getOwned("user-a", operationIds[0])?.state).toBe("reserved");
   });
   test("upgrades the actual master journal without changing existing GitHub metadata or credentials", () => {
     const temp = fs.mkdtempSync(path.join(os.tmpdir(), "moira-local-upgrade-")),
@@ -1220,28 +1034,6 @@ describe("Durable local device enrollment and relay", () => {
       fs.rmSync(temp, { recursive: true, force: true });
     }
   });
-  test("private transfer cleanup can delete an expired result part without orphaning its authority", () => {
-    const { device, credential } = enroll(),
-      resource = bind(device),
-      job = queue(device, resource),
-      auth = service.authenticateDevice(credential);
-    const claim = service.claim(auth)[0],
-      output = payload("user-a", "local_relay_output");
-    service.registerOutputPart(auth, job.requestId, claim.claimId, output.parts[0]);
-    sqlite.prepare("DELETE FROM codespaceTransfer WHERE id=?").run(output.parts[0].transferId);
-    expect(sqlite.prepare("SELECT COUNT(*) count FROM codespaceLocalRelayPart").get()).toEqual({
-      count: 0,
-    });
-    expect(() =>
-      service.authorizeOutput(auth, {
-        requestId: job.requestId,
-        digest,
-        claimId: claim.claimId,
-        status: "completed",
-        outcomeReference: output,
-      }),
-    ).toThrow("Private payload ownership denied");
-  });
   test.each([
     ["malformed", '{"credential":"SYNTHETIC_PRIVATE_CANARY', 400],
     [
@@ -1253,10 +1045,7 @@ describe("Durable local device enrollment and relay", () => {
     "sanitizes %s JSON parser failures before the global error consumer",
     async (_kind, body, status) => {
       const app = express();
-      app.use(
-        "/api/local-devices",
-        createLocalDeviceRoutes(service, {} as CodespaceTransferService, "https://moira.example"),
-      );
+      app.use("/api/local-devices", createLocalDeviceRoutes(service, "https://moira.example"));
       app.use((error: unknown, _req: Request, res: Response, _next: NextFunction) =>
         res.status(500).json({ forwarded: error }),
       );
@@ -1270,268 +1059,6 @@ describe("Durable local device enrollment and relay", () => {
         error: { code: "LOCAL_INVALID", message: "Invalid local-device request." },
       });
       expect(response.text).not.toContain("SYNTHETIC_PRIVATE_CANARY");
-    },
-  );
-  test.each(["exec", "upload"] as const)(
-    "retains native %s request in private objects before consuming its original input",
-    async (mode) => {
-      const { device } = enroll(),
-        resourceId = bind(device),
-        repository = new CodespaceOperationRepository(sqlite);
-      sqlite
-        .prepare(
-          "UPDATE codespaceResource SET externalOwnerId='user-a',billableOwnerId='user-a',providerResourceName=? WHERE id=?",
-        )
-        .run(randomUUID(), resourceId);
-      const directory = fs.mkdtempSync(path.join(os.tmpdir(), "moira-native-retention-"));
-      const transfers = new CodespaceTransferService({
-        repository: new CodespaceTransferRepository(sqlite),
-        policy: () => serverPolicy,
-        root: directory,
-        now: () => now,
-      });
-      const bytes = Buffer.from([0, 255, 65, 10]),
-        hash = createHash("sha256").update(bytes).digest("hex");
-      const reference: CodespaceNativeFileReference = {
-        fileId: "file_nativeRetention",
-        downloadUrl: "https://native.example.test/object",
-        mimeType: "application/octet-stream",
-        declaredSize: bytes.length,
-      };
-      const nativeFetcher = {
-        fetch: async () => ({
-          contentLength: bytes.length,
-          mimeType: "application/octet-stream",
-          body: (async function* () {
-            yield bytes;
-          })(),
-        }),
-      };
-      let retained: LocalRelayPayloadReference | null = null,
-        retainedRequest: unknown = null,
-        originalPath = "";
-      const retain = async (
-        _credential: string,
-        _space: CodespaceResourceRecord,
-        operation: CodespaceOperationRecord,
-        request: unknown,
-      ) => {
-        expect(repository.getOwned("user-a", operation.id)?.state).toBe("reconcile_pending");
-        const original = sqlite
-          .prepare("SELECT objectKey,state FROM codespaceTransfer WHERE purpose='codespace_input'")
-          .get() as { objectKey: string; state: string };
-        expect(original.state).toBe("claimed");
-        originalPath = path.join(directory, original.objectKey);
-        expect(fs.readFileSync(originalPath)).toEqual(bytes);
-        retainedRequest = request;
-        retained = await transfers.retainRelayPayload(
-          "user-a",
-          "local_relay_input",
-          Buffer.from(canonicalJson(request)),
-        );
-        expect(fs.existsSync(originalPath)).toBe(true);
-      };
-      const observed = async (request: unknown) => {
-        expect(request).toBe(retainedRequest);
-        expect(
-          sqlite
-            .prepare("SELECT COUNT(*) count FROM codespaceTransfer WHERE purpose='codespace_input'")
-            .get(),
-        ).toEqual({ count: 0 });
-        expect(fs.existsSync(originalPath)).toBe(false);
-        if (!retained) throw new Error("Native request was not durably retained");
-        const stored = await transfers.readRelayPayload("user-a", "local_relay_input", retained);
-        expect(stored).toEqual(Buffer.from(canonicalJson(request)));
-        expect(sqlite.serialize().includes(Buffer.from("native-retention-canary"))).toBe(false);
-      };
-      const transport: CodespaceOperationTransport & CodespaceFileTransport = {
-        health: async () => ({ ok: true, reason: null }),
-        retainExecuteInput: retain,
-        retainFileInput: retain,
-        execute: async (_credential, _space, _operation, request) => {
-          await observed(request);
-          expect(request.timeoutMs).toBeGreaterThan(0);
-          expect(request.maxRetainedBytes).toBeGreaterThan(0);
-          expect(request.stdin.kind).toBe("inline");
-          return {
-            state: "succeeded",
-            stdout: "",
-            stderr: "",
-            exitCode: 0,
-            stdoutTotalBytes: 0,
-            stderrTotalBytes: 0,
-            outputLimitExceeded: false,
-            sessionCaptureDropped: false,
-          };
-        },
-        executeFile: async (_credential, _space, _operation, request) => {
-          await observed(request);
-          return {
-            action: "upload",
-            path: "file.bin",
-            previous: null,
-            current: { size: bytes.length, sha256: hash, modifiedAt: now },
-          };
-        },
-        inspect: async () => ({ state: "absent" }),
-        cancel: async () => ({ state: "absent" }),
-        finalize: async () => undefined,
-        readOutput: async () => ({ state: "absent" }),
-        inspectFile: async () => ({ state: "absent" }),
-      };
-      try {
-        const common = {
-          repository,
-          credentials: { getCredential: async () => "local-test" },
-          transport,
-          policy: () => serverPolicy,
-          now: () => now,
-          transfers,
-          nativeFetcher,
-        };
-        const result =
-          mode === "exec"
-            ? await new CodespaceOperationService(common).executeNativeReference(
-                "user-a",
-                resourceId,
-                { argv: ["cat", "native-retention-canary"] },
-                reference,
-              )
-            : await new CodespaceFileService(common).uploadReference("user-a", resourceId, {
-                path: "file.bin",
-                reference,
-                expected: { exists: false },
-              });
-        expect(result.operation.state).toBe("succeeded");
-        expect(result.result).not.toBeNull();
-      } finally {
-        fs.rmSync(directory, { recursive: true, force: true });
-      }
-    },
-  );
-  test.each([
-    ["exec", "generic"],
-    ["upload", "generic"],
-    ["upload", "typed-unknown"],
-  ] as const)(
-    "a failed native %s %s retention keeps original private bytes available for recovery",
-    async (mode, failure) => {
-      const { device } = enroll(),
-        resourceId = bind(device),
-        repository = new CodespaceOperationRepository(sqlite);
-      sqlite
-        .prepare(
-          "UPDATE codespaceResource SET externalOwnerId='user-a',billableOwnerId='user-a',providerResourceName=? WHERE id=?",
-        )
-        .run(randomUUID(), resourceId);
-      const directory = fs.mkdtempSync(path.join(os.tmpdir(), "moira-native-retention-failure-"));
-      const transfers = new CodespaceTransferService({
-        repository: new CodespaceTransferRepository(sqlite),
-        policy: () => serverPolicy,
-        root: directory,
-        now: () => now,
-      });
-      const bytes = Buffer.from([0, 255, 65, 10]),
-        reference: CodespaceNativeFileReference = {
-          fileId: "file_nativeRetention",
-          downloadUrl: "https://native.example.test/object",
-          mimeType: "application/octet-stream",
-          declaredSize: bytes.length,
-        };
-      const nativeFetcher = {
-        fetch: async () => ({
-          contentLength: bytes.length,
-          mimeType: "application/octet-stream",
-          body: (async function* () {
-            yield bytes;
-          })(),
-        }),
-      };
-      let acceptedOperationId = "";
-      const refuse = async (
-        _credential: string,
-        _space: CodespaceResourceRecord,
-        operation: CodespaceOperationRecord,
-      ) => {
-        acceptedOperationId = operation.id;
-        if (failure === "typed-unknown")
-          throw new CodespaceResourceError(
-            "CODESPACE_PROVIDER_UNAVAILABLE",
-            "Private relay capacity unavailable",
-          );
-        throw new Error("Private relay capacity unavailable");
-      };
-      const effect = path.join(directory, "guest-execute-effect");
-      const transport: CodespaceOperationTransport & CodespaceFileTransport = {
-        health: async () => ({ ok: true, reason: null }),
-        retainExecuteInput: refuse,
-        retainFileInput: refuse,
-        execute: async () => {
-          fs.appendFileSync(effect, "exec\n");
-          return { state: "running" };
-        },
-        executeFile: async () => {
-          fs.appendFileSync(effect, "upload\n");
-          return { state: "running" };
-        },
-        inspect: async () => ({ state: "absent" }),
-        cancel: async () => ({ state: "absent" }),
-        finalize: async () => undefined,
-        readOutput: async () => ({ state: "absent" }),
-        inspectFile: async () => ({ state: "absent" }),
-      };
-      try {
-        const common = {
-          repository,
-          credentials: { getCredential: async () => "local-test" },
-          transport,
-          policy: () => serverPolicy,
-          now: () => now,
-          transfers,
-          nativeFetcher,
-        };
-        const pending =
-          mode === "exec"
-            ? new CodespaceOperationService(common).executeNativeReference(
-                "user-a",
-                resourceId,
-                { argv: ["cat"] },
-                reference,
-              )
-            : new CodespaceFileService(common).uploadReference("user-a", resourceId, {
-                path: "file.bin",
-                reference,
-                expected: { exists: false },
-              });
-        if (failure === "typed-unknown") {
-          const error = await pending.then(
-            () => null,
-            (error: unknown) => error,
-          );
-          expect(error).toBeInstanceOf(CodespaceResourceError);
-          expect(error).toMatchObject({
-            code: "CODESPACE_PROVIDER_UNAVAILABLE",
-            confirmedRefusal: false,
-            operationId: acceptedOperationId,
-          });
-        } else {
-          const result = await pending;
-          expect(result.operation.id).toBe(acceptedOperationId);
-          expect(result.operation.state).toBe("reconcile_pending");
-          expect(result.result).toBeNull();
-        }
-        expect(repository.listOwned("user-a", resourceId)).toEqual([
-          expect.objectContaining({ id: acceptedOperationId, state: "reconcile_pending" }),
-        ]);
-        expect(fs.existsSync(effect)).toBe(false);
-        const original = sqlite
-          .prepare("SELECT objectKey,state FROM codespaceTransfer WHERE purpose='codespace_input'")
-          .get() as { objectKey: string; state: string } | undefined;
-        expect(original).toEqual(expect.objectContaining({ state: "ready" }));
-        expect(fs.readFileSync(path.join(directory, original!.objectKey))).toEqual(bytes);
-      } finally {
-        fs.rmSync(directory, { recursive: true, force: true });
-      }
     },
   );
   test("HTTP enrollment accepts more than 64 repository grants within its transport envelope", async () => {
@@ -1552,10 +1079,7 @@ describe("Durable local device enrollment and relay", () => {
       policy: full,
     };
     const app = express();
-    app.use(
-      "/api/local-devices",
-      createLocalDeviceRoutes(service, {} as CodespaceTransferService, "https://moira.example"),
-    );
+    app.use("/api/local-devices", createLocalDeviceRoutes(service, "https://moira.example"));
     const response = await httpRequest(app).post("/api/local-devices/enroll").send(body);
     expect(response.status).toBe(201);
     expect(response.body.data.policy.repositories).toHaveLength(65);

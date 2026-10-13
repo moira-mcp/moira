@@ -95,11 +95,10 @@ import { tokenRoutes } from "./routes/tokens.js";
 import { adminTokenRoutes } from "./routes/admin-tokens.js";
 import { createCodespaceConnectionRoutes } from "./routes/codespace-connections.js";
 import { createCodespaceManagementRoutes } from "./routes/codespace-management.js";
-import { createCodespaceFileRoutes } from "./routes/codespace-files.js";
+import { startWorkspaceRouter, stopWorkspaceRouter } from "./services/workspace-services.js";
 import {
   createLocalDeviceManagementRoutes,
   createLocalDeviceRoutes,
-  createLocalDeviceBinaryRoutes,
 } from "./routes/local-devices.js";
 import { createAdminCodespaceRoutes } from "./routes/admin-codespaces.js";
 import { createLocalGitHubDeliveryRoutes } from "./routes/local-github-delivery.js";
@@ -107,7 +106,6 @@ import { getLocalGitHubDeliveryService } from "./services/local-github-delivery-
 import { mcpClientAutoRegister } from "./middleware/mcp-client-auto-register.js";
 import { auth } from "./auth.js";
 import {
-  getCodespaceTransferService,
   getLocalDeviceService,
   getCodespaceProviderBundles,
   startCodespaceProviderServices,
@@ -217,11 +215,6 @@ class MoiraApiServer {
    * Setup middleware that must run AFTER Better Auth routes
    */
   private setupMiddlewareAfterAuth(): void {
-    this.app.use("/api/public/codespace-files", createCodespaceFileRoutes(), (_request, response) =>
-      response
-        .status(404)
-        .json({ error: { code: "CODESPACE_NOT_FOUND", message: "File endpoint was not found" } }),
-    );
     // Device secrets and native byte payloads never pass through global body logging/context.
     this.app.use(
       "/api/local-devices",
@@ -231,12 +224,7 @@ class MoiraApiServer {
         getLocalGitHubDeliveryService().delivery,
         getBaseUrl(),
       ),
-      createLocalDeviceBinaryRoutes(
-        getLocalDeviceService(),
-        getCodespaceTransferService(),
-        getBaseUrl(),
-      ),
-      createLocalDeviceRoutes(getLocalDeviceService(), getCodespaceTransferService(), getBaseUrl()),
+      createLocalDeviceRoutes(getLocalDeviceService(), getBaseUrl()),
       (_req, res) =>
         res.status(404).json({
           success: false,
@@ -584,6 +572,7 @@ class MoiraApiServer {
           },
         });
       });
+      await startWorkspaceRouter(this.server);
 
       // Graceful shutdown handling
       this.setupGracefulShutdown();
@@ -625,6 +614,9 @@ class MoiraApiServer {
       });
 
       stopCodespaceProviderServices();
+      void stopWorkspaceRouter().catch((error) =>
+        logger.error("Workspace router shutdown failed", error),
+      );
       for (const bundle of getCodespaceProviderBundles()) bundle.observability.stop();
 
       // Close metrics server

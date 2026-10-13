@@ -50,6 +50,11 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Install host test dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends ripgrep
+
       - name: Setup env file
         run: cp .env.ci .env
 
@@ -81,6 +86,11 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      - name: Install host test dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends ripgrep
 
       - name: Setup env file
         run: |

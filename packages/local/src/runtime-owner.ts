@@ -7,37 +7,12 @@ import {
   type LocalSpace,
 } from "./space-record.js";
 import { LocalRelay } from "./relay.js";
-import {
-  localManagementOutcomeSchema,
-  LOCAL_WORKER_REQUEST_TIMEOUT_MS,
-} from "../../shared/src/codespaces/local-protocol.js";
+import { localManagementOutcomeSchema } from "../../shared/src/codespaces/local-protocol.js";
 import type { LocalVmRuntime } from "./local-vm-runtime.js";
 import { createLocalVmRuntime } from "./local-vm-runtime-factory.js";
 import { runProcess, type RunProcess } from "./process.js";
 import { guestAssets, installGuest, runtimeApiAsset } from "./assets.js";
-import {
-  LocalRefusal,
-  MAX_MESSAGE_BYTES,
-  requireOperationOutputBudget,
-  requireOperationExecutionBudget,
-  type LocalPolicy,
-} from "./policy.js";
-
-const operation = z
-  .object({
-    action: z.enum([
-      "execute",
-      "inspect",
-      "cancel",
-      "finalize",
-      "output",
-      "file-execute",
-      "file-inspect",
-    ]),
-    remoteMarker: z.string().regex(/^moira-op-[a-f0-9]{32}$/),
-    repositoryFullName: z.string(),
-  })
-  .passthrough();
+import { LocalRefusal, type LocalPolicy } from "./policy.js";
 
 /** The independent guard owns every native call that can start this space. */
 export class RuntimeOwner {
@@ -314,20 +289,17 @@ export class RuntimeOwner {
           );
         const output = await runtime.runFixedGuest(
           identity,
-          "worker",
+          "bootstrap",
           Buffer.from(
             JSON.stringify({
-              kind: "bootstrap",
-              request: {
-                proxySource: assets.proxy,
-                hostPort: saved.port,
-                spaceId: space.id,
-                brokerToken: space.brokerToken,
-                repository: repository.fullName,
-                ref: space.ref,
-                clone,
-                gitAuthor,
-              },
+              proxySource: assets.proxy,
+              hostPort: saved.port,
+              spaceId: space.id,
+              brokerToken: space.brokerToken,
+              repository: repository.fullName,
+              ref: space.ref,
+              clone,
+              gitAuthor,
             }),
           ),
           Math.min(300_000, latest.policy.leaseUntil - Date.now()),
@@ -336,6 +308,59 @@ export class RuntimeOwner {
         z.object({ ok: z.literal(true), result: z.unknown() })
           .strict()
           .parse(JSON.parse(output.toString("utf8")));
+        const probe = z
+          .object({
+            environmentIdentity: z.string().regex(/^[a-f0-9]{64}$/),
+            architecture: z.string(),
+          })
+          .strict()
+          .parse(
+            JSON.parse(
+              (
+                await runtime.runFixedGuest(
+                  identity,
+                  "probe",
+                  undefined,
+                  30_000,
+                  this.controller.signal,
+                )
+              ).toString("utf8"),
+            ),
+          );
+        const remote = await new LocalRelay(this.records).workspaceCredential(
+          space.id,
+          space.repositoryId,
+          probe.environmentIdentity,
+          this.controller.signal,
+        );
+        await runtime.runFixedGuest(
+          identity,
+          "configure",
+          Buffer.from(
+            JSON.stringify({
+              version: 1,
+              repositoryFullName: repository.fullName,
+              root: `/workspaces/${repository.fullName.split("/")[1]}`,
+              expectedOrigin: `http://${space.id}:${space.brokerToken}@127.0.0.1:3437/git/${repository.fullName}.git`,
+              remote,
+            }),
+          ),
+          30_000,
+          this.controller.signal,
+        );
+        await runtime.runFixedGuest(
+          identity,
+          "start-service",
+          undefined,
+          30_000,
+          this.controller.signal,
+        );
+        await this.waitWorkspaceHealth(
+          runtime,
+          identity,
+          probe.environmentIdentity,
+          assets.payload.release,
+        );
         await this.current();
         space.phase = "usable";
         space.lastStartedAt = Date.now();
@@ -345,6 +370,27 @@ export class RuntimeOwner {
     );
   }
 
+  private async waitWorkspaceHealth(
+    runtime: LocalVmRuntime,
+    identity: { name: string; runtimeId: string },
+    environmentIdentity: string,
+    releaseIdentity: string,
+  ): Promise<void> {
+    const value = JSON.parse(
+      (
+        await runtime.runFixedGuest(identity, "health", undefined, 30_000, this.controller.signal)
+      ).toString("utf8"),
+    );
+    if (
+      value.environmentIdentity !== environmentIdentity ||
+      value.releaseIdentity !== releaseIdentity
+    )
+      throw new LocalRefusal(
+        "LOCAL_IDENTITY_CHANGED",
+        "Workspace readiness belongs to another release or guest.",
+      );
+  }
+
   private async boundary(space: LocalSpace, runtime: LocalVmRuntime): Promise<void> {
     if (!space.runtimeId)
       throw new LocalRefusal("LOCAL_CREATE_UNKNOWN", "No confirmed runtime identity.");
@@ -352,70 +398,6 @@ export class RuntimeOwner {
     if (!space.networkPolicy)
       throw new LocalRefusal("LOCAL_NETWORK_CHANGED", "The sandbox network policy changed.");
     await runtime.boundary.verify(identity, space.networkPolicy);
-  }
-
-  operation(value: unknown): Promise<Buffer> {
-    const contact = (async () => {
-      const bytes = Buffer.from(JSON.stringify(value));
-      if (bytes.length > MAX_MESSAGE_BYTES - 1024)
-        throw new LocalRefusal(
-          "LOCAL_REQUEST_TOO_LARGE",
-          "Guest operation input exceeds its bound.",
-        );
-      const request = operation.parse(value);
-      const { space, policy, runtime } = await this.current();
-      const repository = requireSpaceGrant(policy, space, Date.now());
-      if (request.repositoryFullName !== repository.fullName)
-        throw new LocalRefusal(
-          "LOCAL_REPOSITORY_DENIED",
-          "Operation repository differs from local admission.",
-        );
-      if (space.phase !== "usable" || !space.runtimeId)
-        throw new LocalRefusal("LOCAL_NOT_RUNNING", "This local sandbox is not initialized.");
-      if (request.action === "execute") {
-        request.timeoutMs = requireOperationExecutionBudget(
-          request.timeoutMs,
-          request.maxRetainedBytes,
-          policy.leaseUntil - Date.now(),
-        );
-        requireOperationOutputBudget(request.maxStdoutBytes, request.maxStderrBytes);
-      }
-      const identity = { name: space.name, runtimeId: space.runtimeId };
-      await this.protectRuntime();
-      if (!space.networkPolicy)
-        throw new LocalRefusal(
-          "LOCAL_NETWORK_CHANGED",
-          "The sandbox network policy is unconfirmed.",
-        );
-      const latest = await this.current();
-      return runtime.runFixedGuest(
-        identity,
-        "worker",
-        Buffer.from(JSON.stringify({ kind: "operation", request })),
-        Math.min(LOCAL_WORKER_REQUEST_TIMEOUT_MS, latest.policy.leaseUntil - Date.now()),
-        this.controller.signal,
-        {
-          expectedNetworkDigest: space.networkPolicy,
-          confirm: async () => {
-            const admitted = await this.current();
-            if (
-              admitted.space.phase !== "usable" ||
-              admitted.space.networkPolicy !== space.networkPolicy
-            )
-              throw new LocalRefusal(
-                "LOCAL_NETWORK_CHANGED",
-                "The local dispatch receipt changed during verification.",
-              );
-          },
-        },
-      );
-    })();
-    this.guestContacts.add(contact);
-    void contact.then(
-      () => this.guestContacts.delete(contact),
-      () => this.guestContacts.delete(contact),
-    );
-    return contact;
   }
 
   validate(): Promise<void> {

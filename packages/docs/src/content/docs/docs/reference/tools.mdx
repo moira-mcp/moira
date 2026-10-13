@@ -38,7 +38,7 @@ curl --request POST "$uploadUrl" \
   --data-binary @report.pdf
 ```
 
-The declared size must equal both `Content-Length` and the received byte count. Each attachment is
+The declared size must equal both `Content-Length` and the received byte count. Each attachment-token upload is
 limited to 20 MiB; images accept PNG or JPEG and documents reject image MIME types. Before provider
 delivery begins, a failed MIME, size, image-signature, or in-flight admission check releases the
 grant for another corrected request until expiry. After any provider attempt, success or failure is
@@ -75,16 +75,13 @@ All tools publish a root-object input schema so MCP clients can discover the com
 public `start` schema therefore exposes `action` directly and lists the fields accepted by either
 phase. Runtime validation still enforces the selected phase exactly: `prepare` requires `workflowId`
 and `parentExecutionId`, while `execute` requires `startAttemptId`; fields belonging only to the other
-phase and unknown fields are rejected as MCP errors. The `codespace` tool follows the same pattern at
-a larger scale: one flat object carrying `action` plus every action's fields, of which only `action`
-is required, while dispatch enforces the exact form of the action requested (a new request, or a
-resume carrying only `codespace_id` and `operation_id`; exactly one of `stdin_text` or `stdin_file`
-for `exec`). A field that belongs to no action is rejected as an MCP error, as before; a field that
-belongs to a _different_ action is rejected at dispatch as `CODESPACE_REQUEST_INVALID`. A default an
-action declares is applied there too, so it no longer appears in the published schema. Where two
-actions accept the same field with different limits — `max_bytes` is 1 MiB for `search` and 4 MiB for
-`preview_image` — the action you named decides which bound applies. Native `download` uses the
-separate effective binary-transfer policy.
+phase and unknown fields are rejected as MCP errors. The `codespace` tool follows the same pattern:
+one flat object carries `action` and the catalog's fields, while dispatch validates the exact selected
+action and applies its defaults. Collect an admitted command with `codespace_id` and its original
+`request_id`, without submitting command fields again. An execution accepts at most one of
+`stdin_text` and `stdin_file`. Unknown fields are MCP errors; fields belonging only to another action
+return `CODESPACE_REQUEST_INVALID`. Caller-selected search/output windows bound observations;
+image preview has its own decoder budget, and native download streams a complete file by path.
 
 `start({ action: "prepare" })` resolves and validates an authorized workflow, binds the workflow version and request options, and returns a Start attempt ID that expires after 15 minutes without creating an execution. `parentExecutionId` links a child to an existing parent; use `"none"` for a standalone execution. `skipNotificationCheck` records a policy to bypass only optional ordinary-notification preflight during execute. `skipTelegramCheck` remains a deprecated alias with the same behavior, and conflicting values are rejected.
 
@@ -196,279 +193,141 @@ curl -X POST "${uploadUrl}" -F "workflow=@your-workflow.json"
 
 ### Development codespaces
 
-The `codespace` tool gives an agent without a filesystem a persistent, personal instrument for
-executing a flow in GitHub or on an approved local computer. Each local codespace has its own VM;
-one repository may have several independent codespaces. A codespace is not shared; collaboration happens
-through version-control branches. Ordinary work uses `codespace`: `action` selects the operation —
-`list`, `repositories`, `setup_help`, `create`, `get`, `start`, `stop`, `delete`, `exec`,
-`stat`, `search`, `read`, `write`, `apply_patch`, `upload`, `download`, `files_setup` or
-`transfer_status` — and the other fields are
-those the chosen action declares. GitHub is connected only on the Moira website; no action starts,
-resumes or polls an authorization. When the connection, installation or server configuration is
-missing, the refusal carries the provider's applicable configured link set. `setup_help` returns the
-current missing condition, one provider-owned instruction and those exact available links, including
-repository creation and, when its URL is configured, App installation; Moira never provisions
-anything while setup is missing.
+`codespace` operates an owned persistent GitHub Codespace or Local VM. Each Local codespace has
+its own VM, and a repository may have several independent environments. Reuse its `codespace_id`
+across clients; collaboration uses repository branches. The typed catalog above lists the supported
+actions and their exact inputs.
 
-Install the Moira GitHub App on your personal account or an organization and grant it the repositories
-the agent may use. A connected account with no visible App installation is in
-`installation_required`: finish installation on GitHub, then use **Check installation** in Moira
-Settings. If the App's permissions change, accept the update on GitHub. An organization repository
-can appear among approved targets, but `create` checks GitHub's billing owner before creating
-anything. It returns `CODESPACE_BILLING_UNSUPPORTED` if GitHub would bill an organization; Moira
-supports only Codespaces billed to your connected personal account.
+Both providers install the same workspace service with its own Node.js and ripgrep runtime.
+Commands, named sessions, guarded file operations and durable results belong to that service.
+The direct `moira-workspace` CLI uses its private Unix socket. Remote MCP calls reach the same
+owner through authenticated streaming routing; cloud Moira stores neither command queues nor
+command/file results. Provider bootstrap establishes the service before ordinary work is admitted.
 
-Lifecycle, execution and file calls address a `codespace_id`; `list` and `create` return
-that reusable ID, while `repositories` discovers approved repository targets. Local discovery and
-repository admission use the owned device. Ownership is checked server-side, so an unknown or
-foreign ID returns the generic `CODESPACE_NOT_FOUND` result. A codespace is not tied to a chat or session: reuse the same `codespace_id` from any
-client. `list` offers only codespaces that can still be used; a deleted or rejected one
-is absent from it while `get` still answers for its `codespace_id`. Create/start wait for usable
-guest readiness, stop for confirmed shutdown while preserving files, and delete for confirmed absence.
-Delete requires `confirm_delete: true`; the server applies its current owned generation guard internally.
-For a local codespace, MCP deletion also requires the agent's repository deletion permission and
-enabled, unexpired work authority. A refusal directs the owner to **Settings → Development →
-Local computers** to confirm removal of that exact codespace. Browser owner cleanup requires an
-active paired computer and local web-control approval; it works with agent deletion denied or
-agent work disabled or expired, without changing those permissions or renewing the lease.
-List/get/lifecycle return compact codespace ID, repository, ref and state, with a safe cause when known.
+#### Access and lifecycle
 
-`list` refreshes the approved installation and repository snapshot after its TTL and accepts
-`refresh: true` for an immediate refresh. A forced refresh also checks the current GitHub state of
-stored codespaces. A warning identifies an incomplete refresh; saved entries remain visible.
-A repository newly granted to the App therefore appears without reconnecting once refresh succeeds.
-The Cloud codespaces **Refresh** button in Moira Settings performs the same forced reconciliation.
+GitHub authorization happens on the Moira website. Install the Moira GitHub App and grant the
+repositories the agent may use; accept permission updates on GitHub. `setup_help` returns the
+current missing condition, provider instruction and applicable configured links without provisioning
+anything. `repositories` discovers approved targets and `local_devices` discovers owned computers.
+Local pairing, repository admission and finite work permission remain owner-controlled and do not
+require the GitHub Codespaces provider to be enabled.
 
-Moira Settings separately displays `limits`: the limits Moira enforces for you, next to your current use. Compact MCP discovery omits this view. It covers
-the codespaces you hold against your own ceiling and the instance-wide one, plus the interval between
-creations; the largest machine you may select; your active operations against the concurrency limit,
-with the input, output, retained-output, duration and background limits; your transfer bytes and
-objects against their limits, the bytes still in flight against the in-flight limit, the largest
-file and the link lifetime; retention of stopped
-codespaces, the start wait and your idle auto-pause setting with GitHub's maximum idle timeout.
-`limits.provider.billing` separately reports GitHub's current-month Codespaces usage for your
-connected personal account when GitHub's billing API can be read: payer and month, compute core-hours,
-storage GB-month (including prebuilds), included allowance when the personal plan is known, and the
-net amount billed in USD. GitHub usage may appear with a delay. The value is `unavailable` when the
-App lacks `Plan: read` permission, the billing API is unavailable, or the connection cannot supply
-the data; Codespace management and Moira's own limits still work. The website's codespace list shows
-the same billing and local limits in separate cards.
+`create`, `get`, `start`, `stop` and `delete` address the selected provider. Create/start wait for
+readiness within their observation window and may return a pending resource. Ordinary workspace
+dispatch requires a usable guest. Stop preserves repository data, and delete requires `confirm_delete: true` and
+confirmed absence. Local agent deletion also requires its repository permission and current work
+authority. The owner can instead confirm cleanup of that exact environment in **Settings →
+Development → Local computers**, with paired local web control, without granting agent deletion
+or renewing an expired work lease.
 
-A provider-side repository rename keeps its codespace usable because identity follows the provider
-repository ID. The stored display name refreshes during lifecycle work; a different repository ID is
-still refused.
+Unknown or foreign resources disclose no other owner's data. Ordinary resource calls return
+`CODESPACE_NOT_FOUND`; process authority refusal uses `CODESPACE_AUTHORIZATION_REQUIRED`.
+An incomplete provider refresh reports a warning rather than erasing saved entries.
+`codespace({ action: "list", refresh: true })` requests a fresh approved repository/resource observation. Repository
+identity follows the provider ID, so a rename or checked-out branch change does not replace the
+environment. Creation still requires a valid branch or commit reference.
 
-The branch checked out in a codespace is not part of its identity. You may switch branches inside a
-codespace, or leave it on a detached HEAD, and `start`, `stop`, `delete`, `exec` and the file actions
-keep working on the same `codespace_id`; after you reconnect GitHub with the same account, the
-codespace is rebound automatically on whatever branch it is on. MCP reports `ref` from the last
-observed ref or its requested fallback. Website summaries separately report
-`requested_ref`, the ref it was created on, and `current_ref`, the ref GitHub last reported checked
-out, which is `null` until Moira has observed one and while the codespace is on a detached HEAD.
-`create` still takes the input `ref`. Starting a codespace whose GitHub resource Moira is still
-identifying returns the retryable `CODESPACE_CREATE_PENDING`; retry once creation has settled.
+GitHub creation supports personal-account billing. Organization-billed creation is refused with
+`CODESPACE_BILLING_UNSUPPORTED`. Settings shows resource count, creation, machine, retention and
+startup policies, plus available current-month GitHub billing separately from Local owner budgets.
+Billing may be unavailable without `Plan: read` or while its API is unavailable; that does not grant
+or revoke resource access. Physical Local storage, CPU/RAM admission and finite work leases remain
+effective.
 
-An idle codespace pauses on its own. Two user settings decide when: `codespaces.auto_stop_enabled`
-(on by default) and `codespaces.idle_timeout_minutes` (30 by default, 5 to 240), readable and
-writable with the `settings` tool. While pausing is on, Moira stops a codespace once no agent has
-used it through Moira for that long — no command, file action, transfer or start — and it does not
-stop one while a command, including a background command, is still running there. Stopping keeps
-the repository data, and the next call that needs the codespace starts it again. Moira does not see
-direct use in a browser, an editor or over SSH, so a codespace you work in directly is paused on the
-same timeout; turn pausing off if you work in your codespaces directly. Separately, GitHub stops a
-codespace after at most 240 minutes without user or terminal activity, with pausing on or off, and
-that can also end a background command that prints nothing for that long.
+GitHub idle preferences apply when Moira creates a new Codespace:
+`codespaces.auto_stop_enabled` defaults to true and `codespaces.idle_timeout_minutes` defaults to
+30 within GitHub's 5–240-minute range. Disabling the preference requests 240 minutes, not unlimited
+running. Existing environments retain their provider parameters. GitHub detects editor, browser and
+terminal activity; a silent background command can be stopped by its native idle policy or lifetime
+limit. Local environments follow their computer owner's policy. A later call can start a stopped
+environment, but stopping does not preserve a live process.
 
-Choose a UUID `request_id` before submitting `exec` or `codespace_process` start and retain it.
-Matching retries recover the same command; changed command, resource or input identity is refused.
-`exec` runs argv as data (no shell interpolation) in a repository-relative `cwd` with a
-timeout (`timeout_seconds`, optional) and optional per-stream output limits. A collected result contains
-bounded `stdout`, `stderr` and the exact `exit_code`. Those limits bound the answer, not the command:
-a command that prints more keeps
-running, keeps its own exit code and keeps its own `stderr`, and the result reports each stream's
-complete size and whether the payload was truncated. The whole output stays in the codespace until
-the operation is cleaned up, and any range of it is read with `read`. A command is stopped
-for its volume only if its retained output reaches the codespace ceiling, which is reported as that
-rather than as the command's own failure. Exec returns a durable acceptance response without
-waiting for guest completion: `request_id`, `operation_id`, `accepted` and `phase`, plus available
-output. `timeout_seconds` defaults to 300 and bounds guest runtime from confirmed launch, not
-the client's wait. Long-lived development processes use the separate
-`codespace_process` tool: start accepts the same identity/command/session/stdin fields and returns
-`process_id`, acceptance fields and state without waiting for confirmed launch. Get collects that
-process's state and available output by `process_id` or `request_id`;
-read returns a bounded retained stream range; stop cancels only that process. A pending stop is
-not confirmed cancellation. The omitted duration uses the existing background lifetime ceiling,
-and retained output remains collectible for at least the permitted command duration.
+#### Commands, collection and sessions
 
-Commands and reads can run independently in the same local codespace. A pending operation record,
-lost reply or retained result does not lock new commands or file edits, and local operations do not
-consume cloud concurrency slots. Atomic file mutations coordinate inside the guest; their
-`expected` guards still reject an edit whose input version changed. Current account, device and
-repository permissions and the exact owned VM identity are checked independently of lifecycle
-counters. A confirmed stopped-guest refusal refreshes that codespace's saved state without
-repeating the refused command; a subsequent new call can start the same environment on use.
-Explicit stop cancels undelivered work even while its delivery payload is being saved;
-confirmed cancellation before delivery returns `CODESPACE_OPERATION_CANCELLED` with detail that no work started. Companion startup after a
-crash or reboot reclaims only proven abandoned host ownership, preserving saved work without replay.
+Choose a fresh `request_id` in `ws1-<lowercase UUID>` form before `exec`, process start,
+`write`, `apply_patch` or `upload`. Repository admission has its separate UUID identity.
+Historical plain operation UUIDs are archival and cannot address new work; adding a prefix to an
+old identifier does not recover its operation. Retain the actual identity you chose before submission.
 
-Fresh local creation supports server and computer clocks differing by up to five seconds in either
-direction when delivery is prompt and the request, delivery permission and work lease remain unexpired.
-The server leaves 30 seconds inside the companion's maximum request window; expired authority is
-still refused. Keep both clocks synchronized. A lost reply retains the same request identity and
-expiry, so inspect the accepted work before repeating an effect.
+`exec` accepts `argv` as arguments without shell interpolation, or `script` inside a named
+session. It observes briefly and can return `starting` or `running` before completion. Collect a
+lost reply with `exec` containing only `codespace_id` and the original `request_id`; do not start
+a second command. A changed command or input under the same admitted identity is refused.
+`timeout_seconds` sets an execution deadline only when explicitly supplied. Reply windows
+`max_stdout_bytes` and `max_stderr_bytes` bound returned text; they neither stop the command nor
+limit its retained output. Read later output with `read`, the original `request_id`, `stream`,
+`offset` and `length`. Command observations retain their actual `exitCode` and stream sizes.
 
-Consecutive commands can share a working context. Open a session with `session` and
-`session_start: true`, then name the same `session` on later commands: it remembers the `cwd` a call
-names and the variables a call passes in `env`, and applies both to every command that continues it.
-A command without a session is unaffected. Inside a session you may send `script` instead of `argv`:
-it runs under the codespace's own shell, and the directory it ends in and the variables it added,
-changed or removed are carried to the commands that follow, which is how activating a toolchain or a
-virtual environment survives. An `argv` command is never run through a shell, and one call carries one
-kind of work. End a session with `session_end: true`, alone or with a command; ending frees its slot
-and removes what it stored. A codespace holds a bounded number of open sessions, and once it is full the next
-`session_start` is refused with that ceiling named and asks you to end one rather than retry or open
-another codespace. A session's stored context is bounded too, a call that would exceed it is
-refused with that ceiling named, and a script carries its end state whether it
-succeeded or failed, while one whose end state would not fit, one that ends its own shell with `exit`
-and one that was stopped report `session_capture_dropped` instead of leaving a session you cannot use. A session belongs to the
-codespace's current life: after the codespace stops and starts again, naming it returns
-`CODESPACE_SESSION_UNAVAILABLE` and a new session must be opened, as it does for a session that was
-never opened. What a session stores stays in the codespace and is never returned.
-Ordinary exec has neither `background` nor `cancel`; background cancellation uses
-`codespace_process({ action: "stop", codespace_id, process_id })`. A command stops with its codespace, so a
-long one needs a codespace whose idle lifetime outlasts it. A codespace that went to sleep does not
-have to be started first: the call that needs it starts it and then runs, within a bounded wait. If it
-does not finish starting in time the call returns `CODESPACE_START_TIMEOUT`, which names that wait and
-asks you to retry; a codespace that cannot start at all is refused by what it is. A command whose
-codespace restarted under it, or an interrupted file mutation without a saved result, is reported as
-`CODESPACE_OPERATION_INTERRUPTED`. Inspect the affected files before deciding what work remains;
-interruption does not prove that no changes were applied, and the accepted mutation is not replayed
-automatically. The guest recovers an abandoned file transaction without overwriting a later
-conflicting edit and retains its recovery journal and backups when rollback cannot safely finish.
-Supply at most one stdin form: `stdin_text` for UTF-8 text or `stdin_file` for a native
-ChatGPT file reference; the file's bytes reach the process without base64 in the conversation.
-Failed, timed-out and cancelled commands and rejected file edits are returned as tool errors that
-keep any useful bounded output and the recovery identity. File calls wait for their useful terminal
-result and carry `operation_id` for exceptional recovery. Command calls retain their acceptance
-identity; acceptance does not prove success or a running process. After a lost first response,
-call `exec` with only `codespace_id` and the original `request_id`, or use process get with that
-request identity. Existing `operation_id` collection remains available. Lookup and bounded waiting
-never cancel or repeat the command.
+`codespace_process` exposes start/get/read/stop for a long-lived command. Start uses the same
+command identity and fields; retain its `process_id` for collection and explicit cancellation.
+A lost connection closes observation, not the admitted command. `unknown` means its effect is
+unconfirmed, not that it never ran. `not_started` requires evidence that execution was prevented;
+a cancellation request is not proof of completed cancellation. Inspect the same identity and
+affected files before deciding what new work is needed.
 
-`phase: "preparing"` means input preparation is incomplete; `accepted` means admission is durable.
-`started_at: null` means launch is unconfirmed, not that no effect occurred. `not_started` requires
-proof that launch was prevented, while `outcome_unknown` preserves uncertainty. `admission_deadline_at`
-limits permission to start; `started_at` plus `runtime_ms` bounds actual guest execution;
-`result_expires_at` describes result retention. These times are independent of caller waiting.
-Server waiting does not extend a client's transport timeout. After interrupted delivery, inspect
-the accepted identity before repeating that effect or modifying the affected files. Independent
-work can continue without resolving that operation first.
-The bounded reply prefix is verified in private storage before terminal publication and remains
-collectible after server restart during retention. Larger complete streams remain in the guest;
-their availability is separate from that prefix. Retained results remain readable after an ordinary
-restart while the same codespace and current
-access remain valid and the result is still stored. Restart does not preserve a live process.
-`CODESPACE_RESULT_EXPIRED` means the stored result is no longer available; it is not a reason to
-repeat the same write without inspecting the affected files. A typed transport failure after acceptance retains
-`operation_id`, or `process_id` for a background start, so it can be inspected without another launch.
+Open a named session with `session_start: true`; subsequent commands use the same `session`.
+The session carries its working directory and environment, including changes left by a shell
+script. `session_end: true` closes it. Sessions have no inherited slot or context-size quota;
+actual process/environment and storage failures remain observable. Session state is local to the
+guest life, so reopen it after an environment restart. Retained terminal results can remain on the
+persistent disk; a missing or uncertain result is never automatically replayed.
 
-`stat` returns repository-file metadata without reading a large file's contents. Regular files
-above the 4 MiB code-edit ceiling have `version: null`; small editable files retain their whole-file
-SHA256 version. Repository paths, regular-file type, single-link identity and concurrent changes
-are checked independently of file size.
+Supply at most one stdin form: `stdin_text` or a native `stdin_file` reference. Native bytes stream
+to the service without base64 in the conversation or a cloud command-input spool. Current account,
+repository, resource generation and Local device/work authority are checked independently of the
+command journal. Independent commands and reads can proceed while another result is uncertain;
+guarded mutations coordinate inside the guest.
 
-`read` returns only the selected bounded UTF-8 range with `offset` and `total_size`. For a repository
-file, `sha256` means the whole-file digest: it remains available for files up to 4 MiB and is `null`
-for larger files. `range_sha256` hashes exactly the returned bytes and does not replace the whole-file
-version used by edits. Retained older SHA-only results keep their whole-file digest and receive a
-computed range digest when collected. A file offset equal to its size returns an empty range; an
-offset beyond it is refused. Give `path` for a file, or `operation_id` and `stream` for a command's retained `stdout` or
-`stderr`, naming the codespace that command belongs to. A read that starts at or past the end of a
-stream returns no text and the stream's current size. `length` defaults to
-64 KiB with a maximum of 4 MiB, and `search` defaults to 100 matches within 64 KiB of results, so naming only the
-codespace, path and query is a complete call. Search covers repository content and skips the
-repository's own `.git` directory, and it refuses a search rooted at or inside that directory; a
-file there is still readable by its exact path. A non-text range returns
-`CODESPACE_BINARY_READ_REQUIRES_DOWNLOAD`. A call that matches no request form returns
-`CODESPACE_REQUEST_INVALID` naming the missing or invalid fields. `write` replaces a file atomically
-under an `expected` precondition (`exists`, optional `size_bytes` and `sha256`), and
-`apply_patch` applies ordered byte-offset edits per file with the same preconditions and
-returns old/new versions plus a content-free summary. Code writes, patches and image previews have
-a 4 MiB upper bound. Stdin uses the effective input limit, at most 4 MiB and 1 MiB by default.
-Binary transfers have a separate effective limit, 20 MiB by default,
-with 256 KiB byte chunks and unchanged aggregate and in-flight quotas.
-A complete empty download is valid; an empty image is not a valid preview.
+#### Reading, editing and publishing files
 
-Choose a UUID `request_id` before native `upload` or `download`. Upload accepts the native attachment
-reference without base64 and replaces the repository target under its `expected` guard. Download
-returns an MCP `resource_link` and `file.reference_id`, size, digest and expiry. Its HTTPS URL is
-one-use and is not duplicated in JSON; consuming it does not authorize another publication. Repeat
-the exact original request after response loss, or collect by the returned `operation_id`. For a
-download collection retain `file_name` and `mime_type`. A pending result is not a complete file or
-proof that target replacement happened.
+Paths are repository-relative. `stat` returns file metadata and its version; it is useful when an
+edit needs a size/hash precondition, and is not a required step before downloading.
+`search` supports literal or regex search with caller-selected result windows
+`max_matches` and `max_bytes`; those windows do not limit the total file bytes scanned.
+`read` returns the requested UTF-8 range with `offset` and `total_bytes`, defaulting to a 64 KiB
+window. Binary text ranges return `CODESPACE_BINARY_READ_REQUIRES_DOWNLOAD`.
 
-Provision the remote file client with a stable setup identity:
+`write` and `apply_patch` require a stable workspace request identity and `expected` existence,
+with optional `size_bytes` and whole-file `sha256`. Patches use ordered byte-offset edits.
+The service stages and commits guarded changes, refuses stale preconditions, traversal, unsafe
+links and substituted ownership, and retains uncertainty rather than overwriting foreign data
+during interrupted recovery. There is no inherited 4 MiB code-file ceiling.
 
-```javascript
-codespace({ action: "files_setup", codespace_id: "<codespace UUID>", request_id: "<setup UUID>" });
-```
+`upload` streams a native attachment to its guarded repository target. `download` reads a complete
+file by `path` and requires `file_name` and `mime_type`. It publishes an MCP `resource_link` plus
+`file.reference_id`, size, digest and expiry. Optional `max_bytes` refuses an oversized complete
+file with `CODESPACE_DOWNLOAD_BOUND_EXCEEDED`; it never publishes a prefix as the file.
+A complete empty file is valid. Publication does not send a message: explicitly use
+`communication({ action: "deliver-file", referenceId, message, kind })` for an owned ready file.
+Its native download link is single-use, and delivery does not renew its retention.
 
-Wait for `provisioned: true` and use the returned absolute `command` with ordinary exec. Pending
-setup returns `command: null`; do not assume `moira-files` is on PATH. Setup reports the measured
-ABI, guest life and worker/client/executable hashes. It refreshes fixed guest assets without VM or
-companion restart, preserves repository/session state and does not upgrade the running host daemon.
-Repeat pending setup with the same `request_id`: it collects the original installation operation.
-An existing operation marker without launch proof or a retained result remains unconfirmed; it is
-not a failed installation or proof that nothing ran. Only verified completion exposes the command.
+`preview_image` returns PNG/JPEG image content under its separate preview byte/dimension budget.
+Use complete download for the original binary. Workspace command/file streams have no inherited
+aggregate transfer, output, session or implicit execution-duration quota. Physical storage,
+filesystem confinement, scoped authority, provider policies and caller-selected observation bounds
+still apply. The MCP HTTP JSON body guard is a separate metadata boundary; native binary streams
+and the direct guest CLI do not encode their bytes in that JSON body.
+
+#### Direct guest terminal access
+
+The installed CLI uses the same service and identities as remote calls:
 
 ```bash
-"$command" upload films/demo.mp4 --request-id "$upload_request_id" --mime video/mp4
-"$command" status "$upload_request_id"
-"$command" download "$reference_id" incoming/demo.mp4 --request-id "$download_request_id"
+moira-workspace exec --request-id ws1-11111111-1111-4111-8111-111111111111 -- npm test
+moira-workspace status ws1-11111111-1111-4111-8111-111111111111
+moira-workspace output ws1-11111111-1111-4111-8111-111111111111 stdout
+moira-workspace upload --request-id ws1-22222222-2222-4222-8222-222222222222 assets/data.bin /tmp/data.bin
+moira-workspace download assets/data.bin > /tmp/data-copy.bin
 ```
 
-Supply the same UUID on an interrupted CLI transfer. It prints the request identity before network
-admission and resumes only that immutable transfer; changed bytes or target guards are refused.
-A download target must be absent unless `--replace-sha256` supplies its expected whole-file digest.
-`codespace({ action: "transfer_status", codespace_id, request_id })`, with optional `transfer_id`,
-is pure collection, not resume. Its `scope: "private_object"` and `state: "ready"` describe private
-storage, not a committed guest destination. Use the native operation result or CLI completion receipt
-for target replacement. A guest upload publishes only a private object; native download and
-`communication` delivery are separate explicit effects. These narrow file capabilities are bound to
-current owner/provider permissions, resource generations, measured guest life and finite expiry;
-status never renews them. Expired, consumed or revoked references cannot be re-minted by retry.
-
-Interrupted input preparation and private copying retain the original transfer identity before the
-object becomes available to consumers. Resume continues that object's checkpoint; if the bound
-object was consumed or is unavailable, recovery refuses a replacement or another fetch under the
-same request. A completed independent private copy can settle without reopening its original source,
-even if that source was consumed separately. Matching completed retries reuse the retained receipt
-instead of publishing another object or allocating another result. Collection checks current
-permissions; resume never extends the original admission, capability or retention deadlines.
-If admission expires before dispatch was admitted, setup, native transfer or CLI preparation is
-settled as cancelled without execution, even when its private preparation is expired or missing.
-The original identity and deadline remain unchanged. A terminal setup refusal ends waiting and
-exposes no command. Work whose dispatch was already admitted remains uncertain until evidence
-settles its outcome; inspection neither repeats it nor grants a new deadline.
-
-A retained file refusal may include a bounded `reason`: `unsafe_access`, `size_limit`,
-`invalid_range`, `concurrent_change` or `precondition`. It names the actual failed guard without
-exposing host paths or provider exception text. Older or unclassified refusals may omit it;
-the error code and original recovery identity still apply.
-
-The agent runs as the ordinary Codespace user with that environment's repository, network and
-configured secrets. Moira bounds cloud concurrency, input/output size, time and transfer quotas and
-protects the Moira server and other users; it does not sandbox the codespace from the agent its
-owner authorized. A user may hold several codespaces at once, and a creation refused by a ceiling
-says which one refused it: your own ceiling on the codespaces you hold, the instance-wide one, or the
-interval between creations. Stopped codespaces count toward your ceiling, so delete one you no longer
-need to free a slot. The refusal names that ceiling's configured value and never names another user or
-their codespaces. When GitHub itself refuses a creation, start, stop or delete, the error says so
-rather than reporting an internal failure: it distinguishes a grant you must reauthorize, a request
-GitHub will refuse again however many times you repeat it, and a provider outage worth retrying, and
-it repeats GitHub's own explanation in one shortened line. That line is dropped whole, leaving only
-the HTTP status, whenever it contains anything shaped like a credential — a token, a labelled secret,
-a JWT or a URL.
+Choose a fresh identity for each intended mutation; the literals above illustrate the format.
+Without `--request-id`, the CLI generates and prints one before accepting input or starting work.
+`upload`/ `write` default to an absent target unless an explicit expected JSON guard is supplied.
+CLI `download` writes repository bytes to standard output; MCP download is the separate publication
+step that supplies a private reference for communication. Use CLI status/output after a lost reply.
+Installation through the common image or Feature is described in
+[self-hosting](/docs/getting-started/self-hosting/#connect-local-codespaces).
 
 ### Runtime help
 

@@ -1,16 +1,15 @@
 import { createHash, randomUUID } from "node:crypto";
 import type Database from "better-sqlite3";
 import { CodespaceResourceRepository } from "./resource-repository.js";
-import { CodespaceResourceError } from "./resource-types.js";
 import { canonicalJson } from "../utils/canonical-json.js";
 import { getAccountAccessDenial } from "../auth/account-admission.js";
 import { LOCAL_RESULT_SETTLEMENT_RETENTION_MS } from "./local-protocol.js";
+import { localLifecycleEnvelopeSchema, localLifecycleReplySchema } from "./local-protocol.js";
 import {
   CODESPACE_PROVIDER_LOCAL,
   LocalDeviceError,
   localPublicPolicySchema,
   localRepositoryTargetId,
-  localRelayPayloadReferenceSchema,
   type LocalDeviceAuth,
   type LocalDeviceView,
   type LocalPairingView,
@@ -20,7 +19,6 @@ import {
   type LocalRelayClaim,
   type LocalRelayResult,
   type LocalRelayAcknowledgement,
-  type LocalRelayPayloadReference,
 } from "./local-device-types.js";
 import {
   MAX_LOCAL_WORK_LEASE_MS,
@@ -38,8 +36,6 @@ export function digestLocalSecret(value: string): string {
   return createHash("sha256").update(value).digest("hex");
 }
 const RELAY_REPLAY_RETENTION_MS = LOCAL_RESULT_SETTLEMENT_RETENTION_MS;
-const MAX_RETAINED_RELAY_REQUESTS_PER_DEVICE = 2048;
-const MAX_RETAINED_RELAY_REQUESTS_PER_OWNER = 8192;
 interface DeviceRow {
   id: string;
   userId: string;
@@ -113,8 +109,8 @@ function result(row: RelayRow): LocalRelayResult {
     requestId: row.requestId,
     digest: row.digest,
     status: row.status,
-    outcomeReference: row.outputReference
-      ? localRelayPayloadReferenceSchema.parse(JSON.parse(row.outputReference))
+    outcome: row.outputReference
+      ? localLifecycleReplySchema.parse(JSON.parse(row.outputReference))
       : null,
   };
 }
@@ -150,11 +146,11 @@ export class LocalDeviceRepository {
     this.assertAdmitted(userId);
     this.sqlite.transaction(() => this.pruneRelayMetadata(userId, now)).immediate();
     const devices = this.sqlite
-      .prepare("SELECT * FROM codespaceLocalDevice WHERE userId = ? ORDER BY createdAt,id LIMIT 64")
+      .prepare("SELECT * FROM codespaceLocalDevice WHERE userId = ? ORDER BY createdAt,id")
       .all(userId) as DeviceRow[];
     const pairings = this.sqlite
       .prepare(
-        "SELECT * FROM codespaceLocalPairing WHERE userId = ? AND expiresAt > ? ORDER BY createdAt,id LIMIT 16",
+        "SELECT * FROM codespaceLocalPairing WHERE userId = ? AND expiresAt > ? ORDER BY createdAt,id",
       )
       .all(userId, now) as PairingRow[];
     return {
@@ -172,11 +168,6 @@ export class LocalDeviceRepository {
       .transaction(() => {
         this.assertAdmitted(userId);
         this.sqlite.prepare("DELETE FROM codespaceLocalPairing WHERE expiresAt <= ?").run(now);
-        const count = this.sqlite
-          .prepare("SELECT COUNT(*) count FROM codespaceLocalPairing WHERE userId = ?")
-          .get(userId) as { count: number };
-        if (count.count >= 16)
-          throw new LocalDeviceError("LOCAL_CAPACITY", "Too many pending pairings.");
         const pairingId = randomUUID(),
           expiresAt = now + 10 * 60_000;
         this.sqlite
@@ -221,13 +212,6 @@ export class LocalDeviceRepository {
             "LOCAL_CONFLICT",
             "Device already enrolled; revoke and use a new local identity.",
           );
-        const count = this.sqlite
-          .prepare(
-            "SELECT COUNT(*) count FROM codespaceLocalDevice WHERE userId = ? AND status != 'revoked'",
-          )
-          .get(pair.userId) as { count: number };
-        if (count.count >= 32)
-          throw new LocalDeviceError("LOCAL_CAPACITY", "Device limit reached.");
         let connection = this.sqlite
           .prepare("SELECT id FROM codespaceConnection WHERE userId = ? AND provider = ?")
           .get(pair.userId, CODESPACE_PROVIDER_LOCAL) as { id: string } | undefined;
@@ -783,7 +767,7 @@ export class LocalDeviceRepository {
     );
   }
 
-  enqueue(input: LocalRelayRequest, now: number, operationMarker?: string): LocalRelayResult {
+  enqueue(input: LocalRelayRequest, now: number): LocalRelayResult {
     return this.sqlite
       .transaction(() => {
         if ((input.authority === "owner-delete") !== this.ownerDeleteAuthority(input))
@@ -803,47 +787,11 @@ export class LocalDeviceRepository {
             previous.resourceId !== input.resourceId ||
             previous.digest !== input.digest ||
             previous.deadlineAt !== input.deadlineAt ||
-            previous.inputReference !== canonicalJson(input.payloadReference)
+            previous.inputReference !== canonicalJson(input.payload)
           )
             throw new LocalDeviceError("LOCAL_CONFLICT", "Relay request identity changed.");
           return result(previous);
         }
-        // Stop and first delivery share this transaction boundary. Payload retention can
-        // finish after stop/start; a cancelled operation must never first enqueue then.
-        if (
-          operationMarker !== undefined &&
-          !this.sqlite
-            .prepare(
-              `SELECT 1 FROM codespaceOperation WHERE userId = ? AND resourceId = ?
-               AND remoteMarker = ? AND state = 'reconcile_pending'
-               AND lastOutcome = 'dispatch_submitted'`,
-            )
-            .get(input.userId, input.resourceId, operationMarker)
-        )
-          throw new CodespaceResourceError(
-            "CODESPACE_OPERATION_CANCELLED",
-            "The operation was cancelled before delivery",
-            "No command or file change was started. Submit a new request if still needed.",
-            true,
-          );
-        const retained = this.sqlite
-          .prepare(
-            "SELECT COUNT(*) count,SUM(CASE WHEN deviceId=? THEN 1 ELSE 0 END) deviceCount FROM codespaceLocalRelay WHERE userId=?",
-          )
-          .get(input.deviceId, input.userId) as { count: number; deviceCount: number | null };
-        if (
-          retained.count >= MAX_RETAINED_RELAY_REQUESTS_PER_OWNER ||
-          (retained.deviceCount ?? 0) >= MAX_RETAINED_RELAY_REQUESTS_PER_DEVICE
-        )
-          throw new LocalDeviceError("LOCAL_CAPACITY", "Retained device relay metadata is full.");
-        this.verifyPayload(input.userId, input.payloadReference, "local_relay_input", now);
-        const usage = this.sqlite
-          .prepare(
-            "SELECT COUNT(*) count FROM codespaceLocalRelay WHERE deviceId = ? AND status IN ('queued','claimed') AND deadlineAt > ?",
-          )
-          .get(input.deviceId, now) as { count: number };
-        if (usage.count >= 128)
-          throw new LocalDeviceError("LOCAL_CAPACITY", "Device relay queue is full.");
         this.sqlite
           .prepare(
             `INSERT INTO codespaceLocalRelay(requestId,userId,deviceId,deviceGeneration,connectionId,resourceId,resourceGeneration,digest,inputReference,status,deadlineAt,createdAt,updatedAt)
@@ -858,7 +806,7 @@ export class LocalDeviceRepository {
             input.resourceId,
             input.resourceGeneration,
             input.digest,
-            canonicalJson(input.payloadReference),
+            canonicalJson(input.payload),
             input.deadlineAt,
             now,
             now,
@@ -877,6 +825,8 @@ export class LocalDeviceRepository {
         const rows = this.sqlite
           .prepare(
             `SELECT * FROM codespaceLocalRelay WHERE deviceId=? AND deviceGeneration=? AND deadlineAt>?
+        AND json_valid(inputReference) AND json_extract(inputReference,'$.version')=1
+        AND json_extract(inputReference,'$.request.action') IN ('snapshot','create','start','stop','delete')
         AND (status='queued' OR (status='claimed' AND claimExpiresAt<=?)) ORDER BY createdAt,requestId LIMIT ?`,
           )
           .all(auth.deviceId, auth.deviceGeneration, now, now, limit) as RelayRow[];
@@ -888,12 +838,6 @@ export class LocalDeviceRepository {
         for (const row of rows) {
           try {
             this.requireDispatch(row, now);
-            this.verifyPayload(
-              row.userId,
-              localRelayPayloadReferenceSchema.parse(JSON.parse(row.inputReference)),
-              "local_relay_input",
-              now,
-            );
           } catch (error) {
             if (!(error instanceof LocalDeviceError)) throw error;
             this.sqlite
@@ -921,9 +865,7 @@ export class LocalDeviceRepository {
             resourceId: row.resourceId,
             resourceGeneration: row.resourceGeneration,
             digest: row.digest,
-            payloadReference: localRelayPayloadReferenceSchema.parse(
-              JSON.parse(row.inputReference),
-            ),
+            payload: localLifecycleEnvelopeSchema.parse(JSON.parse(row.inputReference)),
             deadlineAt: row.deadlineAt,
             claimId,
             claimExpiresAt,
@@ -946,7 +888,7 @@ export class LocalDeviceRepository {
         if (row.digest !== ack.digest || (row.settlementClaimId ?? row.claimId) !== ack.claimId)
           throw new LocalDeviceError("LOCAL_CONFLICT", "Relay acknowledgement changed.");
         this.requireResourceAuthority(row, now, true);
-        const encoded = canonicalJson(ack.outcomeReference);
+        const encoded = canonicalJson(ack.outcome);
         if (row.status === "completed" || row.status === "refused") {
           if (row.status !== ack.status || row.outputReference !== encoded)
             throw new LocalDeviceError("LOCAL_CONFLICT", "Relay result changed.");
@@ -966,12 +908,12 @@ export class LocalDeviceRepository {
   getResult(userId: string, requestId: string): LocalRelayResult | null {
     this.assertAdmitted(userId);
     const row = this.relay(requestId);
-    return row?.userId === userId ? result(row) : null;
+    return row?.userId === userId && this.isLifecycle(row) ? result(row) : null;
   }
   getRequest(userId: string, requestId: string): LocalRelayRequest | null {
     this.assertAdmitted(userId);
     const row = this.relay(requestId);
-    if (!row || row.userId !== userId) return null;
+    if (!row || row.userId !== userId || !this.isLifecycle(row)) return null;
     return {
       userId: row.userId,
       deviceId: row.deviceId,
@@ -982,7 +924,7 @@ export class LocalDeviceRepository {
       resourceGeneration: row.resourceGeneration,
       ...(this.ownerDeleteAuthority(row) ? { authority: "owner-delete" as const } : {}),
       digest: row.digest,
-      payloadReference: localRelayPayloadReferenceSchema.parse(JSON.parse(row.inputReference)),
+      payload: localLifecycleEnvelopeSchema.parse(JSON.parse(row.inputReference)),
       deadlineAt: row.deadlineAt,
     };
   }
@@ -990,53 +932,6 @@ export class LocalDeviceRepository {
     const claim = this.authorizeResult(auth, ack.requestId, ack.claimId, now);
     if (claim.digest !== ack.digest)
       throw new LocalDeviceError("LOCAL_CONFLICT", "Relay acknowledgement changed.");
-    this.verifyPayload(auth.userId, ack.outcomeReference, "local_relay_output", now);
-    for (const part of ack.outcomeReference.parts) {
-      if (
-        !this.sqlite
-          .prepare(
-            "SELECT transferId FROM codespaceLocalRelayPart WHERE transferId=? AND requestId=? AND claimId=?",
-          )
-          .get(part.transferId, ack.requestId, ack.claimId)
-      )
-        throw new LocalDeviceError(
-          "LOCAL_UNAUTHORIZED",
-          "Result part belongs to another relay claim.",
-        );
-    }
-  }
-
-  registerOutputPart(
-    auth: LocalDeviceAuth,
-    requestId: string,
-    claimId: string,
-    part: LocalRelayPayloadReference["parts"][number],
-    now: number,
-  ): void {
-    this.sqlite
-      .transaction(() => {
-        this.authorizeResult(auth, requestId, claimId, now);
-        this.verifyPayload(
-          auth.userId,
-          { parts: [part], sha256: part.sha256, size: part.size },
-          "local_relay_output",
-          now,
-        );
-        const count = this.sqlite
-          .prepare(
-            `SELECT COUNT(*) count,COALESCE(SUM(t.observedSize),0) bytes FROM codespaceLocalRelayPart p
-        JOIN codespaceTransfer t ON t.id=p.transferId WHERE p.requestId=? AND p.claimId=?`,
-          )
-          .get(requestId, claimId) as { count: number; bytes: number };
-        if (count.count >= 32 || count.bytes + part.size > 24 * 1024 * 1024)
-          throw new LocalDeviceError("LOCAL_CAPACITY", "Relay result exceeds its bound.");
-        this.sqlite
-          .prepare(
-            "INSERT INTO codespaceLocalRelayPart(transferId,requestId,claimId) VALUES(?,?,?)",
-          )
-          .run(part.transferId, requestId, claimId);
-      })
-      .immediate();
   }
 
   renewClaim(
@@ -1137,40 +1032,23 @@ export class LocalDeviceRepository {
       resourceId: row.resourceId,
       resourceGeneration: row.resourceGeneration,
       digest: row.digest,
-      payloadReference: localRelayPayloadReferenceSchema.parse(JSON.parse(row.inputReference)),
+      payload: localLifecycleEnvelopeSchema.parse(JSON.parse(row.inputReference)),
       deadlineAt: row.deadlineAt,
       claimId: row.claimId,
       claimExpiresAt: row.claimExpiresAt,
     };
   }
 
-  private verifyPayload(
-    userId: string,
-    reference: LocalRelayPayloadReference,
-    purpose: string,
-    now: number,
-  ): void {
-    for (const part of reference.parts) {
-      const owned = this.sqlite
-        .prepare(
-          `SELECT id FROM codespaceTransfer WHERE id=? AND userId=? AND purpose=? AND sha256=?
-        AND observedSize=? AND state IN ('ready','claimed') AND expiresAt>?`,
-        )
-        .get(part.transferId, userId, purpose, part.sha256, part.size, now);
-      if (!owned)
-        throw new LocalDeviceError("LOCAL_UNAUTHORIZED", "Private payload ownership denied.");
-    }
-  }
   /** Keep live authority and the full replay horizon; capacity never evicts a fresh receipt. */
   private pruneRelayMetadata(userId: string, now: number): void {
     this.sqlite
       .prepare(
-        "UPDATE codespaceLocalRelay SET status='expired',updatedAt=? WHERE userId=? AND status IN ('queued','claimed') AND deadlineAt<=?",
+        "UPDATE codespaceLocalRelay SET status='expired',updatedAt=? WHERE userId=? AND json_valid(inputReference) AND json_extract(inputReference,'$.request.action') IN ('snapshot','create','start','stop','delete') AND status IN ('queued','claimed') AND deadlineAt<=?",
       )
       .run(now, userId, now);
     this.sqlite
       .prepare(
-        "DELETE FROM codespaceLocalRelay WHERE userId=? AND status NOT IN ('queued','claimed') AND deadlineAt<?",
+        "DELETE FROM codespaceLocalRelay WHERE userId=? AND json_valid(inputReference) AND json_extract(inputReference,'$.request.action') IN ('snapshot','create','start','stop','delete') AND status NOT IN ('queued','claimed') AND deadlineAt<?",
       )
       .run(userId, now - RELAY_REPLAY_RETENTION_MS);
   }
@@ -1179,6 +1057,7 @@ export class LocalDeviceRepository {
     const row = this.relay(requestId);
     if (
       !row ||
+      !this.isLifecycle(row) ||
       row.userId !== auth.userId ||
       row.deviceId !== auth.deviceId ||
       row.deviceGeneration !== auth.deviceGeneration ||
@@ -1325,6 +1204,13 @@ export class LocalDeviceRepository {
   private relay(id: string): RelayRow | undefined {
     return this.sqlite.prepare("SELECT * FROM codespaceLocalRelay WHERE requestId=?").get(id) as
       RelayRow | undefined;
+  }
+  private isLifecycle(row: RelayRow): boolean {
+    try {
+      return localLifecycleEnvelopeSchema.safeParse(JSON.parse(row.inputReference)).success;
+    } catch {
+      return false;
+    }
   }
   private syncConnection(connectionId: string, now: number): void {
     const devices = this.sqlite

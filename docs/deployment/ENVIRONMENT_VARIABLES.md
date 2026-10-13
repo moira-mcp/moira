@@ -70,7 +70,10 @@ An exception for the config module itself is configured in `.eslintrc.json` over
 
 - `TRUST_PROXY` - proxies trusted to report the client address through `X-Forwarded-For`, passed to
   Express `trust proxy` in web-backend and mcp-server. Unset → `loopback` (the in-container nginx
-  only). A non-negative integer is a hop count (`2` = one outer proxy such as Traefik, then nginx);
+  only). The supplied public Compose overrides this with `2` for its ordinary
+  Traefik → nginx route and direct workspace route. An operator override must match
+  the actual trusted proxy topology; public ingress must replace untrusted forwarding
+  headers. A non-negative integer is a hop count (`2` = one outer proxy such as Traefik, then nginx);
   otherwise a comma-separated list of IP addresses, CIDR subnets and `loopback` / `linklocal` /
   `uniquelocal`. `true` and malformed values → start error. Getter: `getTrustProxy()`; parser
   `parseTrustProxy()` (`packages/shared/src/config/trust-proxy.ts`); applied by `applyTrustProxy()`
@@ -171,8 +174,8 @@ openssl rand -hex 32
 
 Compose forwards these names from the operator environment with empty defaults,
 so adding the image does not enable the integration or bake a credential into an
-image layer. Codespace creation and direct operations have a second, independent
-feature gate and remain disabled unless `CODESPACE_CODESPACES_ENABLED=true`.
+image layer. GitHub Codespaces creation and use require `CODESPACE_CODESPACES_ENABLED=true`.
+Local computers use their own applied owner permissions and lease.
 
 The `codespaces` Compose profile runs the credential-bearing connector and its
 credential-free egress proxy from the same `MOIRA_IMAGE`. Enable it only after
@@ -182,59 +185,44 @@ the GitHub App, vault and policy variables are configured:
 docker compose --profile codespaces up -d
 ```
 
-| Variable                                       | Default | Requirement or meaning                                      |
-| ---------------------------------------------- | ------: | ----------------------------------------------------------- |
-| `CODESPACE_CODESPACES_ENABLED`                 | `false` | Enables resource creation and direct operations             |
-| `CODESPACE_MAX_CPU_CORES`                      |       4 | Maximum selected Linux machine CPU cores                    |
-| `CODESPACE_MAX_MEMORY_GB`                      |       8 | Maximum selected machine memory                             |
-| `CODESPACE_MAX_STORAGE_GB`                     |      32 | Maximum selected machine storage                            |
-| `CODESPACE_MAX_ACTIVE_PER_USER`                |       4 | Codespaces a user holds, stopped included; maximum 64       |
-| `CODESPACE_MAX_ACTIVE_GLOBAL`                  |      16 | Codespaces held instance-wide, stopped included; max 1024   |
-| `CODESPACE_CREATE_THROTTLE_SECONDS`            |      60 | Minimum interval between creation reservations              |
-| `CODESPACE_PERSISTENT_RETENTION_DAYS`          |      30 | Provider retention requested for stopped codespaces; max 30 |
-| `CODESPACE_CREATE_DEADLINE_MINUTES`            |      15 | Create reconciliation deadline                              |
-| `CODESPACE_CLEANUP_DEADLINE_MINUTES`           |      15 | Lifecycle cleanup deadline and result retention             |
-| `CODESPACE_CLAIM_LEASE_SECONDS`                |      30 | Cross-process reconciliation claim lease                    |
-| `CODESPACE_RECONCILE_INTERVAL_SECONDS`         |      30 | Background reconciliation interval                          |
-| `CODESPACE_START_WAIT_SECONDS`                 |     180 | Wait for a codespace an operation started; 5 to 900         |
-| `CODESPACE_MAX_CONCURRENT_OPERATIONS_PER_USER` |       8 | Concurrent direct operations per user; maximum 32           |
-| `CODESPACE_MAX_CONCURRENT_OPERATIONS_GLOBAL`   |      32 | Instance-wide concurrent direct operations; maximum 256     |
-| `CODESPACE_MAX_OPERATION_INPUT_KB`             |    1024 | Direct-operation stdin; maximum 4096 KiB                    |
-| `CODESPACE_MAX_OPERATION_STDOUT_KB`            |    1024 | Stdout carried by one answer; maximum 8192 KiB              |
-| `CODESPACE_MAX_OPERATION_STDERR_KB`            |     256 | Stderr carried by one answer; maximum 8192 KiB              |
-| `CODESPACE_MAX_RETAINED_OUTPUT_MB`             |      64 | Retained output per stream, in the codespace; maximum 4096  |
-| `CODESPACE_MAX_OPERATION_SECONDS`              |     900 | Bounded-command duration; maximum 900 seconds               |
-| `CODESPACE_MAX_BACKGROUND_OPERATION_HOURS`     |       4 | Background duration; max 4 (GitHub's 240-min idle stop)     |
-| `CODESPACE_MAX_TRANSFER_FILE_MB`               |      20 | Native binary file ceiling; parser accepts 1–1024 MiB       |
-| `CODESPACE_MAX_TRANSFER_TOTAL_MB_PER_USER`     |     100 | Live private-transfer bytes per user; maximum 1024 MiB      |
-| `CODESPACE_MAX_TRANSFER_TOTAL_MB_GLOBAL`       |    1024 | Instance live private-transfer bytes; maximum 16384 MiB     |
-| `CODESPACE_MAX_TRANSFER_OBJECTS_PER_USER`      |      10 | Live private-transfer objects per user; maximum 100         |
-| `CODESPACE_MAX_TRANSFER_OBJECTS_GLOBAL`        |    1000 | Instance live private-transfer objects; maximum 10000       |
-| `CODESPACE_MAX_TRANSFER_INFLIGHT_MB_PER_USER`  |      40 | Reserved/claimed bytes per user; maximum 256 MiB            |
-| `CODESPACE_MAX_TRANSFER_INFLIGHT_MB_GLOBAL`    |     256 | Instance reserved/claimed bytes; maximum 4096 MiB           |
-| `CODESPACE_TRANSFER_TTL_MINUTES`               |      10 | Private object/capability lifetime; maximum 60 minutes      |
+| Variable                               | Default | Requirement or meaning                                      |
+| -------------------------------------- | ------: | ----------------------------------------------------------- |
+| `CODESPACE_CODESPACES_ENABLED`         | `false` | Enables GitHub Codespaces creation and use                  |
+| `CODESPACE_MAX_CPU_CORES`              |       4 | Maximum selected Linux machine CPU cores                    |
+| `CODESPACE_MAX_MEMORY_GB`              |       8 | Maximum selected machine memory                             |
+| `CODESPACE_MAX_STORAGE_GB`             |      32 | Maximum selected machine storage                            |
+| `CODESPACE_MAX_ACTIVE_PER_USER`        |       4 | GitHub Codespaces a user holds, stopped included            |
+| `CODESPACE_MAX_ACTIVE_GLOBAL`          |      16 | GitHub Codespaces held instance-wide, stopped included      |
+| `CODESPACE_CREATE_THROTTLE_SECONDS`    |      60 | Minimum interval between creation reservations              |
+| `CODESPACE_PERSISTENT_RETENTION_DAYS`  |      30 | Provider retention requested for stopped codespaces; max 30 |
+| `CODESPACE_CREATE_DEADLINE_MINUTES`    |      15 | Create reconciliation deadline                              |
+| `CODESPACE_CLEANUP_DEADLINE_MINUTES`   |      15 | Provider lifecycle cleanup deadline                         |
+| `CODESPACE_CLAIM_LEASE_SECONDS`        |      30 | Cross-process reconciliation claim lease                    |
+| `CODESPACE_RECONCILE_INTERVAL_SECONDS` |      30 | Background reconciliation interval                          |
+| `CODESPACE_START_WAIT_SECONDS`         |     180 | Provider startup wait                                       |
+| `CODESPACE_TRANSFER_TTL_MINUTES`       |      10 | Published private attachment-link lifetime                  |
 
-The binary file ceiling applies to native private transfers. Transfer chunks are
-bounded to 256 KiB. Code-file reads and edits, individual read ranges, image previews
-and relay parts retain their separate 4 MiB ceilings. Command stdin defaults to
-1 MiB and can be configured up to 4 MiB through `CODESPACE_MAX_OPERATION_INPUT_KB`.
-The relay control-envelope ceiling remains 24 MiB. Raising
-`CODESPACE_MAX_TRANSFER_FILE_MB` does not raise these limits or place binary bytes
-inside relay control envelopes.
+Numeric settings require positive safe integers, including their conversion to bytes or
+milliseconds. Provider retention additionally accepts only 1–30 days. The global
+active-resource limit must be at least the per-user limit. Invalid
+resource policy fails configuration. These settings govern GitHub resource lifecycle
+and billing; they do not impose command concurrency, duration, stdin/output or file
+size quotas. Local allocations remain governed by applied owner budgets, grants,
+lease and physical storage availability.
 
-The global active-resource limit must be at least the per-user limit. The same
-constraint applies to global and per-user operation concurrency. Both transfer
-aggregate and in-flight byte budgets must contain the maximum single file; each
-global byte or in-flight ceiling must be at least its per-user counterpart. Although
-the file setting parser accepts up to 1024 MiB, the per-user in-flight setting accepts
-at most 256 MiB, so a valid combined policy cannot allow a file above 256 MiB. With
-the default per-user in-flight budget of 40 MiB, increasing the file ceiling above
-40 MiB also requires increasing that budget and any smaller aggregate budget.
-Invalid policy values fail configuration rather than silently weakening a limit.
-The complete
-connection, lifecycle, operation and isolation contracts are documented in
-`docs/CODESPACES.md`; the website connection procedure remains in the public
-Self-Hosting guide.
+The common guest workspace service streams command and file bytes. Caller-selected
+ranges, expected file versions, repository ownership, path/type safety, current
+resource authority and explicit command deadlines still apply.
+Inline MCP image preview retains its separate 4 MiB, 8192-pixel-per-edge and
+16-million-pixel container bounds; download does not inherit those preview limits.
+`CODESPACE_TRANSFER_TTL_MINUTES` controls published private attachment links,
+not guest command or file-operation retention.
+
+The supported public Compose includes `config/traefik-self-host.yml`. Its ingress
+routes HTTP/1.1 Upgrade requests under `/api/workspaces/` directly to backend
+port 3001 and ordinary requests to nginx port 80 through the same public port.
+The nginx route alone does not support workspace streams. See `docs/CODESPACES.md`
+and the public Self-Hosting guide for connection and lifecycle contracts.
 
 ### First-start secret auto-generation (self-host)
 
@@ -493,21 +481,6 @@ CODESPACE_CLEANUP_DEADLINE_MINUTES=15
 CODESPACE_CLAIM_LEASE_SECONDS=30
 CODESPACE_RECONCILE_INTERVAL_SECONDS=30
 CODESPACE_START_WAIT_SECONDS=180
-CODESPACE_MAX_CONCURRENT_OPERATIONS_PER_USER=8
-CODESPACE_MAX_CONCURRENT_OPERATIONS_GLOBAL=32
-CODESPACE_MAX_OPERATION_INPUT_KB=1024
-CODESPACE_MAX_OPERATION_STDOUT_KB=1024
-CODESPACE_MAX_OPERATION_STDERR_KB=256
-CODESPACE_MAX_RETAINED_OUTPUT_MB=64
-CODESPACE_MAX_OPERATION_SECONDS=900
-CODESPACE_MAX_BACKGROUND_OPERATION_HOURS=4
-CODESPACE_MAX_TRANSFER_FILE_MB=20
-CODESPACE_MAX_TRANSFER_TOTAL_MB_PER_USER=100
-CODESPACE_MAX_TRANSFER_TOTAL_MB_GLOBAL=1024
-CODESPACE_MAX_TRANSFER_OBJECTS_PER_USER=10
-CODESPACE_MAX_TRANSFER_OBJECTS_GLOBAL=1000
-CODESPACE_MAX_TRANSFER_INFLIGHT_MB_PER_USER=40
-CODESPACE_MAX_TRANSFER_INFLIGHT_MB_GLOBAL=256
 CODESPACE_TRANSFER_TTL_MINUTES=10
 
 # Environment

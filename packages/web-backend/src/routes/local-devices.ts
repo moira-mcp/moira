@@ -1,9 +1,8 @@
-import { Router, json, raw, type Request, type Response, type NextFunction } from "express";
+import { Router, json, type Request, type Response, type NextFunction } from "express";
 import { setTimeout as delay } from "node:timers/promises";
 import { z } from "zod";
 import {
   LocalDeviceError,
-  LOCAL_RESULT_SETTLEMENT_RETENTION_MS,
   localPublicPolicySchema,
   localAcknowledgementSchema,
   localControlReportSchema,
@@ -11,10 +10,11 @@ import {
   type LocalDeviceService,
   type LocalDeviceAuth,
   type LocalRelayAcknowledgement,
-  type CodespaceTransferService,
 } from "@mcp-moira/shared";
 import type { AuthenticatedRequest } from "../types/express-types.js";
 import { getLocalRepositoryAdmissionService } from "../services/local-repository-admission-factory.js";
+import { issueWorkspaceAgentCredential } from "../services/workspace-services.js";
+import { getSqliteInstance } from "@mcp-moira/shared";
 
 type Handler = (req: Request, res: Response, next: NextFunction) => unknown | Promise<unknown>;
 function endpoint(handler: Handler) {
@@ -27,7 +27,6 @@ function endpoint(handler: Handler) {
             LOCAL_UNAUTHORIZED: 401,
             LOCAL_CONFLICT: 409,
             LOCAL_EXPIRED: 410,
-            LOCAL_CAPACITY: 429,
             LOCAL_INVALID: 400,
           }[error.code];
           res
@@ -186,14 +185,38 @@ export function createLocalDeviceManagementRoutes(
 }
 
 /** Native companion initiates outbound requests; these routes use device credentials, not cookies. */
-export function createLocalDeviceRoutes(
-  service: LocalDeviceService,
-  transfers: CodespaceTransferService,
-  publicOrigin: string,
-): Router {
+export function createLocalDeviceRoutes(service: LocalDeviceService, publicOrigin: string): Router {
   const router = Router();
   protectOrigin(router, publicOrigin);
   router.use(json({ limit: "2mb" }));
+  router.post(
+    "/workspaces/bootstrap",
+    endpoint((req, res) => {
+      const auth = deviceAuth(service, req);
+      const input = z
+        .object({
+          resourceId: z.string().uuid(),
+          environmentIdentity: z.string().regex(/^[a-f0-9]{64}$/),
+        })
+        .strict()
+        .parse(req.body);
+      const binding = getSqliteInstance()
+        .prepare(
+          `SELECT 1 FROM codespaceLocalResourceBinding
+        WHERE resourceId=? AND userId=? AND deviceId=? AND deviceGeneration=?`,
+        )
+        .get(input.resourceId, auth.userId, auth.deviceId, auth.deviceGeneration);
+      if (!binding) throw new LocalDeviceError("LOCAL_UNAUTHORIZED", "Workspace binding refused.");
+      res.json({
+        success: true,
+        data: issueWorkspaceAgentCredential(
+          auth.userId,
+          input.resourceId,
+          input.environmentIdentity,
+        ),
+      });
+    }),
+  );
   router.post(
     "/enroll",
     endpoint((req, res) =>
@@ -235,7 +258,7 @@ export function createLocalDeviceRoutes(
           if (requests.length || Date.now() >= deadline) {
             res.json({
               success: true,
-              data: { requests, maxPartBytes: transfers.relayPartLimit() },
+              data: { requests },
             });
             return;
           }
@@ -278,84 +301,7 @@ export function createLocalDeviceRoutes(
         res.json({ success: true, data: service.acknowledge(auth, ack) });
         return;
       }
-      service.authorizeOutput(auth, ack);
-      await transfers.readRelayPayload(auth.userId, "local_relay_output", ack.outcomeReference);
       res.json({ success: true, data: service.acknowledge(deviceAuth(service, req), ack) });
-    }),
-  );
-  return finishRouter(router);
-}
-
-/** Mount before global JSON parsing and body logging at /api/local-devices. */
-export function createLocalDeviceBinaryRoutes(
-  service: LocalDeviceService,
-  transfers: CodespaceTransferService,
-  publicOrigin: string,
-): Router {
-  const router = Router();
-  protectOrigin(router, publicOrigin);
-  router.get(
-    "/relay/:requestId/payload/:partIndex",
-    endpoint(async (req, res) => {
-      const auth = deviceAuth(service, req),
-        requestId = param(req, "requestId"),
-        claimId = claimHeader(req);
-      const claim = service.authorizePayload(auth, requestId, claimId);
-      const partIndex = z.coerce.number().int().min(0).max(31).parse(req.params.partIndex);
-      const query = z
-        .object({
-          offset: z.coerce.number().int().min(0),
-          length: z.coerce
-            .number()
-            .int()
-            .min(0)
-            .max(256 * 1024),
-        })
-        .strict()
-        .parse(req.query);
-      const bytes = await transfers.readRelayChunk(
-        auth.userId,
-        "local_relay_input",
-        claim.payloadReference,
-        partIndex,
-        query.offset,
-        query.length,
-      );
-      service.authorizePayload(deviceAuth(service, req), requestId, claimId);
-      res.type("application/octet-stream").send(bytes);
-    }),
-  );
-  router.post(
-    "/relay/:requestId/result-part",
-    endpoint((req, _res, next) => {
-      service.authorizeResult(deviceAuth(service, req), param(req, "requestId"), claimHeader(req));
-      next();
-    }),
-    raw({ type: "application/octet-stream", limit: 4 * 1024 * 1024 }),
-    endpoint(async (req, res) => {
-      const auth = deviceAuth(service, req),
-        requestId = param(req, "requestId"),
-        claimId = claimHeader(req);
-      const claim = service.authorizeResult(auth, requestId, claimId);
-      if (!Buffer.isBuffer(req.body))
-        throw new LocalDeviceError("LOCAL_INVALID", "Binary result part required.");
-      const part = await transfers.retainRelayPart(
-        auth.userId,
-        "local_relay_output",
-        req.body,
-        claim.deadlineAt + LOCAL_RESULT_SETTLEMENT_RETENTION_MS,
-      );
-      try {
-        service.registerOutputPart(deviceAuth(service, req), requestId, claimId, part);
-      } catch (error) {
-        await transfers.discardRelayPayload(auth.userId, "local_relay_output", {
-          parts: [part],
-          sha256: part.sha256,
-          size: part.size,
-        });
-        throw error;
-      }
-      res.status(201).json({ success: true, data: part });
     }),
   );
   return finishRouter(router);

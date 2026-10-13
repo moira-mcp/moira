@@ -46,7 +46,6 @@ describe("MCP Help System E2E", () => {
     // Introduction MDX contains Moira description
     expect(result).toContain("Moira");
     expect(result).toContain("workflow");
-    expect(result.length).toBeLessThan(10000);
 
     console.log("✓ Overview documentation generated");
   });

@@ -13,7 +13,8 @@ export interface ProcessRequest {
   /** Persistent fixed companions retain a bounded tail per stream instead of a lifetime budget. */
   retainOutput?: boolean;
   timeoutMs: number | null;
-  maxBytes: number;
+  /** null is reserved for complete fixed SDK inventory metadata, never command execution. */
+  maxBytes: number | null;
   signal?: AbortSignal;
 }
 export interface ProcessResult {
@@ -63,11 +64,11 @@ export const runProcess: RunProcess = (request) =>
     request.signal?.addEventListener("abort", cancel, { once: true });
     const collect = (chunks: Buffer[]) => (chunk: Buffer) => {
       bytes += chunk.length;
-      if (!request.retainOutput && bytes > request.maxBytes) {
+      if (!request.retainOutput && request.maxBytes !== null && bytes > request.maxBytes) {
         stop("LOCAL_OUTPUT_LIMIT", "Local runtime output exceeded its bound.");
       } else {
         chunks.push(Buffer.from(chunk));
-        if (request.retainOutput) {
+        if (request.retainOutput && request.maxBytes !== null) {
           let retained = chunks.reduce((total, bytes) => total + bytes.length, 0);
           while (retained > request.maxBytes) {
             const first = chunks[0];

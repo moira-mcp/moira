@@ -1,0 +1,14 @@
+{
+  "name": "@mcp-moira/workspace-service",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/server.mjs",
+  "exports": {
+    ".": "./src/server.mjs",
+    "./engine": "./src/engine.mjs"
+  },
+  "dependencies": {
+    "stream-json": "3.7.0"
+  }
+}

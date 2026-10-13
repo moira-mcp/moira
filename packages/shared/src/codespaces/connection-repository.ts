@@ -725,22 +725,6 @@ export class CodespaceConnectionRepository {
           input.userId,
           input.expectedGeneration,
         );
-      this.sqlite
-        .prepare(
-          `UPDATE codespaceOperation SET authorizationGeneration = ?, updatedAt = ?
-           WHERE userId = ? AND authorizationGeneration = ?
-             AND resourceId IN (SELECT id FROM codespaceResource WHERE connectionId = ?)
-             AND (state IN ('reserved', 'running', 'cancel_pending', 'reconcile_pending')
-               OR (remoteCleanupPending = 1
-                 AND state IN ('succeeded', 'failed', 'cancelled', 'timed_out')))`,
-        )
-        .run(
-          input.envelope.generation,
-          input.now,
-          input.userId,
-          input.expectedGeneration,
-          input.connectionId,
-        );
       return true;
     });
     return tx();

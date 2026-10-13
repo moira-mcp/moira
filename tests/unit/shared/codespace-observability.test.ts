@@ -1,12 +1,10 @@
 import { describe, expect, it } from "@jest/globals";
 import {
   CodespaceObservabilityService,
-  effectiveCodespaceLimits,
   isCodespaceReadinessDegraded,
   metricsRegistry,
   projectPublicCodespaceReadiness,
   recordCodespaceConnectionEvent,
-  recordCodespaceOperationEvent,
   recordCodespaceRejection,
   recordCodespaceResourceEvent,
   type CodespaceGitHubConfigStatus,
@@ -40,8 +38,6 @@ const policy: CodespaceResourcePolicy = {
   claimLeaseMs: 5_000,
   reconcileIntervalMs: 30_000,
   startWaitMs: 60_000,
-  maxConcurrentOperationsGlobal: 20,
-  maxTransferBytesGlobal: 1024 ** 3,
 };
 
 function dependencies(
@@ -60,19 +56,6 @@ function dependencies(
       dueSummary: () => ({ count: 1, oldestUpdatedAt: NOW - 45_000 }),
       countHeld: () => 1,
       idlePolicy: () => ({ autoStopEnabled: true, idleTimeoutMinutes: 30 }),
-    },
-    operations: {
-      countActive: () => 3,
-      dueSummary: () => ({ count: 2, oldestUpdatedAt: NOW - 5_000 }),
-      countActiveForUser: () => 1,
-    },
-    transfers: {
-      listLive: () =>
-        [
-          { declaredSize: 1024, observedSize: 512 },
-          { declaredSize: 4096, observedSize: null },
-        ] as ReturnType<CodespaceObservabilityDependencies["transfers"]["listLive"]>,
-      usageForUser: () => ({ objects: 0, bytes: 0, inflightBytes: 0 }),
     },
     transport: { health: async () => ({ ok: true, reason: null }) },
     now: () => NOW,
@@ -132,14 +115,10 @@ describe("codespace observability", () => {
       reason: null,
       configuration: "available",
       connector: { state: "available" },
-      reconciliation: { due_resources: 1, due_operations: 2, oldest_due_age_ms: 45_000 },
+      reconciliation: { due_resources: 1, oldest_due_age_ms: 45_000 },
       usage: {
         active_resources: 2,
         max_active_resources: 4,
-        active_operations: 3,
-        max_active_operations: 20,
-        transfer_live_bytes: 512 + 4096,
-        max_transfer_live_bytes: 2 * 1024 ** 3,
       },
       checked_at: NOW,
     });
@@ -147,33 +126,10 @@ describe("codespace observability", () => {
     await expect(gauge("moira_codespace_ready", { provider: "github-codespaces" })).resolves.toBe(
       1,
     );
-    await expect(gauge("moira_codespace_reconciliation_due", { kind: "operation" })).resolves.toBe(
-      2,
-    );
     await expect(
       gauge("moira_codespace_reconciliation_oldest_due_age_seconds", { kind: "resource" }),
     ).resolves.toBe(45);
     await expect(gauge("moira_codespace_active", { kind: "resource" })).resolves.toBe(2);
-    await expect(gauge("moira_codespace_transfer_live_bytes")).resolves.toBe(4608);
-  });
-
-  it("reports the enforced operation and live-transfer ceilings when the policy leaves them unset", async () => {
-    const unset: CodespaceResourcePolicy = { ...policy };
-    delete unset.maxConcurrentOperationsGlobal;
-    delete unset.maxTransferBytesGlobal;
-    const enforced = effectiveCodespaceLimits(unset);
-
-    const view = await new CodespaceObservabilityService(
-      dependencies({ policy: () => unset }),
-    ).readiness();
-
-    // The ceilings enforcement applies, never an absent value an operator would read as "no limit".
-    expect(view.usage.max_active_operations).toBe(enforced.operations.maxConcurrentGlobal);
-    expect(view.usage.max_transfer_live_bytes).toBe(
-      enforced.transfers.maxBytesGlobal + enforced.relayTransfers.maxBytesGlobal,
-    );
-    expect(view.usage.max_active_operations).not.toBeNull();
-    expect(view.usage.max_transfer_live_bytes).not.toBeNull();
   });
 
   it.each([
@@ -354,23 +310,6 @@ describe("codespace observability", () => {
       state: "usable",
       machine: { name: "m", cpuCores: 2, memoryBytes: 1, storageBytes: 1 },
     });
-    recordCodespaceOperationEvent(
-      {
-        action: "terminal",
-        userId: "user-private",
-        codespaceId: "11111111-1111-4111-8111-111111111111",
-        operationId: "22222222-2222-4222-8222-222222222222",
-        provider: "github-codespaces",
-        state: "succeeded",
-        kind: "exec",
-        inputBytes: 0,
-        outputBytes: 10,
-        exitCode: 0,
-        createdAt: NOW,
-        updatedAt: NOW + 2_500,
-      },
-      2_500,
-    );
     recordCodespaceRejection("CODESPACE_POLICY_LIMIT");
     recordCodespaceRejection("CODESPACE_START_TIMEOUT");
     recordCodespaceRejection("NOT_A_CLOSED_CODE");
@@ -387,12 +326,6 @@ describe("codespace observability", () => {
     expect(rendered).not.toMatch(/connection-private|provider_rejected_refresh/);
     expect(rendered).toContain(
       'moira_codespace_lifecycle_events_total{provider="github-codespaces",action="start",state="usable"} 1',
-    );
-    expect(rendered).toContain(
-      'moira_codespace_operation_events_total{provider="github-codespaces",kind="exec",action="terminal",state="succeeded"} 1',
-    );
-    expect(rendered).toMatch(
-      /moira_codespace_operation_duration_seconds_count\{kind="exec",state="succeeded"\} 1/,
     );
     expect(rendered).toContain('moira_codespace_rejections_total{code="CODESPACE_POLICY_LIMIT"} 1');
     expect(rendered).not.toContain("NOT_A_CLOSED_CODE");

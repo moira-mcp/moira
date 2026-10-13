@@ -19,8 +19,6 @@ const localLimits = projectCodespaceLimits({
   policy: evaluateCodespaceResourcePolicy(() => undefined),
   held: 2,
   instanceHeld: 3,
-  activeOperations: 1,
-  transfers: { objects: 1, bytes: 2048, inflightBytes: 0 },
   idle: { autoStopEnabled: true, idleTimeoutMinutes: 30 },
   providerIdleMaxMinutes: 240,
 });

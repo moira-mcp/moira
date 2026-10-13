@@ -1,9 +1,5 @@
 import { afterEach, describe, expect, it, jest } from "@jest/globals";
-import {
-  LocalDeviceError,
-  CodespaceResourceError,
-  type CodespaceOperationRecord,
-} from "@mcp-moira/shared";
+import { LocalDeviceError, CodespaceResourceError } from "@mcp-moira/shared";
 import {
   executeCodespaceTool,
   parseCodespaceToolParams,
@@ -28,8 +24,7 @@ function services(): CodespaceToolServices {
     guidance: unexpected,
     select: jest.fn(unexpected),
     resource: null,
-    operation: null,
-    file: null,
+    workspace: { json: async () => unexpected(), request: async () => unexpected() },
     localRepositories: {
       listDevices: jest.fn(() => ({ devices: [{ device_id: DEVICE_ID, delegation: null }] })),
       addExistingRepository: jest.fn(async () => ({
@@ -321,119 +316,20 @@ describe("local repository MCP admission", () => {
     expect(() => parseCodespaceToolParams({ ...request, request_id: undefined })).toThrow();
   });
 
-  it("image resume carries only durable operation identity", () => {
-    const resume = { action: "preview_image", codespace_id: DEVICE_ID, operation_id: REQUEST_ID };
-    expect(parseCodespaceToolParams(resume)).toMatchObject({
-      action: "preview_image",
-      request: {
+  it("preview reads the current file and refuses obsolete cloud operation forms", () => {
+    expect(
+      parseCodespaceToolParams({
+        action: "preview_image",
+        codespace_id: DEVICE_ID,
+        path: "image.png",
+      }),
+    ).toMatchObject({ action: "preview_image", request: { path: "image.png" } });
+    expect(() =>
+      parseCodespaceToolParams({
+        action: "preview_image",
         codespace_id: DEVICE_ID,
         operation_id: REQUEST_ID,
-      },
-    });
-    expect(() => parseCodespaceToolParams({ ...resume, path: "different.png" })).toThrow();
-    expect(() => parseCodespaceToolParams({ ...resume, mime_type: "image/png" })).toThrow();
-  });
-
-  it("image resume stays bound to its owned codespace and download kind without redispatch", async () => {
-    const dependencies = services();
-    const unexpected = () => {
-      throw new Error("Unexpected new operation dispatch");
-    };
-    dependencies.select = undefined;
-    dependencies.connection.getStatus = () => ({
-      state: "connected",
-      reason: null,
-      settingsUrl: "https://moira.example/settings",
-      installationUrl: null,
-      account: null,
-      installations: [],
-      repositories: [],
-      canConnect: false,
-      canDisconnect: true,
-    });
-    dependencies.guidance = (situation) => ({
-      provider: "local-sandboxes",
-      situation,
-      instruction: null,
-      links: [],
-    });
-    dependencies.resource = {
-      listRepositories: unexpected,
-      setupSituation: unexpected,
-      listResources: unexpected,
-      refreshProviderState: unexpected,
-      getCodespace: unexpected,
-      create: unexpected,
-      startCodespace: unexpected,
-      stopCodespace: unexpected,
-      deleteCodespace: unexpected,
-      waitForState: unexpected,
-    };
-    let owned: CodespaceOperationRecord | null = {
-      id: REQUEST_ID,
-      userId: "owner",
-      resourceId: DEVICE_ID,
-      resourceGeneration: 3,
-      authorizationGeneration: 7,
-      provider: "local-sandboxes",
-      providerResourceName: "private-runtime",
-      remoteMarker: "private-marker",
-      kind: "download",
-      state: "running",
-      inputBytes: 0,
-      stdoutLimitBytes: 1024,
-      stderrLimitBytes: 1,
-      outputBytes: 0,
-      exitCode: null,
-      remoteCleanupPending: 0,
-      resultExpiresAt: 500,
-      deadlineAt: 400,
-      claimId: null,
-      claimExpiresAt: null,
-      lastOutcome: "pending",
-      createdAt: 100,
-      updatedAt: 200,
-    };
-    dependencies.operation = {
-      get: jest.fn(() => owned),
-      execute: unexpected,
-      executeNativeReference: unexpected,
-      reconcile: unexpected,
-      readOutput: unexpected,
-      cancel: unexpected,
-      waitForResult: unexpected,
-    };
-    dependencies.file = {
-      execute: jest.fn(unexpected),
-      uploadReference: unexpected,
-      downloadReference: unexpected,
-      reconcileDownloadReference: unexpected,
-      waitForDownloadReference: unexpected,
-      reconcile: unexpected,
-      waitForResult: jest.fn(async () => {
-        if (!owned) throw new Error("Missing owned operation");
-        return { operation: owned, result: null };
       }),
-    };
-    const call = parseCodespaceToolParams({
-      action: "preview_image",
-      codespace_id: DEVICE_ID,
-      operation_id: REQUEST_ID,
-    });
-    const unknown = await executeCodespaceTool(call, "owner", dependencies);
-    expect(unknown.isError).toBe(true);
-    expect(unknown.structuredContent).toMatchObject({
-      operation_id: REQUEST_ID,
-      error: { code: "CODESPACE_PROVIDER_UNAVAILABLE" },
-    });
-    expect(dependencies.file.waitForResult).toHaveBeenCalledWith("owner", REQUEST_ID);
-    expect(dependencies.file.execute).not.toHaveBeenCalled();
-    for (const changed of [{ resourceId: REQUEST_ID }, { kind: "read" as const }]) {
-      owned = { ...owned!, ...changed };
-      expect((await executeCodespaceTool(call, "owner", dependencies)).isError).toBe(true);
-    }
-    owned = null;
-    expect((await executeCodespaceTool(call, "other-owner", dependencies)).isError).toBe(true);
-    expect(dependencies.file.waitForResult).toHaveBeenCalledTimes(1);
+    ).toThrow();
   });
 });

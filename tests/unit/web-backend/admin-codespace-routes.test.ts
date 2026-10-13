@@ -23,14 +23,10 @@ const readiness: CodespaceReadinessView = {
     { scope: "provider:github-codespaces", disabled: false, reason: null, updated_at: null },
   ],
   connector: { state: "available", reason: null },
-  reconciliation: { due_resources: 0, due_operations: 0, oldest_due_age_ms: null },
+  reconciliation: { due_resources: 0, oldest_due_age_ms: null },
   usage: {
     active_resources: 0,
     max_active_resources: 4,
-    active_operations: 0,
-    max_active_operations: 20,
-    transfer_live_bytes: 0,
-    max_transfer_live_bytes: 1024 ** 3,
   },
   checked_at: 1,
 };

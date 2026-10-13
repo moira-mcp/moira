@@ -260,16 +260,21 @@ describe("bounded runtime storage mount", () => {
     ).toBeLessThan(104);
   });
 
-  test("a supplied ordinary directory is not treated as a bounded volume or rewritten", async () => {
-    const state = await PrivateState.open(root);
-    const directory = join(root, "manual-mount");
-    await mkdir(directory, { mode: 0o700 });
-    await writeFile(join(directory, "preserved.txt"), "original", { mode: 0o600 });
-    await expect(initializeStorage(state, deviceId, 8 * GiB, directory)).rejects.toMatchObject({
-      code: "LOCAL_STORAGE_UNSAFE",
-    });
-    expect(await readFile(join(directory, "preserved.txt"), "utf8")).toBe("original");
-  });
+  test.each([GiB / 2, 8 * GiB + 1024 * 1024, 2048 * GiB])(
+    "a supplied ordinary directory is not treated as a volume or rewritten at representable size %s",
+    async (capacityBytes) => {
+      const state = await PrivateState.open(root);
+      const directory = join(root, "manual-mount");
+      await mkdir(directory, { mode: 0o700 });
+      await writeFile(join(directory, "preserved.txt"), "original", { mode: 0o600 });
+      await expect(
+        initializeStorage(state, deviceId, capacityBytes, directory),
+      ).rejects.toMatchObject({
+        code: "LOCAL_STORAGE_UNSAFE",
+      });
+      expect(await readFile(join(directory, "preserved.txt"), "utf8")).toBe("original");
+    },
+  );
 
   darwinTest("resize refuses a caller-selected mount without invoking native tools", async () => {
     const state = await PrivateState.open(root);
@@ -283,6 +288,34 @@ describe("bounded runtime storage mount", () => {
     ).rejects.toMatchObject({ code: "LOCAL_STORAGE_OWNER" });
     expect(called).toBe(false);
   });
+
+  darwinTest(
+    "native image sizes must fit whole sectors before creating or resizing anything",
+    async () => {
+      const state = await PrivateState.open(root);
+      const policy = localPolicy(root);
+      const calls: (readonly string[])[] = [];
+      const run: RunProcess = async (request) => {
+        calls.push(request.argv);
+        throw new Error("An unrepresentable native image size must not reach hdiutil");
+      };
+      await expect(
+        initializeStorage(state, deviceId, 8 * GiB + 1, undefined, run),
+      ).rejects.toMatchObject({
+        code: "LOCAL_STORAGE_SIZE",
+      });
+      await expect(resizeStorage(state, policy, 16 * GiB + 1, run)).rejects.toMatchObject({
+        code: "LOCAL_STORAGE_SIZE",
+      });
+      expect(calls).toEqual([]);
+      await expect(lstat(join(root, "storage.sparsebundle"))).rejects.toMatchObject({
+        code: "ENOENT",
+      });
+      await expect(lstat(join(root, "storage-resize.json"))).rejects.toMatchObject({
+        code: "ENOENT",
+      });
+    },
+  );
 
   const nativeTest =
     process.platform === "darwin" && process.env.MOIRA_LOCAL_NATIVE_STORAGE_TESTS === "1"

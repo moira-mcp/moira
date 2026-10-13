@@ -240,7 +240,6 @@ describe("MCP tool definitions", () => {
       "mime_type",
       "mode",
       "offset",
-      "operation_id",
       "path",
       "pull_request_number",
       "query",
@@ -259,19 +258,13 @@ describe("MCP tool definitions", () => {
       "text",
       "timeout_seconds",
       "title",
-      "transfer_id",
     ]);
-    const operationId = published.properties.operation_id as { anyOf?: unknown[] };
-    const maxBytes = published.properties.max_bytes as { anyOf?: unknown[] };
-    expect(operationId.anyOf).toBeUndefined();
-    expect(maxBytes.anyOf).toHaveLength(3);
     expect(getToolOperations(definition("codespace")).slice().sort()).toEqual([
       "apply_patch",
       "create",
       "delete",
       "download",
       "exec",
-      "files_setup",
       "get",
       "list",
       "local_devices",
@@ -288,7 +281,6 @@ describe("MCP tool definitions", () => {
       "start",
       "stat",
       "stop",
-      "transfer_status",
       "upload",
       "write",
     ]);
@@ -312,16 +304,10 @@ describe("MCP tool definitions", () => {
         }).success,
       ).toBe(false);
     }
-    expect(resolveToolDescription(definition("codespace"))).toContain(
-      "personal instrument for executing a flow",
-    );
-    expect(resolveToolDescription(definition("codespace"))).toContain(
-      "collaboration happens through version-control branches",
-    );
     expect(
       codespaceExecRequestSchema.safeParse({
         codespace_id: "00000000-0000-4000-8000-000000000000",
-        request_id: "11111111-1111-4111-8111-111111111111",
+        request_id: "ws1-11111111-1111-4111-8111-111111111111",
         argv: ["node", "script.js"],
         timeout_seconds: 30,
         stdin_file: {
@@ -335,7 +321,7 @@ describe("MCP tool definitions", () => {
     expect(
       codespaceExecRequestSchema.safeParse({
         codespace_id: "00000000-0000-4000-8000-000000000000",
-        request_id: "11111111-1111-4111-8111-111111111111",
+        request_id: "ws1-11111111-1111-4111-8111-111111111111",
         argv: ["node", "script.js"],
         timeout_seconds: 30,
         stdin_text: "input",
@@ -362,7 +348,7 @@ describe("MCP tool definitions", () => {
     ).toBe(false);
   });
 
-  it("requires bounded output metadata for download recovery and rejects mixing it with a new path", () => {
+  it("requires attachment metadata for a current file and refuses obsolete download recovery", () => {
     const download = codespaceDownloadRequestSchema;
     const resume = {
       codespace_id: "00000000-0000-4000-8000-000000000000",
@@ -370,10 +356,19 @@ describe("MCP tool definitions", () => {
       file_name: "result.bin",
       mime_type: "application/octet-stream",
     };
-    expect(download.safeParse(resume).success).toBe(true);
+    expect(download.safeParse(resume).success).toBe(false);
     expect(download.safeParse({ ...resume, path: "new.bin" }).success).toBe(false);
     expect(download.safeParse({ ...resume, max_bytes: 0 }).success).toBe(false);
     expect(download.safeParse({ ...resume, file_name: "../result.bin" }).success).toBe(false);
+    const current = {
+      codespace_id: resume.codespace_id,
+      path: "result.bin",
+      file_name: "result.bin",
+      mime_type: "application/octet-stream",
+    };
+    expect(download.safeParse(current).success).toBe(true);
+    expect(download.safeParse({ ...current, max_bytes: 0 }).success).toBe(false);
+    expect(download.safeParse({ ...current, max_bytes: 128 * 1024 * 1024 }).success).toBe(true);
     // The published object requires only `action`; `file_name` and `mime_type` are required of a
     // download by its own contract, which is what refuses this resume without them.
     const codespaceTool = TOOL_DEFINITIONS.find((definition) => definition.name === "codespace")!;

@@ -6,48 +6,27 @@ import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import { migrate } from "drizzle-orm/better-sqlite3/migrator";
-import { spawn, spawnSync } from "node:child_process";
-import { createHash, randomUUID } from "node:crypto";
-import { EventEmitter } from "node:events";
-import {
-  closeSync,
-  createReadStream,
-  existsSync,
-  ftruncateSync,
-  lstatSync,
-  mkdtempSync,
-  mkdirSync,
-  openSync,
-  readFileSync,
-  rmSync,
-  writeFileSync,
-  writeSync,
-} from "node:fs";
-import type { ClientRequest, IncomingMessage, RequestOptions } from "node:http";
-import { tmpdir } from "node:os";
+import { createHash } from "node:crypto";
+import { createWorkspaceRequestId } from "@mcp-moira/shared/workspace-request-id";
+import { createRequire } from "node:module";
+import { readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import {
   CODESPACE_PROVIDER_CONTRACT_VERSION,
   CodespaceConnectionRepository,
   CodespaceConnectionService,
-  CodespaceFileService,
   CodespaceObservabilityService,
-  CodespaceOperationRepository,
-  CodespaceOperationService,
   CodespaceProviderRegistry,
   CodespaceResourceRepository,
   CodespaceResourceService,
+  CodespaceResourceError,
   CodespaceTransferRepository,
   CodespaceTransferService,
-  type GitHubCodespaceClient,
-  type CodespaceGitHubConfigStatus,
-  type CodespaceNativeFileReference,
+  evaluateCodespaceResourcePolicy,
   type CodespaceProviderAdapter,
   type CodespaceProviderResource,
-  type CodespaceResourcePolicy,
-  CodespaceFileCapabilities,
-  type CodespaceFileTransferService,
-  getAccountAccessDenial,
+  type CodespaceGitHubConfigStatus,
+  type GitHubCodespaceClient,
 } from "@mcp-moira/shared";
 import { runWithMCPContext } from "../../packages/mcp-server/src/core/request-context.js";
 import {
@@ -55,49 +34,26 @@ import {
   type CodespaceToolServices,
 } from "../../packages/mcp-server/src/tools/manage-codespaces.js";
 import { registerTools } from "../../packages/mcp-server/src/tools/register-tools.js";
-import { GitHubCodespacesConnector } from "../../packages/web-backend/src/services/github-codespaces-connector.js";
-import { createCodespaceFileTransfers } from "../../packages/web-backend/src/services/codespace-file-transfers.js";
-import { loadFileClientAssets } from "../../packages/web-backend/src/services/codespace-file-client-assets.js";
-import { nativeFileTls } from "../helpers/native-file-tls.js";
-import { hostFileClientLife, hostFileClientMaintenance } from "../helpers/host-file-client.js";
+import { createWorkspaceClient } from "../../packages/web-backend/src/services/workspace-client.js";
 
-const USER_ID = "chatgpt-user";
-const OTHER_USER_ID = "other-user";
-const FILE_ID = "sediment://file_000000000b1c8210a7cb1a2d896b2ee4";
-const nativeBytes = Buffer.from([0, 255, 17, 128, 4]);
-const streamedNativeSize = 5 * 1024 * 1024 + 7;
-const streamedNativeChunk = Buffer.alloc(256 * 1024, 0xa7);
-const initialSource = "export const value = 1;\n";
-const supervisorSource = readFileSync(
-  resolve("packages/web-backend/src/services/github-codespaces-remote-supervisor.mjs"),
-  "utf8",
-);
-const policy: CodespaceResourcePolicy = {
-  enabled: true,
-  maxCpuCores: 4,
-  maxMemoryBytes: 8 * 1024 ** 3,
-  maxStorageBytes: 32 * 1024 ** 3,
-  maxActivePerUser: 2,
-  maxActiveGlobal: 4,
-  createThrottleMs: 0,
-  createDeadlineMs: 30_000,
-  cleanupDeadlineMs: 30_000,
-  claimLeaseMs: 5_000,
-  reconcileIntervalMs: 60_000,
-  startWaitMs: 60_000,
-  maxConcurrentOperationsPerUser: 2,
-  maxConcurrentOperationsGlobal: 4,
-  maxOperationMs: 60_000,
-  maxBackgroundOperationMs: 4 * 60 * 60_000,
-  maxTransferFileBytes: 4 * 1024 ** 2,
+const USER_ID = "chatgpt-user",
+  OTHER_USER_ID = "other-user";
+type Fixture = { root: string; directory: string; socketPath: string };
+const guest = createRequire(import.meta.url)("../fixtures/workspace-service.cjs") as {
+  createFixture(): Fixture;
+  start(value: Fixture): Promise<void>;
+  stop(value: Fixture): Promise<void>;
+  dispose(value: Fixture): Promise<void>;
 };
-
-function digest(bytes: Uint8Array): string {
-  return createHash("sha256").update(bytes).digest("hex");
-}
-
-// Only the external provider lifecycle is substituted. All local domain state,
-// authorization, wire encoding, filesystem operations and commands are production code.
+const cleanups: Array<() => Promise<void> | void> = [];
+afterEach(async () => {
+  for (const close of cleanups.splice(0).reverse()) await close();
+});
+const policy = {
+  ...evaluateCodespaceResourcePolicy(() => undefined),
+  enabled: true,
+  createThrottleMs: 0,
+};
 class LifecycleProvider implements CodespaceProviderAdapter {
   readonly id = "github-codespaces";
   readonly contractVersion = CODESPACE_PROVIDER_CONTRACT_VERSION;
@@ -169,407 +125,6 @@ class LifecycleProvider implements CodespaceProviderAdapter {
   async probeConnector() {}
 }
 
-class DomainFixture {
-  readonly root = mkdtempSync(join(tmpdir(), "moira-mcp-domain-"));
-  readonly repositoryPath = join(this.root, "codespaces", "repository");
-  environmentId = "life-one";
-  readonly databasePath = join(this.root, "domain.sqlite");
-  readonly provider = new LifecycleProvider();
-  readonly jobs: Array<{ action: string; remoteMarker: string }> = [];
-  readonly fetchedReferences: CodespaceNativeFileReference[] = [];
-  readonly receiptShapes: Array<Record<string, unknown>> = [];
-  private intentGate: ((directory: string) => void) | null = null;
-  private releaseIntentGate: (() => void) | null = null;
-  loseNextResponse: "execute" | "file-execute" | null = null;
-  unavailableMarker: string | null = null;
-  sqlite!: Database.Database;
-  transfers!: CodespaceTransferService;
-  services!: CodespaceToolServices;
-  connection!: CodespaceConnectionService;
-  operation!: CodespaceOperationService;
-  fileTransfers?: CodespaceFileTransferService;
-
-  constructor(readonly streaming?: { origin: string; caPath: string }) {
-    if (streaming) {
-      this.environmentId = digest(Buffer.from("emulated-sdk-guest-life"));
-      mkdirSync(join(this.root, "guest-home"), { recursive: true });
-    }
-    mkdirSync(this.repositoryPath, { recursive: true });
-    for (const args of [
-      ["init", "--initial-branch=main", this.repositoryPath],
-      [
-        "-C",
-        this.repositoryPath,
-        "remote",
-        "add",
-        "origin",
-        "https://github.com/owner/repository.git",
-      ],
-    ])
-      this.git(args);
-    this.reopen();
-    for (const id of [USER_ID, OTHER_USER_ID]) {
-      this.sqlite
-        .prepare(
-          "INSERT INTO user (id, email, handle, createdAt, updatedAt) VALUES (?, ?, ?, 'now', 'now')",
-        )
-        .run(id, `${id}@example.test`, id);
-      if (streaming)
-        this.sqlite
-          .prepare("UPDATE user SET approvedAt = 'now', emailVerified = 1 WHERE id = ?")
-          .run(id);
-    }
-  }
-
-  git(args: string[]) {
-    const result = spawnSync("git", args, { encoding: "utf8" });
-    if (result.status !== 0) throw new Error(result.stderr);
-  }
-
-  holdNextMaintenanceIntent() {
-    let directory: string | null = null;
-    let releaseRequested = false;
-    let released = false;
-    let observed!: (directory: string) => void;
-    const held = new Promise<string>((resolveHeld) => {
-      observed = resolveHeld;
-    });
-    const release = () => {
-      releaseRequested = true;
-      if (directory && !released) {
-        writeFileSync(join(directory, "sdk-intent-release"), "release");
-        released = true;
-      }
-    };
-    this.intentGate = (value) => {
-      directory = value;
-      if (releaseRequested) release();
-      observed(value);
-    };
-    this.releaseIntentGate = release;
-    return { held, release };
-  }
-
-  async authorizeOnWebsite(userId = USER_ID) {
-    const url = await this.connection.beginAuthorization(userId, "website-session");
-    await this.connection.completeAuthorization({
-      userId,
-      sessionToken: "website-session",
-      state: new URL(url).searchParams.get("state")!,
-      code: "github-code-from-website",
-    });
-    expect(this.connection.getStatus(userId).state).toBe("connected");
-  }
-
-  reopen() {
-    this.operation?.stop();
-    this.sqlite?.close();
-    this.sqlite = new Database(this.databasePath);
-    this.sqlite.pragma("foreign_keys = ON");
-    migrate(drizzle(this.sqlite), { migrationsFolder: resolve("packages/web-backend/drizzle") });
-    const config: Extract<CodespaceGitHubConfigStatus, { state: "available" }> = {
-      state: "available",
-      clientId: "Iv23abcdefgh1234",
-      clientSecret: "fixture-client-secret-not-a-real-credential",
-      callbackUrl: "https://moira.example/api/integrations/github/callback",
-      installationUrl: "https://github.com/apps/moira-codespaces/installations/new",
-      vaultKeyHex: "db9cae418f0673b254e0a1c76d9348fb624e37b8a901dc5f02a1e64c739db805",
-      vaultKeyVersion: "v1",
-      settingsUrl: "https://moira.example/app/settings#integrations-github",
-    };
-    const tokenResponse = () => ({
-      accessToken: "ghu_fixture_secret",
-      refreshToken: "ghr_fixture_secret",
-      accessTokenExpiresAt: Date.now() + 3_600_000,
-      refreshTokenExpiresAt: Date.now() + 7_200_000,
-    });
-    const github: GitHubCodespaceClient = {
-      exchangeCode: async () => tokenResponse(),
-      refreshToken: async () => tokenResponse(),
-      getUser: async () => ({ id: "101", login: "owner" }),
-      listInstallations: async () => [
-        {
-          id: "201",
-          accountId: "101",
-          accountLogin: "owner",
-          targetType: "User",
-          repositorySelection: "selected",
-        },
-      ],
-      listInstallationRepositories: async () => [
-        { id: "301", fullName: "owner/repository", private: true },
-      ],
-      revokeToken: async () => undefined,
-      revokeGrant: async () => undefined,
-    };
-    this.connection = new CodespaceConnectionService({
-      repository: new CodespaceConnectionRepository(this.sqlite),
-      config: () => config,
-      client: () => github,
-    });
-    const registry = new CodespaceProviderRegistry();
-    registry.register(this.provider);
-    const resourceRepository = new CodespaceResourceRepository(this.sqlite);
-    const operationRepository = new CodespaceOperationRepository(this.sqlite);
-    const connector = new GitHubCodespacesConnector(this.requestImpl);
-    const currentPolicy = () =>
-      this.streaming ? { ...policy, maxTransferFileBytes: 20 * 1024 ** 2 } : policy;
-    this.transfers = new CodespaceTransferService({
-      repository: new CodespaceTransferRepository(this.sqlite),
-      root: join(this.root, "transfers"),
-      policy: currentPolicy,
-    });
-    const nativeFetcher = {
-      fetch: async (reference: CodespaceNativeFileReference) => {
-        this.fetchedReferences.push(reference);
-        const large = !!this.streaming;
-        return {
-          contentLength: this.streaming ? streamedNativeSize : nativeBytes.length,
-          mimeType: "application/octet-stream",
-          body: (async function* () {
-            if (!large) {
-              yield nativeBytes;
-              return;
-            }
-            for (let offset = 0; offset < streamedNativeSize; offset += streamedNativeChunk.length)
-              yield streamedNativeChunk.subarray(
-                0,
-                Math.min(streamedNativeChunk.length, streamedNativeSize - offset),
-              );
-          })(),
-        };
-      },
-    };
-    const credentials = {
-      getCredential: (userId: string) => this.connection.getAccessToken(userId),
-    };
-    const dependencies = {
-      repository: operationRepository,
-      transport: connector,
-      credentials,
-      policy: currentPolicy,
-      transfers: this.transfers,
-      nativeFetcher,
-    };
-    let native: CodespaceFileTransferService | undefined;
-    const file = new CodespaceFileService({
-      ...dependencies,
-      get native() {
-        return native;
-      },
-    });
-    this.operation = new CodespaceOperationService({
-      ...dependencies,
-      reconcileFile: (operation) => file.recoverNative(operation),
-    });
-    if (this.streaming) {
-      // Only Linux life and maintenance are emulated on this host. The registered MCP boundary,
-      // controller/router, installed CLI, provider codec, journal and private bytes are real.
-      native = createCodespaceFileTransfers({
-        ...dependencies,
-        files: file,
-        origin: this.streaming.origin,
-        capabilities: new CodespaceFileCapabilities(
-          "fixture-file-domain-secret-not-a-real-credential",
-        ),
-        requireAccount: (userId) => {
-          const row = this.sqlite
-            .prepare("SELECT blocked, approvedAt, emailVerified FROM user WHERE id = ?")
-            .get(userId) as
-            { blocked: number; approvedAt: string | null; emailVerified: number } | undefined;
-          if (
-            !row ||
-            getAccountAccessDenial(
-              {
-                userId,
-                blocked: !!row.blocked,
-                approvedAt: row.approvedAt,
-                emailVerified: !!row.emailVerified,
-              },
-              { requireEmailVerified: true },
-            )
-          )
-            throw new Error("Fixture account is not admitted");
-        },
-        wake: () => this.operation.notifyAccepted(),
-        assets: loadFileClientAssets,
-        lifeProbe: () => hostFileClientLife(this.environmentId),
-        installer: async (provider, config) => {
-          const assets = await loadFileClientAssets(provider);
-          return hostFileClientMaintenance(assets, config);
-        },
-      });
-    }
-    this.fileTransfers = native;
-    this.services = {
-      connection: this.connection,
-      guidance: (situation) => ({
-        provider: this.provider.id,
-        situation,
-        instruction: null,
-        links: [],
-      }),
-      observability: new CodespaceObservabilityService({
-        providerId: this.provider.id,
-        config: () => config,
-        policy: currentPolicy,
-        resources: resourceRepository,
-        operations: operationRepository,
-        transfers: new CodespaceTransferRepository(this.sqlite),
-        transport: connector,
-      }),
-      resource: new CodespaceResourceService({
-        repository: resourceRepository,
-        repositories: resourceRepository,
-        registry,
-        credentials,
-        providerId: this.provider.id,
-        requiredCapabilities: { exactLifecycle: true, personalBillingOnly: true },
-        policy: currentPolicy,
-      }),
-      operation: this.operation,
-      file,
-    };
-  }
-
-  private requestImpl = (
-    options: RequestOptions,
-    callback: (response: IncomingMessage) => void,
-  ): ClientRequest => {
-    const request = new EventEmitter() as ClientRequest;
-    Object.assign(request, {
-      setTimeout: () => request,
-      destroy: (error: Error) => queueMicrotask(() => request.emit("error", error)),
-      end: (payload?: Buffer) => {
-        void (async () => {
-          const body = payload ? JSON.parse(payload.toString("utf8")) : null;
-          let value: unknown = { state: "available", reason: null };
-          if (options.path === "/job") {
-            this.jobs.push({ action: body.job.action, remoteMarker: body.job.remoteMarker });
-            if (
-              body.job.remoteMarker === this.unavailableMarker &&
-              ["inspect", "file-inspect"].includes(body.job.action)
-            )
-              throw new Error("Exact accepted outcome is temporarily unavailable");
-            const result = await this.runSupervisor(body.job);
-            if (result && typeof result === "object") {
-              const receipt = result as Record<string, unknown>;
-              if (
-                typeof receipt.stdoutBase64 === "string" &&
-                typeof receipt.stderrBase64 === "string"
-              ) {
-                const bounds = this.sqlite
-                  .prepare(
-                    "SELECT stdoutLimitBytes,stderrLimitBytes FROM codespaceOperation WHERE remoteMarker=?",
-                  )
-                  .get(body.job.remoteMarker) as
-                  { stdoutLimitBytes: number; stderrLimitBytes: number } | undefined;
-                this.receiptShapes.push({
-                  action: body.job.action,
-                  state: receipt.state,
-                  stdoutPrefixBytes: Buffer.from(receipt.stdoutBase64, "base64").length,
-                  stderrPrefixBytes: Buffer.from(receipt.stderrBase64, "base64").length,
-                  stdoutBytes: receipt.stdoutBytes,
-                  stderrBytes: receipt.stderrBytes,
-                  stdoutLimitBytes: bounds?.stdoutLimitBytes,
-                  stderrLimitBytes: bounds?.stderrLimitBytes,
-                });
-              }
-            }
-            if (this.loseNextResponse === body.job.action) {
-              this.loseNextResponse = null;
-              this.unavailableMarker = body.job.remoteMarker;
-              throw new Error("SSH response lost after remote submission");
-            }
-            value = { value: JSON.stringify(result) };
-          }
-          const response = new EventEmitter() as IncomingMessage;
-          response.statusCode = 200;
-          callback(response);
-          response.emit("data", Buffer.from(JSON.stringify(value)));
-          response.emit("end");
-        })().catch((error: unknown) => request.emit("error", error));
-      },
-    });
-    return request;
-  };
-
-  private runSupervisor(job: Record<string, unknown>): Promise<unknown> {
-    const setupOperation =
-      job.action === "execute" && this.intentGate
-        ? (this.sqlite
-            .prepare("SELECT sessionKey FROM codespaceOperation WHERE remoteMarker=?")
-            .get(job.remoteMarker as string) as { sessionKey: string } | undefined)
-        : undefined;
-    const gate = setupOperation?.sessionKey === "moira-file-client" ? this.intentGate : null;
-    if (gate) this.intentGate = null;
-    let source = supervisorSource;
-    if (gate) {
-      const signature = "async function writeDurableJson(directory, name, value) {";
-      if (!source.includes(signature)) throw new Error("Execution-intent boundary is unavailable");
-      source =
-        "import {watch as sdkWatch,existsSync as sdkExists} from 'node:fs'; let sdkHeld=false;\n" +
-        source.replace(
-          signature,
-          signature +
-            `\nif(name==='execution.json'&&!sdkHeld){sdkHeld=true;const release=join(directory,'sdk-intent-release');const allowed=new Promise(done=>{const watcher=sdkWatch(directory,()=>{if(sdkExists(release)){watcher.close();done()}});if(sdkExists(release)){watcher.close();done()}});process.stderr.write('SDK_INTENT_HELD\\n');await allowed;}\n`,
-        );
-    }
-    return new Promise((resolveResult, reject) => {
-      const child = spawn(process.execPath, ["--input-type=module"], {
-        env: {
-          ...process.env,
-          MOIRA_CODESPACES_ROOT: join(this.root, "codespaces"),
-          MOIRA_OPERATION_STATE_DIR: join(this.root, "remote-state"),
-          // A real Codespace derives its life from the running Linux environment; this host is not
-          // one, so the fixture states which life it is emulating.
-          MOIRA_ENVIRONMENT_ID: this.environmentId,
-          ...(this.streaming
-            ? { HOME: join(this.root, "guest-home"), CURL_CA_BUNDLE: this.streaming.caPath }
-            : {}),
-        },
-        stdio: ["pipe", "pipe", "pipe"],
-      });
-      const stdout: Buffer[] = [];
-      const stderr: Buffer[] = [];
-      child.stdout.on("data", (chunk: Buffer) => stdout.push(chunk));
-      let notified = false;
-      child.stderr.on("data", (chunk: Buffer) => {
-        stderr.push(chunk);
-        if (gate && !notified && Buffer.concat(stderr).includes(Buffer.from("SDK_INTENT_HELD\n"))) {
-          notified = true;
-          gate(join(this.root, "remote-state", job.remoteMarker as string));
-        }
-      });
-      child.once("error", reject);
-      child.once("close", (code) => {
-        if (code !== 0) return reject(new Error(Buffer.concat(stderr).toString("utf8")));
-        try {
-          resolveResult(JSON.parse(Buffer.concat(stdout).toString("utf8")).result);
-        } catch (error) {
-          reject(error);
-        }
-      });
-      const encoded = Buffer.from(JSON.stringify(job)).toString("base64");
-      child.stdin.end(`${source}\nawait runEncoded("${encoded}");\n`);
-    });
-  }
-
-  async close() {
-    this.releaseIntentGate?.();
-    this.operation.stop();
-    const active = this.sqlite
-      .prepare(
-        "SELECT id,userId FROM codespaceOperation WHERE kind='exec' AND state IN ('reserved','running','cancel_pending','reconcile_pending')",
-      )
-      .all() as Array<{ id: string; userId: string }>;
-    for (const row of active) await this.operation.cancel(row.userId, row.id);
-    await new Promise<void>((done) => setImmediate(done));
-    this.sqlite.close();
-    rmSync(this.root, { recursive: true, force: true });
-  }
-}
-
 async function client() {
   const server = new McpServer(
     { name: "codespace-client-test", version: "1.0.0" },
@@ -606,965 +161,249 @@ async function client() {
   };
 }
 
-function recoveryId(result: CallToolResult): string {
-  const id = result.structuredContent?.operation_id;
-  if (typeof id !== "string")
-    throw new Error(`Missing exceptional recovery identity: ${JSON.stringify(result)}`);
-  return id;
-}
-
-async function finish(
-  mcp: Awaited<ReturnType<typeof client>>,
-  name: string,
-  codespaceId: string,
-  first: CallToolResult,
-): Promise<CallToolResult> {
-  expect(first.structuredContent).not.toHaveProperty("operation");
-  if (name !== "exec") {
-    expect(first.structuredContent).not.toHaveProperty("operation_id");
-    return first;
-  }
-  expect(first.isError).not.toBe(true);
-  // Submission proves durable acceptance; the public collection form observes the same effect.
-  expect(first.structuredContent).toMatchObject({
-    accepted: true,
-    request_id: expect.any(String),
-    operation_id: expect.any(String),
+async function setup() {
+  const value = guest.createFixture();
+  cleanups.push(() => guest.dispose(value));
+  await guest.start(value);
+  const sqlite = new Database(":memory:");
+  cleanups.push(() => {
+    sqlite.close();
   });
-  const operationId = recoveryId(first);
-  let result = first;
-  const deadline = Date.now() + 10_000;
-  while (
-    !["succeeded", "failed", "cancelled", "timed_out"].includes(
-      String(result.structuredContent?.state),
-    )
-  ) {
-    if (Date.now() >= deadline)
-      throw new Error(`Accepted command did not settle: ${JSON.stringify(result)}`);
-    result = await mcp.call("exec", { codespace_id: codespaceId, operation_id: operationId });
+  migrate(drizzle(sqlite), { migrationsFolder: resolve("packages/web-backend/drizzle") });
+  for (const id of [USER_ID, OTHER_USER_ID])
+    sqlite
+      .prepare("INSERT INTO user(id,email,handle,createdAt,updatedAt) VALUES(?,?,?,'now','now')")
+      .run(id, id + "@example.test", id);
+  const config: Extract<CodespaceGitHubConfigStatus, { state: "available" }> = {
+    state: "available",
+    clientId: "Iv23abcdefgh1234",
+    clientSecret: "fixture-client-secret-not-a-real-credential",
+    callbackUrl: "https://moira.example/api/integrations/github/callback",
+    installationUrl: "https://github.com/apps/moira-codespaces/installations/new",
+    vaultKeyHex: "db9cae418f0673b254e0a1c76d9348fb624e37b8a901dc5f02a1e64c739db805",
+    vaultKeyVersion: "v1",
+    settingsUrl: "https://moira.example/app/settings#integrations-github",
+  };
+  const tokenResponse = () => ({
+    accessToken: "ghu_fixture_secret",
+    refreshToken: "ghr_fixture_secret",
+    accessTokenExpiresAt: Date.now() + 3_600_000,
+    refreshTokenExpiresAt: Date.now() + 7_200_000,
+  });
+  const github: GitHubCodespaceClient = {
+    exchangeCode: async () => tokenResponse(),
+    refreshToken: async () => tokenResponse(),
+    getUser: async () => ({ id: "101", login: "owner" }),
+    listInstallations: async () => [
+      {
+        id: "201",
+        accountId: "101",
+        accountLogin: "owner",
+        targetType: "User",
+        repositorySelection: "selected",
+      },
+    ],
+    listInstallationRepositories: async () => [
+      { id: "301", fullName: "owner/project", private: true },
+    ],
+    revokeToken: async () => undefined,
+    revokeGrant: async () => undefined,
+  };
+  const connection = new CodespaceConnectionService({
+    repository: new CodespaceConnectionRepository(sqlite),
+    config: () => config,
+    client: () => github,
+  });
+
+  for (const userId of [USER_ID, OTHER_USER_ID]) {
+    const url = await connection.beginAuthorization(userId, "website-session");
+    await connection.completeAuthorization({
+      userId,
+      sessionToken: "website-session",
+      state: new URL(url).searchParams.get("state")!,
+      code: "fixture-code",
+    });
   }
-  expect(result.structuredContent).toMatchObject({ operation_id: operationId });
-  return result;
-}
-
-async function waitForProcessState(
-  mcp: Awaited<ReturnType<typeof client>>,
-  codespaceId: string,
-  processId: string,
-  state: "running" | "cancelled",
-) {
-  const deadline = Date.now() + 10_000;
-  let result = await mcp.process("get", { codespace_id: codespaceId, process_id: processId });
-  while (result.structuredContent?.state !== state) {
-    if (result.isError || Date.now() >= deadline)
-      throw new Error(`Process did not become ${state}: ${JSON.stringify(result)}`);
-    await new Promise<void>((done) => setTimeout(done, 25));
-    result = await mcp.process("get", { codespace_id: codespaceId, process_id: processId });
-  }
-  return result;
-}
-
-const cleanups: Array<() => Promise<void> | void> = [];
-afterEach(async () => {
-  for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
-});
-
-async function setup(streaming?: { origin: string; caPath: string }) {
-  const fixture = new DomainFixture(streaming);
-  cleanups.push(() => fixture.close());
-  await fixture.authorizeOnWebsite();
-  await fixture.authorizeOnWebsite(OTHER_USER_ID);
-  cleanups.push(setCodespaceToolServicesLoaderForTests(async () => fixture.services));
+  const provider = new LifecycleProvider();
+  const registry = new CodespaceProviderRegistry();
+  registry.register(provider);
+  const repository = new CodespaceResourceRepository(sqlite);
+  const resource = new CodespaceResourceService({
+    repository,
+    repositories: repository,
+    registry,
+    credentials: { getCredential: (userId) => connection.getAccessToken(userId) },
+    providerId: provider.id,
+    requiredCapabilities: { exactLifecycle: true, personalBillingOnly: true },
+    policy: () => policy,
+  });
+  const wire = createWorkspaceClient(value.socketPath);
+  const authorize = (userId: string, resourceId: string) => {
+    const owned = repository.getOwned(userId, resourceId);
+    if (!owned) throw new CodespaceResourceError("CODESPACE_NOT_FOUND", "Unavailable");
+    return owned;
+  };
+  const workspace: CodespaceToolServices["workspace"] = {
+    request(userId, id, input, signal) {
+      authorize(userId, id);
+      return wire.request(userId, id, input, signal);
+    },
+    json(userId, id, input, signal) {
+      authorize(userId, id);
+      return wire.json(userId, id, input, signal);
+    },
+  };
+  const publisher = new CodespaceTransferService({
+    repository: new CodespaceTransferRepository(sqlite),
+    root: join(value.directory, "attachments"),
+    policy: () => policy,
+  });
+  const nativeBytes = Buffer.alloc(8 * 1024 * 1024 + 31, 0xa7);
+  const services: CodespaceToolServices = {
+    connection,
+    resource,
+    workspace,
+    guidance: () => ({ provider: provider.id, situation: "ready", instruction: null, links: [] }),
+    observability: new CodespaceObservabilityService({
+      providerId: provider.id,
+      config: () => config,
+      policy: () => policy,
+      resources: repository,
+      transport: { health: async () => ({ ok: true, reason: null }) },
+    }),
+    attachments: {
+      publisher,
+      fetcher: {
+        fetch: async () => ({
+          contentLength: nativeBytes.length,
+          mimeType: "application/octet-stream",
+          body: (async function* () {
+            for (let n = 0; n < nativeBytes.length; n += 65536)
+              yield nativeBytes.subarray(n, n + 65536);
+          })(),
+        }),
+      },
+    },
+  };
+  cleanups.push(setCodespaceToolServicesLoaderForTests(async () => services));
   const mcp = await client();
   cleanups.push(mcp.close);
-  return { fixture, mcp };
-}
-
-async function createCodespace(mcp: Awaited<ReturnType<typeof client>>) {
   const created = await mcp.call("create", { repository_id: "301", ref: "main" });
-  expect(created).toEqual(expect.not.objectContaining({ isError: true }));
-  expect(created.structuredContent).toMatchObject({ state: "usable" });
-  expect(JSON.stringify(created)).not.toContain("ghu_fixture_secret");
-  return created.structuredContent!.codespace_id as string;
+  expect(created.isError).not.toBe(true);
+  const id = created.structuredContent!.codespace_id as string;
+  return { ...value, mcp, id, publisher, nativeBytes };
 }
 
-function fileReference() {
-  return {
-    file_id: FILE_ID,
-    download_url: "https://oaisdmntprdenmarkeast.blob.core.windows.net/file?sig=fixture-private",
-    file_name: "input.bin",
-    mime_type: "application/octet-stream",
-  };
-}
-
-async function expectDownloadBytes(fixture: DomainFixture, result: CallToolResult, bytes: Buffer) {
-  const link = result.content[0];
-  if (link.type !== "resource_link")
-    throw new Error(`Expected download link: ${JSON.stringify(result)}`);
-  const token = new URL(link.uri).pathname.split("/").pop()!;
-  const referenceId = `codespace-file://${token}`;
-  const claim = await fixture.transfers.claimDownload(referenceId);
-  const chunks: Buffer[] = [];
-  for await (const chunk of claim.stream) chunks.push(Buffer.from(chunk));
-  expect(Buffer.concat(chunks)).toEqual(bytes);
-  await fixture.transfers.consume(claim.record);
-  await expect(fixture.transfers.claimDownload(referenceId)).rejects.toThrow();
-}
-
-describe("ChatGPT-compatible codespace MCP with real domain services", () => {
-  it("streams large native bytes through the registered SDK and retained controller without republishing after recovery", async () => {
-    const tlsRoot = mkdtempSync(join(tmpdir(), "moira-sdk-native-tls-"));
-    cleanups.push(() => rmSync(tlsRoot, { recursive: true, force: true }));
-    const tls = await nativeFileTls(tlsRoot, () => {
-      if (!fixture.fileTransfers) throw new Error("Native file service is unavailable");
-      return fixture.fileTransfers;
-    });
-    cleanups.push(tls.close);
-    const { fixture, mcp } = await setup(tls);
-    const codespaceId = await createCodespace(mcp);
-    const setupId = randomUUID();
-    let originalSetup!: { id: string; remoteMarker: string };
-    const gate = fixture.holdNextMaintenanceIntent();
-    const firstProvisioning = mcp.call("files_setup", {
-      codespace_id: codespaceId,
-      request_id: setupId,
-    });
-    try {
-      const directory = await gate.held;
-      originalSetup = fixture.sqlite
-        .prepare("SELECT id,remoteMarker FROM codespaceOperation WHERE userId=? AND requestId=?")
-        .get(USER_ID, setupId) as { id: string; remoteMarker: string };
-      expect(directory).toBe(join(fixture.root, "remote-state", originalSetup.remoteMarker));
-      expect(lstatSync(directory).isDirectory()).toBe(true);
-      for (const entry of ["execution.json", "pid", "runner-pid", "result.json"])
-        expect(existsSync(join(directory, entry))).toBe(false);
-      const pending = await mcp.call("files_setup", {
-        codespace_id: codespaceId,
-        request_id: setupId,
-      });
-      if (pending.isError)
-        throw new Error(`Pre-proof provisioning receipt: ${JSON.stringify(fixture.receiptShapes)}`);
-      expect(pending.structuredContent).toMatchObject({
-        request_id: setupId,
-        operation_id: originalSetup.id,
-        provisioned: false,
-        command: null,
-      });
-    } finally {
-      gate.release();
-    }
-    let provisioned = await firstProvisioning;
-    const setupDeadline = Date.now() + 10_000;
-    while (provisioned.structuredContent?.provisioned !== true && !provisioned.isError) {
-      if (Date.now() >= setupDeadline) throw new Error("Guest file provisioning did not settle");
-      await new Promise<void>((done) => setImmediate(done));
-      provisioned = await mcp.call("files_setup", {
-        codespace_id: codespaceId,
-        request_id: setupId,
-      });
-    }
-    if (provisioned.isError) {
-      const outcome = provisioned.structuredContent as
-        { error?: { code?: string; message?: string } } | undefined;
-      throw new Error(
-        `Guest provisioning refused: ${outcome?.error?.code ?? "unknown"}: ${outcome?.error?.message ?? "no public detail"}`,
-      );
-    }
-    expect(provisioned.isError).not.toBe(true);
-    expect(provisioned.structuredContent).toMatchObject({
-      provisioned: true,
-      request_id: setupId,
-      operation_id: originalSetup.id,
-      abi: 1,
-      cli_sha256: expect.stringMatching(/^[a-f0-9]{64}$/),
-    });
-    expect(
-      fixture.sqlite
-        .prepare(
-          "SELECT id,remoteMarker,state,lastOutcome,resultReference IS NOT NULL AS resultRetained FROM codespaceOperation WHERE userId=? AND requestId=?",
-        )
-        .get(USER_ID, setupId),
-    ).toEqual({
-      id: originalSetup.id,
-      remoteMarker: originalSetup.remoteMarker,
-      state: "succeeded",
-      lastOutcome: "file_client_provisioned",
-      resultRetained: 1,
-    });
-    const originalReceipt = JSON.parse(
-      readFileSync(
-        join(fixture.root, "remote-state", originalSetup.remoteMarker, "result.json"),
-        "utf8",
-      ),
-    ) as { state: string; exitCode: number };
-    expect({ state: originalReceipt.state, exitCode: originalReceipt.exitCode }).toEqual({
-      state: "succeeded",
-      exitCode: 0,
-    });
-    expect(provisioned.structuredContent?.executable_sha256).toBe(
-      provisioned.structuredContent?.cli_sha256,
-    );
-    const command = provisioned.structuredContent?.command;
-    expect(command).toBe(join(fixture.root, "guest-home", ".local/bin/moira-files"));
-    const help = await finish(
-      mcp,
-      "exec",
-      codespaceId,
-      await mcp.call("exec", {
-        codespace_id: codespaceId,
-        request_id: randomUUID(),
-        argv: [command, "--help"],
-        timeout_seconds: 10,
-      }),
-    );
-    expect(help.isError).not.toBe(true);
-    expect(help.structuredContent).toMatchObject({
-      exit_code: 0,
-      stdout: expect.stringContaining("moira-files upload PATH"),
-    });
-    const uploadId = randomUUID();
-    const uploadInput = {
-      codespace_id: codespaceId,
-      request_id: uploadId,
-      path: "large.bin",
-      file: { ...fileReference(), size_bytes: streamedNativeSize },
-      expected: { exists: false },
-    };
-    const uploaded = await mcp.call("upload", uploadInput);
-    expect(uploaded.isError).not.toBe(true);
-    expect(uploaded.structuredContent).toMatchObject({ size_bytes: streamedNativeSize });
-    const target = join(fixture.repositoryPath, "large.bin");
-    const initialIdentity = lstatSync(target, { bigint: true });
-    const expected = createHash("sha256");
-    for (let offset = 0; offset < streamedNativeSize; offset += streamedNativeChunk.length)
-      expected.update(
-        streamedNativeChunk.subarray(
-          0,
-          Math.min(streamedNativeChunk.length, streamedNativeSize - offset),
-        ),
-      );
-    const expectedDigest = expected.digest("hex");
-    const actual = createHash("sha256");
-    for await (const bytes of createReadStream(target)) actual.update(bytes);
-    expect(initialIdentity.size).toBe(BigInt(streamedNativeSize));
-    expect(actual.digest("hex")).toBe(expectedDigest);
-
-    // The caller may lose a completed response. Reopen durable state and repeat its known identity.
-    fixture.reopen();
-    const replay = await mcp.call("upload", uploadInput);
-    expect(replay.isError).not.toBe(true);
-    expect(lstatSync(target, { bigint: true }).ino).toBe(initialIdentity.ino);
-    expect(fixture.fetchedReferences).toHaveLength(1);
-    const changed = await mcp.call("upload", { ...uploadInput, path: "different.bin" });
-    expect(changed.isError).toBe(true);
-    expect(lstatSync(target, { bigint: true }).ino).toBe(initialIdentity.ino);
-
-    const downloadId = randomUUID();
-    const downloadInput = {
-      codespace_id: codespaceId,
-      request_id: downloadId,
-      path: "large.bin",
-      max_bytes: streamedNativeSize,
-      file_name: "large.bin",
-      mime_type: "application/octet-stream",
-    };
-    const downloaded = await mcp.call("download", downloadInput);
-    expect(downloaded.isError).not.toBe(true);
-    expect(downloaded.content[0]).toMatchObject({
-      type: "resource_link",
-      size: streamedNativeSize,
-    });
-    const reference = downloaded.structuredContent?.file as {
-      reference_id: string;
-      sha256: string;
-    };
-    expect(reference.sha256).toBe(expectedDigest);
-    const status = await mcp.call("transfer_status", {
-      codespace_id: codespaceId,
-      request_id: downloadId,
-    });
-    expect(status.structuredContent).toMatchObject({
-      transfer: { scope: "private_object", state: "ready", size_bytes: streamedNativeSize },
-    });
-    expect(status.content).toEqual(downloaded.content);
-    const claimed = await fixture.transfers.claimDownload(reference.reference_id);
-    let received = 0;
-    const receivedHash = createHash("sha256");
-    for await (const bytes of claimed.stream) {
-      received += bytes.byteLength;
-      receivedHash.update(bytes);
-    }
-    expect(received).toBe(streamedNativeSize);
-    expect(receivedHash.digest("hex")).toBe(expectedDigest);
-    await fixture.transfers.consume(claimed.record);
-    const before = fixture.sqlite
-      .prepare("SELECT COUNT(*) count FROM codespaceTransfer WHERE purpose = 'codespace_download'")
-      .get();
-    const consumedReplay = await mcp.call("download", downloadInput);
-    expect(consumedReplay.isError).toBe(true);
-    expect(
-      fixture.sqlite
-        .prepare(
-          "SELECT COUNT(*) count FROM codespaceTransfer WHERE purpose = 'codespace_download'",
-        )
-        .get(),
-    ).toEqual(before);
-  });
-
-  it("edits and tests actual code, transfers actual binary bytes, and reuses a codespace after restart", async () => {
-    const { fixture, mcp } = await setup();
-    expect((await mcp.call("list", {})).structuredContent).toMatchObject({
-      codespaces: [],
-    });
-    expect((await mcp.call("repositories", {})).structuredContent).toMatchObject({
-      repositories: [{ repository_id: "301" }],
-    });
-    const codespaceId = await createCodespace(mcp);
-    const args = { codespace_id: codespaceId };
-    const written = await mcp.call("write", {
+describe("registered MCP tools against actual workspace and lifecycle services", () => {
+  it("edits and executes actual code, then observes preserved files after service restart", async () => {
+    const value = await setup();
+    const args = { codespace_id: value.id };
+    const source = "export const value = 1;\n";
+    const written = await value.mcp.call("write", {
       ...args,
+      request_id: createWorkspaceRequestId(),
       path: "app.mjs",
-      text: initialSource,
       expected: { exists: false },
+      text: source,
     });
-    expect(written.structuredContent).not.toHaveProperty("operation");
     expect(written.isError).not.toBe(true);
-    expect(readFileSync(join(fixture.repositoryPath, "app.mjs"), "utf8")).toBe(initialSource);
-    fixture.git(["-C", fixture.repositoryPath, "add", "app.mjs"]);
-    fixture.git([
-      "-C",
-      fixture.repositoryPath,
-      "-c",
-      "user.name=Fixture",
-      "-c",
-      "user.email=fixture@example.test",
-      "-c",
-      "commit.gpgsign=false",
-      "commit",
-      "-m",
-      "fixture baseline",
-    ]);
-    const stat = await mcp.call("stat", { ...args, path: "app.mjs" });
-    expect(stat.structuredContent).toMatchObject({
-      stat: { version: { sha256: digest(Buffer.from(initialSource)) } },
-    });
-    expect(
-      (await mcp.call("read", { ...args, path: "app.mjs", offset: 0, length: 1024 }))
-        .structuredContent,
-    ).toMatchObject({
-      text: initialSource,
-      sha256: digest(Buffer.from(initialSource)),
-      range_sha256: digest(Buffer.from(initialSource)),
-    });
-    const prefix = Buffer.from(initialSource).subarray(0, 6);
-    const partial = await mcp.call("read", { ...args, path: "app.mjs", offset: 0, length: 6 });
-    expect(partial.isError).not.toBe(true);
-    expect(partial.structuredContent).toMatchObject({
-      text: prefix.toString("utf8"),
-      sha256: digest(Buffer.from(initialSource)),
-      range_sha256: digest(prefix),
-    });
-    expect(
-      (
-        await mcp.call("search", {
-          ...args,
-          path: ".",
-          query: "value",
-          mode: "literal",
-          max_matches: 10,
-          max_bytes: 4096,
-        })
-      ).structuredContent,
-    ).toMatchObject({ matches: [expect.objectContaining({ path: "app.mjs" })] });
-    const patched = await mcp.call("apply_patch", {
+    const patched = await value.mcp.call("apply_patch", {
       ...args,
+      request_id: createWorkspaceRequestId(),
       files: [
         {
           path: "app.mjs",
           expected: {
             exists: true,
-            size_bytes: Buffer.byteLength(initialSource),
-            sha256: digest(Buffer.from(initialSource)),
+            size_bytes: Buffer.byteLength(source),
+            sha256: createHash("sha256").update(source).digest("hex"),
           },
           edits: [{ start: 21, end: 22, text: "2" }],
         },
       ],
     });
-    expect(patched.structuredContent).toMatchObject({
-      summary: { files_changed: 1, edits_applied: 1 },
-    });
-    expect(readFileSync(join(fixture.repositoryPath, "app.mjs"), "utf8")).toBe(
-      "export const value = 2;\n",
-    );
-    const run = async (argv: string[]) =>
-      finish(
-        mcp,
-        "exec",
-        codespaceId,
-        await mcp.call("exec", {
-          ...args,
-          request_id: randomUUID(),
-          argv,
-          cwd: ".",
-          timeout_seconds: 10,
-        }),
-      );
-    const tests = await run([
-      process.execPath,
-      "--input-type=module",
-      "-e",
-      "import { value } from './app.mjs'; if (value !== 2) process.exit(23); console.log('tests pass');",
-    ]);
-    expect(tests.structuredContent).toMatchObject({
-      stdout: "tests pass\n",
-      exit_code: 0,
-    });
-    const failed = await run([
-      process.execPath,
-      "--input-type=module",
-      "-e",
-      "import { value } from './app.mjs'; if (value !== 1) process.exit(23);",
-    ]);
-    expect(failed.structuredContent).toMatchObject({ exit_code: 23 });
-    expect(failed.isError).toBe(true);
-    const diff = await run(["git", "diff", "--", "app.mjs"]);
-    expect(diff.structuredContent).toMatchObject({
-      stdout: expect.stringContaining("+export const value = 2;"),
-      exit_code: 0,
-    });
-    const upload = await mcp.call("upload", {
+    expect(patched.isError).not.toBe(true);
+    const tested = await value.mcp.call("exec", {
       ...args,
-      request_id: randomUUID(),
-      path: "input.bin",
-      file: fileReference(),
-      expected: { exists: false },
-    });
-    expect(upload.isError).not.toBe(true);
-    expect(readFileSync(join(fixture.repositoryPath, "input.bin"))).toEqual(nativeBytes);
-    const nativeExec = await finish(
-      mcp,
-      "exec",
-      codespaceId,
-      await mcp.call("exec", {
-        ...args,
-        request_id: randomUUID(),
-        argv: [
-          process.execPath,
-          "-e",
-          "const {createHash}=require('node:crypto'); const h=createHash('sha256');process.stdin.on('data',b=>h.update(b));process.stdin.on('end',()=>process.stdout.write(h.digest('hex')));",
-        ],
-        cwd: ".",
-        timeout_seconds: 10,
-        stdin_file: {
-          file_id: FILE_ID.slice("sediment://".length),
-          download_url: fileReference().download_url,
-        },
-      }),
-    );
-    expect(nativeExec.structuredContent).toMatchObject({
-      stdout: digest(nativeBytes),
-      exit_code: 0,
-    });
-    expect(fixture.fetchedReferences).toHaveLength(2);
-    expect(fixture.fetchedReferences[0]).toEqual({
-      fileId: FILE_ID,
-      downloadUrl: fileReference().download_url,
-      fileName: "input.bin",
-      mimeType: "application/octet-stream",
-    });
-    expect(fixture.fetchedReferences[1]).toEqual({
-      fileId: FILE_ID.slice("sediment://".length),
-      downloadUrl: fileReference().download_url,
-    });
-    const textStdin = await finish(
-      mcp,
-      "exec",
-      codespaceId,
-      await mcp.call("exec", {
-        ...args,
-        request_id: randomUUID(),
-        argv: [process.execPath, "-e", "process.stdin.pipe(process.stdout)"],
-        cwd: ".",
-        timeout_seconds: 10,
-        stdin_text: "literal stdin text\n",
-      }),
-    );
-    expect(textStdin.structuredContent).toMatchObject({
-      stdout: "literal stdin text\n",
-      exit_code: 0,
-    });
-    const download = await mcp.call("download", {
-      ...args,
-      request_id: randomUUID(),
-      path: "input.bin",
-      max_bytes: 1024,
-      file_name: "input.bin",
-      mime_type: "application/octet-stream",
-    });
-    expect(download.content).toEqual([
-      expect.objectContaining({
-        type: "resource_link",
-        name: "input.bin",
-        size: nativeBytes.length,
-      }),
-    ]);
-    await expectDownloadBytes(fixture, download, nativeBytes);
-
-    fixture.reopen();
-    const second = await client();
-    cleanups.push(second.close);
-    expect((await second.call("get", args)).structuredContent).toMatchObject({
-      codespace_id: codespaceId,
-    });
-    expect((await second.call("stop", args)).structuredContent).toMatchObject({
-      state: "stopped",
-    });
-    expect(readFileSync(join(fixture.repositoryPath, "input.bin"))).toEqual(nativeBytes);
-    const started = await second.call("start", args);
-    expect(started.structuredContent).toMatchObject({ state: "usable" });
-    expect(
-      (await second.call("read", { ...args, path: "app.mjs", offset: 0, length: 1024 }))
-        .structuredContent,
-    ).toMatchObject({ text: "export const value = 2;\n" });
-    expect(started.structuredContent).not.toHaveProperty("generation");
-    expect(
-      (
-        await second.call("delete", {
-          ...args,
-          confirm_delete: false,
-        })
-      ).isError,
-    ).toBe(true);
-    const deleted = await second.call("delete", {
-      ...args,
-      confirm_delete: true,
-    });
-    expect(deleted.structuredContent).toMatchObject({
-      state: "deleted",
-    });
-    expect(fixture.provider.current).toBeNull();
-    // A deleted codespace is unusable, so discovery stops offering it while a direct
-    // lookup by its identifier still answers.
-    expect(
-      (
-        (await second.call("list", {})).structuredContent as {
-          codespaces: Array<{ codespace_id: string }>;
-        }
-      ).codespaces,
-    ).toEqual([]);
-    expect((await second.call("get", args)).structuredContent).toMatchObject({
-      state: "deleted",
-    });
-  });
-
-  it("reads large-file metadata and a bounded text range through the registered MCP contract", async () => {
-    const { fixture, mcp } = await setup();
-    const codespaceId = await createCodespace(mcp);
-    const size = 8 * 1024 * 1024 + 137;
-    const offset = 5 * 1024 * 1024 + 11;
-    const bytes = Buffer.from("selected large-file range\n");
-    const descriptor = openSync(join(fixture.repositoryPath, "large.txt"), "wx");
-    try {
-      ftruncateSync(descriptor, size);
-      writeSync(descriptor, bytes, 0, bytes.length, offset);
-    } finally {
-      closeSync(descriptor);
-    }
-    const args = { codespace_id: codespaceId, path: "large.txt" };
-    const stat = await mcp.call("stat", args);
-    expect(stat.isError).not.toBe(true);
-    expect(stat.structuredContent).toMatchObject({
-      stat: { type: "file", size_bytes: size, version: null },
-    });
-    const range = await mcp.call("read", { ...args, offset, length: bytes.length });
-    expect(range.isError).not.toBe(true);
-    expect(range.structuredContent).toEqual({
-      action: "read",
-      path: "large.txt",
-      offset,
-      total_size: size,
-      text: bytes.toString("utf8"),
-      sha256: null,
-      range_sha256: digest(bytes),
-    });
-    expect(JSON.stringify([stat, range])).not.toMatch(/secret-|base64/);
-  });
-
-  it("runs a command past the call that started it, watches it, and stops one on request", async () => {
-    const { fixture, mcp } = await setup();
-    const codespaceId = await createCodespace(mcp);
-    const args = { codespace_id: codespaceId };
-    const markerPath = join(fixture.repositoryPath, "background-done.txt");
-
-    const started = await mcp.process("start", {
-      ...args,
-      request_id: randomUUID(),
+      request_id: createWorkspaceRequestId(),
       argv: [
         process.execPath,
+        "--input-type=module",
         "-e",
-        "const fs=require('node:fs');process.stdout.write('progress\\n');const timer=setInterval(()=>{if(fs.existsSync('background-release')){clearInterval(timer);fs.writeFileSync('background-done.txt','done');process.stdout.write('finished\\n')}},10)",
+        "import {value} from './app.mjs'; if(value!==2)process.exit(23); console.log('tests pass')",
       ],
-      cwd: ".",
-      // Far past anything a single call could wait for; the command is short so the test is fast.
-      timeout_seconds: 3 * 60 * 60,
     });
-    // The call acknowledges accepted work before waiting for its actual guest start.
-    expect(started.structuredContent).toMatchObject({
-      state: "starting",
-      accepted: true,
-      process_id: expect.any(String),
+    expect(tested).toMatchObject({
+      structuredContent: { state: "succeeded", exitCode: 0, stdout: "tests pass\n" },
     });
-    expect(started.structuredContent).not.toHaveProperty("operation");
-    expect(started.structuredContent).not.toHaveProperty("result");
-    const operationId = started.structuredContent!.process_id as string;
-    await waitForProcessState(mcp, codespaceId, operationId, "running");
-    const beforeForeign = fixture.jobs.length;
-    for (const action of ["get", "stop"])
-      expect(
-        (await mcp.process(action, { ...args, process_id: operationId }, OTHER_USER_ID)).isError,
-      ).toBe(true);
-    expect(fixture.jobs).toHaveLength(beforeForeign);
-
-    // Its output is readable while it runs, by the command's own identity.
-    let progress = "";
-    for (let attempt = 0; attempt < 80 && !progress.includes("progress"); attempt++) {
-      const range = await mcp.process("read", {
-        ...args,
-        process_id: operationId,
-        stream: "stdout",
-        offset: 0,
-        length: 1024,
-      });
-      progress = range.structuredContent!.text as string;
-      if (!progress.includes("progress")) {
-        await new Promise((resolveWait) => setTimeout(resolveWait, 25));
-      }
-    }
-    expect(progress).toContain("progress");
-    writeFileSync(join(fixture.repositoryPath, "background-release"), "release");
-
-    let collected = await mcp.process("get", { ...args, process_id: operationId });
-    const deadline = Date.now() + 10_000;
-    while (
-      ["starting", "running", "unknown"].includes(collected.structuredContent!.state as string)
-    ) {
-      if (Date.now() > deadline)
-        throw new Error(`Background process did not finish: ${JSON.stringify(collected)}`);
-      await new Promise((resolveWait) => setTimeout(resolveWait, 25));
-      collected = await mcp.process("get", { ...args, process_id: operationId });
-    }
-    expect(collected.structuredContent).toMatchObject({
-      process_id: operationId,
-      state: "succeeded",
-      stdout: "progress\nfinished\n",
-      exit_code: 0,
-    });
-    expect(readFileSync(markerPath, "utf8")).toBe("done");
-    // One dispatch, however many times it was collected.
-    expect(fixture.jobs.filter((job) => job.action === "execute")).toHaveLength(1);
-
-    const running = await mcp.process("start", {
-      ...args,
-      request_id: randomUUID(),
-      argv: [process.execPath, "-e", "setInterval(()=>{},1000)"],
-      cwd: ".",
-      timeout_seconds: 3 * 60 * 60,
-    });
-    expect(running.structuredContent).toMatchObject({ state: "starting", accepted: true });
-    await waitForProcessState(
-      mcp,
-      codespaceId,
-      running.structuredContent!.process_id as string,
-      "running",
-    );
-    const stopped = await mcp.process("stop", {
-      ...args,
-      process_id: running.structuredContent!.process_id,
-    });
-    expect(stopped.structuredContent).toMatchObject({
-      state: "cancelled",
-      process_id: running.structuredContent!.process_id,
-    });
-  });
-
-  it("carries a working directory and variables between commands in one session", async () => {
-    const { fixture, mcp } = await setup();
-    const codespaceId = await createCodespace(mcp);
-    const args = { codespace_id: codespaceId };
-    mkdirSync(join(fixture.repositoryPath, "service"), { recursive: true });
-    const observe = [
-      process.execPath,
-      "-e",
-      "process.stdout.write(require('node:path').basename(process.cwd())+'|'+(process.env.BUILD_TARGET??'none'))",
-    ];
-
-    const opened = await finish(
-      mcp,
-      "exec",
-      codespaceId,
-      await mcp.call("exec", {
-        ...args,
-        request_id: randomUUID(),
-        argv: observe,
-        timeout_seconds: 10,
-        session: "build",
-        session_start: true,
-        cwd: "service",
-        env: { BUILD_TARGET: "release" },
-      }),
-    );
-    expect(opened.structuredContent).toMatchObject({
-      stdout: "service|release",
-      exit_code: 0,
-    });
-
-    // The next command names neither and observes both; a command outside the session observes
-    // neither. This is the difficulty the requirement describes, gone.
-    const continued = await finish(
-      mcp,
-      "exec",
-      codespaceId,
-      await mcp.call("exec", {
-        ...args,
-        request_id: randomUUID(),
-        argv: observe,
-        timeout_seconds: 10,
-        session: "build",
-      }),
-    );
-    expect(continued.structuredContent).toMatchObject({
-      stdout: "service|release",
-      exit_code: 0,
-    });
-    const outside = await finish(
-      mcp,
-      "exec",
-      codespaceId,
-      await mcp.call("exec", {
-        ...args,
-        request_id: randomUUID(),
-        argv: observe,
-        timeout_seconds: 10,
-      }),
-    );
-    expect(outside.structuredContent).toMatchObject({
-      stdout: "repository|none",
-      exit_code: 0,
-    });
-
-    // Nothing the session stores is echoed back to the agent, and no stored row carries it.
-    expect(JSON.stringify(continued.structuredContent)).not.toContain("BUILD_TARGET");
+    await guest.stop(value);
+    await guest.start(value);
     expect(
-      JSON.stringify(fixture.sqlite.prepare("SELECT * FROM codespaceOperation").all()),
-    ).not.toContain("BUILD_TARGET");
-
-    // A script activates a toolchain; the next ordinary command inherits what it left behind.
-    const activated = await finish(
-      mcp,
-      "exec",
-      codespaceId,
-      await mcp.call("exec", {
-        ...args,
-        request_id: randomUUID(),
-        session: "build",
-        script: "cd service\nexport BUILD_TARGET=debug\nexport TOOLCHAIN=/opt/toolchain\n",
-        timeout_seconds: 20,
-      }),
-    );
-    expect(activated.structuredContent).toMatchObject({
-      exit_code: 0,
-    });
-    const afterScript = await finish(
-      mcp,
-      "exec",
-      codespaceId,
-      await mcp.call("exec", {
-        ...args,
-        request_id: randomUUID(),
-        argv: [
-          process.execPath,
-          "-e",
-          "process.stdout.write(require('node:path').basename(process.cwd())+'|'+process.env.BUILD_TARGET+'|'+process.env.TOOLCHAIN)",
-        ],
-        timeout_seconds: 10,
-        session: "build",
-      }),
-    );
-    expect(afterScript.structuredContent).toMatchObject({
-      stdout: "service|debug|/opt/toolchain",
-      exit_code: 0,
-    });
-
-    // Ending the session removes what it stored, so naming it afterwards is refused.
-    const ended = await finish(
-      mcp,
-      "exec",
-      codespaceId,
-      await mcp.call("exec", {
-        ...args,
-        request_id: randomUUID(),
-        session: "build",
-        session_end: true,
-      }),
-    );
-    expect(ended.structuredContent).toMatchObject({ exit_code: 0 });
-    const afterEnd = await finish(
-      mcp,
-      "exec",
-      codespaceId,
-      await mcp.call("exec", {
-        ...args,
-        request_id: randomUUID(),
-        argv: observe,
-        timeout_seconds: 10,
-        session: "build",
-      }),
-    );
-    expect(afterEnd.isError).toBe(true);
-
-    // A session that was never opened is refused rather than silently created.
-    const unknown = await finish(
-      mcp,
-      "exec",
-      codespaceId,
-      await mcp.call("exec", {
-        ...args,
-        request_id: randomUUID(),
-        argv: observe,
-        timeout_seconds: 10,
-        session: "never-opened",
-      }),
-    );
-    expect(unknown.isError).toBe(true);
-    expect(JSON.stringify(unknown.structuredContent)).toContain("CODESPACE_SESSION_UNAVAILABLE");
+      (await value.mcp.call("read", { ...args, path: "app.mjs", offset: 0, length: 1024 }))
+        .structuredContent,
+    ).toMatchObject({ text: "export const value = 2;\n" });
+    expect(readFileSync(join(value.root, "app.mjs"), "utf8")).toBe("export const value = 2;\n");
+    expect(
+      (
+        await value.mcp.call(
+          "read",
+          { ...args, path: "app.mjs", offset: 0, length: 1024 },
+          OTHER_USER_ID,
+        )
+      ).isError,
+    ).toBe(true);
   });
 
-  it("recovers lost write and exec responses from reopened SQLite without redispatch or foreign access", async () => {
-    const { fixture, mcp } = await setup();
-    const codespaceId = await createCodespace(mcp);
-    for (const kind of ["write", "exec"] as const) {
-      const requestId = randomUUID();
-      fixture.loseNextResponse = kind === "write" ? "file-execute" : "execute";
-      const first = await mcp.call(
-        kind,
-        kind === "write"
-          ? {
-              codespace_id: codespaceId,
-              path: "once.txt",
-              text: "once\n",
-              expected: { exists: false },
-            }
-          : {
-              codespace_id: codespaceId,
-              request_id: requestId,
-              argv: [
-                process.execPath,
-                "-e",
-                "require('node:fs').appendFileSync('executions.txt','once\\n');process.stdout.write('recovered');",
-              ],
-              cwd: ".",
-              timeout_seconds: 10,
-            },
-      );
-      expect(first).toMatchObject(
-        kind === "write"
-          ? { isError: true }
-          : { structuredContent: { accepted: true, request_id: requestId } },
-      );
-      const operationId = recoveryId(first);
-      if (kind === "exec") {
-        // The lost reply belongs to guest delivery, after the caller's durable acceptance.
-        await mcp.call("exec", { codespace_id: codespaceId, operation_id: operationId });
-        await new Promise<void>((done) => setImmediate(done));
-      }
-      expect(fixture.loseNextResponse).toBeNull();
-      fixture.unavailableMarker = null;
-      fixture.reopen();
-      const second = await client();
-      cleanups.push(second.close);
-      const beforeForeign = fixture.jobs.length;
-      const foreign = await second.call(
-        kind,
-        { codespace_id: codespaceId, operation_id: operationId },
-        OTHER_USER_ID,
-      );
-      expect(foreign.isError).toBe(true);
-      expect(fixture.jobs).toHaveLength(beforeForeign);
-      const recovered = await finish(
-        second,
-        kind,
-        codespaceId,
-        await second.call(kind, {
-          codespace_id: codespaceId,
-          ...(kind === "exec" ? { request_id: requestId } : { operation_id: operationId }),
-        }),
-      );
-      expect(recovered.isError).not.toBe(true);
-      const row = fixture.sqlite
-        .prepare("SELECT state, kind FROM codespaceOperation WHERE id = ?")
-        .get(operationId);
-      expect(row).toEqual({
-        state: "succeeded",
-        kind,
-      });
-      const action = kind === "write" ? "file-execute" : "execute";
-      expect(fixture.jobs.filter((job) => job.action === action)).toHaveLength(1);
-      expect(
-        readFileSync(
-          join(fixture.repositoryPath, kind === "write" ? "once.txt" : "executions.txt"),
-          "utf8",
-        ),
-      ).toBe("once\n");
-    }
-    const serializedRows = JSON.stringify(
-      fixture.sqlite.prepare("SELECT * FROM codespaceOperation").all(),
-    );
-    expect(serializedRows).not.toContain("appendFileSync");
-    expect(serializedRows).not.toContain("once\\n");
-    expect(serializedRows).not.toContain("ghu_fixture_secret");
-  });
-
-  it("publishes retained download bytes after a lost response using only the operation ID", async () => {
-    const { fixture, mcp } = await setup();
-    const codespaceId = await createCodespace(mcp);
-    const bytes = Buffer.from("retained file bytes\n");
-    const written = await mcp.call("write", {
-      codespace_id: codespaceId,
-      path: "output.txt",
-      text: bytes.toString("utf8"),
+  it("streams a native attachment above the former limit to a file and returns exact downloadable bytes", async () => {
+    const value = await setup();
+    const args = { codespace_id: value.id };
+    const upload = await value.mcp.call("upload", {
+      ...args,
+      request_id: createWorkspaceRequestId(),
+      path: "binary.bin",
       expected: { exists: false },
+      file: {
+        file_id: "file_fixture",
+        download_url: "https://native.example.test/input",
+        size_bytes: value.nativeBytes.length,
+      },
     });
-    expect(written.isError).not.toBe(true);
-    fixture.loseNextResponse = "file-execute";
-    const first = await mcp.call("download", {
-      codespace_id: codespaceId,
-      request_id: randomUUID(),
-      path: "output.txt",
-      max_bytes: 1024,
-      file_name: "output.txt",
-      mime_type: "text/plain",
+    expect(upload.isError).not.toBe(true);
+    expect(readFileSync(join(value.root, "binary.bin"))).toEqual(value.nativeBytes);
+    const boundedDownload = await value.mcp.call("download", {
+      ...args,
+      path: "binary.bin",
+      file_name: "binary.bin",
+      mime_type: "application/octet-stream",
+      max_bytes: value.nativeBytes.length - 1,
     });
-    expect(first.isError).toBe(true);
-    const operationId = recoveryId(first);
-    const marker = fixture.jobs.at(-1)!.remoteMarker;
-    fixture.unavailableMarker = null;
-    fixture.reopen();
-    const second = await client();
-    cleanups.push(second.close);
-    const resumed = await second.call("download", {
-      codespace_id: codespaceId,
-      operation_id: operationId,
-      file_name: "output.txt",
-      mime_type: "text/plain",
+    expect(boundedDownload).toMatchObject({
+      isError: true,
+      structuredContent: { error: { code: "CODESPACE_DOWNLOAD_BOUND_EXCEEDED" } },
     });
-    expect(resumed.isError).not.toBe(true);
-    expect(resumed.structuredContent).not.toHaveProperty("operation");
-    await expectDownloadBytes(fixture, resumed, bytes);
-    expect(
-      fixture.jobs.filter((job) => job.remoteMarker === marker && job.action === "file-execute"),
-    ).toHaveLength(1);
-    expect(
-      fixture.jobs.filter((job) => job.remoteMarker === marker && job.action === "file-inspect"),
-    ).toHaveLength(2);
+    expect(boundedDownload.content.some((block) => block.type === "resource_link")).toBe(false);
+    const download = await value.mcp.call("download", {
+      ...args,
+      path: "binary.bin",
+      file_name: "binary.bin",
+      mime_type: "application/octet-stream",
+    });
+    expect(download.isError).not.toBe(true);
+    expect(download.content[0]).toMatchObject({
+      type: "resource_link",
+      size: value.nativeBytes.length,
+    });
+    const file = download.structuredContent!.file as { reference_id: string; sha256: string };
+    const claimed = await value.publisher.claimDownload(file.reference_id);
+    const hash = createHash("sha256");
+    let received = 0;
+    for await (const bytes of claimed.stream) {
+      hash.update(bytes);
+      received += bytes.length;
+    }
+    expect(received).toBe(value.nativeBytes.length);
+    expect(hash.digest("hex")).toBe(createHash("sha256").update(value.nativeBytes).digest("hex"));
+    await value.publisher.consume(claimed.record);
+    await expect(value.publisher.claimDownload(file.reference_id)).rejects.toThrow();
   });
 });

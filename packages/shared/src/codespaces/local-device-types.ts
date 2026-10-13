@@ -1,9 +1,9 @@
 import { z } from "zod";
 import type { CodespaceMachine } from "./resource-types.js";
 import type { LocalDeviceControlView } from "./local-management-types.js";
+import type { LocalLifecycleEnvelope, LocalLifecycleReply } from "./local-protocol.js";
 
 export const CODESPACE_PROVIDER_LOCAL = "local-sandboxes" as const;
-export const LOCAL_RELAY_MAX_PARTS = 32;
 const identifier = z.string().uuid();
 export function localRepositoryTargetId(deviceId: string, repositoryId: string): string {
   return `local:${identifier.parse(deviceId)}:${identifier.parse(repositoryId)}`;
@@ -57,17 +57,9 @@ export const localPublicPolicySchema = z
         name: z.literal("local-approved"),
         displayName: safeLabel,
         operatingSystem: z.literal("linux"),
-        cpuCores: z.number().int().min(1).max(32),
-        memoryBytes: z
-          .number()
-          .int()
-          .min(1024 ** 3)
-          .max(64 * 1024 ** 3),
-        storageBytes: z
-          .number()
-          .int()
-          .min(4 * 1024 ** 3)
-          .max(1024 ** 4),
+        cpuCores: z.number().int().positive().safe(),
+        memoryBytes: z.number().int().positive().safe(),
+        storageBytes: z.number().int().positive().safe(),
       })
       .strict(),
   })
@@ -107,23 +99,6 @@ export interface LocalResourceBinding extends LocalDeviceAuth {
   repositoryId: string;
   profileId: string;
 }
-const localRelayPartSchema = z
-  .object({ transferId: identifier, sha256: z.string().regex(/^[a-f0-9]{64}$/), size: integer })
-  .strict();
-export const localRelayPayloadReferenceSchema = z
-  .object({
-    parts: z.array(localRelayPartSchema).min(1).max(LOCAL_RELAY_MAX_PARTS),
-    sha256: z.string().regex(/^[a-f0-9]{64}$/),
-    size: integer.max(24 * 1024 * 1024),
-  })
-  .strict()
-  .refine(
-    (ref) =>
-      ref.parts.reduce((sum, part) => sum + part.size, 0) === ref.size &&
-      new Set(ref.parts.map((part) => part.transferId)).size === ref.parts.length,
-    "Invalid payload parts",
-  );
-export type LocalRelayPayloadReference = z.infer<typeof localRelayPayloadReferenceSchema>;
 export type LocalRelayStatus =
   "queued" | "claimed" | "completed" | "refused" | "expired" | "revoked";
 export interface LocalRelayRequest extends LocalDeviceAuth {
@@ -132,7 +107,7 @@ export interface LocalRelayRequest extends LocalDeviceAuth {
   resourceId: string;
   resourceGeneration: number;
   digest: string;
-  payloadReference: LocalRelayPayloadReference;
+  payload: LocalLifecycleEnvelope;
   deadlineAt: number;
 }
 export interface LocalRelayClaim extends LocalRelayRequest {
@@ -143,14 +118,14 @@ export interface LocalRelayResult {
   requestId: string;
   digest: string;
   status: LocalRelayStatus;
-  outcomeReference: LocalRelayPayloadReference | null;
+  outcome: LocalLifecycleReply | null;
 }
 export interface LocalRelayAcknowledgement {
   requestId: string;
   digest: string;
   claimId: string;
   status: "completed" | "refused";
-  outcomeReference: LocalRelayPayloadReference;
+  outcome: LocalLifecycleReply;
 }
 export interface LocalApprovedRepository {
   id: string;
@@ -160,12 +135,7 @@ export interface LocalApprovedRepository {
 }
 export class LocalDeviceError extends Error {
   constructor(
-    readonly code:
-      | "LOCAL_UNAUTHORIZED"
-      | "LOCAL_CONFLICT"
-      | "LOCAL_EXPIRED"
-      | "LOCAL_CAPACITY"
-      | "LOCAL_INVALID",
+    readonly code: "LOCAL_UNAUTHORIZED" | "LOCAL_CONFLICT" | "LOCAL_EXPIRED" | "LOCAL_INVALID",
     message: string,
   ) {
     super(message);

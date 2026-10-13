@@ -2,14 +2,12 @@ import { Router } from "express";
 import {
   CodespaceConnectionError,
   CodespaceResourceError,
-  projectCodespaceOperationSummary,
   projectCodespaceSummary,
   recordCodespaceRejection,
   localCodespaceFailureGuidance,
   parseLocalRepositoryTargetId,
   type CodespaceConnectionService,
   type CodespaceObservabilityService,
-  type CodespaceOperationService,
   type CodespaceResourceService,
 } from "@mcp-moira/shared";
 import type { AuthenticatedRequest } from "../types/express-types.js";
@@ -17,7 +15,6 @@ import { asyncHandler } from "../middleware/error-middleware.js";
 import {
   getCodespaceConnectionService,
   getCodespaceObservabilityService,
-  getCodespaceOperationService,
   getCodespaceResourceService,
   getCodespaceProviderBundles,
   selectCodespaceProviderServices,
@@ -48,7 +45,6 @@ export interface CodespaceManagementServices {
     | "stopCodespace"
     | "deleteCodespace"
   > | null;
-  operation: Pick<CodespaceOperationService, "list"> | null;
 }
 
 const RESOURCE_ERROR_STATUS: Record<string, number> = {
@@ -60,13 +56,10 @@ const RESOURCE_ERROR_STATUS: Record<string, number> = {
   CODESPACE_CREATE_REJECTED: 422,
   CODESPACE_BILLING_UNSUPPORTED: 422,
   CODESPACE_POLICY_LIMIT: 429,
-  CODESPACE_SESSION_UNAVAILABLE: 409,
   CODESPACE_START_TIMEOUT: 504,
-  CODESPACE_OPERATION_BUSY: 429,
   CODESPACE_PROVIDER_DISABLED: 503,
   CODESPACE_PROVIDER_UNAVAILABLE: 503,
   CODESPACE_AUTHORIZATION_REQUIRED: 409,
-  CODESPACE_RESULT_EXPIRED: 410,
 };
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -76,7 +69,6 @@ function defaultServices(): CodespaceManagementServices {
     connection: getCodespaceConnectionService(),
     observability: getCodespaceObservabilityService(),
     resource: getCodespaceResourceService(),
-    operation: getCodespaceOperationService(),
     providers: getCodespaceProviderBundles(),
     select: selectCodespaceProviderServices,
     repositoryMetadata: (userId, repositoryId) => {
@@ -297,15 +289,9 @@ export function createCodespaceManagementRoutes(
             "Codespace provider is unavailable",
           );
         const codespace = selected.resource.getCodespace(userId, id);
-        const operations =
-          selected.operation
-            ?.list(userId, id)
-            .slice(-20)
-            .reverse()
-            .map(projectCodespaceOperationSummary) ?? [];
         res.json({
           success: true,
-          data: { codespace: projectCodespaceSummary(codespace), operations },
+          data: { codespace: projectCodespaceSummary(codespace) },
         });
       } catch (error) {
         if (!handleError(userId, error, res)) throw error;
@@ -421,12 +407,8 @@ function publicMessage(code: string): string {
       return "The codespace changed; refresh and retry";
     case "CODESPACE_POLICY_LIMIT":
       return "A codespace quota or limit was reached";
-    case "CODESPACE_SESSION_UNAVAILABLE":
-      return "The command session is not available in this codespace";
     case "CODESPACE_START_TIMEOUT":
       return "The codespace is still starting; retry shortly";
-    case "CODESPACE_OPERATION_BUSY":
-      return "Codespace operations are busy; retry later";
     case "CODESPACE_PROVIDER_DISABLED":
       return "Codespace operations are disabled";
     case "CODESPACE_PROVIDER_UNAVAILABLE":

@@ -1,0 +1,24 @@
+# syntax=docker/dockerfile:1
+FROM node:24-bookworm-slim AS payload
+WORKDIR /build
+COPY package*.json ./
+COPY packages ./packages
+COPY scripts/build-workspace-service.js scripts/package-workspace-service.js ./scripts/
+RUN npm ci --ignore-scripts
+COPY tsconfig.base.json ./
+ARG TARGETARCH
+ARG GIT_COMMIT=unknown
+RUN case "$TARGETARCH" in amd64) arch=x64;; arm64) arch=arm64;; *) exit 1;; esac && \
+    WORKSPACE_SOURCE_COMMIT=${GIT_COMMIT} node scripts/package-workspace-service.js --arch "$arch"
+
+FROM debian:bookworm-slim AS runtime
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates git util-linux sudo && \
+    rm -rf /var/lib/apt/lists/* && useradd --create-home --uid 1000 --shell /bin/bash workspace
+COPY --from=payload /build/packages/workspace-service/dist /opt/moira-workspace-payload
+RUN architecture=$(uname -m); case "$architecture" in x86_64) arch=x64;; aarch64) arch=arm64;; *) exit 1;; esac; \
+    runuser -u workspace -- /bin/sh -c "cat /opt/moira-workspace-payload/header-$arch.txt /opt/moira-workspace-payload/moira-workspace-linux-$arch.tar.gz | /bin/sh /opt/moira-workspace-payload/install.sh" && \
+    rm -rf /opt/moira-workspace-payload
+USER workspace
+ENV HOME=/home/workspace
+WORKDIR /home/workspace
+ENTRYPOINT ["/bin/sh", "-c", "IFS= read -r release <\"$HOME/.local/share/moira-workspace/current\"; exec \"$HOME/.local/share/moira-workspace/releases/$release/runtime/bin/node\" \"$HOME/.local/share/moira-workspace/releases/$release/service/daemon.mjs\""]

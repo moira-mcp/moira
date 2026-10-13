@@ -1,12 +1,21 @@
 import { spawn } from "node:child_process";
-import { readFile, rm, writeFile } from "node:fs/promises";
+import { rm, writeFile } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
+import {
+  WORKSPACE_INSTALL_SCRIPT,
+  WORKSPACE_PROBE_SCRIPT,
+  WORKSPACE_CONFIGURE_SCRIPT,
+  WORKSPACE_START_SCRIPT,
+  WORKSPACE_HEALTH_SCRIPT,
+  WORKSPACE_PAYLOAD_DIRECTORY,
+  loadWorkspacePayload,
+  workspaceInstallInput,
+} from "../../../workspace-service/src/bootstrap.mjs";
 import { join } from "node:path";
 import {
   CONNECTOR_MAX_CONTROL_OUTPUT_BYTES,
   CONNECTOR_MAX_REQUEST_BYTES,
-  CONNECTOR_MAX_RESPONSE_BYTES,
   decodeConnectorRequest,
-  encodeConnectorResponse,
   validGitHubUserCredential,
   validateCodespaceSshConfig,
 } from "./github-codespaces-connector-protocol.mjs";
@@ -25,8 +34,7 @@ function diagnostic(text: string): string {
 interface WorkerInput {
   token: string;
   home: string;
-  supervisorPath?: string;
-  job?: Record<string, unknown>;
+  configuration?: Record<string, unknown>;
 }
 
 async function readInput(): Promise<WorkerInput> {
@@ -56,7 +64,7 @@ function run(
   executable: string,
   argv: string[],
   env: NodeJS.ProcessEnv,
-  stdin: Buffer | string = "",
+  stdin: Buffer | string | AsyncIterable<Uint8Array> = "",
   timeoutMs = 90_000,
   outputLimitBytes = CONNECTOR_MAX_CONTROL_OUTPUT_BYTES,
 ): Promise<{ exitCode: number; stdout: Buffer; stderr: Buffer }> {
@@ -105,7 +113,24 @@ function run(
     child.stderr.on("data", collect(stderr));
     child.once("error", (error) => finish(error));
     child.once("close", (code) => finish(undefined, code ?? -1));
-    child.stdin.end(stdin);
+    child.stdin.on("error", () => {
+      killGroup();
+      finish(new Error("Bootstrap input delivery failed"));
+    });
+    if (typeof stdin !== "string" && Symbol.asyncIterator in stdin) {
+      void (async () => {
+        try {
+          for await (const chunk of stdin)
+            await new Promise<void>((done, failed) =>
+              child.stdin.write(chunk, (error) => (error ? failed(error) : done())),
+            );
+          child.stdin.end();
+        } catch {
+          killGroup();
+          finish(new Error("Bootstrap input delivery failed"));
+        }
+      })();
+    } else child.stdin.end(stdin);
   });
 }
 
@@ -156,53 +181,85 @@ function sshHost(config: string): string {
   return match[1];
 }
 
-async function runSupervisor(resourceName: string, input: WorkerInput): Promise<unknown> {
-  if (!input.job || typeof input.supervisorPath !== "string") {
-    throw new Error("Invalid connector operation job");
-  }
+async function runBootstrap(
+  resourceName: string,
+  input: WorkerInput,
+  action: "probe" | "install",
+): Promise<string> {
   const config = await generateSshConfig(resourceName, input);
   const configPath = join(input.home, "ssh_config");
   await writeFile(configPath, config, { mode: 0o600 });
-  const supervisor = await readFile(input.supervisorPath, "utf8");
-  const encoded = Buffer.from(JSON.stringify(input.job), "utf8").toString("base64");
-  const result = await run(
-    "/usr/bin/ssh",
-    [
-      "-F",
-      configPath,
-      "-o",
-      "BatchMode=yes",
-      "-o",
-      "ClearAllForwardings=yes",
-      "-o",
-      "ConnectTimeout=20",
-      sshHost(config),
-      "node",
-      "--input-type=module",
-    ],
-    environment(input, true),
-    `${supervisor}\nawait runEncoded("${encoded}");\n`,
-    Number(input.job.timeoutMs ?? 30_000) + 90_000,
-    CONNECTOR_MAX_RESPONSE_BYTES,
+  const fixed = async (
+    script: string,
+    bytes: Buffer | AsyncIterable<Uint8Array> = Buffer.alloc(0),
+  ) => {
+    const quoted =
+      String.fromCharCode(39) +
+      script.split(String.fromCharCode(39)).join(String.fromCharCode(39, 34, 39, 34, 39)) +
+      String.fromCharCode(39);
+    const result = await run(
+      "/usr/bin/ssh",
+      [
+        "-F",
+        configPath,
+        "-o",
+        "BatchMode=yes",
+        "-o",
+        "ClearAllForwardings=yes",
+        "-o",
+        "ConnectTimeout=20",
+        sshHost(config),
+        `/bin/sh -c ${quoted}`,
+      ],
+      environment(input, true),
+      bytes,
+      300_000,
+      CONNECTOR_MAX_CONTROL_OUTPUT_BYTES,
+    );
+    if (result.exitCode !== 0) throw new Error("Codespace fixed bootstrap failed");
+    return result.stdout.toString("utf8");
+  };
+  const measured = JSON.parse(await fixed(WORKSPACE_PROBE_SCRIPT)) as {
+    environmentIdentity: string;
+    architecture: string;
+  };
+  const rootBase64 = (
+    await fixed("set -eu; git rev-parse --show-toplevel | tr -d '\\n' | base64 -w0")
+  ).trim();
+  if (action === "probe") return JSON.stringify({ ...measured, rootBase64 });
+  const configuration = input.configuration;
+  if (
+    !configuration ||
+    typeof configuration.remote !== "object" ||
+    configuration.remote === null ||
+    (configuration.remote as { environmentIdentity?: unknown }).environmentIdentity !==
+      measured.environmentIdentity ||
+    configuration.root !== Buffer.from(rootBase64, "base64").toString("utf8")
+  )
+    throw new Error("Workspace bootstrap identity changed");
+  const architecture =
+    measured.architecture === "x86_64"
+      ? "x64"
+      : measured.architecture === "aarch64"
+        ? "arm64"
+        : "unsupported";
+  const payload = await loadWorkspacePayload(
+    fileURLToPath(WORKSPACE_PAYLOAD_DIRECTORY),
+    architecture,
   );
-  if (result.exitCode !== 0) {
-    throw new Error(
-      `Codespace operation failed (ssh exit ${result.exitCode}: ${diagnostic(
-        result.stderr.toString("utf8"),
-      )})`,
-    );
-  }
-  const envelope = JSON.parse(result.stdout.toString("utf8")) as { ok?: boolean; result?: unknown };
-  if (envelope.ok !== true) {
-    throw new Error(
-      `Codespace supervisor rejected the operation (${diagnostic(
-        typeof (envelope as { error?: unknown }).error === "string"
-          ? String((envelope as { error?: unknown }).error)
-          : result.stderr.toString("utf8"),
-      )})`,
-    );
-  }
-  return envelope.result;
+  await fixed(WORKSPACE_INSTALL_SCRIPT, workspaceInstallInput(payload));
+  await fixed(WORKSPACE_CONFIGURE_SCRIPT, Buffer.from(JSON.stringify(configuration)));
+  await fixed(WORKSPACE_START_SCRIPT);
+  const ready = JSON.parse(await fixed(WORKSPACE_HEALTH_SCRIPT)) as {
+    environmentIdentity?: string;
+    releaseIdentity?: string;
+  };
+  if (
+    ready.environmentIdentity !== measured.environmentIdentity ||
+    ready.releaseIdentity !== payload.release
+  )
+    throw new Error("Workspace bootstrap readiness identity changed");
+  return JSON.stringify(ready);
 }
 
 async function main(): Promise<void> {
@@ -221,8 +278,8 @@ async function main(): Promise<void> {
       process.stdout.write(await generateSshConfig(resourceName!, input));
       return;
     }
-    if (action !== "operation") throw new Error("Invalid connector operation");
-    process.stdout.write(encodeConnectorResponse(await runSupervisor(resourceName!, input)));
+    if (action !== "probe" && action !== "install") throw new Error("Invalid connector bootstrap");
+    process.stdout.write(await runBootstrap(resourceName!, input, action));
   } finally {
     await rm(input.home, { recursive: true, force: true });
   }

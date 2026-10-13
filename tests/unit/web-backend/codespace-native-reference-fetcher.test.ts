@@ -1,6 +1,6 @@
 import { describe, expect, jest, test } from "@jest/globals";
 import { EventEmitter } from "node:events";
-import { Readable } from "node:stream";
+import { PassThrough, Readable } from "node:stream";
 import type { ClientRequest, IncomingMessage } from "node:http";
 import type { RequestOptions } from "node:https";
 import {
@@ -26,9 +26,11 @@ function response(status: number, headers: Record<string, string>, peer = "8.8.8
 
 function requestHarness(values: IncomingMessage[]) {
   const calls: RequestOptions[] = [];
+  const requests: ClientRequest[] = [];
   const request = ((options: RequestOptions, callback: (value: IncomingMessage) => void) => {
     calls.push(options);
     const result = new EventEmitter() as ClientRequest;
+    requests.push(result);
     Object.assign(result, {
       setTimeout: jest.fn(),
       destroy: (error?: Error) => queueMicrotask(() => result.emit("error", error)),
@@ -36,10 +38,29 @@ function requestHarness(values: IncomingMessage[]) {
     });
     return result;
   }) as unknown as typeof import("node:https").request;
-  return { request, calls };
+  return { request, calls, requests };
 }
 
 describe("OpenAI native file reference fetcher", () => {
+  test("accepted headers release the admission timer before a held binary body is consumed", async () => {
+    const incoming = new PassThrough() as unknown as IncomingMessage;
+    incoming.statusCode = 200;
+    incoming.headers = { "content-length": "3", "content-type": "application/octet-stream" };
+    Object.defineProperty(incoming, "socket", { value: { remoteAddress: "8.8.8.8" } });
+    const harness = requestHarness([incoming]);
+    const fetcher = new OpenAINativeReferenceFetcher(
+      harness.request,
+      jest.fn(async () => [{ address: "8.8.8.8", family: 4 }]) as never,
+    );
+    const result = await fetcher.fetch(reference);
+    expect(harness.requests[0].setTimeout).toHaveBeenNthCalledWith(1, 30_000, expect.any(Function));
+    expect(harness.requests[0].setTimeout).toHaveBeenLastCalledWith(0);
+    (incoming as unknown as PassThrough).end(Buffer.from([0, 255, 128]));
+    const chunks: Buffer[] = [];
+    for await (const chunk of result.body) chunks.push(Buffer.from(chunk));
+    expect(Buffer.concat(chunks)).toEqual(Buffer.from([0, 255, 128]));
+  });
+
   test("accepts the two-field native reference with absent MIME as bounded binary metadata", async () => {
     const incoming = response(200, { "content-length": "3" });
     const harness = requestHarness([incoming]);

@@ -37,29 +37,55 @@ Run its commands from the repository root:
 npm run local:build
 npm run local -- --help
 npm run typecheck:local
-npm run local:verify:guest
+npm run workspace:verify:guest
 ```
 
-`local:build` emits the CLI, independent guard, fixed runtime API and guest assets
-under `packages/local/dist`, including native ownership and credential helpers.
+`local:build` emits the CLI, independent guard, fixed runtime API, configuration bundle,
+native ownership/credential helpers and verified workspace payload under `packages/local/dist`.
 Do not copy a single JavaScript entry without its companion assets.
-`local:verify:guest` rebuilds and exercises the packaged guest helper in a Docker
-container, including large-file metadata, bounded range reads and distinct whole-file/range
-digests. It also exercises commands, stdin, persistent sessions, cancellation and repository/path
-binding refusals. It is a guest diagnostic, not proof of microVM isolation or SDK lifecycle.
-Building these assets does not replace workers already installed in running guests or update a
-running host daemon's journal implementation.
+`workspace:verify:guest` packages the common Linux service and exercises actual installation,
+startup acknowledgment, Unix health/CLI, binary files, repository ownership and shutdown in an
+offline container. It is not proof of microVM isolation or physical SDK lifecycle.
+Building mutable checkout assets does not replace a running host owner. Install a complete immutable
+executable release before selecting its `cli.js` in the launcher; an asset directory outside the
+checkout is supported. Keep initialized companion state, SDK HOME/storage/profile, credentials,
+grants and VM disks at their existing paths. Do not copy stale ignored worker outputs as release assets.
 Host runtime validation requires the supported macOS SDK and locally approved
 state. Linux VM execution fails closed before creation.
 
-The companion shares the provider-neutral job codec and guest supervisor with the
-GitHub connector. Changes to lifecycle, relay or guest behavior must preserve
+The common workspace service owns ordinary command/file/session execution in both providers.
+Local lifecycle RPC and GitHub SSH perform only fixed trusted bootstrap and provider management;
+they are not command transports. Changes to lifecycle or guest behavior must preserve
 durable replay receipts, independent kernel ownership and unknown-outcome fences;
 an injected test runtime does not establish physical SDK isolation. Use root
 Testfold scripts for focused tests in `tests/integration/local/` and device/provider
 integration tests. Integration global setup runs `local:build` before database
 migration, so source consumers use current packaged native and guest assets on a
 clean checkout. This build prerequisite does not run the SDK or validate a microVM.
+Host `create`, `start` and raw `request` are refused before state/VM admission. Use paired Moira
+lifecycle actions, retain host `stop/remove/recover` custody and run ordinary work through MCP or
+the guest `~/.local/bin/moira-workspace` CLI. Active command/mutation IDs use `ws1-<lowercase UUID>`;
+repository-admission UUIDs are a different domain.
+
+### Common workspace payload
+
+```bash
+npm run workspace:build
+npm run workspace:package -- --arch x64
+npm run workspace:package -- --arch arm64
+node scripts/prepare-workspace-feature.js
+```
+
+The payload contains owned Node.js 24.21.0 and ripgrep 15.2.0 for Linux glibc x64/arm64 and does not
+use the project's Node executable or PATH. The public OCI image
+`ghcr.io/moira-mcp/moira-workspace-service` and optional Dev Container Feature
+`ghcr.io/moira-mcp/features/workspace-service` install identical payloads. Feature preparation
+stages the complete Feature under ignored `agent_temp_files_local/workspace-feature/`; do not
+publish the source-only Feature directory. A project can retain its own image/runtime and add
+the Feature. Provider bootstrap also installs/upgrades an existing environment in place without
+container recreation or VM-disk replacement. Root and nonroot guests require repository ownership
+to equal the service UID. Confirmed startup checks the selected release and Unix service health.
+
 See [System architecture](SYSTEM.md#local-codespace-composition-and-ownership),
 [API contracts](API.md#local-device-enrollment-and-relay-api) and
 [Codespaces](CODESPACES.md) for runtime setup and recovery.
@@ -268,7 +294,7 @@ src/server.ts       # StreamableHTTPServerTransport (stateless mode)
 packages/web-backend/           # Express API server (internal port 4201)
 packages/web-frontend/src/      # React UI components (static build served by nginx)
 config/             # Docker deployment configuration
-├── docker-compose.yml  # 4-service Docker setup
+├── traefik-self-host.yml  # Workspace Upgrade route → backend; other traffic → nginx
 ├── Dockerfile          # Multi-stage build: deps → frontend/docs/backend builds → runtime-deps (prod only) → runtime
 ├── supervisord.conf    # Process manager (init-database → services)
 ├── nginx.conf          # Reverse proxy configuration
@@ -539,7 +565,8 @@ npm run test:e2e
 
 ### Docker Container
 
-All services run inside single Docker container managed by supervisord:
+The app's frontend, backend and MCP processes run inside its Docker container managed by
+supervisord. Supported public Compose additionally runs static Traefik ingress on the same host port:
 
 - **Port**: DOCKER_PORT from .env.local
 - **Frontend**: `/app/*` → static files (nginx)
@@ -569,8 +596,15 @@ both terminal sentinels: it clears stale values before backup, suppresses child 
 ### Request Flow
 
 ```
-Browser → nginx:80 → internal services
+Browser → Traefik → nginx:80 → ordinary internal services
+Workspace HTTP/1.1 Upgrade → Traefik → backend:3001
 ```
+
+`config/traefik-self-host.yml` supplies the separate workspace route without an established-stream
+idle/transfer deadline or Docker socket. The application has no separately published port in
+this Compose topology. Compose defaults `TRUST_PROXY` to 2; preserve an explicit operator override
+for another proxy topology. The global app default remains loopback. Guest agents connect outbound;
+direct guest CLI calls use the private Unix socket and do not require the cloud to be online.
 
 ## Debugging
 

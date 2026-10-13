@@ -1,6 +1,6 @@
 import { build } from "esbuild";
 import { mkdir, chmod, copyFile } from "node:fs/promises";
-import { buildGuestAssets } from "./build-guest-assets.js";
+import { packageWorkspaceService } from "./package-workspace-service.js";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
@@ -8,11 +8,11 @@ const execute = promisify(execFile);
 
 const output = "packages/local/dist";
 await mkdir(output, { recursive: true });
-for (const entry of ["cli", "guard", "runtime-api", "guest-proxy", "guest-bootstrap", "config"]) {
+for (const entry of ["cli", "guard", "runtime-api", "config"]) {
   await build({
     bundle: true,
     platform: "node",
-    target: entry.startsWith("guest-") ? "node22" : "node24",
+    target: "node24",
     format: "esm",
     sourcemap: false,
     legalComments: "none",
@@ -21,9 +21,15 @@ for (const entry of ["cli", "guard", "runtime-api", "guest-proxy", "guest-bootst
     banner: entry === "cli" ? { js: "#!/usr/bin/env node" } : undefined,
   });
 }
-await buildGuestAssets();
-for (const entry of ["guest-worker", "guest-files-cli"])
-  await copyFile(`packages/web-backend/dist/guest-assets/${entry}.js`, `${output}/${entry}.js`);
+await packageWorkspaceService({
+  architecture: process.arch,
+  output: `${output}/workspace-payload`,
+});
+await mkdir(`${output}/workspace-payload/service`, { recursive: true });
+await copyFile(
+  `${output}/workspace-payload/guest-proxy.mjs`,
+  `${output}/workspace-payload/service/guest-proxy.mjs`,
+);
 await chmod(`${output}/cli.js`, 0o755);
 if (process.platform === "darwin" || process.platform === "linux") {
   await execute(

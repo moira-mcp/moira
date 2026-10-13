@@ -1,11 +1,8 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import { PrivateState } from "./private-state.js";
-import { LocalRefusal, MAX_MESSAGE_BYTES } from "./policy.js";
-import {
-  LOCAL_REQUEST_MAX_WINDOW_MS,
-  LOCAL_RESULT_SETTLEMENT_RETENTION_MS,
-} from "../../shared/src/codespaces/local-protocol.js";
+import { LocalRefusal } from "./policy.js";
+import { LOCAL_RESULT_SETTLEMENT_RETENTION_MS } from "../../shared/src/codespaces/local-protocol.js";
 
 const receipt = z
   .object({
@@ -13,12 +10,10 @@ const receipt = z
     digest: z.string().regex(/^[a-f0-9]{64}$/),
     expiresAt: z.number().int().nonnegative(),
     state: z.enum(["accepted", "complete", "collected"]),
-    reservedBytes: z.number().int().min(0).max(MAX_MESSAGE_BYTES),
     settled: z.boolean().optional(),
   })
   .strict();
-const receipts = z.array(receipt).max(1024);
-const SPOOL_LIMIT = 64 * 1024 * 1024;
+const receipts = z.array(receipt);
 
 /** A lost answer is not permission to repeat a side effect. Inspection uses a different request. */
 export class RequestJournal {
@@ -40,7 +35,7 @@ export class RequestJournal {
     z.string().uuid().parse(id);
     const digest = createHash("sha256").update(JSON.stringify(input)).digest("hex");
     return this.serial(async () => {
-      const entries = (await this.state.read("requests.json", receipts.parse)) ?? [];
+      const entries = (await this.state.read("lifecycle-receipts.json", receipts.parse)) ?? [];
       const entry = entries.find((item) => item.id === id);
       if (
         !entry ||
@@ -53,7 +48,7 @@ export class RequestJournal {
           "LOCAL_REPLAY_CONFLICT",
           "The retained receipt cannot change its accepted request.",
         );
-      return (await this.state.read(`result-${id}.json`, (value) => value)) ?? undefined;
+      return (await this.state.read(`lifecycle-result-${id}.json`, (value) => value)) ?? undefined;
     });
   }
 
@@ -64,7 +59,7 @@ export class RequestJournal {
     input: unknown,
     includeComplete = false,
   ): Promise<boolean> {
-    const entries = (await this.state.read("requests.json", receipts.parse)) ?? [];
+    const entries = (await this.state.read("lifecycle-receipts.json", receipts.parse)) ?? [];
     const digest = createHash("sha256").update(JSON.stringify(input)).digest("hex");
     return entries.some(
       (entry) =>
@@ -84,14 +79,10 @@ export class RequestJournal {
   ): Promise<unknown> {
     z.string().uuid().parse(id);
     const encoded = JSON.stringify(input);
-    if (typeof encoded !== "string" || Buffer.byteLength(encoded) > MAX_MESSAGE_BYTES) {
+    if (typeof encoded !== "string") {
       throw new LocalRefusal("LOCAL_REQUEST_TOO_LARGE", "Local request is too large.");
     }
-    if (
-      !Number.isSafeInteger(expiresAt) ||
-      expiresAt <= this.now() ||
-      expiresAt > this.now() + LOCAL_REQUEST_MAX_WINDOW_MS
-    ) {
+    if (!Number.isSafeInteger(expiresAt) || expiresAt <= this.now()) {
       throw new LocalRefusal(
         "LOCAL_REQUEST_EXPIRED",
         "Local request is expired or outside its time window.",
@@ -123,37 +114,28 @@ export class RequestJournal {
         if (work) return;
         throw new LocalRefusal(
           "LOCAL_OUTCOME_UNKNOWN",
-          "The request may have run; inspect its resource or operation instead of repeating it.",
+          "The lifecycle request may have run; inspect its resource instead of repeating it.",
         );
       }
-      if (
-        entries.length >= 1024 ||
-        entries.reduce((sum, item) => sum + item.reservedBytes, 0) + MAX_MESSAGE_BYTES > SPOOL_LIMIT
-      ) {
-        throw new LocalRefusal(
-          "LOCAL_REQUEST_CAPACITY",
-          "Local request capacity is busy; acknowledge or expire retained results.",
-        );
-      }
-      entries.push({ id, digest, expiresAt, state: "accepted", reservedBytes: MAX_MESSAGE_BYTES });
-      await this.state.write("requests.json", entries);
+      entries.push({ id, digest, expiresAt, state: "accepted" });
+      await this.state.write("lifecycle-receipts.json", entries);
       // Defer the side effect until the index mutation has left the serialization boundary.
       work = Promise.resolve()
         .then(action)
         .then(async (result) => {
           const bytes = JSON.stringify(result);
-          if (typeof bytes !== "string" || Buffer.byteLength(bytes) > MAX_MESSAGE_BYTES) {
+          if (typeof bytes !== "string") {
             throw new LocalRefusal("LOCAL_OUTPUT_LIMIT", "Local result is too large.");
           }
           await this.serial(async () => {
-            await this.state.write(`result-${id}.json`, result);
-            const current = (await this.state.read("requests.json", receipts.parse)) ?? [];
+            await this.state.write(`lifecycle-result-${id}.json`, result);
+            const current =
+              (await this.state.read("lifecycle-receipts.json", receipts.parse)) ?? [];
             const entry = current.find((item) => item.id === id);
             if (!entry)
               throw new LocalRefusal("LOCAL_OUTCOME_UNKNOWN", "Request journal entry was lost.");
             entry.state = "complete";
-            entry.reservedBytes = Buffer.byteLength(bytes);
-            await this.state.write("requests.json", current);
+            await this.state.write("lifecycle-receipts.json", current);
           });
           return result;
         })
@@ -162,7 +144,7 @@ export class RequestJournal {
       void work.catch(() => undefined);
     });
     if (cached) {
-      const result = await this.state.read(`result-${id}.json`, (value) => value);
+      const result = await this.state.read(`lifecycle-result-${id}.json`, (value) => value);
       if (result === null)
         throw new LocalRefusal("LOCAL_RESULT_EXPIRED", "Local request result expired.");
       return result;
@@ -173,24 +155,23 @@ export class RequestJournal {
   async acknowledge(id: string, retainLiveReplay = false): Promise<void> {
     z.string().uuid().parse(id);
     await this.serial(async () => {
-      const entries = (await this.state.read("requests.json", receipts.parse)) ?? [];
+      const entries = (await this.state.read("lifecycle-receipts.json", receipts.parse)) ?? [];
       const entry = entries.find((item) => item.id === id);
       if (entry?.state === "complete") {
         if (retainLiveReplay && entry.expiresAt > this.now()) {
           entry.settled = true;
-          await this.state.write("requests.json", entries);
+          await this.state.write("lifecycle-receipts.json", entries);
           return;
         }
         entry.state = "collected";
-        entry.reservedBytes = 0;
-        await this.state.write("requests.json", entries);
-        await this.state.remove(`result-${id}.json`);
+        await this.state.write("lifecycle-receipts.json", entries);
+        await this.state.remove(`lifecycle-result-${id}.json`);
       }
     });
   }
 
   private async clean() {
-    const entries = (await this.state.read("requests.json", receipts.parse)) ?? [];
+    const entries = (await this.state.read("lifecycle-receipts.json", receipts.parse)) ?? [];
     const keep = entries.filter(
       (entry) =>
         entry.expiresAt +
@@ -199,9 +180,13 @@ export class RequestJournal {
             : LOCAL_RESULT_SETTLEMENT_RETENTION_MS) >
           this.now() || this.pending.has(entry.id),
     );
-    await this.state.write("requests.json", keep);
-    for (const key of await this.state.keys("result-")) {
-      if (!keep.some((entry) => key === `result-${entry.id}.json` && entry.state !== "collected"))
+    await this.state.write("lifecycle-receipts.json", keep);
+    for (const key of await this.state.keys("lifecycle-result-")) {
+      if (
+        !keep.some(
+          (entry) => key === `lifecycle-result-${entry.id}.json` && entry.state !== "collected",
+        )
+      )
         await this.state.remove(key);
     }
     return keep;

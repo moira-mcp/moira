@@ -127,7 +127,7 @@ export const githubSetupGuide: GuideDefinition = {
       id: "autopause",
       anchor: "settings.codespace-autopause",
       kind: "look",
-      revision: 1,
+      revision: 2,
       prepare: { section: "development-environments" },
     },
   ],

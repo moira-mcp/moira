@@ -89,9 +89,6 @@ const PROVIDER_OBSERVATION_INTERVALS = 10;
 /** Users whose codespaces one tick may list from the provider. */
 const PROVIDER_OBSERVATION_USERS_PER_TICK = 5;
 
-/** Idle codespaces one tick may request stops for. */
-const IDLE_STOP_LIMIT = 50;
-
 /** Provider states in which the provider is already moving the codespace. */
 const TRANSITIONAL_PROVIDER_STATES: ReadonlySet<CodespaceProviderState> = new Set([
   "provisioning",
@@ -719,6 +716,7 @@ export class CodespaceResourceService {
       );
     }
     const submitted = this.dependencies.repository.getOwned(userId, initial.id)!;
+    const idle = this.dependencies.repository.idlePolicy(userId);
     let result: Awaited<ReturnType<CodespaceProviderAdapter["create"]>>;
     try {
       result = await provider.create(credential, {
@@ -726,10 +724,9 @@ export class CodespaceResourceService {
         ref: requestedRef,
         machine,
         operationMarker: initial.operationMarker,
-        // Always the provider's maximum. GitHub's own idle timer ignores silent background commands,
-        // so a shorter provider timeout would stop a codespace under a long agent command; the
-        // owner's timeout is enforced by Moira's idle stop, which sees agent activity.
-        idleTimeoutMinutes: CODESPACE_IDLE_TIMEOUT_MINUTES.maximum,
+        idleTimeoutMinutes: idle.autoStopEnabled
+          ? idle.idleTimeoutMinutes
+          : CODESPACE_IDLE_TIMEOUT_MINUTES.maximum,
         retentionMinutes: Math.min(
           43_200,
           Math.max(1, Math.ceil(effectiveCodespaceLimits(policy).persistentRetentionMs / 60_000)),
@@ -1934,10 +1931,7 @@ export class CodespaceResourceService {
     if (this.scheduledReconcileRunning) return;
     this.scheduledReconcileRunning = true;
     try {
-      // A record observed in this tick is left for the next tick's idle scan: an idle stop leads to
-      // a lifecycle pass that reads the codespace again, and no record is looked at twice in a tick.
-      const observed = await this.observeProviderState();
-      await this.stopIdleCodespaces(observed);
+      await this.observeProviderState();
       // One rebind attempt per tick, then every due record up to a bound. A record that does not
       // converge is deferred, so it is not claimed twice in one tick and cannot crowd others out.
       if (await this.reconcileOnce()) {
@@ -1953,12 +1947,11 @@ export class CodespaceResourceService {
   /**
    * Lists the codespaces of the users whose observation is due, at most once per user per interval.
    * A missing list entry is checked by exact name before a stable managed resource is retired.
-   * Nothing is mutated at the provider. Returns records observed for the idle-stop pass.
+   * Nothing is mutated at the provider. Idle shutdown belongs to the provider.
    */
-  private async observeProviderState(): Promise<Set<string>> {
-    const observed = new Set<string>();
+  private async observeProviderState(): Promise<void> {
     const policy = this.dependencies.policy();
-    if (!policy.enabled) return observed;
+    if (!policy.enabled) return;
     const provider = this.dependencies.registry.require(this.dependencies.providerId);
     const users = this.dependencies.repository.claimProviderObservations(
       provider.id,
@@ -1968,14 +1961,12 @@ export class CodespaceResourceService {
     );
     for (const userId of users) {
       try {
-        const result = await this.observeUserProviderState(userId, provider);
-        for (const resourceId of result.observed) observed.add(resourceId);
+        await this.observeUserProviderState(userId, provider);
       } catch {
         // One user's credential or provider failure never holds back another's observation or the
         // rest of the tick; the next interval observes again.
       }
     }
-    return observed;
   }
 
   /** Explicit Settings refresh uses the same bounded, read-only observation as the scheduler. */
@@ -2003,18 +1994,17 @@ export class CodespaceResourceService {
     provider: CodespaceProviderAdapter,
     authorizationFresh = false,
     codespaceId?: string,
-  ): Promise<{ observed: Set<string>; stale: boolean }> {
-    const observed = new Set<string>();
+  ): Promise<{ stale: boolean }> {
     const records = this.dependencies.repository
       .listObservablePersistent(userId, provider.id)
       .filter((record) => codespaceId === undefined || record.id === codespaceId);
-    if (records.length === 0) return { observed, stale: false };
+    if (records.length === 0) return { stale: false };
     if (
       !authorizationFresh &&
       this.dependencies.refreshAuthorization &&
       !(await this.dependencies.refreshAuthorization(userId))
     ) {
-      return { observed, stale: true };
+      return { stale: true };
     }
     const credential = await this.dependencies.credentials.getCredential(userId, provider.id);
     const identity = await provider.getIdentity(credential);
@@ -2034,7 +2024,6 @@ export class CodespaceResourceService {
         stale = true;
         continue;
       }
-      observed.add(record.id);
       let actual = listed?.get(record.providerResourceName!);
       if (!actual || !exactIdentityMatches(actual, record)) {
         try {
@@ -2139,30 +2128,7 @@ export class CodespaceResourceService {
           this.now(),
         );
     }
-    return { observed, stale };
-  }
-
-  /**
-   * Requests a stop for every codespace idle past its owner's timeout. The stop converges through
-   * ordinary lifecycle, and the next use starts the codespace again. `skip` are records observed in
-   * this tick, stopped (if still idle) in the next.
-   */
-  private async stopIdleCodespaces(skip: ReadonlySet<string>): Promise<void> {
-    if (!this.dependencies.policy().enabled) return;
-    const candidates = this.dependencies.repository.listIdleStopCandidates(
-      this.dependencies.providerId,
-      this.now(),
-      IDLE_STOP_LIMIT,
-      [...skip],
-    );
-    for (const candidate of candidates) {
-      const stopped = this.dependencies.repository.requestIdleStop(
-        candidate.id,
-        candidate.generation,
-        this.now(),
-      );
-      if (stopped) await this.emit("stop", stopped, "idle_stop_requested");
-    }
+    return { stale };
   }
 
   stop(): void {

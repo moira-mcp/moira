@@ -8,23 +8,13 @@ export function localRelayMutationId(
   request: Record<string, unknown>,
   authority?: "owner-delete",
 ): string {
-  const job =
-    request.action === "operation" && typeof request.job === "object" && request.job !== null
-      ? (request.job as Record<string, unknown>)
-      : null;
-  const identity = job
-    ? {
-        action: "operation",
-        spaceId: request.spaceId,
-        job: { action: job.action, remoteMarker: job.remoteMarker },
-      }
-    : request;
   const hex = createHash("sha256")
     .update(
       canonicalJson({
+        protocol: "workspace-lifecycle/2",
         resourceId: resource.id,
-        ...(request.action === "operation" ? {} : { generation: resource.generation }),
-        request: identity,
+        generation: resource.generation,
+        request,
         ...(authority ? { authority } : {}),
       }),
     )
@@ -55,6 +45,62 @@ export const localManagementOutcomeSchema = z
   .strict()
   .refine((outcome) => outcome.generation > outcome.originGeneration);
 export type LocalManagementOutcome = z.infer<typeof localManagementOutcomeSchema>;
+
+export const localLifecycleRequestSchema = z.discriminatedUnion("action", [
+  z.object({ action: z.literal("snapshot"), spaceId: uuid.optional() }).strict(),
+  z
+    .object({
+      action: z.literal("create"),
+      repositoryId: uuid,
+      ref: z.string().max(255),
+      operationMarker: marker,
+    })
+    .strict(),
+  z
+    .object({
+      action: z.literal("start"),
+      spaceId: uuid,
+      workspaceReleases: z
+        .object({
+          x64: z.string().regex(/^[a-f0-9]{64}$/),
+          arm64: z.string().regex(/^[a-f0-9]{64}$/),
+        })
+        .strict()
+        .optional(),
+    })
+    .strict(),
+  z
+    .object({ action: z.literal("stop"), spaceId: uuid, generation: generation.optional() })
+    .strict(),
+  z.object({ action: z.literal("delete"), spaceId: uuid, generation }).strict(),
+]);
+export const localLifecycleEnvelopeSchema = z
+  .object({
+    version: z.literal(1),
+    id: uuid,
+    expiresAt: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
+    authority: z.literal("owner-delete").optional(),
+    request: localLifecycleRequestSchema,
+  })
+  .strict()
+  .refine((value) => !value.authority || ["snapshot", "delete"].includes(value.request.action));
+export const localLifecycleReplySchema = z.discriminatedUnion("ok", [
+  z.object({ ok: z.literal(true), result: z.unknown() }).strict(),
+  z
+    .object({
+      ok: z.literal(false),
+      error: z
+        .object({
+          code: z.string().regex(/^LOCAL_[A-Z0-9_]{1,80}$/),
+          message: z.string().max(500),
+          management: localManagementOutcomeSchema.optional(),
+        })
+        .strict(),
+    })
+    .strict(),
+]);
+export type LocalLifecycleEnvelope = z.infer<typeof localLifecycleEnvelopeSchema>;
+export type LocalLifecycleReply = z.infer<typeof localLifecycleReplySchema>;
 
 export const localResourceSnapshotSchema = z
   .object({

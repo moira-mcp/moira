@@ -69,6 +69,10 @@ Updates/errors/retry stay local; other controls, loaded data and drafts remain.
 Use `codespace` for persistent GitHub or local Docker Sandboxes environments.
 **Settings → Development:** environments, GitHub connection and local computers.
 Approve pairing on your computer; its companion applies pending owner settings within local limits.
+Both providers run the same guest workspace service. MCP and the direct guest
+`moira-workspace` CLI share its commands, files and retained output; its owned Node
+runtime is independent of the project. Owner permissions, leases and physical resources
+remain enforced without command/file quotas.
 [Setup, permissions and security](/docs/getting-started/self-hosting/#connect-local-codespaces).
 
 ## A gradual path
@@ -219,7 +223,7 @@ Moira is open source (Apache-2.0). The engine, node types, and MCP tools are ide
 
 ### Self-host
 
-Run the full engine, Web UI, and MCP server in a single Docker container on your own
+Run the engine, Web UI and MCP server with the supplied app-and-ingress Docker Compose on your own
 infrastructure — free, single-tenant, your data stays with you. Private-team accounts register
 behind administrator approval. This is the default (`DEPLOYMENT_MODE=self-host`). See the
 [Self-hosting guide](/docs/getting-started/self-hosting/).

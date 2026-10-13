@@ -7,7 +7,7 @@ import { build } from "esbuild";
 import { writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { runProcess } from "../../../packages/local/src/process.js";
-import { GUEST_WORKER_COMMAND } from "../../../packages/local/src/assets.js";
+import { GUEST_COMMANDS } from "../../../packages/local/src/assets.js";
 import {
   createWithoutGateway,
   attachFixedGuest,
@@ -100,7 +100,7 @@ async function execServer(
     if (
       request.method !== "POST" ||
       request.url !== `/sandbox/${name}/exec/attach` ||
-      JSON.stringify(body) !== JSON.stringify({ cmd: GUEST_WORKER_COMMAND, env: {}, tty: false })
+      JSON.stringify(body) !== JSON.stringify({ cmd: GUEST_COMMANDS.install, env: {}, tty: false })
     ) {
       peer.destroy();
       return;
@@ -136,7 +136,7 @@ test("fixed attach preserves binary stdin and split stdout/stderr frames until v
       home,
       namespace,
       name,
-      "worker",
+      "install",
       Readable.from([bytes.subarray(0, 2), bytes.subarray(2)]),
       stdout.stream,
       stderr.stream,
@@ -164,7 +164,7 @@ test.each([
       home,
       namespace,
       name,
-      "worker",
+      "install",
       Readable.from([Buffer.from("input")]),
       output().stream,
       output().stream,
@@ -179,7 +179,7 @@ test("aborting attach does not claim that closing the socket killed the guest", 
     home,
     namespace,
     name,
-    "worker",
+    "install",
     Readable.from([Buffer.from("input")]),
     output().stream,
     output().stream,
@@ -288,55 +288,58 @@ test.each([
   await expect(readContainerIdentity(home, namespace, name)).rejects.toThrow();
 });
 
-test("raw creation supplies only the approved mountless shell profile without reserving MCP", async () => {
-  let accepted: unknown;
-  server = createServer((request, response) => {
-    let body = "";
-    request.on("data", (bytes: Buffer) => {
-      body += bytes.toString();
+test.each([2, 33])(
+  "raw creation supplies only the approved mountless shell profile with CPU%s without reserving MCP",
+  async (cpuCores) => {
+    let accepted: unknown;
+    server = createServer((request, response) => {
+      let body = "";
+      request.on("data", (bytes: Buffer) => {
+        body += bytes.toString();
+      });
+      request.on("end", () => {
+        if (request.method !== "POST" || request.url !== "/sandbox") {
+          response.writeHead(404).end();
+          return;
+        }
+        accepted = JSON.parse(body);
+        response
+          .writeHead(201)
+          .end(JSON.stringify({ name, agent: "shell", workspace: "", status: "created" }));
+      });
     });
-    request.on("end", () => {
-      if (request.method !== "POST" || request.url !== "/sandbox") {
-        response.writeHead(404).end();
-        return;
-      }
-      accepted = JSON.parse(body);
-      response
-        .writeHead(201)
-        .end(JSON.stringify({ name, agent: "shell", workspace: "", status: "created" }));
+    await listen();
+    await expect(createWithoutGateway(home, namespace, { ...profile, cpuCores })).resolves.toEqual({
+      name,
+      agent: "shell",
+      workspace: "",
     });
-  });
-  await listen();
-  await expect(createWithoutGateway(home, namespace, profile)).resolves.toEqual({
-    name,
-    agent: "shell",
-    workspace: "",
-  });
-  expect(accepted).toEqual({
-    agent: "shell",
-    name,
-    template: profile.template,
-    cpus: 2,
-    memory: "2048m",
-    dind_volume_size: "4096m",
-    skills: "off",
-    workspace: "",
-    additional_workspaces: [],
-    credential_values: [],
-    environment: {},
-    kits: [],
-    ssh_agent_socket_path: "",
-    clone: false,
-    display: false,
-    gpu: false,
-    nested: false,
-    usb_devices: [],
-  });
-});
+    expect(accepted).toEqual({
+      agent: "shell",
+      name,
+      template: profile.template,
+      cpus: cpuCores,
+      memory: "2048m",
+      dind_volume_size: "4096m",
+      skills: "off",
+      workspace: "",
+      additional_workspaces: [],
+      credential_values: [],
+      environment: {},
+      kits: [],
+      ssh_agent_socket_path: "",
+      clone: false,
+      display: false,
+      gpu: false,
+      nested: false,
+      usb_devices: [],
+    });
+  },
+);
 
 test.each([
   { label: "host mount", override: { workspace: "/host" } },
-  { label: "unbounded CPU", override: { cpuCores: 33 } },
+  { label: "unsafe integer CPU", override: { cpuCores: Number.MAX_SAFE_INTEGER + 1 } },
   { label: "unpinned image", override: { template: "debian:latest" } },
 ])("creation refuses $label before reaching the SDK", async ({ override }) => {
   let reached = false;

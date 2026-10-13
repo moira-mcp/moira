@@ -52,7 +52,6 @@ export {
   digestCodespaceCapability,
   type ReserveCodespaceResult,
 } from "../codespaces/resource-repository.js";
-export { CodespaceOperationRepository } from "../codespaces/operation-repository.js";
 export { CodespaceTransferRepository } from "../codespaces/transfer-repository.js";
 export type { AccountApprovalTransitionResult } from "./repositories/account-approval-repository.js";
 export {

@@ -3,7 +3,6 @@ import { CODESPACE_PROVIDER_LOCAL } from "./local-device-types.js";
 import { codespaceLifecycleErrorCode } from "./resource-types.js";
 import type {
   CodespaceResourceErrorCode,
-  CodespaceOperationRecord,
   CodespaceResourcePolicy,
   CodespaceResourceRecord,
 } from "./resource-types.js";
@@ -73,39 +72,6 @@ export function projectCodespaceSummary(codespace: CodespaceResourceRecord): Cod
   };
 }
 
-/** Metadata-only projection of one durable operation for website activity views. */
-export interface CodespaceOperationSummaryView {
-  operation_id: string;
-  codespace_id: string;
-  kind: CodespaceOperationRecord["kind"];
-  state: CodespaceOperationRecord["state"];
-  input_bytes: number;
-  output_bytes: number;
-  exit_code: number | null;
-  deadline_at: number;
-  result_expires_at: number | null;
-  created_at: number;
-  updated_at: number;
-}
-
-export function projectCodespaceOperationSummary(
-  operation: CodespaceOperationRecord,
-): CodespaceOperationSummaryView {
-  return {
-    operation_id: operation.id,
-    codespace_id: operation.resourceId,
-    kind: operation.kind,
-    state: operation.state,
-    input_bytes: operation.inputBytes,
-    output_bytes: operation.outputBytes,
-    exit_code: operation.exitCode,
-    deadline_at: operation.deadlineAt,
-    result_expires_at: operation.resultExpiresAt,
-    created_at: operation.createdAt,
-    updated_at: operation.updatedAt,
-  };
-}
-
 /** GitHub's monthly bill for the connected personal account, separate from Moira's own limits. */
 export interface CodespaceAvailableBillingView {
   state: "available";
@@ -145,27 +111,6 @@ export interface CodespaceLimitsView {
     create_throttle_seconds: number | null;
   };
   machine_ceiling: { cpu_cores: number; memory_bytes: number; storage_bytes: number } | null;
-  operations: {
-    active: number;
-    max_concurrent_per_user: number | null;
-    max_input_bytes: number;
-    max_stdout_bytes: number;
-    max_stderr_bytes: number;
-    max_retained_output_bytes: number;
-    max_duration_seconds: number;
-    max_background_seconds: number;
-  };
-  transfers: {
-    used_bytes: number;
-    objects: number;
-    /** Bytes of transfers still being reserved or claimed. */
-    inflight_bytes: number;
-    max_bytes_per_user: number;
-    max_inflight_bytes_per_user: number;
-    max_objects_per_user: number;
-    max_file_bytes: number;
-    ttl_seconds: number;
-  };
   lifecycle: {
     retention_days: number;
     start_wait_seconds: number;
@@ -180,8 +125,6 @@ export function projectCodespaceLimits(input: {
   policy: CodespaceResourcePolicy;
   held: number;
   instanceHeld: number;
-  activeOperations: number;
-  transfers: { objects: number; bytes: number; inflightBytes: number };
   idle: { autoStopEnabled: boolean; idleTimeoutMinutes: number };
   providerIdleMaxMinutes: number;
 }): CodespaceLimitsView {
@@ -204,26 +147,6 @@ export function projectCodespaceLimits(input: {
           memory_bytes: policy.maxMemoryBytes,
           storage_bytes: policy.maxStorageBytes,
         },
-    operations: {
-      active: input.activeOperations,
-      max_concurrent_per_user: local ? null : limits.operations.maxConcurrentPerUser,
-      max_input_bytes: limits.operations.maxInputBytes,
-      max_stdout_bytes: limits.operations.maxStdoutBytes,
-      max_stderr_bytes: limits.operations.maxStderrBytes,
-      max_retained_output_bytes: limits.operations.maxRetainedOutputBytes,
-      max_duration_seconds: seconds(limits.operations.maxDurationMs),
-      max_background_seconds: seconds(limits.operations.maxBackgroundMs),
-    },
-    transfers: {
-      used_bytes: input.transfers.bytes,
-      objects: input.transfers.objects,
-      inflight_bytes: input.transfers.inflightBytes,
-      max_bytes_per_user: limits.transfers.maxBytesPerUser,
-      max_inflight_bytes_per_user: limits.transfers.maxInflightBytesPerUser,
-      max_objects_per_user: limits.transfers.maxObjectsPerUser,
-      max_file_bytes: limits.transfers.maxFileBytes,
-      ttl_seconds: seconds(limits.transfers.ttlMs),
-    },
     lifecycle: {
       retention_days: Math.floor(limits.persistentRetentionMs / (24 * 60 * 60_000)),
       start_wait_seconds: seconds(policy.startWaitMs),
@@ -297,16 +220,11 @@ export interface CodespaceReadinessView {
   connector: { state: "available" | "unavailable" | "not_applicable"; reason: string | null };
   reconciliation: {
     due_resources: number;
-    due_operations: number;
     oldest_due_age_ms: number | null;
   };
   usage: {
     active_resources: number;
     max_active_resources: number | null;
-    active_operations: number;
-    max_active_operations: number | null;
-    transfer_live_bytes: number;
-    max_transfer_live_bytes: number;
   };
   checked_at: number;
 }

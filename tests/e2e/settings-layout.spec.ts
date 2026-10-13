@@ -148,7 +148,9 @@ test.describe("Codespace auto-pause preference", () => {
     await page.getByRole("tab", { name: "GitHub Codespaces", exact: true }).click();
     const card = page.getByTestId("codespace-auto-pause");
     await card.scrollIntoViewIfNeeded();
-    await expect(card).toContainText("Only agent activity through Moira counts");
+    await expect(card).toContainText(
+      "These settings apply at creation. Existing Codespaces keep their provider settings. Local codespaces follow their computer owner's policy instead.",
+    );
 
     const toggle = page.getByTestId("codespace-auto-pause-switch");
     const timeout = page.getByTestId("codespace-auto-pause-timeout");

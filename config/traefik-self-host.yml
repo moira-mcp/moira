@@ -1,0 +1,28 @@
+http:
+  routers:
+    workspace:
+      rule: PathPrefix(`/api/workspaces/`)
+      entryPoints: [web]
+      priority: 100
+      service: workspace
+    application:
+      rule: PathPrefix(`/`)
+      entryPoints: [web]
+      priority: 1
+      service: application
+  services:
+    workspace:
+      loadBalancer:
+        serversTransport: workspace
+        servers:
+          - url: http://moira:3001
+    application:
+      loadBalancer:
+        servers:
+          - url: http://moira:80
+  serversTransports:
+    workspace:
+      forwardingTimeouts:
+        dialTimeout: 30s
+        responseHeaderTimeout: 30s
+        idleConnTimeout: 0s

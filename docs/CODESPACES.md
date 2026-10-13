@@ -13,102 +13,61 @@ collaboration happens through version-control branches in the repository.
 GitHub authorization belongs to the authenticated website. Agents do not
 receive provider credentials, OAuth operations, SSH configuration or lifecycle
 capabilities. Agents reach codespaces through the authenticated MCP
-`codespace` and `codespace_process` tools and the scoped guest file CLI described below; the website owns the GitHub connection and
+`codespace` and `codespace_process` tools and the direct workspace CLI described below; the website owns the GitHub connection and
 offers the same basic codespace management (list, create, start, stop, confirmed
 delete) over the same services. Administrators own the instance-wide kill switches.
 
 ## Component boundary
 
-- `packages/shared/src/codespaces/connection-service.ts` and
-  `connection-repository.ts` own tenant-bound GitHub authorization, repository
-  grants, credential rotation, revocation and safe status projection.
-- `packages/shared/src/codespaces/resource-service.ts` and
-  `resource-repository.ts` own persistent codespace identity, policy,
-  lifecycle generations, desired and observed state, quotas and reconciliation.
-- `packages/shared/src/codespaces/operation-service.ts` and
-  `operation-repository.ts` own one durable record per direct operation,
-  cloud concurrency reservations, cancellation and terminal cleanup. Local operation
-  records track accepted work and results without locking other operations.
-- `packages/shared/src/codespaces/file-service.ts`, `transfer-service.ts` and
-  `transfer-repository.ts` own provider-neutral file operations, native byte
-  authority, quotas and private object lifecycle.
-- `packages/shared/src/codespaces/file-transfer-service.ts` and
-  `file-transfer-capability.ts` compose resumable native/CLI transfers with scoped file authority.
-  The backend's `codespace-file-transfers.ts` factory, `codespace-file-client-assets.ts` and
-  `routes/codespace-files.ts` provide fixed-asset provisioning and the bounded HTTPS byte channel.
-- `packages/shared/src/codespaces/provider-registry.ts` enforces the versioned
-  provider contract. `github-codespaces` and `local-sandboxes` implement it.
-- `packages/local/` owns the user-run companion, local policy, bounded storage,
-  private SDK credentials, independently supervised runtime and outbound relay.
-- `packages/shared/src/codespaces/local-device-service.ts` and
-  `local-device-repository.ts` own pairing, device generations, public local grants
-  and durable relay claims. The web backend's local provider adapts the common lifecycle and operations.
-- `packages/web-backend/src/routes/local-devices.ts` and the Settings
-  `LocalDeviceSettings` card own browser pairing confirmation, revocation and
-  revision-fenced owner settings requests within a locally approved envelope.
-- `packages/shared/src/codespaces/credential-vault.ts` owns versioned
-  AES-256-GCM credential envelopes bound to the Moira user, provider and opaque
-  connection or revocation record.
-- `packages/web-backend/src/services/github-codespace-client.ts` translates the
-  GitHub App, repository and Codespaces lifecycle APIs.
-- `packages/web-backend/src/services/github-codespaces-connector*.{ts,mjs}`
-  implement the Unix-socket connector, bounded worker, official GitHub CLI/SSH
-  transport and remote direct-operation supervisor.
-- `packages/web-backend/src/services/codespace-native-reference-fetcher.ts` and
-  `packages/mcp-server/src/codespace-transfer-route.ts` own trusted inbound
-  download and private one-use outbound HTTP delivery.
-- `packages/web-backend/src/routes/codespace-connections.ts` and
-  `packages/web-frontend/src/pages/settings/GitHubCodespaceSettings.tsx` own the
-  authenticated website authorization boundary.
-- `packages/shared/src/codespaces/views.ts` owns the sanitized codespace and
-  operation summaries shared by the website and MCP, the readiness view, its public
-  projection and the health-degradation rule; `observability.ts` computes the
-  readiness decision, projects the Prometheus gauges and counts audit events with
-  closed labels.
-- `packages/web-backend/src/routes/codespace-management.ts` and
-  `packages/web-frontend/src/pages/settings/CodespaceManagement.tsx` own shared
-  resource cards; `GitHubCodespaceManagement.tsx` owns their GitHub section. They provide
-  authenticated website codespace management; `routes/admin-codespaces.ts` and
-  `packages/web-frontend/src/pages/AdminCodespaceControls.tsx` own the administrator
-  readiness view and kill switches.
-- `packages/mcp-server/src/tools/manage-codespaces.ts` is the agent-facing
-  presentation adapter: it takes the tenant from the MCP request context, projects
-  sanitized results and maps domain failures to bounded tool errors. Schemas,
-  descriptions, examples and native-file metadata live in the typed registry
-  (`tool-schemas.ts`, `tool-definitions.ts`). The adapter composes the exported
-  `@mcp-moira/web-backend/services` getters and holds no lifecycle, quota,
-  credential or byte authority of its own.
+Shared connection/resource services own tenant authorization, grants, lifecycle, billing,
+desired/observed state and reconciliation. `packages/workspace-service/` owns commands,
+sessions, input, output and guarded files inside each workspace. Its terminal CLI and
+remote clients reach the same private Unix HTTP service and durable local journal.
 
-Every internal resource or operation lookup supplies the authenticated Moira
-user ID and a codespace or operation ID. Ownership is resolved from SQLite;
-possession of an opaque ID does not grant access. Public projections omit provider
-resource names and credentials. GitHub credentials remain in the server vault;
-enrolled local private Git and write operations use that server-held OAuth
-credential through a repository-scoped proxy. Local SDK credentials remain in the
-computer's owned store, separate from its device credential.
+The backend workspace router authenticates scoped agent credentials and forwards raw
+HTTP streams over outbound HTTPS Upgrade connections. Its rendezvous state is in memory:
+there is no cloud command queue or result store. `WorkspaceAuthRepository` stores only
+credential digests bound to user, resource, authorization/resource generations and measured
+guest life. Fixed provider bootstrap installs the common payload without giving the guest
+GitHub or device credentials.
+
+GitHub's connector performs fixed bootstrap/readiness and provider lifecycle work.
+The Local companion owns exact VM lifecycle, approved policy, storage, SDK credentials
+and inline lifecycle relay; ordinary commands/files bypass that relay.
+`CodespaceTransferService` separately owns private attachment publication and one-use
+download links. It does not own workspace input or file recovery.
+
+Website/MCP adapters share sanitized resource/readiness projections. MCP adapts lifecycle
+services and the workspace client; the typed registry owns its public schema.
+Every cloud lookup supplies the authenticated user and resource identity. An opaque ID
+grants no access. GitHub credentials remain in the vault, enrolled Local private Git uses
+the repository-scoped broker, and SDK credentials remain in the computer's owned store.
+See [System reference](SYSTEM.md#local-codespace-composition-and-ownership) and
+[API](API.md#workspace-streaming-transport).
 
 ## Moira Local companion
 
 Local execution has four layers: the server control plane owns authenticated requests and
 repository authorization; `LocalDaemon` owns connection confirmation and reconnect; `LocalVmRuntime`
-owns exact VM lifecycle and its isolation boundary; the installed guest supervisor owns jobs,
-sessions, output and version-checked file operations. The CLI delegates persistent `run` to the
+owns exact VM lifecycle and its isolation boundary; the installed workspace service owns commands,
+sessions, output and guarded file operations. The CLI delegates persistent `run` to the
 daemon. The runtime factory currently selects only the supported SBX backend; no Lima backend
 is implemented. Before each fixed guest attachment, that backend verifies configuration, exact
 identity, mounts and network receipt once, then rechecks the current local grant and runtime state
 after those asynchronous proofs and before dispatch.
 
 Moira Local uses outbound authenticated HTTPS to a locally selected Moira application URL.
-Server codespace work requires `CODESPACE_CODESPACES_ENABLED=true` and enabled instance controls;
-GitHub App credentials and the GitHub connector are not required for public read-only local work.
+Local work requires enabled instance/provider controls and the computer owner's current grant
+and lease. `CODESPACE_CODESPACES_ENABLED` gates GitHub only; GitHub App credentials and the
+GitHub connector are not required for public read-only Local work.
 Private Git, push and pull-request creation use the connected GitHub App user authorization.
 Agent work cannot choose host commands, VM templates, updates or broader local grants.
 Owner web settings require a separate explicit local approval and remain within its ceilings.
 Each codespace has its own persistent mountless microVM. One repository may have multiple codespaces,
 each with a separate VM and lifecycle. The computer's bounded backing image holds the local SDK
 storage; its configured capacity is shared across these codespaces, not assigned to each one.
-Local VMs and operations do not consume GitHub
-Codespaces count or concurrency slots and are not subject to its machine ceiling or creation throttle.
+Local VMs do not consume GitHub
+Codespaces count slots and are not subject to its machine ceiling or creation throttle.
 CPU, RAM and disk allocations remain owner-controlled. Backend, frontend
 and browser jobs in one codespace share that VM. The companion requires Node.js 24,
 macOS on Apple silicon and Docker Sandboxes `sbx` 0.46.0. Linux execution is refused because
@@ -179,7 +138,7 @@ npm run local -- run
 Keep that foreground process running to serve the account; Ctrl+C settles owned work. Reconnection
 uses durable request IDs, digests and claims, so a lost response does not authorize redispatch.
 
-New local relay envelopes expire at most 870000 ms after the server's issuance time, leaving
+New Local lifecycle relay envelopes expire at most 870000 ms after the server's issuance time, leaving
 30 seconds inside the companion's strict 900000 ms future-window ceiling. Shorter requested
 windows, the resource's creation deadline and the ordinary work lease still cap expiry.
 Retained requests keep their original deadline, digest and payload bytes on replay.
@@ -214,36 +173,23 @@ closure and connection-capacity reservation/release. A CONNECT reservation finis
 shutdown is released without destination lookup or connection, so closed service ownership does
 not leave an upstream connection running after shutdown.
 
-Local diagnostics use `status`, `create OWNER/REPO --ref REF`, `start SPACE_ID`, `stop SPACE_ID`
-and `exec SPACE_ID -- COMMAND ARG…`. Stop retains files; `remove SPACE_ID --confirm` deletes the
-owned VM through that explicit local confirmation. Manager-backed CLI commands are one-shot:
-their final cleanup stops owned VM processes on exit. Persistent server/MCP work uses the long-lived
-paired `run`; stop it before another command needs the same runner lock. Browser revocation denies
-new server work, but physical shutdown of an offline computer cannot be asserted by the browser;
-local disable and the independent lease guard remain authoritative. A lost ordinary guest response
-leaves that operation's outcome unconfirmed; inspect the same operation ID without repeating its
-command or file edit. It does not retire the VM or block independent work. `recover SPACE_ID --confirm`
-is an explicit stopped-runtime recovery action that verifies the exact VM, current grant and network
-boundary without retrying prior jobs. Missing identity, incomplete initialization and other failures
-remain refused. Device-level `recover --confirm` requires disabled work and
-acknowledges an orphan shutdown after proving owned processes stopped; it preserves jobs and data.
-After abrupt companion termination or a computer reboot, restart `run` with the same state.
-Startup reclaims a stale `runner.lock` under the existing kernel gate only after proving the
-former runner and guard absent. It preserves policy, VM records and unknown jobs; the new owner
-verifies native identity before work. Live, unknown or malformed ownership remains refused.
-Do not manually unlink the marker or discard receipts. Explicit disabled-device recovery remains
-available for an orphan shutdown that requires physical settlement. After a confirmed ordinary stop, including idle disconnection,
-restart `run` under an enabled, unexpired local lease. Ordinary work uses the same stable VM binding
-and current native state; it does not require synchronizing lifecycle counters. Recovery preserves
-retained jobs and their unknown outcomes; it authorizes subsequent work, not replay. Do not clear
-journals or adopt a VM by name to bypass ownership recovery.
+Local diagnostics use `status`, `stop SPACE_ID`, `remove SPACE_ID --confirm` and
+`recover SPACE_ID --confirm` for owned lifecycle/recovery. Manual host create/start
+and raw execution are refused; use the paired server lifecycle and the guest
+`moira-workspace` CLI for commands/files. Persistent paired `run` owns the VM lifetime.
+Closing it settles owned processes while preserving disks and receipts.
 
-Background reconciliation can inspect, cancel, finalize or read retained output and file outcomes
-from the same local VM across stop/start. It verifies current ownership, exact provider identity,
-device and connection authority and repository grants. Lifecycle counters do not authorize execution
-or result collection. Disabled instance controls do not block required settlement, but still deny
-new work. The operation journal records uncertainty and cleanup obligations without locking unrelated
-commands or files. Recovery does not redispatch an old execute or file edit.
+After abrupt termination or reboot, restart `run` with the same state. The runner
+gate permits stale-marker reclamation only after proving the former runner and guard
+absent. Unverifiable ownership remains refused; do not unlink locks, clear journals
+or adopt a VM by name. Explicit disabled-device recovery proves physical settlement
+without enabling work or replaying unknown commands.
+
+Lifecycle relay carries inline authenticated create/start/stop/delete/snapshot metadata
+and retained replies. It does not carry commands, file bodies or transfer parts.
+Request/claim identity fences lifecycle effects; ordinary and late acknowledgement
+use the active RPC journal's serialization boundary. Archived operation requests and
+receipts remain untouched and non-runnable.
 
 ### Owner web control and bundle updates
 
@@ -267,21 +213,11 @@ prerequisite is distinct from live repository append inside a coordinated runnin
 preserves existing VMs and grants. A device without the control capability must use the rebuilt
 companion before the website can apply owner settings.
 
-The strict persisted control schemas require an offline format conversion when their fields change.
-Back up the server database and the computer's complete private state and disk before conversion,
-and keep the matching server and companion bundles for rollback. After confirmed shutdown, remove
-only the unsupported quota and network-profile fields: repository `domains`; delegation
-`maxRepositories` and `networkProfile`; `maxSandboxes`, `maxOperationMs`, `maxOutputBytes`,
-`maxConcurrent`, `maxNetworkBytes` and `maxNetworkConnections` from saved settings and ceilings;
-and the local policy's `limits` object. Apply the same conversion to nested settings, applied
-delegation and retained control-intent policy copies, and to a retained repository-creation
-request's serialized delegation. Recompute the server public-policy digest from its canonical JSON.
-Validate the converted values against the matching strict schemas before restarting either side.
-Preserve repository grants and receipts, account/device/VM IDs, generations, request fingerprints,
-recovery markers, jobs, SDK credentials and disks. The new bundles do not automatically read an
-unsupported saved shape. Rollback restores the corresponding database, local state and matching
-bundles and SDK backing storage together; resetting the SDK, deleting journals or enrolling a replacement computer is not
-the conversion procedure.
+Persisted policy/control shapes must match their installed reader. An unsupported
+shape is a refusal, not permission to clear journals or adopt replacement state.
+Coordinate a reviewed conversion separately while stopped, preserving grants, credentials,
+VM/profile/disk identity and all unknown receipts. Rollback must retain the matching
+bundle and coherent state rather than resetting the SDK.
 
 After pairing confirmation, approve web control on the local machine:
 
@@ -342,9 +278,9 @@ CPU, RAM and Docker disk
 defaults apply to new VMs; existing VMs restart with their admitted machine and
 repository identity. The storage setting bounds the computer's SDK backing filesystem, while
 Docker disk capacity belongs to each admitted VM. The default owned APFS image can grow or shrink while stopped
-after native bounds and free-space checks, preserving data. Storage must be integral
-GiB, at least 8 GiB and at least Docker capacity plus 1 GiB; filesystem usable
-capacity includes native overhead. Unknown physical changes retain their journal
+after native bounds and free-space checks, preserving data. Storage and Docker byte
+values must be positive safe integers, storage must exceed Docker capacity, and native
+sector alignment and usable filesystem capacity remain authoritative. Unknown physical changes retain their journal
 and keep work fenced. Retrying the same settings may renew a finite lease; an
 unrelated request cannot erase an uncertain resize.
 
@@ -507,10 +443,8 @@ back to the record, or no ref when the provider reports none.
   is compared as a branch name (`refs/heads/x` matches `x`), and a Codespace that
   does not report a ref yet is adopted on the remaining identity. An ambiguous
   provider response remains pending for exact reconciliation. The Codespace is
-  always created with GitHub's maximum idle timeout of 240 minutes, whatever the
-  owner's settings: GitHub's own timer does not see a silent background command,
-  so the owner's shorter timeout is enforced by Moira alone (see "Idle
-  auto-pause").
+  created with the owner's selected native idle timeout, or GitHub's maximum of
+  240 minutes when auto-pause is off (see "Idle auto-pause").
 - Start records desired running state before provider contact. While that
   generation remains current, the official GitHub CLI may restore a Codespace
   that stopped outside Moira. Starting a codespace whose provider resource Moira
@@ -523,16 +457,12 @@ back to the record, or no ref when the provider reports none.
   it is `CODESPACE_START_TIMEOUT`, which names the wait and asks the caller to
   retry once the codespace has finished starting. A codespace that cannot start —
   deleted, rejected or being deleted — is refused by that condition without the
-  provider being asked to start it, and a start never bypasses a concurrency,
-  kind or current-authorization check: the reservation that follows is the same one as
-  before. Explicitly starting a codespace remains available and unchanged.
-- Stop records desired stopped state, advances the generation, cancels or
-  reconciles older operations and stops the exact Codespace. It preserves the
-  codespace and repository data. Local stop also revokes queued execution deliveries and
-  aborts their request scopes, so an undelivered old command cannot first execute after restart.
-  First execution delivery also checks the exact operation's cancellation state atomically with
-  queue insertion, including when stop occurs while its payload is being retained. Confirmed
-  cancellation before delivery returns `CODESPACE_OPERATION_CANCELLED` without a guest effect.
+  provider being asked to start it. Start never bypasses current resource,
+  account, provider-control or owner-grant authorization. Explicitly starting a codespace remains available and unchanged.
+- Stop records desired stopped state, advances the generation and stops the exact
+  provider environment, preserving repository data. Router authority changes close
+  affected observer streams; they do not fabricate command cancellation or authorize
+  replay. The workspace remains the owner of its retained outcomes.
 - Delete is a separate destructive operation. It requires the caller's current
   observed generation, checks local deletion permission before recording a new intent, persists
   delete intent before provider contact and
@@ -597,10 +527,9 @@ An owner confirmation can replace an old refused local delete intent, or one wit
 requests, with a fresh guarded owner intent. A retained destructive delete request with an unknown
 outcome keeps its existing generation and identity; a snapshot receipt alone is not evidence that
 deletion was dispatched.
-The local relay retains authenticated create/start/stop/delete request and reply payloads until
-their existing private-transfer expiry. A retry reads the same mutation receipt even after the
-original delivery deadline, without dispatching the effect again. Snapshot and guest-operation
-payloads retain their ordinary cleanup behavior.
+The local relay retains authenticated inline create/start/stop/delete requests and replies
+under their lifecycle receipt retention. A retry reads the same mutation receipt even after the
+original delivery deadline, without dispatching the effect again. Snapshot requests retain their lifecycle cleanup behavior.
 Input and new dispatch require current resource authority. Already accepted output/ACK settlement
 can complete an older exact claim after reconciliation advances the resource, without rewriting
 the newer generation. Identical terminal ACK and terminal renewal are read-only receipts: they do
@@ -621,7 +550,7 @@ request for the codespace and a pass that settles it reset that wait. Records a
 rebind pass could not re-verify move to the back of the rebind order, so one
 codespace that cannot be rebound does not hold back other users' codespaces.
 
-Disconnect first cancels operations and stops persistent codespaces. It does
+Disconnect fences workspace routing and stops persistent codespaces. It does
 not silently delete their data. A later authorization rebinds a codespace
 automatically when the same GitHub account, approved repository and exact provider
 resource still match, whichever branch the codespace has checked out, or when that
@@ -650,655 +579,110 @@ a different key and is recorded separately; an internal failure is not recorded 
 the provider's answer.
 
 Durable global and provider controls act as kill switches. A disabled control
-rejects new creation, start and operation reservations, while already required
-stop, cancellation and cleanup work remains eligible for reconciliation.
+rejects new creation, start and workspace routing, while required lifecycle stop and
+cleanup remain eligible for reconciliation.
 
 ### Idle auto-pause
 
-Two built-in, non-administrative user settings in category `codespaces` control
-idle pausing. The Settings page edits them in the Automatic pause card of
-**Development → GitHub Codespaces** (not in the generic settings editor), and the settings API and the
-MCP `settings` tool read and write them:
+`codespaces.auto_stop_enabled` (default true) and `codespaces.idle_timeout_minutes`
+(default 30, allowed 5–240) select GitHub's native idle timeout for **new** Codespaces
+created through Moira. Settings/API/MCP share these values; invalid stored values use
+the default, and extensions cannot declare keys in this namespace.
 
-| Setting                           | Type    | Default | Meaning                                                 |
-| --------------------------------- | ------- | ------: | ------------------------------------------------------- |
-| `codespaces.auto_stop_enabled`    | boolean |  `true` | Moira stops the owner's idle codespaces                 |
-| `codespaces.idle_timeout_minutes` | number  |      30 | Idle time before a stop; 5 to 240, the range GitHub has |
+When enabled, creation requests the selected timeout. When disabled, it requests
+GitHub's maximum of 240 minutes, not indefinite running. Existing Codespaces keep
+their provider parameters. GitHub detects editor, browser and terminal input/output
+activity; a silent command can be stopped. Moira does not infer idleness from cloud
+command rows or impose another command idle timer. Local VMs follow their owner's policy.
 
-A write outside 5–240 is refused on every settings write path; a stored value
-outside that range is read as the default. The `codespaces` setting namespace is
-reserved, so no extension can declare a key in it.
-
-Each scheduled reconciler tick first observes the provider, then stops idle
-codespaces, then reconciles. Idleness counts only agent work through Moira. A
-persistent codespace is idle when it is usable and meant to run, its owner has
-auto-pause on, none of its operations is reserved, running or awaiting
-cancellation or reconciliation (a background command counts as running), and the
-latest of these is older than the owner's timeout: its creation, Moira's own
-activity (adoption, a completed start, an operation reservation) and the last
-change of any of its operations. Commands, file operations and transfers all run
-as operations. For each idle codespace, up to a bounded batch per tick, Moira
-requests a stop exactly as a user stop does, with the outcome
-`idle_stop_requested`; the stop converges through ordinary lifecycle and preserves
-data, and the next operation starts the codespace again. The request re-checks the
-whole idle condition in the same database statement, so an operation reserved
-after the scan wins and nothing is stopped under it.
-
-Moira does not see direct use of a codespace in a browser, an editor or over SSH,
-so a codespace a person works in directly is paused once no agent has used it for
-the owner's timeout; owners who work in their codespaces directly turn auto-pause
-off. Independently of Moira, GitHub stops a codespace after at most 240 minutes
-without user or terminal activity, with auto-pause on or off. That limit equals
-the `CODESPACE_MAX_BACKGROUND_OPERATION_HOURS` ceiling, which is why a higher value
-is refused at startup; GitHub can still stop a codespace under a background command
-that produces no terminal activity near the end of its permitted run.
-
-Provider observation lists, in each tick, the codespaces of a bounded number of
-users who have a persistent running or stopped codespace and whose last listing
-is at least ten reconcile intervals old, least recently listed first, with one
-listing per user. Before interpreting the result, Moira refreshes repository
-grants. For each managed codespace, it records the checked-out ref and the
-provider's `last_used_at`, which GitHub sets when the codespace was last started;
-that timestamp is informational and plays no part in the idle decision. A list
-omission or identity mismatch triggers an exact read by the stored provider name.
-Only an exact 404 with current authorization and resource generation marks the
-codespace deleted, cancels its active operations and releases its held capacity.
-Failed reads, mismatched identities and changed grants or generations keep the
-record for another observation. Unknown GitHub Codespaces are not imported.
-
-A running codespace GitHub has shut down is recorded stopped, with its previous
-operations cancelled; a stopped codespace started outside Moira is recorded
-running with a new idle window. These transitions are audited as
-`provider_observed_stopped` or `provider_observed_running`. A codespace observed
-in a scheduled tick is judged for idleness in the next tick. Settings Refresh
-and MCP `list` with `refresh: true` run the same bounded observation immediately.
+Provider observation refreshes managed state/ref under exact identity and authorization.
+Failed observations retain the last verified state; unknown resources are not imported.
+Refresh requests fresh observation. A provider stop does not authorize command replay:
+collect the original workspace request and retain uncertainty without outcome proof.
 
 ## Direct operations
 
-The provider-neutral operation service executes one command in a running
-codespace. A request contains an argv array, a codespace-relative working
-directory, bounded stdin and a timeout. Arguments are data and are never
-interpolated into a shell program. Stdin is either inline bytes or a tenant-bound
-private transfer reference with an exact declared size and MIME type. A native
-reference request records an authenticated operation against the running codespace
-before source fetch. The resulting private object is durably retained for the accepted command
-before its original transfer is consumed, and materialized as exact binary
-connector input without model-context base64. `CodespaceOperationService.executeNativeReference()`
-composes native reference validation/fetch/storage with that dispatch path; callers do
-not handle the internal `codespace-file://` capability.
+One workspace service owns commands, sessions and retained output in both providers.
+The installed `moira-workspace` terminal CLI calls its private Unix HTTP socket.
+MCP reaches the same owner through the cloud router; ordinary work uses neither
+GitHub SSH dispatch nor Local lifecycle relay.
 
-The shared guest supervisor runs the command directly as the ordinary codespace user
-inside the selected repository. It keeps its opaque marker, process-group facts
-and bounded result outside the repository. The result preserves separate stdout
-and stderr, terminal state and exit code.
+Choose a fresh `request_id` in `ws1-<lowercase UUID>` form before mutation.
+The owner durably binds it to immutable input before effects; changed input is refused.
+Historical bare UUIDs remain archival and are never translated, imported or dispatched.
+After reply loss inspect the original identity without resubmitting the command.
+Observer/service reconnect never authorizes launch replay.
 
-The GitHub adapter mounts its provider-owned operation root from
-`MOIRA_CODESPACES_ROOT`, whose default is `/workspaces`. That path is a Codespaces
-runtime convention used by the remote supervisor, not a public alias for the
-renamed Moira domain.
+Exec accepts argv, or a script in a named session. Sessions preserve working directory
+and exported variables; opening/ending is explicit. Session context publication serializes
+within that session, while distinct sessions/stateless commands remain independent.
+`stdin_text` is inline text; `stdin_file` streams native attachment input before launch.
 
-A command caller chooses a UUID `request_id` before submission. Moira durably saves its identity,
-normalized semantic digest and private input intent before returning admission. Matching retries
-recover the same operation; changed command, resource or input identity is refused. A command reply
-reports `accepted`, `phase`, `operation_id` and `request_id` without waiting for guest completion.
-`preparing` means input preparation is incomplete; `accepted` does not prove the guest has started.
-Native input preparation and provider delivery continue from the saved intent after server restart.
+Admission may return `starting`. Inspection distinguishes actual running, terminal
+receipts, proved `not_started` and `unknown`. Missing witnesses cannot manufacture
+terminal success/failure/cancellation. Addressed cancellation requires actual execution
+evidence to settle. Observer disconnect does not cancel detached work. Output stays in
+the workspace and is read by stream/offset/length from the original request.
 
-Use `exec` with only `codespace_id` and `request_id` to look up that accepted request without
-dispatching, or collect by its existing `operation_id`. File calls retain their terminal waiting
-contract. Lookup and bounded waiting never cancel or repeat a command. Transport interruption
-does not extend the MCP client's timeout or prove nonexecution; recover the original identity before
-deciding whether another effect is needed. Independent work can continue while an outcome is unknown.
-`started_at: null` means start is unconfirmed, not that no work ran. Only a proved closed launch
-boundary produces `not_started`; `outcome_unknown` preserves uncertainty.
-An authenticated refusal before guest admission ends that operation and preserves the actual
-reason. If the local runtime confirms that it is stopped while the server still records usable,
-Moira refreshes that exact VM's observed state and returns `CODESPACE_NOT_RUNNING` without replay.
-A subsequent new call can use the ordinary start-on-use path. A generic transport failure is not
-evidence of a stopped VM and does not change its readiness to stopped.
+Only explicit `timeout_seconds` imposes an execution deadline. Observation windows
+and transport authentication checks do not stop commands. Moira imposes no aggregate
+command/session/stdin/output or implicit runtime ceiling. Caller output windows bound
+one response, not retained output. Actual disk/process failures, scoped authority and
+provider lifecycle still apply: GitHub may stop silent work; Local requires an enabled,
+unexpired owner lease.
 
-Background reconciliation transactionally claims due operations into a bounded recovery pool.
-One held inspection does not prevent independent accepted work from progressing. Selection uses
-the same eligibility rules as dispatch, including explicit-session ordering, and advances the
-attempt timestamp so repeatedly failed cleanup cannot starve ready work.
-
-Before connector contact, SQLite records the authenticated tenant, stable codespace
-and provider identity, credential authority, private input/result references,
-independent stdout/stderr bounds and deadlines. SQLite stores only
-operation metadata. It does not store argv, cwd, stdin, stdout, stderr, provider
-tokens or SSH configuration. Cloud concurrency reservations count only cloud operations;
-local operations use no owner-set concurrency quota and do not consume those cloud slots.
-An unfinished local record or historical job ledger does not prevent another operation.
-Local commands and reads contact the guest independently; lifecycle stop closes new admission
-and drains the contacts already admitted. A lost response affects only its accepted operation.
-
-For GitHub, cancellation targets the recorded foreground process group and validates the
-process start time before signalling. A lost worker, SSH connection or control
-response is not treated as successful cancellation: the operation remains
-`reconcile_pending` and occupies capacity until remote inspection proves a
-terminal state or sufficient proof that launch never occurred, or an explicit codespace stop/delete
-terminates the provider environment. A reservation abandoned before dispatch expires without
-connector contact; dispatch intent is durable before a remote command can start.
-
-The shared scheduler settles an expired `reserved` admission before reading retained private
-preparation or delegating file recovery. This includes native upload/download, file-client setup
-and CLI upload/download. The captured claim must still own the transition; a displaced owner cannot
-publish terminal evidence. Settlement preserves the original request/operation IDs and deadline,
-marks the never-dispatched operation cancelled, releases active accounting and creates no result
-object or guest cleanup obligation. Missing or expired preparation does not prevent this outcome.
-Original source and target bytes remain unchanged; private preparation follows ordinary owned
-retention cleanup. This rule does not classify an already-dispatched unknown effect as not started
-or replace the separate collection and cleanup contract for retained terminal results.
-
-A command's complete standard output and standard error are written into its own
-remote operation directory as it runs. The per-stream response limits bound only
-what an answer carries; they neither stop the command nor replace its standard
-error. One bound does stop a command: `CODESPACE_MAX_RETAINED_OUTPUT_MB` is the
-disk a single command's retained output may occupy in the codespace, and passing
-it kills the foreground process group and is reported as reaching that ceiling
-rather than as the command's own failure.
-
-The guest runtime begins at confirmed command launch. `admission_deadline_at` limits permission
-to start; `started_at` plus `runtime_ms` determines runner enforcement. Caller waiting has its own
-bound and cannot cancel work. `result_expires_at` describes result retention. Historical operations
-without launch receipts keep their stored identity and do not acquire invented start timestamps.
-An original accepted relay claim can settle an immutable result after delivery expiry within its
-separate settlement retention. It cannot fetch input or authorize another launch. Observing the
-original completed/refused claim leaves its row and deadlines unchanged; expired nonterminal work
-cannot renew. Current owner, device, resource, repository and credential authority remain checked.
-
-Before publishing a dispatched command's terminal result metadata, Moira saves a verified bounded reply prefix in the existing
-private transfer store. Internal command input/results have bounded control accounting distinct
-from native file quotas. Collection of that prefix survives service restart during retention;
-corruption is refused rather than returned. Moira retains the remote stdout/stderr file for
-the configured cleanup window, or for as long as the command itself was allowed
-to run when that is longer. A result therefore stays collectible for at least the
-command's own permitted duration, which is what makes an unattended background
-command safe to collect late. Caller reconciliation can read the same result
-repeatedly during that window. Only after the window expires may background
-cleanup remove the remote output bytes; failed finalization remains a durable, idempotently retried
-obligation. The small launch proof remains fenced through its admission window, so early output
-cleanup cannot permit another execution of the same accepted command.
-
-A terminal result reports the complete size of each stream next to its bounded
-payload, so a caller knows what the answer omitted. Any range of a retained
-stream is read with the `read` action by naming the command's `operation_id` and
-`stream` instead of a path. That read is a bounded control request rather than a
-new operation: it creates no operation record, checks the same current ownership,
-stable provider identity and authorization as every other call against that
-operation, requires the named codespace to own that command, and returns
-`CODESPACE_RESULT_EXPIRED` once cleanup has removed the streams with the result.
-A read that starts at or past the end of a stream returns no bytes and the
-stream's current size, which is how a caller finds where a stream ends.
-
-A command may also be started with `codespace_process({ action: "start", ... })`. It is the same operation, the
-same single dispatch and the same resume path; only its ceiling and its deadline
-differ. It is admitted against `CODESPACE_MAX_BACKGROUND_OPERATION_HOURS` instead
-of `CODESPACE_MAX_OPERATION_SECONDS`. The guest runner enforces that duration from confirmed launch,
-and reconciliation observes its outcome independently of caller waiting. The dispatching call
-returns the durable acceptance identity without waiting for a proven running state.
-Start also requires a caller-chosen `request_id`; get can look up that request before the
-first `process_id` response is recovered. A caller that names no duration receives the one its mode
-implies: 300 seconds for a bounded command, the whole ceiling for a background
-one. The lifetime is granted when the command starts running, so a reservation
-that never dispatches is reaped within fifteen minutes whatever it asked for. Its output is readable by range while it runs, and it is
-stopped with `codespace_process({ action: "stop", codespace_id, process_id })`. A pending stop
-does not certify cancellation. A command that outlives the
-codespace's idle lifetime stops with the codespace, so the two values belong
-together.
-
-Inspection returns a retained terminal result when one is published, and reports running only
-under the applicable live-process and launch-proof contract. An existing marker without a result,
-live runner, explicit no-start proof or proved environment change remains `outcome_unknown`, including when launch metadata
-is missing. It is not a synthetic command failure or proof that execution never began. Provisioning
-with an unproved dispatch stays pending until the original maintenance outcome is proved; an
-expired, never-dispatched admission follows the cancellation rule above.
-
-A codespace restart takes every process with it and leaves the operation files
-behind. The codespace records the life of the environment each command is
-dispatched in, and an inspection that finds no result, no live process and a
-different life reports the operation as interrupted; the operation becomes
-terminal with `codespace_restarted` recorded as why it ended, which is distinct
-both from a cancellation the caller asked for and from a command that failed on
-its own. The caller sees that distinction: the operation carries
-`interrupted_by_restart` and the answer is `CODESPACE_OPERATION_INTERRUPTED`
-rather than the generic command failure. An interrupted file mutation is inspected and its
-existing transaction is recovered where safe; its original write or patch is never automatically
-executed again. An unresolved interrupted mutation reports `CODESPACE_OPERATION_INTERRUPTED`.
-
-The fixed connector ceilings are 4 MiB of raw input, 8 MiB for each output
-stream and 15 minutes for a bounded command; a background command is bounded by
-GitHub's 240-minute idle stop, since it cannot outlive its codespace. A remote job request is bounded separately and never waits for a
-command to end. Runtime policy may lower these ceilings but
-cannot raise them. An argv contains 1–128 non-empty arguments; each argument is
-at most 16 KiB, and the relative cwd is at most 4096 bytes.
+The adapter opens outbound authenticated CONTROL carrying bounded call identities and
+per-call DATA carrying raw HTTP. Native backpressure bounds stream buffers. Offline
+work is not durably queued in the cloud. Before-dispatch loss is a known refusal;
+after-dispatch loss can be unknown. Reconnection collects existing work, never replays it.
 
 ## File operations and native transfer
 
-The provider-neutral file service addresses the same persistent `codespace_id` as
-command execution. It supports stat, bounded literal or regular-expression search,
-byte-range read, atomic write, structured multi-file patch, native-reference upload
-and private download. Each request records a durable operation kind, stable codespace and
-provider identity, credential authority, deadline and byte budget before credential or connector
-contact. SQLite stores metadata and private references; paths, queries, patches and content remain
-in verified private storage rather than database payloads.
+Stat/search/read/write/patch share that confined owner. Repository binding, safe paths,
+no-follow descriptors, link/inode identity and current preconditions remain enforced.
+File sizes/range positions must be safely representable. Workspace files and native
+binary streams have no artificial Moira size ceiling.
 
-Paths are repository-relative data. Empty components, `.`/`..`, absolute and drive
-paths, NUL bytes and overlong values are rejected. The Codespaces supervisor snapshots
-the verified repository identity, opens each directory component without following
-links and keeps the opened parent across staging and replacement. Final files must be
-single-link regular files. Symlinks, hard links, directories in file position, FIFOs,
-sockets and devices are rejected.
+Stat returns metadata/version. Read streams selected bytes with offset and total size;
+complete binary reads use no whole-file transport buffer. Search accepts caller-selected
+`max_matches`/`max_bytes` response windows rather than an execution quota.
 
-Stat holds a confined regular-file descriptor and reports safe-integer metadata. A regular file
-larger than the 4 MiB editable-file ceiling has a null hashed `version`, without reading its content.
-Small files retain their whole-file SHA-256 version, computed with bounded hashing chunks. Directory
-metadata retains zero size and a null version. Regular-file observations compare descriptor device,
-inode, size, nanosecond timestamps and single-link status before and after work, then re-resolve
-the repository-relative path and compare its identity. Moving a parent while the original inode
-remains linked therefore cannot publish a result for a different named file.
+Write/upload and patches require namespaced identity and explicit `expected`.
+Writes stage bytes before guarded publication. Mutation journals retain original
+target/backup inode ownership across interruption. Recovery never overwrites a
+same-content foreign inode or replays a file effect; conflict preserves the uncertain
+transaction. Collect the original request after reply loss. Matching write replay
+validates unchanged path/precondition/bytes.
 
-Read returns an explicit byte offset, total size and only the selected bounded byte range. Its
-`sha256` is the whole-file digest for files up to 4 MiB and null for larger files; `rangeSha256`
-hashes exactly its returned bytes. A large range reads no content outside that interval. A small
-range retains only selected bytes while streaming the whole-file hash in chunks of at most 256 KiB.
-Offsets equal to file size return an empty range; offsets beyond size are refused. Range lengths
-remain bounded by the code-file ceiling, and arithmetic uses safe integers without overflowing
-offset-plus-length. Guarded code edits and inline image preview retain a 4 MiB full-file ceiling.
-Native binary upload/download use a separate effective binary ceiling, default 20 MiB, and
-256 KiB HTTP chunks. Complete empty binary downloads are valid; preview requires a nonempty image.
-Relay parts remain at most 4 MiB, with unchanged 8 MiB IPC frame and 24 MiB relay-envelope limits.
-Streamed native binary payloads and their base64 encodings do not cross MCP or the owner relay.
+Native upload streams the authorized attachment directly to the workspace, without
+cloud transfer checkpoints or file capabilities. Download performs one complete read,
+then separately publishes an owned private attachment as `reference_id` and an MCP
+resource link. Optional `max_bytes` refuses an oversized complete file before publication,
+never publishes a truncated prefix. An agent can create a file with the direct CLI
+and call MCP download without a separate stat.
 
-Search is bounded by scanned/result bytes, match count and remote time and does
-not traverse links or special files. It also skips the repository's own `.git`
-directory wherever it meets one and refuses a search rooted at or inside it; those
-files stay readable, writable and inspectable by exact path. Skipping is not
-truncation: `truncated` still reports only that a bound stopped the walk.
-Regular expressions execute in a terminable worker;
-a match that reaches the search deadline returns a truncated result instead of blocking
-the supervisor event loop. The result-byte ceiling covers the complete serialized search
-envelope, including its action, match separators and `truncated` state. A typed file
-failure carries no file payload and therefore remains recordable even when the caller's
-success-payload budget is smaller than a JSON error envelope. A classified guard failure carries
-an optional bounded `reason`: `unsafe_access`, `size_limit`, `invalid_range`, `concurrent_change`
-or `precondition`. Unclassified and retained older failures may omit it; raw exception text and
-host paths are not added to the result.
-
-Write requires an expected existence state and may require the previous size and
-SHA-256 digest. Patch supplies ordered byte edits for each file. A successful patch
-returns old/new versions and a content-free summary containing complete file, edit and
-inserted/deleted-byte totals. Ordered per-file summary entries fit a connector-selected
-4 KiB serialized budget and set `truncated` when the complete totals describe more files
-than can be listed. The remote supervisor applies the supplied internal budget only
-within its separate protocol safety range.
-
-Running commands or reads in the same codespace do not by themselves block write, upload or patch
-admission. An active server operation record does not serialize file mutations. The guest uses
-an operating-system lock only for the filesystem transaction and recovery; staging, version checks,
-replacement and rollback happen under that lock. Kernel ownership releases it when its worker dies.
-Cloud operations share per-user and instance concurrency ceilings; local operations do not
-consume those slots. File existence,
-size and digest preconditions are checked in the guest; another writer changing the expected
-version causes refusal rather than an overwrite. Patch staging and atomic journal recovery remain
-the mutation boundary.
-
-All patch targets are staged before mutation; a repository-relative transaction journal,
-backups and ordered file/directory sync support commit or rollback after interruption.
-Before another mutation, the guest recovers an abandoned transaction under the same lock.
-If another writer changed a target or its parent and rollback would overwrite that change,
-the guest preserves the current files, backups and `file-transaction.conflicted.json` for inspection,
-marks the old operation interrupted and permits unrelated new work. Ordinary result finalization
-preserves those conflict artifacts; repair them explicitly or remove the workspace when no longer needed.
-Inspect the affected files before submitting a fresh edit with current version preconditions.
-Exact-marker ownership is published atomically from a complete process
-identity, so overlapping execute and reconciliation calls do not run the same mutation
-twice. Each journal entry also binds the opened parent device and inode. Commit and
-recovery re-resolve that repository-relative parent and fail before mutation if the
-namespace now points at another directory. The connector validates the complete remote
-result as untrusted input, including exact result variants, operation/action agreement,
-relative paths, byte ranges, versions, search coordinates and bounds, unique patch paths,
-summary totals and agreement between inner and outer success or failure state. Read and complete
-download are distinct result variants: inline download retains its non-null whole-file digest and
-bounded bytes; streamed native download returns a compact verified transfer receipt. Modern read
-range digests are verified against the decoded bytes. A retained older
-SHA-only read keeps its original whole-file digest and receives a locally computed range digest;
-stored receipts and operation identities are not rewritten.
-
-Inbound native references contain a `sediment://file_...` identifier, HTTPS download
-URL, safe file name, supported MIME type and declared size. Only the reviewed OpenAI
-storage host families are accepted. Every redirect repeats issuer, DNS and connected-
-peer validation; IP literals and any mixed or non-public resolution are rejected.
-Declared, HTTP and observed sizes plus MIME must agree. Text is admitted as valid UTF-8;
-JSON must parse; PDF, ZIP, gzip, tar, PNG, JPEG, GIF and WebP declarations must match
-their format signatures. `application/octet-stream` remains intentionally opaque. The
-absolute transfer expiry also bounds a response that continues to produce data.
-
-Transfer bytes live under `<dirname(DB_PATH)>/codespace-transfers`, separate from
-public artifacts. SQLite stores only a digest of the capability, tenant, purpose,
-size/MIME/digest metadata, expiry, claim state, immutable request/authority identity and offset.
-The original random native receipt is retained in a protected private receipt file for replay;
-the database does not store its raw bearer capability.
-Per-user and instance-wide object, aggregate-byte and in-flight-byte reservations occur
-before source I/O, independently for native file transfers and internal local-relay payloads.
-Native purposes `codespace_input` and `codespace_download` retain their configured object ceilings;
-companion purposes `local_relay_input` and `local_relay_output` do not consume those slots. Each
-relay object ceiling is `(maxConcurrentOperations + maxActiveResources) × 2 directions × 32 parts`,
-using the corresponding per-user or instance capacities. Existing
-byte, in-flight-byte, single-file and expiry bounds apply to each class. Public transfer usage
-reports native files only; internal relay objects have no public download capability.
-Native download observes a confined source's size and full digest and reserves that exact object
-before transferring its bytes. Inline download reserves its declared `maxBytes` capacity and
-reduces it to the observed size on publication. Published directory entries are synced before their SQLite
-state becomes ready. Expired physical objects remain quota-bound until cleanup removes
-their bytes and metadata together. Startup and periodic cleanup preserve reservations
-owned by a live Moira process, verify each ready/claimed object's type, link count,
-size and digest, and remove eligible expired, consumed, missing or invalid objects under current
-ownership checks. Resumable offsets survive process loss; an uncheckpointed tail is reconciled
-before append. Explicit input disposal uses its current random claim identity, so lease renewal
-or a successor claim cannot cause deletion of another owner's bytes. Confirmed pre-dispatch refusal
-can discard an ephemeral input; an unconfirmed remote effect retains its input for collection.
-
-Native upload/download require a caller UUID `request_id`, bound to owner, codespace and immutable
-semantic input. A matching retry recovers the original operation, transfer and receipt; a changed
-request is refused, including while the first request is pending. Explicit repeat resumes retained
-work, while `transfer_status`, CLI status and operation lookup only collect. A consumed or expired
-receipt cannot be republished under the same request identity. Admission, guest runtime, client
-waiting and retained object/result expiry remain separate bounds. Missing guest markers do not
-prove nonexecution; collection does not cancel or restart the accepted effect.
-
-The accepted native-input or CLI-copy intent binds the original transfer ID before ready
-publication. If another one-use consumer removes that object, recovery reports its loss rather
-than fetching or copying another object under the same request. A ready private copy can settle
-its retained operation without reopening the original source, even when that source was consumed
-independently. Matching ready/terminal replay does not allocate another result or consume extra
-control-object quota; current authority and expiry still apply.
-
-### Scoped guest file client
-
-`files_setup` installs fixed worker/client/config assets through the existing provider maintenance
-boundary without recreating the VM, repository or execution sessions. It returns `provisioned: false`,
-`pending: true` and `command: null` until installation and a fresh provider probe are confirmed.
-Successful setup returns the measured absolute executable `command`, ABI, actual environment identity,
-client SHA and independently measured executable SHA. Executable and client bytes must match the
-expected packaged asset. Invoke that returned path; provisioning does not modify PATH or shell files.
-
-Provision through the authenticated MCP action before using the returned command:
-
-```json
-{
-  "action": "files_setup",
-  "codespace_id": "<owned-codespace-id>",
-  "request_id": "af77e0b3-c266-43f0-aabf-c95dcb469075"
-}
-```
-
-Assign the returned absolute path to `command`; the installed client supports these forms:
-
-```bash
-"$command" upload output/video.mp4 --request-id 6ad0a423-67e8-498d-9e10-f4a18a3a93d2 --mime video/mp4
-"$command" download "$reference_id" input/data.bin --request-id fcfb50ce-4f89-41a9-a724-bfc50b151a17
-"$command" status 6ad0a423-67e8-498d-9e10-f4a18a3a93d2
-```
-
-Here `reference_id` is an owned private reference returned by a completed transfer.
-CLI upload publishes a private server object; CLI download pulls an owned private reference into a
-guarded repository target. Its default target precondition is absence; `--replace-sha256` supplies
-the existing full-file version for replacement. Chunk retries retain offset/hash checkpoints and
-the exact immutable transfer identity. Pure status never resumes network or target effects.
-An unconfirmed CLI HTTP exchange retains `TRANSFER_OUTCOME_UNKNOWN` and reports only bounded
-HTTP/process diagnostics, without raw response content, stderr, URLs or credentials. Inspect status
-with the original request UUID before resuming that same immutable transfer; the diagnostic does
-not establish whether its effect happened.
-
-The bootstrap credential is file-only and binds setup, owner, resource, provider, authorization/resource
-generations, actual guest life and finite expiry. Per-transfer credentials additionally bind the
-transfer, direction, size and full SHA. Every phase checks current account/provider ownership;
-new effects also freshly observe the accepted setup's guest life. A matching generation counter
-alone is insufficient. Boot change refuses new work while original terminal receipts remain
-collectible under their retained authority. Expired provisioning requires a new setup request,
-not an extension of its original grant. No full MCP/OAuth, GitHub, Telegram or host credential is
-installed in the guest. This asset installation does not replace the host companion executable.
-The HTTP phase contracts and rate admission are described in
-[Scoped Codespace File Channel](API.md#scoped-codespace-file-channel).
-
-`transfer_status.transfer.scope` is `private_object`: ready bytes, offsets and expiry describe server
-storage, and operation state is separate. Server-to-guest finalize checks fresh commit authority
-after staged full-digest validation, including an empty file, but source readiness is not proof of
-guest target commit. The guest's guarded target/result is collected separately; native input is
-consumed only after that result is confirmed. Guest partial cleanup observes descriptor expiry,
-runner ownership and held inode/path identity, preserving ambiguous commits and foreign replacements.
-
-Outbound download uses the rate-limited
-`/api/codespaces/transfers/:token` capability route. It sends an attachment with
-`no-store`, `noindex`, `nosniff` and no-referrer controls and consumes the capability
-after complete or interrupted delivery. The raw capability is redacted from application
-logs, and both Nginx variants proxy this prefix to the MCP process unbuffered with
-access and error logging disabled. The `download` action returns the capability to the
-agent as an MCP `resource_link`; its structured result carries name, MIME type, size,
-digest and expiry but not the URL.
+Published attachments have finite retention and one-use browser download semantics,
+independent of guest target commit/workspace receipts. Explicit
+`communication({ action: "deliver-file", referenceId, message, channelId? })` sends a
+retained owned attachment; download alone sends no notification. Checked sources
+stream to capable adapters; extension adapters refuse streams rather than buffering
+the whole file. Safe UTF-8 basenames including quotes are accepted; controls,
+separators and dot-only names are refused.
 
 ## MCP tools
 
-The authenticated MCP catalog exposes ordinary development through `codespace`, whose required
-`action` selects the operation: `list`, `repositories`, `setup_help`, `create`, `get`,
-`start`, `stop`, `delete`, `exec`, `stat`, `search`, `read`, `write`, `apply_patch`,
-`upload`, `download`, `files_setup`, `transfer_status`, `local_devices`, `repository_add`, `repository_create`, `preview_image`, `pull_request_create`, `pull_request_get` and
-`pull_request_find`. The public tools reference renders its schema from the typed
-registry. `codespace_process` separately exposes background `start`, `get`, `read` and `stop`.
-Changing the catalog changes `MCP_TOOLS_REVISION`, so a client holding an older catalog
-receives the ordinary HTTP 426 reconnect contract.
+`codespace` exposes lifecycle, Git/pull requests, command collection and guarded files.
+`codespace_process` starts/inspects/reads/cancels background commands; its process
+identity is the namespaced workspace request identity. Mutations require that identity;
+reads/lifecycle calls keep their own contracts.
 
-Every action derives the user from the MCP request context. Lifecycle, execution, file and PR
-actions address a persistent resource by `codespace_id`; local discovery and repository admission
-use the owned device and applied delegation. The tool accepts no user, chat, OAuth, provider token,
-SSH or internal capability field. Execution sessions are guest working contexts, not authorization
-identities. The published schema is one flat root object carrying
-`action` plus the union of every action's fields, of which only `action` is required —
-the projection this repository uses wherever a client may not read a root `anyOf`. It
-stays strict, so a field no action declares is refused there; the adapter then applies
-the requested action's own strict contract, so a field belonging to a different action,
-a mixed stdin form or a partial resume call is refused as `CODESPACE_REQUEST_INVALID`
-rather than by the published schema. A default an action declares is applied by that
-contract and is deliberately absent from the published object, which would otherwise
-inject every action's defaults into every request; the field keeps its description. A field two
-actions declare differently — `max_bytes`, which `search` bounds at 1 MiB and native `download` at the binary ceiling —
-is published as both forms under one key, so the projection narrows neither. `operation_id`, whose
-declarations differ only in description, is published once. `list` returns compact owned
-codespaces (`codespace_id`, repository, ref and state); `repositories` returns approved targets
-with `repository_id`, name and visibility. Neither includes an operation journal, connection,
-billing or limits envelope. `setup_help` owns actionable setup guidance.
-
-The website management list's `limits` combines `CodespaceObservabilityService.limits()` from policy
-and the database with an optional personal GitHub monthly billing read. Every non-null limit in it is a value Moira
-enforces, taken from the one definition every enforcement site reads
-(`effectiveCodespaceLimits` in
-`resource-policy.ts`), beside the user's current use:
-
-| Group             | Fields                                                                                                                                                                                                                                                                                                                         |
-| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `codespaces`      | `held` (codespaces the user holds, stopped ones and ones being created, identified or cleaned up included), `max_per_user`, `instance_held`, `max_instance`, `create_throttle_seconds`                                                                                                                                         |
-| `machine_ceiling` | `cpu_cores`, `memory_bytes`, `storage_bytes`                                                                                                                                                                                                                                                                                   |
-| `operations`      | `active` (the user's unfinished operations), `max_concurrent_per_user`, `max_input_bytes`, `max_stdout_bytes`, `max_stderr_bytes`, `max_retained_output_bytes`, `max_duration_seconds`, `max_background_seconds`                                                                                                               |
-| `transfers`       | `used_bytes`, `objects`, `inflight_bytes` (bytes still reserved or claimed), `max_bytes_per_user`, `max_inflight_bytes_per_user`, `max_objects_per_user`, `max_file_bytes`, `ttl_seconds`                                                                                                                                      |
-| `lifecycle`       | `retention_days`, `start_wait_seconds`, `idle` { `auto_stop_enabled`, `timeout_minutes` (the owner's settings), `provider_max_minutes` (GitHub's maximum idle timeout) }                                                                                                                                                       |
-| `provider`        | `billing` is either `"unavailable"` or the connected personal account's current UTC-month Codespaces usage: payer, period, retrieval time, Free/Pro plan when known, compute core-hours, storage GB-month including prebuilds, included allowances when known, and net USD amounts. This is GitHub's usage, not a Moira limit. |
-
-The `transfers` group counts native file transfers only, excluding internal companion relay
-messages. Its published ceilings remain the native file policy, not the relay control budget.
-For the local provider, codespace count ceilings, creation throttle, operation concurrency
-ceiling and `machine_ceiling` are `null`: no cloud quota is imposed there. Counts report
-the selected provider's resources and operations. Transport, native-transfer, output and
-operation deadline bounds remain explicit; CPU/RAM/disk settings belong to the computer owner.
-
-`instance_held` is the only instance-wide figure; no other user's codespaces or
-identifiers appear. Billing requires the GitHub App user permission `Plan: read`.
-If permission is absent, the API format is unsupported, or GitHub fails, billing
-is `"unavailable"` while local limits and management remain usable. Successful
-billing reads are cached briefly; an explicit refresh asks GitHub again.
-
-For GitHub, every grant-dependent discovery or creation action — `list`, `repositories`, `setup_help` and
-`create` — refreshes the stored installation and repository snapshot after a
-bounded TTL before using it. `list` also accepts `refresh: true` to force that
-attempt and reconcile managed Codespaces with GitHub. A provider failure returns
-the previous snapshot with a warning from compact discovery and `repositories_stale: true` from
-`setup_help`. Website lists retain separate repository/resource stale flags. A successful grant refresh updates
-personal and organization installation selections and repositories without
-reconnecting.
-
-Snapshot replacement is one database transaction guarded by the credential generation
-and the monotonic `grantsVersion`, so a slower process cannot overwrite a newer snapshot.
-Deleted and rejected codespaces are finished and accept no operation, so they are
-absent from that listing and from the website's, which reads the same service method.
-The `get` action returns one owned summary; an unknown or foreign ID returns the
-generic `CODESPACE_NOT_FOUND` result. Website summaries report `requested_ref`, the ref the
-codespace was created on, and `current_ref`, the ref the provider last reported
-checked out, which is `null` until Moira has observed one and while the codespace is
-on a detached HEAD; `create` still takes the input `ref`. Summaries omit connection and authorization
-generations, external owner/billing IDs, operation markers, provider resource names,
-claims and capabilities. MCP `get` uses the same compact codespace projection as `list`, with a
-safe `error` when a lifecycle cause exists; its `ref` is the observed ref or the requested fallback.
-
-MCP create/start wait for usable guest readiness, stop for confirmed non-running state while
-preserving files, and delete for confirmed absence. `delete` requires `confirm_delete: true`;
-the adapter reads the current owned generation and applies the domain deletion guard internally.
-Website deletion still requires its displayed `expected_generation`. Successful MCP lifecycle
-responses are compact codespace records; an unconfirmed result carries a bounded error and the
-existing codespace ID, without authorizing another creation.
-
-Ordinary `exec` returns durable acceptance with `request_id`, `operation_id`, `accepted`, `phase`
-and the admission, start/runtime and result-retention fields. Available terminal output includes
-stdout, stderr and exit code. File actions wait for their terminal useful result. Failed, cancelled
-and timed-out commands and rejected file edits are tool errors (`isError: true`) retaining useful
-bounded output. Command replies always retain their acceptance identity; file replies include
-`operation_id` when exceptional recovery needs it. Calling the same action with only `codespace_id`
-and that ID observes the accepted operation without dispatching another effect. Exec also accepts
-pure lookup by `request_id`, so a lost first response does not lose the command identity.
-Ordinary exec accepts neither `background` nor `cancel`; use `codespace_process` for independently
-managed processes.
-
-`codespace_process` start accepts the same required `request_id` and command/session/stdin inputs
-and returns `process_id`, acceptance fields and state without waiting for guest launch or completion.
-Get accepts either `process_id` or pure `request_id` lookup and collects state and available output;
-read returns a bounded UTF-8 stream range; stop cancels that exact process. Ranges use byte offsets:
-a split multibyte character or invalid UTF-8 is shown with replacement
-characters, matching ordinary retained command-output reads. Repository-file reads keep their
-separate strict UTF-8 and binary-download contract. The process ID addresses the
-existing command operation, not a new job queue. Unknown state, retained-output expiry and
-interruption remain explicit; inspect the same ID instead of starting a duplicate process.
-
-Consecutive commands share a working context through a named session. A caller
-opens one with `session` and `session_start: true` and continues it by naming
-`session` alone. The session remembers the `cwd` a call names and the variables a
-call passes in `env`, and applies both to every command that continues it; a
-command without a session is unaffected. Accepted commands in the same session observe the
-predecessor's committed context in admission order; unrelated sessions remain independent.
-
-Inside a session a caller may send `script` instead of `argv`. The script is run
-by the codespace's own shell and sourced, so its directory changes and exports
-take effect, and the session then keeps the directory it ended in together with
-the variables it added, changed or removed. A removal is remembered as a removal,
-so a later command does not see a variable the script took away. Only the
-difference from the environment the script started in is kept, never the whole
-inherited environment, which is what keeps the codespace's own environment out of
-the stored file; the few variables a shell maintains for itself are excluded. An
-argv command is never run through a shell, and a call carries exactly one kind of
-work: `argv`, a `script` inside a session, or ending a session with neither.
-
-`session_end: true` ends the named session, alone or alongside a command. Ending
-frees the session's slot and removes its stored context. A codespace holds at most
-sixteen sessions of its current life, and opening one past that is refused with
-that ceiling named; a session left by an earlier life holds no slot and is removed
-by the call that ends it. A queued end whose launch admission expires does not remove the context.
-
-A script is at most 64 KiB of text, and the stored context is bounded by 64
-variables and 64 KiB, enforced where it is written. A call whose declared context would cross that is refused as a bounded
-policy outcome naming the stored-context ceiling, and the previous context
-survives. A script whose end state fits is stored whether the script succeeded or failed;
-one whose end state would not fit, or a script that ended its own shell with
-`exit` or was stopped before it finished, carries nothing and the result says
-`session_capture_dropped` rather than leaving a session that later commands
-cannot use. A capture obeys every rule the stored context is read back under, so a
-variable whose name or value the context cannot hold drops the capture instead of
-wedging the session.
-
-A session belongs to the codespace life it was opened in. The remote side stores it
-beside the operation directories in the codespace's own state root, together with
-the identity of the running environment, which on Linux is the kernel boot identity
-and the first process's start time; an explicit override is honoured only where
-those sources do not exist. A command naming a session from an earlier life,
-or one that was never opened, is refused with `CODESPACE_SESSION_UNAVAILABLE` and
-does not run. The stored context never returns to the caller. A session name is
-validated data, never a path: the remote side builds the path from a name it has
-accepted, and a session's stored working directory is resolved by the same rule that
-refuses any escape from the repository.
-
-The `exec` action requires a caller-chosen UUID `request_id` and accepts argv as data,
-an optional repository-relative `cwd`,
-`timeout_seconds`, `session`, `session_start`, `session_end`, `env`, `script`, optional per-stream output limits and exactly one optional stdin
-form: `stdin_text` (UTF-8) or `stdin_file`, a native ChatGPT file reference. The
-registry publishes `_meta["openai/fileParams"]` on the tool for both `stdin_file` and
-`file`; inside a reference only `file_id` and `download_url` are
-required, while `file_name`, `mime_type` and `size_bytes` are optional. Native input
-goes directly through the one-call native execution path and is never staged through
-the `upload` action; neither the file ID nor the temporary URL is echoed back.
-
-The `stat` action can inspect a large regular file with a null hashed version. The `read` action
-returns UTF-8 text with offset and total size; for a repository file, `sha256` is its whole-file
-digest or null beyond the editable ceiling, while `range_sha256` hashes the returned bytes. The
-range digest is not an expected whole-file version for editing. `length` defaults to 64 KiB with a
-4 MiB ceiling, and `search` defaults to 100 matches within 64 KiB of
-result bytes, so a call that names only the codespace, path and query is complete.
-A range that is not valid UTF-8 returns `CODESPACE_BINARY_READ_REQUIRES_DOWNLOAD`
-instead of base64. The `write` action replaces a file atomically from UTF-8 text under an explicit
-existence precondition with optional size/digest guards; `apply_patch` takes
-ordered byte-offset edits with UTF-8 replacement text and returns old/new versions and
-the content-free summary. New native `upload` and `download` calls require `request_id`;
-their existing operation IDs remain collectible. `files_setup` takes `codespace_id` and `request_id`.
-`transfer_status` takes those fields and optional `transfer_id`, returns private-object metadata and
-the separate operation, and does not dispatch or republish. A ready guest-to-server transfer returns
-its original private `resource_link` and `reference_id`. The `download` action returns that same kind
-of private receipt (see the previous section). Sending it to a person is a separate explicit
-`communication` action `deliver-file`, not an automatic consequence of download.
-
-`preview_image` instead returns a complete repository-relative PNG/JPEG as standard MCP
-`ImageContent`, with safe image format, dimensions and byte-size metadata. Pass `codespace_id`, `path` and optional
-`max_bytes` (default and maximum 4 MiB). It uses the existing download operation and its authorization
-and stable-identity checks. Resume with only `codespace_id` and `operation_id`; the owned operation must
-have download kind. The ordinary call waits for complete bytes; an unconfirmed result is an error
-with its accepted operation ID, never a successful pending image. Successful projection
-checks complete bytes, digest, container/header framing, dimensions up to 8192 per edge and 16 million
-pixels; SVG, other formats, animated PNG, truncated and over-limit containers are refused. These
-checks are not full pixel decoding. Binary data appears only in the native image block, never in
-JSON text or a public URL. A captured screenshot is not evidence of visual correctness until inspected.
-
-`setup_help` diagnoses the current configuration, connection, installation, repository
-approval, instance-control and capacity condition after the same bounded grant refresh.
-It returns `repositories_stale` with the provider-owned instruction and the applicable
-Settings, installation, repository-creation and console links; the installation link is
-present when its configured URL is valid. This surface remains available when operational
-services cannot start. Repository guidance offers owner-delegated `repository_create` for a new
-personal private repository on a local device, or manual provider creation followed by App approval.
-An existing repository must be exposed by the App before delegated local admission.
-
-Known connection, codespace, state, policy and provider failures become bounded tool
-errors with `code`, safe `message` and `retryable`; actionable setup, authorization and
-capacity refusals carry the same provider link set as `setup_help`, plus the
-same-origin `settings_url` where applicable. A refusal that knows a bounded fact the caller
-may act on adds it to that message: a creation refused by `CODESPACE_POLICY_LIMIT` names
-whether the per-user ceiling on held codespaces (stopped ones count, so the message
-suggests deleting one no longer needed), the instance-wide ceiling or the creation
-throttle stopped it, and that ceiling's configured value. The addition never names a
-user, codespace or repository, so a caller refused by instance capacity learns only that
-the instance is full. The website management API adds the same sentence to its own
-message for the same refusals. Input that matches no strict request form
-returns `CODESPACE_REQUEST_INVALID` whose message names the offending field paths
-and the generic schema issue (for example `expected: Required`), never the
-submitted values. Unexpected failures return the generic
-`INTERNAL_ERROR` to the agent and are recorded server-side with the tool name and the
-request context's opaque IDs, never with agent input. The MCP process logs only the
-tool name and UUID-validated codespace/operation IDs for these tools; paths, queries,
-patches, argv, text and native references do not enter request context.
+The typed registry owns fields, defaults, native metadata and examples; use the
+[public tool reference](../packages/docs/src/content/docs/docs/reference/tools.mdx).
+`files_setup`, `transfer_status` and scoped file-capability CLI are not actions.
+The installed `moira-workspace` CLI uses the same local owner independently of cloud
+connectivity for exec/status/cancel/output/stat/read/download/write/upload/search/patch.
+Known auth/provider/pre-dispatch failures remain bounded refusals. Unknown dispatched
+outcomes require collection of the original identity, not a fresh ID to bypass uncertainty.
 
 ## Website management
 
@@ -1355,18 +739,16 @@ grant and managed-resource observation. If GitHub cannot confirm current resourc
 state, the card shows a stale warning and retains the saved entries. It never
 mentions chats or sessions.
 
-The Automatic pause card edits the two idle settings (a switch and a choice of
-timeouts within 5–240 minutes; a value set through the API or the MCP tool stays
-selectable) and saves each change through the settings API. Its note and help say
-that only agent activity through Moira counts, that direct use in a browser, an
-editor or over SSH is not seen, and that GitHub itself stops a codespace after 240
-minutes. A separate GitHub monthly usage card shows compute core-hours, storage
-GB-month including prebuilds, included Free/Pro allowances when known, net billable
-USD, the personal payer and retrieval time; it says unavailable when GitHub cannot
-provide a trustworthy summary. The Your limits card shows GitHub's `limits`:
-codespaces held, commands running and file-transfer bytes, plus the applicable finite ceilings.
-The local API limits projection has no cloud count/concurrency ceiling; local VM resources
-belong to the computer owner, and native-transfer and protocol bounds still apply.
+The Automatic pause card selects GitHub's native timeout for new Codespaces only,
+including its 240-minute maximum when off. It explains editor/browser/terminal activity
+and the risk to silent commands. Existing resources keep their provider parameters;
+Local follows the computer owner's policy.
+
+The separate GitHub monthly usage card shows compute/storage use, available plan
+allowances, net billable cost, payer and retrieval time, or unavailable. Your limits
+shows held GitHub resources and applicable owner-selected machine/lifecycle/billing
+controls. It contains no cloud command/output/file-transfer counters. Local resources
+follow their signed computer policy rather than GitHub count or machine budgets.
 
 The routes retain `/api/integrations/github/codespaces` behind
 `requireAuth` and are a second presentation of the same services the MCP tools use,
@@ -1383,14 +765,14 @@ resource's persisted provider/device identity:
 | `GET`    | `/`                   | Refreshes grants behind the TTL, then returns readiness, connection, approved repositories, `repositories_stale`, `resources_stale: false`, summaries still in use and `limits`                         |
 | `POST`   | `/refresh`            | Forces grant refresh, managed-resource observation and billing read; returns the list with separate repository and resource stale flags                                                                 |
 | `POST`   | `/`                   | Selects the provider from `repository_id`, verifies its grants and policy, then creates for `ref`; GitHub also verifies the personal billable owner; returns the sanitized (possibly pending) codespace |
-| `GET`    | `/:codespaceId`       | One owned codespace plus its recent metadata-only operations                                                                                                                                            |
+| `GET`    | `/:codespaceId`       | One owned sanitized codespace                                                                                                                                                                           |
 | `POST`   | `/:codespaceId/start` | Records desired running state; `data_preserved: true`                                                                                                                                                   |
 | `POST`   | `/:codespaceId/stop`  | Records desired stopped state; `data_preserved: true`                                                                                                                                                   |
 | `DELETE` | `/:codespaceId`       | Requires `confirm_delete: true` and the current `expected_generation`; `data_preserved: false`                                                                                                          |
 
 Domain failures map to bounded codes: not found and malformed IDs return the generic
 404, generation conflicts and not-running states 409, unsupported organization
-billing 422, quota and busy 429, provider disabled or unavailable 503, and a
+billing 422, resource policy refusal 429, provider disabled or unavailable 503, and a
 missing feature configuration 503 with the
 same-origin Settings link. Responses never carry provider resource names, markers,
 claims, capabilities or credentials.
@@ -1415,10 +797,9 @@ For GitHub, its states are `disabled` (configuration absent or
 configuration), `control_disabled` (a kill switch is on), `connector_unavailable`
 (the credential connector does not answer its health probe) and `ready`. The view
 also carries the configuration state, both controls, connector state, the
-reconciliation backlog (resources and operations awaiting reconciliation, including
-resources held by a claim or waiting out a retry backoff, plus the age of the oldest) and active resources/operations and live transfer bytes against
-their limits. Readiness counts physical native and relay bytes together against the sum of their
-independent byte ceilings; the user's transfer usage remains native-only.
+resource reconciliation backlog, oldest due age and active resource count against
+its applicable lifecycle limit. It does not infer workspace activity or count command
+queues, retained output or transfer bytes.
 It contains no user, codespace or operation identifier, and the
 connector is never probed while the feature is disabled.
 
@@ -1437,19 +818,16 @@ two seconds; a slower probe yields `connector_unavailable` with reason
 
 Prometheus metrics on the internal metrics port use closed labels only:
 
-| Metric                                                  | Labels                                | Meaning                                                    |
-| ------------------------------------------------------- | ------------------------------------- | ---------------------------------------------------------- |
-| `moira_codespace_connection_events_total`               | `provider`, `action`                  | Connection start/complete/refresh_failed/disconnect events |
-| `moira_codespace_lifecycle_events_total`                | `provider`, `action`, `state`         | Resource create/start/stop/delete/cleanup outcomes         |
-| `moira_codespace_operation_events_total`                | `provider`, `kind`, `action`, `state` | Operation reserve/reconcile/terminal outcomes              |
-| `moira_codespace_operation_duration_seconds`            | `kind`, `state`                       | Reservation-to-terminal duration histogram                 |
-| `moira_codespace_rejections_total`                      | `code`                                | Refusals before provider contact by bounded error code     |
-| `moira_codespace_reconciliation_due`                    | `kind`                                | Records waiting for reconciliation                         |
-| `moira_codespace_reconciliation_oldest_due_age_seconds` | `kind`                                | Age of the oldest waiting record                           |
-| `moira_codespace_active`                                | `kind`                                | Active resources and operations                            |
-| `moira_codespace_transfer_live_bytes`                   | —                                     | Bytes reserved or held by private transfers                |
-| `moira_codespace_connector_available`                   | `provider`                            | 1 when the connector answers its health probe              |
-| `moira_codespace_ready`                                 | `provider`                            | 1 when the instance accepts new codespace work             |
+| Metric                                                  | Labels                        | Meaning                                                    |
+| ------------------------------------------------------- | ----------------------------- | ---------------------------------------------------------- |
+| `moira_codespace_connection_events_total`               | `provider`, `action`          | Connection start/complete/refresh_failed/disconnect events |
+| `moira_codespace_lifecycle_events_total`                | `provider`, `action`, `state` | Resource create/start/stop/delete/cleanup outcomes         |
+| `moira_codespace_rejections_total`                      | `code`                        | Refusals before provider contact by bounded error code     |
+| `moira_codespace_reconciliation_due`                    | `kind`                        | Records waiting for reconciliation                         |
+| `moira_codespace_reconciliation_oldest_due_age_seconds` | `kind`                        | Age of the oldest waiting record                           |
+| `moira_codespace_active`                                | `kind`                        | Active resources                                           |
+| `moira_codespace_connector_available`                   | `provider`                    | 1 when the connector answers its health probe              |
+| `moira_codespace_ready`                                 | `provider`                    | 1 when the instance accepts new codespace work             |
 
 Both the web backend and the MCP server process refresh their readiness decision and
 gauges on `CODESPACE_RECONCILE_INTERVAL_SECONDS`; every readiness computation also
@@ -1457,17 +835,16 @@ refreshes them. Suggested alert conditions: `moira_codespace_ready`
 equal to 0 while `CODESPACE_CODESPACES_ENABLED=true`; `moira_codespace_connector_available`
 equal to 0; `moira_codespace_reconciliation_oldest_due_age_seconds` above several
 reconcile intervals; a rising rate of `moira_codespace_rejections_total` with
-`code="CODESPACE_POLICY_LIMIT"` or `"CODESPACE_OPERATION_BUSY"` (quota saturation);
+`code="CODESPACE_POLICY_LIMIT"` (resource policy refusal);
 `moira_codespace_lifecycle_events_total{action="create_rejected"}` or
-`moira_codespace_connection_events_total{action="refresh_failed"}` increasing; and an
-unusual rate of `moira_codespace_operation_events_total{action="reserve"}`.
+`moira_codespace_connection_events_total{action="refresh_failed"}` increasing.
 
 Kill switches are the durable `codespaceProviderControl` rows for the `global` scope
 and the `provider:github-codespaces` scope. Administrators read and change them through
 `GET /api/admin/codespaces` and `PUT /api/admin/codespaces/controls/:scope` (body
 `{ "disabled": boolean, "reason"?: string }`) or the Codespaces tab of the admin
 Settings page, which shows the readiness facts and asks for confirmation before
-stopping work. Disabling refuses new create, start and operation reservations,
+stopping work. Disabling refuses new create, start and workspace routing,
 rejects unsubmitted creates and requests stop for persistent codespaces through
 ordinary reconciliation; it never deletes data. Re-enabling clears the control. Every
 change is audited as `CODESPACE_CONTROL_UPDATE` with the scope, flag, reason and the
@@ -1487,7 +864,7 @@ The connector boundary protects the multi-tenant Moira server:
 
 - the credential-bearing connector is non-root, read-only, capability-limited
   runs under an init process that reaps finished gh/ssh helpers, and is bounded to
-  1 CPU, 640 MiB memory and 384 tasks (each job's worker is further limited to 256
+  1 CPU, 640 MiB memory and 384 tasks (each lifecycle/bootstrap worker is further limited to 256
   processes and threads);
 - it mounts only private Unix-socket volumes and a bounded tmpfs, with no Moira
   database, data directory, vault key, Docker socket or other-tenant volume;
@@ -1563,53 +940,32 @@ error without aborting unrelated authentication. The callback uses HTTPS for a
 public host, contains no query or fragment and shares the configured Moira
 origin. Runtime secrets are not baked into the image.
 
-Codespace creation and direct operations require
-`CODESPACE_CODESPACES_ENABLED=true`. These policy defaults apply when a value is
-not supplied:
+GitHub creation and workspace routing require `CODESPACE_CODESPACES_ENABLED=true`.
+Local availability is independently authorized by its owner policy/device/grants.
+The remaining environment defaults control provider lifecycle, billing and attachment
+retention, not command or file execution:
 
-| Variable                                       | Default | Meaning                                                                                |
-| ---------------------------------------------- | ------: | -------------------------------------------------------------------------------------- |
-| `CODESPACE_MAX_CPU_CORES`                      |       4 | Maximum selected Linux machine CPU cores                                               |
-| `CODESPACE_MAX_MEMORY_GB`                      |       8 | Maximum selected machine memory                                                        |
-| `CODESPACE_MAX_STORAGE_GB`                     |      32 | Maximum selected machine storage                                                       |
-| `CODESPACE_MAX_ACTIVE_PER_USER`                |       4 | Codespaces a user may hold, stopped ones included                                      |
-| `CODESPACE_MAX_ACTIVE_GLOBAL`                  |      16 | Codespaces held across the instance, stopped ones included                             |
-| `CODESPACE_CREATE_THROTTLE_SECONDS`            |      60 | Minimum interval between creation reservations                                         |
-| `CODESPACE_PERSISTENT_RETENTION_DAYS`          |      30 | Codespaces stopped-codespace retention requested at creation                           |
-| `CODESPACE_CREATE_DEADLINE_MINUTES`            |      15 | Create reconciliation deadline                                                         |
-| `CODESPACE_CLEANUP_DEADLINE_MINUTES`           |      15 | Lifecycle cleanup deadline and terminal-result retention                               |
-| `CODESPACE_CLAIM_LEASE_SECONDS`                |      30 | Cross-process reconciliation claim lease                                               |
-| `CODESPACE_RECONCILE_INTERVAL_SECONDS`         |      30 | Background reconciliation interval                                                     |
-| `CODESPACE_START_WAIT_SECONDS`                 |     180 | Wait for a codespace an operation started; 5 to 900                                    |
-| `CODESPACE_MAX_CONCURRENT_OPERATIONS_PER_USER` |       8 | Direct operations per user                                                             |
-| `CODESPACE_MAX_CONCURRENT_OPERATIONS_GLOBAL`   |      32 | Direct operations across the instance                                                  |
-| `CODESPACE_MAX_OPERATION_INPUT_KB`             |    1024 | Maximum direct-operation stdin                                                         |
-| `CODESPACE_MAX_OPERATION_STDOUT_KB`            |    1024 | Stdout carried by one answer                                                           |
-| `CODESPACE_MAX_OPERATION_STDERR_KB`            |     256 | Stderr carried by one answer                                                           |
-| `CODESPACE_MAX_RETAINED_OUTPUT_MB`             |      64 | Retained output per stream before a command is stopped                                 |
-| `CODESPACE_MAX_OPERATION_SECONDS`              |     900 | Maximum bounded-command duration                                                       |
-| `CODESPACE_MAX_BACKGROUND_OPERATION_HOURS`     |       4 | Background-command duration; 1 to 4, higher is refused                                 |
-| `CODESPACE_MAX_TRANSFER_FILE_MB`               |      20 | Native binary ceiling; parser accepts 1–1024 MiB, subject to aggregate/inflight quotas |
-| `CODESPACE_MAX_TRANSFER_TOTAL_MB_PER_USER`     |     100 | Live private-transfer bytes per user                                                   |
-| `CODESPACE_MAX_TRANSFER_TOTAL_MB_GLOBAL`       |    1024 | Live private-transfer bytes across the instance                                        |
-| `CODESPACE_MAX_TRANSFER_OBJECTS_PER_USER`      |      10 | Live private-transfer objects per user                                                 |
-| `CODESPACE_MAX_TRANSFER_OBJECTS_GLOBAL`        |    1000 | Live private-transfer objects across the instance                                      |
-| `CODESPACE_MAX_TRANSFER_INFLIGHT_MB_PER_USER`  |      40 | Reserved/claimed transfer bytes per user                                               |
-| `CODESPACE_MAX_TRANSFER_INFLIGHT_MB_GLOBAL`    |     256 | Reserved/claimed transfer bytes across the instance                                    |
-| `CODESPACE_TRANSFER_TTL_MINUTES`               |      10 | Private capability and object lifetime; maximum 60 minutes                             |
+| Variable                               | Default | Meaning                                           |
+| -------------------------------------- | ------: | ------------------------------------------------- |
+| `CODESPACE_MAX_CPU_CORES`              |       4 | GitHub selected machine CPU budget                |
+| `CODESPACE_MAX_MEMORY_GB`              |       8 | GitHub selected machine memory budget             |
+| `CODESPACE_MAX_STORAGE_GB`             |      32 | GitHub selected machine storage budget            |
+| `CODESPACE_MAX_ACTIVE_PER_USER`        |       4 | Held GitHub resources, including stopped          |
+| `CODESPACE_MAX_ACTIVE_GLOBAL`          |      16 | Held GitHub resources across the instance         |
+| `CODESPACE_CREATE_THROTTLE_SECONDS`    |      60 | GitHub creation reservation interval              |
+| `CODESPACE_PERSISTENT_RETENTION_DAYS`  |      30 | Provider stopped-resource retention, at most 30   |
+| `CODESPACE_CREATE_DEADLINE_MINUTES`    |      15 | Creation reconciliation deadline                  |
+| `CODESPACE_CLEANUP_DEADLINE_MINUTES`   |      15 | Lifecycle cleanup deadline                        |
+| `CODESPACE_CLAIM_LEASE_SECONDS`        |      30 | Resource reconciliation ownership                 |
+| `CODESPACE_RECONCILE_INTERVAL_SECONDS` |      30 | Lifecycle reconciliation cadence                  |
+| `CODESPACE_START_WAIT_SECONDS`         |     180 | Provider start observation window                 |
+| `CODESPACE_TRANSFER_TTL_MINUTES`       |      10 | Separately published private attachment retention |
 
-The global active-resource limit cannot be lower than the per-user limit; the same
-rule applies to operation concurrency and the global/per-user byte and in-flight
-transfer pairs. Transfer byte and in-flight aggregates cannot be lower than the
-single-file ceiling. The per-user inflight setting accepts at most 256 MiB, so the largest valid
-combined binary-file ceiling is currently 256 MiB, with matching aggregate and global limits.
-Code files, read ranges, inline preview and relay parts remain at most 4 MiB independently of this
-binary setting; transfer chunks remain 256 KiB. Increasing it does not increase command stdin,
-search, output, IPC or relay-envelope budgets.
-Configured operation input cannot
-exceed 4096 KiB, either output stream cannot exceed 8192 KiB, command duration
-cannot exceed 900 seconds, background-command duration cannot exceed 4 hours (GitHub's
-240-minute idle stop) and persistent retention cannot exceed 30 days.
+Values must be positive safely representable integers in their units; the global held
+resource budget cannot be below the per-user budget. The provider retention bound
+remains explicit. Removed operation/input/output/binary aggregate settings are not
+workspace execution controls. Actual storage, scoped authority and native provider
+constraints remain applicable.
 
 ## Website authorization API
 
@@ -1716,61 +1072,21 @@ accepts it.
 
 ## Persistence and audit
 
-Historical migrations `0027_workspace_connections.sql`, `0028_workspace_resources.sql`,
-`0029_persistent_workspace_operations.sql`, `0030_workspace_transfers.sql` and
-`0031_workspace_daily_budget_removal.sql` create the original tables without being
-rewritten. Migration `0037_codespace_rename.sql` renames those tables and indexes,
-preserves their rows and foreign keys, adds `grantsRefreshedAt` and the monotonic
-`grantsVersion` to connection snapshots, adds the nullable audit `dedupeKey`, and
-converts persisted codespace outcomes, transfer purposes and audit identifiers.
-Migration `0039_codespace_observed_ref.sql` adds the resource's nullable
-`observedRef`, the ref last observed checked out, and its `reconcileFailures`
-counter, which drives the reconciliation retry backoff. Migration
-`0040_codespace_activity.sql` adds the resource's `lastActivityAt` (Moira's last work
-in the codespace) and `providerLastUsedAt` (the provider's last start time, stored for information), and the
-connection's `resourcesObservedAt`, which paces provider observation. Migration
-`0043_codespace_reauthorization_intent.sql`
-adds an authorization-state intent and the expected connection ID and credential
-generation so a returning permission update can be checked against the connection
-that initiated it. The resulting connection, resource, lifecycle-capability, policy-usage,
-provider-mutation, provider-control, operation and private-transfer metadata tables
-use the `codespace` vocabulary. Credential tables
-contain versioned ciphertext; resource, operation and transfer tables contain
-authority and accounting metadata but no command, path, query, patch, file content,
-native source URL, result stream, provider token or SSH material.
+SQLite retains connection/resource identity, grants, lifecycle intents, provider controls,
+credential envelopes and attachment metadata. `workspaceAgentCredential` stores scoped
+credential digests and measured-life/generation bindings; clear credentials are delivered
+only by fixed bootstrap. Command/input/output/file journals live in the workspace.
 
-Migration `0057_codespace_observation.sql` adds nullable resource `observedAt`. Existing rows
-remain null until a verified observation; startup and retries do not invent physical freshness.
-Install matching server and companion builds: local snapshots require the derived
-`nativeStopConfirmed` observation field. Follow **Owner web control and bundle updates** for the
-coordinated backup, offline strict-field normalization and paired rollback; this contract does
-not automatically accept an earlier companion's snapshot.
+Historical SQL operation and transfer rows and companion receipts remain archival.
+They are not attached to execution, counted as active command work, imported into the
+new namespace or replayed. Resource observation timestamps advance only after verified
+provider observation. Credential vault envelopes retain their authenticated ownership.
 
-Migration `0056_repository_creation_requests.sql` adds the tenant-owned durable private-repository
-request journal. It stores request fingerprint, device/account/installation authority, name,
-recovery marker, submitted/unknown/created/rejected state and admission reservation independently
-of VM operations. Public creation results exclude the internal journal, marker and credentials.
-
-Credential envelope version 1 keeps its original authenticated-context label so
-pre-rename ciphertext remains decryptable. New writes use envelope version 2 and
-the codespace label. On startup, the transfer service also moves the former
-`workspace-transfers` data root to `codespace-transfers` (or merges non-conflicting
-objects when both exist), so stored private transfers are not orphaned by the rename.
-
-Audit actions cover connection start/completion/refresh failure/disconnect;
-resource create/pending/rejection/cleanup/start/stop/delete; typed exec/file
-operation reservation/reconciliation/terminal outcomes; and administrator control
-updates. Metadata is limited to opaque
-resource relationships, provider, state/outcome, selected machine facts, byte
-counts, exit code and, for a refusal, a bounded `reason`. A creation rejected by the connector probe
-records the connector's own failure; a creation the provider rejected, and a start, stop or delete the
-provider refused, record the redacted provider reason described under "Persistent lifecycle". A
-refused lifecycle operation is audited under the operation it refused, with the refusing HTTP status
-as its outcome, including a refusal reached through background reconciliation, where no caller is
-waiting to see it. A failure that is not the provider's answer is not audited as one.
-The connector sidecar keeps the underlying `gh`/`ssh` diagnostics in its own
-container log with the credential redacted; the application never receives them. Repository content, source, argv, cwd, stdin, stdout,
-stderr, OAuth code/state, session token and provider credentials are excluded.
+Cloud audit emits connection, resource lifecycle and administrator-control events.
+MCP call audit records the tool boundary; it is not a cloud execution journal. Metadata
+is sanitized and excludes command/file content, argv, cwd, stdin/stdout/stderr, provider
+credentials, capabilities and SSH material. Provider refusals retain only safe bounded
+classification/reasons; unexpected failures are not represented as provider answers.
 
 ## Verification
 
@@ -1790,7 +1106,7 @@ unreachable through the actual filesystem and network policy while the reviewed
 GitHub egress path stays usable; it removes its containers, network and volumes on
 exit and ends with `codespace-connector-isolation-ok`.
 
-`tests/COVERAGE-MAP.md` maps the focused connection, resource, operation,
+`tests/COVERAGE-MAP.md` maps the focused connection, resource, workspace-service/router,
 migration, connector, egress, packaged-isolation, MCP tool, website management,
 readiness/metrics and kill-switch suites, including the ChatGPT-compatible client
 scenario over real services, the HTTP contracts against the local container

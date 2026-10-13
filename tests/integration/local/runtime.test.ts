@@ -4,11 +4,9 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { PrivateState } from "../../../packages/local/src/private-state.js";
 import { SbxRuntime } from "../../../packages/local/src/sbx-runtime.js";
+import { runProcess } from "../../../packages/local/src/process.js";
 import { LocalManager } from "../../../packages/local/src/manager.js";
-import {
-  GUEST_WORKER_COMMAND,
-  VERIFIED_GUEST_FAILURE_EXIT,
-} from "../../../packages/local/src/assets.js";
+import { GUEST_COMMANDS, VERIFIED_GUEST_FAILURE_EXIT } from "../../../packages/local/src/assets.js";
 import { localFixture } from "./fixtures.js";
 
 let root: string;
@@ -67,6 +65,26 @@ const safeSettings = {
   "proxy.sandbox": "direct",
   "no_proxy.sandbox": "",
 };
+
+test("complete fixed SDK inventory exceeds former count and byte ceilings while other metadata stays bounded", async () => {
+  const fixture = await localFixture(state);
+  const runtime = simulatedRuntime(fixture.policy, (request) =>
+    runProcess({
+      ...request,
+      binary: process.execPath,
+      cwd: root,
+      env: {},
+      argv: [
+        "-e",
+        "process.stdout.write(JSON.stringify({sandboxes:Array.from({length:130},(_,i)=>({id:'runtime-'+i,name:'moira-'+i.toString(16).padStart(32,'0'),agent:'shell',status:'stopped',metadata:'x'.repeat(80*1024)}))}))",
+      ],
+    }),
+  );
+  const inventory = await runtime.list();
+  expect(inventory).toHaveLength(130);
+  expect(inventory[129]).toMatchObject({ id: "runtime-129", metadata: "x".repeat(80 * 1024) });
+  await expect(runtime.call(["version"])).rejects.toMatchObject({ code: "LOCAL_OUTPUT_LIMIT" });
+});
 
 async function ownedSocket(runtime: SbxRuntime): Promise<string> {
   const directory = join(runtime.home, "sandboxd");
@@ -491,7 +509,7 @@ describe("Docker Sandboxes lifecycle boundary", () => {
     ).rejects.toMatchObject({ code: "LOCAL_GUEST_COMMAND_INVALID" });
   });
   test.each([
-    { helperExit: 0, expected: "worker output" },
+    { helperExit: 0, expected: "bootstrap output" },
     { helperExit: VERIFIED_GUEST_FAILURE_EXIT, expected: "LOCAL_GUEST_FAILED" },
     { helperExit: 1, expected: "LOCAL_GUEST_SETTLEMENT_UNKNOWN" },
   ])(
@@ -499,13 +517,13 @@ describe("Docker Sandboxes lifecycle boundary", () => {
     async ({ helperExit, expected }) => {
       const fixture = await localFixture(state);
       const runtime = simulatedRuntime(fixture.policy, async () => ({
-        ...result("worker output"),
+        ...result("bootstrap output"),
         exitCode: helperExit,
       }));
       runtime.exact = async () => ({ name, id: "runtime-1", agent: "shell", status: "running" });
       runtime.verifyBoundary = async () => undefined;
       const outcome = await runtime
-        .guest({ name, runtimeId: "runtime-1" }, GUEST_WORKER_COMMAND)
+        .guest({ name, runtimeId: "runtime-1" }, GUEST_COMMANDS.health)
         .then(
           (bytes) => bytes.toString(),
           (error: { code: string }) => error.code,

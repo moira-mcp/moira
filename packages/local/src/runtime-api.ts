@@ -7,11 +7,7 @@ import { pathToFileURL } from "node:url";
 import { z } from "zod";
 import { LocalRefusal, localPolicySchema, MAX_MESSAGE_BYTES } from "./policy.js";
 import { containerIdentitySchema, type ContainerIdentity } from "./sbx-runtime.js";
-import {
-  GUEST_INSTALL_COMMAND,
-  GUEST_WORKER_COMMAND,
-  VERIFIED_GUEST_FAILURE_EXIT,
-} from "./assets.js";
+import { GUEST_COMMANDS, VERIFIED_GUEST_FAILURE_EXIT } from "./assets.js";
 
 const MAX_RESPONSE_BYTES = 64 * 1024;
 
@@ -234,7 +230,7 @@ export async function readContainerIdentity(
   return containerIdentitySchema.parse({ containerId: rows[0].Id, name, state: rows[0].State });
 }
 
-type GuestMode = "installer" | "worker";
+type GuestMode = keyof typeof GUEST_COMMANDS;
 const unknownGuest = () =>
   new LocalRefusal(
     "LOCAL_GUEST_SETTLEMENT_UNKNOWN",
@@ -252,11 +248,11 @@ export async function attachFixedGuest(
   stderr: Writable,
   signal?: AbortSignal,
 ): Promise<number> {
-  if (mode !== "installer" && mode !== "worker")
+  if (!Object.hasOwn(GUEST_COMMANDS, mode))
     throw new LocalRefusal("LOCAL_GUEST_COMMAND_INVALID", "Unknown guest entrypoint.");
   const socketPath = await ownedSocket(home, namespace, name);
   const body = JSON.stringify({
-    cmd: mode === "installer" ? GUEST_INSTALL_COMMAND : GUEST_WORKER_COMMAND,
+    cmd: GUEST_COMMANDS[mode],
     env: {},
     tty: false,
   });
@@ -423,15 +419,12 @@ if (
   new URL(import.meta.url).pathname.endsWith("/runtime-api.js") &&
   import.meta.url === pathToFileURL(process.argv[1]).href
 ) {
-  if (
-    process.argv.length === 6 &&
-    (process.argv[4] === "installer" || process.argv[4] === "worker")
-  ) {
+  if (process.argv.length === 6 && Object.hasOwn(GUEST_COMMANDS, process.argv[4])) {
     void attachFixedGuest(
       process.argv[2],
       process.argv[3],
       process.argv[5],
-      process.argv[4],
+      process.argv[4] as GuestMode,
       process.stdin,
       process.stdout,
       process.stderr,

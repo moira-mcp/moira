@@ -1,7 +1,6 @@
 import { isAbsolute } from "node:path";
 import { z } from "zod";
 import { gitFetchRefSchema } from "../../shared/src/codespaces/git-ref.js";
-import { CODESPACE_CONNECTOR_LIMITS } from "../../shared/src/codespaces/resource-policy.js";
 import type { LocalManagementOutcome } from "../../shared/src/codespaces/local-protocol.js";
 import {
   MAX_LOCAL_WORK_LEASE_MS,
@@ -15,7 +14,6 @@ export const MAX_MESSAGE_BYTES = 8 * 1024 * 1024;
 export const MAX_LEASE_MS = MAX_LOCAL_WORK_LEASE_MS;
 export const GiB = 1024 ** 3;
 
-const integer = (minimum: number, maximum: number) => z.number().int().min(minimum).max(maximum);
 const hasControl = (value: string): boolean =>
   [...value].some((character) => {
     const code = character.codePointAt(0) ?? 0;
@@ -61,7 +59,7 @@ export const localPolicySchema = z
       .max(80)
       .refine((value) => !hasControl(value)),
     enabled: z.boolean(),
-    leaseUntil: integer(0, Number.MAX_SAFE_INTEGER),
+    leaseUntil: z.number().int().safe().nonnegative(),
     gitAuthor: localGitAuthorSchema.nullable().optional(),
     runtime: z
       .object({
@@ -71,10 +69,10 @@ export const localPolicySchema = z
           .max(512)
           .regex(/^[a-z0-9][a-z0-9./:_-]*@sha256:[a-f0-9]{64}$/),
         storageRoot: absolutePath,
-        maxStorageBytes: integer(4 * GiB, 1024 * GiB),
-        cpuCores: integer(1, 32),
-        memoryBytes: integer(GiB, 64 * GiB),
-        dockerBytes: integer(GiB, 128 * GiB),
+        maxStorageBytes: z.number().int().safe().positive(),
+        cpuCores: z.number().int().safe().positive(),
+        memoryBytes: z.number().int().safe().positive(),
+        dockerBytes: z.number().int().safe().positive(),
       })
       .strict(),
     repositories: z.array(localRepositorySchema),
@@ -106,32 +104,6 @@ export class LocalRefusal extends Error {
     super(message);
     this.name = "LocalRefusal";
   }
-}
-
-/** Base64 prefixes plus the fixed worker/result metadata must fit one guest JSON reply. */
-export function requireOperationOutputBudget(stdout: unknown, stderr: unknown): void {
-  const prefix = integer(1, MAX_MESSAGE_BYTES / 2);
-  const encoded = (value: unknown) => 4 * Math.ceil(prefix.parse(value) / 3);
-  // The installed supervisor publishes two prefixes and fixed terminal/counter fields,
-  // not argv or session environment. Reserve room for that envelope independently of data.
-  if (encoded(stdout) + encoded(stderr) > MAX_MESSAGE_BYTES - 1024)
-    throw new LocalRefusal(
-      "LOCAL_OUTPUT_LIMIT",
-      "Combined encoded output prefixes exceed the local response budget.",
-    );
-}
-
-/** Request bounds belong to the guest protocol, independent of owner settings. */
-export function requireOperationExecutionBudget(
-  timeout: unknown,
-  retainedBytes: unknown,
-  remainingLeaseMs: number,
-): number {
-  const requested = integer(1, Number.MAX_SAFE_INTEGER).parse(timeout);
-  integer(1, CODESPACE_CONNECTOR_LIMITS.maxRetainedOutputBytes).parse(retainedBytes);
-  if (remainingLeaseMs <= 0)
-    throw new LocalRefusal("LOCAL_LEASE_EXPIRED", "The accepted work deadline expired.");
-  return Math.min(requested, remainingLeaseMs);
 }
 
 export function requireLocalGrant(

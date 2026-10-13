@@ -13,23 +13,24 @@ describe("canonical guest asset publication", () => {
     try {
       const source = join(root, "packages/local/src");
       await mkdir(source, { recursive: true });
+      await mkdir(join(root, "packages/workspace-service/src"), { recursive: true });
       const driver = join(root, "publication.mjs");
       const outcome = join(root, "outcome.json");
       await writeFile(
         driver,
-        `const { buildGuestAssets } = await import(process.argv[2]);
+        `const { buildWorkspaceService } = await import(process.argv[2]);
 import { open, readFile, writeFile, stat } from "node:fs/promises";
 process.umask(0);
-const entries = ["guest-worker", "guest-files-cli"];
-for (const entry of entries) await writeFile("packages/local/src/" + entry + ".ts", "export const generation = 'generation-A';\\n");
-await buildGuestAssets("output");
+const entries = ["daemon", "cli", "local-bootstrap", "guest-proxy"];
+for (const entry of entries) await writeFile((entry === "guest-proxy" ? "packages/local/src/guest-proxy.ts" : "packages/workspace-service/src/" + entry + ".mjs"), "export const generation = 'generation-A';\\n");
+await buildWorkspaceService("output");
 const readers = await Promise.all(entries.map(async entry => {
-  const path = "output/" + entry + ".js";
+  const path = "output/" + entry + ".mjs";
   return { path, handle: await open(path, "r"), bytes: (await readFile(path)).toString("base64"), inode: (await stat(path)).ino, mode: (await stat(path)).mode & 0o777 };
 }));
 try {
-  for (const entry of entries) await writeFile("packages/local/src/" + entry + ".ts", "export const generation = 'generation-B';\\n");
-  await buildGuestAssets("output");
+  for (const entry of entries) await writeFile((entry === "guest-proxy" ? "packages/local/src/guest-proxy.ts" : "packages/workspace-service/src/" + entry + ".mjs"), "export const generation = 'generation-B';\\n");
+  await buildWorkspaceService("output");
   const observed = await Promise.all(readers.map(async reader => ({
     original: reader.bytes,
     retained: (await reader.handle.readFile()).toString("base64"),
@@ -47,7 +48,7 @@ try {
       );
       const child = spawnSync(
         process.execPath,
-        [driver, pathToFileURL(resolve("scripts/build-guest-assets.js")).href, outcome],
+        [driver, pathToFileURL(resolve("scripts/build-workspace-service.js")).href, outcome],
         {
           cwd: root,
           encoding: "utf8",
@@ -57,7 +58,7 @@ try {
       if (child.error) throw child.error;
       expect({ exit: child.status, stderr: child.stderr }).toEqual({ exit: 0, stderr: "" });
       const assets = JSON.parse(await readFile(outcome, "utf8"));
-      expect(assets).toHaveLength(2);
+      expect(assets).toHaveLength(4);
       for (const asset of assets) {
         expect(asset.retained).toBe(asset.original);
         expect(asset.currentInode).not.toBe(asset.originalInode);
@@ -66,9 +67,6 @@ try {
         expect(asset.currentMode).toBe(asset.originalMode);
         expect(asset.currentMode).toBe(0o644);
       }
-      expect(Buffer.from(assets[1].current, "base64").toString()).toMatch(
-        /^#!\/usr\/bin\/env node\n/,
-      );
     } finally {
       await rm(root, { recursive: true, force: true });
     }
@@ -78,39 +76,40 @@ try {
     const root = await mkdtemp(join(tmpdir(), "moira-guest-publication-failure-"));
     try {
       await mkdir(join(root, "packages/local/src"), { recursive: true });
+      await mkdir(join(root, "packages/workspace-service/src"), { recursive: true });
       const driver = join(root, "failure.mjs");
       const outcome = join(root, "outcome.json");
       await writeFile(
         driver,
-        `const { buildGuestAssets } = await import(process.argv[2]);
+        `const { buildWorkspaceService } = await import(process.argv[2]);
 import { mkdir, readFile, readdir, rename, stat, writeFile } from "node:fs/promises";
-for (const entry of ["guest-worker", "guest-files-cli"]) await writeFile("packages/local/src/" + entry + ".ts", "export const generation = 'complete';\\n");
-await buildGuestAssets("output");
-const original = (await readFile("output/guest-worker.js")).toString("base64");
-await writeFile("packages/local/src/guest-worker.ts", "export const = ;");
+for (const entry of ["daemon", "cli", "local-bootstrap", "guest-proxy"]) await writeFile((entry === "guest-proxy" ? "packages/local/src/guest-proxy.ts" : "packages/workspace-service/src/" + entry + ".mjs"), "export const generation = 'complete';\\n");
+await buildWorkspaceService("output");
+const original = (await readFile("output/daemon.mjs")).toString("base64");
+await writeFile("packages/workspace-service/src/daemon.mjs", "export const = ;");
 let compileFailed = false;
-try { await buildGuestAssets("output"); } catch { compileFailed = true; }
-const afterCompile = (await readFile("output/guest-worker.js")).toString("base64");
+try { await buildWorkspaceService("output"); } catch { compileFailed = true; }
+const afterCompile = (await readFile("output/daemon.mjs")).toString("base64");
 const compileEntries = await readdir("output");
-await writeFile("packages/local/src/guest-worker.ts", "export const generation = 'replacement';\\n");
-await rename("output/guest-worker.js", "output/previous-worker.js");
-await mkdir("output/guest-worker.js");
-await writeFile("output/guest-worker.js/foreign.txt", "foreign bytes");
-const foreignInode = (await stat("output/guest-worker.js")).ino;
+await writeFile("packages/workspace-service/src/daemon.mjs", "export const generation = 'replacement';\\n");
+await rename("output/daemon.mjs", "output/previous-daemon.mjs");
+await mkdir("output/daemon.mjs");
+await writeFile("output/daemon.mjs/foreign.txt", "foreign bytes");
+const foreignInode = (await stat("output/daemon.mjs")).ino;
 let publishFailed = false;
-try { await buildGuestAssets("output"); } catch { publishFailed = true; }
+try { await buildWorkspaceService("output"); } catch { publishFailed = true; }
 await writeFile(process.argv[3], JSON.stringify({
   compileFailed, publishFailed, original, afterCompile, compileEntries,
-  previous: (await readFile("output/previous-worker.js")).toString("base64"),
+  previous: (await readFile("output/previous-daemon.mjs")).toString("base64"),
   entries: await readdir("output"), foreignInode,
-  currentForeignInode: (await stat("output/guest-worker.js")).ino,
-  foreign: await readFile("output/guest-worker.js/foreign.txt", "utf8"),
+  currentForeignInode: (await stat("output/daemon.mjs")).ino,
+  foreign: await readFile("output/daemon.mjs/foreign.txt", "utf8"),
 }));
 `,
       );
       const child = spawnSync(
         process.execPath,
-        [driver, pathToFileURL(resolve("scripts/build-guest-assets.js")).href, outcome],
+        [driver, pathToFileURL(resolve("scripts/build-workspace-service.js")).href, outcome],
         { cwd: root, encoding: "utf8", maxBuffer: 64 * 1024 },
       );
       if (child.error) throw child.error;
@@ -120,11 +119,18 @@ await writeFile(process.argv[3], JSON.stringify({
       expect(observed.publishFailed).toBe(true);
       expect(observed.afterCompile).toBe(observed.original);
       expect(observed.previous).toBe(observed.original);
-      expect(observed.compileEntries.sort()).toEqual(["guest-files-cli.js", "guest-worker.js"]);
+      expect(observed.compileEntries.sort()).toEqual([
+        "cli.mjs",
+        "daemon.mjs",
+        "guest-proxy.mjs",
+        "local-bootstrap.mjs",
+      ]);
       expect(observed.entries.sort()).toEqual([
-        "guest-files-cli.js",
-        "guest-worker.js",
-        "previous-worker.js",
+        "cli.mjs",
+        "daemon.mjs",
+        "guest-proxy.mjs",
+        "local-bootstrap.mjs",
+        "previous-daemon.mjs",
       ]);
       expect(observed.currentForeignInode).toBe(observed.foreignInode);
       expect(observed.foreign).toBe("foreign bytes");

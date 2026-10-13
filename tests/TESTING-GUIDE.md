@@ -12,7 +12,7 @@ npm run test:mcp-tools            # MCP tools tests
 npm run test:e2e                  # E2E browser tests
 
 # No Docker dependency
-npm run test:unit                 # Unit tests (in-memory)
+npm run test:unit                 # Unit and isolated component fixtures
 npm run test:integration          # Integration tests (test-integration.db)
 ```
 
@@ -97,11 +97,11 @@ Do NOT read `unit.log` for workflow tests — it's huge and wastes tokens.
 
 ### Database Usage
 
-| Test Type   | Database                     | Notes       |
-| ----------- | ---------------------------- | ----------- |
-| Unit        | in-memory                    | No file     |
-| Integration | `./data/test-integration.db` | Direct code |
-| API/MCP/E2E | `./data/moira.db`            | Docker      |
+| Test Type   | Database                     | Notes                                                            |
+| ----------- | ---------------------------- | ---------------------------------------------------------------- |
+| Unit        | usually in-memory            | Owned temporary filesystem/component fixtures are also supported |
+| Integration | `./data/test-integration.db` | Direct code                                                      |
+| API/MCP/E2E | `./data/moira.db`            | Docker                                                           |
 
 ---
 
@@ -117,23 +117,23 @@ Do NOT read `unit.log` for workflow tests — it's huge and wastes tokens.
 
 ## Test Categories
 
-### 1. Unit Tests
+### Unit Tests
 
 **Location:** `tests/unit/`
-**Purpose:** Test components in isolation, mock all dependencies
+**Purpose:** Test isolated contracts with controlled dependencies; filesystem, subprocess and Unix HTTP fixtures may be real
 
-The root unit runner builds the fixed guest worker and file CLI before starting tests,
-including filtered runs. It uses `scripts/build-guest-assets.js`; no manual prebuild is
-required. Each program is compiled before an exclusive temporary file is written and
-atomically renamed into place. Readers holding an open file retain the complete original
-program. Publication is per file, not a transaction across both programs.
+The root unit runner builds the common workspace daemon, CLI, local bootstrap and guest
+proxy through `scripts/build-workspace-service.js`, including filtered runs. No manual
+prebuild is required. Each program is compiled before its exclusive temporary file is
+synced and atomically renamed into place. Held readers retain the complete original
+program. Publication is per file, not a transaction across the payload.
 
-### 2. Integration Tests
+### Integration Tests
 
 **Location:** `tests/integration/`
 **Purpose:** Test component interactions with real code, mocked external services
 
-### 3. API Tests
+### API Tests
 
 **Location:** `tests/api/`
 **Purpose:** Test HTTP endpoints with real requests
@@ -146,153 +146,102 @@ them against a second container started with `DEPLOYMENT_MODE=self-host` on port
 `npm run test:api:ci -- --file <file>`. To run them locally, start such a container on 3031
 (see `.github/workflows/ci.yml`, "Start self-host Docker container") and use the same command.
 
-### 4. MCP Tools Tests
+### MCP Tools Tests
 
 **Location:** `tests/mcp-tools/`
 **Purpose:** Test MCP protocol - **critical for all MCP functionality**
 
-### 5. E2E Tests
+### E2E Tests
 
 **Location:** `tests/e2e/`
 **Purpose:** Full system tests with browser
 
-### Local companion and codespace providers
+### Local companion and workspace service
 
-Use the root runners for focused local tests:
+Use the root runners for focused checks:
 
 ```bash
-npm run test:unit -- --file tests/unit/local/policy.test.ts
-npm run test:unit -- --file tests/unit/web-frontend/local-device-settings.test.tsx
+npm run test:unit -- --file tests/unit/workspace-service/service.test.cjs
+npm run test:integration -- --file tests/integration/workspace-router.test.ts
+npm run test:integration -- --file tests/integration/codespace-mcp-client-flow.test.ts
 npm run test:integration -- --file tests/integration/local/runtime-api.test.ts
-npm run test:integration -- --file tests/integration/local-devices-relay.test.ts
 npm run test:integration -- --file tests/integration/local-codespace-provider.test.ts
 ```
 
-`tests/integration/local/` covers private journals, bounded subprocesses, local policy,
-broker and relay authority, SDK protocol validation, credential-store preparation and
-independent shutdown. SDK and keychain fixtures substitute external responses; the guard
-uses controlled executables and real process/socket effects. The native runtime-control
-tests compile the shipped C helper and distinguish Darwin kernel ownership from unsupported
-Linux VM transport. None of these fixtures starts a real sbx microVM or uses personal
-credentials. Darwin-only guard cases are skipped on other platforms.
+Host service fixtures require Git and ripgrep; the TLS router fixture also uses OpenSSL
+to create its disposable certificate. They use the repository's Node runtime.
 
-Integration global setup runs `npm run local:build` before creating and migrating the
-fresh test database, so source consumers receive the shipped companion bundles and
-native helpers. The guard's packaged CLI recovery regression kills a real fixture lock
-owner, then checks owned fake SDK/worker shutdown, retained unknown jobs and disabled
-admission. A live owner remains protected even when its runner marker is stale. Idle
-relay regressions exercise the actual manager/relay with substituted runtime peers:
-parent closure, lease expiry and emergency disable fence old requests while confirmed
-recovery permits a fresh start. These host regressions do not establish real-VM recovery.
+The common fixture in `tests/fixtures/workspace-service.cjs` owns a temporary Git
+repository, private state and Unix HTTP socket. Service cases observe real commands,
+exact binary and Unicode input/output, sessions, guarded files and direct CLI calls.
+Restart collects the original request without another effect. Explicit spawn rejection
+and actual command completion are distinguished from missing owner proof; surviving
+child or descendant effects after a response retain uncertainty. Cancellation never
+grants signal authority to a saved foreign PID. Storage faults observe directory/output
+sync errors before durable success.
 
-Broker startup fixtures retain dead runner and guard receipts from a real exited child process,
-then open the manager through its normal kernel gate. They verify unchanged policy, VM records and
-unknown jobs, and refusal of live or unverifiable ownership. Provider fixtures separately hold
-payload retention before the first queue insertion, complete stop/start, and prove that cancelled
-exec/write never reaches the guest while fresh work and prior-result inspection succeed.
+Filesystem cases substitute targets and parents after staging and interrupt real
+multi-file publication. Owned recovery restores original bytes and inodes without replay.
+Same-content foreign targets or backups preserve every target, stage and backup before
+any rollback, including through another restart. These are process-interruption
+observations, not power-loss simulations.
 
-Storage startup fixtures substitute native disk-tool responses and final volume admission.
-They distinguish restoring the existing default image, including a lost attach reply, from
-creating a replacement. Retained image bytes and policy stay unchanged; custom mounts, missing
-or unsafe images, nonempty mount points, conflicting native bindings and failed owner/capacity/free-space
-admission remain refused. These fixtures invoke no native disk tools or VM.
+The TLS router fixture runs the actual service and outbound adapter in another process.
+CONTROL carries call identifiers; each DATA channel pipes one raw HTTP call to the Unix service.
+It checks raw binary backpressure, independent calls while a response is unread, reconnect
+without replay, pre-dispatch refusal, and authority expiry/revocation closing CONTROL and
+DATA without cancelling admitted work. Workspace authority cases use migrated SQLite for
+scoped credential rotation, server-owned bootstrap after generation changes and account denial.
 
-The provider and device/relay integration suites use real SQLite migrations, private
-transfer files and authenticated HTTP. The provider suite also uses the production
-companion relay and LocalRpc, with the external runtime substituted. They check device
-and repository binding, lifecycle-independent execution, current revocation, receipt reuse after response loss,
-native bytes retained before input consumption and bounded payload/metadata storage.
-Settings tests cover pairing, confirmation, revocation and provider selection without a
-GitHub connection, exact computer UUID grouping and existing-intent retries with local pending/error
-regions. Provider lifecycle fixtures set physical state independently of desired state: created
-is actionable but not a stop certificate, unknown preserves the last verified state/time, and
-receipt replay after the delivery deadline does not dispatch a second effect. Native guard cases
-independently check SDK/Engine identity, held workers and durable stop generation without launching
-a VM. Verified observation time is tested separately from retry and connector-probe bookkeeping.
-The current native Local cases run the compiled worker/supervisor, installed remote file client and
-real HTTPS byte transfer through that SQL/HTTP/relay/RPC composition. They preserve bounded native
-stdin and separately verify large binary upload/download, original operation and target inode on
-replay, no input refetch, pure transfer status and consumed download bytes. Only the exact fixed
-life/installer requests and host/Linux fixed-path namespace are adapted at the external runtime
-boundary; no transfer result is fabricated. Shared SDK helpers own the isolated TLS server and
-asset installation. These cases do not prove the Linux production pathname or physical VM isolation.
-Ordinary and late relay ACK regressions observe the exact active RPC journal alongside the original
-effect and retained receipt; journal concurrency checks protect its shared serialization boundary.
-See [COVERAGE-MAP.md](COVERAGE-MAP.md#codespace-connections) for each
-suite's responsibility.
+The registered MCP fixture combines the real registry, lifecycle authority, attachment
+publisher and Unix service. It edits and executes repository code, checks native binary
+upload/download and single-use publication, preserves files across restart and refuses
+foreign owners. Container-backed MCP cases check the advertised actions, `ws1-` command
+identities, strict action forms, setup guidance, normal path-based download and private
+attachment delivery through the application origin without a configured provider.
 
-Local quota-isolation cases use actual migrated SQLite and controlled provider responses to
-distinguish local VM/operation admission from cloud count, throttle, concurrency and machine limits.
-Repository-admission cases retain stable recovery identities alongside multiple additions without
-an owner repository-count quota. Broker cases exercise public destinations beyond a technology
-profile, no cumulative traffic budget, retained public-address/computer-network refusal and
-bounded socket backpressure. Job cases preserve explicit lease and protocol output bounds without
-owner concurrency settings. These checks do not execute a physical VM.
+Local integration cases cover lifecycle journals, policy, broker/relay authority, SDK
+protocols, credential-store preparation, storage custody and independent shutdown.
+SDK and keychain responses are substituted; native guard cases use controlled real
+processes and sockets rather than a physical microVM. Darwin custody cases are excluded
+on unsupported platforms. Integration setup runs `npm run local:build` before preparing
+its migrated database.
 
-`tests/integration/local/operation-independence.test.ts` holds a native contact while a second
-command proceeds, then verifies that stop closes new admission and settles owned contacts.
-The jobs fixtures distinguish inspecting an uncertain accepted marker from executing it again,
-and verify that historical ledgers and unfinished work do not impose an operation-count gate.
-Relay fixtures hold an old delivery before admission, stop and restart the codespace, and prove
-that only fresh work executes. Current device, repository and exact-VM authority remain required.
+Provider and device/relay cases retain repository/device/account/grant authority, exact
+create/stop/delete receipts and verified observation times. The host relay handles
+lifecycle work; historical command intents and unknown receipts remain untouched and
+nonrunnable. Host CLI cases refuse unsupported create, start and raw-request admission
+before creating private state. Journal cases check canonical-target serialization,
+failure cleanup, receipt reuse and archived bytes without command-output reservations.
 
-`tests/unit/web-backend/github-codespaces-remote-supervisor.test.ts` uses real fixture workers
-and filesystem effects to prove that reads remain independent of a held transaction, worker death
-releases the kernel-owned lock, and another mutation can proceed. It distinguishes safe recovery
-from externally changed targets: the latter preserves current files, the conflicted journal and
-original backups through result finalization, without replaying the old mutation or blocking unrelated
-work. Recovery cases replace partial files, targets and backups with foreign inodes, including
-targets with the same digest, and require their bytes and identities to remain untouched. Owned
-fsynced tails remain resumable; historical journals without ownership proof remain conflicted
-while their existing terminal receipts stay collectible. The same guards cover write, upload and
-patch rollback. These host/container checks do not establish physical microVM isolation.
+Native recovery cases distinguish SDK/Engine custody from guest readiness, preserve
+peer state and unknown receipts, and exercise lease expiry, parent loss and emergency
+shutdown. Storage fixtures check retained image reattachment, sector/byte sizing,
+lost replies and unsafe binding refusal without native disk tools. Broker cases check
+all resolved addresses, peer pinning, streaming backpressure, establishment-only timers
+and later revocation/lease closure. Network admission has no socket-count or traffic-ledger
+workload quota; authority remains mandatory. Local physical budgets and cloud billing
+capacity have separate fixtures.
 
-The same supervisor fixture executes the remote file CLI through real local TLS, holds transfer
-progress, loses chunk/finalization responses and verifies exact resume, pure status, guarded target
-commit recovery and expiry cleanup. The registered MCP SDK fixture separately connects the production
-transfer factory/router, provider codec, measured absolute CLI path and durable private store;
-reopening storage preserves original handles and target identity. Its host life/maintenance
-adaptation is explicit and does not establish a real GitHub VM or production Local owner. A
-deterministic setup case holds execution before its first durable launch record: lookup must remain
-pending, then collect the actual installation through the same request, operation and marker.
-Guest inspection separately distinguishes an unproved legacy outcome from a proved environment
-restart and preserves actual terminal receipts.
+Private attachment storage is a separate publication contract. Its cases observe streamed
+bytes, MIME/name/size checks, held-inode/digest validation, source closure, claim ownership,
+expiry cleanup and single use. Communication uses independent sources. A real local
+multipart receiver checks Telegram transport bytes without sending to Telegram or
+certifying that service's filename interpretation.
+See [COVERAGE-MAP.md](COVERAGE-MAP.md#codespace-connections) for suite responsibilities.
 
-Private storage tests observe bounded chunks and physical bytes rather than whole-file JSON/base64
-equivalence. They cover incremental MIME/UTF-8/JSON validation, same-identity offsets/finalization,
-content-identity invalidation, claim progress and quotas, and concurrent cleanup/claim ownership.
-File-lifecycle cases pin original native and CLI input before publication, settle an independent
-ready copy after its original source disappears, and refuse republication after input consumption.
-They also exercise expired terminal quota cleanup and captured publisher ownership: a stale owner
-cannot publish, while fresh recovery settles the same retained checkpoint without another allocation.
-Admission-expiry cases interrupt native upload/download, setup and CLI upload/download after durable
-input attachment but before dispatch. The claimed scheduler settles the original never-dispatched
-operation before reading private intent or delegating file recovery, with retained, expired and
-missing preparation under both provider policies. Assertions preserve original identity, deadline,
-source and target bytes, release active capacity and exclude credentials, guest probes, dispatch,
-refetch and replacement results. Ordinary owned private cleanup remains finite; already-dispatched
-unknown work is not treated as proved nonexecution. Terminal events require a successful
-claim-guarded state transition.
-Communication tests exercise independent source opens, cancellation settlement, retained private
-references and unsupported extension streams. The native Telegram multipart integration uses a real
-HTTP socket and disk parser to verify exact size/hash and UTF-8/quoted filename bytes; it does not
-send to Telegram or certify that service's filename interpretation.
-
-`tests/integration/local/guest-docker.test.ts` requires Docker and the configured pinned
-template image. It runs real Linux descriptor-limit behavior with substituted Docker
-service plumbing. To check the built guest bundles in that image separately:
+To check the packaged common service:
 
 ```bash
-npm run local:verify:guest
+npm run workspace:verify:guest
 ```
 
-This command builds the local package and requires the pinned image already present
-locally. Its network-disabled container checks repository binding, stdin, binary files,
-persistent sessions and cancellation. It also installs fixed file-client assets, verifies actual
-Linux boot identity and independent asset hashes, executes the returned absolute command and preserves
-repository bytes, named-session state and a retained terminal result. Unsafe installation locks are
-refused. Container compatibility and `npm run verify:docker`
-API/MCP/self-host checks do not establish physical sbx isolation.
+This builds and packages the canonical payload, then exercises its installer, daemon
+and CLI in a network-disabled pinned Linux container. It checks actual startup refusal
+and readiness, single ownership, repository binding, exact binary/Unicode bytes, files,
+sessions, cancellation and restart receipts. The pinned image must already exist locally.
+Container compatibility and `npm run verify:docker` do not establish physical sbx
+ownership or host/LAN/VPN/metadata/other-VM isolation.
 
 ### Real sbx acceptance
 
@@ -331,9 +280,8 @@ npm run test:mcp-tools:prod       # MCP on production
 
 ### File Naming
 
-- Unit/Integration/API/MCP: `*.test.ts`; repository automation that executes as
-  CommonJS in GitHub Actions may use `*.test.cjs` to exercise the shipped module
-  without an interop wrapper.
+- Unit/Integration/API/MCP: `*.test.ts`; Node component fixtures and repository
+  automation may use `*.test.cjs` to exercise shipped modules directly.
 - E2E: `*.spec.ts`
 
 ### E2E Import Rule

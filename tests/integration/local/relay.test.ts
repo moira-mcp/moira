@@ -86,7 +86,7 @@ async function fixture() {
   let refusedRenewStatus: number | undefined;
   let nextRenewFailure: "network" | "server" | undefined;
   let nextPartFailure: "network" | "server" | "body" | "unauthorized" | undefined;
-  let payloadReads = 0;
+  const payloadReads = 0;
   let heartbeatFailure = false;
   let brokenHeartbeatStatus: number | undefined;
   let brokenRenewStatus: number | undefined;
@@ -123,6 +123,18 @@ async function fixture() {
         return Response.json(identityRefusal.body, { status: identityRefusal.status });
       return json({ name: "Fixture Owner", email: "owner@example.test" });
     }
+    if (url.pathname.endsWith("/workspaces/bootstrap")) {
+      const body = JSON.parse(String(options?.body));
+      return json({
+        version: 1,
+        origin: connection.origin,
+        resourceId: body.resourceId,
+        resourceGeneration: 1,
+        authorizationGeneration: 1,
+        environmentIdentity: body.environmentIdentity,
+        credential: "w".repeat(43),
+      });
+    }
     if (url.pathname.endsWith("/relay/claim")) {
       if (idleClaim) {
         enteredIdle();
@@ -132,7 +144,7 @@ async function fixture() {
           }),
         );
       }
-      return json({ requests: [claim], maxPartBytes });
+      return json({ requests: [claim] });
     }
     if (url.pathname.endsWith("/renew")) {
       renewals++;
@@ -147,47 +159,15 @@ async function fixture() {
         ? new Response(null, { status: refusedRenewStatus })
         : json({ ...scopedClaim, claimExpiresAt: Date.now() + 30_000 });
     }
-    if (url.pathname.includes("/payload/0")) {
-      payloadReads++;
-      expect(new Headers(options?.headers).get("X-Moira-Claim-Id")).toBe(scopedClaim.claimId);
-      const offset = Number(url.searchParams.get("offset")),
-        length = Number(url.searchParams.get("length"));
-      return new Response(
-        Uint8Array.from(payloads.get(requestId!)!.subarray(offset, offset + length)),
-      );
-    }
-    if (url.pathname.endsWith("/result-part")) {
+    if (url.pathname.endsWith("/relay/ack")) {
+      const ack = JSON.parse(String(options?.body));
       const failure = nextPartFailure;
       nextPartFailure = undefined;
       if (failure === "network") throw new TypeError("Controlled relay transport failure");
       if (failure === "server") return new Response(null, { status: 503 });
       if (failure === "unauthorized") return new Response(null, { status: 401 });
-      if (failure === "body")
-        return new Response(
-          new ReadableStream({
-            start(controller) {
-              controller.error(new TypeError("Controlled response body loss"));
-            },
-          }),
-        );
-      expect(new Headers(options?.headers).get("X-Moira-Claim-Id")).toBe(scopedClaim.claimId);
-      const result = Buffer.from(options!.body as Uint8Array);
-      expect(result.length).toBeLessThanOrEqual(maxPartBytes);
-      const transferId = randomUUID();
-      uploaded.set(transferId, result);
-      return json({ transferId, size: result.length, sha256: hash(result) });
-    }
-    if (url.pathname.endsWith("/relay/ack")) {
-      const ack = JSON.parse(String(options?.body));
-      receipts.push(
-        JSON.parse(
-          Buffer.concat(
-            ack.outcomeReference.parts.map((part: { transferId: string }) =>
-              uploaded.get(part.transferId)!,
-            ),
-          ).toString("utf8"),
-        ),
-      );
+      if (failure === "body") return brokenResponse(503);
+      receipts.push(ack.outcome);
       if (loseAck) {
         loseAck = false;
         throw new Error("Controlled response loss after receipt");
@@ -196,7 +176,7 @@ async function fixture() {
         requestId: ack.requestId,
         digest: ack.digest,
         status: "completed",
-        outcomeReference: JSON.parse(String(options?.body)).outcomeReference,
+        outcome: ack.outcome,
       });
     }
     throw new Error(`Unexpected test transport path ${url.pathname}`);
@@ -230,11 +210,7 @@ async function fixture() {
       resourceGeneration: generation,
       ...(authority ? { authority } : {}),
       digest: hash(bytes),
-      payloadReference: {
-        parts: [{ transferId: randomUUID(), sha256: hash(bytes), size: bytes.length }],
-        sha256: hash(bytes),
-        size: bytes.length,
-      },
+      payload: message,
       deadlineAt: envelope.expiresAt,
       claimId: randomUUID(),
       claimExpiresAt: Date.now() + 30_000,
@@ -334,6 +310,13 @@ async function fixture() {
   };
 }
 
+async function admitWorkspace(local: Awaited<ReturnType<typeof fixture>>) {
+  local.manager.dependencies.storage = async () => {};
+  local.manager.dependencies.brokerPorts = { http: 0, tunnel: 0 };
+  await local.manager.open();
+  await local.manager.start(local.space.id);
+}
+
 describe("outbound companion authority and durable response replay", () => {
   async function ownerCleanupFixture() {
     const local = await fixture();
@@ -394,7 +377,7 @@ describe("outbound companion authority and durable response replay", () => {
     expect(local.removals()).toBe(1);
     const requestId = local.claim().requestId;
     expect(
-      await local.state.read(`relay-request-${requestId}.json`, (value) => value),
+      await local.state.read(`lifecycle-request-${requestId}.json`, (value) => value),
     ).toMatchObject({
       authority: "owner-delete",
       message: { authority: "owner-delete", request: { generation: 1, spaceId: local.space.id } },
@@ -415,7 +398,7 @@ describe("outbound companion authority and durable response replay", () => {
     expect(local.inventory.has(local.peer.runtimeId!)).toBe(true);
     expect(await readFile(join(directory, "policy.json"))).toEqual(policy);
     const retained = await local.state.read(
-      `relay-request-${requestId}.json`,
+      `lifecycle-request-${requestId}.json`,
       (value) => value as { message: Record<string, unknown> },
     );
     const changedAuthority = { ...retained!.message };
@@ -571,7 +554,7 @@ describe("outbound companion authority and durable response replay", () => {
     await local.manager.close();
   });
 
-  test.each(["create", "start", "stop", "operation"] as const)(
+  test.each(["create", "start", "stop"] as const)(
     "owner deletion authority cannot admit %s",
     async (action) => {
       const local = await ownerCleanupFixture();
@@ -586,21 +569,6 @@ describe("outbound companion authority and durable response replay", () => {
           : {
               action,
               spaceId: local.resourceId,
-              ...(action === "operation"
-                ? {
-                    job: {
-                      version: 1,
-                      action: "execute",
-                      remoteMarker: `moira-op-${"e".repeat(32)}`,
-                      argv: ["node", "-e", "process.stdout.write('guest-only-value')"],
-                      stdin: "",
-                      timeoutMs: 1000,
-                      maxStdoutBytes: 1024,
-                      maxStderrBytes: 1024,
-                      maxRetainedBytes: 1024,
-                    },
-                  }
-                : {}),
             };
       local.setRequest(request, 2, "owner-delete");
       await local.relay.poll(local.rpc);
@@ -639,14 +607,7 @@ describe("outbound companion authority and durable response replay", () => {
           ok: true,
           result: { spaces: [{ id: local.space.id, state: "stopped" }] },
         });
-        for (const request of [
-          { action: "start", spaceId: local.resourceId },
-          {
-            action: "operation",
-            spaceId: local.resourceId,
-            job: { version: 1, action: "execute", remoteMarker: `moira-op-${"e".repeat(32)}` },
-          },
-        ]) {
+        for (const request of [{ action: "start", spaceId: local.resourceId }]) {
           local.setRequest(request, 3);
           expect(await companion.cycle()).toBe(false);
           expect(local.receipts.at(-1)).toMatchObject({
@@ -694,7 +655,6 @@ describe("outbound companion authority and durable response replay", () => {
         spaces: [{ ...local.space, state: "stopped", nativeStopConfirmed: true }],
       });
       const start = jest.spyOn(local.manager, "start");
-      const dispatch = jest.spyOn(local.rpc.jobs, "dispatch");
       local.setRequest({ action: "snapshot" }, generation);
       await local.relay.poll(local.rpc);
       expect(local.receipts.at(-1)).toMatchObject({
@@ -712,21 +672,17 @@ describe("outbound companion authority and durable response replay", () => {
       });
       expect(snapshot).toHaveBeenCalledWith(local.space.id);
       expect(await local.state.read(key, (value) => value)).toEqual(before);
-      for (const request of [
-        { action: "start", spaceId: local.space.id },
-        { action: "operation", spaceId: local.space.id, job: {} },
-      ]) {
+      for (const request of [{ action: "start", spaceId: local.space.id }]) {
         local.setRequest(request, generation);
         await local.relay.poll(local.rpc);
         expect(local.receipts.at(-1)).toMatchObject({
           ok: false,
           error: {
-            code: request.action === "operation" ? "LOCAL_NOT_RUNNING" : "LOCAL_SETUP_INCOMPLETE",
+            code: "LOCAL_SETUP_INCOMPLETE",
           },
         });
       }
       expect(start).toHaveBeenCalledTimes(1);
-      expect(dispatch).not.toHaveBeenCalled();
       expect(await local.state.read(key, (value) => value)).toEqual(before);
     },
   );
@@ -1005,119 +961,20 @@ describe("outbound companion authority and durable response replay", () => {
       expect(stopped.recoveryGeneration).toBeUndefined();
     },
   );
-  test("ordinary work and Git remain usable when lifecycle counters disagree", async () => {
+  test("Git authority remains scoped to its resource when lifecycle counters disagree", async () => {
     const local = await fixture();
     await local.relay.poll(local.rpc);
     const key = `relay-space-${local.resourceId}.json`;
     const previous = await local.state.read(key, (value) => value as Record<string, unknown>);
     await local.state.write(key, { ...previous, serverGeneration: 2 });
-    let authority: unknown;
-    const dispatch = jest.spyOn(local.rpc.jobs, "dispatch").mockImplementation(async () => {
-      authority = await local.relay.gitAuthority(local.space.id, local.space.repositoryId);
-      return { state: "complete" };
-    });
     await local.records.put({ ...local.space, generation: 34 });
-    local.setRequest({ action: "operation", spaceId: local.space.id, job: { kind: "git" } }, 3);
-    await local.relay.poll(local.rpc);
-    expect(local.receipts.at(-1)).toMatchObject({ ok: true, result: { state: "complete" } });
-    expect(authority).toMatchObject({ resourceId: local.resourceId });
-    expect(dispatch).toHaveBeenCalledTimes(1);
+    expect(await local.relay.gitAuthority(local.space.id, local.space.repositoryId)).toMatchObject({
+      resourceId: local.resourceId,
+    });
     expect(await local.state.read(key, (value) => value)).toMatchObject({
       serverGeneration: 2,
       localGeneration: 1,
     });
-  });
-
-  test("stop cancels a downloaded command before native admission even after a subsequent start", async () => {
-    const local = await fixture();
-    await local.relay.poll(local.rpc);
-    const native: string[] = [];
-    local.manager.dependencies.guard = async () => ({
-      active: true,
-      stop: async () => {},
-      observe: async () => [],
-      remove: async () => {},
-      retire: async () => {
-        const space = (await local.records.get(local.space.id))!;
-        await local.records.put({
-          ...space,
-          generation: space.generation + 1,
-          desiredState: "stopped",
-          phase: "stopped",
-        });
-      },
-      space: async () => ({
-        active: true,
-        prepare: async () => {},
-        validate: async () => {},
-        stop: async () => {},
-        operation: async (request) => {
-          native.push((request as { remoteMarker: string }).remoteMarker);
-          return Buffer.from(JSON.stringify({ ok: true, result: { state: "running" } }));
-        },
-      }),
-    });
-    let enter!: () => void;
-    const entered = new Promise<void>((done) => {
-      enter = done;
-    });
-    let release!: () => void;
-    const held = new Promise<void>((done) => {
-      release = done;
-    });
-    const original = local.manager.dispatchGuest.bind(local.manager);
-    let first = true;
-    jest.spyOn(local.manager, "dispatchGuest").mockImplementation(async (id, work, signal) => {
-      if (first) {
-        first = false;
-        enter();
-        await held;
-      }
-      return original(id, work, signal);
-    });
-    const job = (remoteMarker: string) => ({
-      version: 1,
-      action: "execute",
-      remoteMarker,
-      argv: ["echo", "accepted"],
-      stdin: "",
-      timeoutMs: 1000,
-      maxStdoutBytes: 1024,
-      maxStderrBytes: 1024,
-      maxRetainedBytes: 2048,
-    });
-    const oldMarker = `moira-op-${"7a".repeat(16)}`;
-    local.setRequest({ action: "operation", spaceId: local.space.id, job: job(oldMarker) });
-    await local.relay.poll(local.rpc, undefined, true);
-    await entered;
-    try {
-      local.setRequest({ action: "stop", spaceId: local.space.id }, 2);
-      await local.relay.poll(local.rpc);
-      expect(local.receipts.at(-1)).toMatchObject({ ok: true });
-      local.manager.start = async () => {
-        const space = (await local.records.get(local.space.id))!;
-        const started = {
-          ...space,
-          generation: space.generation + 1,
-          desiredState: "running" as const,
-          phase: "usable" as const,
-        };
-        await local.records.put(started);
-        return started;
-      };
-      local.setRequest({ action: "start", spaceId: local.space.id }, 3);
-      await local.relay.poll(local.rpc);
-      expect(local.receipts.at(-1)).toMatchObject({ ok: true });
-      const freshMarker = `moira-op-${"7b".repeat(16)}`;
-      local.setRequest({ action: "operation", spaceId: local.space.id, job: job(freshMarker) }, 3);
-      await local.relay.poll(local.rpc);
-      expect(native).toEqual([freshMarker]);
-    } finally {
-      release();
-      await local.relay.drain();
-      await local.manager.close();
-    }
-    expect(native).not.toContain(oldMarker);
   });
 
   test.each(["stop", "delete"] as const)(
@@ -1137,12 +994,11 @@ describe("outbound companion authority and durable response replay", () => {
       });
       delete local.space.recoveryGeneration;
       await local.records.put(local.space);
-      await local.state.write(`result-${binding!.createRequestId}.json`, {
+      await local.state.write(`lifecycle-result-${binding!.createRequestId}.json`, {
         ok: false,
         error: { code: "LOCAL_SETUP_INCOMPLETE", message: "Bootstrap stopped after adoption" },
       });
       const start = jest.spyOn(local.manager, "start");
-      const work = jest.spyOn(local.rpc.jobs, "dispatch");
       local.setRequest({ action: "start", spaceId: local.space.id }, 3);
       await local.relay.poll(local.rpc);
       expect(local.receipts.at(-1)).toMatchObject({
@@ -1150,13 +1006,6 @@ describe("outbound companion authority and durable response replay", () => {
         error: { code: "LOCAL_SETUP_INCOMPLETE" },
       });
       expect(start).toHaveBeenCalledTimes(1);
-      expect(work).not.toHaveBeenCalled();
-      local.setRequest({ action: "operation", spaceId: local.space.id, job: { kind: "git" } }, 3);
-      await local.relay.poll(local.rpc);
-      expect(local.receipts.at(-1)).toMatchObject({
-        ok: false,
-        error: { code: "LOCAL_NOT_RUNNING" },
-      });
       const cleanup =
         action === "stop"
           ? jest.spyOn(local.manager, "stop").mockImplementation(async () => {
@@ -1185,7 +1034,6 @@ describe("outbound companion authority and durable response replay", () => {
         localGeneration: action === "stop" ? 3 : 4,
       });
       expect(start).toHaveBeenCalledTimes(1);
-      expect(work).not.toHaveBeenCalled();
     },
   );
 
@@ -1283,7 +1131,7 @@ describe("outbound companion authority and durable response replay", () => {
         space.generation++;
         await local.records.put(space);
       } else if (variant === "missing-tuple") {
-        await local.state.write(`result-${local.claim().requestId}.json`, {
+        await local.state.write(`lifecycle-result-${local.claim().requestId}.json`, {
           ok: true,
           result: { accepted: true },
         });
@@ -1393,11 +1241,13 @@ describe("outbound companion authority and durable response replay", () => {
           localGeneration: 1,
           serverGeneration: 2,
         });
-        const key = `relay-request-${createId}.json`;
+        const key = `lifecycle-request-${createId}.json`;
         if (variant === "completed") {
-          const journal = JSON.parse(await readFile(join(directory, "requests.json"), "utf8"));
+          const journal = JSON.parse(
+            await readFile(join(directory, "lifecycle-receipts.json"), "utf8"),
+          );
           journal.find((entry: { id: string }) => entry.id === createId).state = "complete";
-          await local.state.write("requests.json", journal);
+          await local.state.write("lifecycle-receipts.json", journal);
         } else if (variant !== "valid") {
           const intent = JSON.parse(await readFile(join(directory, key), "utf8"));
           if (variant === "expired") intent.message.expiresAt = Date.now() - 1;
@@ -1531,7 +1381,6 @@ describe("outbound companion authority and durable response replay", () => {
         space: async (id) => ({
           active: true,
           validate: async () => {},
-          operation: async () => Buffer.from("{}"),
           stop: async () => {},
           prepare: async () => {
             creatingId = id;
@@ -1548,9 +1397,7 @@ describe("outbound companion authority and durable response replay", () => {
       .catch((error: unknown) => error);
     try {
       await preparing;
-      expect(await manager.dispatchGuest(local.space.id, async () => "peer work completed")).toBe(
-        "peer work completed",
-      );
+      expect((await manager.snapshot(local.space.id)).spaces).toHaveLength(1);
       const next = {
         ...local.policy,
         repositories: [
@@ -1617,8 +1464,8 @@ describe("outbound companion authority and durable response replay", () => {
     const key = `relay-space-${local.resourceId}.json`;
     const binding = JSON.parse(await readFile(join(directory, key), "utf8"));
     await local.state.write(key, { ...binding, localSpaceId: null, localGeneration: null });
-    await local.state.remove(`relay-request-${binding.createRequestId}.json`);
-    await local.state.remove("requests.json");
+    await local.state.remove(`lifecycle-request-${binding.createRequestId}.json`);
+    await local.state.remove("lifecycle-receipts.json");
   }
 
   test("expired creation receipt recovers the own manifest and observes only that resource despite a stale peer", async () => {
@@ -1975,7 +1822,6 @@ describe("outbound companion authority and durable response replay", () => {
         active: true,
         prepare: async () => {},
         validate: async () => {},
-        operation: async () => Buffer.from("{}"),
         stop: async () => {
           const space = await local.records.get(local.space.id);
           await local.records.put({
@@ -1987,7 +1833,7 @@ describe("outbound companion authority and durable response replay", () => {
         },
       }),
     });
-    await local.manager.operation(local.space.id, {});
+    await admitWorkspace(local);
     jest.spyOn(local.manager, "open").mockResolvedValue(undefined);
     const daemon = new LocalDaemon(local.manager, local.relay, { report: () => {} });
     try {
@@ -2037,7 +1883,6 @@ describe("outbound companion authority and durable response replay", () => {
               "Controlled observation",
             );
         },
-        operation: async () => Buffer.from("{}"),
         stop: async () => {},
       };
       local.manager.dependencies.guard = async () => ({
@@ -2050,7 +1895,7 @@ describe("outbound companion authority and durable response replay", () => {
       });
       await local.manager.open();
       try {
-        await local.manager.operation(local.space.id, {});
+        await local.manager.start(local.space.id);
         if (state === "changed-network")
           await expect(local.manager.start(local.space.id)).rejects.toMatchObject({
             code: "LOCAL_NETWORK_CHANGED",
@@ -2059,7 +1904,7 @@ describe("outbound companion authority and durable response replay", () => {
           await expect(local.manager.start(local.space.id)).resolves.toMatchObject({
             runtimeId: local.space.runtimeId,
           });
-        expect(preparations).toBe(state === "stopped" ? 1 : 0);
+        expect(preparations).toBe(state === "changed-network" ? 1 : 2);
       } finally {
         await local.manager.close();
       }
@@ -2092,9 +1937,20 @@ describe("outbound companion authority and durable response replay", () => {
       const bootstraps: unknown[] = [];
       jest
         .spyOn(SbxRuntime.prototype, "runFixedGuest")
-        .mockImplementation(async (_identity, _argv, stdin) => {
-          if (stdin && stdin.toString().startsWith("{")) {
-            bootstraps.push(JSON.parse(stdin.toString()));
+        .mockImplementation(async (_identity, entrypoint, stdin) => {
+          if (entrypoint === "probe")
+            return Buffer.from(
+              JSON.stringify({ environmentIdentity: "e".repeat(64), architecture: "aarch64" }),
+            );
+          if (entrypoint === "health")
+            return Buffer.from(
+              JSON.stringify({
+                environmentIdentity: "e".repeat(64),
+                releaseIdentity: "f".repeat(64),
+              }),
+            );
+          if (entrypoint === "bootstrap" && stdin instanceof Uint8Array) {
+            bootstraps.push(JSON.parse(Buffer.from(stdin).toString()));
             expect(await local.records.get(local.space.id)).toMatchObject({
               phase: "stopped",
               generation: 3,
@@ -2107,7 +1963,20 @@ describe("outbound companion authority and durable response replay", () => {
         local.space.id,
         async () => {},
         async () => {},
-        async () => ({ worker: Buffer.from("worker"), proxy: "proxy" }),
+        async () => ({
+          payload: {
+            version: 1,
+            architecture: "arm64",
+            libc: "glibc",
+            release: "f".repeat(64),
+            archiveSha256: "a".repeat(64),
+            fileName: "moira-workspace-linux-arm64.tar.gz",
+            size: 1,
+            path: "/not-consumed-by-sdk-substitute",
+            identity: { dev: 1, ino: 1, size: 1, mtimeMs: 1, ctimeMs: 1 },
+          },
+          proxy: "proxy",
+        }),
       );
       local.manager.dependencies.storage = async () => {};
       local.manager.dependencies.brokerPorts = { http: 0, tunnel: 0 };
@@ -2123,7 +1992,6 @@ describe("outbound companion authority and durable response replay", () => {
             active: true,
             prepare: () => owner.prepare(),
             validate: () => owner.validate(),
-            operation: (request) => owner.operation(request),
             stop: async () => {
               await owner.quiesce();
               await owner.confirmStopped();
@@ -2141,11 +2009,8 @@ describe("outbound companion authority and durable response replay", () => {
         ]);
         expect(bootstraps).toEqual([
           expect.objectContaining({
-            kind: "bootstrap",
-            request: expect.objectContaining({
-              clone: false,
-              gitAuthor: { name: "Fixture Owner", email: "owner@example.test" },
-            }),
+            clone: false,
+            gitAuthor: { name: "Fixture Owner", email: "owner@example.test" },
           }),
         ]);
         expect(await local.records.get(local.space.id)).toMatchObject({
@@ -2177,17 +2042,19 @@ describe("outbound companion authority and durable response replay", () => {
           phase: "stopped",
           desiredState: "running",
         });
-        const key = `relay-request-${local.claim().requestId}.json`;
+        const key = `lifecycle-request-${local.claim().requestId}.json`;
         const intent = JSON.parse(await readFile(join(directory, key), "utf8"));
         if (invalid === "expired") intent.message.expiresAt = Date.now() - 1;
         if (invalid === "changed-space") intent.message.request.spaceId = randomUUID();
         if (invalid === "changed-digest") intent.digest = "f".repeat(64);
         if (invalid === "changed-connection") intent.connectionId = randomUUID();
         if (invalid === "completed") {
-          const entries = JSON.parse(await readFile(join(directory, "requests.json"), "utf8"));
+          const entries = JSON.parse(
+            await readFile(join(directory, "lifecycle-receipts.json"), "utf8"),
+          );
           entries.find((entry: { id: string }) => entry.id === intent.message.id).state =
             "complete";
-          await local.state.write("requests.json", entries);
+          await local.state.write("lifecycle-receipts.json", entries);
         }
         if (invalid !== "changed-digest")
           intent.digest = hash(Buffer.from(canonicalJson(intent.message)));
@@ -2231,11 +2098,10 @@ describe("outbound companion authority and durable response replay", () => {
           active: true,
           prepare: async () => {},
           validate: async () => {},
-          operation: async () => Buffer.from("{}"),
           stop,
         }),
       });
-      await local.manager.operation(local.space.id, {});
+      await admitWorkspace(local);
       local.idle();
       const controller = new AbortController();
       const idle = local.relay.poll(local.rpc, controller.signal);
@@ -2336,7 +2202,6 @@ describe("outbound companion authority and durable response replay", () => {
               await local.records.put({ ...admitted!, phase: "usable" });
             },
             validate: async () => {},
-            operation: async () => Buffer.from("{}"),
             stop: async () => {},
           };
         },
@@ -2384,14 +2249,13 @@ describe("outbound companion authority and durable response replay", () => {
         active: true,
         prepare: async () => {},
         validate: async () => {},
-        operation: async () => Buffer.from("{}"),
         stop: async () => {
           await owner.quiesce();
           throw new Error("Controlled physical stop refusal");
         },
       }),
     });
-    await local.manager.operation(local.space.id, {});
+    await admitWorkspace(local);
     await expect(local.manager.close()).rejects.toThrow("could not be confirmed stopped");
     expect((await local.records.get(local.space.id))?.recoveryGeneration).toBeUndefined();
     local.setRequest({ action: "snapshot" }, 2);
@@ -2502,7 +2366,6 @@ describe("outbound companion authority and durable response replay", () => {
         active: true,
         prepare: async () => {},
         validate: async () => {},
-        operation: async () => Buffer.from("{}"),
         stop: async () => {
           const space = await local.records.get(local.space.id);
           if (space)
@@ -2515,7 +2378,7 @@ describe("outbound companion authority and durable response replay", () => {
         },
       }),
     });
-    await local.manager.operation(local.space.id, {});
+    await admitWorkspace(local);
     local.loseAck();
     await expect(local.relay.poll(local.rpc)).rejects.toThrow("Controlled response loss");
     expect(await local.records.get(local.space.id)).toMatchObject({
@@ -2536,35 +2399,6 @@ describe("outbound companion authority and durable response replay", () => {
     ).toMatchObject({ localGeneration: 1, serverGeneration: 1 });
     await local.manager.close();
   });
-  test.each(["network", "server", "body"] as const)(
-    "transient %s result upload preserves a running operation and reclaims its cached result without redispatch",
-    async (kind) => {
-      const local = await fixture();
-      await local.relay.poll(local.rpc);
-      const lease = local.policy.leaseUntil;
-      const dispatch = jest
-        .spyOn(local.rpc.jobs, "dispatch")
-        .mockResolvedValue({ state: "running" });
-      const close = jest.spyOn(local.manager, "close").mockResolvedValue(undefined);
-      local.setRequest({ action: "operation", spaceId: local.space.id, job: {} });
-      local.failNextPart(kind);
-      await expect(local.relay.poll(local.rpc)).rejects.toBeDefined();
-      expect(dispatch).toHaveBeenCalledTimes(1);
-      expect(close).not.toHaveBeenCalled();
-      expect(await local.records.get(local.space.id)).toMatchObject({
-        phase: "usable",
-        desiredState: "running",
-        generation: 1,
-      });
-      expect((await local.records.policy()).leaseUntil).toBe(lease);
-      const reconnect = new LocalRpc(local.manager);
-      const redispatch = jest.spyOn(reconnect.jobs, "dispatch");
-      local.claim().claimId = randomUUID();
-      await expect(local.relay.poll(reconnect)).resolves.toBe(1);
-      expect(redispatch).not.toHaveBeenCalled();
-      expect(local.receipts.at(-1)).toEqual({ ok: true, result: { state: "running" } });
-    },
-  );
   test.each(["network", "server"] as const)(
     "transient %s renewal drains its claim without closing admission or repeating a completed side effect",
     async (kind) => {
@@ -2608,14 +2442,6 @@ describe("outbound companion authority and durable response replay", () => {
       expect(local.receipts).toEqual([{ ok: true, result: { spaceId: local.space.id } }]);
     },
   );
-  test("result upload obeys the server's smaller effective chunk bound without changing the RPC result", async () => {
-    const local = await fixture();
-    local.partLimit(64);
-    await expect(local.relay.poll(local.rpc)).resolves.toBe(1);
-    expect(local.uploaded.size).toBeGreaterThan(1);
-    expect([...local.uploaded.values()].every((part) => part.length <= 64)).toBe(true);
-    expect(local.receipts).toEqual([{ ok: true, result: { spaceId: local.space.id } }]);
-  });
   test("one persisted creation marker cannot alias another server resource to the same local VM", async () => {
     const local = await fixture();
     await local.relay.poll(local.rpc);
@@ -2688,15 +2514,6 @@ describe("outbound companion authority and durable response replay", () => {
     local.setRequest({ action: "delete", spaceId: local.space.id, generation: 3 }, 3);
     await local.relay.poll(local.rpc);
     expect(removed).toBe(4);
-    local.setRequest({ action: "operation", spaceId: local.space.id, job: {} }, 2);
-    jest.spyOn(local.rpc.jobs, "dispatch").mockResolvedValue({ state: "running" });
-    let closures = 0;
-    local.manager.close = async () => {
-      closures++;
-    };
-    await expect(local.relay.poll(local.rpc)).resolves.toBe(1);
-    expect(local.receipts.at(-1)).toMatchObject({ ok: true, result: { state: "running" } });
-    expect(closures).toBe(0);
   });
   test("server observation ticks advance independently without clearing a changed local generation", async () => {
     const local = await fixture();

@@ -16,10 +16,6 @@ import { useLatestRequest } from "@/hooks/useLatestRequest";
 import { useRefreshOnActivation } from "@/components/settings/useRefreshOnActivation";
 import { useReadOwnerGuard } from "@/auth/ReadScopeBoundary";
 
-function formatMiB(bytes: number): string {
-  return `${Math.round((bytes / 1024 ** 2) * 10) / 10} MiB`;
-}
-
 function formatAge(ms: number | null): string {
   if (ms === null) return "—";
   return `${Math.round(ms / 1000)} s`;
@@ -129,29 +125,13 @@ export const AdminCodespaceControls: React.FC<{ active?: boolean }> = ({ active 
         ],
         [
           t("admin.codespaces.facts.reconciliation"),
-          t("admin.codespaces.reconciliationValue", {
-            resources: readiness.reconciliation.due_resources,
-            operations: readiness.reconciliation.due_operations,
-            age: formatAge(readiness.reconciliation.oldest_due_age_ms),
-          }),
+          `${readiness.reconciliation.due_resources} / ${formatAge(readiness.reconciliation.oldest_due_age_ms)}`,
         ],
         [
           t("admin.codespaces.facts.activeResources"),
           readiness.usage.max_active_resources === null
             ? String(readiness.usage.active_resources)
             : `${readiness.usage.active_resources} / ${readiness.usage.max_active_resources}`,
-        ],
-        [
-          t("admin.codespaces.facts.activeOperations"),
-          readiness.usage.max_active_operations === null
-            ? String(readiness.usage.active_operations)
-            : `${readiness.usage.active_operations} / ${readiness.usage.max_active_operations}`,
-        ],
-        [
-          t("admin.codespaces.facts.transferBytes"),
-          `${formatMiB(readiness.usage.transfer_live_bytes)} / ${formatMiB(
-            readiness.usage.max_transfer_live_bytes,
-          )}`,
         ],
       ]
     : [];

@@ -1,11 +1,11 @@
 # @mcp-moira/mcp-server
 
-MCP HTTP protocol server with 8 workflow management tools.
+MCP HTTP protocol server for workflow management and development environments.
 
 ## Features
 
 - **HTTP Transport**: StreamableHTTPServerTransport with JSON-RPC
-- **8 MCP Tools**: Workflow management via MCP protocol
+- **MCP Tools**: Workflow management and authorized workspace operations
 - **OAuth 2.1 Authentication**: Better Auth MCP plugin integration
 - **Stateless Mode**: No session storage, per-request context
 - **User Context**: AsyncLocalStorage for userId propagation
@@ -54,6 +54,14 @@ Inspector automatically handles OAuth flow via Dynamic Client Registration.
 - `settings` - User settings management (action: get|set|list)
 - `session` - Session information (action: user|executions|execution_context|current_step)
 - `token` - Generate upload/download tokens (action: upload|download)
+- `codespace` - Resource lifecycle, commands and repository files
+- `codespace_process` - Guest process start, status, output and cancellation
+
+Commands and file mutations use `ws1-<lowercase UUID>` request identities. Their
+receipts and output remain in the common guest workspace service; MCP routes live
+authorized calls rather than storing an offline command queue. The direct guest
+`moira-workspace` CLI uses the same service. Repository admission retains its
+separate UUID request contract. See the canonical Self-Hosting help for setup.
 
 ## Usage
 
@@ -68,7 +76,7 @@ npm run docker:restart  # Build and run Docker
 ## API
 
 ```bash
-curl -X POST http://localhost:3000/mcp \
+curl -X POST http://localhost:${DOCKER_PORT}/mcp \
   -H "Content-Type: application/json" \
   -H "Accept: application/json, text/event-stream" \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}'

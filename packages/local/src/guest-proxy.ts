@@ -25,7 +25,7 @@ export async function serveGuestProxy(hostPort: number, authorization: string, g
     });
   };
   const server = createServer(
-    { maxHeaderSize: 8192, headersTimeout: 5000, requestTimeout: 120_000 },
+    { maxHeaderSize: 8192, headersTimeout: 5000, requestTimeout: 0 },
     (request, response) => {
       const upstream = httpRequest(
         {
@@ -84,7 +84,6 @@ export async function serveGuestProxy(hostPort: number, authorization: string, g
     });
   });
   server.on("clientError", (_error, socket) => socket.destroy());
-  server.maxConnections = 64;
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);
     server.listen(guestPort, "0.0.0.0", resolve);
