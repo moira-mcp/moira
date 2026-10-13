@@ -32,14 +32,21 @@ const childProgram = `
   service.server.on('request',request=>{
     if(request.url?.includes('waitMs=60000'))process.stdout.write('observing\\n');
   });
-  let remote=startWorkspaceRemote(c.remote);
+  let remote;
   const {createInterface}=await import('node:readline');
   const lines=createInterface({input:process.stdin});
   lines.on('line',async line=>{
-    if(line==='disconnect'){await remote.close();process.stdout.write('disconnected\\n');}
+    if(line.startsWith('connect:')){
+      const life=line.slice('connect:'.length);
+      if(remote||!/^[a-f0-9]{64}$/.test(life))throw new Error('Invalid fixture bootstrap');
+      c.remote.environmentIdentity=life;
+      remote=startWorkspaceRemote(c.remote);
+    }
+    else if(line==='disconnect'){await remote.close();process.stdout.write('disconnected\\n');}
     else if(line==='reconnect'){remote=startWorkspaceRemote(c.remote);}
   });
-  process.on('SIGTERM',async()=>{await remote.close();await service.close();process.exit(0)});
+  process.on('SIGTERM',async()=>{await remote?.close();await service.close();process.exit(0)});
+  process.stdout.write('ready\\n');
 `;
 
 async function fixture(expiresAt: number | null = null) {
@@ -79,23 +86,28 @@ async function fixture(expiresAt: number | null = null) {
     { stdio: "ignore" },
   );
   if (cert.status !== 0) throw new Error("Fixture certificate failed");
-  const binding: WorkspaceBinding = {
+  const principal = {
     userId: randomUUID(),
     resourceId: randomUUID(),
     resourceGeneration: 1,
     authorizationGeneration: 1,
-    environmentIdentity: createHash("sha256").update("override:router-test").digest("hex"),
   };
+  let binding: WorkspaceBinding | undefined = undefined;
   let allowed = true;
   const credential = "fixture-credential";
   const router = new WorkspaceRouter({
     async credential(value) {
-      if (value !== credential || !allowed || (expiresAt !== null && expiresAt <= Date.now()))
+      if (
+        !binding ||
+        value !== credential ||
+        !allowed ||
+        (expiresAt !== null && expiresAt <= Date.now())
+      )
         throw new Error("Denied");
       return { ...binding, expiresAt };
     },
     async request(user, id) {
-      if (user !== binding.userId || id !== binding.resourceId || !allowed)
+      if (!binding || user !== binding.userId || id !== binding.resourceId || !allowed)
         throw new Error("Denied");
       return { ...binding };
     },
@@ -137,10 +149,8 @@ async function fixture(expiresAt: number | null = null) {
       socketPath: join(root, "service.sock"),
       origin: "https://127.0.0.1:3100",
       credential,
-      environmentIdentity: binding.environmentIdentity,
     },
   };
-  const connected = once(router, "connected");
   const child = spawn(
     process.execPath,
     ["--import", "tsx", "--input-type=module", "-e", childProgram],
@@ -155,6 +165,7 @@ async function fixture(expiresAt: number | null = null) {
       stdio: ["pipe", "pipe", "pipe"],
     },
   );
+  const ready = once(child.stdout!, "data");
   let childDiagnostic = "";
   child.stderr!.on("data", (bytes) => {
     if (childDiagnostic.length < 4096)
@@ -179,6 +190,21 @@ async function fixture(expiresAt: number | null = null) {
       await exited;
     }
   });
+  expect(String((await Promise.race([ready, failed]))[0]).trim()).toBe("ready");
+  const health = await Promise.race([
+    createWorkspaceClient(config.service.socketPath).json(principal.userId, principal.resourceId, {
+      method: "GET",
+      path: "/v1/health",
+    }),
+    failed,
+  ]);
+  const life = health.environmentIdentity;
+  if (typeof life !== "string" || !/^[a-f0-9]{64}$/.test(life))
+    throw new Error("Fixture service did not report its measured life");
+  const measuredBinding = { ...principal, environmentIdentity: life };
+  binding = measuredBinding;
+  const connected = once(router, "connected");
+  child.stdin!.write(`connect:${life}\n`);
   await Promise.race([connected, failed]);
   return {
     root,
@@ -187,7 +213,7 @@ async function fixture(expiresAt: number | null = null) {
     server,
     child,
     ca,
-    binding,
+    binding: measuredBinding,
     credential,
     client: createWorkspaceClient(join(root, "router", "router.sock")),
     revoke: () => {
