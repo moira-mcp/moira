@@ -14,7 +14,7 @@ export interface TelegramConfig {
   defaultChatId?: string;
   /** Telegram API base URL (default: https://api.telegram.org/bot) */
   apiUrl?: string;
-  /** Request timeout in milliseconds (default: 5000) */
+  /** An explicit caller-selected request deadline; absent means no implicit deadline. */
   timeout?: number;
 }
 
@@ -104,39 +104,6 @@ export interface TelegramError extends Error {
   originalError?: unknown;
   /** Additional context data */
   context?: Record<string, unknown>;
-}
-
-/**
- * Rate limiter configuration and state
- * Simple implementation for Telegram API rate limiting
- */
-export interface RateLimiterConfig {
-  /** Maximum requests per time window */
-  maxRequests: number;
-  /** Time window in milliseconds */
-  timeWindow: number;
-}
-
-/**
- * Rate limiter internal state tracking
- */
-export interface RateLimiterState {
-  /** Timestamps of recent requests */
-  requestTimestamps: number[];
-  /** Last cleanup timestamp */
-  lastCleanup: number;
-}
-
-/**
- * Result of rate limit check
- */
-export interface RateLimitResult {
-  /** Whether the request is allowed */
-  allowed: boolean;
-  /** Milliseconds until next request is allowed (if not allowed) */
-  retryAfter?: number;
-  /** Current request count in time window */
-  currentCount: number;
 }
 
 /**

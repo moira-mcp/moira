@@ -196,6 +196,45 @@ test("unknown issuance is attempted once and never becomes an implicit mint retr
   expect(await f.state.keys("git-")).toEqual([]);
 });
 
+test("caller cancellation retains original issuance custody without a synthetic relay deadline", async () => {
+  const f = await fixture();
+  const abort = new AbortController();
+  let issued!: () => void;
+  const submitted = new Promise<void>((resolve) => {
+    issued = resolve;
+  });
+  const signals: Array<AbortSignal | null | undefined> = [];
+  let attempts = 0;
+  const relay = new LocalRelay(f.records, async (url, options) => {
+    signals.push(options?.signal);
+    if (String(url).endsWith("/acquire")) {
+      attempts++;
+      issued();
+      return new Promise<Response>((_resolve, reject) => {
+        options!.signal!.addEventListener("abort", () => reject(options!.signal!.reason), {
+          once: true,
+        });
+      });
+    }
+    return Response.json({ success: true, data: { ...f.identity, status: "active" } });
+  });
+  const pending = relay.acquireGitCredential(
+    f.space.id,
+    f.space.repositoryId,
+    "push",
+    abort.signal,
+  );
+  const rejected = expect(pending).rejects.toMatchObject({ code: "WORKSPACE_OUTCOME_UNCONFIRMED" });
+  await submitted;
+  abort.abort(new Error("Original caller cancelled"));
+  await rejected;
+  expect(signals.every((signal) => signal === abort.signal)).toBe(true);
+  expect(attempts).toBe(1);
+  expect(await relay.pendingGitCredentialRequests()).toEqual([
+    expect.objectContaining({ state: "unconfirmed", action: "push" }),
+  ]);
+});
+
 test.each([
   "SCOPED_CREDENTIAL_CUSTODY_UNCONFIRMED",
   "SCOPED_CREDENTIAL_DISPOSAL_PENDING",

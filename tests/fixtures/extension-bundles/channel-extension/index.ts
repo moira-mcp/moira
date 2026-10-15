@@ -1,6 +1,7 @@
 import { defineChannel, defineExtension } from "@mcp-moira/extension-sdk";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
+import { appendFileSync, writeFileSync } from "node:fs";
 
 const notifications = defineChannel({
   id: "channel-probe.notifications",
@@ -21,14 +22,16 @@ const notifications = defineChannel({
       return;
     }
     if (message.text === "hang") {
+      writeFileSync(".channel-pending", "pending\n");
       await new Promise<void>((resolve) => signal.addEventListener("abort", () => resolve()));
+      appendFileSync(".channel-pending", "cancelled\n");
       return;
     }
     const token = await services.secret("channel-probe.token");
     if (settings["channel-probe.destination"] !== "configured" || token !== "channel-secret") {
       throw new Error("channel configuration did not cross its declared boundary");
     }
-    if (message.text !== "portable text") {
+    if (message.text !== "portable text" && message.text !== "long:" + "x".repeat(1_100_000)) {
       throw new Error("the portable message did not reach the channel");
     }
   },

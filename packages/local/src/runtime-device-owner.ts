@@ -314,7 +314,6 @@ export class RuntimeDeviceOwner {
         this.unknownStartup = true;
       throw error;
     }
-    const deadline = Date.now() + 30_000;
     for (;;) {
       await this.current();
       if (!this.launch.active)
@@ -326,8 +325,6 @@ export class RuntimeDeviceOwner {
           JSON.parse((await this.runtime.call(["daemon", "status", "--json"])).toString("utf8")),
         );
       if (status.status === "running") break;
-      if (Date.now() >= deadline)
-        throw new LocalRefusal("LOCAL_COMMAND_TIMEOUT", "Owned daemon startup did not settle.");
       await pause(25, undefined, { signal: this.controller.signal });
     }
     await this.control.protect();

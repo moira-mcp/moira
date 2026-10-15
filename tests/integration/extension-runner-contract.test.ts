@@ -131,7 +131,6 @@ describe("The runner provides what the bundle declares", () => {
     await expect(
       client.deliverCommunicationChannel!({
         channelId: "channel-probe.notifications",
-        timeoutMs: 5_000,
         message: {
           text: "portable text",
         },
@@ -147,10 +146,9 @@ describe("The runner provides what the bundle declares", () => {
     ).resolves.toBeUndefined();
   });
 
-  test("channel permissions, timeout and recovery use the existing isolated host boundary", async () => {
-    const channelRequest = (text: string, timeoutMs = 5_000) => ({
+  test("channel permissions, addressed cancellation and recovery use the existing isolated host boundary", async () => {
+    const channelRequest = (text: string) => ({
       channelId: "channel-probe.notifications",
-      timeoutMs,
       message: { text },
       settings: { "channel-probe.destination": "configured" },
       secrets: { "channel-probe.token": "channel-secret" },
@@ -168,9 +166,20 @@ describe("The runner provides what the bundle declares", () => {
       kind: "handler-error",
       message: expect.stringContaining("not granted"),
     });
-    await expect(
-      client.deliverCommunicationChannel!(channelRequest("hang", 300)),
-    ).rejects.toMatchObject({ kind: "timeout" });
+    const marker = path.join(BUNDLES_DIR, "channel-extension", ".channel-pending");
+    fs.rmSync(marker, { force: true });
+    const controller = new AbortController();
+    const pending = client.deliverCommunicationChannel!(channelRequest("hang"), controller.signal);
+    try {
+      await waitForMarkerLines(marker, 1);
+      controller.abort();
+      await expect(pending).rejects.toMatchObject({ kind: "runner-unavailable" });
+      await waitForMarkerLines(marker, 2);
+    } finally {
+      controller.abort();
+      await pending.catch(() => undefined);
+      fs.rmSync(marker, { force: true });
+    }
     await expect(
       client.deliverCommunicationChannel!({
         ...channelRequest("portable text"),
@@ -178,6 +187,9 @@ describe("The runner provides what the bundle declares", () => {
           text: "portable text",
         },
       }),
+    ).resolves.toBeUndefined();
+    await expect(
+      client.deliverCommunicationChannel!(channelRequest("long:" + "x".repeat(1_100_000))),
     ).resolves.toBeUndefined();
   });
 

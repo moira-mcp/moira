@@ -236,7 +236,10 @@ describe("Local cloud facade routes to the authoritative owner", () => {
     expect(
       await devices.authorizeGitHubOperation(auth, stopped.codespace_id, 1, "fetch"),
     ).toMatchObject({
-      id: owner!.policy.repositories[0].id,
+      repository: { id: owner!.policy.repositories[0].id },
+      resourceId: stopped.codespace_id,
+      resourceGeneration: 1,
+      ownerResourceGeneration: 2,
     });
     expect(await devices.getOperation("owner", deviceId, stopId)).toMatchObject({
       state: "completed",
@@ -250,6 +253,58 @@ describe("Local cloud facade routes to the authoritative owner", () => {
     );
     expect(started).toMatchObject({ state: "usable", generation: 3 });
   });
+  test.each(["push", "pull_request"] as const)(
+    "one %s decision retains a coherent owner witness and the next phase observes changed rights",
+    async (action) => {
+      const created = await create(),
+        policy = await owner!.records.policy();
+      policy.repositories[0].allowPush = true;
+      policy.repositories[0].allowPullRequests = true;
+      await owner!.state.write("policy.json", policy);
+      const snapshot = await devices.localSnapshot("owner", deviceId);
+      const original = owner!.client.json;
+      let changed = false;
+      owner!.client.json = async (...args) => {
+        const result = await original(...args);
+        if (!changed && args[2].path === "/v1/controller") {
+          changed = true;
+          await owner!.state.write("policy.json", {
+            ...policy,
+            leaseUntil: policy.leaseUntil - 1,
+            repositories: policy.repositories.map((repository) => ({
+              ...repository,
+              allowPush: false,
+              allowPullRequests: false,
+            })),
+          });
+        }
+        return result;
+      };
+      const decision = await devices.authorizeOwnedGitHubOperation(
+        "owner",
+        created.codespace_id,
+        action,
+      );
+      const binding = devices.getBinding("owner", created.codespace_id)!;
+      expect(decision).toMatchObject({
+        auth: {
+          userId: "owner",
+          deviceId,
+          deviceGeneration: binding.deviceGeneration,
+          connectionId: binding.connectionId,
+        },
+        resourceId: created.codespace_id,
+        resourceGeneration: 1,
+        ownerResourceGeneration: 1,
+        appliedRevision: snapshot.control.appliedRevision,
+        useUntil: policy.leaseUntil,
+        repository: { ...policy.repositories[0], allowPush: true, allowPullRequests: true },
+      });
+      await expect(
+        devices.authorizeOwnedGitHubOperation("owner", created.codespace_id, action),
+      ).rejects.toMatchObject({ code: "LOCAL_UNAUTHORIZED" });
+    },
+  );
   test("changing next defaults does not report an existing admitted VM as resized", async () => {
     const first = await create(),
       policy = await owner!.records.policy();

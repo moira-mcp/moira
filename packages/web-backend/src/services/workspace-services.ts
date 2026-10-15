@@ -137,8 +137,12 @@ export function issueWorkspaceAgentCredential(
   };
 }
 
-function requireBinding(binding: WorkspaceAgentBinding, credentialExpiresAt: number | null = null) {
-  const { resource, expiresAt } = currentAuthority(binding.userId, binding.resourceId);
+function requireBinding(
+  binding: WorkspaceAgentBinding,
+  credentialExpiresAt: number | null = null,
+  authority = currentAuthority(binding.userId, binding.resourceId),
+) {
+  const { resource, expiresAt } = authority;
   if (
     resource.generation !== binding.resourceGeneration ||
     resource.authorizationGeneration !== binding.authorizationGeneration
@@ -159,8 +163,8 @@ function requireBinding(binding: WorkspaceAgentBinding, credentialExpiresAt: num
   };
 }
 
-/** Scoped Git credentials require the current enrolled life and connected owner. */
-export function authorizeWorkspaceAgentCredential(
+/** Authenticate the enrolled actor independently of its live dispatch connection. */
+export async function authorizeWorkspaceAgentCredential(
   credential: string,
   resourceId: string,
   resourceGeneration: number,
@@ -171,17 +175,11 @@ export function authorizeWorkspaceAgentCredential(
       "CODESPACE_GENERATION_CONFLICT",
       "Workspace credential identity changed",
     );
-  const binding = requireBinding(record, record.expiresAt);
-  if (!getWorkspaceRouter().isConnected(binding))
-    throw new CodespaceResourceError(
-      "CODESPACE_PROVIDER_UNAVAILABLE",
-      "Workspace owner unavailable",
-    );
-  return binding;
+  return requireBinding(record, record.expiresAt);
 }
 
 /** A public owner capability can route only to an already enrolled, currently authorized guest. */
-export function authorizeWorkspacePublication(resourceId: string): string {
+export async function authorizeWorkspacePublication(resourceId: string): Promise<string> {
   const sqlite = getSqliteInstance();
   const route = sqlite
     .prepare(
@@ -190,19 +188,14 @@ export function authorizeWorkspacePublication(resourceId: string): string {
     .get({ resourceId }) as { userId: string } | undefined;
   if (!route)
     throw new CodespaceResourceError("CODESPACE_NOT_FOUND", "Publication route unavailable");
-  currentAuthority(route.userId, resourceId);
+  const authority = currentAuthority(route.userId, resourceId);
   const record = new WorkspaceAuthRepository(sqlite).getOwned(route.userId, resourceId);
-  if (!record)
+  if (!record || (record.expiresAt !== null && record.expiresAt <= Date.now()))
     throw new CodespaceResourceError(
       "CODESPACE_PROVIDER_UNAVAILABLE",
       "Publication owner unavailable",
     );
-  const binding = requireBinding(record, record.expiresAt);
-  if (!getWorkspaceRouter().isConnected(binding))
-    throw new CodespaceResourceError(
-      "CODESPACE_PROVIDER_UNAVAILABLE",
-      "Publication owner unavailable",
-    );
+  requireBinding(record, record.expiresAt, authority);
   return route.userId;
 }
 
@@ -262,20 +255,14 @@ export function getWorkspaceRouter(): WorkspaceRouter {
     },
     async request(userId, resourceId, _signal, kind = "workspace") {
       if (kind === "controller") return currentControllerAuthority(userId, resourceId);
-      currentAuthority(userId, resourceId);
+      const authority = currentAuthority(userId, resourceId);
       const record = new WorkspaceAuthRepository(getSqliteInstance()).getOwned(userId, resourceId);
       if (!record || (record.expiresAt !== null && record.expiresAt <= Date.now()))
         throw new CodespaceResourceError(
           "CODESPACE_PROVIDER_UNAVAILABLE",
           "Workspace owner has not enrolled a current service; no operation was dispatched",
         );
-      const binding = requireBinding(record, record.expiresAt);
-      if (!getWorkspaceRouter().isConnected(binding))
-        throw new CodespaceResourceError(
-          "CODESPACE_PROVIDER_UNAVAILABLE",
-          "Workspace service is offline; no operation was dispatched",
-        );
-      return binding;
+      return requireBinding(record, record.expiresAt, authority);
     },
   }));
 }

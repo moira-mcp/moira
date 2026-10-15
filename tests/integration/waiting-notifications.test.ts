@@ -138,13 +138,7 @@ describe("waiting-for-you notifications", () => {
   const delivered: Array<{ text: string }> = [];
   const channelId = `test.waiting-notifications.${Math.random().toString(36).slice(2)}`;
   let clock = 0;
-  // The sender's communication service shares the injected clock, so its per-minute channel budget
-  // moves with the test's time rather than the wall clock.
-  const communication = new UserCommunicationService(
-    getActiveCommunicationChannelRegistry(),
-    {},
-    () => clock,
-  );
+  const communication = new UserCommunicationService(getActiveCommunicationChannelRegistry());
   const sender = () =>
     new WaitingNotificationSender(new DatabaseRepository(), queue(), {
       now: () => clock,
@@ -610,8 +604,7 @@ describe("waiting-for-you notifications", () => {
     const { executionId } = await runAtGate("notify-remind-behind-backlog", {
       gate: { label: "Approve the release plan", remindAfter: "30m" },
     });
-    // The backlog spent the person's per-minute channel budget; the first notification goes out
-    // once the window has passed, and its reminder 30 minutes after that.
+    // The next first notification and its reminder remain independent of the settled backlog.
     at(2 * MINUTE);
     await sender().tick();
     const first = rows(executionId).find((row) => row.kind === "first")!;
@@ -639,34 +632,24 @@ describe("waiting-for-you notifications", () => {
     );
   });
 
-  test("a notification refused for the person's channel budget is tried again after the window", async () => {
-    const tight = new UserCommunicationService(
-      getActiveCommunicationChannelRegistry(),
-      { maxRequestsPerWindow: 1 },
-      () => clock,
-    );
-    const tightSender = () =>
-      new WaitingNotificationSender(new DatabaseRepository(), queue(), {
-        now: () => clock,
-        communication: tight,
-      });
+  test("independent due waits deliver once without a shared channel budget", async () => {
     const one = await runAtGate("notify-budget-one");
     const two = await runAtGate("notify-budget-two");
     at(0);
-    await tightSender().tick();
+    await sender().tick();
     const sentNow = [one.executionId, two.executionId].filter(
       (id) => deliveredFor(id).length === 1,
     );
-    expect(sentNow).toHaveLength(1);
-    const heldId = sentNow[0] === one.executionId ? two.executionId : one.executionId;
-    expect(rows(heldId)[0]).toEqual(expect.objectContaining({ state: "pending" }));
+    expect(sentNow.sort()).toEqual([one.executionId, two.executionId].sort());
+    for (const id of sentNow)
+      expect(rows(id)[0]).toEqual(
+        expect.objectContaining({ state: "sent", deliveryStatus: "delivered" }),
+      );
 
     clock += 61_000;
-    await tightSender().tick();
-    expect(deliveredFor(heldId)).toHaveLength(1);
-    expect(rows(heldId)[0]).toEqual(
-      expect.objectContaining({ state: "sent", deliveryStatus: "delivered" }),
-    );
+    await sender().tick();
+    expect(deliveredFor(one.executionId)).toHaveLength(1);
+    expect(deliveredFor(two.executionId)).toHaveLength(1);
   });
 
   test("a gate reached by recovery keeps its notifications through a variable edit", async () => {

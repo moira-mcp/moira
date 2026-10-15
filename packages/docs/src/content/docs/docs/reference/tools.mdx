@@ -21,8 +21,9 @@ The typed catalog defines what clients can send. The following notes describe au
 
 `communication` delivers only to the authenticated user's enabled channels. The server selects
 providers and recipients; callers cannot supply a user, provider, destination, credential, local
-path, remote URL, or arbitrary request header. `send` accepts a non-empty message of at most 4096
-characters and returns a sanitized aggregate status for all configured channels.
+path, remote URL, or arbitrary request header. `send` accepts a non-empty message and returns
+a sanitized aggregate status for all configured channels. Text limits belong to the selected
+provider; Telegram limits an ordinary message to 4096 characters.
 
 A file owner is an enrolled workspace service or a paired controller on the user's computer.
 It retains the immutable source and original delivery receipt. Cloud Moira authorizes the channel
@@ -31,8 +32,10 @@ keeping a temporary file copy. Ordinary text through `send` needs no file owner.
 
 Before `deliver-file`, choose a fresh `request_id` in `ws1-<lowercase UUID>` form. Supply exactly
 one source: a returned `file.reference_id` in `referenceId`, or the host's native descriptor in
-`file`. A native source needs a live paired controller; select `device_id` if several are eligible.
-Omit it only when exactly one is available. A publication reference identifies its owner:
+`file`. A native source needs a paired controller with an active registration. Select `device_id`
+if several are registered, even when only one is online. Omit it only when exactly one is registered.
+Availability is checked by the actual dispatch; an unavailable selected controller is not replaced.
+A publication reference identifies its owner:
 
 ```javascript
 communication({
@@ -134,8 +137,9 @@ A rename, including a same-clock change back to the original text, invalidates a
 Stale redemption does not successfully consume it; obtain a fresh grant, also when its identity
 binding is absent. Failed rendering or HTTP delivery releases reservation; successful response
 completion consumes the grant once.
-Rendering requires a live paired controller. Supply `device_id` to select it when several are
-eligible; omission requires exactly one live owner. `COMMUNICATION_OWNER_UNAVAILABLE` is an
+Rendering requires a paired controller with an active registration. Supply `device_id` when several
+are registered, even when only one is online; omission requires exactly one registered owner.
+Actual dispatch checks availability without substituting another controller. `COMMUNICATION_OWNER_UNAVAILABLE` is an
 operational HTTP 503 from mint/public read and a coded MCP failure. Connect that controller rather
 than recreating a VM. The one-use progress URL is distinct from the repeatable owner publication;
 an error response finishing does not consume the progress grant. Ordinary progress reads and text
@@ -277,8 +281,9 @@ Git authority; admitted VMs can be managed offline under applicable current owne
 Starting requires the finite work lease; owner-confirmed cleanup does not renew it. Ordinary
 commands/files use the guest `moira-workspace` CLI.
 
-GitHub create/adopt runs at an available paired controller; choose `device_id` when several
-are live. `adopt` accepts a registered `codespace_id` with its observed `generation`, or an owned
+GitHub create/adopt runs at a paired controller with an active registration; choose `device_id`
+when several are registered, even when only one is online. Actual dispatch checks that selected
+controller's availability without substituting another. `adopt` accepts a registered `codespace_id` with its observed `generation`, or an owned
 `provider_resource_name` for initial admission. The controller uses trusted gh/SSH and the shipped
 payload in place, preserving the disk and original operation journal. Ordinary file calls cannot
 start or SSH into the environment. Local has no cloud aggregate quota; its current rights and
@@ -349,6 +354,10 @@ repository, resource generation and Local device/work authority are checked inde
 command journal. Independent commands and reads can proceed while another result is uncertain;
 guarded mutations coordinate inside the guest.
 
+Source preparation is distinct from execution: repository authority is checked before native
+acquisition, and the final locked session/repository gate can still refuse the prepared command.
+Collect its original result; prepared bytes alone do not prove execution or authorize a retry.
+
 #### Reading, editing and publishing files
 
 Paths are repository-relative. `stat` returns file metadata and its version; it is useful when an
@@ -393,10 +402,36 @@ moira-workspace download assets/data.bin > /tmp/data-copy.bin
 ```
 
 Choose a fresh identity for each intended mutation; the literals above illustrate the format.
-Without `--request-id`, the CLI generates and prints one before accepting input or starting work.
+The command shortcuts generate and print one before accepting input or starting work when their
+optional `--request-id` is omitted.
 `upload`/ `write` default to an absent target unless an explicit expected JSON guard is supplied.
 CLI `download` writes repository bytes to standard output; MCP download is the separate publication
 step that supplies a private reference for communication. Use CLI status/output after a lost reply.
+
+Use `moira-workspace action request.json` (or `action -` for JSON on stdin) for the full
+workspace action contract, including scripts, sessions, cwd, environment, explicit timeouts,
+native descriptors and observation windows. For example, `request.json` can contain:
+
+```json
+{
+  "action": "exec",
+  "request": {
+    "request_id": "ws1-33333333-3333-4333-8333-333333333333",
+    "session": "checks",
+    "session_start": true,
+    "cwd": ".",
+    "env": { "CHECK_MODE": "local" },
+    "script": "printf '%s\\n' \"$CHECK_MODE\"",
+    "timeout_seconds": 30
+  }
+}
+```
+
+The JSON adapter preserves the supplied `request_id` or `process_id`; it does not generate one.
+Collect with an `exec` action containing only the original `request_id`, or use status/output.
+`moira-workspace communication request.json` (or `communication -`) submits the owner communication
+JSON with its original camelCase `requestId`; status collects that original receipt without
+another publication or send. Keep signed native descriptors in the JSON file or stdin, never argv.
 Installation through the common image or Feature is described in
 [self-hosting](/docs/getting-started/self-hosting/#connect-local-codespaces).
 

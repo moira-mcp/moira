@@ -554,6 +554,8 @@ Public destinations are independent of technology; network downloads have no cum
 per-response byte, connection-count or established-transfer duration quota. Host, LAN and service destinations remain denied.
 
 `doctor` requires an enabled, unexpired lease and checks prerequisites, not live VM isolation.
+Its bounded diagnostic window does not establish settlement of pending work. Current authority
+is checked while SDK startup is pending; installation and registration have no general work deadline.
 Device `active`/`enabled` and setup `ready` describe authorization and configuration, not a
 successful guest connection. Check the companion's current diagnostic when guest calls time out.
 After a crash or reboot, `run` safely reclaims a stale runner marker when its runner and guard are
@@ -561,13 +563,15 @@ proven absent under the system lock. It preserves saved work and never replays u
 Live or unverifiable owners remain refused; do not clear their lock or receipt to bypass the check.
 If the default macOS storage mount is absent after reboot, restart `run` with the same state.
 Startup attaches only its existing owned `storage.sparsebundle`, verifies the native mount binding
-and repeats volume ownership, capacity and free-space admission. A lost attach reply is resolved
+and repeats volume ownership and approved capacity admission without a fixed free-space reserve. A lost attach reply is resolved
 by observing that binding. `LOCAL_STORAGE_NOT_MOUNTED` means storage remains unavailable: mount a
 custom volume manually, or check that the saved default image is present and can be mounted.
 `LOCAL_STORAGE_OWNER` requires resolving an unsafe image/mount or conflicting binding. Preserve
 the image and state; startup never creates a replacement disk or resets data to bypass a refusal.
-If the companion reports `LOCAL_STORAGE_FULL`, check the computer's shared backing-image capacity
-and its free space separately from free space on the Mac. To raise its approved maximum, stop
+If the companion reports `LOCAL_STORAGE_FULL` during shrink, the requested size cannot preserve
+existing data or the native APFS minimum. Check the computer's shared backing-image capacity and
+actual disk space separately from free space on the Mac; admission imposes no extra reserve.
+To raise its approved maximum, stop
 the foreground companion through Ctrl+C or ordinary owner-managed shutdown and repeat locally:
 
 ```bash

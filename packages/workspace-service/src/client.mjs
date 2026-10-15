@@ -1,7 +1,7 @@
 import { request } from "node:http";
 import { Buffer } from "node:buffer";
 
-/** Shared private Unix HTTP transport for the owner CLI and tool presentation. */
+/** Private Unix HTTP transport for callers outside the owner, including its terminal CLI. */
 export function workspaceRequest(socketPath, method, path, body, headers = {}) {
   return new Promise((resolve, reject) => {
     const outgoing = request({ socketPath, method, path, headers }, resolve);

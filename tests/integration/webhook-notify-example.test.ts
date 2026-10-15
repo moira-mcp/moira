@@ -132,7 +132,6 @@ describe("the installable webhook example", () => {
     await expect(
       client.deliverCommunicationChannel!({
         channelId: "webhook-notify.notifications",
-        timeoutMs: 5_000,
         message: { text: "generic notification" },
         settings: {
           "webhook-notify.enabled": true,

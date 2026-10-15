@@ -13,6 +13,7 @@ import {
   GitHubResourceRepository,
   LocalDeviceRepository,
   LocalDeviceService,
+  LocalDeviceError,
   type CodespaceConnectionService,
   type CodespaceGitHubConfigStatus,
   type LocalControllerClient,
@@ -90,7 +91,7 @@ function fixture() {
   let ownerOutcome: ControllerOperation["outcome"];
   let connectedGuest: WorkspaceBinding | null = null;
   const guestConnected = jest.fn(
-    (binding: WorkspaceBinding) =>
+    async (binding: WorkspaceBinding) =>
       connectedGuest !== null && JSON.stringify(binding) === JSON.stringify(connectedGuest),
   );
   const fetchImpl = jest.fn<typeof fetch>(async (url, init) => {
@@ -238,7 +239,9 @@ async function attachOwner(value: ReturnType<typeof fixture>) {
       Object.assign(req, { userId: "owner" });
       next();
     },
-    createLocalDeviceManagementRoutes(value.devices, "https://moira.example"),
+    createLocalDeviceManagementRoutes(value.devices, "https://moira.example", (_req, _res, next) =>
+      next(),
+    ),
   );
   const bridge: typeof fetch = async (url, init) => {
     const target = new URL(String(url));
@@ -273,6 +276,92 @@ async function attachOwner(value: ReturnType<typeof fixture>) {
   };
 }
 describe("GitHub cloud identity and fixed provider broker", () => {
+  test.each(["explicit", "single-registered"] as const)(
+    "%s controller admission survives a failed snapshot observer and retains its original owner receipt",
+    async (selection) => {
+      const value = fixture(),
+        requestId = "ws1-" + randomUUID(),
+        id = requestId.slice(4),
+        boundary = await attachOwner(value);
+      const observation = jest
+        .spyOn(value.devices, "snapshot")
+        .mockRejectedValue(
+          new LocalDeviceError("LOCAL_UNAVAILABLE", "Controlled snapshot observer failure"),
+        );
+      try {
+        await expect(
+          value.service.create(
+            "owner",
+            "201",
+            "main",
+            requestId,
+            selection === "explicit" ? { deviceId: value.deviceId } : {},
+          ),
+        ).rejects.toMatchObject({
+          code: "WORKSPACE_OUTCOME_UNCONFIRMED",
+          requestId,
+          deviceId: value.deviceId,
+          resourceId: id,
+        });
+        expect(value.identities.getOwned("owner", id)).toMatchObject({
+          deviceId: value.deviceId,
+          deviceGeneration: 1,
+          deviceConnectionId: value.deviceConnectionId,
+          retirement: "unknown",
+        });
+        expect(await boundary.owner.collectOperation(requestId)).toMatchObject({
+          requestId,
+          state: "completed",
+          outcome: { ok: false, error: { code: "WORKSPACE_OUTCOME_UNCONFIRMED" } },
+        });
+      } finally {
+        observation.mockRestore();
+        await boundary.close();
+        value.sqlite.close();
+      }
+    },
+  );
+
+  test("two registered controllers remain ambiguous when only one snapshot observer is available", async () => {
+    const value = fixture(),
+      requestId = "ws1-" + randomUUID(),
+      offlineId = randomUUID(),
+      boundary = await attachOwner(value);
+    value.sqlite
+      .prepare(
+        "INSERT INTO codespaceLocalDevice(id,userId,connectionId,label,generation,status,credentialDigest,createdAt,updatedAt) VALUES(?,'owner',?,'Offline controller',1,'active',?,1,1)",
+      )
+      .run(
+        offlineId,
+        value.deviceConnectionId,
+        createHash("sha256").update("c".repeat(43)).digest("hex"),
+      );
+    const snapshot = value.devices.snapshot.bind(value.devices);
+    const observation = jest
+      .spyOn(value.devices, "snapshot")
+      .mockImplementation((userId, deviceId) => {
+        if (deviceId === offlineId)
+          throw new LocalDeviceError("LOCAL_UNAVAILABLE", "Controlled offline observer");
+        return snapshot(userId, deviceId);
+      });
+    try {
+      await expect(value.service.create("owner", "201", "main", requestId)).rejects.toMatchObject({
+        code: "CODESPACE_PROVIDER_UNAVAILABLE",
+        message: "Select an explicit registered controller",
+      });
+      expect(value.identities.listOwned("owner")).toEqual([]);
+      expect(await boundary.owner.collectOperation(requestId)).toEqual({
+        requestId,
+        state: "absent",
+      });
+      expect(value.requests).toEqual([]);
+    } finally {
+      observation.mockRestore();
+      await boundary.close();
+      value.sqlite.close();
+    }
+  });
+
   test("actual HTTP402 payment refusal closes its owner receipt and billable witness without provisioning or retry", async () => {
     const value = fixture(),
       requestId = "ws1-" + randomUUID(),

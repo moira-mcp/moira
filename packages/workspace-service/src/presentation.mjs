@@ -1,7 +1,5 @@
 import { Buffer } from "node:buffer";
-import { URLSearchParams } from "node:url";
 import { TextDecoder } from "node:util";
-import { workspaceRequest, workspaceJson } from "./client.mjs";
 import { previewImageBytes } from "./image-preview.mjs";
 import { scopedCredentialFailureOutcome } from "../../shared/src/codespaces/scoped-credential-types.ts";
 import { WORKSPACE_REQUEST_ID_PATTERN } from "../../shared/src/codespaces/workspace-request-id.mjs";
@@ -36,14 +34,6 @@ function commandStatus(data) {
   );
 }
 
-function query(input) {
-  return new URLSearchParams(
-    Object.entries(input)
-      .filter(([, value]) => value !== undefined)
-      .map(([key, value]) => [key, String(value)]),
-  ).toString();
-}
-
 function expected(input) {
   return {
     exists: input.exists,
@@ -62,52 +52,33 @@ function nativeReference(file) {
   };
 }
 
-async function bytes(response, maximum) {
-  const chunks = [];
-  let size = 0;
-  try {
-    for await (const chunk of response) {
-      const value = Buffer.from(chunk);
-      size += value.length;
-      if (
-        response.statusCode >= 200 &&
-        response.statusCode < 300 &&
-        maximum !== undefined &&
-        size > maximum
-      )
+async function range(owner, input, maximum) {
+  const consume = async ({ body, total }) => {
+    const chunks = [];
+    let size = 0;
+    for await (const chunk of body) {
+      size += chunk.length;
+      if (maximum !== undefined && size > maximum)
         throw Object.assign(new Error("Observation bound exceeded"), {
           details: { error: { code: "CODESPACE_RESOURCE_INVALID" } },
         });
-      chunks.push(value);
+      chunks.push(chunk);
     }
-    const data = Buffer.concat(chunks, size);
-    if (response.statusCode < 200 || response.statusCode >= 300) {
-      let details;
-      try {
-        details = JSON.parse(data.toString("utf8"));
-      } catch {
-        /* No confirmed refusal without an owner receipt. */
-      }
-      throw Object.assign(new Error("Workspace byte stream refused"), { details });
-    }
-    return data;
-  } finally {
-    response.destroy();
-  }
+    return { value: Buffer.concat(chunks, size), total };
+  };
+  return input.path !== undefined
+    ? await owner.fileRange(input.path, input.offset ?? 0, input.length ?? null, consume)
+    : owner.outputRange(
+        input.requestId,
+        input.stream ?? "stdout",
+        input.offset ?? 0,
+        input.length ?? null,
+        consume,
+      );
 }
 
-async function range(socketPath, path, length) {
-  const response = await workspaceRequest(socketPath, "GET", path);
-  const value = await bytes(response, length);
-  return { value, total: Number(response.headers["x-moira-total-size"] ?? value.length) };
-}
-
-async function collect(socketPath, requestId, options = {}) {
-  const operation = await workspaceJson(
-    socketPath,
-    "GET",
-    `/v1/operations/${requestId}?${query({ waitMs: options.waitMs ?? 10_000 })}`,
-  );
+async function collect(owner, requestId, options = {}, signal) {
+  const operation = await owner.observe(requestId, options.waitMs ?? 10_000, signal);
   const status = commandStatus(operation);
   if (operation.error || operation.state === "absent" || operation.state === "unknown")
     return workspaceResult({ ...status, request_id: requestId });
@@ -119,11 +90,7 @@ async function collect(socketPath, requestId, options = {}) {
       output[stream] = "";
       continue;
     }
-    const result = await range(
-      socketPath,
-      `/v1/operations/${requestId}/output?${query({ stream, offset: 0, length })}`,
-      length,
-    );
+    const result = await range(owner, { requestId, stream, offset: 0, length }, length);
     output[stream] = result.value.toString("utf8");
     if (typeof total === "number" && total > result.value.length) {
       output[`${stream}_truncated`] = true;
@@ -134,7 +101,12 @@ async function collect(socketPath, requestId, options = {}) {
 }
 
 export function workspaceFailure(error, requestId) {
-  const candidate = error?.details?.error;
+  const candidate = error?.details?.error ?? {
+    code:
+      error?.publicCode ??
+      (error?.code === "ENOENT" ? "NOT_FOUND" : error?.fileReason ? "FILE_REJECTED" : undefined),
+    reason: error?.fileReason,
+  };
   const scopedOutcome = scopedCredentialFailureOutcome(candidate?.code);
   const trustedReply =
     !Number.isInteger(error?.httpStatus) || error.httpStatus < 500 || scopedOutcome !== null;
@@ -173,14 +145,16 @@ export function workspaceFailure(error, requestId) {
           }),
     ...(requestId ? { request_id: requestId } : {}),
     ...(scopedOutcome !== null &&
-    WORKSPACE_REQUEST_ID_PATTERN.test(error?.details?.security_request_id ?? "")
-      ? { security_request_id: error.details.security_request_id }
+    WORKSPACE_REQUEST_ID_PATTERN.test(
+      error?.details?.security_request_id ?? error?.securityRequestId ?? "",
+    )
+      ? { security_request_id: error?.details?.security_request_id ?? error.securityRequestId }
       : {}),
   });
 }
 
 /** Final agent-facing payload is produced at the same owner as execution/files and their journals. */
-export async function executeOwnerTool(socketPath, { action, request }) {
+export async function executeOwnerTool(owner, { action, request }, { signal } = {}) {
   const requestId = request.request_id ?? request.process_id;
   try {
     if (["pull_request_create", "pull_request_get", "pull_request_find"].includes(action)) {
@@ -198,7 +172,7 @@ export async function executeOwnerTool(socketPath, { action, request }) {
           : action === "pull_request_get"
             ? { number: request.pull_request_number }
             : { head: request.head, base: request.base };
-      const data = await workspaceJson(socketPath, "POST", "/v1/github/pull-requests", {
+      const data = await owner.pullRequestAction({
         action,
         ...(action === "pull_request_create" ? { requestId } : {}),
         ...(input === undefined ? {} : { input }),
@@ -218,11 +192,8 @@ export async function executeOwnerTool(socketPath, { action, request }) {
       });
     }
     if (action === "process_get" || action === "process_stop") {
-      const data = await workspaceJson(
-        socketPath,
-        action === "process_stop" ? "POST" : "GET",
-        `/v1/operations/${requestId}${action === "process_stop" ? "/cancel" : ""}`,
-      );
+      const data =
+        action === "process_stop" ? await owner.cancel(requestId) : await owner.inspect(requestId);
       return workspaceResult({
         ...commandStatus(data),
         process_id: requestId,
@@ -231,8 +202,8 @@ export async function executeOwnerTool(socketPath, { action, request }) {
     }
     if (action === "process_read") {
       const { value, total } = await range(
-        socketPath,
-        `/v1/operations/${requestId}/output?${query({ stream: request.stream, offset: request.offset, length: request.length })}`,
+        owner,
+        { requestId, stream: request.stream, offset: request.offset, length: request.length },
         request.length,
       );
       return workspaceResult({
@@ -245,7 +216,7 @@ export async function executeOwnerTool(socketPath, { action, request }) {
     }
     if (action === "exec" || action === "process_start") {
       if ("argv" in request || "script" in request || request.session_end) {
-        const accepted = await workspaceJson(socketPath, "POST", "/v1/exec", {
+        const accepted = await owner.execute({
           requestId,
           argv: request.argv,
           script: request.script,
@@ -270,28 +241,35 @@ export async function executeOwnerTool(socketPath, { action, request }) {
         if (accepted.error)
           return workspaceResult({ ...commandStatus(accepted), request_id: requestId });
       }
-      return await collect(socketPath, requestId, {
-        stdoutBytes: request.max_stdout_bytes,
-        stderrBytes: request.max_stderr_bytes,
-      });
+      return await collect(
+        owner,
+        requestId,
+        {
+          stdoutBytes: request.max_stdout_bytes,
+          stderrBytes: request.max_stderr_bytes,
+        },
+        signal,
+      );
     }
     if (action === "stat")
-      return workspaceResult(
-        await workspaceJson(socketPath, "POST", "/v1/files/stat", { path: request.path }),
-      );
+      return workspaceResult(await owner.file({ action: "stat", path: request.path }, signal));
     if (action === "search")
       return workspaceResult(
-        await workspaceJson(socketPath, "POST", "/v1/files/search", {
-          path: request.path,
-          query: request.query,
-          mode: request.mode,
-          maxMatches: request.max_matches,
-          maxBytes: request.max_bytes,
-        }),
+        await owner.file(
+          {
+            action: "search",
+            path: request.path,
+            query: request.query,
+            mode: request.mode,
+            maxMatches: request.max_matches,
+            maxBytes: request.max_bytes,
+          },
+          signal,
+        ),
       );
     if (action === "apply_patch")
       return workspaceResult(
-        await workspaceJson(socketPath, "POST", "/v1/files/patch", {
+        await owner.patch({
           requestId,
           files: request.files.map((file) => ({
             path: file.path,
@@ -302,7 +280,7 @@ export async function executeOwnerTool(socketPath, { action, request }) {
       );
     if (action === "upload")
       return workspaceResult(
-        await workspaceJson(socketPath, "POST", "/v1/files/native-upload", {
+        await owner.nativeUpload({
           requestId,
           path: request.path,
           expected: expected(request.expected),
@@ -310,21 +288,23 @@ export async function executeOwnerTool(socketPath, { action, request }) {
         }),
       );
     if (action === "write") {
-      const response = await workspaceRequest(
-        socketPath,
-        "PUT",
-        `/v1/files/write?${query({ path: request.path, requestId })}`,
-        Buffer.from(request.text),
-        { "x-moira-expected": JSON.stringify(expected(request.expected)) },
+      return workspaceResult(
+        await owner.write({
+          requestId,
+          path: request.path,
+          expected: expected(request.expected),
+          source: [Buffer.from(request.text)],
+        }),
       );
-      return workspaceResult(JSON.parse((await bytes(response)).toString("utf8")));
     }
     if (action === "read") {
-      const path =
+      const { value, total } = await range(
+        owner,
         "stream" in request
-          ? `/v1/operations/${requestId}/output?${query({ stream: request.stream, offset: request.offset, length: request.length })}`
-          : `/v1/files/read?${query({ path: request.path, offset: request.offset, length: request.length })}`;
-      const { value, total } = await range(socketPath, path, request.length);
+          ? { requestId, stream: request.stream, offset: request.offset, length: request.length }
+          : { path: request.path, offset: request.offset, length: request.length },
+        request.length,
+      );
       let text;
       try {
         text = new TextDecoder("utf8", { fatal: true }).decode(value);
@@ -339,15 +319,11 @@ export async function executeOwnerTool(socketPath, { action, request }) {
       return workspaceResult({ offset: request.offset, text, total_bytes: total });
     }
     if (action === "preview_image") {
-      const { value } = await range(
-        socketPath,
-        `/v1/files/read?${query({ path: request.path, offset: 0 })}`,
-        request.max_bytes,
-      );
+      const { value } = await range(owner, { path: request.path, offset: 0 }, request.max_bytes);
       return previewImageBytes(value);
     }
     if (action === "download") {
-      const file = await workspaceJson(socketPath, "POST", "/v1/files/publish", {
+      const file = await owner.publish({
         path: request.path,
         fileName: request.file_name,
         mimeType: request.mime_type,

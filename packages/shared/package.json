@@ -29,6 +29,7 @@
     "./codespace-resource-types": "./src/codespaces/resource-types.ts",
     "./execution-management": "./src/types/execution-management.ts",
     "./logging/logger": "./src/logging/logger.ts",
+    "./http/work-fetch": "./src/http/work-fetch.ts",
     "./config/env": "./src/config/env.ts",
     "./errors": "./src/errors/index.ts",
     "./validation/attachment-filename": "./src/validation/attachment-filename.ts",
@@ -41,7 +42,8 @@
     "nodemailer": "^10.0.15",
     "prom-client": "^15.1.3",
     "re2js": "^2.8.6",
-    "stream-json": "3.7.0"
+    "stream-json": "3.7.0",
+    "undici": "8.12.2"
   },
   "private": true,
   "devDependencies": {

@@ -46,19 +46,19 @@ function fixture(statusCode: number, code: string, transportFailure = false) {
 }
 
 describe("cloud file-owner receipt boundary", () => {
-  test("selection retains the verified pairing tuple and refuses a changed pairing observation", async () => {
+  test("selection pins a registered offline owner and refuses a changed pairing identity", async () => {
     const observed = {
       deviceId: resourceId,
       status: "active",
       deviceGeneration: 2,
       connectionId: "620b1509-24ea-48d4-a73e-063fae51e167",
-      owner: { state: "available" },
+      owner: { state: "unavailable" },
     };
     let current = { ...observed };
     const owner = new LiveCommunicationFileOwner({
       devices: () =>
         ({
-          listOwned: async () => ({ devices: [observed] }),
+          listRegistered: () => ({ devices: [observed] }),
           getDeviceIdentity: () => current,
         }) as never,
       controller: () => {
@@ -86,6 +86,48 @@ describe("cloud file-owner receipt boundary", () => {
     };
     await expect(owner.select("user", resourceId)).rejects.toMatchObject({
       code: "COMMUNICATION_OWNER_UNAVAILABLE",
+    });
+  });
+
+  test("implicit selection never substitutes an online owner for an ambiguous registered pairing", async () => {
+    const registered = [
+      {
+        deviceId: resourceId,
+        status: "active",
+        deviceGeneration: 2,
+        connectionId: "620b1509-24ea-48d4-a73e-063fae51e167",
+        owner: { state: "unavailable" },
+      },
+      {
+        deviceId: "620b1509-24ea-48d4-a73e-063fae51e169",
+        status: "active",
+        deviceGeneration: 1,
+        connectionId: "620b1509-24ea-48d4-a73e-063fae51e170",
+        owner: { state: "available" },
+      },
+    ];
+    const owner = new LiveCommunicationFileOwner({
+      devices: () =>
+        ({
+          listRegistered: () => ({ devices: registered }),
+          getDeviceIdentity: (_user: string, id: string) =>
+            registered.find((device) => device.deviceId === id),
+        }) as never,
+      controller: () => {
+        throw new Error("selection cannot dispatch");
+      },
+      workspace: () => {
+        throw new Error("selection cannot dispatch");
+      },
+      authorizePublication: () => "user",
+    });
+    await expect(owner.select("user")).rejects.toMatchObject({
+      code: "COMMUNICATION_OWNER_UNAVAILABLE",
+    });
+    expect(await owner.select("user", resourceId)).toMatchObject({
+      deviceId: resourceId,
+      deviceGeneration: 2,
+      connectionId: registered[0]!.connectionId,
     });
   });
 
@@ -117,7 +159,7 @@ describe("cloud file-owner receipt boundary", () => {
     const owner = new LiveCommunicationFileOwner({
       devices: () =>
         ({
-          listOwned: async () => ({ devices: [current] }),
+          listRegistered: () => ({ devices: [current] }),
           getDeviceIdentity: () => current,
         }) as never,
       controller: () => client,
@@ -184,5 +226,45 @@ describe("cloud file-owner receipt boundary", () => {
       outcome: { ok: false, error: { code: "COMMUNICATION_SCOPE_REFUSED" } },
     });
     expect(f.methods).toEqual(["GET"]);
+  });
+
+  test.each([
+    "CODESPACE_PROVIDER_UNAVAILABLE",
+    "CODESPACE_AUTHORIZATION_REQUIRED",
+    "CODESPACE_GENERATION_CONFLICT",
+    "CODESPACE_PROVIDER_DISABLED",
+    "CODESPACE_RESOURCE_INVALID",
+    "CODESPACE_NOT_FOUND",
+  ])("keeps current dispatch refusal %s without inventing the historical outcome", async (code) => {
+    const f = fixture(503, code);
+    const submitted = await f.owner.submit("user", {
+      action: "deliver",
+      requestId,
+      source: { type: "publication", referenceId },
+      kind: "document",
+      text: "",
+    });
+    expect(submitted).toMatchObject({
+      requestId,
+      state: "unconfirmed",
+      codespace_id: resourceId,
+      outcome: { ok: false, error: { code } },
+    });
+    expect(submitted).toHaveProperty(
+      "outcome.error.message",
+      expect.stringContaining("before dispatch"),
+    );
+    const original = await f.owner.collect("user", requestId, { resourceId });
+    expect(original).toMatchObject({
+      requestId,
+      state: "unconfirmed",
+      outcome: { ok: false, error: { code } },
+    });
+    expect(original).toHaveProperty(
+      "outcome.error.message",
+      expect.stringContaining("original outcome remains unconfirmed"),
+    );
+    expect(JSON.stringify([submitted, original])).not.toMatch(/secret|no delivery was admitted/);
+    expect(f.methods).toEqual(["POST", "GET"]);
   });
 });

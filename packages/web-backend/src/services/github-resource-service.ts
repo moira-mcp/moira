@@ -57,7 +57,9 @@ export class GitHubResourceService {
     private readonly policy: () => CodespaceResourcePolicy,
     private readonly configuration = getCodespaceGitHubConfig,
     private readonly baseUrl = getBaseUrl,
-    private readonly guestConnected: (binding: WorkspaceBinding) => boolean = () => false,
+    private readonly guestConnected: (
+      binding: WorkspaceBinding,
+    ) => boolean | Promise<boolean> = () => false,
   ) {}
   get db(): Database.Database {
     return this.identities.db;
@@ -132,26 +134,14 @@ export class GitHubResourceService {
       .devices.filter(
         (device) => device.status === "active" && (!deviceId || device.deviceId === deviceId),
       );
-    const live = (
-      await Promise.all(
-        candidates.map(async (device) => {
-          try {
-            await this.devices.snapshot(userId, device.deviceId);
-            return device;
-          } catch {
-            return null;
-          }
-        }),
-      )
-    ).filter((device) => device !== null);
-    if (live.length !== 1)
+    if (candidates.length !== 1)
       throw new CodespaceResourceError(
         "CODESPACE_PROVIDER_UNAVAILABLE",
-        live.length
-          ? "Select an explicit online controller"
-          : "The assigned controller is unavailable before admission",
+        candidates.length
+          ? "Select an explicit registered controller"
+          : "No active controller is registered for this owner",
       );
-    return this.devices.getDeviceIdentity(userId, live[0]!.deviceId);
+    return this.devices.getDeviceIdentity(userId, candidates[0]!.deviceId);
   }
   listRepositories(userId: string) {
     this.account(userId);
@@ -216,7 +206,7 @@ export class GitHubResourceService {
     ) {
       try {
         this.current(identity);
-        guestLive = this.guestConnected({
+        guestLive = await this.guestConnected({
           kind: "workspace",
           userId,
           resourceId: id,

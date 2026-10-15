@@ -56,7 +56,8 @@ export interface RunnerChannelCheckRequest {
   timeoutMs: number;
 }
 
-export interface RunnerChannelDeliverRequest extends RunnerChannelCheckRequest {
+export interface RunnerChannelDeliverRequest {
+  channelId: string;
   message: RunnerCommunicationMessage;
   settings?: Record<string, unknown>;
   secrets?: Record<string, string | null>;
@@ -70,7 +71,7 @@ export interface RunnerInvokeRequest {
   workflowId: string;
   config: Record<string, unknown>;
   input?: Record<string, unknown>;
-  timeoutMs: number;
+  timeoutMs?: number;
   /** Secret values Moira resolved for the aliases the manifest was granted. */
   secrets?: Record<string, string | null>;
   /** Internal child-host projection used by the runner's channel endpoints. */

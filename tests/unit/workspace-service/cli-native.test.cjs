@@ -37,6 +37,150 @@ const descriptor = {
   size_bytes: 3,
 };
 
+test("CLI action preserves session cwd, environment and scripts through the common owner contract", async () => {
+  const value = await service();
+  mkdirSync(join(value.root, "nested"));
+  const requestId = `ws1-${randomUUID()}`;
+  const started = cli(
+    value,
+    ["action", "-"],
+    JSON.stringify({
+      action: "exec",
+      request: {
+        request_id: requestId,
+        session: "cli-context",
+        session_start: true,
+        cwd: "nested",
+        env: { CLI_VALUE: "authored value" },
+        script: 'printf "%s|%s" "$CLI_VALUE" "$PWD"; export CLI_VALUE="retained value"',
+        timeout_seconds: 10,
+      },
+    }),
+  );
+  expect(started.status).toBe(0);
+  const [printed, payload] = started.stdout.trim().split("\n");
+  expect(printed).toBe(requestId);
+  expect(JSON.parse(payload).structuredContent).toMatchObject({
+    request_id: requestId,
+    state: "succeeded",
+    runtimeMs: 10_000,
+    stdout: `authored value|${join(value.root, "nested")}`,
+  });
+  const continuedId = `ws1-${randomUUID()}`;
+  const continued = cli(
+    value,
+    ["action", "-"],
+    JSON.stringify({
+      action: "exec",
+      request: {
+        request_id: continuedId,
+        session: "cli-context",
+        script: 'printf "%s|%s" "$CLI_VALUE" "$PWD"',
+      },
+    }),
+  );
+  expect(continued.status).toBe(0);
+  expect(JSON.parse(continued.stdout.trim().split("\n")[1]).structuredContent).toMatchObject({
+    request_id: continuedId,
+    state: "succeeded",
+    stdout: `retained value|${join(value.root, "nested")}`,
+  });
+});
+
+test("CLI action collects the original process and reads its requested range without repeating its effect", async () => {
+  const value = await service();
+  const requestId = `ws1-${randomUUID()}`;
+  const inputPath = join(value.directory, "action.json");
+  writeFileSync(
+    inputPath,
+    JSON.stringify({
+      action: "process_start",
+      request: {
+        request_id: requestId,
+        argv: [
+          process.execPath,
+          "-e",
+          "require('node:fs').appendFileSync('effect','once\\n');process.stdout.write('0123456789abcdef')",
+        ],
+      },
+    }),
+  );
+  const submitted = cli(value, ["action", inputPath]);
+  expect(submitted.status).toBe(0);
+  expect(submitted.stdout.split("\n")[0]).toBe(requestId);
+  const collect = () =>
+    cli(
+      value,
+      ["action", "-"],
+      JSON.stringify({ action: "exec", request: { request_id: requestId } }),
+    );
+  const collected = collect();
+  expect(collected.status).toBe(0);
+  const original = JSON.parse(collected.stdout.trim().split("\n")[1]);
+  expect(original.structuredContent).toMatchObject({
+    request_id: requestId,
+    state: "succeeded",
+    stdout: "0123456789abcdef",
+  });
+  expect(collect().stdout).toBe(collected.stdout);
+  const ranged = cli(
+    value,
+    ["action", "-"],
+    JSON.stringify({
+      action: "process_read",
+      request: { process_id: requestId, stream: "stdout", offset: 3, length: 5 },
+    }),
+  );
+  expect(ranged.status).toBe(0);
+  expect(JSON.parse(ranged.stdout.trim().split("\n")[1]).structuredContent).toEqual({
+    process_id: requestId,
+    stream: "stdout",
+    offset: 3,
+    total_bytes: 16,
+    text: "34567",
+  });
+  expect(readFileSync(join(value.root, "effect"), "utf8")).toBe("once\n");
+});
+
+test("CLI communication publishes exact bytes and collects its original receipt without a second publication", async () => {
+  const value = await service();
+  const requestId = `ws1-${randomUUID()}`;
+  const bytes = Buffer.from([0, 255, 42, 13, 10, 128]);
+  const input = JSON.stringify({
+    action: "publish",
+    requestId,
+    source: {
+      type: "inline",
+      data: bytes.toString("base64"),
+      fileName: "owner.bin",
+      mimeType: "application/octet-stream",
+    },
+  });
+  const submitted = cli(value, ["communication", "-"], input);
+  expect(submitted.status).toBe(0);
+  const [printed, payload] = submitted.stdout.trim().split("\n");
+  expect(printed).toBe(requestId);
+  const receipt = JSON.parse(payload);
+  expect(receipt).toMatchObject({
+    requestId,
+    state: "completed",
+    outcome: { ok: true, result: { file: { fileName: "owner.bin", size: bytes.length } } },
+  });
+  const collected = cli(value, ["status", requestId]);
+  expect(collected.status).toBe(0);
+  expect(JSON.parse(collected.stdout)).toEqual(receipt);
+  const repeated = cli(value, ["communication", "-"], input);
+  expect(repeated.status).toBe(0);
+  const [repeatedId, repeatedPayload] = repeated.stdout.trim().split("\n");
+  expect(repeatedId).toBe(requestId);
+  expect(JSON.parse(repeatedPayload)).toEqual(receipt);
+  expect(readdirSync(join(value.stateRoot, "publications", "objects"))).toHaveLength(1);
+  const token = receipt.outcome.result.file.referenceId.split("/").at(-1);
+  const downloaded = await call(value, "GET", `/v1/publications/${token}`);
+  expect(downloaded.status).toBe(200);
+  expect(downloaded.bytes).toEqual(bytes);
+});
+
 function scopedService(code, securityRequestId) {
   return service((fixture) => {
     const module = join(fixture.directory, "scoped-refusal.mjs");

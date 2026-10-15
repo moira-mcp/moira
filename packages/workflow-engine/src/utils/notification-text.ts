@@ -68,10 +68,10 @@ export interface NotificationParts {
   heading: string;
   body: string;
   /** Renders the plan within a character budget; returns no lines when nothing fits. */
-  planList: (budget: number) => string[];
+  planList: (budget?: number) => string[];
   waitingLine: string | null;
   /** The channel's text limit. */
-  limit: number;
+  limit?: number;
 }
 
 /**
@@ -84,7 +84,12 @@ export function composeNotification(parts: NotificationParts): string {
     sections.filter((section): section is string => Boolean(section)).join("\n\n");
   const fixed = [parts.heading, parts.waitingLine];
   let body = parts.body.trim();
-  const room = (text: string) => parts.limit - join([...fixed, text]).length;
+  if (parts.limit === undefined) {
+    const plan = parts.planList();
+    return join([parts.heading, body, plan.length ? plan.join("\n") : null, parts.waitingLine]);
+  }
+  const limit = parts.limit;
+  const room = (text: string) => limit - join([...fixed, text]).length;
   if (room(body) < 0) {
     const keep = Math.max(0, body.length + room(body) - 2);
     const cut = body.slice(0, keep);

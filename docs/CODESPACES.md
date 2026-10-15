@@ -24,9 +24,11 @@ paired controller; existing Local work follows its owner grants and finite lease
 Shared connection/resource services own tenant authorization, repository grants, billing reads
 and minimal resource routing identity. The paired controller owns GitHub and Local lifecycle,
 original receipts and live observations; Local policy and repository admission also remain there.
-`packages/workspace-service/` owns commands,
-sessions, input, output and guarded files inside each workspace. Its terminal CLI and
-remote clients reach the same private Unix HTTP service and durable local journal.
+`packages/workspace-service/` owns commands, sessions, input, output and guarded files
+inside each workspace. `createWorkspaceOwner()` provides their common operation API;
+tool presentation calls it directly. The Unix HTTP server adapts external callers and
+raw streams to that API, and the terminal CLI uses this private socket. Presentation
+does not send an HTTP request back to its own service.
 
 The backend workspace router authenticates scoped agent credentials and forwards raw
 HTTP streams over outbound HTTPS Upgrade connections. Its rendezvous state is in memory:
@@ -34,6 +36,14 @@ there is no cloud command queue or result store. `WorkspaceAuthRepository` store
 credential digests bound to user, resource, authorization/resource generations and measured
 guest life. Fixed provider bootstrap installs the common payload without giving project
 commands the original GitHub OAuth, refresh or device credentials.
+
+The backend workspace router owns the live CONTROL/DATA connections and dispatch decision.
+MCP and other server processes forward requests through its protected Unix socket. Actor and
+publication authorization checks current account, credential, registration, resource generations
+and enrolled guest life independently of connection availability. The router selects the current
+connection and rechecks authority after asynchronous DATA rendezvous before dispatch. Explicit
+GitHub status reads observe guest health through that same route; they do not establish a separate
+presence gate for subsequent operations.
 
 The paired controller uses fixed authorized GitHub REST actions and its packaged provisioner
 to install and start the common service. The cloud does not run SSH, bootstrap workers or a
@@ -107,7 +117,8 @@ set local resource defaults at initialization. `--storage-root` accepts an exist
 private, separately mounted bounded filesystem, not an ordinary directory. Preserve the image and
 ownership records. On macOS, manager startup restores an unmounted default image from the same
 state directory under the runner gate. It verifies the native image/mount binding, then repeats
-the volume's device ownership, capacity and free-space checks before work. A lost attach reply
+the volume's device ownership and approved capacity checks before work. Admission does not require
+a fixed free-space reserve. A lost attach reply
 is resolved from the observed binding rather than another attach. Custom storage mounts require
 manual mounting; a missing image or unsafe binding remains a refusal. Startup never creates a
 replacement image, resets storage or substitutes an unbounded directory.
@@ -115,6 +126,10 @@ replacement image, resets storage or substitutes an unbounded directory.
 `setup` initializes only an empty dedicated SDK profile. `doctor` checks storage, supported SDK,
 settings, global network policy and owned inventory under an enabled, unexpired lease. Its
 `liveVmIsolationVerified: false` result is explicit: it does not execute a microVM isolation test.
+Work and `doctor` check current authority from the start of SDK startup. Disable, lease expiry,
+caller cancellation and parent loss remain effective while startup or guest registration is pending.
+Installation, bootstrap and registration wait for actual completion rather than a general work
+deadline; fixed metadata observations and the bounded `doctor` diagnostic remain distinct.
 The SDK profile has its own HOME, namespace and encrypted credential store; it does not select
 the user's personal Docker profile or change personal Keychain default/search metadata.
 The bundled native helper prepares and unlocks only the owned store without interactive password
@@ -265,6 +280,13 @@ The Local computers editor controls enablement, finite lease, defaults, storage,
 repository grants and permissions and optional Git author identity.
 Saving creates a requested revision. Applied means the companion confirmed that
 revision; pending or rejected settings are distinct from the applied device policy.
+Browser settings admission checks the session and matching Origin before incremental JSON
+parsing, then revalidates the session and unchanged account before owner submission. Variable
+repository policy does not pass through the ordinary web API body ceiling. Native enrollment
+and bootstrap use a separate bounded parser for their closed identity metadata.
+Successful settings responses and original-request collection project the checked snapshot
+stored in that owner operation, with current cloud device registration revalidated. They do not
+perform another discovery or report a newer policy as the original operation's result.
 Offline contact does not imply application: saving is refused and the editor retains its draft.
 Reconnect and refresh before explicitly saving. The live controller can receive management
 changes while work is disabled or expired, without authorizing guest work. Offline revocation cannot promise
@@ -285,7 +307,9 @@ CPU, RAM and Docker disk
 defaults apply to new VMs; existing VMs restart with their admitted machine and
 repository identity. The storage setting bounds the computer's SDK backing filesystem, while
 Docker disk capacity belongs to each admitted VM. The default owned APFS image can grow or shrink while stopped
-after native bounds and free-space checks, preserving data. Storage and Docker byte
+after checking the native APFS minimum and whether existing data fits, preserving data. Sparse
+image creation and growth do not require the entire logical capacity plus a fixed host reserve
+to be free in advance; actual filesystem failures still refuse the operation. Storage and Docker byte
 values must be positive safe integers, storage must exceed Docker capacity, and native
 sector alignment and usable filesystem capacity remain authoritative. Unknown physical changes retain their journal
 and keep work fenced. Collecting the original settings receipt cannot renew a lease or
@@ -314,6 +338,9 @@ is null until the exact grant is confirmed by the owner. MCP calls live owner ad
 returns the usable ID as `repository_id`. Reuse the same request identity and payload after an
 unconfirmed outcome. An existing local grant is reused through discovery rather than added again. Requests
 racing unapplied owner settings are refused.
+Admission reuses its post-GitHub owner observation for the current decision and checks cloud
+registration again. Completion requires the original owner result and its actually applied grant;
+admission metadata alone cannot release a repository-creation reservation.
 
 `repository_create` takes `device_id`, a stable UUID `request_id`, `repository_name` and the personal
 `installation_id` from discovery. The name is 1–100 ASCII letters, digits, underscores, dots or
@@ -368,6 +395,12 @@ the child token in memory, checks finite authority and disposes it after the ups
 transport physically closes. Its same-UID trust boundary is not an OS sandbox against
 authorized project commands. Explicitly approved public read-only Local fetch can use
 anonymous access; failed scoped issuance never enables that branch.
+
+Each Local Git authorization phase returns one coherent owner observation: repository rights,
+stable route generation, owner lifecycle generation, applied settings revision and finite lease.
+The issuer and author-identity resolver reuse that observation within the phase. They reauthorize
+after asynchronous GitHub grant refresh and credential issuance; an earlier observation cannot
+authorize use after those rights change.
 
 Guest Git identity is repository-local: use owner-configured name/email or the
 verified GitHub login and numeric-account noreply address. Host Git configuration
@@ -469,8 +502,11 @@ retirement witness. It is not a cloud lifecycle journal or desired-state cache. 
 retains the create marker, requested ref, native provisioning custody, measured guest root/life,
 lifecycle generation and pending original request IDs.
 
-Create requires a caller-selected ws1 request ID and an explicit live paired controller, or the
-sole eligible one. The controller admits the original operation before invoking fixed provider
+Create requires a caller-selected ws1 request ID and an explicit active registered controller, or the
+sole active registered one. Selection does not probe controller snapshots. If several controllers
+are registered, choose one even when only one is reachable; the gateway never substitutes another
+owner. The actual route reports whether the selected controller can receive the request.
+The controller admits the original operation before invoking fixed provider
 actions. Cloud rechecks account, App grant, numeric repository, personal payer and assignment at
 those boundaries; parent authorization never leaves cloud. The controller receives narrowly scoped
 provisioning authority, installs the packaged service, measures repository/root/release and enrolls
@@ -584,10 +620,20 @@ Historical bare UUIDs remain archival and are never translated, imported or disp
 After reply loss inspect the original identity without resubmitting the command.
 Observer/service reconnect never authorizes launch replay.
 
+The owner admission record binds the original request to its operation. Collection
+reads the authoritative result for that operation: command execution uses the engine's
+physical launch/result evidence, while communication uses its original delivery receipt.
+Neither an observer failure nor collection creates a second logical outcome.
+
 Exec accepts argv, or a script in a named session. Sessions preserve working directory
 and exported variables; opening/ending is explicit. Session context publication serializes
 within that session, while distinct sessions/stateless commands remain independent.
 `stdin_text` is inline text; `stdin_file` streams native attachment input before launch.
+Native descriptor identity and byte validation are shared with upload and communication;
+the transient signed URL is not part of durable input identity. Repository authority is
+checked before source acquisition. Preparation can finish before the final locked
+session/repository gate rejects execution, so prepared input does not prove a command
+started. Collect the original no-start or uncertain outcome without fetching or launching again.
 
 Admission may return `starting`. Inspection distinguishes actual running, terminal
 receipts, proved `not_started` and `unknown`. Missing witnesses cannot manufacture
@@ -646,7 +692,7 @@ in-context fallback retains its 256 KiB UTF-8 budget and refuses instead of trun
 
 The workspace or paired controller owns immutable attachment publication and communication receipts. `owner-file://workspace/...` references retain their original guest; `owner-file://controller/...` references retain their original controller. Cloud publication routes authenticate current owner authority and forward the private immutable source. The owner must be reachable; expiry and revocation remain effective. Ordinary owner links are repeatable while authorized, unlike the separately single-use progress-image grant.
 
-The `communication` action `deliver-file` explicitly delivers a publication using `request_id`, `referenceId`, `message`, `kind` and optional `channelId`. It can instead accept a native `file` descriptor with the selected `device_id`, or use the sole eligible live paired controller. Choose and retain the original ws1 ID before submission. Collect with action `operation`, the original `request_id` and its assigned `device_id` or `codespace_id`; collection never downloads again or resends. Missing/ambiguous/offline owner refuses before admission, with no cloud queue or fallback to a different source owner. Text communication remains independent of owner availability.
+The `communication` action `deliver-file` explicitly delivers a publication using `request_id`, `referenceId`, `message`, `kind` and optional `channelId`. It can instead accept a native `file` descriptor with the selected `device_id`, or use the sole active registered paired controller. Selection pins that identity without a health/snapshot probe; multiple registered controllers require an explicit choice. Choose and retain the original ws1 ID before submission. Collect with action `operation`, the original `request_id` and its assigned `device_id` or `codespace_id`; collection never downloads again or resends. An unavailable route refuses the current dispatch, with no cloud queue or fallback to a different source owner. It does not prove that a previous submission under the original ID never ran. Text communication remains independent of owner availability.
 
 ## MCP tools
 
@@ -660,6 +706,14 @@ The typed registry owns fields, defaults, native metadata and examples; use the
 `files_setup`, `transfer_status` and scoped file-capability CLI are not actions.
 The installed `moira-workspace` CLI uses the same local owner independently of cloud
 connectivity for exec/status/cancel/output/stat/read/download/write/upload/search/patch.
+`moira-workspace action INPUT_JSON_FILE|-` forwards the complete `{action,request}`
+tool operation to that owner, including session, cwd, environment, explicit timeout,
+native descriptors and observation windows. Supply the original `request_id` or
+`process_id` in the JSON. `moira-workspace communication INPUT_JSON_FILE|-` submits
+the owner communication JSON with its camelCase `requestId`; `status REQUEST_ID`
+collects that same receipt. Put signed native descriptors in the input file or stdin,
+not command arguments. The command shortcuts generate and print an ID when their
+optional `--request-id` is omitted; the JSON adapters preserve the supplied identity.
 Known auth/provider/pre-dispatch failures remain bounded refusals. Unknown dispatched
 outcomes require collection of the original identity, not a fresh ID to bypass uncertainty.
 
@@ -670,8 +724,9 @@ The common management card retains provider/resource identity, live owner genera
 original IDs and nullable machine observation. Local cards group by stable computer UUID rather
 than label. A neutral controller can provision GitHub without fabricated Local VM settings.
 
-GitHub create selects an approved repository/ref and a live controller. Several eligible
-controllers require a choice; without one, creation is unavailable before admission. Explicit
+GitHub create selects an approved repository/ref and an active registered controller. Several
+registered controllers require a choice, irrespective of their observed availability; without one,
+creation is unavailable before admission. Explicit
 adopt accepts a provider name or managed resource and preserves its disk. Lifecycle actions use
 an original ws1 identity and observed owner generation. **Check state again** collects retained
 originals or refreshes when none is pending; newer metadata alone cannot settle an uncertain effect.

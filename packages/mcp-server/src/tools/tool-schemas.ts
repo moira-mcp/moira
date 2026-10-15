@@ -660,7 +660,7 @@ export const codespaceNativeFileSchema = z
 export const communicationSchema = z
   .object({
     action: z.enum(["send", "deliver-file", "operation"]),
-    message: z.string().max(4096).optional(),
+    message: z.string().optional(),
     format: z.enum(["plain", "markdown", "html"]).optional(),
     silent: z.boolean().optional(),
     kind: z.enum(["image", "document"]).optional(),

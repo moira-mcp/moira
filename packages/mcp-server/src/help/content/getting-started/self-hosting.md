@@ -585,10 +585,17 @@ reclaims a stale runner marker only under the system lock and after proving both
 owners absent. Saved policy, VM records and unknown operations are retained without replay.
 Live, unknown or malformed ownership stays refused; do not delete its marker manually.
 On macOS, startup also remounts the existing default disk image from that same state directory
-when needed. It verifies the native image/mount binding and the volume's ownership, capacity and
-free space before work; a lost attach reply is checked against the observed binding. Custom
+when needed. It verifies the native image/mount binding and the volume's ownership and approved
+capacity before work, without a fixed free-space reserve; a lost attach reply is checked against the observed binding. Custom
 storage mounts must be mounted manually. Missing images or conflicting bindings remain refused;
 startup does not create a replacement disk or reset its data.
+Sparse image growth does not require full logical preallocation or an extra host reserve.
+Shrinking still requires the native APFS minimum and enough capacity for existing data;
+uncertain physical changes retain their original resize journal.
+Work and `doctor` enforce current authority from SDK startup onward. Installation, bootstrap and
+guest registration wait for actual completion; disable, lease expiry, cancellation and parent loss
+still stop owned work. Fixed metadata checks and the bounded `doctor` diagnostic are observations,
+not proof that a pending operation has settled.
 The local daemon separates server contact from VM lifetime. Network/5xx failures reconnect;
 remote owner state is unavailable until connection succeeds, without stopping already-admitted
 work. Remote mutations are refused rather than queued. An addressed resource refusal stays with
@@ -671,7 +678,9 @@ tool or agent. When setup is
 missing or a credential must be renewed, the user returns to this website.
 
 GitHub Codespaces requires `CODESPACE_CODESPACES_ENABLED=true`, current App grants and an
-available paired controller. Choose `device_id` if more than one controller is available.
+active registered paired controller. Choose `device_id` if more than one controller is registered,
+even when only one is reachable. Selection does not probe each controller; the normal route
+reports whether the chosen owner can receive the request and never switches to another owner.
 The controller owns original-operation journals and fixed provisioning through its packaged gh,
 trusted SSH and verified Linux payload; cloud Moira retains minimal resource/account authority
 and fixed provider API calls. No cloud connector Compose service is required.
@@ -838,7 +847,9 @@ you want to rejoin the normal release channel.
 
 Run a paired controller for native attachment capture and workflow progress rendering.
 Owning these communication files requires neither a Local VM nor an enabled Local SDK work
-lease. Select `device_id` when several controllers are live. Preserve the owner's private
+lease. Select `device_id` when several active controllers are registered, even if only one is
+reachable. The selected identity stays fixed; an unavailable route does not authorize another
+owner or prove that a previous submission never ran. Preserve the owner's private
 immutable files and delivery journal when updating its matched executable release.
 Workspace publications remain with their workspace owner.
 Materialize archives use the paired controller's immutable publication and original receipt;

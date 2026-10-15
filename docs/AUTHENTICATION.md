@@ -422,7 +422,11 @@ store and is not sent as enrollment policy or forwarded into guest environment.
 Owner web control requires a separate, explicit local `web-control --confirm`
 approval pinned to the server, user, device and connection, with finite ceilings.
 `PUT /api/integrations/local/devices/:id/settings` accepts only an admitted browser
-session with the configured Origin and current device generation/revision. Device
+session with the configured Origin and current device generation/revision. Browser admission
+precedes incremental settings JSON parsing; the same session/account middleware runs again
+after the body is read, and a changed user is refused before owner submission. These policy
+controls bypass the ordinary web API body parser. Closed native enrollment/bootstrap metadata
+retains its separate 2 MiB parser; that bound does not limit repository policy or file bytes. Device
 Bearer credentials, API tokens and MCP calls cannot write those settings. Operational
 policy, approved ceilings and settings revisions belong to the always-on controller,
 not cloud enrollment or heartbeat state. A settings write carries its caller-selected
@@ -452,7 +456,10 @@ the exact approved repository and action. The trusted Local host or GitHub guest
 broker receives only that child and performs fixed Git/PR requests directly over
 verified HTTPS. The issuer checks current account, parent generation, App grant
 and device/resource authority; Local uses its stable route-authority generation,
-while the separately observed lifecycle generation guards start/stop/delete.
+while the separately observed lifecycle generation guards start/stop/delete. Each Local phase
+returns one coherent owner observation of the repository grant, route/lifecycle generations,
+applied settings revision and finite lease. Issuer and identity consumers reuse it within that
+phase; asynchronous grant refresh and issuance still require fresh authorization.
 The original OAuth/refresh credential and Local device credential never reach
 project commands. Derived tokens remain broker-private memory and must not enter
 project files, argv, environment, logs or agent output. This is the existing
@@ -572,9 +579,15 @@ and preserves the predecessor's catalog state. Authentication failures and block
 otherwise denied accounts retain their normal 401/403 responses and cannot use initialize to bypass
 admission.
 
-MCP communication uses the caller's ordinary OAuth or persistent MCP credential and catalog admission. Its binary effect is assigned to the original workspace owner or a live paired controller. Private `/api/communication/owner` endpoints require that actor's existing device or workspace credential, not the caller's MCP token. Controller scope binds user/device/generation/connection; workspace scope binds resource/resource-generation/authorization-generation/measured-life. The current account and actor are authenticated before reading framed control, then the complete scope and current configured channel are authorized. A channel descriptor grants no caller-selected recipient, endpoint, header or secret. The cloud injects provider credentials only into its fixed authorized request; binary extension handlers and project commands receive none.
+MCP authenticates the credential and account before incrementally parsing its JSON body and
+revalidates both after that asynchronous read, before SDK dispatch. The
+pre-parsed value reaches the SDK's JSON-RPC, batch, media-type and protocol validation. Invalid
+JSON returns a controlled 400. The HTTP gateway rate limiter counts requests per client IP,
+including authenticated requests; it is separate from owner operation lifetime or file size.
 
-Public progress-image grants remain run-bound authorization, distinct from both MCP identity and private owner credentials. Minting requires a selected or unique live owner; absence returns `COMMUNICATION_OWNER_UNAVAILABLE`, not an authentication failure or a claimed image. Existing task/context/step/version binding and response-finish consumption remain enforced.
+MCP communication uses the caller's ordinary OAuth or persistent MCP credential and catalog admission. Its binary effect is assigned to the original workspace owner or an active registered paired controller. Private `/api/communication/owner` endpoints require that actor's existing device or workspace credential, not the caller's MCP token. Controller scope binds user/device/generation/connection; workspace scope binds resource/resource-generation/authorization-generation/measured-life. The current account and actor are authenticated before reading preparation JSON or framed control, then the complete scope and current configured channel are authorized and rechecked after configuration resolution. These credential and scope decisions do not consult a presence API; actual dispatch uses the backend router's current connection. A channel descriptor grants no caller-selected recipient, endpoint, header or secret. The cloud injects provider credentials only into its fixed authorized request; binary extension handlers and project commands receive none.
+
+Public progress-image grants remain run-bound authorization, distinct from both MCP identity and private owner credentials. Minting requires a selected or unique active registered controller; missing or ambiguous selection returns `COMMUNICATION_OWNER_UNAVAILABLE`. Rendering and publication require that owner's actual route. A route failure does not prove that an original request was never admitted. Existing task/context/step/version binding and response-finish consumption remain enforced.
 
 **Client setup instructions:**
 

@@ -158,7 +158,9 @@ describe("Local registration, revocation and owner routing", () => {
     });
     app.use(
       "/api/integrations/local",
-      createLocalDeviceManagementRoutes(service, "https://moira.example"),
+      createLocalDeviceManagementRoutes(service, "https://moira.example", (_req, _res, next) =>
+        next(),
+      ),
     );
     app.use("/api/local-devices", createLocalDeviceRoutes(service, "https://moira.example"));
     const denied = await httpRequest(app)

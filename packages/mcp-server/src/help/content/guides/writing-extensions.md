@@ -176,11 +176,11 @@ user. The handler receives none of that user's identity, workflow, execution, re
 or log data.
 
 An extension channel participates in the fan-out of the built-in `user-notification` node and of
-the «waiting for you» notifications. A missing,
-disabled, invalid, or payload-incompatible channel is skipped. A runner or handler health failure is
-a failed channel with a bounded, sanitized reason; with no successful sibling the aggregate is
-`all_failed`, and with a successful sibling it is `partial`. Neither result exposes endpoint
-responses or credentials.
+the «waiting for you» notifications. A missing, disabled, invalid, or payload-incompatible channel
+is skipped. Ordinary delivery resolves current settings and sends to the handler without a
+separate runner health check. A transport or handler failure is a failed channel with a bounded,
+sanitized reason; with no successful sibling the aggregate is `all_failed`, and with a successful
+sibling it is `partial`. Neither result exposes endpoint responses or credentials.
 
 Each installed channel appears as a card under Settings > Notifications. Moira uses the
 declaration's title, description, capabilities, `enabledSetting`, and exact setting aliases; the
@@ -188,8 +188,7 @@ existing settings schema editor renders and saves those values. The card reports
 incomplete, or unavailable state and sends a fixed test through the common service using stored
 current-user settings. The browser sends only the channel ID and never resubmits secrets or
 destinations. Removing a bundle removes its card and definitions but retains saved per-user values
-for reinstall. A registered channel that is disabled or fails its current health check remains
-visible. Trusted-delivery
+for reinstall. A disabled or incompletely configured registered channel remains visible. Trusted-delivery
 declaration and administrator approval are shown as read-only state on the user card.
 
 ## Handler
@@ -269,6 +268,13 @@ The ordinary text handler receives a portable message, schema-checked nonsecret 
 an abort signal and only `fetch` and `secret`. It has no logging or artifact service.
 If `defineChannel` repeats `configurationSchema`, it must exactly match the manifest.
 
+Ordinary text delivery has no shared message-length, request-rate, concurrency or work-deadline
+budget. The handler receives the full text and must respect its provider's payload rules. Caller
+cancellation still aborts the call. The authored deadline of a workflow extension node is a
+separate contract; it does not impose a deadline on channel delivery. The ordinary runner delivery
+request has no default response-header or body-idle work clock; connection establishment and
+explicit metadata checks remain separate.
+
 ### Streaming binary delivery
 
 A channel supporting images or documents additionally declares `binaryTransport` and exports
@@ -335,6 +341,9 @@ The original owner delivery ID binds the installed bundle and channel configurat
 Changes refuse stale delivery rather than redirecting it. After a vendor stage may have
 started, uncertain results remain uncertain; collection never repeats a stage. An observer
 disconnect is not evidence that no delivery occurred.
+
+The incoming HTTP proxy can close an observer after an idle interval between I/O events. Collect the original
+owner delivery ID after response loss; an idle disconnect does not authorize another send.
 
 ## Trusted delivery approval
 

@@ -2,6 +2,8 @@ import { describe, expect, test } from "@jest/globals";
 import { Readable } from "node:stream";
 import { EventEmitter } from "node:events";
 import type { Request, Response } from "express";
+import express from "express";
+import request from "supertest";
 import { createCommunicationOwnerRoutes } from "../../../packages/web-backend/src/routes/communication-owner.js";
 import { CommunicationOwnerTransport } from "../../../packages/web-backend/src/services/communication-owner-transport.js";
 import {
@@ -25,6 +27,7 @@ const input: CommunicationOwnerPrepare = {
   text: "Report",
   file: { fileName: "report.bin", mimeType: "application/octet-stream", size: 3 },
 };
+const routeBearer = "o".repeat(43);
 function fixture(fetcher: typeof fetch) {
   const settings = new Map<string, unknown>([
     ["telegram.bot_token", "123:trusted-secret"],
@@ -33,7 +36,8 @@ function fixture(fetcher: typeof fetch) {
   let active = true;
   const service = new CommunicationOwnerTransport({
     authenticate(bearer) {
-      if (!active || bearer !== "owner-bearer") throw new Error("refused");
+      if (!active || (bearer !== "owner-bearer" && bearer !== routeBearer))
+        throw new Error("refused");
     },
     authorize(_bearer, actual) {
       if (!active || actual.kind !== "controller" || actual.deviceId !== scope.deviceId)
@@ -68,66 +72,111 @@ async function sendInput(
 }
 
 describe("fixed owner communication transport", () => {
-  test("a shaped forged bearer is refused by the actual route before opening a framed body", async () => {
-    let reads = 0,
-      vendorCalls = 0;
-    const f = fixture((async () => {
-      vendorCalls++;
-      return Response.json({ ok: true });
-    }) as typeof fetch);
-    const incoming = Object.assign(
-      new Readable({
-        read() {
-          reads++;
-          this.push(Buffer.alloc(4));
-          this.push(null);
-        },
-      }),
-      {
-        socket: Object.assign(new EventEmitter(), { destroyed: false }),
-        method: "POST",
-        url: "/send",
-        headers: { authorization: `Bearer ${"f".repeat(43)}` },
-        get(name: string) {
-          return this.headers[name.toLowerCase() as "authorization"];
+  test.each([
+    { path: "/send", expected: { status: "refused", reason: "owner_unauthorized" } },
+    {
+      path: "/prepare",
+      expected: {
+        error: {
+          code: "COMMUNICATION_AUTHORITY_REFUSED",
+          message: "Channel or owner authority refused before delivery.",
         },
       },
-    );
-    let statusCode = 200;
-    const headers: Record<string, unknown> = {};
-    const result = new Promise<unknown>((resolve, reject) => {
-      const response = Object.assign(new EventEmitter(), {
-        destroyed: false,
-        headersSent: false,
-        writableEnded: false,
-        setHeader(name: string, value: unknown) {
-          headers[name.toLowerCase()] = value;
-          return this;
+    },
+  ])(
+    "a shaped forged bearer is refused at $path before opening its body",
+    async ({ path, expected }) => {
+      let reads = 0,
+        vendorCalls = 0;
+      const f = fixture((async () => {
+        vendorCalls++;
+        return Response.json({ ok: true });
+      }) as typeof fetch);
+      const incoming = Object.assign(
+        new Readable({
+          read() {
+            reads++;
+            this.push(Buffer.alloc(4));
+            this.push(null);
+          },
+        }),
+        {
+          socket: Object.assign(new EventEmitter(), { destroyed: false }),
+          method: "POST",
+          url: path,
+          headers: { authorization: `Bearer ${"f".repeat(43)}` },
+          get(name: string) {
+            return this.headers[name.toLowerCase() as "authorization"];
+          },
         },
-        status(value: number) {
-          statusCode = value;
-          return this;
-        },
-        json(value: unknown) {
-          this.writableEnded = true;
-          resolve(value);
-          return this;
-        },
-      });
-      createCommunicationOwnerRoutes(f.service)(
-        incoming as unknown as Request,
-        response as unknown as Response,
-        reject,
       );
-    });
-    expect(await result).toEqual({ status: "refused", reason: "owner_unauthorized" });
-    expect(statusCode).toBe(403);
-    expect(headers.connection).toBe("close");
-    expect(reads).toBe(0);
-    expect(vendorCalls).toBe(0);
-    incoming.socket.destroyed = true;
-    incoming.socket.emit("close");
-    expect(incoming.destroyed).toBe(true);
+      let statusCode = 200;
+      const headers: Record<string, unknown> = {};
+      const result = new Promise<unknown>((resolve, reject) => {
+        const response = Object.assign(new EventEmitter(), {
+          destroyed: false,
+          headersSent: false,
+          writableEnded: false,
+          setHeader(name: string, value: unknown) {
+            headers[name.toLowerCase()] = value;
+            return this;
+          },
+          status(value: number) {
+            statusCode = value;
+            return this;
+          },
+          json(value: unknown) {
+            this.writableEnded = true;
+            resolve(value);
+            return this;
+          },
+        });
+        createCommunicationOwnerRoutes(f.service)(
+          incoming as unknown as Request,
+          response as unknown as Response,
+          reject,
+        );
+      });
+      expect(await result).toEqual(expected);
+      expect(statusCode).toBe(403);
+      expect(headers.connection).toBe("close");
+      expect(reads).toBe(0);
+      expect(vendorCalls).toBe(0);
+      incoming.socket.destroyed = true;
+      incoming.socket.emit("close");
+      expect(incoming.destroyed).toBe(true);
+    },
+  );
+
+  test("authenticated preparation accepts large controls, rejects invalid JSON, and rechecks revoked authority", async () => {
+    const f = fixture((async () => {
+      throw new Error("Preparation cannot dispatch");
+    }) as typeof fetch);
+    const app = express();
+    app.use(createCommunicationOwnerRoutes(f.service));
+    const body = { ...input, file: { ...input.file, fileName: `${"中".repeat(40_000)}.bin` } };
+    const prepared = await request(app)
+      .post("/prepare")
+      .set("Authorization", `Bearer ${routeBearer}`)
+      .send(body);
+    expect(prepared.status).toBe(200);
+    expect(prepared.body.channels).toEqual([
+      expect.objectContaining({ channelId: "telegram", provider: "telegram" }),
+    ]);
+    const malformed = await request(app)
+      .post("/prepare")
+      .set("Authorization", `Bearer ${routeBearer}`)
+      .set("Content-Type", "application/json")
+      .send('{"scope":');
+    expect(malformed.status).toBe(400);
+    expect(malformed.body.error.code).toBe("COMMUNICATION_REQUEST_INVALID");
+    f.revoke();
+    const revoked = await request(app)
+      .post("/prepare")
+      .set("Authorization", `Bearer ${routeBearer}`)
+      .send(body);
+    expect(revoked.status).toBe(403);
+    expect(revoked.body.error.code).toBe("COMMUNICATION_AUTHORITY_REFUSED");
   });
 
   test("streams the exact opaque file chunk while only the cloud chooses the secret and recipient framing", async () => {

@@ -12,6 +12,12 @@ ordinary Express request admission.
 - Auth endpoints (`/api/auth/*`): 1000 requests/minute
 - MCP endpoint (`/mcp`): 1000 requests/minute
 
+These gateway budgets count requests from the same IP, including authenticated callers; they
+are separate from owner-operation lifetime and payload rules. MCP authenticates the caller before
+the shared incremental JSON reader consumes the body and rechecks current credential/account
+authority after that asynchronous read. The SDK validates the resulting parsed body,
+including protocol shape, batching and media type; no generic MCP JSON-body size ceiling applies.
+
 Workspace CONTROL frames contain bounded metadata; DATA streams are raw HTTP with
 backpressure. Authentication/expiry checks protect live streams without imposing a
 binary-byte or command-duration quota. See [Workspace streaming transport](#workspace-streaming-transport).
@@ -497,7 +503,7 @@ Stale grants are not successfully consumed; request a fresh grant, including whe
 the independent identity binding. Current identity is checked at atomic reservation and after
 asynchronous rendering.
 
-`POST /api/executions/:id/progress-image-token` accepts optional `deviceId`; MCP `session` action `progress-image-token` accepts `device_id`. Minting selects that live paired controller, or the sole eligible controller. No available or unambiguous owner returns operational `COMMUNICATION_OWNER_UNAVAILABLE` (HTTP 503; MCP error result with that code), rather than a PNG or a usable image grant. Reading progress as structured text does not require a file owner.
+`POST /api/executions/:id/progress-image-token` accepts optional `deviceId`; MCP `session` action `progress-image-token` accepts `device_id`. Minting resolves that active registered paired controller, or the sole eligible registered controller. Multiple candidates require explicit selection; a live candidate does not replace the selected owner. The router decides actual availability at dispatch without a separate health or snapshot gate. Missing, ambiguous or unreachable owner returns operational `COMMUNICATION_OWNER_UNAVAILABLE` (HTTP 503; MCP error result with that code), rather than a PNG or a usable image grant. Reading progress as structured text does not require a file owner.
 
 The selected owner renders the authorized immutable map descriptor with the packaged renderer. The public PNG route streams its owner publication. Existing execution owner, version, step/context/task identity and option guards remain mandatory at redemption and after asynchronous owner work. Successful response completion consumes the progress-image grant once; failed delivery releases its reservation. This single-use progress grant is distinct from the repeatable immutable owner publication underneath it.
 
@@ -695,8 +701,11 @@ Response:
 }
 ```
 
-The aggregate distinguishes delivered, no configured channel and failed/rate-limited/unavailable
-delivery without returning secrets or destinations. An unknown or removed channel returns 404.
+The aggregate status is `delivered`, `partial`, `no_configured_channels` or `all_failed`;
+individual channels report `delivered`, `not_configured`, `unsupported` or `failed` with a sanitized
+reason. Real provider refusals remain failures. There is no shared text-size, per-user rate,
+concurrency or delivery-deadline budget. Ordinary extension delivery resolves configuration and
+sends without a runner-health preflight. An unknown or removed channel returns 404.
 
 Authentication: Required
 
@@ -1836,10 +1845,10 @@ authority returns `"unavailable"`. No cloud resource-limit or lifecycle-queue vi
 `POST /api/integrations/github/codespaces` accepts
 `{repository_id,ref,request_id,device_id?,devcontainer_path?}`. All mutations require
 a caller-selected `ws1-<lowercase UUID>` before submission. GitHub selects an explicit
-live paired controller or the sole eligible one; multiple choices require selection.
+active registered paired controller or the sole eligible registered one; multiple choices require selection.
 The optional devcontainer path selects repository configuration, not commands or a host.
 Local repository targets already identify their device. Creation requires current
-account/repository authority and an available controller; Local additionally checks
+account/repository authority and a controller reachable at actual dispatch; Local additionally checks
 owner-approved repository rights and finite work lease. Offline work is never queued.
 
 GitHub creation verifies personal billing; an organization payer is rejected with
@@ -1942,7 +1951,9 @@ differs from an unconfirmed post-dispatch outcome; collect the original identity
 
 Commands have no implicit Moira runtime deadline. Explicit timeouts, reply windows,
 filesystem safeguards and provider/owner lifetimes remain distinct. Established raw
-DATA streams have no inherited request-body timeout. Native attachment streaming and
+DATA streams have no inherited request-body timeout. An ingress idle-between-I/O timeout can
+still close an observer; this does not settle accepted owner work or authorize replay. Collect
+the original request identity after losing its response. Native attachment streaming and
 private download publication retain their separate contracts below.
 
 ## Materialize Delivery API
@@ -1994,7 +2005,7 @@ authorization layered over an owner publication.
 
 ## Communication Owner API
 
-MCP `communication` authenticates the user through the ordinary MCP boundary. `send` delivers text without a file owner. `deliver-file` requires a caller-selected original `request_id` in `ws1-<lowercase UUID>` form and exactly one native `file` descriptor or immutable `referenceId`. A publication remains with the workspace or controller named by its `owner-file://` reference. Native and other nonworkspace sources use the explicit `device_id`, or the sole eligible live paired controller. An unavailable or ambiguous controller refuses before admission; the cloud does not queue delivery.
+MCP `communication` authenticates the user through the ordinary MCP boundary. `send` delivers text without a file owner. `deliver-file` requires a caller-selected original `request_id` in `ws1-<lowercase UUID>` form and exactly one native `file` descriptor or immutable `referenceId`. A publication remains with the workspace or controller named by its `owner-file://` reference. Native and other nonworkspace sources use the explicit `device_id`, or the sole eligible active registered paired controller. Selection resolves identity, not availability; the router makes that decision at dispatch without a separate health or snapshot request. Multiple candidates require explicit selection, with no fallback to a different live owner. A refusal of the current dispatch or receipt observation does not prove that the original request was never admitted; collect using its original identity. The cloud does not queue delivery.
 
 Collect with `communication({action:"operation",request_id,device_id})` or the original `codespace_id`, without source or message fields. Retain the assigned owner identity even after a lost reply. The owner returns its original `absent`, `accepted`, `completed` or `unconfirmed` receipt, immutable outcome and channel stages. Collection does not acquire the source again or resend a file. A completed receipt can retain an uncertain failure. Neither absence nor uncertainty authorizes automatic replay.
 
@@ -2009,6 +2020,11 @@ The trusted owner uses private endpoints under `/api/communication/owner` with i
 `/send` uses `Content-Type: application/vnd.moira.owner-stream`. Its body is a four-byte unsigned big-endian JSON byte length, the UTF-8 JSON control and the opaque file bytes. `Content-Length` must equal four plus the JSON byte length plus the declared file size. `encodeOwnerFrame`, `readOwnerFrame` and `settleOwnerFrame` in `packages/workspace-service/src/stream-frame.mjs` own this format and response/ingress lifetime. Authentication happens before reading the metadata frame; typed scope authorization follows parsing. File bytes never enter the JSON parser, temporary cloud storage or a whole-file buffer. A known refusal is flushed before unread ingress is closed.
 
 The cloud resolves the current registered channel, configured recipient, fixed endpoint and granted secret. Owners cannot supply a destination, URL, arbitrary header or credential. Configuration and installed-artifact digests must still match at dispatch; workflow frame revision and task identity are rechecked before vendor submission. The cloud constructs fixed raw or multipart vendor framing around the stream. Provider refusal is distinct from a lost or incomplete dispatched result.
+
+Work HTTP requests to vendors use a dedicated dispatcher without default response-header or
+body-idle work clocks. Connection establishment, caller cancellation and explicit deadlines remain
+separate. Ingress can close an idle connection while the original owner receipt remains
+authoritative; collect that receipt rather than repeating an uncertain delivery.
 
 Telegram applies its provider-specific photo/document sizes, PNG/JPEG image MIME and text/caption limits. A long message uses separate owner-journal stages for file upload and text; a failed later stage cannot repeat the accepted upload. Extension binary operations use their installed declaration and the same source stream. Public HTML artifacts have a separate contract.
 
@@ -5493,8 +5509,8 @@ deployment's account policy: unblocked, approved when approval is required, and 
 when that gate is enabled. Each recipient uses their own enabled, configured Telegram bot and chat.
 The plain message contains the new account's name, email, recorded registration time and
 prefix-correct admin detail link. Delivery does not delay the auth response, failures do not affect
-registration or other recipients, and unknown outcomes are not retried. The communication service
-applies its shared channel limits; the event does not fan out to extension channels.
+registration or other recipients, and unknown outcomes are not retried. The formatter fits each
+recipient's message to Telegram's provider text limit; the event does not fan out to extension channels.
 
 Response:
 
@@ -5814,7 +5830,7 @@ ordinary Markdown alert through their configured user communication channels
 `UserService.getAdminUserIds`, includes the artifact UUID, owner, report count,
 view link, and admin reported-artifacts link, and sends through the active
 `UserCommunicationService`. The service selects configured built-in and extension
-channels, applies the shared delivery limits, and returns sanitized aggregate
+channels and returns sanitized aggregate
 outcomes. The route processes administrators independently: no configured channel,
 partial or failed provider delivery, or one thrown attempt never stops later
 administrators and never changes the report response. Logs contain only safe

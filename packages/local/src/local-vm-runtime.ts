@@ -39,7 +39,7 @@ export interface LocalVmRuntime {
     identity: LocalVmIdentity,
     entrypoint: FixedGuestEntrypoint,
     input?: Uint8Array | AsyncIterable<Uint8Array>,
-    timeoutMs?: number,
+    timeoutMs?: number | null,
     signal?: AbortSignal,
     admission?: LocalVmDispatchAdmission,
   ): Promise<Buffer>;

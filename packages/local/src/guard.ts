@@ -9,7 +9,7 @@ import { RuntimeOwner } from "./runtime-owner.js";
 import { DeviceRuntimeControl } from "./runtime-control.js";
 import { RuntimeDeviceOwner } from "./runtime-device-owner.js";
 import type { LocalVmObservation } from "./local-vm-runtime.js";
-import { LocalRefusal, MAX_MESSAGE_BYTES, localPolicySchema, type LocalPolicy } from "./policy.js";
+import { LocalRefusal, localPolicySchema, type LocalPolicy } from "./policy.js";
 import {
   localManagementOutcomeSchema,
   type LocalManagementOutcome,
@@ -353,23 +353,17 @@ export const startGuard: StartGuard = (root, mode = "work") =>
         "LOCAL_GUARD_UNAVAILABLE",
         "The independent local device owner is unavailable.",
       );
-    const timer = setTimeout(() => {
-      if (child.connected) child.disconnect();
-      reject(unavailable());
-    }, 45_000);
     const fail = () => {
       for (const call of pending.values()) call.reject(startupError ?? unavailable());
       pending.clear();
     };
     child.once("error", () => {
-      clearTimeout(timer);
       fail();
       reject(unavailable());
     });
     child.once("exit", (code) => {
       closed = true;
       exitCode = code;
-      clearTimeout(timer);
       fail();
       if (!ready) reject(startupError ?? unavailable());
     });
@@ -457,7 +451,6 @@ export const startGuard: StartGuard = (root, mode = "work") =>
       }
       if (value === "ready" && !ready) {
         ready = true;
-        clearTimeout(timer);
         resolve({
           get active() {
             return !closed && !shutdown && child.connected;
@@ -639,42 +632,6 @@ async function runGuard(
     settled: false,
   };
   await records.state.write("runtime-owner.json", receipt);
-  const settle = async () => {
-    await control.stop();
-    await records.state.write("runtime-owner.json", { ...receipt, settled: true });
-  };
-  const earlyStop = () => {
-    void settle().then(
-      () => process.exit(0),
-      () => process.exit(1),
-    );
-  };
-  process.once("disconnect", earlyStop);
-  process.once("SIGTERM", earlyStop);
-  process.once("SIGINT", earlyStop);
-  try {
-    if (!process.connected)
-      throw new LocalRefusal("LOCAL_GUARD_UNAVAILABLE", "The local parent disconnected.");
-    await control.open();
-  } catch (error) {
-    await settle().catch(() => undefined);
-    throw error;
-  }
-  if (action === "doctor" || action === "setup") {
-    const deadline = setTimeout(earlyStop, 300_000);
-    try {
-      if (action === "setup") await control.runtime.initialize();
-      const sandboxes = action === "doctor" ? (await control.observe()).length : 0;
-      await control.stop();
-      await records.state.write("runtime-owner.json", { ...receipt, settled: true });
-      process.send?.({ localResult: { sandboxes } }, () => process.exit(0));
-    } finally {
-      clearTimeout(deadline);
-      await control.stop();
-      await records.state.write("runtime-owner.json", { ...receipt, settled: true });
-    }
-    return;
-  }
   const owners = new Map<string, RuntimeOwner>();
   let stopping: Promise<void> | undefined;
   let poll: ReturnType<typeof setTimeout> | undefined;
@@ -709,9 +666,6 @@ async function runGuard(
   process.once("disconnect", emergency);
   process.once("SIGTERM", emergency);
   process.once("SIGINT", emergency);
-  process.removeListener("disconnect", earlyStop);
-  process.removeListener("SIGTERM", earlyStop);
-  process.removeListener("SIGINT", earlyStop);
   const reply = (id: number, result: unknown, error?: unknown, exit = false) => {
     if (!process.connected) return;
     process.send?.(
@@ -749,21 +703,6 @@ async function runGuard(
       return;
     }
     if (stopping || !process.connected) return;
-    const serialized = JSON.stringify(value);
-    if (typeof serialized !== "string" || Buffer.byteLength(serialized) > MAX_MESSAGE_BYTES) {
-      if (
-        typeof value === "object" &&
-        value !== null &&
-        "id" in value &&
-        Number.isSafeInteger(value.id)
-      )
-        reply(
-          value.id as number,
-          null,
-          new LocalRefusal("LOCAL_REQUEST_INVALID", "Lifecycle IPC input was refused."),
-        );
-      return;
-    }
     const parsed = callSchema.safeParse(value);
     if (!parsed.success) {
       if (
@@ -910,43 +849,30 @@ async function runGuard(
       },
     );
   });
-  // Recovered running records are observed by the same owner; unknown pending creation is not adopted.
-  for (const space of await records.list()) {
-    if (action === "cleanup") break;
-    if (space.desiredState !== "running") continue;
-    // Pending manifests are retained for addressed management, not re-admitted as SDK create.
-    // Their unknown VM identity is not a revocation of independent, initialized peers.
-    if (!space.runtimeId) continue;
-    const owner = new RuntimeOwner(
-      records,
-      space.id,
-      (closure) => control.protect(space.id, closure),
-      () => control.prepareCredentials(),
-    );
-    owners.set(space.id, owner);
-    void owner.admit().catch((error: unknown) => {
-      if (owners.get(space.id) === owner) owners.delete(space.id);
-      if (deviceFailure(error)) {
-        emergency(error);
-      }
-    });
-  }
+  const workAuthority = action === "work" || action === "doctor";
   const check = async () => {
     try {
+      if (stopping) return;
       const policy = await records.policy();
+      if (stopping) return;
       if (leaseTimer) clearTimeout(leaseTimer);
-      if (action !== "cleanup")
+      if (workAuthority)
         leaseTimer = setTimeout(emergency, Math.max(1, policy.leaseUntil - Date.now()));
+      if (workAuthority && (!policy.enabled || policy.leaseUntil <= Date.now())) {
+        emergency(
+          new LocalRefusal("LOCAL_NOT_RUNNING", "Local work is disabled or its lease expired."),
+        );
+        return;
+      }
       if (
         !process.connected ||
-        (action !== "cleanup" && (!policy.enabled || policy.leaseUntil <= Date.now())) ||
         policy.deviceId !== initial.deviceId ||
         JSON.stringify(policy.runtime) !== JSON.stringify(initial.runtime)
       ) {
         emergency();
         return;
       }
-      for (const owner of action === "cleanup" ? [] : owners.values())
+      for (const owner of action === "work" ? owners.values() : [])
         if (owner.active) {
           try {
             await owner.check();
@@ -983,13 +909,59 @@ async function runGuard(
           () => {
             void check();
           },
-          action === "cleanup" ? 1000 : Math.max(1, Math.min(1000, policy.leaseUntil - Date.now())),
+          workAuthority ? Math.max(1, Math.min(1000, policy.leaseUntil - Date.now())) : 1000,
         );
     } catch (error) {
       emergency(error);
     }
   };
-  void check();
+  // The same authority checker owns foreground startup and subsequent space work.
+  await check();
+  if (stopping) {
+    await shutdown();
+    return;
+  }
+  try {
+    if (!process.connected)
+      throw new LocalRefusal("LOCAL_GUARD_UNAVAILABLE", "The local parent disconnected.");
+    await control.open();
+    if (stopping || !process.connected) {
+      await shutdown();
+      return;
+    }
+  } catch (error) {
+    await shutdown().catch(() => undefined);
+    throw error;
+  }
+  if (action === "doctor" || action === "setup") {
+    const deadline = action === "doctor" ? setTimeout(emergency, 300_000) : undefined;
+    try {
+      if (action === "setup") await control.runtime.initialize();
+      const sandboxes = action === "doctor" ? (await control.observe()).length : 0;
+      await shutdown();
+      process.send?.({ localResult: { sandboxes } }, () => process.exit(0));
+    } finally {
+      clearTimeout(deadline);
+      await shutdown();
+    }
+    return;
+  }
+  // Recovered records retain the same identities; unknown creation is never adopted.
+  for (const space of await records.list()) {
+    if (action === "cleanup" || stopping) break;
+    if (space.desiredState !== "running" || !space.runtimeId) continue;
+    const owner = new RuntimeOwner(
+      records,
+      space.id,
+      (closure) => control.protect(space.id, closure),
+      () => control.prepareCredentials(),
+    );
+    owners.set(space.id, owner);
+    void owner.admit().catch((error: unknown) => {
+      if (owners.get(space.id) === owner) owners.delete(space.id);
+      if (deviceFailure(error)) emergency(error);
+    });
+  }
   if (!stopping && process.connected) process.send?.("ready");
 }
 if (

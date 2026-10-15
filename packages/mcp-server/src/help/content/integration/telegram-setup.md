@@ -13,6 +13,16 @@ ID for both. The deprecated
 `telegram-notification` node keeps Telegram-only compatibility, while `lock` uses a separate trusted
 Telegram path for approval PINs.
 
+Telegram requires text messages to fit its 4096-character payload limit. Workflow notification
+formatting fits the selected Telegram delivery; other text channels receive their own full message
+unless their provider requires fitting. Ordinary delivery has no shared per-user rate, concurrency
+or work-deadline budget. Provider refusals remain failures, and an uncertain send is not
+automatically repeated.
+
+Telegram requests have no default response-header or body-idle work clock in Moira. Explicit call
+deadlines and cancellation still apply. A lost connection or response does not establish whether
+Telegram accepted the message.
+
 ## Setup
 
 ### 1. Create a Bot via @BotFather

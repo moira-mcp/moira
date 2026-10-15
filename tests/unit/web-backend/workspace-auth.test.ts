@@ -26,6 +26,8 @@ import supertest from "supertest";
 import { createWorkspacePublicationHandler } from "../../../packages/mcp-server/src/workspace-publication-route.js";
 import { WORKSPACE_UPGRADE } from "../../../packages/shared/src/codespaces/workspace-transport.js";
 import { CODESPACE_PROVIDER_GITHUB } from "../../../packages/shared/src/codespaces/types.js";
+import { spawn } from "node:child_process";
+import { pathToFileURL } from "node:url";
 
 let authorityDb: Database.Database;
 let providerEnabled = true;
@@ -106,12 +108,17 @@ test.each([
   "revoked resource",
   "disabled provider",
   "owner disconnect after publication authorization",
+  "publication from another process",
+  "controller authorization from another process",
+  "offline actor from another process",
 ] as const)(
-  "production router requires current live enrollment (%s) without lifecycle or bootstrap effects",
+  "production routing requires current enrollment while actor authentication survives disconnection (%s)",
   async (change) => {
-    authorityDb = new Database(":memory:");
     providerEnabled = true;
     const directory = await mkdtemp(join(tmpdir(), "workspace-authority-"));
+    authorityDb = new Database(
+      change.endsWith("from another process") ? join(directory, "test-authority.db") : ":memory:",
+    );
     const socketPath = join(directory, "control.sock");
     const sockets = new Set<Duplex>();
     const server = createServer((_req, res) => {
@@ -156,7 +163,12 @@ test.each([
         .prepare(
           "INSERT INTO codespaceLocalDevice(id,userId,connectionId,label,generation,status,credentialDigest,createdAt,updatedAt) VALUES(?,?,?,'Controller',1,'active',?,1,1)",
         )
-        .run(deviceId, userId, deviceConnectionId, "a".repeat(64));
+        .run(
+          deviceId,
+          userId,
+          deviceConnectionId,
+          createHash("sha256").update("c".repeat(43)).digest("hex"),
+        );
       new GitHubResourceRepository(authorityDb).reserve({
         id: resourceId,
         userId,
@@ -180,6 +192,9 @@ test.each([
       });
       const router = getWorkspaceRouter();
       router.attach(server);
+      const { WORKSPACE_ROUTER_SOCKET } =
+        await import("../../../packages/web-backend/src/services/workspace-client.js");
+      await router.listenPrivate(WORKSPACE_ROUTER_SOCKET);
       let ownerSocket: Duplex | undefined;
       server.on("upgrade", (_request, socket) => {
         ownerSocket = socket;
@@ -193,7 +208,11 @@ test.each([
         observeDispatch = resolve;
       });
       const dispatched = jest.fn((_callId: string) => observeDispatch());
-      async function connectControl(remote: { credential: string; environmentIdentity: string }) {
+      async function connectControl(remote: {
+        credential: string;
+        environmentIdentity: string;
+        kind?: "workspace" | "controller";
+      }) {
         return new Promise<void>((done, reject) => {
           const req = httpRequest({
             socketPath,
@@ -202,7 +221,7 @@ test.each([
               connection: "Upgrade",
               upgrade: WORKSPACE_UPGRADE,
               authorization: `Bearer ${remote.credential}`,
-              "x-moira-endpoint-kind": "workspace",
+              "x-moira-endpoint-kind": remote.kind ?? "workspace",
               "x-moira-endpoint-identity": remote.environmentIdentity,
             },
           });
@@ -238,6 +257,102 @@ test.each([
       const original = issueWorkspaceAgentCredential(userId, resourceId, "a".repeat(64));
       await connectControl(original);
       const originalDigest = createHash("sha256").update(original.credential).digest("hex");
+      if (change.endsWith("from another process")) {
+        const controller = change === "controller authorization from another process";
+        if (controller)
+          await connectControl({
+            credential: "c".repeat(43),
+            environmentIdentity: deviceConnectionId,
+            kind: "controller",
+          });
+        const module = pathToFileURL(
+          resolve("packages/web-backend/src/services/workspace-services.ts"),
+        ).href;
+        const authorityModule = pathToFileURL(
+          resolve("packages/web-backend/src/services/communication-owner-authority.ts"),
+        ).href;
+        const scope = controller
+          ? {
+              kind: "controller",
+              userId,
+              deviceId,
+              deviceGeneration: 1,
+              connectionId: deviceConnectionId,
+            }
+          : {
+              kind: "workspace",
+              resourceId,
+              resourceGeneration: 1,
+              authorizationGeneration: 1,
+              environmentIdentity: original.environmentIdentity,
+            };
+        if (change === "offline actor from another process") {
+          if (!ownerSocket) throw new Error("Missing actual owner control");
+          const closed = once(ownerSocket, "close");
+          ownerSocket.destroy();
+          await closed;
+          expect(router.isConnected({ kind: "workspace", ...original, userId })).toBe(false);
+        }
+        const program = `
+          const {authorizeWorkspacePublication}=await import(${JSON.stringify(module)});
+          const {authorizeControllerPublication,authorizeCommunicationOwner,authenticateCommunicationOwner}=await import(${JSON.stringify(authorityModule)});
+          const scope=${JSON.stringify(scope)},credential=${JSON.stringify(controller ? "c".repeat(43) : original.credential)};
+          const refused=async(candidate,token=credential)=>{
+            try{await authorizeCommunicationOwner(token,candidate);return false;}
+            catch{return true;}
+          };
+          try{
+            const userId=await ${controller ? `authorizeControllerPublication(${JSON.stringify(deviceId)})` : `authorizeWorkspacePublication(${JSON.stringify(resourceId)})`};
+            const actor=await authorizeCommunicationOwner(credential,scope);
+            await authenticateCommunicationOwner(credential);
+            const changedIdentityRefused=await refused({...scope,...(scope.kind==='workspace'?{environmentIdentity:'b'.repeat(64)}:{connectionId:${JSON.stringify(randomUUID())}})});
+            const changedGenerationRefused=await refused({...scope,...(scope.kind==='workspace'?{resourceGeneration:2}:{deviceGeneration:2})});
+            const changedAuthorizationRefused=await refused({...scope,...(scope.kind==='workspace'?{authorizationGeneration:2}:{userId:${JSON.stringify(randomUUID())}})});
+            const foreignCredentialRefused=await refused(scope,'z'.repeat(43));
+            process.send({userId,actor,changedIdentityRefused,changedGenerationRefused,changedAuthorizationRefused,foreignCredentialRefused});
+          }catch(error){process.send({error:error.code??error.message});}
+        `;
+        const child = spawn(
+          process.execPath,
+          ["--import", "tsx", "--input-type=module", "-e", program],
+          {
+            env: {
+              ...process.env,
+              NODE_ENV: "test",
+              DB_PATH: authorityDb.name,
+              CODESPACE_CODESPACES_ENABLED: "true",
+            },
+            stdio: ["ignore", "ignore", "pipe", "ipc"],
+          },
+        );
+        let diagnostic = "";
+        child.stderr!.on("data", (bytes) => {
+          diagnostic += String(bytes);
+        });
+        const outcome = new Promise<unknown>((done, reject) => {
+          child.once("message", done);
+          child.once("error", reject);
+          child.once("exit", (code) =>
+            reject(new Error(`Authority caller exited (${code}): ${diagnostic}`)),
+          );
+        });
+        try {
+          expect(await outcome).toEqual({
+            userId,
+            actor: userId,
+            changedIdentityRefused: true,
+            changedGenerationRefused: true,
+            changedAuthorizationRefused: true,
+            foreignCredentialRefused: true,
+          });
+        } finally {
+          if (child.exitCode === null) {
+            const exited = once(child, "exit");
+            child.kill("SIGTERM");
+            await exited;
+          }
+        }
+      }
       if (change === "resource generation")
         authorityDb
           .prepare("UPDATE githubResourceIdentity SET generation=2 WHERE id=?")
@@ -260,7 +375,10 @@ test.each([
           .prepare("UPDATE githubResourceIdentity SET revokedAt=1 WHERE id=?")
           .run(resourceId);
       else if (change === "disabled provider") providerEnabled = false;
-      if (change === "current enrollment") {
+      if (
+        change === "current enrollment" ||
+        (change.endsWith("from another process") && change !== "offline actor from another process")
+      ) {
         const abort = new AbortController();
         const outcome = router
           .request(userId, resourceId, { method: "GET", path: "/v1/health" }, abort.signal)
@@ -275,7 +393,7 @@ test.each([
           "/api/codespaces/files/:resourceId/:token",
           createWorkspacePublicationHandler({
             async authorize(id) {
-              const owner = authorizeWorkspacePublication(id);
+              const owner = await authorizeWorkspacePublication(id);
               expect(owner).toBe(userId);
               if (!ownerSocket) throw new Error("Missing actual owner control");
               const closed = once(ownerSocket, "close");
@@ -313,7 +431,13 @@ test.each([
                   : "CODESPACE_PROVIDER_UNAVAILABLE",
         });
       }
-      expect(dispatched).toHaveBeenCalledTimes(change === "current enrollment" ? 1 : 0);
+      expect(dispatched).toHaveBeenCalledTimes(
+        change === "current enrollment" ||
+          (change.endsWith("from another process") &&
+            change !== "offline actor from another process")
+          ? 1
+          : 0,
+      );
       const current = new WorkspaceAuthRepository(authorityDb).getOwned(userId, resourceId);
       if (change === "missing enrollment") expect(current).toBeNull();
       else expect(current?.credentialDigest).toBe(originalDigest);

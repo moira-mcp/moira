@@ -11,7 +11,6 @@ import { Buffer } from "node:buffer";
 import process from "node:process";
 import { workspaceRequest, workspaceJson as control } from "./client.mjs";
 import { workspaceFailure } from "./presentation.mjs";
-import { validateOwnerPullRequestInput } from "./github-owner.mjs";
 import { scopedCredentialFailureOutcome } from "../../shared/src/codespaces/scoped-credential-types.ts";
 import { WORKSPACE_REQUEST_ID_PATTERN } from "../../shared/src/codespaces/workspace-request-id.mjs";
 export { workspaceRequest } from "./client.mjs";
@@ -77,6 +76,12 @@ export async function runWorkspaceCli(
   const [action, ...rest] = args;
   if (!action || action === "--help") {
     stdout.write(
+      "moira-workspace action INPUT_JSON_FILE|-\nForward the complete owner {action, request} contract as JSON, including session/cwd/env/timeout, native descriptors and observation windows. Supply the original request_id or process_id for mutation and collection; signed native descriptors belong in the input file or stdin.\n",
+    );
+    stdout.write(
+      "moira-workspace communication INPUT_JSON_FILE|-\nSubmit the owner communication JSON unchanged, with its original requestId. Collect it with status REQUEST_ID.\n",
+    );
+    stdout.write(
       "moira-workspace pull-request-create [--request-id ws1-UUID] INPUT_JSON_FILE|-\nmoira-workspace pull-request-create --request-id ws1-UUID (collect original create only)\nmoira-workspace pull-request-get NUMBER\nmoira-workspace pull-request-find HEAD BASE\nPR creation retains its original owner receipt; after uncertainty collect that ID and find the same head/base before considering another create.\n",
     );
     stdout.write(
@@ -85,7 +90,26 @@ export async function runWorkspaceCli(
     return;
   }
   let result;
-  if (action === "exec") {
+  if (action === "action" || action === "communication") {
+    if (rest.length !== 1) throw invalidInput();
+    const input =
+      rest[0] === "-" ? await nativeDescriptor() : jsonInput(await readFile(rest[0], "utf8"));
+    const requestId =
+      action === "communication"
+        ? input?.requestId
+        : (input?.request?.request_id ?? input?.request?.process_id);
+    if (typeof requestId === "string") stdout.write(`${requestId}\n`);
+    try {
+      result = await control(
+        socketPath,
+        "POST",
+        action === "communication" ? "/v1/communication" : "/v1/tools",
+        input,
+      );
+    } catch (error) {
+      result = workspaceFailure(error, requestId);
+    }
+  } else if (action === "exec") {
     let requestId;
     let useStdin = false;
     let useNativeStdin = false;
@@ -146,10 +170,8 @@ export async function runWorkspaceCli(
       let details = {};
       if (file !== undefined) {
         try {
-          details = validateOwnerPullRequestInput(
-            "pull_request_create",
-            file === "-" ? await nativeDescriptor() : jsonInput(await readFile(file, "utf8")),
-          );
+          details =
+            file === "-" ? await nativeDescriptor() : jsonInput(await readFile(file, "utf8"));
         } catch {
           throw invalidInput();
         }

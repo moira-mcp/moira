@@ -150,12 +150,9 @@ export class ExtensionCommunicationChannelAdapter implements CommunicationChanne
 
   async isConfigured(
     configuration: CommunicationConfigurationResolver,
-    signal: AbortSignal,
+    _signal: AbortSignal,
   ): Promise<boolean> {
-    const resolved = await this.resolveConfiguration(configuration);
-    if (!resolved.configured) return false;
-    await this.checkRunner(signal);
-    return true;
+    return this.isConfigurationValid(configuration);
   }
 
   async deliver(
@@ -170,7 +167,6 @@ export class ExtensionCommunicationChannelAdapter implements CommunicationChanne
     }
     const request: ExtensionCommunicationChannelRequest = {
       channelId: this.id,
-      timeoutMs: DEFAULT_EXTENSION_COMMUNICATION_TIMEOUT_MS,
       message: {
         text: message.text,
         format: message.format,

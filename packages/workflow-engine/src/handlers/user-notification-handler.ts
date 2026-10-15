@@ -70,7 +70,7 @@ export class UserNotificationHandler implements INodeHandler {
     try {
       const body = this.messageProcessor(node.format).processDirective(node.message, context);
       const frame = await resolveNotificationFrame(repository, context, node.id, liveRun);
-      const prepare = async () => {
+      const prepare = async (textLimit?: number) => {
         const prepared = await prepareNotificationFrame(
           repository,
           context,
@@ -82,7 +82,7 @@ export class UserNotificationHandler implements INodeHandler {
           text: frameNotification(prepared.frame, body, {
             format: node.format,
             planList: node.planList,
-            limit: this.communication.maxTextLength,
+            limit: textLimit,
           }),
           format: node.format,
           silent: node.silent,

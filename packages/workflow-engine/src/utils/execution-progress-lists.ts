@@ -298,10 +298,15 @@ export type PlanListMode = "full" | "progress" | "none";
 /** A single item title longer than this is shortened, so one item cannot crowd out the rest. */
 const PLAN_TITLE_LIMIT = 160;
 
-function planItemLine(item: ExecutionListItem, escape: TextEscaper, ended: boolean): string {
+function planItemLine(
+  item: ExecutionListItem,
+  escape: TextEscaper,
+  ended: boolean,
+  fitTitle: boolean,
+): string {
   const mark = item.done ? "✓" : item.current && !ended ? "▶" : "○";
   const title =
-    item.title.length > PLAN_TITLE_LIMIT
+    fitTitle && item.title.length > PLAN_TITLE_LIMIT
       ? `${item.title.slice(0, PLAN_TITLE_LIMIT - 1)}…`
       : item.title;
   return `${mark} ${item.index + 1}. ${escape(title)}`;
@@ -317,7 +322,7 @@ function planItemLine(item: ExecutionListItem, escape: TextEscaper, ended: boole
  */
 export function planListLines(
   progress: ExecutionProgress | null,
-  budget: number,
+  budget?: number,
   escape: TextEscaper = asIs,
   options: PlanListOptions = {},
 ): string[] {
@@ -327,7 +332,10 @@ export function planListLines(
   if (!list || count === null || list.items?.length === 0) return [];
   const header = `📝 ${count}`;
   const items = list.items ?? [];
-  const lines = items.map((item) => planItemLine(item, escape, options.ended === true));
+  const lines = items.map((item) =>
+    planItemLine(item, escape, options.ended === true, budget !== undefined),
+  );
+  if (budget === undefined) return [header, ...lines];
   const size = (parts: readonly string[]) => parts.reduce((sum, line) => sum + line.length + 1, 0);
   if (size([header, ...lines]) <= budget) return [header, ...lines];
   if (header.length > budget) return [];

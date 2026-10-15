@@ -1,21 +1,10 @@
 import { createHash, randomUUID } from "node:crypto";
-import { createReadStream, createWriteStream } from "node:fs";
-import {
-  mkdir,
-  readFile,
-  rename,
-  rm,
-  readdir,
-  lstat,
-  writeFile,
-  copyFile,
-  chmod,
-} from "node:fs/promises";
-import { pipeline } from "node:stream/promises";
-import { Readable } from "node:stream";
+import { createReadStream } from "node:fs";
+import { mkdir, readFile, rm, readdir, lstat, writeFile, copyFile, chmod } from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { join, posix, resolve } from "node:path";
+import { acquirePinnedArchive } from "./acquire-pinned-archive.js";
 
 const execute = promisify(execFile);
 const FONT_ARCHIVE_SHA256 = "fa9ca4d13871dd122f61258a80d01751d603b4d3ee14095d65453b4e846e17d7";
@@ -111,28 +100,13 @@ async function acquire(cache, url, integrity) {
   if (!match || new URL(url).protocol !== "https:")
     throw new Error("Owner dependency requires a pinned HTTPS archive");
   const [, algorithm, expected] = match;
-  const target = join(cache, createHash("sha256").update(integrity).digest("hex"));
-  try {
-    if ((await digest(target, algorithm, "base64")) === expected) return target;
-    throw new Error("Cached owner dependency failed its pinned integrity");
-  } catch (error) {
-    if (error.code !== "ENOENT") throw error;
-  }
-  const temporary = `${target}.next-${randomUUID()}`;
-  try {
-    const response = await fetch(url);
-    if (!response.ok || !response.body) throw new Error("Owner dependency download failed");
-    await pipeline(
-      Readable.fromWeb(response.body),
-      createWriteStream(temporary, { flags: "wx", mode: 0o600 }),
-    );
-    if ((await digest(temporary, algorithm, "base64")) !== expected)
-      throw new Error("Owner dependency archive integrity mismatch");
-    await rename(temporary, target);
-    return target;
-  } finally {
-    await rm(temporary, { force: true });
-  }
+  return acquirePinnedArchive({
+    url,
+    target: join(cache, createHash("sha256").update(integrity).digest("hex")),
+    algorithm,
+    expected,
+    encoding: "base64",
+  });
 }
 
 async function extract(archive, destination, prefix, selected) {

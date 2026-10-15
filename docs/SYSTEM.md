@@ -335,9 +335,8 @@ the channels that took it and the time in the row. The run's visit log is not to
 sends a gate's first notification and the gate has `humanGate.remindAfter`, it queues the gate's
 single `remind` row due that long after; if the wait ends first, the reminder is dropped when it
 comes due, like any row whose wait is gone. A gate beneath an open agent question still counts as a
-current wait, so its notification is not lost to the question. A notification refused only by the
-communication service's per-person limits (`rate_limited`: the per-minute budget or the concurrency
-limits) is held for a minute and tried again; any other failed delivery is recorded, not retried. A
+current wait, so its notification is not lost to the question. Failed delivery is recorded, not
+automatically retried. A
 row whose handling throws (for example, a definition that cannot be read) is logged and set aside for
 five minutes, so it never blocks the rows behind it. When a run holds two waits at once — a gate marked
 beneath an open agent question — each gets its own row. `GET /api/executions/:id` returns the
@@ -516,6 +515,11 @@ Used by: `ExecutionRepository`, `AuditRepository`, `NoteRepository`, `ArtifactRe
 
 ### MCP HTTP Transport Integration
 
+The public MCP boundary authenticates the caller before the shared incremental JSON reader and
+rechecks current credential/account authority after asynchronous body reading.
+The SDK consumes that parsed body and validates protocol, batch and media-type rules. The gateway
+IP request budget includes authenticated traffic, independently of owner-operation lifetime.
+
 ```typescript
 // HTTP Server: StreamableHTTPServerTransport (Stateless Mode)
 const transport = new StreamableHTTPServerTransport({
@@ -585,7 +589,7 @@ prompt. The no-argument topic catalog adds the special `tools` entry from MCP-ow
 and that topic renders directly from the typed tool contract rather than a Markdown copy.
 Presentation-only Astro components remain in the shells, and runtime never parses or removes MDX/JSX.
 
-`communication` uses the ordinary authenticated MCP user context. Text calls `UserCommunicationService`; binary submission calls the shared `CommunicationFileOwner` composition. `LiveCommunicationFileOwner` resolves an immutable reference's original workspace/controller, or selects the explicit or sole live paired controller for nonworkspace sources. A neutral controller does not need Local VM policy to own communication. Source acquisition, immutable publication, rasterization, source digest and original delivery receipts live with that owner.
+`communication` uses the ordinary authenticated MCP user context. Text calls `UserCommunicationService`; binary submission calls the shared `CommunicationFileOwner` composition. `LiveCommunicationFileOwner` resolves an immutable reference's original workspace/controller, or selects the explicit or sole active registered paired controller for nonworkspace sources. Selection resolves identity without a health/snapshot preflight; actual availability belongs to the router at dispatch. A neutral controller does not need Local VM policy to own communication. Source acquisition, immutable publication, rasterization, source digest and original delivery receipts live with that owner. Current credential, generation, registration and scope checks remain mandatory. A route refusal during collection cannot certify that the historical effect was never admitted.
 
 `createOwnerCommunication` in `packages/workspace-service/src/owner-communication.mjs` composes owner publications, direct native source acquisition, packaged progress rendering and extension execution. `/v1/communication` submits a typed descriptor; `/v1/communication/stream` accepts framed control plus raw bytes; `/v1/communication/operations/:requestId` collects the original receipt. Existing owner admission also binds the original ID across action namespaces. The journal retains immutable input identity, source publication and per-channel stages, excluding signed native URLs, base64 payloads and file bytes. Same-ID collection or repetition never refetches an accepted source or replays a vendor effect. Changing input or owner scope refuses the request.
 
@@ -726,13 +730,16 @@ and stopped-policy intents fence interrupted changes; a persisted applied revisi
 permits cleanup of its completed intent, not a newer uncertain intent. CPU, RAM and
 Docker disk changes are defaults for new VMs. Existing VMs retain their admitted
 machine and repository identity. Storage resizing uses only the exact owned disk
-image and APFS container, checks native bounds and capacity, and preserves data;
+image and APFS container, checks native bounds, actual used-data fit and capacity, and preserves data;
 uncertain native settlement retains its journal and disables work.
+Sparse image creation and growth require no synthetic host reserve or full logical preallocation.
+Shrink retains the native APFS minimum and actual used-data bound; native filesystem failures
+remain refusals.
 
 Manager startup holds the runner gate while `ensureStorageMounted` checks storage.
 On macOS it may attach only the existing `storage.sparsebundle` in the same private
 state to that device's default mount. Fresh native image/mount binding and ordinary
-volume ownership, finite capacity and free-space admission are required, including
+volume ownership and approved finite capacity are required, including
 after a lost attach reply. Custom mounts remain manually managed. Missing images,
 unsafe mount points and conflicting bindings refuse startup without creating or
 resetting storage.
@@ -793,6 +800,12 @@ leaves the account blocked. Pending retirement preserves encrypted custody and
 ownership rather than cascading them away or implicitly deleting external VMs.
 
 An independent device guard owns SDK launch and calls before VM creation. It
+checks current work or `doctor` authority before opening the SDK and throughout startup;
+setup and cleanup retain their separate local authority. SDK startup, installation,
+bootstrap and authenticated guest registration have no aggregate work clock. Fixed
+identity/health observations and the bounded `doctor` diagnostic retain their own bounds;
+an expired observation never proves physical settlement. Disable, lease expiry,
+caller cancellation and parent death remain effective during pending startup. The guard
 cancels and reaps tracked calls, holds exact kernel identities for the SDK daemon
 and VM workers, and maps SDK UUIDs to private container identities before admitting
 work. Shutdown does not depend on a readable SDK credential store. It signals only
@@ -840,14 +853,38 @@ trusted-delivery declaration. `GET /api/notifications/channels` evaluates those 
 the authenticated user's repository-backed configuration and projects sanitized
 `ready|disabled|incomplete|unavailable` state. `POST
 /api/notifications/channels/:channelId/test` accepts no body and invokes the registry-selected
-adapter through `UserCommunicationService.testChannel()`, retaining shared limits and result
+adapter through `UserCommunicationService.testChannel()`, retaining configuration authority and result
 normalization without ordinary fan-out. Administrator trust approval is read-only in this user
 projection and remains writable only through the admin boundary.
 
-`UserCommunicationService.deliverChannel(channelId, request, repository)` sends through one
-registered adapter using the same validation, repository-backed configuration, provider rate and
-concurrency limits, deadlines and aggregate results as ordinary delivery. `testChannel` composes
-this method with its fixed test message; an unknown channel returns null.
+`UserCommunicationService.deliverChannel(channelId, request, repository, prepare?)` sends through
+one registered adapter using the same validation, repository-backed configuration and aggregate
+results as ordinary delivery. There is no shared text-size, request-rate, concurrency or
+work-deadline budget. Optional `prepare(textLimit?)` refreshes mutable notification content after
+configuration resolution at each adapter handoff; the adapter supplies a provider payload limit
+only when fitting is required. Without that limit the formatter retains the full text and plan.
+Telegram validates its actual text payload limit and preserves provider refusals. An explicit
+Telegram caller timeout remains optional; there is no default delivery timeout or local rate bucket.
+`testChannel` composes the selected-channel method with its fixed test message; an unknown channel
+returns null.
+
+Ordinary extension delivery checks current enabled settings, schema and granted secrets without
+a runner-health preflight. Actual runner/handler failures remain sanitized channel failures.
+The communication call has no blanket deadline; caller cancellation follows it through HTTP,
+startup, queuing and the handler. Workflow node calls retain their authored deadlines. Explicit
+configuration discovery and trusted-channel eligibility keep their separate bounded checks;
+trusted PIN activation still follows confirmed delivery.
+
+`fetchWork` in `packages/shared/src/http/work-fetch.ts` supplies one dedicated maintained HTTP
+dispatcher for ordinary extension delivery, Telegram, streamed vendor delivery and Local relay
+work. Response-header and body-idle work clocks are disabled on those requests without replacing
+the global dispatcher. Connection establishment, explicit node/metadata deadlines and caller
+cancellation retain their own contracts. Local ESM program bundles provide Node `createRequire`
+for the dispatcher's bundled CommonJS dependencies.
+
+Ingress retains a timeout between I/O events and can close an idle observer. That is not a total
+owner-work deadline or evidence of no effect. Original owner receipts and stages remain
+authoritative after response loss; collection never automatically repeats the operation.
 
 `notifyAdminsOfRegistration` selects only the built-in Telegram channel for a confirmed new
 account. Both service-owned auth factories inject it as `onSuccessfulRegistration`; dispatch does
@@ -1711,9 +1748,10 @@ Workflow binary notifications use the same owner delivery primitive. Inline base
   connection leads to a node the run pauses on (`lock` → a person, and so is an `agent-directive`
   marked `humanGate` whose `when` holds; any other `agent-directive`, `teleport`, `materialize`,
   `subgraph` → the agent). Values substituted into a Markdown or HTML message, list
-  titles and block labels are escaped for the format. The text is fitted to the communication
-  service's `maxTextLength`: the plan takes the room left, and an over-long message is cut at a
-  line with `…`, so delivery never fails for length
+  titles and block labels are escaped for the format. When the selected adapter declares a provider
+  text limit, the plan takes the room left and an over-long message is cut at a line with `…`.
+  Without a provider limit the message and selected plan remain complete. Formatting for one
+  provider does not truncate the message sent to another
 - **Progress picture** - `attachProgressImage` attaches the run's phone steps picture
   (`renderExecutionProgressStepsImage`: 390 px wide at the phone type scale, never scaled, 3×
   density), not the map; no statistics are read for it

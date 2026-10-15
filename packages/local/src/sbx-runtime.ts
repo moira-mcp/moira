@@ -2,12 +2,7 @@ import { lstat, mkdir, realpath } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { basename, dirname, isAbsolute, join, sep } from "node:path";
 import { z } from "zod";
-import {
-  LocalRefusal,
-  MAX_MESSAGE_BYTES,
-  SUPPORTED_SBX_VERSION,
-  type LocalPolicy,
-} from "./policy.js";
+import { LocalRefusal, SUPPORTED_SBX_VERSION, type LocalPolicy } from "./policy.js";
 import { runProcess, type RunProcess, type ProcessResult } from "./process.js";
 import {
   keychainAsset,
@@ -16,6 +11,11 @@ import {
   VERIFIED_GUEST_FAILURE_EXIT,
 } from "./assets.js";
 import { prepareKeychain } from "./keychain.js";
+
+// Fixed SDK identity/settings and installed-entrypoint results contain control metadata.
+// Variable sandbox and policy inventories are read completely instead.
+const FIXED_RUNTIME_METADATA_BYTES = 8 * 1024 * 1024;
+const FIXED_RUNTIME_OBSERVATION_MS = 30_000;
 
 const sandboxSchema = z
   .object({
@@ -92,7 +92,12 @@ export class SbxRuntime {
   async call(
     argv: readonly string[],
     stdin?: Uint8Array,
-    timeoutMs = 30_000,
+    timeoutMs: number | null = argv[0] === "version" ||
+    argv[0] === "inspect" ||
+    (argv[0] === "daemon" && argv[1] === "status") ||
+    (argv[0] === "settings" && ["get", "list"].includes(argv[1]))
+      ? FIXED_RUNTIME_OBSERVATION_MS
+      : null,
     signal?: AbortSignal,
   ): Promise<Buffer> {
     await this.prepareCredentials();
@@ -111,7 +116,10 @@ export class SbxRuntime {
       stdin,
       timeoutMs,
       maxBytes:
-        argv.length === 2 && argv[0] === "ls" && argv[1] === "--json" ? null : MAX_MESSAGE_BYTES,
+        (argv.length === 2 && argv[0] === "ls" && argv[1] === "--json") ||
+        (argv[0] === "policy" && argv[1] === "ls")
+          ? null
+          : FIXED_RUNTIME_METADATA_BYTES,
       signal,
     });
     if (result.exitCode !== 0) {
@@ -490,7 +498,7 @@ export class SbxRuntime {
           dockerBytes: this.policy.runtime.dockerBytes,
         }),
       ),
-      timeoutMs: 10 * 60_000,
+      timeoutMs: null,
       maxBytes: 8192,
     });
     if (created.exitCode !== 0)
@@ -542,7 +550,7 @@ export class SbxRuntime {
       ],
       cwd: this.home,
       env: this.environment,
-      timeoutMs: 120_000,
+      timeoutMs: null,
       maxBytes: 8192,
     });
     if (startup.exitCode !== 0)
@@ -550,19 +558,19 @@ export class SbxRuntime {
         "LOCAL_START_FAILED",
         "The SDK refused startup without its MCP gateway.",
       );
-    for (let attempt = 0; attempt < 80; attempt++) {
+    for (;;) {
       const current = await this.exact(identity);
       if (current?.status === "running") {
         await this.verifyBoundary(identity);
         return;
       }
-      if (current?.status === "error") break;
+      if (!current || current.status === "error")
+        throw new LocalRefusal(
+          "LOCAL_START_FAILED",
+          "Docker Sandboxes did not confirm the owned sandbox as running.",
+        );
       await new Promise((resolve) => setTimeout(resolve, 250));
     }
-    throw new LocalRefusal(
-      "LOCAL_START_FAILED",
-      "Docker Sandboxes did not confirm the owned sandbox as running.",
-    );
   }
 
   async verifyBoundary(identity: SandboxIdentity): Promise<void> {
@@ -757,41 +765,12 @@ export class SbxRuntime {
     return this.call(["policy", "ls", identity.name, "--json"]);
   }
 
-  async guest(
-    identity: SandboxIdentity,
-    argv: readonly string[],
-    stdin?: Uint8Array,
-    timeoutMs = 30_000,
-    signal?: AbortSignal,
-  ): Promise<Buffer> {
-    const mode = (Object.keys(GUEST_COMMANDS) as FixedGuestEntrypoint[]).find(
-      (key) =>
-        argv.length === GUEST_COMMANDS[key].length &&
-        argv.every((value, index) => value === GUEST_COMMANDS[key][index]),
-    );
-    if (!mode)
-      throw new LocalRefusal(
-        "LOCAL_GUEST_COMMAND_INVALID",
-        "Only the installed guest entrypoints are admitted.",
-      );
-    const observed = await this.exact(identity);
-    if (!observed)
-      throw new LocalRefusal("LOCAL_SANDBOX_ABSENT", "The owned sandbox no longer exists.");
-    if (observed.status !== "running")
-      throw new LocalRefusal("LOCAL_NOT_RUNNING", "The owned sandbox is not running.");
-    await this.verifyBoundary(identity);
-    await this.prepareCredentials();
-    if (signal?.aborted)
-      throw new LocalRefusal("LOCAL_CANCELLED", "Guest work was canceled before dispatch.");
-    return this.attachGuest(identity, mode, stdin, timeoutMs, signal);
-  }
-
   /** One final backend proof for an owned portable dispatch, with fresh caller authority before I/O. */
   async runFixedGuest(
     identity: SandboxIdentity,
     entrypoint: FixedGuestEntrypoint,
     stdin?: Uint8Array | AsyncIterable<Uint8Array>,
-    timeoutMs = 30_000,
+    timeoutMs: number | null = null,
     signal?: AbortSignal,
     admission?: LocalVmDispatchAdmission,
   ): Promise<Buffer> {
@@ -822,7 +801,7 @@ export class SbxRuntime {
     identity: SandboxIdentity,
     mode: FixedGuestEntrypoint,
     stdin: Uint8Array | AsyncIterable<Uint8Array> | undefined,
-    timeoutMs: number,
+    timeoutMs: number | null,
     signal?: AbortSignal,
   ): Promise<Buffer> {
     let result: ProcessResult;
@@ -842,7 +821,7 @@ export class SbxRuntime {
           ? { input: stdin }
           : { stdin: stdin as Uint8Array | undefined }),
         timeoutMs,
-        maxBytes: 8 * 1024 * 1024,
+        maxBytes: FIXED_RUNTIME_METADATA_BYTES,
         signal,
       });
     } catch {

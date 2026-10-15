@@ -514,40 +514,7 @@ export async function createOwnerPublications({
       return publish(input);
     },
     openSource,
-    async serve(token, response) {
-      const abort = new globalThis.AbortController();
-      const disconnected = () => abort.abort();
-      response.once("close", disconnected);
-      let source;
-      try {
-        source = await openSource(token, abort.signal);
-        response.writeHead(200, {
-          "content-type": source.mimeType,
-          "content-length": source.size,
-          "content-disposition": disposition(source.fileName),
-          "cache-control": "private, no-store, max-age=0",
-          "x-content-type-options": "nosniff",
-          "x-robots-tag": "noindex, nofollow, noarchive",
-          "referrer-policy": "no-referrer",
-        });
-        for await (const bytes of source) {
-          if (response.destroyed) break;
-          await new Promise((resolve, reject) => {
-            const closed = () => resolve();
-            response.once("close", closed);
-            response.write(bytes, (error) => {
-              response.off("close", closed);
-              if (error && !response.destroyed) reject(error);
-              else resolve();
-            });
-          });
-        }
-        if (!response.destroyed) response.end();
-      } finally {
-        response.off("close", disconnected);
-        await source?.close();
-      }
-    },
+    serve: (token, response) => serveOwnerPublication(openSource, token, response),
     async close() {
       closed = true;
       globalThis.clearInterval(timer);
@@ -557,4 +524,40 @@ export async function createOwnerPublications({
       await cleaning;
     },
   };
+}
+
+/** HTTP presentation of an existing owned source; publication authority stays in its opener. */
+export async function serveOwnerPublication(openSource, token, response) {
+  const abort = new globalThis.AbortController();
+  const disconnected = () => abort.abort();
+  response.once("close", disconnected);
+  let source;
+  try {
+    source = await openSource(token, abort.signal);
+    response.writeHead(200, {
+      "content-type": source.mimeType,
+      "content-length": source.size,
+      "content-disposition": disposition(source.fileName),
+      "cache-control": "private, no-store, max-age=0",
+      "x-content-type-options": "nosniff",
+      "x-robots-tag": "noindex, nofollow, noarchive",
+      "referrer-policy": "no-referrer",
+    });
+    for await (const bytes of source) {
+      if (response.destroyed) break;
+      await new Promise((resolve, reject) => {
+        const closed = () => resolve();
+        response.once("close", closed);
+        response.write(bytes, (error) => {
+          response.off("close", closed);
+          if (error && !response.destroyed) reject(error);
+          else resolve();
+        });
+      });
+    }
+    if (!response.destroyed) response.end();
+  } finally {
+    response.off("close", disconnected);
+    await source?.close();
+  }
 }

@@ -5,7 +5,7 @@ import type { Writable } from "node:stream";
 import { join, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 import { z } from "zod";
-import { LocalRefusal, localPolicySchema, MAX_MESSAGE_BYTES } from "./policy.js";
+import { LocalRefusal, localPolicySchema } from "./policy.js";
 import { containerIdentitySchema, type ContainerIdentity } from "./sbx-runtime.js";
 import { GUEST_COMMANDS, VERIFIED_GUEST_FAILURE_EXIT } from "./assets.js";
 
@@ -50,7 +50,7 @@ function call(
   expected: number,
   body?: string,
   signal?: AbortSignal,
-  timeoutMs = 15_000,
+  timeoutMs: number | null = 15_000,
 ): Promise<Buffer> {
   return new Promise<Buffer>((resolve, reject) => {
     const operation = request(
@@ -60,7 +60,7 @@ function call(
         path,
         agent: false,
         signal,
-        timeout: timeoutMs,
+        timeout: timeoutMs ?? 0,
         maxHeaderSize: 8192,
         headers: {
           connection: "close",
@@ -114,8 +114,8 @@ export async function startWithoutGateway(
 ): Promise<void> {
   const socket = await ownedSocket(home, namespace, name);
   if (gatewayPresent)
-    await call(socket, "DELETE", `/sandbox/${name}/mcp/gateway`, 204, undefined, signal);
-  await call(socket, "POST", `/sandbox/${name}/start`, 200, "{}", signal);
+    await call(socket, "DELETE", `/sandbox/${name}/mcp/gateway`, 204, undefined, signal, null);
+  await call(socket, "POST", `/sandbox/${name}/start`, 200, "{}", signal, null);
 }
 
 const createProfile = localPolicySchema
@@ -174,7 +174,7 @@ export async function createWithoutGateway(
       usb_devices: [],
     }),
     signal,
-    10 * 60_000,
+    null,
   );
   const response = createdResponse.parse(JSON.parse(bytes.toString("utf8")));
   if (
@@ -347,7 +347,6 @@ export async function attachFixedGuest(
             if (![1, 2].includes(header[0]) || header[1] || header[2] || header[3])
               throw unknownGuest();
             remaining = header.readUInt32BE(4);
-            if (remaining > MAX_MESSAGE_BYTES) throw unknownGuest();
             destination = header[0] === 1 ? stdout : stderr;
             filled = 0;
             if (!remaining) continue;

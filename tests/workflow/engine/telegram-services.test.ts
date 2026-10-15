@@ -1,10 +1,9 @@
 /**
  * Unit Tests for Telegram Services
- * Test rate limiter and HTTP client functionality
+ * Test HTTP client and notification handler functionality
  */
 
 import { describe, test, expect, beforeEach, jest } from "@jest/globals";
-import { RateLimiter, createTelegramRateLimiter } from "@mcp-moira/workflow-engine";
 import { TelegramClient } from "@mcp-moira/workflow-engine";
 import { TelegramNotificationHandler, AgentMessageQueue } from "@mcp-moira/workflow-engine";
 import { TelegramConfig, TelegramErrorType, SendMessageParams } from "@mcp-moira/workflow-engine";
@@ -16,121 +15,8 @@ const mockFetch = jest.fn() as jest.MockedFunction<typeof fetch>;
 global.fetch = mockFetch;
 
 describe("Telegram Services", () => {
-  describe("RateLimiter", () => {
-    let rateLimiter: RateLimiter;
-
-    beforeEach(() => {
-      rateLimiter = new RateLimiter({
-        maxRequests: 3,
-        timeWindow: 500, // Shorter window for more reliable tests
-      });
-    });
-
-    describe("Basic Rate Limiting", () => {
-      test("should allow requests under limit", async () => {
-        const result1 = await rateLimiter.checkLimit();
-        const result2 = await rateLimiter.checkLimit();
-
-        expect(result1.allowed).toBe(true);
-        expect(result1.currentCount).toBe(1);
-        expect(result2.allowed).toBe(true);
-        expect(result2.currentCount).toBe(2);
-      });
-
-      test("should deny requests over limit", async () => {
-        // Fill up the rate limit
-        await rateLimiter.checkLimit();
-        await rateLimiter.checkLimit();
-        await rateLimiter.checkLimit();
-
-        // This should be denied
-        const result = await rateLimiter.checkLimit();
-
-        expect(result.allowed).toBe(false);
-        expect(result.currentCount).toBe(3);
-        expect(result.retryAfter).toBeGreaterThan(0);
-      });
-
-      test("should reset after time window", async () => {
-        jest.useFakeTimers();
-
-        // Fill up the rate limit
-        await rateLimiter.checkLimit();
-        await rateLimiter.checkLimit();
-        await rateLimiter.checkLimit();
-
-        // Advance time past the time window (500ms + buffer)
-        jest.advanceTimersByTime(600);
-
-        // Should be allowed again
-        const result = await rateLimiter.checkLimit();
-        expect(result.allowed).toBe(true);
-        expect(result.currentCount).toBe(1);
-
-        jest.useRealTimers();
-      });
-    });
-
-    describe("Rate Limiter Status", () => {
-      test("should provide accurate status", async () => {
-        await rateLimiter.checkLimit();
-        await rateLimiter.checkLimit();
-
-        const status = rateLimiter.getStatus();
-
-        expect(status.currentCount).toBe(2);
-        expect(status.maxRequests).toBe(3);
-        expect(status.timeWindow).toBe(500);
-        expect(status.nextResetTime).toBeGreaterThan(Date.now());
-      });
-
-      test("should reset correctly", async () => {
-        await rateLimiter.checkLimit();
-        await rateLimiter.checkLimit();
-
-        rateLimiter.reset();
-
-        const status = rateLimiter.getStatus();
-        expect(status.currentCount).toBe(0);
-        expect(status.nextResetTime).toBe(null);
-      });
-    });
-
-    describe("Wait for Availability", () => {
-      test("should return immediately when allowed", async () => {
-        const start = Date.now();
-        await rateLimiter.waitForAvailability();
-        const elapsed = Date.now() - start;
-
-        expect(elapsed).toBeLessThan(100); // Should be immediate
-      });
-    });
-
-    describe("Factory Function", () => {
-      test("should create rate limiter with Telegram defaults", () => {
-        const limiter = createTelegramRateLimiter();
-        const status = limiter.getStatus();
-
-        expect(status.maxRequests).toBe(30);
-        expect(status.timeWindow).toBe(60000);
-      });
-
-      test("should accept custom configuration", () => {
-        const limiter = createTelegramRateLimiter({
-          maxRequests: 10,
-          timeWindow: 30000,
-        });
-        const status = limiter.getStatus();
-
-        expect(status.maxRequests).toBe(10);
-        expect(status.timeWindow).toBe(30000);
-      });
-    });
-  });
-
   describe("TelegramClient", () => {
     let client: TelegramClient;
-    let mockRateLimiter: RateLimiter;
 
     const validConfig: TelegramConfig = {
       botToken: "123456789:ABCDEFGHIJKLMNOPQRSTUVWXYZ",
@@ -139,8 +25,7 @@ describe("Telegram Services", () => {
     };
 
     beforeEach(() => {
-      mockRateLimiter = new RateLimiter({ maxRequests: 100, timeWindow: 60000 });
-      client = new TelegramClient(validConfig, mockRateLimiter);
+      client = new TelegramClient(validConfig);
       mockFetch.mockClear();
     });
 
@@ -272,13 +157,10 @@ describe("Telegram Services", () => {
             }),
         );
 
-        const shortTimeoutClient = new TelegramClient(
-          {
-            ...validConfig,
-            timeout: 50, // Very short timeout
-          },
-          mockRateLimiter,
-        );
+        const shortTimeoutClient = new TelegramClient({
+          ...validConfig,
+          timeout: 50, // Very short timeout
+        });
 
         await expect(
           shortTimeoutClient.sendMessage({
@@ -378,14 +260,6 @@ describe("Telegram Services", () => {
       test("should test connection successfully", async () => {
         const result = await client.testConnection();
         expect(result).toBe(true);
-      });
-
-      test("should get rate limit status", () => {
-        const status = client.getRateLimitStatus();
-
-        expect(status).toHaveProperty("currentCount");
-        expect(status).toHaveProperty("maxRequests");
-        expect(status).toHaveProperty("timeWindow");
       });
     });
   });
@@ -790,7 +664,7 @@ describe("Telegram Services", () => {
         expect(customHandler.getNodeType()).toBe("telegram-notification");
       });
 
-      test("should integrate with rate limiting", async () => {
+      test("should deliver through the configured HTTP client", async () => {
         mockFetch.mockResolvedValueOnce(Response.json({ ok: true, result: {} }));
 
         const testNode: TelegramNotificationNode = {
@@ -801,7 +675,6 @@ describe("Telegram Services", () => {
           connections: { default: "next-node" },
         };
 
-        // Rate limiting is automatic in TelegramClient
         const mockEngine = {} as IGraphExecutionEngine;
         const result = await handler.execute(
           testNode,

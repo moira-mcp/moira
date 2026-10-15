@@ -138,7 +138,7 @@ export function createManageCommunication(dependencies: ManageCommunicationDepen
             code,
             message:
               code === "COMMUNICATION_OWNER_UNAVAILABLE"
-                ? "The selected owner is unavailable; no delivery was admitted."
+                ? "The selected owner is unavailable for this attempt; the original delivery outcome remains unconfirmed. Collect the same request when access is restored."
                 : "The delivery outcome is unconfirmed. Collect the original request before another explicit action.",
           },
           request_id: input.request_id,

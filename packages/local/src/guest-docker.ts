@@ -87,7 +87,6 @@ export async function configureGuestDocker(
       "sudo",
       ["-n", "prlimit", "--nofile=524288:", "--", "service", "docker", "restart"],
       {
-        timeout: 30_000,
         maxBuffer: 128 * 1024,
       },
     );

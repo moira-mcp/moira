@@ -7,7 +7,14 @@ export function getLocalGitIdentityService() {
   return (identity ??= new LocalGitIdentity({
     connection: getCodespaceConnectionService(),
     connections: new CodespaceConnectionRepository(getSqliteInstance()),
-    authorize: (auth, resourceId, generation) =>
-      getLocalDeviceService().authorizeGitHubOperation(auth, resourceId, generation, "fetch"),
+    authorize: async (auth, resourceId, generation) =>
+      (
+        await getLocalDeviceService().authorizeGitHubOperation(
+          auth,
+          resourceId,
+          generation,
+          "fetch",
+        )
+      ).repository,
   }));
 }

@@ -205,11 +205,8 @@ test("one provider refusal does not stop another administrator and is not logged
   );
 });
 
-test("an ambiguous provider outcome times out without declaring delivery or retrying", async () => {
+test("a held provider outcome is not declared failed or retried before the actual response", async () => {
   jest.useFakeTimers();
-  dependencies.communication = new UserCommunicationService([new TelegramCommunicationAdapter()], {
-    deadlineMs: 10,
-  });
   let release!: (value: Response) => void;
   jest.mocked(globalThis.fetch).mockImplementation(
     () =>
@@ -218,12 +215,11 @@ test("an ambiguous provider outcome times out without declaring delivery or retr
       }),
   );
   const pending = notifyAdminsOfRegistration(event, dependencies);
-  await jest.advanceTimersByTimeAsync(10);
-  await pending;
+  await jest.advanceTimersByTimeAsync(10_001);
   expect(globalThis.fetch).toHaveBeenCalledTimes(1);
-  expect(dependencies.logger.info).toHaveBeenCalledWith(
+  expect(dependencies.logger.info).not.toHaveBeenCalledWith(
     "Registration notification completed",
-    expect.objectContaining({ status: "all_failed", deliveredChannels: 0 }),
+    expect.anything(),
   );
   release(
     Response.json({
@@ -231,18 +227,16 @@ test("an ambiguous provider outcome times out without declaring delivery or retr
       result: { message_id: 1, date: 1, chat: { id: 7, type: "private" } },
     }),
   );
-  await jest.advanceTimersByTimeAsync(5000);
+  await pending;
   expect(globalThis.fetch).toHaveBeenCalledTimes(1);
-  expect(dependencies.logger.info).not.toHaveBeenCalledWith(
+  expect(dependencies.logger.info).toHaveBeenCalledWith(
     "Registration notification completed",
     expect.objectContaining({ status: "delivered" }),
   );
 });
 
-test("selected-channel delivery and channel testing share provider admission limits", async () => {
-  const service = new UserCommunicationService([new TelegramCommunicationAdapter()], {
-    maxRequestsPerWindow: 1,
-  });
+test("selected-channel delivery and channel testing both reach the configured provider", async () => {
+  const service = new UserCommunicationService([new TelegramCommunicationAdapter()]);
   expect(
     await service.deliverChannel(
       "telegram",
@@ -251,10 +245,13 @@ test("selected-channel delivery and channel testing share provider admission lim
     ),
   ).toMatchObject({ status: "delivered", deliveredChannels: 1 });
   expect(await service.testChannel("telegram", "admin", repository)).toMatchObject({
-    status: "all_failed",
-    channels: [{ channelId: "telegram", status: "rate_limited" }],
+    status: "delivered",
+    channels: [{ channelId: "telegram", status: "delivered" }],
   });
-  expect(accepted.map((value) => value.text)).toEqual(["Actual event"]);
+  expect(accepted.map((value) => value.text)).toEqual([
+    "Actual event",
+    "Test notification from MCP Moira.",
+  ]);
 });
 
 test("migration seeds a global true boolean and preserves the operator's disabled value on replay", async () => {

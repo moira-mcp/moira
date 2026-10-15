@@ -226,6 +226,7 @@ export class LocalRepositoryAdmissionService {
           allowPullRequests: false,
         },
       },
+      device,
     );
     return this.result(added, input.requestId);
   }

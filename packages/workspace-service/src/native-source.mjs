@@ -2,7 +2,7 @@ import { request } from "node:https";
 import { isIP } from "node:net";
 import { URL } from "node:url";
 import { setTimeout, clearTimeout } from "node:timers";
-import { connectHttps } from "./tls-transport.mjs";
+import { connectHttps, transportClosed } from "./tls-transport.mjs";
 
 const HEADER_ADMISSION_MS = 30_000;
 const REDIRECTS = new Set([301, 302, 303, 307, 308]);
@@ -10,9 +10,129 @@ const MIME = /^[a-z0-9][a-z0-9!#$&^_.+-]*\/[a-z0-9][a-z0-9!#$&^_.+-]*$/i;
 
 export class SourceRefusal extends Error {
   publicCode = "SOURCE_REFUSED";
+  status = 422;
   constructor() {
     super("Native file source refused");
     this.name = "SourceRefusal";
+  }
+}
+
+/** Stable operation identity excludes the transient signed download authority. */
+export function nativeFileIdentity(reference) {
+  if (
+    !reference ||
+    typeof reference !== "object" ||
+    Array.isArray(reference) ||
+    Object.keys(reference).some(
+      (key) => !["fileId", "downloadUrl", "fileName", "mimeType", "declaredSize"].includes(key),
+    ) ||
+    typeof reference.fileId !== "string" ||
+    !reference.fileId ||
+    typeof reference.downloadUrl !== "string" ||
+    (reference.fileName !== undefined && typeof reference.fileName !== "string") ||
+    (reference.mimeType !== undefined && typeof reference.mimeType !== "string") ||
+    (reference.declaredSize !== undefined &&
+      (!Number.isSafeInteger(reference.declaredSize) || reference.declaredSize < 0))
+  )
+    throw Object.assign(new Error("Invalid native file source"), {
+      publicCode: "INVALID_NATIVE_SOURCE",
+      status: 400,
+    });
+  return {
+    fileId: reference.fileId,
+    ...(reference.fileName !== undefined ? { fileName: reference.fileName } : {}),
+    ...(reference.mimeType !== undefined ? { mimeType: reference.mimeType } : {}),
+    ...(reference.declaredSize !== undefined ? { declaredSize: reference.declaredSize } : {}),
+  };
+}
+
+/** Apply the same byte and lifetime contract to HTTPS and trusted in-process source transports. */
+export async function nativeFileBytes(reference, { sourceOpener, proxy, signal } = {}) {
+  nativeFileIdentity(reference);
+  let source;
+  let closing;
+  let resolveSettled, rejectSettled;
+  const settled = new Promise((resolve, reject) => {
+    resolveSettled = resolve;
+    rejectSettled = reject;
+  });
+  settled.catch(() => {});
+  const close = () => {
+    if (!closing) {
+      signal?.removeEventListener("abort", cancel);
+      closing = (async () => {
+        try {
+          source?.cancel?.();
+        } finally {
+          try {
+            await source?.close();
+          } finally {
+            await source?.settled;
+          }
+        }
+      })().then(resolveSettled, () => {
+        const error = new SourceRefusal();
+        rejectSettled(error);
+        throw error;
+      });
+    }
+    return closing;
+  };
+  const cancel = () => {
+    void close().catch(() => {});
+  };
+  try {
+    if (signal?.aborted) throw new SourceRefusal();
+    const open =
+      !sourceOpener || sourceOpener === openNativeFile ? openNativeTransport : sourceOpener;
+    source = await open(reference, { proxy, signal });
+    if (signal?.aborted) throw new SourceRefusal();
+    signal?.addEventListener("abort", cancel, { once: true });
+    const contentLength = source.contentLength;
+    const mimeType = source.mimeType ?? "application/octet-stream";
+    if (
+      !source.body ||
+      typeof source.body[Symbol.asyncIterator] !== "function" ||
+      (contentLength !== null && (!Number.isSafeInteger(contentLength) || contentLength < 0)) ||
+      (reference.declaredSize !== undefined &&
+        contentLength !== null &&
+        contentLength !== reference.declaredSize) ||
+      typeof mimeType !== "string" ||
+      mimeType.length > 256 ||
+      !MIME.test(mimeType)
+    )
+      throw new SourceRefusal();
+    const body = (async function* () {
+      let received = 0;
+      try {
+        if (closing) throw new SourceRefusal();
+        for await (const chunk of source.body) {
+          if (signal?.aborted || !(chunk instanceof Uint8Array)) throw new SourceRefusal();
+          received += chunk.byteLength;
+          if (
+            !Number.isSafeInteger(received) ||
+            (reference.declaredSize !== undefined && received > reference.declaredSize) ||
+            (contentLength !== null && received > contentLength)
+          )
+            throw new SourceRefusal();
+          yield chunk;
+        }
+        if (
+          signal?.aborted ||
+          (reference.declaredSize !== undefined && received !== reference.declaredSize) ||
+          (contentLength !== null && received !== contentLength)
+        )
+          throw new SourceRefusal();
+      } catch {
+        throw new SourceRefusal();
+      } finally {
+        await close();
+      }
+    })();
+    return { body, contentLength, mimeType, close, cancel, settled };
+  } catch {
+    await close();
+    throw new SourceRefusal();
   }
 }
 
@@ -45,16 +165,11 @@ function sourceUrl(value, base) {
 }
 
 /** Acquire source bytes at the owner; signed download authority never leaves this call. */
-export async function openNativeFile(reference, { proxy, signal } = {}) {
-  if (
-    !reference ||
-    typeof reference.fileId !== "string" ||
-    !reference.fileId ||
-    typeof reference.downloadUrl !== "string" ||
-    (reference.declaredSize !== undefined &&
-      (!Number.isSafeInteger(reference.declaredSize) || reference.declaredSize < 0))
-  )
-    throw new SourceRefusal();
+export function openNativeFile(reference, options) {
+  return nativeFileBytes(reference, options);
+}
+
+async function openNativeTransport(reference, { proxy, signal } = {}) {
   let url = sourceUrl(reference.downloadUrl);
   const controller = new globalThis.AbortController();
   const abort = () => controller.abort();
@@ -66,16 +181,13 @@ export async function openNativeFile(reference, { proxy, signal } = {}) {
   let socket;
   let closed = false;
   let closing = Promise.resolve();
+  const held = [];
   const cancel = () => {
     if (closed) return;
     closed = true;
     clearTimeout(timer);
     signal?.removeEventListener("abort", abort);
-    closing = Promise.all(
-      [incoming, socket]
-        .filter((stream) => stream && !stream.closed)
-        .map((stream) => new Promise((done) => stream.once("close", done))),
-    ).then(() => undefined);
+    closing = Promise.all(held).then(() => undefined);
     controller.abort();
     incoming?.destroy();
     outgoing?.destroy();
@@ -96,6 +208,7 @@ export async function openNativeFile(reference, { proxy, signal } = {}) {
         signal: controller.signal,
         publicTarget: true,
       });
+      held.push(transportClosed(socket));
       incoming = await new Promise((resolve, reject) => {
         outgoing = request(
           {
@@ -113,6 +226,7 @@ export async function openNativeFile(reference, { proxy, signal } = {}) {
         outgoing.once("error", () => reject(new SourceRefusal()));
         outgoing.end();
       });
+      held.push(transportClosed(incoming));
       clearTimeout(timer);
       const status = incoming.statusCode ?? 0;
       if (REDIRECTS.has(status)) {
@@ -127,44 +241,13 @@ export async function openNativeFile(reference, { proxy, signal } = {}) {
       if (status !== 200) throw new SourceRefusal();
       const length = incoming.headers["content-length"];
       const contentLength = length === undefined ? null : Number(length);
-      if (
-        contentLength !== null &&
-        (!Number.isSafeInteger(contentLength) ||
-          contentLength < 0 ||
-          (reference.declaredSize !== undefined && reference.declaredSize !== contentLength))
-      )
-        throw new SourceRefusal();
       const header = incoming.headers["content-type"] ?? "application/octet-stream";
       if (typeof header !== "string" || header.length > 256) throw new SourceRefusal();
       const mimeType = header.split(";", 1)[0].trim().toLowerCase();
-      if (!MIME.test(mimeType)) throw new SourceRefusal();
-      const body = (async function* () {
-        let received = 0;
-        try {
-          for await (const chunk of incoming) {
-            received += chunk.byteLength;
-            if (
-              !Number.isSafeInteger(received) ||
-              (reference.declaredSize !== undefined && received > reference.declaredSize)
-            )
-              throw new SourceRefusal();
-            yield chunk;
-          }
-          if (
-            (contentLength !== null && received !== contentLength) ||
-            (reference.declaredSize !== undefined && received !== reference.declaredSize)
-          )
-            throw new SourceRefusal();
-        } catch {
-          throw new SourceRefusal();
-        } finally {
-          cancel();
-        }
-      })();
-      return { body, contentLength, mimeType, close, cancel };
+      return { body: incoming, contentLength, mimeType, close, cancel };
     }
   } catch {
-    cancel();
+    await close();
     throw new SourceRefusal();
   }
 }

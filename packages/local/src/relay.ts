@@ -1,6 +1,7 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import { hostname } from "node:os";
 import { z } from "zod";
+import { fetchWork } from "@mcp-moira/shared/http/work-fetch";
 import { LocalRecords, requireSpaceGrant } from "./space-record.js";
 import { ControllerState } from "./controller-state.js";
 import {
@@ -111,18 +112,20 @@ export class LocalRelay {
           : namespace === "scoped"
             ? "/api/codespaces/github/credentials"
             : "/api/codespaces/github/resources";
-      response = await this.fetch(`${relayOrigin(connection.origin)}${prefix}${path}`, {
-        method: body === undefined ? "GET" : "POST",
-        redirect: "error",
-        signal: signal
-          ? AbortSignal.any([signal, AbortSignal.timeout(30_000)])
-          : AbortSignal.timeout(30_000),
-        headers: {
-          authorization: `Bearer ${connection.credential}`,
-          ...(body === undefined ? {} : { "content-type": "application/json" }),
+      response = await fetchWork(
+        `${relayOrigin(connection.origin)}${prefix}${path}`,
+        {
+          method: body === undefined ? "GET" : "POST",
+          redirect: "error",
+          signal,
+          headers: {
+            authorization: `Bearer ${connection.credential}`,
+            ...(body === undefined ? {} : { "content-type": "application/json" }),
+          },
+          ...(body === undefined ? {} : { body: JSON.stringify(body) }),
         },
-        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-      });
+        this.fetch,
+      );
     } catch (error) {
       if (signal?.aborted) throw error;
       if (namespace === "scoped")

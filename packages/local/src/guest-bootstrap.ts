@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
 import { connect } from "node:net";
+import { runProcess } from "./process.js";
 import type { WorkspaceRepositoryBinding } from "../../workspace-service/src/server.mjs";
 import {
   localGitAuthorSchema,
@@ -13,6 +14,30 @@ import {
 } from "../../shared/src/codespaces/local-management-types.js";
 
 const execute = promisify(execFile);
+
+/** Consume Git output through actual close; only diagnostics are retained as a tail. */
+async function runGuestGit(argv: string[], environment: NodeJS.ProcessEnv): Promise<boolean> {
+  let advertised = false;
+  const result = await runProcess({
+    binary: "git",
+    argv,
+    cwd: process.cwd(),
+    env: Object.fromEntries(
+      Object.entries(environment).filter(
+        (entry): entry is [string, string] => entry[1] !== undefined,
+      ),
+    ),
+    timeoutMs: null,
+    maxBytes: 64 * 1024,
+    retainOutput: true,
+    onStdout: (chunk) => {
+      if (/\S/.test(chunk.toString("utf8"))) advertised = true;
+    },
+  });
+  if (result.exitCode !== 0)
+    throw new Error(`Guest Git failed (${result.exitCode}): ${result.stderr.toString("utf8")}`);
+  return advertised;
+}
 export interface GuestBootstrap {
   proxySource: string;
   hostPort: number;
@@ -47,9 +72,9 @@ export async function checkoutGuestRepository(
   ref: string,
   environment: NodeJS.ProcessEnv,
 ): Promise<void> {
-  const options = { env: environment, timeout: 120_000, maxBuffer: 1024 * 1024 };
-  const refs = await execute("git", ["-C", root, "ls-remote", "--refs", "origin"], options);
-  if (refs.stdout.trim() === "") {
+  const options = { env: environment, timeout: 10_000, maxBuffer: 64 * 1024 };
+  const advertised = await runGuestGit(["-C", root, "ls-remote", "--refs", "origin"], environment);
+  if (!advertised) {
     const branch = ref.replace(/^refs\/heads\//, "");
     if (ref.startsWith("refs/tags/") || /^[a-f0-9]{40}$/.test(ref))
       throw new Error("An empty repository requires an initial branch name");
@@ -57,16 +82,15 @@ export async function checkoutGuestRepository(
     await execute("git", ["-C", root, "symbolic-ref", "HEAD", `refs/heads/${branch}`], options);
     return;
   }
-  await execute(
-    "git",
+  await runGuestGit(
     ["-C", root, "-c", "core.hooksPath=/dev/null", "fetch", "origin", ref],
-    options,
+    environment,
   );
   const checkout =
     ref.startsWith("refs/tags/") || /^[a-f0-9]{40}$/.test(ref)
       ? ["checkout", "--detach", "FETCH_HEAD"]
       : ["checkout", "-B", ref.replace(/^refs\/heads\//, ""), "FETCH_HEAD"];
-  await execute("git", ["-C", root, "-c", "core.hooksPath=/dev/null", ...checkout], options);
+  await runGuestGit(["-C", root, "-c", "core.hooksPath=/dev/null", ...checkout], environment);
 }
 
 /** Records the repository the local bootstrap owns; job messages cannot select this binding. */
@@ -219,8 +243,7 @@ export async function bootstrap(input: GuestBootstrap) {
       { timeout: 10_000 },
     );
     const url = `http://${input.spaceId}:${input.brokerToken}@127.0.0.1:3437/git/${input.repository}.git`;
-    await execute(
-      "git",
+    await runGuestGit(
       [
         "-c",
         "credential.helper=",
@@ -232,7 +255,7 @@ export async function bootstrap(input: GuestBootstrap) {
         url,
         root,
       ],
-      { env: environment, timeout: 120_000, maxBuffer: 1024 * 1024 },
+      environment,
     );
     await checkoutGuestRepository(root, input.ref, environment);
   }

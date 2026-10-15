@@ -13,7 +13,7 @@ export interface ProcessRequest {
   cwd: string;
   env: Readonly<Record<string, string>>;
   stdin?: Uint8Array;
-  /** Owner-bound companions use EOF instead of a command deadline. SDK calls remain finite. */
+  /** Owner-bound companions use EOF instead of a command deadline. */
   input?: AsyncIterable<Uint8Array>;
   onStdout?: (chunk: Buffer) => void;
   /** Persistent fixed companions retain a bounded tail per stream instead of a lifetime budget. */

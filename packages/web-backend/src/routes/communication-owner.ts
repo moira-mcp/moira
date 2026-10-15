@@ -1,4 +1,4 @@
-import { Router, json } from "express";
+import { Router } from "express";
 import {
   communicationOwnerScopeSchema,
   communicationOwnerSendSchema,
@@ -10,6 +10,7 @@ import {
   readOwnerFrame,
   settleOwnerFrame,
 } from "../../../workspace-service/src/stream-frame.mjs";
+import { readOwnerJsonBody } from "../../../workspace-service/src/request-body.mjs";
 
 /** Private actor endpoint: source bytes are opaque and never pass through a JSON body parser. */
 export function createCommunicationOwnerRoutes(service: CommunicationOwnerTransport): Router {
@@ -63,18 +64,28 @@ export function createCommunicationOwnerRoutes(service: CommunicationOwnerTransp
       })
       .finally(() => settleOwnerFrame(req, res, frame));
   });
-  router.post("/prepare", json(), (req, res) => {
-    void Promise.resolve()
-      .then(() => service.prepare(bearer(req.get("authorization")), req.body))
+  router.post("/prepare", (req, res) => {
+    void (async () => {
+      const credential = bearer(req.get("authorization"));
+      await service.authenticate(credential);
+      if (!req.is("application/json"))
+        throw Object.assign(new Error("INVALID_JSON"), { publicCode: "INVALID_JSON" });
+      return service.prepare(credential, await readOwnerJsonBody(req));
+    })()
       .then((result) => res.json(result))
-      .catch(() =>
-        res.status(403).json({
+      .catch((error: unknown) => {
+        settleOwnerFrame(req, res);
+        const invalid =
+          error instanceof Error && "publicCode" in error && error.publicCode === "INVALID_JSON";
+        res.status(invalid ? 400 : 403).json({
           error: {
-            code: "COMMUNICATION_AUTHORITY_REFUSED",
-            message: "Channel or owner authority refused before delivery.",
+            code: invalid ? "COMMUNICATION_REQUEST_INVALID" : "COMMUNICATION_AUTHORITY_REFUSED",
+            message: invalid
+              ? "Invalid communication preparation JSON."
+              : "Channel or owner authority refused before delivery.",
           },
-        }),
-      );
+        });
+      });
   });
   router.get("/artifacts/:channelId/:digest", (req, res) => {
     void (async () => {

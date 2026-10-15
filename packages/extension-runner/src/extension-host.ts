@@ -45,7 +45,7 @@ export interface ExtensionHostOptions {
 
 interface PendingCall {
   resolve: (response: RunnerInvokeResponse) => void;
-  timer: NodeJS.Timeout;
+  timer?: NodeJS.Timeout;
   /** The process this call was sent to, so a dying process fails only its own calls. */
   child: ChildProcess;
   artifacts: RunnerArtifact[];
@@ -68,7 +68,7 @@ class StartInterruptedFailure extends Error {}
 
 interface QueuedCall {
   resolve: (result: AdmissionResult) => void;
-  timer: NodeJS.Timeout;
+  timer?: NodeJS.Timeout;
   signal?: AbortSignal;
   onAbort?: () => void;
 }
@@ -121,7 +121,9 @@ export class ExtensionHost {
       return { ok: false, kind: "runner-unavailable", message: "extension host is stopping" };
     }
     const startedAt = Date.now();
-    const admission = await this.acquire(request.timeoutMs, signal);
+    const timeoutMs = request.communication?.kind === "deliver" ? undefined : request.timeoutMs;
+    const deadlineAt = timeoutMs === undefined ? undefined : startedAt + timeoutMs;
+    const admission = await this.acquire(timeoutMs, signal);
     if (admission === "timeout") {
       return {
         ok: false,
@@ -145,21 +147,20 @@ export class ExtensionHost {
     }
 
     try {
-      const remainingMs = request.timeoutMs - (Date.now() - startedAt);
-      if (remainingMs <= 0) {
+      if (deadlineAt !== undefined && deadlineAt <= Date.now()) {
         return {
           ok: false,
           kind: "timeout",
           message: `call exceeded its deadline of ${request.timeoutMs} ms while waiting to run`,
         };
       }
-      return await this.invokeNow(request, startedAt + request.timeoutMs, signal);
+      return await this.invokeNow(request, deadlineAt, signal);
     } finally {
       this.release();
     }
   }
 
-  private acquire(timeoutMs: number, signal?: AbortSignal): Promise<AdmissionResult> {
+  private acquire(timeoutMs: number | undefined, signal?: AbortSignal): Promise<AdmissionResult> {
     const limit = Math.max(1, this.options.maxConcurrent ?? 4);
     if (signal?.aborted) return Promise.resolve("cancelled");
     if (this.running < limit) {
@@ -173,7 +174,10 @@ export class ExtensionHost {
     return new Promise<AdmissionResult>((resolve) => {
       const waiter: QueuedCall = {
         resolve,
-        timer: setTimeout(() => this.settleQueued(waiter, "timeout", true), timeoutMs),
+        timer:
+          timeoutMs === undefined
+            ? undefined
+            : setTimeout(() => this.settleQueued(waiter, "timeout", true), timeoutMs),
         signal,
       };
       if (signal) {
@@ -217,7 +221,7 @@ export class ExtensionHost {
 
   private async invokeNow(
     request: RunnerInvokeRequest,
-    deadlineAt: number,
+    deadlineAt: number | undefined,
     signal?: AbortSignal,
   ): Promise<RunnerInvokeResponse> {
     try {
@@ -230,8 +234,8 @@ export class ExtensionHost {
       };
     }
 
-    const remainingMs = deadlineAt - Date.now();
-    if (remainingMs <= 0) {
+    const remainingMs = deadlineAt === undefined ? undefined : deadlineAt - Date.now();
+    if (remainingMs !== undefined && remainingMs <= 0) {
       return {
         ok: false,
         kind: "timeout",
@@ -246,20 +250,23 @@ export class ExtensionHost {
 
     const id = randomUUID();
     return new Promise<RunnerInvokeResponse>((resolve) => {
-      const timer = setTimeout(() => {
-        // The handler is told first and killed afterwards. Telling it is what lets a well-behaved
-        // handler stop its own work and release what it holds; killing it is what makes the
-        // deadline true for a handler that ignores the signal.
-        this.finishCall(
-          id,
-          {
-            ok: false,
-            kind: "timeout",
-            message: `call exceeded its deadline of ${request.timeoutMs} ms`,
-          },
-          true,
-        );
-      }, remainingMs);
+      const timer =
+        remainingMs === undefined
+          ? undefined
+          : setTimeout(() => {
+              // The handler is told first and killed afterwards. Telling it is what lets a well-behaved
+              // handler stop its own work and release what it holds; killing it is what makes the
+              // deadline true for a handler that ignores the signal.
+              this.finishCall(
+                id,
+                {
+                  ok: false,
+                  kind: "timeout",
+                  message: `call exceeded its deadline of ${request.timeoutMs} ms`,
+                },
+                true,
+              );
+            }, remainingMs);
 
       const onAbort = () => {
         this.finishCall(
@@ -391,8 +398,8 @@ export class ExtensionHost {
   }
 
   private async ensureStartedWithin(
-    deadlineAt: number,
-    originalTimeoutMs: number,
+    deadlineAt: number | undefined,
+    originalTimeoutMs: number | undefined,
     signal?: AbortSignal,
   ): Promise<void> {
     for (;;) {
@@ -407,7 +414,7 @@ export class ExtensionHost {
           error instanceof StartInterruptedFailure &&
           !this.stopped &&
           !signal?.aborted &&
-          deadlineAt > Date.now()
+          (deadlineAt === undefined || deadlineAt > Date.now())
         ) {
           continue;
         }
@@ -417,12 +424,12 @@ export class ExtensionHost {
   }
 
   private waitForStartAttempt(
-    deadlineAt: number,
-    originalTimeoutMs: number,
+    deadlineAt: number | undefined,
+    originalTimeoutMs: number | undefined,
     signal?: AbortSignal,
   ): Promise<void> {
-    const remainingMs = deadlineAt - Date.now();
-    if (remainingMs <= 0) {
+    const remainingMs = deadlineAt === undefined ? undefined : deadlineAt - Date.now();
+    if (remainingMs !== undefined && remainingMs <= 0) {
       return Promise.reject(
         new StartWaitFailure(
           "timeout",
@@ -455,15 +462,18 @@ export class ExtensionHost {
           child.kill("SIGKILL");
         }
       };
-      const timer = setTimeout(() => {
-        finish(
-          new StartWaitFailure(
-            "timeout",
-            `call exceeded its deadline of ${originalTimeoutMs} ms during handler startup`,
-          ),
-        );
-        terminateStartingChild();
-      }, remainingMs);
+      const timer =
+        remainingMs === undefined
+          ? undefined
+          : setTimeout(() => {
+              finish(
+                new StartWaitFailure(
+                  "timeout",
+                  `call exceeded its deadline of ${originalTimeoutMs} ms during handler startup`,
+                ),
+              );
+              terminateStartingChild();
+            }, remainingMs);
       const onAbort = () => {
         finish(
           new StartWaitFailure(

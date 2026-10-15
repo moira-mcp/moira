@@ -241,7 +241,19 @@ class MoiraApiServer {
           error: { code: "ENDPOINT_NOT_FOUND", message: "Unknown local-device endpoint" },
         }),
     );
-    // JSON parsing with default limits (AFTER Better Auth)
+    // Authenticate browser Local policy controls before reading their incremental JSON body.
+    this.app.use(
+      "/api/integrations/local",
+      apiLimiter,
+      requireAuth,
+      createLocalDeviceManagementRoutes(getLocalDeviceService(), getBaseUrl(), requireAuth),
+      (_req, res) =>
+        res.status(404).json({
+          success: false,
+          error: { code: "ENDPOINT_NOT_FOUND", message: "Unknown local-device endpoint" },
+        }),
+    );
+    // Ordinary web APIs retain their separate bounded body policy.
     this.app.use(
       express.json({
         limit: "10mb",
@@ -453,12 +465,6 @@ class MoiraApiServer {
     this.app.use("/api/executions", apiLimiter, requireAuth, executionRoutes);
     this.app.use("/api/settings", apiLimiter, requireAuth, settingsRoutes);
     this.app.use(
-      "/api/integrations/local",
-      apiLimiter,
-      requireAuth,
-      createLocalDeviceManagementRoutes(getLocalDeviceService(), getBaseUrl()),
-    );
-    this.app.use(
       "/api/integrations/github/codespaces",
       apiLimiter,
       requireAuth,
@@ -580,6 +586,9 @@ class MoiraApiServer {
           },
         });
       });
+      // Authenticated owner management and workspace streams have no whole-body work clock.
+      // Header admission and the ordinary APIs' own bounded parsers remain separate.
+      this.server.requestTimeout = 0;
       await startWorkspaceRouter(this.server);
 
       // Graceful shutdown handling

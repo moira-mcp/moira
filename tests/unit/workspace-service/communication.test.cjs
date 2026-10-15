@@ -65,6 +65,69 @@ const prepare = async () => ({
   channels: [{ channelId: "telegram", authorityDigest: "a".repeat(64), provider: "telegram" }],
 });
 
+test("workspace collection reads the original communication receipt without a second logical result", async () => {
+  const value = guest.createFixture();
+  cleanup.push(() => guest.dispose(value));
+  value.publicationScope = {
+    resourceId: randomUUID(),
+    resourceGeneration: 1,
+    authorizationGeneration: 1,
+    publicOrigin: "https://moira.example",
+  };
+  await guest.start(value);
+  const requestId = "ws1-" + randomUUID();
+  const input = {
+    action: "publish",
+    requestId,
+    source: {
+      type: "inline",
+      fileName: "owned.txt",
+      mimeType: "text/plain",
+      data: Buffer.from("original bytes").toString("base64"),
+    },
+  };
+  const submitted = await guest.call(value, "POST", "/v1/communication", input, {
+    "content-type": "application/json",
+  });
+  expect(submitted.status).toBe(200);
+  const receipt = JSON.parse(submitted.bytes.toString());
+  expect(receipt).toMatchObject({ requestId, state: "completed", outcome: { ok: true } });
+  expect(
+    JSON.parse((await guest.call(value, "GET", `/v1/operations/${requestId}`)).bytes.toString()),
+  ).toEqual(receipt);
+  const admission = join(value.stateRoot, "requests", requestId);
+  expect(JSON.parse(await readFile(join(admission, "accepted.json"), "utf8"))).toMatchObject({
+    kind: "communication",
+  });
+  await expect(lstat(join(admission, "result.json"))).rejects.toMatchObject({ code: "ENOENT" });
+  const original = await readFile(
+    join(value.stateRoot, "communication", requestId + ".json"),
+    "utf8",
+  );
+  await guest.stop(value);
+  await guest.start(value);
+  expect(
+    JSON.parse((await guest.call(value, "GET", `/v1/operations/${requestId}`)).bytes.toString()),
+  ).toEqual(receipt);
+  expect(
+    JSON.parse(
+      (
+        await guest.call(value, "POST", "/v1/communication", input, {
+          "content-type": "application/json",
+        })
+      ).bytes.toString(),
+    ),
+  ).toEqual(receipt);
+  expect(await readFile(join(value.stateRoot, "communication", requestId + ".json"), "utf8")).toBe(
+    original,
+  );
+  expect(
+    (await readdir(join(value.stateRoot, "publications", "objects"))).filter(
+      (name) => !name.endsWith(".json"),
+    ),
+  ).toHaveLength(1);
+});
+
 test("controller publication and delivery retain the original source and receipt without another vendor mutation", async () => {
   let sends = 0,
     received;

@@ -9,8 +9,12 @@ import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { createWorkspaceRequestId } from "@mcp-moira/shared/workspace-request-id";
 import { createRequire } from "node:module";
-import { readFileSync, writeFileSync, statSync } from "node:fs";
-import { mkdtemp, realpath, rm } from "node:fs/promises";
+import { readFileSync, writeFileSync, statSync, watch } from "node:fs";
+import { request as tlsRequest } from "node:https";
+import { mkdtemp, realpath, rm, readFile } from "node:fs/promises";
+import { spawn, spawnSync, type ChildProcess } from "node:child_process";
+import { once } from "node:events";
+import { pathToFileURL } from "node:url";
 import express from "express";
 import httpRequest from "supertest";
 import { createWorkspacePublicationHandler } from "../../packages/mcp-server/src/workspace-publication-route.js";
@@ -44,6 +48,7 @@ import {
   getWorkflowService,
   TokenManager,
   metadataRevision,
+  WorkspaceAuthRepository,
 } from "@mcp-moira/shared";
 import { runWithMCPContext } from "../../packages/mcp-server/src/core/request-context.js";
 import {
@@ -72,6 +77,8 @@ type Fixture = {
   directory: string;
   socketPath: string;
   publicationScope?: Record<string, unknown>;
+  remote?: Record<string, unknown>;
+  environment?: Record<string, string>;
 };
 const guest = createRequire(import.meta.url)("../fixtures/workspace-service.cjs") as {
   createFixture(): Fixture;
@@ -190,11 +197,14 @@ async function client() {
   };
 }
 
-async function setup() {
+async function setup(fileDatabase = false) {
   const value = guest.createFixture();
   cleanups.push(() => guest.dispose(value));
   await guest.start(value);
-  const sqlite = new Database(":memory:");
+  const sqlite = new Database(
+    fileDatabase ? join(value.directory, "test-authority.db") : ":memory:",
+  );
+  sqlite.pragma("journal_mode=WAL");
   cleanups.push(() => {
     sqlite.close();
   });
@@ -443,6 +453,317 @@ async function setup() {
 }
 
 describe("registered MCP tools against actual workspace and lifecycle services", () => {
+  it("separate cloud caller streams the enrolled owner's publication and collects one delivery after caller loss", async () => {
+    const value = await setup(true);
+    const database = value.sqlite.name;
+    const health = await value.wire.json(USER_ID, value.id, { method: "GET", path: "/v1/health" });
+    const resource = new GitHubResourceRepository(value.sqlite).getOwned(USER_ID, value.id)!;
+    const credential = new WorkspaceAuthRepository(value.sqlite).issue(
+      {
+        userId: USER_ID,
+        resourceId: value.id,
+        resourceGeneration: resource.generation,
+        authorizationGeneration: resource.authorizationGeneration,
+        environmentIdentity: String(health.environmentIdentity),
+      },
+      null,
+    );
+    for (const [key, setting] of [
+      ["telegram.bot_token", "123:fixture"],
+      ["telegram.chat_id", "42"],
+    ]) {
+      value.sqlite
+        .prepare(
+          "INSERT OR IGNORE INTO settingDefinition(key,type,category,label,createdAt,updatedAt) VALUES(?,'string','telegram',?,1,1)",
+        )
+        .run(key, key);
+      value.sqlite
+        .prepare(
+          "INSERT INTO userSettingValue(userId,settingKey,value,encrypted,updatedAt) VALUES(?,?,?,0,1)",
+        )
+        .run(USER_ID, key, setting);
+    }
+    const key = join(value.directory, "key.pem"),
+      ca = join(value.directory, "ca.pem");
+    expect(
+      spawnSync(
+        "openssl",
+        [
+          "req",
+          "-x509",
+          "-newkey",
+          "rsa:2048",
+          "-nodes",
+          "-days",
+          "1",
+          "-subj",
+          "/CN=localhost",
+          "-addext",
+          "subjectAltName=IP:127.0.0.1",
+          "-keyout",
+          key,
+          "-out",
+          ca,
+        ],
+        { stdio: "ignore" },
+      ).status,
+    ).toBe(0);
+    let sequence = 0;
+    const startCloud = async (role: "backend" | "caller") => {
+      const child = spawn(
+        process.execPath,
+        [
+          "--import",
+          "tsx",
+          "--input-type=module",
+          "-e",
+          `import {startCloudProcess} from ${JSON.stringify(pathToFileURL(resolve("tests/fixtures/workspace-cloud.ts")).href)};await startCloudProcess(${JSON.stringify(role)},${JSON.stringify({ directory: value.directory, userId: USER_ID })});`,
+        ],
+        {
+          env: {
+            ...process.env,
+            DB_PATH: database,
+            CODESPACE_CODESPACES_ENABLED: "true",
+            NODE_EXTRA_CA_CERTS: ca,
+          },
+          stdio: ["ignore", "pipe", "pipe", "ipc"],
+        },
+      );
+      let diagnostics = "";
+      child.stderr!.on("data", (bytes) => {
+        diagnostics += String(bytes);
+      });
+      const exited = new Promise<never>((_done, reject) =>
+        child.once("exit", (code) => reject(new Error(`${role} exited ${code}: ${diagnostics}`))),
+      );
+      cleanups.push(async () => {
+        if (child.exitCode === null && child.signalCode === null) {
+          const closed = once(child, "exit");
+          child.kill("SIGTERM");
+          await closed;
+        }
+      });
+      const [ready] = await Promise.race([once(child, "message"), exited]);
+      expect(ready).toMatchObject({ ready: true, database });
+      expect((ready as { pid: number }).pid).not.toBe(process.pid);
+      return child;
+    };
+    const callCloud = (
+      child: ChildProcess,
+      action: string,
+      request: Record<string, unknown> = {},
+    ) =>
+      new Promise<Record<string, unknown>>((done, reject) => {
+        const id = ++sequence;
+        const closed = () => {
+          child.off("message", reply);
+          reject(new Error("Cloud caller closed before its reply"));
+        };
+        const reply = (message: {
+          id?: number;
+          result?: Record<string, unknown>;
+          error?: string;
+        }) => {
+          if (message.id !== id) return;
+          child.off("message", reply);
+          child.off("exit", closed);
+          if (message.error) reject(new Error(message.error));
+          else done(message.result!);
+        };
+        child.on("message", reply);
+        child.once("exit", closed);
+        child.send({ id, action, request });
+      });
+    const backend = await startCloud("backend");
+    await guest.stop(value);
+    value.remote = {
+      origin: "https://127.0.0.1:3100",
+      credential,
+      environmentIdentity: health.environmentIdentity,
+    };
+    value.environment = { NODE_EXTRA_CA_CERTS: ca };
+    await guest.start(value);
+    let caller = await startCloud("caller");
+    expect(caller.pid).not.toBe(backend.pid);
+    writeFileSync(join(value.root, "binary.bin"), value.nativeBytes);
+    const download = await callCloud(caller, "tool", {
+      action: "download",
+      codespace_id: value.id,
+      path: "binary.bin",
+      file_name: "binary.bin",
+      mime_type: "application/octet-stream",
+    });
+    expect(download.isError).not.toBe(true);
+    const file = (download.structuredContent as { file: { reference_id: string; sha256: string } })
+      .file;
+    expect(file.sha256).toBe(createHash("sha256").update(value.nativeBytes).digest("hex"));
+    const token = file.reference_id.split("/").at(-1)!;
+    const publicRead = async () => {
+      const reply = await createWorkspaceClient(join(value.directory, "caller.sock")).request(
+        USER_ID,
+        value.id,
+        { method: "GET", path: `/api/codespaces/files/${value.id}/${token}` },
+      );
+      const chunks: Buffer[] = [];
+      for await (const chunk of reply.body) chunks.push(Buffer.from(chunk));
+      return { status: reply.statusCode, bytes: Buffer.concat(chunks) };
+    };
+    expect(await publicRead()).toEqual({ status: 200, bytes: value.nativeBytes });
+    const scope = {
+      kind: "workspace",
+      resourceId: value.id,
+      resourceGeneration: resource.generation,
+      authorizationGeneration: resource.authorizationGeneration,
+      environmentIdentity: health.environmentIdentity,
+    };
+    const prepare = (bearer: string, currentScope = scope) =>
+      new Promise<number>((done, reject) => {
+        const outgoing = tlsRequest(
+          {
+            hostname: "127.0.0.1",
+            port: 3100,
+            path: "/api/communication/owner/prepare",
+            method: "POST",
+            ca: readFileSync(ca),
+            headers: { authorization: `Bearer ${bearer}`, "content-type": "application/json" },
+          },
+          (reply) => {
+            reply.resume();
+            reply.once("end", () => done(reply.statusCode!));
+          },
+        );
+        outgoing.once("error", reject);
+        outgoing.end(
+          JSON.stringify({
+            scope: currentScope,
+            requestId: createWorkspaceRequestId(),
+            channelIds: ["telegram"],
+            kind: "document",
+            text: "Report",
+            file: {
+              fileName: "binary.bin",
+              mimeType: "application/octet-stream",
+              size: value.nativeBytes.length,
+            },
+          }),
+        );
+      });
+    expect(await prepare("f".repeat(43))).toBe(403);
+    expect(await prepare(credential, { ...scope, resourceId: randomUUID() })).toBe(403);
+    expect(await prepare(credential)).toBe(200);
+    const requestId = createWorkspaceRequestId();
+    const delivery = {
+      requestId,
+      action: "deliver",
+      source: { type: "publication", referenceId: file.reference_id },
+      kind: "document",
+      text: "Report",
+      channelIds: ["telegram"],
+    };
+    const delivered = new Promise<void>((done, reject) => {
+      const marker = join(value.directory, "vendor-effects");
+      const inspect = () => {
+        void readFile(marker, "utf8").then(
+          () => {
+            observer.close();
+            done();
+          },
+          (error) => {
+            if (error.code !== "ENOENT") {
+              observer.close();
+              reject(error);
+            }
+          },
+        );
+      };
+      const observer = watch(value.directory, inspect);
+      cleanups.push(() => observer.close());
+      observer.once("error", reject);
+      inspect();
+    });
+    const pending = callCloud(caller, "submit", delivery);
+    const lostReply = expect(pending).rejects.toThrow("closed before its reply");
+    await Promise.race([
+      delivered,
+      pending.then(() => {
+        throw new Error("Delivery replied before the vendor barrier");
+      }),
+    ]);
+    const closed = once(caller, "exit");
+    caller.kill("SIGTERM");
+    await closed;
+    await lostReply;
+    caller = await startCloud("caller");
+    expect(await callCloud(caller, "collect", { requestId, resourceId: value.id })).toMatchObject({
+      requestId,
+      state: "accepted",
+    });
+    const completed = new Promise<void>((done, reject) => {
+      const directory = join(value.directory, "state", "communication");
+      const inspect = () => {
+        void readFile(join(directory, requestId + ".json"), "utf8").then((bytes) => {
+          if (JSON.parse(bytes).outcome) {
+            observer.close();
+            done();
+          }
+        }, reject);
+      };
+      const observer = watch(directory, inspect);
+      cleanups.push(() => observer.close());
+      observer.once("error", reject);
+      inspect();
+    });
+    await callCloud(backend, "release-vendor");
+    await completed;
+    // Re-submitting the same admitted input collects its original result, never a second vendor effect.
+    const receipt = await callCloud(caller, "submit", delivery);
+    expect(receipt).toMatchObject({
+      requestId,
+      state: "completed",
+      outcome: { ok: true, result: { status: "delivered" } },
+    });
+    expect(await callCloud(caller, "collect", { requestId, resourceId: value.id })).toEqual(
+      receipt,
+    );
+    expect(readFileSync(join(value.directory, "vendor-effects"), "utf8")).toBe("delivered\n");
+    const multipart = readFileSync(join(value.directory, "vendor-body"));
+    const contentStart =
+      multipart.indexOf(Buffer.from("Content-Type: application/octet-stream\r\n\r\n")) +
+      Buffer.byteLength("Content-Type: application/octet-stream\r\n\r\n");
+    expect(contentStart).toBeGreaterThan(
+      Buffer.byteLength("Content-Type: application/octet-stream\r\n\r\n"),
+    );
+    expect(multipart.subarray(contentStart, contentStart + value.nativeBytes.length)).toEqual(
+      value.nativeBytes,
+    );
+    const refusedId = createWorkspaceRequestId();
+    await callCloud(backend, "revoke-at-rendezvous", { resourceId: value.id });
+    expect(
+      await callCloud(caller, "tool", {
+        action: "exec",
+        codespace_id: value.id,
+        request_id: refusedId,
+        argv: [
+          process.execPath,
+          "-e",
+          "require('node:fs').writeFileSync('revoked-effect','unexpected')",
+        ],
+      }),
+    ).toMatchObject({ isError: true });
+    expect(
+      await value.wire.json(USER_ID, value.id, {
+        method: "GET",
+        path: `/v1/operations/${refusedId}`,
+      }),
+    ).toMatchObject({ requestId: refusedId, state: "absent" });
+    await expect(readFile(join(value.root, "revoked-effect"))).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+    expect(await prepare(credential)).toBe(403);
+    expect((await publicRead()).status).toBe(404);
+    expect(readFileSync(join(value.directory, "vendor-effects"), "utf8")).toBe("delivered\n");
+  });
+
   it("streams an actual controller-built tar and repeats its immutable original without another submission", async () => {
     const value = await setup();
     const db = getSqliteInstance();

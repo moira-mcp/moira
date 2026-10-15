@@ -1,4 +1,11 @@
-import { Router, json, type Request, type Response, type NextFunction } from "express";
+import {
+  Router,
+  json,
+  type Request,
+  type Response,
+  type NextFunction,
+  type RequestHandler,
+} from "express";
 import { z } from "zod";
 import {
   LocalDeviceError,
@@ -17,6 +24,8 @@ import { issueWorkspaceAgentCredential } from "../services/workspace-services.js
 import { getSqliteInstance } from "@mcp-moira/shared";
 import { getCodespaceProviderServices } from "../services/codespace-services.js";
 import { LocalCodespaceResourceService } from "../services/local-codespace-resource-service.js";
+import { readOwnerJsonBody } from "../../../workspace-service/src/request-body.mjs";
+import { settleOwnerFrame } from "../../../workspace-service/src/stream-frame.mjs";
 
 type Handler = (req: Request, res: Response, next: NextFunction) => unknown | Promise<unknown>;
 function endpoint(handler: Handler) {
@@ -142,10 +151,10 @@ function finishRouter(router: Router): Router {
 export function createLocalDeviceManagementRoutes(
   service: LocalDeviceService,
   publicOrigin: string,
+  revalidate: RequestHandler,
 ): Router {
   const router = Router();
   protectOrigin(router, publicOrigin);
-  router.use(json({ limit: "2mb" }));
   const owner = (req: Request) => {
     const id = (req as AuthenticatedRequest).userId;
     if (typeof id !== "string" || !id)
@@ -160,6 +169,7 @@ export function createLocalDeviceManagementRoutes(
   );
   router.post(
     "/pairings",
+    json({ limit: "2mb" }),
     endpoint((req, res) => {
       z.object({})
         .strict()
@@ -169,6 +179,7 @@ export function createLocalDeviceManagementRoutes(
   );
   router.post(
     "/pairings/:id/confirm",
+    json({ limit: "2mb" }),
     endpoint(async (req, res) => {
       const input = z
         .object({ expectedRevision: z.number().int().positive() })
@@ -182,6 +193,7 @@ export function createLocalDeviceManagementRoutes(
   );
   router.delete(
     "/devices/:id",
+    json({ limit: "2mb" }),
     endpoint(async (req, res) => {
       const input = z
         .object({ expectedGeneration: z.number().int().positive() })
@@ -195,16 +207,35 @@ export function createLocalDeviceManagementRoutes(
   );
   router.put(
     "/devices/:id/settings",
+    endpoint(async (req, res, next) => {
+      try {
+        res.locals.localSettingsOwner = owner(req);
+        if (
+          !(req as AuthenticatedRequest).session?.token ||
+          req.get("Authorization") ||
+          req.get("Origin") !== new URL(publicOrigin).origin
+        )
+          throw new LocalDeviceError(
+            "LOCAL_UNAUTHORIZED",
+            "A confirmed browser session and matching origin are required.",
+          );
+        if (!req.is("application/json"))
+          throw new LocalDeviceError("LOCAL_INVALID", "Invalid local-device request.");
+        try {
+          req.body = await readOwnerJsonBody(req);
+        } catch {
+          throw new LocalDeviceError("LOCAL_INVALID", "Invalid local-device request.");
+        }
+        next();
+      } catch (error) {
+        settleOwnerFrame(req, res);
+        throw error;
+      }
+    }),
+    revalidate,
     endpoint(async (req, res) => {
-      if (
-        !(req as AuthenticatedRequest).session?.token ||
-        req.get("Authorization") ||
-        req.get("Origin") !== new URL(publicOrigin).origin
-      )
-        throw new LocalDeviceError(
-          "LOCAL_UNAUTHORIZED",
-          "A confirmed browser session and matching origin are required.",
-        );
+      if (owner(req) !== res.locals.localSettingsOwner)
+        throw new LocalDeviceError("LOCAL_UNAUTHORIZED", "Account access changed during input.");
       const input = localControlRequestSchema.parse(req.body);
       if (input.settings.agentRepositoryManagement)
         await getLocalRepositoryAdmissionService().validateOwner(

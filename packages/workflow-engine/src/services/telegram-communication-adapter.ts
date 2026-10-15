@@ -5,10 +5,12 @@ import type {
   PortableCommunicationMessage,
 } from "./user-communication.js";
 import { CommunicationChannelError } from "./user-communication.js";
+import { TELEGRAM_TEXT_MAX_LENGTH } from "../types/telegram-types.js";
 
 export class TelegramCommunicationAdapter implements CommunicationChannelAdapter {
   readonly id = "telegram";
   readonly provider = "telegram";
+  readonly textLimit = TELEGRAM_TEXT_MAX_LENGTH;
   readonly capabilities = {
     text: true,
     image: true,
@@ -44,23 +46,29 @@ export class TelegramCommunicationAdapter implements CommunicationChannelAdapter
   ): Promise<void> {
     try {
       if (signal.aborted) throw new CommunicationChannelError("cancelled");
-      const [token, chatId] = await Promise.all([
+      const [enabled, token, chatId] = await Promise.all([
+        configuration.get<boolean>("telegram.enabled"),
         configuration.get<string>("telegram.bot_token"),
         configuration.get<string>("telegram.chat_id"),
       ]);
-      if (!token || !chatId) throw new CommunicationChannelError("configuration_changed");
+      if (enabled === false || !token || !chatId)
+        throw new CommunicationChannelError("configuration_changed");
       const client = getTelegramClient(token, chatId);
       if (!client) throw new CommunicationChannelError("provider_unavailable");
       const parseMode =
         request.format === "markdown" ? "Markdown" : request.format === "html" ? "HTML" : undefined;
-      await client.sendMessage({
-        chatId,
-        text: request.text,
-        parseMode,
-        disableNotification: request.silent,
-        disableLinkPreview: true,
-      });
+      await client.sendMessage(
+        {
+          chatId,
+          text: request.text,
+          parseMode,
+          disableNotification: request.silent,
+          disableLinkPreview: true,
+        },
+        signal,
+      );
     } catch (error) {
+      if (signal.aborted) throw new CommunicationChannelError("cancelled");
       if (error instanceof CommunicationChannelError) throw error;
       const providerReason =
         error && typeof error === "object" && "type" in error && typeof error.type === "string"

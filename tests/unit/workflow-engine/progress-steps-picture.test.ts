@@ -315,7 +315,7 @@ describe("the notification hands the steps picture to its owner", () => {
       channels: [],
     }));
     const handler = new UserNotificationHandler(
-      { deliver: text, maxTextLength: 4096 } as unknown as UserCommunicationService,
+      { deliver: text } as unknown as UserCommunicationService,
       fixture.owner,
     );
     const repository = {
@@ -358,7 +358,7 @@ describe("the notification hands the steps picture to its owner", () => {
       channels: [],
     }));
     const handler = new UserNotificationHandler(
-      { deliver: text, maxTextLength: 4096 } as unknown as UserCommunicationService,
+      { deliver: text } as unknown as UserCommunicationService,
       fixture.owner,
     );
     const repository = {

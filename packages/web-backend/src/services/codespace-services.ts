@@ -32,7 +32,6 @@ import {
   githubCodespaceGuidance,
 } from "./github-codespace-client.js";
 import { GitHubResourceService } from "./github-resource-service.js";
-import { getWorkspaceRouter } from "./workspace-services.js";
 
 interface CodespaceServices {
   connection: CodespaceConnectionService;
@@ -162,7 +161,16 @@ function initializeCodespaceServices(): CodespaceServices {
         getCodespaceResourcePolicy,
         getCodespaceGitHubConfig,
         getBaseUrl,
-        (binding) => getWorkspaceRouter().isConnected(binding),
+        async (binding) => {
+          if (binding.kind !== "workspace") return false;
+          // An explicit status read observes the owner through the normal route;
+          // admission never consults a second availability registry.
+          const observed = await getWorkspaceClient().json(binding.userId, binding.resourceId, {
+            method: "GET",
+            path: "/v1/health",
+          });
+          return observed.environmentIdentity === binding.environmentIdentity;
+        },
       )
     : null;
   const billing = createCodespaceBillingReader({

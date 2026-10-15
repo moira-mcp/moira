@@ -352,7 +352,7 @@ describe("workspace-backed codespace and process tools", () => {
       isError: true,
       structuredContent: {
         state: "not_started",
-        reason: "COMMAND_REJECTED",
+        reason: "COMMAND_START_REJECTED",
         request_id: requestId,
       },
     });

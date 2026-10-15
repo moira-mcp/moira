@@ -26,6 +26,32 @@ function ownerFailure(
       ? (error as { statusCode?: unknown; details?: { error?: { code?: unknown } } })
       : null;
   const code = value?.details?.error?.code;
+  if (
+    typeof value?.statusCode === "number" &&
+    typeof code === "string" &&
+    [
+      "CODESPACE_PROVIDER_UNAVAILABLE",
+      "CODESPACE_AUTHORIZATION_REQUIRED",
+      "CODESPACE_GENERATION_CONFLICT",
+      "CODESPACE_PROVIDER_DISABLED",
+      "CODESPACE_RESOURCE_INVALID",
+      "CODESPACE_NOT_FOUND",
+    ].includes(code)
+  )
+    return {
+      requestId,
+      state: "unconfirmed",
+      ...owner,
+      outcome: {
+        ok: false,
+        error: {
+          code,
+          message: collecting
+            ? "The current route refused receipt observation. The original outcome remains unconfirmed."
+            : "The current request was refused before dispatch. Collect the original request ID; its previous outcome remains unconfirmed.",
+        },
+      },
+    };
   // These are explicit owner pre-admission/source refusals, not status-only inference.
   if (
     typeof value?.statusCode === "number" &&
@@ -75,7 +101,12 @@ function ownerFailure(
 
 export class LiveCommunicationFileOwner implements CommunicationFileOwner {
   constructor(
-    private readonly dependencies = {
+    private readonly dependencies: {
+      devices: typeof getLocalDeviceService;
+      controller: typeof getControllerClient;
+      workspace: typeof getWorkspaceClient;
+      authorizePublication: (resourceId: string) => string | Promise<string>;
+    } = {
       devices: getLocalDeviceService,
       controller: getControllerClient,
       workspace: getWorkspaceClient,
@@ -87,12 +118,11 @@ export class LiveCommunicationFileOwner implements CommunicationFileOwner {
     deviceId?: string,
   ): Promise<Extract<CommunicationOwnerScope, { kind?: "controller" }>> {
     const devices = this.dependencies.devices();
-    const candidates = (await devices.listOwned(userId)).devices.filter(
-      (device) =>
-        device.status === "active" &&
-        device.owner.state === "available" &&
-        (!deviceId || device.deviceId === deviceId),
-    );
+    const candidates = devices
+      .listRegistered(userId)
+      .devices.filter(
+        (device) => device.status === "active" && (!deviceId || device.deviceId === deviceId),
+      );
     if (candidates.length !== 1) throw new CommunicationChannelOwnerUnavailableError();
     const selected = candidates[0]!;
     const current = devices.getDeviceIdentity(userId, selected.deviceId);
@@ -119,7 +149,10 @@ export class LiveCommunicationFileOwner implements CommunicationFileOwner {
     owner: { device_id?: string; codespace_id?: string };
   }> {
     if (owner.resourceId) {
-      if (owner.deviceId || this.dependencies.authorizePublication(owner.resourceId) !== userId)
+      if (
+        owner.deviceId ||
+        (await this.dependencies.authorizePublication(owner.resourceId)) !== userId
+      )
         throw new CommunicationChannelOwnerUnavailableError();
       return {
         client: this.dependencies.workspace(),

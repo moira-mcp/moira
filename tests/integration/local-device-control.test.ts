@@ -20,6 +20,8 @@ let db: Database.Database, directory: string, service: LocalDeviceService;
 let owner: Awaited<ReturnType<typeof controllerFixture>> | undefined;
 let deviceId: string;
 let lostReply = false;
+let discoveryUnavailable = false;
+let revokeAfterSettings = false;
 beforeEach(async () => {
   directory = await realpath(await mkdtemp("/tmp/moira-live-settings-"));
   db = new Database(":memory:");
@@ -31,14 +33,20 @@ beforeEach(async () => {
     ).run(id, id + "@example.test", id);
   owner = undefined;
   lostReply = false;
+  discoveryUnavailable = false;
+  revokeAfterSettings = false;
   deviceId = randomUUID();
   service = new LocalDeviceService(new LocalDeviceRepository(db), Date.now, {
     async json(user, id, input) {
-      if (!owner)
+      if (!owner || (discoveryUnavailable && input.path === "/v1/controller"))
         throw Object.assign(new Error("Controlled owner connection absent"), {
           code: "ECONNREFUSED",
         });
       const value = await owner.client.json(user, id, input);
+      if (revokeAfterSettings && input.method === "PUT") {
+        revokeAfterSettings = false;
+        await service.revokeOwned(user, id, 1);
+      }
       if (lostReply && input.method === "PUT") {
         lostReply = false;
         throw new Error("Controlled reply lost after owner completion");
@@ -73,7 +81,11 @@ function app() {
     });
     next();
   });
-  value.use(createLocalDeviceManagementRoutes(service, "https://moira.example"));
+  value.use(
+    createLocalDeviceManagementRoutes(service, "https://moira.example", (_req, _res, next) =>
+      next(),
+    ),
+  );
   return value;
 }
 function save(value: ReturnType<typeof app>, body: Record<string, unknown>) {
@@ -84,6 +96,56 @@ function save(value: ReturnType<typeof app>, body: Record<string, unknown>) {
     .send(body);
 }
 describe("Browser-authorized settings reach one live owner", () => {
+  test("a completed settings snapshot cannot project authority revoked while its reply arrives", async () => {
+    revokeAfterSettings = true;
+    const settings = {
+      ...controlSettings(await owner!.records.policy()),
+      label: "Before revocation",
+    };
+    await expect(
+      service.requestSettings("owner", deviceId, {
+        requestId: createWorkspaceRequestId(),
+        expectedGeneration: 1,
+        expectedRevision: 0,
+        settings,
+      }),
+    ).rejects.toMatchObject({ code: "LOCAL_UNAUTHORIZED" });
+    expect((await owner!.records.policy()).label).toBe(settings.label);
+    expect(service.getDeviceIdentity("owner", deviceId).status).toBe("revoked");
+  });
+  test("successful settings and collection project the original receipt without fresh discovery", async () => {
+    const settings = { ...controlSettings(await owner!.records.policy()), label: "Original" };
+    const requestId = createWorkspaceRequestId();
+    discoveryUnavailable = true;
+    const saved = await service.requestSettings("owner", deviceId, {
+      requestId,
+      expectedGeneration: 1,
+      expectedRevision: 0,
+      settings,
+    });
+    expect(saved.owner.local.policy.label).toBe("Original");
+    await owner!.controller.settings({
+      requestId: createWorkspaceRequestId(),
+      expectedGeneration: 1,
+      expectedRevision: 1,
+      settings: { ...settings, label: "Later" },
+    });
+    const collected = await service.collectSettings("owner", deviceId, requestId);
+    expect(collected).toMatchObject({
+      requestId,
+      state: "completed",
+      result: {
+        owner: {
+          local: {
+            policy: { label: "Original" },
+            control: { revision: 1, appliedRevision: 1 },
+          },
+        },
+      },
+    });
+    expect((await owner!.records.policy()).label).toBe("Later");
+    expect((await service.listOwned("owner")).devices[0].owner.state).toBe("unavailable");
+  });
   test("the owner applies settings and retains the receipt while cloud has no requested policy/control columns", async () => {
     const current = await owner!.records.policy(),
       requestId = createWorkspaceRequestId();
