@@ -16,13 +16,15 @@
 #include <sys/sysctl.h>
 #elif defined(__linux__)
 #include <dirent.h>
+#include <poll.h>
+#include <sys/syscall.h>
 #else
 #error Unsupported provisioning platform
 #endif
 
 static volatile sig_atomic_t cancelled;
 static void cancel(int signal_number) { (void)signal_number; cancelled = 1; }
-/* Zombies have no executing code or open transports; their eventual reaping is not claimed. */
+/* A process is settled only after all its threads release their transports. Reaping is separate. */
 static int live_group(pid_t group) {
 #ifdef __APPLE__
   int mib[4] = {CTL_KERN, KERN_PROC, KERN_PROC_PGRP, group};
@@ -57,7 +59,18 @@ static int live_group(pid_t group) {
     char *fields = strrchr(value, ')'), state;
     int parent, pgid;
     if (!fields || sscanf(fields + 1, " %c %d %d", &state, &parent, &pgid) != 3) { failed = 1; continue; }
-    if (pgid == group && state != 'Z' && state != 'X') live = 1;
+    if (pgid != group) continue;
+    /* A zombie main thread can still have live sibling threads and shared file descriptors.
+       As in runtime-control-helper, a process pidfd (without PIDFD_THREAD) becomes readable
+       only after its last thread exits. The unreaped direct child still pins our PGID. */
+    int identity = syscall(SYS_pidfd_open, (pid_t)strtol(entry->d_name, NULL, 10), 0);
+    if (identity < 0) { if (errno != ESRCH) failed = 1; continue; }
+    struct pollfd process = { .fd = identity, .events = POLLIN };
+    int observed = poll(&process, 1, 0);
+    if (observed < 0 || (observed && (!(process.revents & POLLIN) ||
+        (process.revents & ~(POLLIN | POLLHUP))))) failed = 1;
+    else if (!observed) live = 1;
+    if (close(identity)) failed = 1;
   }
   closedir(directory); return failed ? -1 : live;
 #endif

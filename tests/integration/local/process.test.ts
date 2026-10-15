@@ -187,6 +187,35 @@ describe("bounded local subprocess boundary", () => {
       await rm(socketRoot, { recursive: true, force: true });
     }
   });
+  (process.platform === "linux" ? test : test.skip)(
+    "a zombie main thread cannot prove settlement while its worker still serves a transport",
+    async () => {
+      const fixture = join(root, "process-group-thread");
+      await promisify(execFile)("/usr/bin/cc", [
+        "-std=c11",
+        "-O2",
+        "-Wall",
+        "-Wextra",
+        "-Werror",
+        "-pthread",
+        "tests/fixtures/local/process-group-thread.c",
+        "-o",
+        fixture,
+      ]);
+      const result = await promisify(execFile)(fixture, {
+        timeout: 10_000,
+        killSignal: "SIGTERM",
+      });
+      expect(JSON.parse(result.stdout)).toEqual({
+        mainThreadState: "Z",
+        liveGroup: 1,
+        connected: true,
+        challengeEchoed: true,
+        settledGroup: 0,
+        reaped: true,
+      });
+    },
+  );
   test("fixed provisioning closes a surviving descendant transport before returning to credential release", async () => {
     const helper = join(root, "process-group-helper");
     await promisify(execFile)(process.platform === "darwin" ? "/usr/bin/clang" : "/usr/bin/cc", [
