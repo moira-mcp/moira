@@ -98,7 +98,10 @@ describe("Browser-authorized settings reach one live owner", () => {
     expect(saved.status).toBe(200);
     expect(saved.body.data.owner).toMatchObject({
       state: "available",
-      control: { revision: 1, appliedRevision: 1, status: "applied" },
+      local: {
+        state: "configured",
+        control: { revision: 1, appliedRevision: 1, status: "applied" },
+      },
     });
     expect((await owner!.records.policy()).label).toBe(body.settings.label);
     const columns = (
@@ -114,7 +117,12 @@ describe("Browser-authorized settings reach one live owner", () => {
     expect(receipt.body.data).toMatchObject({
       requestId,
       state: "completed",
-      result: { owner: { state: "available", control: { revision: 1 } } },
+      result: {
+        owner: {
+          state: "available",
+          local: { state: "configured", control: { revision: 1 } },
+        },
+      },
     });
     const stale = await save(value, {
       ...body,
@@ -147,7 +155,12 @@ describe("Browser-authorized settings reach one live owner", () => {
     expect(collected.status).toBe(200);
     expect(collected.body.data).toMatchObject({
       state: "completed",
-      result: { owner: { control: { revision: 1, appliedRevision: 1 } } },
+      result: {
+        owner: {
+          state: "available",
+          local: { state: "configured", control: { revision: 1, appliedRevision: 1 } },
+        },
+      },
     });
     expect((await owner!.records.policy()).label).toBe(settings.label);
     expect(await owner!.state.keys("controller-operation-")).toHaveLength(1);

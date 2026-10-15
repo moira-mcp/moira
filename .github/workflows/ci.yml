@@ -101,6 +101,15 @@ jobs:
       - name: Create data directory
         run: mkdir -p data
 
+      # Hosted runner toolcache executables are writable by other users. The
+      # custody supervisor intentionally accepts only a protected interpreter.
+      - name: Prepare private integration interpreter
+        run: |
+          node_dir=$(mktemp -d "${RUNNER_TEMP}/moira-integration-node.XXXXXX")
+          install -m 700 "$(command -v node)" "$node_dir/node"
+          cmp --silent "$(command -v node)" "$node_dir/node"
+          printf '%s\n' "$node_dir" >> "$GITHUB_PATH"
+
       - name: Run integration tests
         run: npm run test:integration
 

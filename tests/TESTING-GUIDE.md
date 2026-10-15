@@ -212,10 +212,16 @@ protocols, credential-store preparation, storage custody and independent shutdow
 SDK and keychain responses are substituted; native guard cases use controlled real
 processes and sockets rather than a physical microVM. Darwin custody cases are excluded
 on unsupported platforms. Integration global setup builds the host Local programs with
-`scripts/build-local-programs.js` and native helpers with `scripts/build-local-native.js`
-before preparing its migrated database. This preparation does not download or package
+`scripts/build-local-programs.js`, native helpers with `scripts/build-local-native.js`,
+and the controller's owner programs with `scripts/build-workspace-service.js` before
+preparing its migrated database. Controller rendering uses the installed npm dependencies.
+This preparation does not download or package
 guest archives, GitHub CLI toolchains, fonts or renderer dependencies; complete release
 packaging remains part of the packaged guest verifier below.
+
+The hosted CI integration job uses a byte-verified private copy of Node with mode `0700`.
+This satisfies the supervisor's executable ownership and permission checks without changing
+the shared runner toolcache or weakening the product's custody policy.
 
 The real private Unix controller owns Local lifecycle and settings effects. Provider and
 browser-authorized settings routes retain repository/device/account/grant authority and
