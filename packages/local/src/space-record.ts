@@ -121,7 +121,10 @@ export class LocalRecords {
       !space ||
       space.desiredState !== "running" ||
       !space.runtimeId ||
-      (space.phase !== "creating" && space.phase !== "usable") ||
+      space.failure !== null ||
+      (space.phase !== "creating" &&
+        space.phase !== "usable" &&
+        (space.phase !== "stopped" || space.lastStartedAt === null)) ||
       !timingSafeEqual(Buffer.from(space.brokerToken), Buffer.from(credentials[2]))
     )
       return null;

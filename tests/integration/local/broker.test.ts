@@ -220,77 +220,141 @@ describe("local broker authority and address boundary", () => {
     expect(peers.size).toBe(129);
     expect(clients.every((socket) => !socket.destroyed)).toBe(true);
   });
-  test("verified CONNECT and its fixed tunnel clear only establishment timers and carry a later response", async () => {
+  test.each(["creating", "usable", "stopped"] as const)(
+    "%s with admitted running intent carries CONNECT before readiness and clears only establishment timers",
+    async (phase) => {
+      const fixture = await localFixture(state);
+      fixture.space.phase = phase;
+      await fixture.records.put(fixture.space);
+      const framed = new Set<Socket>();
+      const setTimeout = Socket.prototype.setTimeout;
+      jest.spyOn(Socket.prototype, "setTimeout").mockImplementation(function (
+        this: Socket,
+        milliseconds,
+        callback,
+      ) {
+        if (milliseconds === 5000) framed.add(this);
+        return setTimeout.call(this, milliseconds, callback);
+      });
+      const peers = new Set<Socket>();
+      const remote = createServer((socket) => {
+        peers.add(socket);
+        socket.once("close", () => peers.delete(socket));
+        socket.on("data", (bytes) => socket.write(bytes));
+      });
+      remote.listen(0, "127.0.0.1");
+      await once(remote, "listening");
+      const remotePort = (remote.address() as { port: number }).port;
+      closers.push(
+        () =>
+          new Promise<void>((done) => {
+            for (const peer of peers) peer.destroy();
+            remote.close(() => done());
+          }),
+      );
+      let upstream!: Socket;
+      let pendingTimeout: number | undefined;
+      const broker = await startBroker({
+        authorize: (header) => fixture.records.authorize(header),
+        budget: new NetworkBudget(),
+        resolve: async () => [{ address: "8.8.8.8", family: 4 }],
+        dial: (target) => {
+          upstream = connect({ host: "127.0.0.1", port: remotePort });
+          Object.defineProperty(upstream, "remoteAddress", { get: () => target.address });
+          upstream.prependOnceListener("connect", () => {
+            pendingTimeout = upstream.timeout;
+          });
+          return upstream;
+        },
+        git: async (_request, response) => {
+          response.end();
+        },
+        onFault: () => {},
+      });
+      closers.push(broker.close);
+      const tunnel = await startBrokerTunnel(broker.port);
+      closers.push(tunnel.close);
+      const client = connect({ host: "127.0.0.1", port: tunnel.port });
+      client.on("error", () => {});
+      try {
+        await once(client, "connect");
+        const established = once(client, "data");
+        client.write(
+          `${BROKER_PREFACE}CONNECT packages.example.com:443 HTTP/1.1\r\nHost: packages.example.com\r\nProxy-Authorization: ${fixture.authorization}\r\n\r\n`,
+        );
+        expect((await established)[0].toString()).toContain("200 Connection Established");
+        expect(pendingTimeout).toBe(15_000);
+        expect({
+          upstream: upstream.timeout,
+          framed: [...framed].map((socket) => socket.timeout),
+        }).toEqual({ upstream: 0, framed: [0] });
+        const reply = once(client, "data");
+        const bytes = Buffer.from([0, 255, 65, 13, 10]);
+        client.write(bytes);
+        expect((await reply)[0]).toEqual(bytes);
+      } finally {
+        client.destroy();
+      }
+    },
+  );
+
+  test.each([
+    "stopped intent",
+    "deleted intent",
+    "failed",
+    "deleting",
+    "deleted",
+    "unknown guest",
+    "incomplete setup",
+    "missing runtime",
+    "bad token",
+    "revoked repository",
+    "renamed repository",
+    "expired lease",
+    "disabled policy",
+  ])("resume CONNECT refuses %s before opening an upstream", async (reason) => {
     const fixture = await localFixture(state);
-    const framed = new Set<Socket>();
-    const setTimeout = Socket.prototype.setTimeout;
-    jest.spyOn(Socket.prototype, "setTimeout").mockImplementation(function (
-      this: Socket,
-      milliseconds,
-      callback,
-    ) {
-      if (milliseconds === 5000) framed.add(this);
-      return setTimeout.call(this, milliseconds, callback);
+    fixture.space.phase = "stopped";
+    let authorization = fixture.authorization;
+    if (reason === "stopped intent") fixture.space.desiredState = "stopped";
+    else if (reason === "deleted intent") fixture.space.desiredState = "deleted";
+    else if (reason === "failed" || reason === "deleting" || reason === "deleted")
+      fixture.space.phase = reason;
+    else if (reason === "unknown guest") fixture.space.failure = "LOCAL_GUEST_SETTLEMENT_UNKNOWN";
+    else if (reason === "incomplete setup") fixture.space.lastStartedAt = null;
+    else if (reason === "missing runtime") fixture.space.runtimeId = null;
+    else if (reason === "bad token")
+      authorization = `Basic ${Buffer.from(`${fixture.space.id}:${"c".repeat(64)}`).toString("base64")}`;
+    else if (reason === "revoked repository") fixture.policy.repositories = [];
+    else if (reason === "renamed repository")
+      fixture.space.admittedRepositoryFullName = "owner/previous";
+    else if (reason === "expired lease") fixture.policy.leaseUntil = Date.now() - 1;
+    else if (reason === "disabled policy") fixture.policy.enabled = false;
+    await fixture.records.put(fixture.space);
+    await state.write("policy.json", fixture.policy);
+    const dial = jest.fn(() => {
+      throw new Error("Refused resume reached the upstream dialer");
     });
-    const peers = new Set<Socket>();
-    const remote = createServer((socket) => {
-      peers.add(socket);
-      socket.once("close", () => peers.delete(socket));
-      socket.on("data", (bytes) => socket.write(bytes));
-    });
-    remote.listen(0, "127.0.0.1");
-    await once(remote, "listening");
-    const remotePort = (remote.address() as { port: number }).port;
-    closers.push(
-      () =>
-        new Promise<void>((done) => {
-          for (const peer of peers) peer.destroy();
-          remote.close(() => done());
-        }),
-    );
-    let upstream!: Socket;
-    let pendingTimeout: number | undefined;
     const broker = await startBroker({
       authorize: (header) => fixture.records.authorize(header),
       budget: new NetworkBudget(),
       resolve: async () => [{ address: "8.8.8.8", family: 4 }],
-      dial: (target) => {
-        upstream = connect({ host: "127.0.0.1", port: remotePort });
-        Object.defineProperty(upstream, "remoteAddress", { get: () => target.address });
-        upstream.prependOnceListener("connect", () => {
-          pendingTimeout = upstream.timeout;
-        });
-        return upstream;
-      },
+      dial,
       git: async (_request, response) => {
         response.end();
       },
       onFault: () => {},
     });
     closers.push(broker.close);
-    const tunnel = await startBrokerTunnel(broker.port);
-    closers.push(tunnel.close);
-    const client = connect({ host: "127.0.0.1", port: tunnel.port });
-    client.on("error", () => {});
-    try {
-      await once(client, "connect");
-      const established = once(client, "data");
-      client.write(
-        `${BROKER_PREFACE}CONNECT packages.example.com:443 HTTP/1.1\r\nHost: packages.example.com\r\nProxy-Authorization: ${fixture.authorization}\r\n\r\n`,
-      );
-      expect((await established)[0].toString()).toContain("200 Connection Established");
-      expect(pendingTimeout).toBe(15_000);
-      expect({
-        upstream: upstream.timeout,
-        framed: [...framed].map((socket) => socket.timeout),
-      }).toEqual({ upstream: 0, framed: [0] });
-      const reply = once(client, "data");
-      const bytes = Buffer.from([0, 255, 65, 13, 10]);
-      client.write(bytes);
-      expect((await reply)[0]).toEqual(bytes);
-    } finally {
-      client.destroy();
-    }
+    expect(
+      await exchange(
+        broker.port,
+        `CONNECT packages.example.com:443 HTTP/1.1\r\nHost: packages.example.com\r\nProxy-Authorization: ${authorization}\r\n\r\n`,
+      ),
+    ).toContain("403 Forbidden");
+    expect(dial).not.toHaveBeenCalled();
+    expect(await fixture.records.get(fixture.space.id)).toEqual(fixture.space);
+    expect(await fixture.records.policy()).toEqual(fixture.policy);
   });
 
   test("a stalled CONNECT retains its finite timeout and releases admission for the next connection", async () => {

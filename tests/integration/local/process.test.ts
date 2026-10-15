@@ -215,18 +215,37 @@ describe("bounded local subprocess boundary", () => {
       expect(result.exitCode).toBe(0);
       expect(Number.isInteger(pid) && pid > 1).toBe(true);
       // This callback is where the lease could be released. The owned live socket must already refuse.
-      const transportClosed = await new Promise<boolean>((done) => {
+      const transport = await new Promise<{
+        connected: boolean;
+        code?: string;
+        syscall?: string;
+        message?: string;
+      }>((done) => {
         const peer = connect(socket);
         peer.once("connect", () => {
           peer.destroy();
-          done(false);
+          done({ connected: true });
         });
-        peer.once("error", (error) =>
-          done(["ECONNREFUSED", "ENOENT"].includes((error as NodeJS.ErrnoException).code ?? "")),
-        );
+        peer.once("error", (error: NodeJS.ErrnoException) => {
+          done({
+            connected: false,
+            code: error.code,
+            syscall: error.syscall,
+            message: error.message,
+          });
+        });
       });
-      expect(transportClosed).toBe(true);
-      quiescent = transportClosed;
+      // Keep unexpected errors distinct from an actual surviving listener in CI diagnostics.
+      expect({
+        ...transport,
+        root,
+        socket,
+        socketPathBytes: Buffer.byteLength(socket),
+      }).toMatchObject({
+        connected: false,
+        code: expect.stringMatching(/^(ECONNREFUSED|ENOENT)$/),
+      });
+      quiescent = true;
     } finally {
       if (pid && !quiescent)
         try {
