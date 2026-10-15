@@ -98,7 +98,8 @@ test("complete policy inventory preserves the final global denial and refuses a 
       env: {},
       argv: [
         "-e",
-        `const rules=Array.from({length:50000},(_,i)=>({resource_type:'network',scope:'sandbox',applies_to:'moira-'+i.toString(16).padStart(32,'0'),decision:'allow',status:'active',resources:['localhost:42500'],actions:['net:connect:tcp']}));rules.push({...${JSON.stringify(baseline)},decision:${JSON.stringify(decision)}});process.stdout.write(JSON.stringify({rules}));`,
+        "const rules=Array.from({length:50000},(_,i)=>({resource_type:'network',scope:'sandbox',applies_to:'moira-'+i.toString(16).padStart(32,'0'),decision:'allow',status:'active',resources:['localhost:42500'],actions:['net:connect:tcp']}));rules.push(JSON.parse(process.argv[1]));process.stdout.write(JSON.stringify({rules}));",
+        JSON.stringify({ ...baseline, decision }),
       ],
     }),
   );

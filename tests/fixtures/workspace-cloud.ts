@@ -26,6 +26,7 @@ import {
 import { createCommunicationOwnerRoutes } from "../../packages/web-backend/src/routes/communication-owner.js";
 import { LiveCommunicationFileOwner } from "../../packages/web-backend/src/services/communication-file-owner.js";
 import { createWorkspacePublicationHandler } from "../../packages/mcp-server/src/workspace-publication-route.js";
+import { mcpLimiter } from "../../packages/mcp-server/src/middleware/rate-limit-middleware.js";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -121,6 +122,7 @@ export async function startCloudProcess(
     await mcp.connect(clientTransport);
     app.get(
       "/api/codespaces/files/:resourceId/:token",
+      mcpLimiter,
       createWorkspacePublicationHandler({
         authorize: authorizeWorkspacePublication,
         workspace: getWorkspaceClient(),

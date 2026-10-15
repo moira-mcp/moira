@@ -5,13 +5,14 @@ import request from "supertest";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { readAuthenticatedMcpRequest } from "../../../packages/mcp-server/src/authenticated-request.js";
 import { communicationSchema } from "../../../packages/mcp-server/src/tools/tool-schemas.js";
+import { mcpLimiter } from "../../../packages/mcp-server/src/middleware/rate-limit-middleware.js";
 
 function fixture(revokeAfterAdmission = false) {
   const app = express();
   const messages: unknown[] = [];
   let credentialActive = true;
   app.use(cors({ origin: "https://allowed.example" }));
-  app.post("/mcp", async (req, res) => {
+  app.post("/mcp", mcpLimiter, async (req, res) => {
     const principal = await readAuthenticatedMcpRequest(req, res, async (incoming, outgoing) => {
       if (!credentialActive || incoming.get("authorization") !== "Bearer approved") {
         outgoing.status(401).json({ error: "invalid_token" });
