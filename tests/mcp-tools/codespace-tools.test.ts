@@ -157,7 +157,10 @@ describe("Codespace MCP HTTP contract without configured GitHub or paired Local"
       await client.callTool({ name: "codespace", arguments: { action: "list" } }),
     );
     expect(result.isError).not.toBe(true);
-    expect(result.structuredContent).toEqual({ codespaces: [] });
+    expect(result.structuredContent).toEqual({
+      codespaces: [],
+      provider_billing: "unavailable",
+    });
     expect(JSON.stringify(result)).not.toMatch(
       /accessToken|refreshToken|clientSecret|vaultKey|BEGIN .*PRIVATE KEY/,
     );
@@ -204,8 +207,10 @@ describe("Codespace MCP HTTP contract without configured GitHub or paired Local"
     expect(result.isError).toBe(true);
     expect(result.structuredContent).toMatchObject({
       error: { code: "CODESPACE_AUTHORIZATION_REQUIRED" },
-      process_id: action === "start" ? requestId : processId,
+      request_id: action === "start" ? requestId : processId,
     });
+    // Authorization refused before owner dispatch: retain correlation without inventing a process.
+    expect(result.structuredContent).not.toHaveProperty("process_id");
     expect(JSON.stringify(result)).not.toMatch(/accessToken|refreshToken|clientSecret|vaultKey/);
   });
 
