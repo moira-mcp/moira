@@ -14,7 +14,7 @@ import {
 import { WORKSPACE_REQUEST_ID_PATTERN } from "../../shared/src/codespaces/workspace-request-id.ts";
 import { writeDurableJson, persistDirectory } from "./file-primitives.mjs";
 import { readPrivateOwnerJson } from "./private-json.mjs";
-import { openNativeFile } from "./native-source.mjs";
+import { nativeFileBytes, nativeFileIdentity } from "./native-source.mjs";
 
 function refused(code, status = 409) {
   return Object.assign(new Error(code), { publicCode: code, status });
@@ -29,9 +29,7 @@ function immutableInput(input) {
     input.source.type === "native"
       ? {
           type: "native",
-          file: Object.fromEntries(
-            Object.entries(input.source.file).filter(([key]) => key !== "downloadUrl"),
-          ),
+          file: nativeFileIdentity(input.source.file),
         }
       : input.source.type === "inline"
         ? { ...input.source, data: undefined, dataDigest: hash(input.source.data) }
@@ -46,7 +44,7 @@ export async function createOwnerCommunication({
   publications,
   transport,
   sourceProxy,
-  sourceOpener = openNativeFile,
+  sourceOpener,
   renderProgress,
   renderMaterialize,
   deliverExtension,
@@ -119,12 +117,14 @@ export async function createOwnerCommunication({
     let body, fileName, mimeType, close, settled;
     try {
       if (source.type === "native") {
-        const opened = await sourceOpener(source.file, {
+        const opened = await nativeFileBytes(source.file, {
+          sourceOpener,
           proxy: sourceProxy,
           signal: shutdown.signal,
         });
         body = opened.body;
         close = () => opened.close();
+        settled = opened.settled;
         fileName = source.file.fileName ?? "attachment";
         mimeType = source.file.mimeType ?? opened.mimeType ?? "application/octet-stream";
       } else if (source.type === "inline") {

@@ -349,6 +349,10 @@ repository, resource generation and Local device/work authority are checked inde
 command journal. Independent commands and reads can proceed while another result is uncertain;
 guarded mutations coordinate inside the guest.
 
+Source preparation is distinct from execution: repository authority is checked before native
+acquisition, and the final locked session/repository gate can still refuse the prepared command.
+Collect its original result; prepared bytes alone do not prove execution or authorize a retry.
+
 #### Reading, editing and publishing files
 
 Paths are repository-relative. `stat` returns file metadata and its version; it is useful when an
@@ -393,10 +397,36 @@ moira-workspace download assets/data.bin > /tmp/data-copy.bin
 ```
 
 Choose a fresh identity for each intended mutation; the literals above illustrate the format.
-Without `--request-id`, the CLI generates and prints one before accepting input or starting work.
+The command shortcuts generate and print one before accepting input or starting work when their
+optional `--request-id` is omitted.
 `upload`/ `write` default to an absent target unless an explicit expected JSON guard is supplied.
 CLI `download` writes repository bytes to standard output; MCP download is the separate publication
 step that supplies a private reference for communication. Use CLI status/output after a lost reply.
+
+Use `moira-workspace action request.json` (or `action -` for JSON on stdin) for the full
+workspace action contract, including scripts, sessions, cwd, environment, explicit timeouts,
+native descriptors and observation windows. For example, `request.json` can contain:
+
+```json
+{
+  "action": "exec",
+  "request": {
+    "request_id": "ws1-33333333-3333-4333-8333-333333333333",
+    "session": "checks",
+    "session_start": true,
+    "cwd": ".",
+    "env": { "CHECK_MODE": "local" },
+    "script": "printf '%s\\n' \"$CHECK_MODE\"",
+    "timeout_seconds": 30
+  }
+}
+```
+
+The JSON adapter preserves the supplied `request_id` or `process_id`; it does not generate one.
+Collect with an `exec` action containing only the original `request_id`, or use status/output.
+`moira-workspace communication request.json` (or `communication -`) submits the owner communication
+JSON with its original camelCase `requestId`; status collects that original receipt without
+another publication or send. Keep signed native descriptors in the JSON file or stdin, never argv.
 Installation through the common image or Feature is described in
 [self-hosting](/docs/getting-started/self-hosting/#connect-local-codespaces).
 

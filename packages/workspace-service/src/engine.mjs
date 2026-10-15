@@ -220,11 +220,8 @@ export function createWorkspaceEngine({ stateRoot, binding, searchExecutable }) 
     };
   }
 
-  async function verifyRepository(request) {
+  async function verifyBindingIdentity() {
     const root = binding.root;
-    if (binding.repositoryFullName !== request.repositoryFullName) {
-      fail("repository identity mismatch");
-    }
     const value = await stat(root);
     if (!value.isDirectory() || value.uid !== process.getuid?.())
       fail("invalid workspace repository owner");
@@ -239,6 +236,14 @@ export function createWorkspaceEngine({ stateRoot, binding, searchExecutable }) 
     ) {
       fail("repository root identity mismatch");
     }
+  }
+
+  async function verifyRepository(request) {
+    const root = binding.root;
+    if (binding.repositoryFullName !== request.repositoryFullName) {
+      fail("repository identity mismatch");
+    }
+    await verifyBindingIdentity();
     const result = await capture("/usr/bin/git", [
       "-c",
       `safe.directory=${root}`,
@@ -959,6 +964,7 @@ if(input.sessionLock){require('node:fs').writeSync(3,'release\n');require('node:
     await writeDurableJson(directory, "execution.json", execution);
     const sessionLock = await acquireSessionLock(request);
     let admissionLock = null;
+    let runnerAttempted = false;
     try {
       const session = await resolveSession(request);
       // A command whose session belongs to an earlier life of this environment does not run at all.
@@ -966,6 +972,7 @@ if(input.sessionLock){require('node:fs').writeSync(3,'release\n');require('node:
       admissionLock = await acquireKernelLock(join(directory, "admission.lock"));
       const cancellation = await readCancellation(directory, request);
       if (cancellation) return inspect(request);
+      const cwd = await verifyRepository({ ...request, cwd: session.ended ? "." : session.cwd });
       // Ending a session is answered here: the stored context is removed and nothing is dispatched.
       if (session.ended) {
         await writeDurableJson(directory, "execution.json", {
@@ -995,7 +1002,6 @@ if(input.sessionLock){require('node:fs').writeSync(3,'release\n');require('node:
         if (request.requestDigest === undefined) return { state: "session_ended" };
         return readResult(directory);
       }
-      const cwd = await verifyRepository({ ...request, cwd: session.cwd });
       // The life of the environment the command runs in, so a later inspection can tell a command whose
       // codespace restarted underneath it from a supervisor that exited without publishing a result.
       const life = await environmentIdentity();
@@ -1012,6 +1018,7 @@ if(input.sessionLock){require('node:fs').writeSync(3,'release\n');require('node:
         scriptPath = join(directory, "script.sh");
         await writeFile(scriptPath, request.script, { mode: 0o600 });
       }
+      runnerAttempted = true;
       const runner = spawn(process.execPath, ["-e", RUNNER], {
         detached: true,
         stdio: [
@@ -1082,6 +1089,13 @@ if(input.sessionLock){require('node:fs').writeSync(3,'release\n');require('node:
           }
         );
       return { state: "running" };
+    } catch (error) {
+      // A durable negative launch proof permits one collectible no-start result.
+      // Once launch was attempted, lost observation must retain uncertainty.
+      const proof = await executionMetadata(directory);
+      if (!runnerAttempted && proof?.launchAttempted === false)
+        return publishNotStarted(directory, execution, "COMMAND_START_REJECTED");
+      throw error;
     } finally {
       admissionLock?.release();
       sessionLock?.release();
@@ -1304,16 +1318,6 @@ if(input.sessionLock){require('node:fs').writeSync(3,'release\n');require('node:
       validateExecution(request);
       validateSessionEnvironment(request.env);
     },
-    verifyCommand: async (request) => {
-      // Resolve without storing or ending a session before acquiring native stdin.
-      // Execution still resolves again under its session lock at the launch boundary.
-      const session = await resolveSession(request);
-      if (session === null)
-        throw Object.assign(new Error("session unavailable"), {
-          commandReason: "SESSION_UNAVAILABLE",
-        });
-      return verifyRepository({ ...request, cwd: session.ended ? "." : session.cwd });
-    },
     execute: (request, inputDescriptor) => execute(request, binding, inputDescriptor),
     inspect,
     cancel,
@@ -1349,5 +1353,6 @@ if(input.sessionLock){require('node:fs').writeSync(3,'release\n');require('node:
     verifyEntryIdentity,
     verifyBinding: () =>
       verifyRepository({ repositoryFullName: binding.repositoryFullName, cwd: "." }),
+    verifyBindingIdentity,
   };
 }

@@ -407,3 +407,75 @@ test("a source header contradicting declared size refuses before its body is adm
   );
   expect(result).toEqual({ publicCode: "SOURCE_REFUSED" });
 });
+
+test("common native identity excludes signed URL rotation and rejects malformed descriptors before opening", async () => {
+  const result = await child(`
+    import {nativeFileIdentity,nativeFileBytes} from ${JSON.stringify(source)};
+    const file={fileId:'native-id',downloadUrl:'https://files.oaiusercontent.com/one?sig=first',fileName:'image.png',mimeType:'image/png',declaredSize:3};
+    const first=nativeFileIdentity(file);
+    const rotated=nativeFileIdentity({...file,downloadUrl:'https://files.oaiusercontent.com/two?sig=rotated'});
+    let opened=false,code,status;
+    try{await nativeFileBytes({...file,untrusted:true},{sourceOpener:async()=>{opened=true}})}
+    catch(error){code=error.publicCode;status=error.status}
+    console.log(JSON.stringify({first,rotated,opened,code,status}));
+  `);
+  expect(result).toEqual({
+    first: { fileId: "native-id", fileName: "image.png", mimeType: "image/png", declaredSize: 3 },
+    rotated: { fileId: "native-id", fileName: "image.png", mimeType: "image/png", declaredSize: 3 },
+    opened: false,
+    code: "INVALID_NATIVE_SOURCE",
+    status: 400,
+  });
+});
+
+test.each([
+  ["contradicting header", "3", "[Buffer.from([1,2,3])]", false],
+  ["short body", "null", "[Buffer.from([1,2,3])]", true],
+  ["oversized body", "4", "[Buffer.from([1,2,3,4,5])]", true],
+  ["non-byte chunk", "4", "['text']", true],
+])(
+  "trusted source transport cannot bypass %s validation or closure",
+  async (_kind, length, chunks, bodyRead) => {
+    const result = await child(`
+    import {nativeFileBytes} from ${JSON.stringify(source)};
+    const file={fileId:'native-id',downloadUrl:'https://files.oaiusercontent.com/object?sig=private',declaredSize:4};
+    let closed=false,read=false,code,status;
+    try{const opened=await nativeFileBytes(file,{sourceOpener:async()=>({
+      contentLength:${length},mimeType:'application/octet-stream',
+      body:(async function*(){read=true;yield* ${chunks}})(),close:async()=>{closed=true}
+    })});for await(const chunk of opened.body){void chunk}}
+    catch(error){code=error.publicCode;status=error.status}
+    console.log(JSON.stringify({closed,read,code,status}));
+  `);
+    expect(result).toEqual({ closed: true, read: bodyRead, code: "SOURCE_REFUSED", status: 422 });
+  },
+);
+
+test("common native byte consumption and explicit cancellation await source physical settlement", async () => {
+  const result = await child(`
+    import {nativeFileBytes} from ${JSON.stringify(source)};
+    const file={fileId:'native-id',downloadUrl:'https://files.oaiusercontent.com/object?sig=private',declaredSize:3};
+    let releaseClose,closeRequested,releaseSettled;
+    const closing=new Promise(done=>{closeRequested=done});
+    const closeGate=new Promise(done=>{releaseClose=done});
+    const physical=new Promise(done=>{releaseSettled=done});
+    const abort=new AbortController();
+    const opened=await nativeFileBytes(file,{signal:abort.signal,sourceOpener:async()=>({
+      contentLength:3,mimeType:'image/png',body:(async function*(){yield Buffer.from([0,255,128])})(),
+      close:async()=>{closeRequested();await closeGate},settled:physical
+    })});
+    let finished=false;const bytes=[];
+    const reading=(async()=>{for await(const chunk of opened.body)bytes.push(...chunk)})().then(()=>{finished=true});
+    await closing;abort.abort();await Promise.resolve();const beforeClose=finished;
+    releaseClose();await Promise.resolve();await Promise.resolve();const beforeSettlement=finished;
+    releaseSettled();await reading;await opened.close();await opened.settled;
+    console.log(JSON.stringify({bytes,mimeType:opened.mimeType,beforeClose,beforeSettlement,finished}));
+  `);
+  expect(result).toEqual({
+    bytes: [0, 255, 128],
+    mimeType: "image/png",
+    beforeClose: false,
+    beforeSettlement: false,
+    finished: true,
+  });
+});

@@ -25,7 +25,7 @@ export function createOwnerCommunication(options: {
   publications: Awaited<ReturnType<typeof createOwnerPublications>>;
   transport?: OwnerCommunicationTransport;
   sourceProxy?: string;
-  sourceOpener?: typeof import("./native-source.mjs").openNativeFile;
+  sourceOpener?: import("./native-source.mjs").NativeFileOpener;
   renderProgress?: (
     descriptor: unknown,
     options: { signal?: AbortSignal; cacheRoot?: string },

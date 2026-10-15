@@ -260,23 +260,28 @@ test("graceful owner shutdown aborts a held native source before admission and l
   assertNoSourceAuthority(value);
 });
 
-test("an unavailable session refuses native stdin before acquiring source bytes", async () => {
+test("the final session gate refuses a prepared native stdin command without an effect", async () => {
   const value = await fixture();
   const requestId = createWorkspaceRequestId();
   const result = await jsonCall(value, "POST", "/v1/exec", {
     requestId,
     nativeInput: value.file,
     session: "never-opened",
-    argv: [process.execPath, "-e", "process.stdin.pipe(process.stdout)"],
+    argv: [
+      process.execPath,
+      "-e",
+      "require('node:fs').writeFileSync('invalid-session-effect','unexpected')",
+    ],
   });
   expect(result.status).toBe(200);
-  expect(result.body).toMatchObject({
+  expect(result.body).toMatchObject({ requestId });
+  expect(await collect(value, requestId)).toMatchObject({
     requestId,
     state: "not_started",
     reason: "SESSION_UNAVAILABLE",
   });
-  expect(value.sourceRequests).toHaveLength(0);
-  expect(await collect(value, requestId)).toMatchObject({ state: "not_started" });
+  expect(value.sourceRequests).toHaveLength(1);
+  expect(existsSync(join(value.root, "invalid-session-effect"))).toBe(false);
   assertNoSourceAuthority(value);
 });
 

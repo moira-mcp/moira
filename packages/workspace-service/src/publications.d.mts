@@ -40,6 +40,12 @@ export type PublicationSource = PublicationMetadata &
     close(): Promise<void>;
   };
 
+export function serveOwnerPublication(
+  openSource: (token: string, signal?: AbortSignal) => Promise<PublicationSource>,
+  token: string,
+  response: ServerResponse,
+): Promise<void>;
+
 /** The supplier retains source/path identity through the callback's completed read. */
 export type GuardedSourceReader = (
   path: string,

@@ -24,9 +24,11 @@ paired controller; existing Local work follows its owner grants and finite lease
 Shared connection/resource services own tenant authorization, repository grants, billing reads
 and minimal resource routing identity. The paired controller owns GitHub and Local lifecycle,
 original receipts and live observations; Local policy and repository admission also remain there.
-`packages/workspace-service/` owns commands,
-sessions, input, output and guarded files inside each workspace. Its terminal CLI and
-remote clients reach the same private Unix HTTP service and durable local journal.
+`packages/workspace-service/` owns commands, sessions, input, output and guarded files
+inside each workspace. `createWorkspaceOwner()` provides their common operation API;
+tool presentation calls it directly. The Unix HTTP server adapts external callers and
+raw streams to that API, and the terminal CLI uses this private socket. Presentation
+does not send an HTTP request back to its own service.
 
 The backend workspace router authenticates scoped agent credentials and forwards raw
 HTTP streams over outbound HTTPS Upgrade connections. Its rendezvous state is in memory:
@@ -591,10 +593,20 @@ Historical bare UUIDs remain archival and are never translated, imported or disp
 After reply loss inspect the original identity without resubmitting the command.
 Observer/service reconnect never authorizes launch replay.
 
+The owner admission record binds the original request to its operation. Collection
+reads the authoritative result for that operation: command execution uses the engine's
+physical launch/result evidence, while communication uses its original delivery receipt.
+Neither an observer failure nor collection creates a second logical outcome.
+
 Exec accepts argv, or a script in a named session. Sessions preserve working directory
 and exported variables; opening/ending is explicit. Session context publication serializes
 within that session, while distinct sessions/stateless commands remain independent.
 `stdin_text` is inline text; `stdin_file` streams native attachment input before launch.
+Native descriptor identity and byte validation are shared with upload and communication;
+the transient signed URL is not part of durable input identity. Repository authority is
+checked before source acquisition. Preparation can finish before the final locked
+session/repository gate rejects execution, so prepared input does not prove a command
+started. Collect the original no-start or uncertain outcome without fetching or launching again.
 
 Admission may return `starting`. Inspection distinguishes actual running, terminal
 receipts, proved `not_started` and `unknown`. Missing witnesses cannot manufacture
@@ -667,6 +679,14 @@ The typed registry owns fields, defaults, native metadata and examples; use the
 `files_setup`, `transfer_status` and scoped file-capability CLI are not actions.
 The installed `moira-workspace` CLI uses the same local owner independently of cloud
 connectivity for exec/status/cancel/output/stat/read/download/write/upload/search/patch.
+`moira-workspace action INPUT_JSON_FILE|-` forwards the complete `{action,request}`
+tool operation to that owner, including session, cwd, environment, explicit timeout,
+native descriptors and observation windows. Supply the original `request_id` or
+`process_id` in the JSON. `moira-workspace communication INPUT_JSON_FILE|-` submits
+the owner communication JSON with its camelCase `requestId`; `status REQUEST_ID`
+collects that same receipt. Put signed native descriptors in the input file or stdin,
+not command arguments. The command shortcuts generate and print an ID when their
+optional `--request-id` is omitted; the JSON adapters preserve the supplied identity.
 Known auth/provider/pre-dispatch failures remain bounded refusals. Unknown dispatched
 outcomes require collection of the original identity, not a fresh ID to bypass uncertainty.
 

@@ -84,6 +84,111 @@ test("raw input and retained output exceed former envelopes without changing exa
   expect(existsSync(join(value.stateRoot, "requests", requestId, "input"))).toBe(true);
 });
 
+test("the direct owner and tool view share original effects and retained results without an HTTP server", async () => {
+  const value = fixture();
+  const { createWorkspaceOwner } =
+    await import("../../../packages/workspace-service/src/owner.mjs");
+  const { executeOwnerTool } =
+    await import("../../../packages/workspace-service/src/presentation.mjs");
+  const options = {
+    stateRoot: value.stateRoot,
+    binding: value.binding,
+    searchExecutable: value.searchExecutable,
+  };
+  let owner = await createWorkspaceOwner(options);
+  const requestId = createWorkspaceRequestId();
+  const request = {
+    request_id: requestId,
+    stdin_text: "retained input",
+    argv: [
+      process.execPath,
+      "-e",
+      "const f=require('node:fs');f.appendFileSync('direct-effects','once\\n');process.stdin.pipe(process.stdout)",
+    ],
+  };
+  try {
+    const admitted = await executeOwnerTool(owner, { action: "process_start", request });
+    expect(admitted.isError).toBeUndefined();
+    expect(await owner.observe(requestId, 5000)).toMatchObject({
+      state: "succeeded",
+      stdoutBytes: 14,
+    });
+    await owner.close();
+    owner = await createWorkspaceOwner(options);
+    const collected = await executeOwnerTool(owner, {
+      action: "exec",
+      request: { request_id: requestId },
+    });
+    expect(collected.structuredContent).toMatchObject({
+      state: "succeeded",
+      request_id: requestId,
+      stdout: "retained input",
+    });
+    const same = await executeOwnerTool(owner, { action: "process_start", request });
+    expect(same.structuredContent).toMatchObject({ state: "succeeded", request_id: requestId });
+    expect(readFileSync(join(value.root, "direct-effects"), "utf8")).toBe("once\n");
+    expect(existsSync(value.socketPath)).toBe(false);
+    const written = await executeOwnerTool(owner, {
+      action: "write",
+      request: {
+        request_id: createWorkspaceRequestId(),
+        path: "direct-file",
+        expected: { exists: false },
+        text: "owner bytes",
+      },
+    });
+    expect(written.structuredContent).toMatchObject({ state: "succeeded", path: "direct-file" });
+    const observed = await executeOwnerTool(owner, {
+      action: "read",
+      request: { path: "direct-file", offset: 6, length: 5 },
+    });
+    expect(observed.structuredContent).toEqual({ offset: 6, text: "bytes", total_bytes: 11 });
+    const previous = (await owner.file({ action: "stat", path: "direct-file" })).stat.version;
+    const writes = await Promise.all(
+      ["first replacement", "second replacement"].map((text) =>
+        executeOwnerTool(owner, {
+          action: "write",
+          request: {
+            request_id: createWorkspaceRequestId(),
+            path: "direct-file",
+            expected: { exists: true, size_bytes: previous.size, sha256: previous.sha256 },
+            text,
+          },
+        }),
+      ),
+    );
+    expect(writes.filter((result) => result.structuredContent.state === "succeeded")).toHaveLength(
+      1,
+    );
+    expect(writes.filter((result) => result.isError)).toHaveLength(1);
+    expect(["first replacement", "second replacement"]).toContain(
+      readFileSync(join(value.root, "direct-file"), "utf8"),
+    );
+    renameSync(value.root, `${value.root}-retained`);
+    mkdirSync(value.root);
+    const refusedId = createWorkspaceRequestId();
+    const refused = await executeOwnerTool(owner, {
+      action: "exec",
+      request: {
+        request_id: refusedId,
+        argv: [
+          process.execPath,
+          "-e",
+          "require('node:fs').writeFileSync('foreign-effect','unexpected')",
+        ],
+      },
+    });
+    expect(refused.structuredContent).toMatchObject({
+      request_id: refusedId,
+      error: { code: "WORKSPACE_OPERATION_ERROR" },
+    });
+    expect(readdirSync(value.root)).toEqual([]);
+    expect(existsSync(join(value.stateRoot, "requests", refusedId, "accepted.json"))).toBe(false);
+  } finally {
+    await owner.close();
+  }
+});
+
 test("service restart and direct CLI collect a detached command without launching it again", async () => {
   const value = fixture();
   await start(value);
