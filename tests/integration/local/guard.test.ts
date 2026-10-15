@@ -271,6 +271,7 @@ int main(int argc,char **argv){
       "packages/local/src/sbx-runtime.ts",
       "packages/local/src/cli.ts",
       "packages/local/src/manager.ts",
+      "packages/local/src/guest-proxy.ts",
     ],
     outdir: root,
     bundle: true,
@@ -322,7 +323,6 @@ int main(int argc,char **argv){
     "packages/local/dist/runtime-control-helper",
     join(root, "runtime-control-helper"),
   );
-  await copyFile("packages/local/dist/guest-proxy.js", join(root, "guest-proxy.js"));
   await copyFile("packages/local/dist/runtime-api.js", join(root, "runtime-api.js"));
   const payload = join(root, "workspace-payload");
   await mkdir(join(payload, "service"), { recursive: true, mode: 0o700 });
@@ -341,7 +341,7 @@ int main(int argc,char **argv){
       size: archive.length,
     }),
   );
-  await copyFile("packages/local/dist/guest-proxy.js", join(payload, "service/guest-proxy.mjs"));
+  await copyFile(join(root, "guest-proxy.js"), join(payload, "service/guest-proxy.mjs"));
   await state.write("broker.json", { port: 42500 });
   return { ...local, state, observation, pending, release, sentinel };
 }

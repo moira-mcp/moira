@@ -1,11 +1,13 @@
 /**
  * Integration tests global setup — runs ONCE before all workers.
- * Builds the shipped local companion assets and creates a fresh migrated test database.
+ * Builds host Local programs/native helpers and creates a fresh migrated test database.
  */
 import { execSync } from "child_process";
 import { existsSync, mkdirSync, readFileSync } from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
+import { buildLocalPrograms } from "../../scripts/build-local-programs.js";
+import { buildLocalNativeHelpers } from "../../scripts/build-local-native.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -31,8 +33,10 @@ const testDbPath = "./data/test-integration.db";
 const dbDir = path.dirname(testDbPath);
 
 export default async function globalSetup() {
-  // Direct source consumers use the same fixed native helper as the packaged companion.
-  execSync("npm run local:build", { cwd: projectRoot, stdio: "inherit" });
+  // Exercise the shipped host programs and real kernel helpers without downloading
+  // guest archives, gh, or renderer dependencies. Guest packaging has its own verifier.
+  await buildLocalPrograms();
+  await buildLocalNativeHelpers();
 
   // Ensure data directory exists
   if (!existsSync(dbDir)) {

@@ -122,9 +122,11 @@ Do NOT read `unit.log` for workflow tests — it's huge and wastes tokens.
 **Location:** `tests/unit/`
 **Purpose:** Test isolated contracts with controlled dependencies; filesystem, subprocess and Unix HTTP fixtures may be real
 
-The root unit runner builds the common workspace daemon, CLI, local bootstrap and guest
-proxy through `scripts/build-workspace-service.js`, including filtered runs. No manual
-prebuild is required. Each program is compiled before its exclusive temporary file is
+The root unit runner builds the common workspace programs through
+`scripts/build-workspace-service.js`, including filtered runs. Unit global setup also
+compiles the host-native process custody and runtime-control helpers through
+`scripts/build-local-native.js`. No manual prebuild or release packaging is required.
+Each workspace program is compiled before its exclusive temporary file is
 synced and atomically renamed into place. Held readers retain the complete original
 program. Publication is per file, not a transaction across the payload.
 
@@ -209,8 +211,11 @@ Local integration cases cover owner lifecycle receipts, policy, broker/device au
 protocols, credential-store preparation, storage custody and independent shutdown.
 SDK and keychain responses are substituted; native guard cases use controlled real
 processes and sockets rather than a physical microVM. Darwin custody cases are excluded
-on unsupported platforms. Integration setup runs `npm run local:build` before preparing
-its migrated database.
+on unsupported platforms. Integration global setup builds the host Local programs with
+`scripts/build-local-programs.js` and native helpers with `scripts/build-local-native.js`
+before preparing its migrated database. This preparation does not download or package
+guest archives, GitHub CLI toolchains, fonts or renderer dependencies; complete release
+packaging remains part of the packaged guest verifier below.
 
 The real private Unix controller owns Local lifecycle and settings effects. Provider and
 browser-authorized settings routes retain repository/device/account/grant authority and
