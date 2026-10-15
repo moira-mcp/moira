@@ -24,7 +24,11 @@ import {
 import { createLocalCodespaceServices } from "./local-codespace-services.js";
 import { getScopedCredentialService } from "./scoped-credential-factory.js";
 import type { LocalCodespaceResourceService } from "./local-codespace-resource-service.js";
-import { getWorkspaceClient, getControllerClient } from "./workspace-client.js";
+import {
+  getWorkspaceClient,
+  getControllerClient,
+  isWorkspaceOwnerConnected,
+} from "./workspace-client.js";
 import type { WorkspaceClient } from "./workspace-router.js";
 import {
   GitHubCodespaceClientError,
@@ -32,7 +36,6 @@ import {
   githubCodespaceGuidance,
 } from "./github-codespace-client.js";
 import { GitHubResourceService } from "./github-resource-service.js";
-import { getWorkspaceRouter } from "./workspace-services.js";
 
 interface CodespaceServices {
   connection: CodespaceConnectionService;
@@ -162,7 +165,7 @@ function initializeCodespaceServices(): CodespaceServices {
         getCodespaceResourcePolicy,
         getCodespaceGitHubConfig,
         getBaseUrl,
-        (binding) => getWorkspaceRouter().isConnected(binding),
+        isWorkspaceOwnerConnected,
       )
     : null;
   const billing = createCodespaceBillingReader({

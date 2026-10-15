@@ -5,10 +5,11 @@ import {
   type CommunicationOwnerScope,
 } from "@mcp-moira/shared";
 import { getLocalDeviceService } from "./codespace-services.js";
-import { authorizeWorkspaceAgentCredential, getWorkspaceRouter } from "./workspace-services.js";
+import { authorizeWorkspaceAgentCredential } from "./workspace-services.js";
+import { isWorkspaceOwnerConnected } from "./workspace-client.js";
 
 /** Resolve an existing private actor before accepting an unbounded framed metadata stream. */
-export function authenticateCommunicationOwner(bearer: string): void {
+export async function authenticateCommunicationOwner(bearer: string): Promise<void> {
   let workspace;
   try {
     workspace = new WorkspaceAuthRepository(getSqliteInstance()).authenticate(bearer);
@@ -16,11 +17,15 @@ export function authenticateCommunicationOwner(bearer: string): void {
     // Device and workspace credentials have separate existing stores, never an MCP fallback.
   }
   if (workspace) {
-    authorizeWorkspaceAgentCredential(bearer, workspace.resourceId, workspace.resourceGeneration);
+    await authorizeWorkspaceAgentCredential(
+      bearer,
+      workspace.resourceId,
+      workspace.resourceGeneration,
+    );
     return;
   }
   const device = getLocalDeviceService().authenticateDevice(bearer);
-  authorizeCommunicationOwner(bearer, {
+  await authorizeCommunicationOwner(bearer, {
     kind: "controller",
     userId: device.userId,
     deviceId: device.deviceId,
@@ -30,12 +35,12 @@ export function authenticateCommunicationOwner(bearer: string): void {
 }
 
 /** Authenticates the actual source actor; a valid user MCP credential is not an owner credential. */
-export function authorizeCommunicationOwner(
+export async function authorizeCommunicationOwner(
   bearer: string,
   scope: CommunicationOwnerScope,
-): string {
+): Promise<string> {
   if (scope.kind === "workspace") {
-    const binding = authorizeWorkspaceAgentCredential(
+    const binding = await authorizeWorkspaceAgentCredential(
       bearer,
       scope.resourceId,
       scope.resourceGeneration,
@@ -59,7 +64,7 @@ export function authorizeCommunicationOwner(
   )
     throw new Error("owner_scope_refused");
   if (
-    !getWorkspaceRouter().isConnected({
+    !(await isWorkspaceOwnerConnected({
       kind: "controller",
       userId: device.userId,
       resourceId: device.deviceId,
@@ -67,13 +72,13 @@ export function authorizeCommunicationOwner(
       authorizationGeneration: device.deviceGeneration,
       connectionId: device.connectionId,
       expiresAt: null,
-    })
+    }))
   )
     throw new Error("owner_unavailable");
   return device.userId;
 }
 
-export function authorizeControllerPublication(deviceId: string): string {
+export async function authorizeControllerPublication(deviceId: string): Promise<string> {
   const row = getSqliteInstance()
     .prepare("SELECT userId FROM codespaceLocalDevice WHERE id=?")
     .get(deviceId) as { userId: string } | undefined;
@@ -81,7 +86,7 @@ export function authorizeControllerPublication(deviceId: string): string {
   const device = getLocalDeviceService().getDeviceIdentity(row.userId, deviceId);
   if (
     device.status !== "active" ||
-    !getWorkspaceRouter().isConnected({
+    !(await isWorkspaceOwnerConnected({
       kind: "controller",
       userId: device.userId,
       resourceId: device.deviceId,
@@ -89,7 +94,7 @@ export function authorizeControllerPublication(deviceId: string): string {
       authorizationGeneration: device.deviceGeneration,
       connectionId: device.connectionId,
       expiresAt: null,
-    })
+    }))
   )
     throw new Error("owner_unavailable");
   return row.userId;

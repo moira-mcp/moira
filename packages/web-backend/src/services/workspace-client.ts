@@ -1,8 +1,34 @@
 import { connect } from "node:net";
-import type { WorkspaceClient, WorkspaceRequest } from "./workspace-router.js";
+import type { WorkspaceBinding, WorkspaceClient, WorkspaceRequest } from "./workspace-router.js";
 import { jsonResponse, sendHttp } from "./workspace-router.js";
 
 export const WORKSPACE_ROUTER_SOCKET = "/tmp/moira-workspace-router/router.sock";
+
+/** Observe the authoritative backend registry without dispatching a call to the owner. */
+export async function isWorkspaceOwnerConnected(
+  binding: WorkspaceBinding,
+  socketPath = WORKSPACE_ROUTER_SOCKET,
+): Promise<boolean> {
+  try {
+    const result = await createWorkspaceClient(socketPath, binding.kind).json(
+      binding.userId,
+      binding.resourceId,
+      {
+        method: "GET",
+        path: "/v1/router/presence",
+        headers: {
+          "x-moira-resource-generation": String(binding.resourceGeneration),
+          "x-moira-authorization-generation": String(binding.authorizationGeneration),
+          "x-moira-endpoint-identity":
+            binding.kind === "workspace" ? binding.environmentIdentity : binding.connectionId,
+        },
+      },
+    );
+    return result.connected === true;
+  } catch {
+    return false;
+  }
+}
 
 export function createWorkspaceClient(
   socketPath = WORKSPACE_ROUTER_SOCKET,

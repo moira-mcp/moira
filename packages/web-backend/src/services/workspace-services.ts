@@ -15,7 +15,7 @@ import {
 } from "@mcp-moira/shared";
 import { WorkspaceRouter } from "./workspace-router.js";
 import type { WorkspaceBinding } from "./workspace-router.js";
-import { WORKSPACE_ROUTER_SOCKET } from "./workspace-client.js";
+import { WORKSPACE_ROUTER_SOCKET, isWorkspaceOwnerConnected } from "./workspace-client.js";
 
 let router: WorkspaceRouter | undefined;
 
@@ -160,7 +160,7 @@ function requireBinding(binding: WorkspaceAgentBinding, credentialExpiresAt: num
 }
 
 /** Scoped Git credentials require the current enrolled life and connected owner. */
-export function authorizeWorkspaceAgentCredential(
+export async function authorizeWorkspaceAgentCredential(
   credential: string,
   resourceId: string,
   resourceGeneration: number,
@@ -172,7 +172,7 @@ export function authorizeWorkspaceAgentCredential(
       "Workspace credential identity changed",
     );
   const binding = requireBinding(record, record.expiresAt);
-  if (!getWorkspaceRouter().isConnected(binding))
+  if (!(await isWorkspaceOwnerConnected(binding)))
     throw new CodespaceResourceError(
       "CODESPACE_PROVIDER_UNAVAILABLE",
       "Workspace owner unavailable",
@@ -181,7 +181,7 @@ export function authorizeWorkspaceAgentCredential(
 }
 
 /** A public owner capability can route only to an already enrolled, currently authorized guest. */
-export function authorizeWorkspacePublication(resourceId: string): string {
+export async function authorizeWorkspacePublication(resourceId: string): Promise<string> {
   const sqlite = getSqliteInstance();
   const route = sqlite
     .prepare(
@@ -198,7 +198,7 @@ export function authorizeWorkspacePublication(resourceId: string): string {
       "Publication owner unavailable",
     );
   const binding = requireBinding(record, record.expiresAt);
-  if (!getWorkspaceRouter().isConnected(binding))
+  if (!(await isWorkspaceOwnerConnected(binding)))
     throw new CodespaceResourceError(
       "CODESPACE_PROVIDER_UNAVAILABLE",
       "Publication owner unavailable",

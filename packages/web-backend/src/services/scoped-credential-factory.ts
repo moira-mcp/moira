@@ -163,7 +163,7 @@ export function createScopedCredentialService(): ScopedCredentialService {
         }
         if (
           resource.provider !== CODESPACE_PROVIDER_GITHUB ||
-          authorizeWorkspacePublication(input.resourceId) !== authority.userId
+          (await authorizeWorkspacePublication(input.resourceId)) !== authority.userId
         )
           return false;
         const record = new WorkspaceAuthRepository(sqlite).getOwned(
@@ -223,7 +223,7 @@ export function createScopedCredentialService(): ScopedCredentialService {
         }
         if (resource.provider !== CODESPACE_PROVIDER_GITHUB)
           throw new ScopedCredentialError("SCOPED_CREDENTIAL_AUTHORITY_REFUSED", 403);
-        const binding = authorizeWorkspaceAgentCredential(
+        const binding = await authorizeWorkspaceAgentCredential(
           bearer,
           input.resourceId,
           input.resourceGeneration,

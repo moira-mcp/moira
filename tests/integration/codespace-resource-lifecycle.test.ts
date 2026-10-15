@@ -90,7 +90,7 @@ function fixture() {
   let ownerOutcome: ControllerOperation["outcome"];
   let connectedGuest: WorkspaceBinding | null = null;
   const guestConnected = jest.fn(
-    (binding: WorkspaceBinding) =>
+    async (binding: WorkspaceBinding) =>
       connectedGuest !== null && JSON.stringify(binding) === JSON.stringify(connectedGuest),
   );
   const fetchImpl = jest.fn<typeof fetch>(async (url, init) => {

@@ -57,7 +57,9 @@ export class GitHubResourceService {
     private readonly policy: () => CodespaceResourcePolicy,
     private readonly configuration = getCodespaceGitHubConfig,
     private readonly baseUrl = getBaseUrl,
-    private readonly guestConnected: (binding: WorkspaceBinding) => boolean = () => false,
+    private readonly guestConnected: (
+      binding: WorkspaceBinding,
+    ) => boolean | Promise<boolean> = () => false,
   ) {}
   get db(): Database.Database {
     return this.identities.db;
@@ -216,7 +218,7 @@ export class GitHubResourceService {
     ) {
       try {
         this.current(identity);
-        guestLive = this.guestConnected({
+        guestLive = await this.guestConnected({
           kind: "workspace",
           userId,
           resourceId: id,

@@ -35,6 +35,13 @@ credential digests bound to user, resource, authorization/resource generations a
 guest life. Fixed provider bootstrap installs the common payload without giving project
 commands the original GitHub OAuth, refresh or device credentials.
 
+The backend is the sole live connection registry. MCP and other server processes observe
+workspace/controller presence asynchronously through its protected Unix socket. The backend
+rechecks current authority and the exact endpoint identity and both generations without
+dispatching an owner call. Publication, communication, scoped credentials and GitHub readiness
+use this observation; an unreachable backend or mismatched binding is unavailable. Owner
+dispatch independently rechecks current authority.
+
 The paired controller uses fixed authorized GitHub REST actions and its packaged provisioner
 to install and start the common service. The cloud does not run SSH, bootstrap workers or a
 lifecycle reconciler.

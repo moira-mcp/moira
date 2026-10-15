@@ -75,7 +75,12 @@ function ownerFailure(
 
 export class LiveCommunicationFileOwner implements CommunicationFileOwner {
   constructor(
-    private readonly dependencies = {
+    private readonly dependencies: {
+      devices: typeof getLocalDeviceService;
+      controller: typeof getControllerClient;
+      workspace: typeof getWorkspaceClient;
+      authorizePublication: (resourceId: string) => string | Promise<string>;
+    } = {
       devices: getLocalDeviceService,
       controller: getControllerClient,
       workspace: getWorkspaceClient,
@@ -119,7 +124,10 @@ export class LiveCommunicationFileOwner implements CommunicationFileOwner {
     owner: { device_id?: string; codespace_id?: string };
   }> {
     if (owner.resourceId) {
-      if (owner.deviceId || this.dependencies.authorizePublication(owner.resourceId) !== userId)
+      if (
+        owner.deviceId ||
+        (await this.dependencies.authorizePublication(owner.resourceId)) !== userId
+      )
         throw new CommunicationChannelOwnerUnavailableError();
       return {
         client: this.dependencies.workspace(),
