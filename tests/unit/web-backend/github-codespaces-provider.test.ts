@@ -112,7 +112,15 @@ describe("GitHub Codespaces provider edge", () => {
     );
     await expect(
       new HttpGitHubCodespaceClient(config, foreignPagination).listOwned("ghu_secret"),
-    ).rejects.toThrow(/pagination left/);
+    ).rejects.toMatchObject({
+      status: 502,
+      providerFailure: {
+        kind: "reply_invalid",
+        phase: "projection",
+        reason: "GitHub returned an invalid pagination continuation",
+      },
+    });
+    expect(foreignPagination).toHaveBeenCalledTimes(1);
 
     const invalidOwner = jest.fn<typeof fetch>().mockResolvedValue(
       new Response(JSON.stringify(codespace({ owner: { id: "not-an-id" } })), {
@@ -125,7 +133,10 @@ describe("GitHub Codespaces provider edge", () => {
         "ghu_secret",
         "silver-space-123",
       ),
-    ).rejects.toThrow(/invalid identifier/);
+    ).rejects.toMatchObject({
+      status: 502,
+      providerFailure: { kind: "reply_invalid", phase: "projection" },
+    });
 
     const failed = jest
       .fn<typeof fetch>()
@@ -153,7 +164,7 @@ describe("GitHub Codespaces provider edge", () => {
     await expect(request).rejects.not.toThrow(/ghu_secret/);
   });
 
-  test("refuses pagination beyond its bound and malformed immutable resource facts", async () => {
+  test("refuses repeated pagination and malformed immutable resource facts", async () => {
     const endless = jest.fn<typeof fetch>().mockImplementation(
       async () =>
         new Response(JSON.stringify({ codespaces: [] }), {
@@ -166,8 +177,15 @@ describe("GitHub Codespaces provider edge", () => {
     );
     await expect(
       new HttpGitHubCodespaceClient(config, endless).listOwned("ghu_secret"),
-    ).rejects.toThrow(/pagination exceeded/);
-    expect(endless).toHaveBeenCalledTimes(20);
+    ).rejects.toMatchObject({
+      status: 502,
+      providerFailure: {
+        kind: "reply_invalid",
+        phase: "projection",
+        reason: "GitHub returned an invalid pagination continuation",
+      },
+    });
+    expect(endless).toHaveBeenCalledTimes(2);
 
     const malformed = [
       { billable_owner: { id: 0 } },
@@ -345,10 +363,12 @@ describe("GitHub Codespaces provider edge", () => {
     await expect(client.create("ghu_secret", input)).resolves.toEqual({
       outcome: "accepted",
       resource: null,
+      providerReply: { status: 202 },
     });
     await expect(client.create("ghu_secret", input)).resolves.toEqual({
       outcome: "rejected",
       reason: "github_status_422",
+      providerFailure: { kind: "http", phase: "request", status: 422 },
     });
 
     const constrained = jest.fn<typeof fetch>().mockResolvedValue(
@@ -367,6 +387,13 @@ describe("GitHub Codespaces provider edge", () => {
       reason: "github_status_400",
       detail:
         "You do not have permission to create codespaces in this repository. retention_period_minutes exceeds the maximum for this owner",
+      providerFailure: {
+        kind: "http",
+        phase: "request",
+        status: 400,
+        reason:
+          "You do not have permission to create codespaces in this repository. retention_period_minutes exceeds the maximum for this owner",
+      },
     });
   });
 

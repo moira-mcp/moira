@@ -161,11 +161,20 @@ jest.unstable_mockModule("../../../packages/web-backend/src/auth.js", () => ({
   auth: { api: {} },
 }));
 
+const unrelatedAccountService = () => {
+  throw new Error("account block/delete services entered the approval fixture");
+};
+jest.unstable_mockModule(
+  "../../../packages/web-backend/src/services/scoped-credential-factory.js",
+  () => ({ getScopedCredentialService: jest.fn(unrelatedAccountService) }),
+);
+
 // Admin system status composes the shared codespace readiness decision; this test only
 // exercises approval gating, so the disabled (healthy) readiness view is enough.
 jest.unstable_mockModule(
   "../../../packages/web-backend/src/services/codespace-services.js",
   () => ({
+    getCodespaceConnectionService: jest.fn(unrelatedAccountService),
     getCodespaceObservabilityService: () => ({
       readiness: async () => ({
         state: "disabled",

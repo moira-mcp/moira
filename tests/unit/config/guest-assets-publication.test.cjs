@@ -7,6 +7,15 @@ const { join, resolve } = require("node:path");
 const { pathToFileURL } = require("node:url");
 const { describe, expect, test } = require("@jest/globals");
 
+const entryPoints = {
+  daemon: "packages/workspace-service/src/daemon.mjs",
+  cli: "packages/workspace-service/src/cli.mjs",
+  "local-bootstrap": "packages/workspace-service/src/local-bootstrap.mjs",
+  "guest-proxy": "packages/local/src/guest-proxy.ts",
+  "owner-renderer": "packages/workspace-service/src/owner-renderer.mjs",
+  "extension-handler-host": "packages/extension-runner/src/binary-handler-host.mjs",
+};
+
 describe("canonical guest asset publication", () => {
   test("rebuilding publishes complete new files while held readers retain their original generation", async () => {
     const root = await mkdtemp(join(tmpdir(), "moira-guest-publication-"));
@@ -14,6 +23,7 @@ describe("canonical guest asset publication", () => {
       const source = join(root, "packages/local/src");
       await mkdir(source, { recursive: true });
       await mkdir(join(root, "packages/workspace-service/src"), { recursive: true });
+      await mkdir(join(root, "packages/extension-runner/src"), { recursive: true });
       const driver = join(root, "publication.mjs");
       const outcome = join(root, "outcome.json");
       await writeFile(
@@ -21,15 +31,16 @@ describe("canonical guest asset publication", () => {
         `const { buildWorkspaceService } = await import(process.argv[2]);
 import { open, readFile, writeFile, stat } from "node:fs/promises";
 process.umask(0);
-const entries = ["daemon", "cli", "local-bootstrap", "guest-proxy"];
-for (const entry of entries) await writeFile((entry === "guest-proxy" ? "packages/local/src/guest-proxy.ts" : "packages/workspace-service/src/" + entry + ".mjs"), "export const generation = 'generation-A';\\n");
+const entryPoints = ${JSON.stringify(entryPoints)};
+const entries = Object.keys(entryPoints);
+for (const source of Object.values(entryPoints)) await writeFile(source, "export const generation = 'generation-A';\\n");
 await buildWorkspaceService("output");
 const readers = await Promise.all(entries.map(async entry => {
   const path = "output/" + entry + ".mjs";
   return { path, handle: await open(path, "r"), bytes: (await readFile(path)).toString("base64"), inode: (await stat(path)).ino, mode: (await stat(path)).mode & 0o777 };
 }));
 try {
-  for (const entry of entries) await writeFile((entry === "guest-proxy" ? "packages/local/src/guest-proxy.ts" : "packages/workspace-service/src/" + entry + ".mjs"), "export const generation = 'generation-B';\\n");
+  for (const source of Object.values(entryPoints)) await writeFile(source, "export const generation = 'generation-B';\\n");
   await buildWorkspaceService("output");
   const observed = await Promise.all(readers.map(async reader => ({
     original: reader.bytes,
@@ -58,7 +69,7 @@ try {
       if (child.error) throw child.error;
       expect({ exit: child.status, stderr: child.stderr }).toEqual({ exit: 0, stderr: "" });
       const assets = JSON.parse(await readFile(outcome, "utf8"));
-      expect(assets).toHaveLength(4);
+      expect(assets).toHaveLength(6);
       for (const asset of assets) {
         expect(asset.retained).toBe(asset.original);
         expect(asset.currentInode).not.toBe(asset.originalInode);
@@ -77,13 +88,15 @@ try {
     try {
       await mkdir(join(root, "packages/local/src"), { recursive: true });
       await mkdir(join(root, "packages/workspace-service/src"), { recursive: true });
+      await mkdir(join(root, "packages/extension-runner/src"), { recursive: true });
       const driver = join(root, "failure.mjs");
       const outcome = join(root, "outcome.json");
       await writeFile(
         driver,
         `const { buildWorkspaceService } = await import(process.argv[2]);
 import { mkdir, readFile, readdir, rename, stat, writeFile } from "node:fs/promises";
-for (const entry of ["daemon", "cli", "local-bootstrap", "guest-proxy"]) await writeFile((entry === "guest-proxy" ? "packages/local/src/guest-proxy.ts" : "packages/workspace-service/src/" + entry + ".mjs"), "export const generation = 'complete';\\n");
+const entryPoints = ${JSON.stringify(entryPoints)};
+for (const source of Object.values(entryPoints)) await writeFile(source, "export const generation = 'complete';\\n");
 await buildWorkspaceService("output");
 const original = (await readFile("output/daemon.mjs")).toString("base64");
 await writeFile("packages/workspace-service/src/daemon.mjs", "export const = ;");
@@ -122,14 +135,18 @@ await writeFile(process.argv[3], JSON.stringify({
       expect(observed.compileEntries.sort()).toEqual([
         "cli.mjs",
         "daemon.mjs",
+        "extension-handler-host.mjs",
         "guest-proxy.mjs",
         "local-bootstrap.mjs",
+        "owner-renderer.mjs",
       ]);
       expect(observed.entries.sort()).toEqual([
         "cli.mjs",
         "daemon.mjs",
+        "extension-handler-host.mjs",
         "guest-proxy.mjs",
         "local-bootstrap.mjs",
+        "owner-renderer.mjs",
         "previous-daemon.mjs",
       ]);
       expect(observed.currentForeignInode).toBe(observed.foreignInode);

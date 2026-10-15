@@ -4,6 +4,7 @@ import { packageWorkspaceService } from "./package-workspace-service.js";
 import { packageControllerDependencies } from "./package-controller-dependencies.js";
 import { buildWorkspaceService } from "./build-workspace-service.js";
 import { packageOwnerDependencies } from "./package-owner-dependencies.js";
+import { buildLocalNativeHelpers } from "./build-local-native.js";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
@@ -40,37 +41,7 @@ await copyFile(
 );
 await chmod(`${output}/cli.js`, 0o755);
 if (process.platform === "darwin" || process.platform === "linux") {
-  await execute(
-    process.platform === "darwin" ? "/usr/bin/clang" : "cc",
-    [
-      "-std=c11",
-      "-O2",
-      "-Wall",
-      "-Wextra",
-      "-Werror",
-      "packages/local/src/process-group-helper.c",
-      "-o",
-      `${output}/process-group-helper`,
-    ],
-    { maxBuffer: 64 * 1024 },
-  );
-  await chmod(`${output}/process-group-helper`, 0o755);
-  await execute(
-    process.platform === "darwin" ? "/usr/bin/clang" : "cc",
-    [
-      "-std=c11",
-      "-O2",
-      "-Wall",
-      "-Wextra",
-      "-Werror",
-      "packages/local/src/runtime-control-helper.c",
-      ...(process.platform === "darwin" ? ["-lbsm"] : []),
-      "-o",
-      `${output}/runtime-control-helper`,
-    ],
-    { maxBuffer: 64 * 1024 },
-  );
-  await chmod(`${output}/runtime-control-helper`, 0o755);
+  await buildLocalNativeHelpers(output);
 }
 if (process.platform === "darwin") {
   await execute(

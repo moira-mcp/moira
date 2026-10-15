@@ -13,6 +13,7 @@ export default {
   // Use 50% of CPUs in CI (2 cores = 1 worker), more locally
   maxWorkers: process.env.CI ? "50%" : 6,
   workerIdleMemoryLimit: "512MB",
+  globalSetup: "<rootDir>/tests/config/jest-unit-global-setup.js",
   // For jsdom tests - polyfills loaded BEFORE environment setup
   setupFiles: ["<rootDir>/tests/setup-jsdom.ts"],
   // Additional module mappings for frontend components
