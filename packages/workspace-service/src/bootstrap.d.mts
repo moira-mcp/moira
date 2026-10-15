@@ -14,6 +14,7 @@ export const WORKSPACE_PROBE_SCRIPT: string;
 export const WORKSPACE_CONFIGURE_SCRIPT: string;
 export const WORKSPACE_LOCAL_BOOTSTRAP_SCRIPT: string;
 export const WORKSPACE_HEALTH_SCRIPT: string;
+export const WORKSPACE_GITHUB_PROOF_SCRIPT: string;
 export const WORKSPACE_START_SCRIPT: string;
 export function loadWorkspacePayload(
   directory: string,

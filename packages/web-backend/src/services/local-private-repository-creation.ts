@@ -170,17 +170,17 @@ export class LocalPrivateRepositoryCreationService {
       links: this.dependencies.links(),
     };
   }
-  private current(
+  private async current(
     record: RepositoryCreationRecord,
     admitted: RepositoryCreationAuthority,
-  ): RepositoryCreationAuthority {
+  ): Promise<RepositoryCreationAuthority> {
     const current = this.dependencies.currentAuthority(record.userId);
     if (canonicalJson(current) !== canonicalJson(admitted))
       throw new LocalDeviceError(
         "LOCAL_UNAUTHORIZED",
         "GitHub credentials changed before repository mutation.",
       );
-    this.dependencies.repository.assertCurrent(record, current, this.now());
+    await this.dependencies.repository.assertCurrent(record, current, this.now());
     return current;
   }
   async createRepository(
@@ -199,9 +199,9 @@ export class LocalPrivateRepositoryCreationService {
     try {
       context = await this.dependencies.authorize(userId, input.installationId);
       stage = "device_delegation";
-      record = record ?? ledger.reserve(userId, input, context.authority, this.now());
+      record = record ?? (await ledger.reserve(userId, input, context.authority, this.now()));
       stage = "authority_validation";
-      this.current(record, context.authority);
+      await this.current(record, context.authority);
     } catch (error) {
       if (!(error instanceof LocalDeviceError) && !(error instanceof GitHubCodespaceClientError))
         throw error;
@@ -230,7 +230,7 @@ export class LocalPrivateRepositoryCreationService {
           record.repositoryName,
         );
         stage = "authority_validation";
-        this.current(record, context.authority);
+        await this.current(record, context.authority);
         if (present) {
           ledger.mark(record, "rejected", "LOCAL_REPOSITORY_NAME_EXISTS", this.now());
           return this.result(
@@ -240,7 +240,7 @@ export class LocalPrivateRepositoryCreationService {
             "LOCAL_REPOSITORY_NAME_EXISTS",
           );
         }
-        ledger.submit(record, this.current(record, context.authority), this.now());
+        await ledger.submit(record, await this.current(record, context.authority), this.now());
         record = ledger.getOwned(userId, input.requestId)!;
         let created: GitHubPrivateRepositoryIdentity;
         try {
@@ -297,7 +297,7 @@ export class LocalPrivateRepositoryCreationService {
           record.repositoryName,
         );
         stage = "authority_validation";
-        this.current(record, context.authority);
+        await this.current(record, context.authority);
         if (!observed || !this.matches(record, observed)) {
           ledger.mark(record, "unknown", "LOCAL_REPOSITORY_CREATE_UNKNOWN", this.now());
           return this.result(
@@ -310,7 +310,7 @@ export class LocalPrivateRepositoryCreationService {
         ledger.recordCreated(record, observed.id, observed.fullName, this.now());
         record = ledger.getOwned(userId, input.requestId)!;
       }
-      this.current(record, context.authority);
+      await this.current(record, context.authority);
       if (!record.installationVerified) {
         stage = "installation_access";
         if (context.repositorySelection === "selected")
@@ -319,14 +319,14 @@ export class LocalPrivateRepositoryCreationService {
             input.installationId,
             record.repositoryId!,
           );
-        this.current(record, context.authority);
+        await this.current(record, context.authority);
         await this.dependencies.verifyInstallation(
           userId,
           input.installationId,
           record.repositoryId!,
         );
         // Refresh may legitimately rotate an expiring token; consent and pinned account still hold.
-        ledger.assertCurrent(record, this.dependencies.currentAuthority(userId), this.now());
+        await ledger.assertCurrent(record, this.dependencies.currentAuthority(userId), this.now());
         ledger.confirmInstallation(record, this.now());
         record = ledger.getOwned(userId, input.requestId)!;
       }

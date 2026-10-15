@@ -44,6 +44,7 @@ function mapErrorCodeToApiCode(error: AppError): ApiErrorCode {
     CONFIGURATION_ERROR: ApiErrorCode.INTERNAL_ERROR,
     EXTERNAL_SERVICE_ERROR: ApiErrorCode.INTERNAL_ERROR,
     INTERNAL_ERROR: ApiErrorCode.INTERNAL_ERROR,
+    COMMUNICATION_OWNER_UNAVAILABLE: ApiErrorCode.COMMUNICATION_OWNER_UNAVAILABLE,
   };
   return mapping[error.code] || ApiErrorCode.INTERNAL_ERROR;
 }

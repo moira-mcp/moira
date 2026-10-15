@@ -94,18 +94,10 @@ export interface ExtensionNodeDefinition<
   handler: ExtensionNodeHandler<Config, Input, Output>;
 }
 
-export interface ExtensionCommunicationAttachment {
-  kind: "image" | "document";
-  bytes: Uint8Array;
-  filename: string;
-  mimeType: string;
-}
-
 export interface ExtensionCommunicationMessage {
   text: string;
   format?: "plain" | "markdown" | "html";
   silent?: boolean;
-  attachment?: ExtensionCommunicationAttachment;
 }
 
 /** Services granted specifically to one channel declaration. */
@@ -129,6 +121,29 @@ export interface ExtensionCommunicationChannelDefinition<Settings extends JsonOb
   id: string;
   configurationSchema?: JsonObject;
   handler: ExtensionCommunicationChannelHandler<Settings>;
+  /** Runs next to the immutable file, without cloud secrets or arbitrary authenticated fetch. */
+  binaryHandler?: (context: ExtensionBinaryChannelContext<Settings>) => Promise<void>;
+}
+
+export interface ExtensionBinaryChannelContext<Settings extends JsonObject = JsonObject> {
+  message: Omit<ExtensionCommunicationMessage, "attachment"> & {
+    attachment: {
+      kind: "image" | "document";
+      filename: string;
+      mimeType: string;
+      size: number;
+      sha256: string;
+      open(): ReadableStream<Uint8Array>;
+    };
+  };
+  settings: Settings;
+  signal: AbortSignal;
+  services: {
+    send(
+      operationId: string,
+      controls: { caption?: string; format?: "plain" | "markdown" | "html"; silent?: boolean },
+    ): Promise<unknown>;
+  };
 }
 
 /** Declare an outbound communication channel without registering or executing it in-process. */

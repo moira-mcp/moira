@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from "@jest/globals";
 import { createHash } from "node:crypto";
 import { createWorkspaceRequestId } from "@mcp-moira/shared/workspace-request-id";
-import { readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { createRequire } from "node:module";
 import {
@@ -24,11 +24,17 @@ import {
 } from "../../../packages/mcp-server/src/tools/manage-codespaces.js";
 import {
   executeWorkspaceAction,
-  collectWorkspaceCommand,
+  workspaceFailure,
 } from "../../../packages/mcp-server/src/tools/codespace-workspace.js";
 import { createWorkspaceClient } from "../../../packages/web-backend/src/services/workspace-client.js";
 
-type Fixture = { root: string; socketPath: string };
+type Fixture = {
+  root: string;
+  socketPath: string;
+  directory: string;
+  stateRoot: string;
+  environment?: Record<string, string>;
+};
 const fixture = createRequire(import.meta.url)("../../fixtures/workspace-service.cjs") as {
   createFixture(): Fixture;
   start(value: Fixture): Promise<void>;
@@ -48,6 +54,117 @@ async function service() {
 const codespaceId = "00000000-0000-4000-8000-000000000001";
 
 describe("workspace-backed codespace and process tools", () => {
+  it("reports an accepted file effect with failed receipt publication as uncertain through owner and MCP", async () => {
+    const value = fixture.createFixture();
+    resources.push(value);
+    const requestId = createWorkspaceRequestId();
+    const directory = join(value.stateRoot, "requests", requestId);
+    const armed = join(value.directory, "result-fault-armed");
+    const observed = join(value.directory, "result-fault-observed");
+    const fault = join(value.directory, "result-fault.cjs");
+    writeFileSync(
+      fault,
+      `const fs=require('node:fs');const path=require('node:path');const promises=require('node:fs/promises');const original=promises.rename;promises.rename=async(from,to)=>{if(path.basename(String(to))==='result.json'&&fs.existsSync(${JSON.stringify(armed)})&&fs.realpathSync(path.dirname(String(to)))===${JSON.stringify(directory)}){fs.writeFileSync(${JSON.stringify(observed)},'result-publication');throw Object.assign(new Error('injected result storage failure'),{code:'EIO'})}return original(from,to)};require('node:module').syncBuiltinESMExports();`,
+    );
+    value.environment = { NODE_OPTIONS: `--require=${fault}` };
+    writeFileSync(join(value.root, "target"), "original");
+    await fixture.start(value);
+    writeFileSync(armed, "armed");
+    const workspace = createWorkspaceClient(value.socketPath);
+    const result = await executeWorkspaceAction(
+      parseCodespaceToolParams({
+        action: "apply_patch",
+        codespace_id: codespaceId,
+        request_id: requestId,
+        files: [
+          {
+            path: "target",
+            expected: { exists: true },
+            edits: [{ start: 0, end: 8, text: "changed" }],
+          },
+        ],
+      }),
+      "owned-user",
+      workspace,
+    );
+    expect(readFileSync(observed, "utf8")).toBe("result-publication");
+    expect(readFileSync(join(value.root, "target"), "utf8")).toBe("changed");
+    expect(existsSync(join(directory, "accepted.json"))).toBe(true);
+    expect(existsSync(join(directory, "result.json"))).toBe(false);
+    expect(result).toMatchObject({
+      isError: true,
+      structuredContent: {
+        request_id: requestId,
+        error: { code: "WORKSPACE_OUTCOME_UNCONFIRMED" },
+      },
+    });
+    const message = String((result.structuredContent?.error as { message?: string })?.message);
+    expect(message).toContain("Collect the original request ID");
+    expect(message).not.toMatch(/refused|reply was lost/i);
+    unlinkSync(armed);
+    const collected = await executeWorkspaceAction(
+      parseCodespaceToolParams({
+        action: "exec",
+        codespace_id: codespaceId,
+        request_id: requestId,
+      }),
+      "owned-user",
+      workspace,
+    );
+    expect(collected.structuredContent).toMatchObject({ request_id: requestId, state: "unknown" });
+    expect(readFileSync(join(value.root, "target"), "utf8")).toBe("changed");
+  });
+
+  it("keeps cloud transport uncertainty distinct from a confirmed refusal and reconnectable reads", () => {
+    const requestId = createWorkspaceRequestId();
+    const transport = { details: { error: { code: "WORKSPACE_OUTCOME_UNKNOWN" } } };
+    const uncertain = workspaceFailure(transport, requestId);
+    expect(uncertain).toMatchObject({
+      isError: true,
+      structuredContent: {
+        request_id: requestId,
+        error: { code: "WORKSPACE_OUTCOME_UNCONFIRMED" },
+      },
+    });
+    expect(JSON.stringify(uncertain)).not.toMatch(/refused|reply was lost/i);
+    expect(workspaceFailure(transport)).toMatchObject({
+      structuredContent: { error: { code: "WORKSPACE_UNAVAILABLE" } },
+    });
+    expect(
+      workspaceFailure(
+        { details: { error: { code: "FILE_REJECTED", reason: "precondition" } } },
+        requestId,
+      ),
+    ).toMatchObject({
+      structuredContent: {
+        request_id: requestId,
+        error: { code: "FILE_REJECTED", reason: "precondition" },
+      },
+    });
+  });
+  it("forwards a distinctive owner result unchanged without cloud formatting or file acquisition", async () => {
+    const ownerResult = {
+      content: [
+        { type: "text", text: "owner-text-not-json" },
+        { type: "resource_link", uri: "https://owner.example/exact", name: "owned" },
+      ],
+      structuredContent: { ownerOnly: "opaque", request_id: "distinctive" },
+      isError: true,
+    };
+    const workspace = {
+      json: async () => ownerResult,
+      request: async () => {
+        throw new Error("Cloud bytes are forbidden");
+      },
+    };
+    const result = await executeWorkspaceAction(
+      parseCodespaceToolParams({ action: "stat", codespace_id: codespaceId, path: "file" }),
+      "owned-user",
+      workspace,
+    );
+    expect(result).toBe(ownerResult);
+    expect(result.content[0]).toEqual({ type: "text", text: "owner-text-not-json" });
+  });
   it("collects a real failed command and output windows without exposing runner proofs", async () => {
     const value = await service();
     const requestId = createWorkspaceRequestId();
@@ -113,9 +230,15 @@ describe("workspace-backed codespace and process tools", () => {
     });
     expect(
       (
-        await collectWorkspaceCommand(value.workspace, "owned-user", codespaceId, requestId, {
-          waitMs: 10_000,
-        })
+        await executeWorkspaceAction(
+          parseCodespaceToolParams({
+            action: "exec",
+            codespace_id: codespaceId,
+            request_id: requestId,
+          }),
+          "owned-user",
+          value.workspace,
+        )
       ).structuredContent,
     ).toMatchObject({ state: "succeeded", stdout: "done" });
     await executeCodespaceProcess({ action: "start", request }, "owned-user", value.services);

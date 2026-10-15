@@ -72,6 +72,16 @@ describe("codespaceErrorMessage", () => {
     );
   });
 
+  test.each(["WORKSPACE_OUTCOME_UNCONFIRMED", "SCOPED_CREDENTIAL_DISPOSAL_PENDING"])(
+    "%s asks the reader to inspect the original request",
+    async (code) => {
+      await i18n.changeLanguage("ru");
+      expect(
+        codespaceErrorMessage(serverError(code, "Internal provider detail"), i18n.t, FALLBACK),
+      ).toBe(i18n.t("localDevices.editor.unconfirmed"));
+    },
+  );
+
   test.each(CODESPACE_ERROR_CODES)("%s has a message in English and in Russian", (code) => {
     const english = (en.common.codespaceErrors as Record<string, string>)[code];
     const russian = (ru.common.codespaceErrors as Record<string, string>)[code];

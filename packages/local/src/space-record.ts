@@ -65,9 +65,36 @@ export function requireSpaceGrant(policy: LocalPolicy, space: LocalSpace, now: n
 
 export class LocalRecords {
   constructor(readonly state: PrivateState) {}
+  async policyOrNull(): Promise<LocalPolicy | null> {
+    return this.state.read("policy.json", localPolicySchema.parse);
+  }
+  /** Pairing identity exists independently of a physical Local capability. */
+  async deviceIdentity(): Promise<{ deviceId: string; label: string } | null> {
+    const policy = await this.policyOrNull();
+    const connection = await this.state.read("connection.json", (value) =>
+      z
+        .object({ deviceId: z.string().uuid(), label: z.string().min(1).optional() })
+        .passthrough()
+        .parse(value),
+    );
+    if (policy && connection && policy.deviceId !== connection.deviceId)
+      throw new LocalRefusal("LOCAL_IDENTITY_CHANGED", "Pairing and Local device identity differ.");
+    if (policy) return { deviceId: policy.deviceId, label: policy.label };
+    if (!connection) return null;
+    if (!connection.label)
+      throw new LocalRefusal(
+        "LOCAL_IDENTITY_CHANGED",
+        "The paired controller has no retained label.",
+      );
+    return { deviceId: connection.deviceId, label: connection.label };
+  }
   async policy(): Promise<LocalPolicy> {
-    const policy = await this.state.read("policy.json", localPolicySchema.parse);
-    if (!policy) throw new Error("Run moira-local init first.");
+    const policy = await this.policyOrNull();
+    if (!policy)
+      throw new LocalRefusal(
+        "LOCAL_NOT_CONFIGURED",
+        "Initialize the Local SDK capability before physical Local work.",
+      );
     return policy;
   }
   async list(): Promise<LocalSpace[]> {
@@ -106,22 +133,9 @@ export class LocalRecords {
         space.admittedRepositoryFullName !== repository.fullName
       )
         return null;
-      const secret = await this.state.read(
-        `git-${repository.id}.json`,
-        z
-          .object({
-            token: z
-              .string()
-              .min(1)
-              .max(4096)
-              .regex(/^[A-Za-z0-9_]+$/),
-          })
-          .strict().parse,
-      );
       return {
         policy,
         repository,
-        gitCredential: secret?.token ?? null,
         spaceId: space.id,
         generation: space.generation,
       };

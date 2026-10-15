@@ -11,6 +11,8 @@ export const EXTENSION_API_VERSION = "moira.extensions/v1";
 
 /** Wire protocol version spoken between Moira and the isolated extension runner. */
 export const EXTENSION_RUNNER_API_VERSION = "moira.extension-runner/v2";
+export { binaryTransportSchema, binaryControlsSchema } from "./binary-transport.js";
+export type { BinaryTransport, BinaryControls } from "./binary-transport.js";
 
 /**
  * Namespaced custom node type: `<extension>.<node>`.
@@ -113,6 +115,7 @@ export interface ExtensionCommunicationChannelPermissions {
 
 /** One ordinary outbound communication channel contributed by an extension. */
 export interface ExtensionCommunicationChannelDeclaration {
+  binaryTransport?: import("./binary-transport.js").BinaryTransport;
   /** Stable namespaced identity, for example `corporate-messenger.notifications`. */
   id: string;
   title: string;

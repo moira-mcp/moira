@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { WORKSPACE_REQUEST_ID_PATTERN } from "./workspace-request-id.js";
 
 export const MAX_LOCAL_WORK_LEASE_MS = 7 * 24 * 60 * 60_000;
 const integer = (min: number, max: number) => z.number().int().min(min).max(max);
@@ -108,11 +109,13 @@ export const localDeviceControlViewSchema = z
     error: localControlErrorSchema.nullable(),
     repositoryAdmissions: z.array(localRepositoryAdmissionReceiptSchema).optional(),
     appliedAgentRepositoryManagement: agentRepositoryManagementSchema.nullable().optional(),
+    pendingRequestId: z.string().regex(WORKSPACE_REQUEST_ID_PATTERN).optional(),
   })
   .strict();
 export type LocalDeviceControlView = z.infer<typeof localDeviceControlViewSchema>;
 export const localControlRequestSchema = z
   .object({
+    requestId: z.string().regex(WORKSPACE_REQUEST_ID_PATTERN),
     expectedRevision: integer(0, Number.MAX_SAFE_INTEGER),
     expectedGeneration: integer(1, Number.MAX_SAFE_INTEGER),
     settings: localDeviceSettingsSchema,

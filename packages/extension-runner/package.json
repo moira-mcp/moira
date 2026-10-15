@@ -13,6 +13,7 @@
     "moira-extension-runner": "./bin/moira-extension-runner.js"
   },
   "dependencies": {
+    "esbuild": "^0.28.2",
     "@mcp-moira/extension-sdk": "*",
     "@mcp-moira/workflow-engine": "*",
     "ajv": "^8.17.1",

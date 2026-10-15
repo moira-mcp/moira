@@ -24,14 +24,24 @@ import {
   getActionableTelegramErrorMessage,
 } from "../types/telegram-types.js";
 import { GraphTemplateProcessor } from "../templates/graph-template-processor.js";
-import { createLogger, WorkflowLogger, InternalError } from "@mcp-moira/shared";
-import { renderExecutionProgressStepsImage } from "../utils/execution-progress-steps.js";
+import {
+  createLogger,
+  WorkflowLogger,
+  InternalError,
+  communicationOwnerReceiptSchema,
+  metadataRevision,
+} from "@mcp-moira/shared";
+import {
+  getActiveCommunicationFileOwner,
+  type CommunicationFileOwner,
+} from "../services/user-communication-provider.js";
 import { withInFlightPause } from "../utils/execution-visits.js";
 import { textEscaper, type NotificationFormat } from "../utils/notification-text.js";
 import {
   frameNotification,
   resolveNotificationFrame,
   prepareNotificationFrame,
+  notificationDeliveryRequestId,
 } from "../services/notification-frame.js";
 
 function formatOf(parseMode: TelegramNotificationNode["parseMode"]): NotificationFormat {
@@ -46,9 +56,7 @@ export class TelegramNotificationHandler implements INodeHandler {
   private templateProcessor: GraphTemplateProcessor;
   private logger: WorkflowLogger;
 
-  constructor(
-    private readonly progressImageRenderer: typeof renderExecutionProgressStepsImage = renderExecutionProgressStepsImage,
-  ) {
+  constructor(private readonly fileOwner?: CommunicationFileOwner) {
     this.templateProcessor = new GraphTemplateProcessor();
     this.logger = createLogger({ component: "TelegramNotificationHandler" });
 
@@ -203,7 +211,7 @@ export class TelegramNotificationHandler implements INodeHandler {
     const frame = await resolveNotificationFrame(repository, context, node.id, liveRun);
     let processedMessage = frameNotification(frame, body, {
       format,
-      limit: node.attachProgressImage ? TELEGRAM_CAPTION_MAX_LENGTH : TELEGRAM_TEXT_MAX_LENGTH,
+      limit: TELEGRAM_TEXT_MAX_LENGTH,
     });
 
     // Determine target chat ID (template or static)
@@ -233,51 +241,77 @@ export class TelegramNotificationHandler implements INodeHandler {
 
     // Send message via HTTP client
     if (node.attachProgressImage) {
-      const { graph, run } = frame;
-      if (!graph?.progress || !run)
-        throw this.createTelegramError(
-          TelegramErrorType.TEMPLATE_ERROR,
-          "Workflow has no progress graph",
+      try {
+        // A binary owner cannot override the configured channel destination or keyboard.
+        if (targetChatId !== defaultChatId || node.replyMarkup)
+          throw new Error("binary_destination_unavailable");
+        const requestId = await notificationDeliveryRequestId(repository, node.id, liveRun);
+        const prepared = await prepareNotificationFrame(
+          repository,
+          context,
+          node.id,
+          frame,
+          async (current) => current,
         );
-      // The phone steps picture of the run as of this node.
-      const prepared = await prepareNotificationFrame(
+        const current = prepared.frame;
+        if (!current.graph?.progress || !current.run) throw new Error("progress_unavailable");
+        const raw = await (this.fileOwner ?? getActiveCommunicationFileOwner()).submit(userId, {
+          action: "deliver",
+          requestId,
+          source: {
+            type: "progress",
+            descriptor: {
+              kind: "steps",
+              graph: current.graph as unknown as Record<string, unknown>,
+              run: withInFlightPause(current.graph, current.run, node.id) as unknown as Record<
+                string,
+                unknown
+              >,
+              renderContext: { runUrl: current.url },
+            },
+          },
+          channelIds: ["telegram"],
+          kind: "image",
+          text: frameNotification(current, body, { format, limit: TELEGRAM_CAPTION_MAX_LENGTH }),
+          format,
+          silent: node.disableNotification,
+          workflowFrame: {
+            executionId: context.executionId,
+            workflowId: context.workflowId,
+            revision: current.run.revision,
+            taskIdentityRevision: metadataRevision(current.run.taskIdentity ?? null),
+          },
+        });
+        const receipt = communicationOwnerReceiptSchema.passthrough().parse(raw);
+        if (receipt.outcome?.ok && receipt.outcome.result.status === "delivered") return true;
+      } catch {
+        /* Optional binary work cannot prevent the independent text notification. */
+      }
+      messageQueue.addNotification(
+        node.id,
+        "Optional progress image unavailable; the text notification is sent independently.",
+        "attachment_unavailable",
+      );
+      const current = await prepareNotificationFrame(
         repository,
         context,
         node.id,
         frame,
-        async (current) =>
-          this.progressImageRenderer(graph, withInFlightPause(graph, current.run ?? run, node.id)),
+        async () => null,
       );
-      const rendered = prepared.value;
-      processedMessage = frameNotification(prepared.frame, body, {
+      processedMessage = frameNotification(current.frame, body, {
         format,
-        limit: TELEGRAM_CAPTION_MAX_LENGTH,
-      });
-      if (!rendered)
-        throw this.createTelegramError(
-          TelegramErrorType.TEMPLATE_ERROR,
-          "Workflow has no progress graph",
-        );
-      await telegramClient.sendPhoto({
-        chatId: targetChatId,
-        photo: rendered.buffer,
-        filename: "workflow-progress.png",
-        mimeType: "image/png",
-        caption: processedMessage,
-        parseMode: node.parseMode,
-        disableNotification: node.disableNotification,
-        replyMarkup: node.replyMarkup,
-      });
-    } else {
-      await telegramClient.sendMessage({
-        chatId: targetChatId,
-        text: processedMessage,
-        parseMode: node.parseMode,
-        disableNotification: node.disableNotification,
-        disableLinkPreview: true,
-        replyMarkup: node.replyMarkup,
+        limit: TELEGRAM_TEXT_MAX_LENGTH,
       });
     }
+    await telegramClient.sendMessage({
+      chatId: targetChatId,
+      text: processedMessage,
+      parseMode: node.parseMode,
+      disableNotification: node.disableNotification,
+      disableLinkPreview: true,
+      replyMarkup: node.replyMarkup,
+    });
 
     return true; // Notification sent successfully
   }

@@ -7,6 +7,26 @@
   "communicationChannels": [
     {
       "id": "channel-probe.notifications",
+      "binaryTransport": {
+        "operations": [
+          {
+            "id": "upload",
+            "endpoint": { "url": "https://allowed.example/files" },
+            "method": "POST",
+            "credential": {
+              "header": "authorization",
+              "secret": "channel-probe.token",
+              "scheme": "Bearer"
+            },
+            "recipient": { "field": "recipient", "setting": "channel-probe.destination" },
+            "body": {
+              "mode": "multipart",
+              "fileField": "file",
+              "controls": { "caption": "caption" }
+            }
+          }
+        ]
+      },
       "title": "Channel probe",
       "capabilities": {
         "text": true,

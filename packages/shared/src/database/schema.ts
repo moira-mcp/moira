@@ -10,6 +10,7 @@ import {
   primaryKey,
   uniqueIndex,
   index,
+  check,
 } from "drizzle-orm/sqlite-core";
 import { sql } from "drizzle-orm";
 import { storedTimestampMs } from "./timestamp-sql.js";
@@ -180,11 +181,11 @@ export const codespaceConnection = sqliteTable(
     // Monotonic compare-and-swap version for the complete installation/repository snapshot.
     grantsVersion: integer("grantsVersion").notNull().default(0),
     credentialGeneration: integer("credentialGeneration").notNull().default(1),
+    // Authorization epoch changes on explicit grant replacement/revocation, not OAuth refresh.
+    authorityGeneration: integer("authorityGeneration").notNull().default(1),
     refreshLeaseId: text("refreshLeaseId"),
     refreshLeaseExpiresAt: integer("refreshLeaseExpiresAt", { mode: "timestamp_ms" }),
     lastErrorCode: text("lastErrorCode"),
-    // When this user's codespaces were last listed from the provider by the periodic observation.
-    resourcesObservedAt: integer("resourcesObservedAt", { mode: "timestamp_ms" }),
     createdAt: integer("createdAt", { mode: "timestamp_ms" }).notNull(),
     updatedAt: integer("updatedAt", { mode: "timestamp_ms" }).notNull(),
   },
@@ -224,6 +225,10 @@ export const codespaceCredentialRevocation = sqliteTable(
       .notNull()
       .references(() => user.id, { onDelete: "cascade" }),
     provider: text("provider").notNull(),
+    credentialKind: text("credentialKind").notNull().default("parent"),
+    state: text("state").notNull().default("dispose_pending"),
+    requestId: text("requestId"),
+    scopeMetadata: text("scopeMetadata"),
     envelopeVersion: integer("envelopeVersion").notNull(),
     keyVersion: text("keyVersion").notNull(),
     iv: text("iv").notNull(),
@@ -238,6 +243,9 @@ export const codespaceCredentialRevocation = sqliteTable(
       table.userId,
       table.provider,
     ),
+    scopedRequestIdx: uniqueIndex("codespace_scoped_credential_request_idx")
+      .on(table.userId, table.provider, table.requestId)
+      .where(sql`${table.credentialKind} = 'scoped'`),
   }),
 );
 
@@ -302,9 +310,9 @@ export const codespaceConnectionRepository = sqliteTable(
   }),
 );
 
-/** Durable intent and exact ownership record for one disposable codespace. */
-export const codespaceResource = sqliteTable(
-  "codespaceResource",
+/** Immutable Local route; physical state and results belong to the assigned owner. */
+export const localResourceIdentity = sqliteTable(
+  "localResourceIdentity",
   {
     id: text("id").primaryKey(),
     userId: text("userId")
@@ -313,65 +321,77 @@ export const codespaceResource = sqliteTable(
     connectionId: text("connectionId")
       .notNull()
       .references(() => codespaceConnection.id),
-    authorizationGeneration: integer("authorizationGeneration").notNull().default(1),
-    provider: text("provider").notNull(),
+    authorizationGeneration: integer("authorizationGeneration").notNull(),
     repositoryId: text("repositoryId").notNull(),
     repositoryFullName: text("repositoryFullName").notNull(),
     requestedRef: text("requestedRef").notNull(),
-    /** Ref the provider last reported checked out; observed state, not identity. */
-    observedRef: text("observedRef"),
     operationMarker: text("operationMarker").notNull(),
-    providerResourceName: text("providerResourceName"),
-    externalOwnerId: text("externalOwnerId"),
-    billableOwnerId: text("billableOwnerId"),
-    machineName: text("machineName").notNull(),
-    machineDisplayName: text("machineDisplayName").notNull(),
-    machineOperatingSystem: text("machineOperatingSystem").notNull(),
-    machineCpuCores: integer("machineCpuCores").notNull(),
-    machineMemoryBytes: integer("machineMemoryBytes").notNull(),
-    machineStorageBytes: integer("machineStorageBytes").notNull(),
-    state: text("state").notNull(),
-    retentionPolicy: text("retentionPolicy").notNull().default("legacy_disposable"),
-    desiredState: text("desiredState").notNull().default("running"),
-    observedState: text("observedState").notNull().default("unknown"),
-    generation: integer("generation").notNull().default(1),
-    createDeadlineAt: integer("createDeadlineAt", { mode: "timestamp_ms" }).notNull(),
-    remoteExpiresAt: integer("remoteExpiresAt", { mode: "timestamp_ms" }).notNull(),
-    cleanupDeadlineAt: integer("cleanupDeadlineAt", { mode: "timestamp_ms" }),
-    claimId: text("claimId"),
-    claimExpiresAt: integer("claimExpiresAt", { mode: "timestamp_ms" }),
-    /** Consecutive unconverged reconciler passes; drives the bounded retry backoff. */
-    reconcileFailures: integer("reconcileFailures").notNull().default(0),
-    /** Last work Moira did in the codespace: adoption, a completed start, an operation reserved. */
-    lastActivityAt: integer("lastActivityAt", { mode: "timestamp_ms" }),
-    /** The provider's last start time (GitHub's `last_used_at`), for display only. */
-    providerLastUsedAt: integer("providerLastUsedAt", { mode: "timestamp_ms" }),
-    /** Last exact verified provider observation; retry bookkeeping does not advance it. */
-    observedAt: integer("observedAt", { mode: "timestamp_ms" }),
-    lastOutcome: text("lastOutcome"),
+    routeGeneration: integer("routeGeneration").notNull(),
     createdAt: integer("createdAt", { mode: "timestamp_ms" }).notNull(),
-    updatedAt: integer("updatedAt", { mode: "timestamp_ms" }).notNull(),
+    retiredAt: integer("retiredAt", { mode: "timestamp_ms" }),
+    retiredGeneration: integer("retiredGeneration"),
+    retiredRequestId: text("retiredRequestId"),
   },
   (table) => ({
-    markerIdx: uniqueIndex("codespace_resource_operation_marker_idx").on(table.operationMarker),
-    providerNameIdx: uniqueIndex("codespace_resource_provider_name_idx").on(
-      table.provider,
-      table.providerResourceName,
-    ),
-    userStateIdx: index("codespace_resource_user_state_idx").on(table.userId, table.state),
-    reconcileIdx: index("codespace_resource_reconcile_idx").on(
-      table.state,
-      table.claimExpiresAt,
-      table.remoteExpiresAt,
+    markerIdx: uniqueIndex("local_resource_operation_marker_idx").on(table.operationMarker),
+    ownerIdx: index("local_resource_owner_idx").on(table.userId),
+    retirement: check(
+      "local_resource_retirement",
+      sql`(${table.retiredAt} IS NULL AND ${table.retiredGeneration} IS NULL AND ${table.retiredRequestId} IS NULL) OR (${table.retiredAt} IS NOT NULL AND ${table.retiredGeneration} IS NOT NULL AND ${table.retiredGeneration}>0)`,
     ),
   }),
 );
 
-/** The one current outbound workspace credential; clear credentials never enter SQL. */
-export const workspaceAgentCredential = sqliteTable("workspaceAgentCredential", {
+/** Minimal GitHub identity, controller assignment and persistent billable ownership. */
+export const githubResourceIdentity = sqliteTable("githubResourceIdentity", {
+  id: text("id").primaryKey(),
+  userId: text("userId")
+    .notNull()
+    .references(() => user.id),
+  connectionId: text("connectionId")
+    .notNull()
+    .references(() => codespaceConnection.id),
+  authorizationGeneration: integer("authorizationGeneration").notNull(),
+  repositoryId: text("repositoryId").notNull(),
+  repositoryFullName: text("repositoryFullName").notNull(),
+  requestedRef: text("requestedRef").notNull(),
+  devcontainerPath: text("devcontainerPath"),
+  operationMarker: text("operationMarker").notNull().unique(),
+  providerResourceName: text("providerResourceName").unique(),
+  externalOwnerId: text("externalOwnerId").notNull(),
+  billableOwnerId: text("billableOwnerId").notNull(),
+  deviceId: text("deviceId"),
+  deviceGeneration: integer("deviceGeneration"),
+  deviceConnectionId: text("deviceConnectionId"),
+  generation: integer("generation").notNull(),
+  retirement: text("retirement").notNull(),
+  revokedAt: integer("revokedAt"),
+  createdAt: integer("createdAt").notNull(),
+});
+/** Digest-only boot renewal authority for one controller-proved root/release. */
+export const githubWorkspaceRenewal = sqliteTable("githubWorkspaceRenewal", {
   resourceId: text("resourceId")
     .primaryKey()
-    .references(() => codespaceResource.id, { onDelete: "cascade" }),
+    .references(() => githubResourceIdentity.id),
+  userId: text("userId")
+    .notNull()
+    .references(() => user.id),
+  credentialDigest: text("credentialDigest").notNull().unique(),
+  resourceGeneration: integer("resourceGeneration").notNull(),
+  authorizationGeneration: integer("authorizationGeneration").notNull(),
+  root: text("root").notNull(),
+  rootDevice: text("rootDevice").notNull(),
+  rootInode: text("rootInode").notNull(),
+  release: text("release").notNull(),
+  enrollmentRequestId: text("enrollmentRequestId").notNull(),
+  enrollmentDigest: text("enrollmentDigest").notNull(),
+  currentRequestId: text("currentRequestId"),
+  currentEnvironmentIdentity: text("currentEnvironmentIdentity"),
+});
+
+/** The one current outbound workspace credential; clear credentials never enter SQL. */
+export const workspaceAgentCredential = sqliteTable("workspaceAgentCredential", {
+  resourceId: text("resourceId").primaryKey(),
   userId: text("userId")
     .notNull()
     .references(() => user.id, { onDelete: "cascade" }),
@@ -383,171 +403,7 @@ export const workspaceAgentCredential = sqliteTable("workspaceAgentCredential", 
   createdAt: integer("createdAt", { mode: "timestamp_ms" }).notNull(),
 });
 
-/** Non-transferable lifecycle authority; only its digest is persisted. */
-export const codespaceLifecycleCapability = sqliteTable("codespaceLifecycleCapability", {
-  resourceId: text("resourceId")
-    .primaryKey()
-    .references(() => codespaceResource.id, {
-      onDelete: "cascade",
-    }),
-  userId: text("userId")
-    .notNull()
-    .references(() => user.id),
-  capabilityHash: text("capabilityHash").notNull().unique(),
-  createdAt: integer("createdAt", { mode: "timestamp_ms" }).notNull(),
-});
-
-/** Required provider cleanups are counted once per UTC day for operator accounting. */
-export const codespacePolicyUsage = sqliteTable(
-  "codespacePolicyUsage",
-  {
-    userId: text("userId")
-      .notNull()
-      .references(() => user.id, { onDelete: "cascade" }),
-    provider: text("provider").notNull(),
-    utcDay: text("utcDay").notNull(),
-    requiredCleanupOperations: integer("requiredCleanupOperations").notNull().default(0),
-    updatedAt: integer("updatedAt", { mode: "timestamp_ms" }).notNull(),
-  },
-  (table) => ({
-    pk: primaryKey({ columns: [table.userId, table.provider, table.utcDay] }),
-  }),
-);
-
-/** One durable record per external provider mutation attempt. */
-export const codespaceProviderMutation = sqliteTable(
-  "codespaceProviderMutation",
-  {
-    id: text("id").primaryKey(),
-    resourceId: text("resourceId")
-      .notNull()
-      .references(() => codespaceResource.id),
-    userId: text("userId")
-      .notNull()
-      .references(() => user.id),
-    provider: text("provider").notNull(),
-    generation: integer("generation").notNull(),
-    kind: text("kind").notNull(),
-    attempt: integer("attempt").notNull(),
-    createdAt: integer("createdAt", { mode: "timestamp_ms" }).notNull(),
-  },
-  (table) => ({
-    attemptIdx: uniqueIndex("codespace_provider_mutation_attempt_idx").on(
-      table.resourceId,
-      table.generation,
-      table.kind,
-      table.attempt,
-    ),
-    userDayIdx: index("codespace_provider_mutation_user_created_idx").on(
-      table.userId,
-      table.createdAt,
-    ),
-  }),
-);
-
-/** Durable global/provider emergency controls owned by core. */
-export const codespaceProviderControl = sqliteTable("codespaceProviderControl", {
-  scope: text("scope").primaryKey(),
-  disabled: integer("disabled", { mode: "boolean" }).notNull().default(false),
-  reason: text("reason"),
-  updatedAt: integer("updatedAt", { mode: "timestamp_ms" }).notNull(),
-  updatedBy: text("updatedBy").references(() => user.id),
-});
-
-/** Durable metadata for an exact operation in a user-owned codespace. */
-export const codespaceOperation = sqliteTable(
-  "codespaceOperation",
-  {
-    id: text("id").primaryKey(),
-    requestId: text("requestId"),
-    requestDigest: text("requestDigest"),
-    inputReference: text("inputReference"),
-    resultReference: text("resultReference"),
-    admissionDeadlineAt: integer("admissionDeadlineAt"),
-    runtimeMs: integer("runtimeMs"),
-    startedAt: integer("startedAt"),
-    sessionKey: text("sessionKey"),
-    userId: text("userId")
-      .notNull()
-      .references(() => user.id),
-    resourceId: text("resourceId")
-      .notNull()
-      .references(() => codespaceResource.id),
-    resourceGeneration: integer("resourceGeneration").notNull(),
-    authorizationGeneration: integer("authorizationGeneration").notNull(),
-    provider: text("provider").notNull(),
-    providerResourceName: text("providerResourceName").notNull(),
-    remoteMarker: text("remoteMarker").notNull().unique(),
-    kind: text("kind").notNull(),
-    state: text("state").notNull(),
-    inputBytes: integer("inputBytes").notNull(),
-    stdoutLimitBytes: integer("stdoutLimitBytes").notNull(),
-    stderrLimitBytes: integer("stderrLimitBytes").notNull(),
-    outputBytes: integer("outputBytes").notNull().default(0),
-    exitCode: integer("exitCode"),
-    remoteCleanupPending: integer("remoteCleanupPending").notNull().default(1),
-    resultExpiresAt: integer("resultExpiresAt", { mode: "timestamp_ms" }),
-    deadlineAt: integer("deadlineAt", { mode: "timestamp_ms" }).notNull(),
-    claimId: text("claimId"),
-    claimExpiresAt: integer("claimExpiresAt", { mode: "timestamp_ms" }),
-    lastOutcome: text("lastOutcome"),
-    createdAt: integer("createdAt", { mode: "timestamp_ms" }).notNull(),
-    updatedAt: integer("updatedAt", { mode: "timestamp_ms" }).notNull(),
-  },
-  (table) => ({
-    ownerIdx: index("codespace_operation_owner_idx").on(table.userId, table.resourceId),
-    requestIdx: uniqueIndex("codespace_operation_request_idx").on(table.userId, table.requestId),
-    reconcileIdx: index("codespace_operation_reconcile_idx").on(table.state, table.claimExpiresAt),
-  }),
-);
-
-/** Metadata-only authority for private, expiring codespace byte transfers. */
-export const codespaceTransfer = sqliteTable(
-  "codespaceTransfer",
-  {
-    id: text("id").primaryKey(),
-    tokenDigest: text("tokenDigest").notNull().unique(),
-    requestId: text("requestId"),
-    requestDigest: text("requestDigest"),
-    direction: text("direction"),
-    resourceId: text("resourceId"),
-    provider: text("provider"),
-    resourceGeneration: integer("resourceGeneration"),
-    authorizationGeneration: integer("authorizationGeneration"),
-    environmentIdentity: text("environmentIdentity"),
-    expectedSha256: text("expectedSha256"),
-    uploadedBytes: integer("uploadedBytes").notNull().default(0),
-    userId: text("userId")
-      .notNull()
-      .references(() => user.id, { onDelete: "cascade" }),
-    purpose: text("purpose").notNull(),
-    state: text("state").notNull(),
-    fileName: text("fileName").notNull(),
-    mimeType: text("mimeType").notNull(),
-    declaredSize: integer("declaredSize").notNull(),
-    observedSize: integer("observedSize"),
-    sha256: text("sha256"),
-    objectKey: text("objectKey").notNull().unique(),
-    ownerPid: integer("ownerPid").notNull(),
-    ownerStartTime: text("ownerStartTime"),
-    claimId: text("claimId"),
-    claimExpiresAt: integer("claimExpiresAt", { mode: "timestamp_ms" }),
-    expiresAt: integer("expiresAt", { mode: "timestamp_ms" }).notNull(),
-    createdAt: integer("createdAt", { mode: "timestamp_ms" }).notNull(),
-    updatedAt: integer("updatedAt", { mode: "timestamp_ms" }).notNull(),
-  },
-  (table) => ({
-    ownerStateExpiryIdx: index("codespace_transfer_owner_state_expiry_idx").on(
-      table.userId,
-      table.state,
-      table.expiresAt,
-    ),
-    stateExpiryIdx: index("codespace_transfer_state_expiry_idx").on(table.state, table.expiresAt),
-    requestIdx: uniqueIndex("codespace_transfer_request_idx").on(table.userId, table.requestId),
-  }),
-);
-
-/** Locally approved devices; only credential digests and public policy metadata are persisted. */
+/** Paired device identity and revocable routing authority; operational policy is owner-held. */
 export const codespaceLocalDevice = sqliteTable(
   "codespaceLocalDevice",
   {
@@ -562,9 +418,6 @@ export const codespaceLocalDevice = sqliteTable(
     generation: integer("generation").notNull().default(1),
     status: text("status").notNull(),
     credentialDigest: text("credentialDigest").notNull().unique(),
-    policy: text("policy").notNull(),
-    policyDigest: text("policyDigest").notNull(),
-    control: text("control"),
     lastSeenAt: integer("lastSeenAt"),
     createdAt: integer("createdAt").notNull(),
     updatedAt: integer("updatedAt").notNull(),
@@ -645,7 +498,7 @@ export const codespaceLocalResourceBinding = sqliteTable(
   {
     resourceId: text("resourceId")
       .primaryKey()
-      .references(() => codespaceResource.id, { onDelete: "cascade" }),
+      .references(() => localResourceIdentity.id, { onDelete: "cascade" }),
     userId: text("userId")
       .notNull()
       .references(() => user.id),
@@ -655,6 +508,7 @@ export const codespaceLocalResourceBinding = sqliteTable(
     deviceGeneration: integer("deviceGeneration").notNull(),
     repositoryId: text("repositoryId").notNull(),
     profileId: text("profileId").notNull(),
+    revokedAt: integer("revokedAt"),
   },
   (table) => ({
     deviceIdx: index("codespace_local_binding_device_idx").on(
@@ -663,61 +517,6 @@ export const codespaceLocalResourceBinding = sqliteTable(
     ),
   }),
 );
-/** Relay rows contain private transfer references, never command arguments or byte payloads. */
-export const codespaceLocalRelay = sqliteTable(
-  "codespaceLocalRelay",
-  {
-    requestId: text("requestId").primaryKey(),
-    userId: text("userId")
-      .notNull()
-      .references(() => user.id),
-    deviceId: text("deviceId")
-      .notNull()
-      .references(() => codespaceLocalDevice.id),
-    deviceGeneration: integer("deviceGeneration").notNull(),
-    connectionId: text("connectionId")
-      .notNull()
-      .references(() => codespaceConnection.id),
-    resourceId: text("resourceId")
-      .notNull()
-      .references(() => codespaceResource.id),
-    resourceGeneration: integer("resourceGeneration").notNull(),
-    digest: text("digest").notNull(),
-    inputReference: text("inputReference").notNull(),
-    status: text("status").notNull(),
-    claimId: text("claimId"),
-    settlementClaimId: text("settlementClaimId"),
-    claimExpiresAt: integer("claimExpiresAt"),
-    outputReference: text("outputReference"),
-    deadlineAt: integer("deadlineAt").notNull(),
-    createdAt: integer("createdAt").notNull(),
-    updatedAt: integer("updatedAt").notNull(),
-  },
-  (table) => ({
-    claimIdx: index("codespace_local_relay_claim_idx").on(
-      table.deviceId,
-      table.deviceGeneration,
-      table.status,
-      table.deadlineAt,
-      table.createdAt,
-    ),
-    ownerDeadlineIdx: index("codespace_local_relay_owner_deadline_idx").on(
-      table.userId,
-      table.deadlineAt,
-      table.status,
-    ),
-  }),
-);
-
-export const codespaceLocalRelayPart = sqliteTable("codespaceLocalRelayPart", {
-  transferId: text("transferId")
-    .primaryKey()
-    .references(() => codespaceTransfer.id, { onDelete: "cascade" }),
-  requestId: text("requestId")
-    .notNull()
-    .references(() => codespaceLocalRelay.requestId, { onDelete: "cascade" }),
-  claimId: text("claimId").notNull(),
-});
 
 // ===== MCP Moira Workflow Tables =====
 
@@ -1094,41 +893,6 @@ export const workflowTokens = sqliteTable("workflow_tokens", {
   used: integer("used", { mode: "boolean" }).default(false),
   createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
 });
-
-/** Digest-only, short-lived grants for authenticated communication attachment uploads. */
-export const communicationAttachmentGrant = sqliteTable(
-  "communication_attachment_grant",
-  {
-    tokenDigest: text("token_digest").primaryKey(),
-    userId: text("user_id")
-      .notNull()
-      .references(() => user.id, { onDelete: "cascade" }),
-    correlationId: text("correlation_id").notNull(),
-    audience: text("audience").notNull(),
-    purpose: text("purpose").notNull(),
-    message: text("message").notNull(),
-    format: text("format").notNull(),
-    silent: integer("silent", { mode: "boolean" }).notNull().default(false),
-    kind: text("kind").notNull(),
-    filename: text("filename").notNull(),
-    mimeType: text("mime_type").notNull(),
-    declaredSize: integer("declared_size").notNull(),
-    state: text("state").notNull().default("pending"),
-    claimId: text("claim_id"),
-    claimedAt: integer("claimed_at", { mode: "timestamp_ms" }),
-    completedAt: integer("completed_at", { mode: "timestamp_ms" }),
-    expiresAt: integer("expires_at", { mode: "timestamp_ms" }).notNull(),
-    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
-  },
-  (table) => ({
-    userStateExpiryIdx: index("communication_grant_user_state_expiry_idx").on(
-      table.userId,
-      table.state,
-      table.expiresAt,
-    ),
-    stateExpiryIdx: index("communication_grant_state_expiry_idx").on(table.state, table.expiresAt),
-  }),
-);
 
 // ===== Notes System Tables =====
 // User notes for persistent storage between workflow executions

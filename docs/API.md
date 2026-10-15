@@ -497,6 +497,10 @@ Stale grants are not successfully consumed; request a fresh grant, including whe
 the independent identity binding. Current identity is checked at atomic reservation and after
 asynchronous rendering.
 
+`POST /api/executions/:id/progress-image-token` accepts optional `deviceId`; MCP `session` action `progress-image-token` accepts `device_id`. Minting selects that live paired controller, or the sole eligible controller. No available or unambiguous owner returns operational `COMMUNICATION_OWNER_UNAVAILABLE` (HTTP 503; MCP error result with that code), rather than a PNG or a usable image grant. Reading progress as structured text does not require a file owner.
+
+The selected owner renders the authorized immutable map descriptor with the packaged renderer. The public PNG route streams its owner publication. Existing execution owner, version, step/context/task identity and option guards remain mandatory at redemption and after asynchronous owner work. Successful response completion consumes the progress-image grant once; failed delivery releases its reservation. This single-use progress grant is distinct from the repeatable immutable owner publication underneath it.
+
 The PNG adapter consumes the wrapped visual model; the run page reads the projection directly. Both
 expose the complete task, goal, facts and ordered block content; no essential field is available
 only through hover or another interactive control. Valid bounded content is wrapped into
@@ -843,7 +847,9 @@ to Settings with a bounded `github=<outcome>` as `/start` does.
 Adding the App's `Plan: read` account permission requires the connected user to
 authorize the updated permission to obtain a new token. `POST /github/refresh`
 cannot add a token permission, and account-permission updates alone do not require
-reinstalling the App. `DELETE /github` stops managed Codespaces.
+reinstalling the App. `DELETE /github` retires access; it does not stop managed
+Codespaces. Explicitly stop a running VM to end its compute use. Stopped VM disks
+remain until explicitly deleted and can still incur storage charges.
 
 Authentication: Required
 
@@ -879,7 +885,9 @@ Authentication: Required
 Makes the connection unusable before provider I/O, retries every exact pending
 token revocation, revokes the active GitHub App grant, and returns the sanitized
 view. A transient provider failure leaves `revocation_pending`; it never restores
-local authority.
+local authority. Guest/renewal and scoped credential authority are retired, but this
+route does not stop or delete the provider VM. Explicitly stop running resources to
+end compute use; preserved disks and unresolved cleanup identities remain.
 
 Authentication: Required
 
@@ -1575,7 +1583,7 @@ Errors:
 
 Authentication: Via token (no session required)
 
-## Local Device Enrollment and Relay API
+## Local Device Enrollment and Controller API
 
 Browser device management uses `/api/integrations/local` with ordinary admitted-user
 authentication. Companion requests use `/api/local-devices` with device credentials,
@@ -1585,41 +1593,57 @@ configured application origin. Successful JSON responses use `{success:true,data
 
 ### Browser device management
 
-| Method and path                                     | Input                                            | Returned `data`                                              |
-| --------------------------------------------------- | ------------------------------------------------ | ------------------------------------------------------------ |
-| `GET /api/integrations/local/devices`               | None                                             | `{devices: LocalDeviceView[], pairings: LocalPairingView[]}` |
-| `POST /api/integrations/local/pairings`             | Empty object                                     | `201`: `{pairingId, revision, expiresAt, pairingToken}`      |
-| `POST /api/integrations/local/pairings/:id/confirm` | `{expectedRevision: positive integer}`           | Confirmed `LocalDeviceView`                                  |
-| `DELETE /api/integrations/local/devices/:id`        | `{expectedGeneration: positive integer}`         | Revoked `LocalDeviceView`                                    |
-| `PUT /api/integrations/local/devices/:id/settings`  | `{expectedRevision,expectedGeneration,settings}` | Requested `LocalDeviceView`                                  |
+| Method and path                                                          | Input                                                      | Returned `data`                                              |
+| ------------------------------------------------------------------------ | ---------------------------------------------------------- | ------------------------------------------------------------ |
+| `GET /api/integrations/local/devices`                                    | None                                                       | `{devices: LocalDeviceView[], pairings: LocalPairingView[]}` |
+| `POST /api/integrations/local/pairings`                                  | Empty object                                               | `201`: `{pairingId, revision, expiresAt, pairingToken}`      |
+| `POST /api/integrations/local/pairings/:id/confirm`                      | `{expectedRevision: positive integer}`                     | Confirmed `LocalDeviceView`                                  |
+| `DELETE /api/integrations/local/devices/:id`                             | `{expectedGeneration: positive integer}`                   | Revoked `LocalDeviceView`                                    |
+| `PUT /api/integrations/local/devices/:id/settings`                       | `{requestId,expectedRevision,expectedGeneration,settings}` | Live `LocalDeviceView` after confirmed application           |
+| `GET /api/integrations/local/devices/:id/settings/operations/:requestId` | Original ws1 request ID                                    | Original owner operation receipt                             |
+| `GET /api/integrations/local/devices/:id/operations/:requestId`          | Original ws1 request ID                                    | Original owner operation receipt                             |
 
-Pairing lasts ten minutes. Its secret is returned when created; subsequent list
-responses do not disclose it. The local companion must enroll with that secret
-before the browser can confirm the received policy. Confirmation requires the
-current pairing revision. Revocation requires the current device generation and
-invalidates that device's authority without revoking sibling devices.
+Pairing lasts ten minutes. Its secret is returned when created; subsequent lists do not
+disclose it. The companion enrolls with the secret before browser confirmation of the
+current pairing revision. Enrollment stores device identity and label, not operational
+policy. Revocation checks the current device generation and invalidates that device's
+authority without revoking sibling devices.
 
-`LocalDeviceView` contains `userId`, `deviceId`, `deviceGeneration`, `connectionId`,
-`label`, `status` (`pending|active|revoked`), public `policy`, nullable `lastSeenAt`
-and `createdAt`, plus optional `control`. `LocalPairingView` contains `id`, `revision`, nullable `deviceId`,
-`state` (`waiting_local|waiting_confirmation|confirmed|expired`) and `expiresAt`.
-Timestamps are epoch milliseconds.
+`LocalDeviceView` contains `userId`, `deviceId`, `deviceGeneration`, pairing
+`connectionId`, `label`, `status` (`pending|active|revoked`), nullable
+`lastSeenAt`, `createdAt`, and a discriminated `owner`:
 
-The version-1 public policy includes device identity and label, `enabled`,
-`leaseUntil`, approved repositories (`id`, `fullName`, `private`, `allowPush`,
-`allowDelete`, optional `allowPullRequests`), owner-selected machine defaults and storage policy. It has no host paths,
-repository tokens, SDK credentials or executable selection. Browser confirmation
-does not itself grant web control. Server revocation fences requests;
-an offline machine's physical stop still depends on its independent local lease
-and disable mechanism, rather than an instantaneous server-to-host command.
+```typescript
+type LocalDeviceOwnerView =
+  | {
+      state: "available";
+      observedAt: number;
+      local:
+        | { state: "configured"; policy: LocalPublicPolicy; control: LocalDeviceControlView }
+        | { state: "unconfigured" };
+      github: { resources: GitHubControllerResource[] };
+    }
+  | { state: "unavailable" };
+```
+
+The local capability discriminant distinguishes configured Local VM rights from a neutral
+paired controller. Available configured policy and control come from a fresh authenticated
+controller observation; GitHub resources do not require Local SDK configuration.
+Unavailable does not contain cached policy or imply an empty grant set. Contact time
+is registry metadata, not permission to dispatch. `LocalPairingView` contains `id`,
+`revision`, nullable `deviceId`, `state`
+(`waiting_local|waiting_confirmation|confirmed|expired`) and `expiresAt`.
+Timestamps are epoch milliseconds. Public policy exposes enabled state, finite lease,
+repository permissions and machine defaults; it contains no host paths or secrets.
 
 ### Owner settings control
 
-The settings PUT requires a Better Auth browser session and an explicit matching
-Origin; an Authorization header is refused. The owner must first approve a finite
-web-control envelope locally. Both revision and device generation are checked
-before storing a request. Saving returns pending desired settings, not proof that
-the host applied them. JSON management input is bounded to 2 MiB.
+The settings PUT requires a Better Auth browser session and explicit matching Origin;
+an Authorization header is refused. The owner first approves `web-control --confirm`
+locally. Submit a fresh `requestId` in `ws1-<lowercase UUID>` form and the observed
+device generation and control revision. The cloud routes the request to the live owner;
+it stores no requested-settings queue. An unavailable owner refuses before dispatch.
+JSON management input is bounded to 2 MiB.
 
 ```typescript
 interface LocalDeviceControlView {
@@ -1630,433 +1654,363 @@ interface LocalDeviceControlView {
   settings: LocalDeviceSettingsValue;
   ceiling: LocalControlCeiling | null;
   error: { code: string; message: string } | null;
+  repositoryAdmissions?: LocalRepositoryAdmissionReceipt[];
+  appliedAgentRepositoryManagement?: AgentRepositoryManagement | null;
+  pendingRequestId?: string;
 }
 ```
 
-`LocalDeviceSettingsValue` and `LocalControlCeiling` are defined by
-`packages/shared/src/codespaces/local-management-types.ts`. Settings contain
-`label`, `enabled`, epoch-ms `leaseUntil`, `cpuCores`, `memoryBytes`, `storageBytes`,
-`dockerBytes`, repository grants and nullable
-`gitAuthor:{name,email}`. Repository grants carry UUID `id`, `fullName`, `private`,
-`allowPush`, `allowDelete`, optional `allowPullRequests`.
-The ceiling bounds owner-selected numeric settings and `maxLeaseMs`; leases are finite
-and at most seven days. Numeric resources must be positive safe integers and storage
-must exceed Docker bytes. Requested settings cannot exceed the locally approved envelope;
-actual disk alignment, capacity and native SDK failures remain enforced.
+`revision` identifies the latest admitted settings revision; `appliedRevision`
+identifies the physically applied revision. A known rejection permits a corrected
+request against the next observed revision. A pending or uncertain physical change
+does not permit a replacement effect. `pendingRequestId` points to the original
+unfinished owner operation and clears on completion; collect it after a lost reply
+or page reload without resubmitting settings. Collection returns `requestId`,
+`state: absent|accepted|completed|unconfirmed` and, when settled, an `outcome`
+discriminated by `ok` with `result` or `error`. An unconfirmed result is not proof
+that no effect occurred.
+The settings-specific collection route also returns the live device view in top-level
+`result` after a successful completed receipt.
 
-The device's `policy` remains its reported applied policy. The control view holds
-the latest requested settings and applied/rejected state; `lastSeenAt` separately
-describes contact, so an offline save does not report success on the machine.
-CPU, RAM and Docker disk are new-VM defaults, not in-place resizing of existing VMs.
+Settings and ceilings are defined by
+`packages/shared/src/codespaces/local-management-types.ts`. Settings include label,
+enabled state, epoch-ms lease, CPU/RAM/shared disk and guest Docker capacity, repository
+read/push/PR/delete permissions, Git author and optional repository-management
+delegation. Numeric resources are positive safe integers; storage exceeds Docker
+capacity, and leases are finite and at most seven days. Settings cannot exceed the
+locally approved envelope. Physical disk alignment, capacity and SDK failures remain
+owner-enforced. CPU/RAM/Docker are new-VM defaults; existing VM profiles come from
+their actual admission. Human whole-settings replacement is distinct from delegated
+repository admission, which can append only the exactly authorized repository.
 
-### Companion enrollment and work
+### Companion enrollment and routing
 
 `POST /api/local-devices/enroll` accepts
-`{pairingId, pairingToken, credential, policy}` and returns `201` with the pending
-device. The companion generates the 32-byte base64url credential locally. The
-server stores digests of credentials and pairing tokens, not their plaintext.
-`POST /api/local-devices/pairings/status` accepts `{pairingId,pairingToken}` and
-returns `{pairing,device}`, with a nullable device while enrollment is incomplete.
-These two endpoints use the pairing secret rather than Bearer authentication.
+`{pairingId,pairingToken,credential,deviceId,label}` and returns `201` with the pending
+device. The companion generates its 32-byte base64url credential locally. Only
+credential and pairing-token digests are stored on the server.
+`POST /api/local-devices/pairings/status` accepts `{pairingId,pairingToken}` and returns
+`{pairing,device}`, with a nullable device before enrollment. These endpoints use the
+pairing secret rather than Bearer authentication.
 
-All remaining companion endpoints require `Authorization: Bearer <device credential>`.
+Other companion endpoints require `Authorization: Bearer <device credential>`.
 Authentication resolves current account admission, device identity and generation.
-The companion pins the locally chosen HTTPS application URL and refuses redirects;
-server responses cannot choose another origin. There is no HTTP-origin bypass flag.
+The companion pins its chosen HTTPS application URL and refuses redirects.
 
-| Method and path relative to `/api/local-devices` | Input                                                     | Returned `data`                      |
-| ------------------------------------------------ | --------------------------------------------------------- | ------------------------------------ |
-| `POST /heartbeat`                                | `{policy,control?}`                                       | Current `LocalDeviceView`            |
-| `POST /relay/claim`                              | Optional `limit` (1–8), `waitMs` (0–25000)                | `{requests: LocalRelayClaim[]}`      |
-| `POST /relay/:requestId/renew`                   | Empty object, `X-Moira-Claim-Id`                          | Current claim                        |
-| `POST /relay/ack`                                | `{requestId,digest,claimId,status,outcome}`               | `LocalRelayResult`                   |
-| `POST /workspaces/bootstrap`                     | Exact resource binding and measured `environmentIdentity` | Scoped workspace agent configuration |
+| Method and path relative to `/api/local-devices` | Input                                                                | Returned `data`                                |
+| ------------------------------------------------ | -------------------------------------------------------------------- | ---------------------------------------------- |
+| `POST /heartbeat`                                | Empty object                                                         | Current device registry identity               |
+| `POST /resources/register`                       | `{resourceId,repositoryId,resourceGeneration:1,operationMarker,ref}` | `{resourceId,resourceGeneration,repositoryId}` |
+| `POST /workspaces/bootstrap`                     | `{resourceId,environmentIdentity}`                                   | Scoped workspace agent configuration           |
 
-The heartbeat reports the current policy and optional control ceiling/settings,
-applied revision or rejection. Reports cannot claim unapplied requested settings.
-Management polling remains authenticated while work is disabled/expired; new lifecycle
-work and Git require current enabled lease/grants. Owner-confirmed deletion permits
-only its exact cleanup under the active device/account/resource/control binding.
+Heartbeat does not upload or retrieve operational policy/settings. Resource registration
+checks the authenticated device, live approved repository and finite work authority
+before creating a minimal cloud route. Exact existing registration is idempotent;
+conflicting identity/ref/marker is refused. Host CLI create registers that route before
+Git/bootstrap or physical SDK work. Fresh creation therefore requires cloud route
+registration and initial Git credential authority.
 
-A claim carries user/device/connection/resource identities and generations, request ID,
-digest, inline `payload`, deadline, claim ID and claim expiry. The strict lifecycle
-envelope permits only create/start/stop/delete/snapshot metadata; ordinary command/file
-bytes never pass through relay. Lifecycle mutations use their own protocol domain.
-Old operation-reference rows and receipts are archival and never dispatched.
+The always-on controller retains management access while work is disabled or expired;
+that access does not authorize new jobs or Git. Browser-confirmed deletion requires
+the exact active owner/device/resource binding and local web-control approval. It
+does not require enabled agent work or agent delete permission; MCP cleanup retains
+ordinary agent permissions.
 
-The current claim lease is bounded by the original request deadline and applicable
-owner work lease. Reclaim changes claim ID rather than request identity. Completed/refused
-renewal returns the original claim read-only without changing deadlines or granting new
-work. Exact terminal acknowledgement replay returns its retained receipt; changed digest,
-outcome or authority is refused. Retained late settlement remains authenticated and cannot
-renew dispatch authority. Companion acknowledgement uses the same active RPC journal
-serialization boundary as receipt publication.
+Bootstrap checks the exact Local resource/device, repository grant and measured guest
+life. Credentials are resource/route-generation/life scoped, not general Moira or device
+credentials. The host checks the packaged release before guest preparation.
 
-Bootstrap is device-authenticated and requires the exact current Local resource/device,
-repository grant and measured provider life. It issues resource/generation/life-scoped
-credentials, not general Moira or device credentials. The host compares the expected
-packaged architecture release before preparation; stale installed assets are refused.
-
-Errors use `{success:false,error:{code,message}}`: `LOCAL_INVALID` → 400,
-`LOCAL_UNAUTHORIZED` → 401, `LOCAL_CONFLICT` → 409 and `LOCAL_EXPIRED` → 410.
-Unacceptable Origin is 403; oversized management parser input is 413. Device secrets
-and payloads are excluded from request-context logging. There are no relay part/chunk
-upload or download endpoints.
+Errors use `{success:false,error:{code,message,request_id?}}`:
+`LOCAL_INVALID` → 400, `LOCAL_UNAUTHORIZED` → 401, `LOCAL_CONFLICT` and
+`LOCAL_OUTCOME_UNCONFIRMED` → 409, `LOCAL_EXPIRED` → 410 and
+`LOCAL_UNAVAILABLE` → 503. Unacceptable Origin is 403; oversized management input is 413. Collect uncertain effects using the original request identity. Secrets and payloads
+are excluded from request-context logging. There are no relay claim/renew/ACK endpoints.
 
 ### Repository-scoped Git and pull requests
 
-Device-authenticated Git routes are relative to
-`/api/local-devices/github/:resourceId/:resourceGeneration`. They require the
-current device/resource binding, enabled finite lease and exact approved repository.
+`GET /api/local-devices/github/:resourceId/:resourceGeneration/identity` is a
+device-authenticated metadata operation. It returns the verified GitHub login as
+`name` and numeric-account noreply `email` inside `{success:true,data:{name,email}}`.
+It checks the current device/resource binding, enabled finite lease, exact approved
+repository and current GitHub App grant. `resourceGeneration` is the stable
+route-authority generation, distinct from the Local lifecycle generation used for
+start/stop/delete. Invalid parameters return 400, device/domain authority refusals
+403, and unavailable verified metadata 503. The response is `Cache-Control: no-store`.
 
-| Method and relative path                    | Purpose                                                                             |
-| ------------------------------------------- | ----------------------------------------------------------------------------------- |
-| `GET /identity`                             | Verified GitHub login and numeric-account noreply Git author email                  |
-| `GET /git/refs-fetch`, `GET /git/refs-push` | Fixed Git smart-HTTP ref discovery                                                  |
-| `POST /git/fetch`, `POST /git/push`         | Raw binary smart-HTTP request/response stream                                       |
-| `POST /pulls`                               | Create with typed `head`, `base`, `title`, optional `body` and `draft`; returns 201 |
-| `GET /pulls/:number`                        | Read an approved repository's pull request                                          |
-| `POST /pulls/find`                          | Find by exact `head` and `base` after an uncertain create                           |
+Git smart HTTP and typed pull-request operations execute in the trusted Local host
+or GitHub workspace broker, directly against GitHub over verified HTTPS. Cloud
+routes do not execute Git pack transfers or PR requests. Ordinary `git fetch` and
+`git push` use the installed fixed broker; it checks canonical and effective remote
+origins. Fetch and PR reads use repository read authority; push requires `allowPush`,
+and PR creation requires `allowPullRequests`. Local anonymous fetch is available only
+for an explicitly approved public read-only repository. Private/write issuer failure
+never falls back to anonymous access, a host token or the original OAuth token.
 
-No route accepts a provider URL or exports OAuth tokens. Fetch and PR reads use
-repository read authority; push requires `allowPush`, and PR creation requires
-`allowPullRequests`. Git credentials stay in the server vault. Public read-only
-Git does not require a GitHub App grant. A failed enrolled private/write request
-does not fall back to a host token. Git-route domain errors map invalid input to
-400, conflicts to 409, expiry to 410 and other device-authority refusals to 403.
+MCP `codespace` actions `pull_request_create`, `pull_request_get` and
+`pull_request_find` reach the live workspace owner. Creation requires a caller-chosen
+`request_id` in ws1 form, the codespace ID, `head`, `base`, `title`, and optional
+`body`/`draft`. To collect after a lost reply, call `pull_request_create` with only
+the same codespace ID and original `request_id`; omit create input. Collection does
+not submit another PR. Get takes `pull_request_number`; find takes exact `head` and `base` and
+helps inspect an uncertain provider creation. Credential acquisition uncertainty
+has a separate `security_request_id` and does not prove PR dispatch.
+
+### Private scoped GitHub credential issuer
+
+The trusted broker authenticates with its current paired-device or resource-life
+Bearer credential at `/api/codespaces/github/credentials`. These endpoints are not
+browser/MCP token-export APIs. Responses are private JSON without the ordinary API
+success envelope, with `Cache-Control: no-store` and `Referrer-Policy: no-referrer`;
+they bypass generic request/body/error-context logging.
+
+| Method and relative path      | Input and behavior                                                                                                     |
+| ----------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `POST /acquire`               | `{resourceId,resourceGeneration,action,requestId}`; accepts one original security request and issues at most one child |
+| `POST /requests/:requestId`   | The same complete binding/action/original ID; pure collection, never issuance or parent refresh                        |
+| `POST /:credentialId/release` | `{resourceId,resourceGeneration}`; retires the exact child                                                             |
+
+`action` is `fetch`, `push`, `pull_request_read` or `pull_request_create`. The server
+derives the exact repository and permissions from current authority, not caller
+repository names, URLs or permission objects. Fetch receives contents read, push
+contents write, PR read receives pull-requests read, and PR create pull-requests write;
+each also receives metadata read. Parent generation, App repository grant, account,
+device/resource binding and finite owner authority are rechecked.
+
+The private acquire response contains `credentialId`, `token`, `expiresAt`,
+`useUntil` and `repositoryFullName`; only the trusted broker consumes it in memory.
+Collection returns `state: absent|unconfirmed|disposed|refused`, or
+`{state:"live",credential:…}` with that private credential view. Release returns
+`{released:true}`. The original OAuth/refresh credential stays in the cloud vault;
+derived children are retained under separate encrypted custody before validation
+or delivery. Neither credential belongs in project files, argv, environment, logs
+or agent results.
+
+The owner durably records token-free original security metadata before acquire.
+After an uncertain reply or restart, collect the original identity; even confirmed
+absence does not authorize automatic reacquisition or replay of Git/PR work.
+`SCOPED_CREDENTIAL_OUTCOME_UNCONFIRMED`,
+`SCOPED_CREDENTIAL_CUSTODY_UNCONFIRMED` and
+`SCOPED_CREDENTIAL_DISPOSAL_PENDING` retain uncertainty, not confirmed refusal.
+Errors are `{error:{code,message}}`; invalid input is 400 and missing authentication
+401, while authority and custody outcomes retain their controlled status/code.
+Unexpected failures preserve outcome uncertainty; a failed custody state write after
+submission or revocation cannot establish a confirmed authority refusal.
+The broker rechecks authority during work and disposes a known child after the
+upstream transport physically closes. `useUntil` is a local usage fence, not proof
+of GitHub expiry enforcement or automatic child revocation when a parent changes.
 
 ## Codespace Management API
 
-Website management of the user's persistent GitHub and local codespaces. These routes are
-mounted under `/api/integrations/github/codespaces` behind `requireAuth`, use the same
-domain services as the MCP `codespace` tool, and return `Cache-Control: no-store`
-and `Referrer-Policy: no-referrer`. Responses contain the sanitized codespace summary
-(opaque `codespace_id`, provider, repository, `requested_ref` — the ref the codespace was
-created on — and `current_ref` — the ref the provider last reported checked out, `null` until
-observed or on a detached HEAD — machine, state, retention policy, desired/observed state,
-generation, timestamps) and never provider resource names,
-markers, claims, capabilities or credentials.
-
-The existing GitHub-named prefix is shared by both providers. Creation selects
-`github-codespaces` for a GitHub repository ID and `local-sandboxes` for a qualified
-`local:<device UUID>:<repository UUID>` target. Later actions select the provider
-from the owned codespace record, not from a caller-supplied provider or device.
-Local targets identify an approved repository on one specific device; identical
-repository names on different devices remain distinct targets.
+Website resource management uses `/api/integrations/github/codespaces` behind ordinary
+admitted-user authentication. Both providers return `CodespaceSummaryView` directly:
+opaque `codespace_id`, provider, repository identity, requested and nullable current ref,
+nullable observed machine, state, retention policy, desired/observed state, observation
+time, lifecycle error, owner generation and timestamps. Assigned resources expose
+`device_id` and unfinished original `pending_request_ids`. Missing live observation
+does not manufacture a machine, current ref or lifecycle generation.
 
 ### GET /api/integrations/github/codespaces
 
-Returns the instance readiness view, the connection view, approved repositories, the
-user's codespaces and the user's limits.
+Returns `{success:true,data:{readiness,connection,repositories,repositories_stale,
+resources_stale,codespaces,providers,controllers,provider_billing?}}`. Repository targets
+retain their public `repository_id`; Local targets qualify the device and approved
+repository. `controllers` contains `{device_id,label,available}`. The provider entries
+contain their own connection, readiness, repositories and resources; top-level lists
+combine them. Readiness is a fresh configuration projection:
+`disabled|misconfigured|ready`, with provider, configuration status,
+`resources_enabled`, nullable reason and `checked_at`. It is not an SSH or guest probe.
 
-```typescript
-{
-  success: true;
-  data: {
-    readiness: CodespaceReadinessView;
-    connection: CodespaceConnectionView;
-    repositories: Array<{
-      repository_id: string;
-      name: string;
-      private: boolean;
-      provider: string;
-      device_id?: string; // Local repository target only
-      device_label?: string;
-    }>;
-    repositories_stale: boolean;
-    resources_stale: boolean;
-    codespaces: CodespaceSummaryView[];
-    limits: CodespaceLimitsView;
-    providers: Array<{
-      provider: "github-codespaces" | "local-sandboxes";
-      readiness: CodespaceReadinessView;
-      connection: CodespaceConnectionView;
-      repositories: Array<{ repository_id: string; name: string; private: boolean }>;
-      repositories_stale: boolean;
-      resources_stale: boolean;
-      codespaces: CodespaceSummaryView[];
-      limits: CodespaceLimitsView;
-    }>;
-  }
-}
-```
+GitHub lists use current authorized provider reads and owner observations, rather than
+a cloud lifecycle cache. Local grants require an available current controller.
+`POST /refresh` forces repository-grant refresh. Both GET and Refresh make a current
+authorized monthly billing read; this composition has no billing cache.
+Stale flags distinguish failed grant/resource observations from an authoritative empty list.
+Optional `provider_billing` reports validated personal-account monthly compute/storage
+usage, included allowances and USD amounts, or `"unavailable"`. Billing requires GitHub
+Plan read permission. The result is accepted only if the same connected account and
+credential generation remain current after the provider read; a failed read or changed
+authority returns `"unavailable"`. No cloud resource-limit or lifecycle-queue view is returned.
 
-The top-level repository and codespace lists combine the providers. Top-level
-readiness, connection and limits come from the first connected provider, or the
-first provider when neither is connected; use `providers` for provider-specific
-facts. Stale flags aggregate the providers. Local connection facts use active
-enrolled devices and their public repository policies; no GitHub App is required
-for a local-only account. Workspace response windows are caller-selected rather than
-cloud command/output quotas.
+### Creation and adoption
 
-For GitHub, the route refreshes grants behind the normal TTL and lists stored codespaces.
-It does not observe provider resources; `resources_stale` is `false` on this read.
-If grant enumeration fails, it keeps the saved repositories and returns
-`repositories_stale: true`.
+`POST /api/integrations/github/codespaces` accepts
+`{repository_id,ref,request_id,device_id?,devcontainer_path?}`. All mutations require
+a caller-selected `ws1-<lowercase UUID>` before submission. GitHub selects an explicit
+live paired controller or the sole eligible one; multiple choices require selection.
+The optional devcontainer path selects repository configuration, not commands or a host.
+Local repository targets already identify their device. Creation requires current
+account/repository authority and an available controller; Local additionally checks
+owner-approved repository rights and finite work lease. Offline work is never queued.
 
-### POST /api/integrations/github/codespaces/refresh
+GitHub creation verifies personal billing; an organization payer is rejected with
+`422 CODESPACE_BILLING_UNSUPPORTED`. The controller owns admission, provider creation,
+fixed preparation and guest enrollment; cloud services retain only authorization,
+routing identity and billable/unknown retirement witnesses.
 
-Returns the same response shape as `GET` and refreshes each provider's resources.
-For GitHub, it forces installation and repository
-enumeration, then observes the user's persistent codespaces at GitHub and updates
-the local list. If grant enumeration is stale, provider observation is skipped and
-both `repositories_stale` and `resources_stale` are `true`. If observation fails or
-cannot verify a resource, the local list remains available and `resources_stale` is
-`true`. This request also bypasses the provider billing cache.
+`POST /adopt` accepts `{provider_resource_name,request_id,device_id?}` for an unmanaged
+existing resource. `POST /:codespaceId/adopt` accepts
+`{request_id,expected_generation,device_id?}` for an existing route. Exact provider owner,
+billing, numeric repository and current grant are verified. Existing authority is
+rebound only through the same assigned controller after old physical custody settles;
+adoption preserves the VM and disk and does not create a replacement.
 
-`limits` is the same view the MCP `codespace` `list` action returns. Local limits and
-use are read from Moira policy and the database. The separate `provider.billing`
-field reports GitHub's current-month usage for the connected personal account when
-that read succeeds. The GitHub App user token needs `Plan: read` permission;
-`"unavailable"` means no validated billing summary is available.
-Ordinary reads may reuse a billing summary cached for five minutes; the refresh
-route bypasses that cache. Billing availability does not affect the local limits.
+### Resource lifecycle and recovery
 
-```typescript
-interface CodespaceLimitsView {
-  codespaces: {
-    held: number; // stopped codespaces and ones still being created or cleaned up count
-    max_per_user: number | null; // null for Local
-    instance_held: number;
-    max_instance: number | null;
-    create_throttle_seconds: number | null;
-  };
-  machine_ceiling: { cpu_cores: number; memory_bytes: number; storage_bytes: number } | null;
-  lifecycle: {
-    retention_days: number;
-    start_wait_seconds: number;
-    idle: { auto_stop_enabled: boolean; timeout_minutes: number; provider_max_minutes: number };
-  };
-  provider: {
-    billing:
-      | "unavailable"
-      | {
-          state: "available";
-          payer_login: string;
-          period: { year: number; month: number }; // UTC calendar month
-          retrieved_at: number; // retrieval time; GitHub usage may lag
-          plan: "free" | "pro" | null;
-          compute: {
-            used_core_hours: number;
-            included_core_hours: number | null;
-            net_amount_usd: number;
-          };
-          storage: {
-            used_gb_month: number;
-            included_gb_month: number | null;
-            net_amount_usd: number;
-          };
-          net_amount_usd: number;
-        };
-  };
-}
-```
+`GET /:codespaceId` returns one owned summary; malformed, foreign and unknown IDs
+return `404 CODESPACE_NOT_FOUND`. `POST /:codespaceId/start` and `/stop` accept
+`{request_id,expected_generation}`. `DELETE /:codespaceId` additionally requires
+`confirm_delete:true`. The expected generation is the observed owner lifecycle CAS;
+stale admission returns `409 CODESPACE_GENERATION_CONFLICT`. Successful start/stop
+returns `{codespace,data_preserved:true}`; deletion returns
+`{codespace,data_preserved:false}` only after exact physical absence is established.
 
-### POST /api/integrations/github/codespaces
+Local browser deletion uses owner-approved web control for that exact generation,
+independently of agent delete permission or an enabled work lease. MCP retains agent
+permissions. Current account/device and binding authority remain mandatory.
 
-Body: `{ "repository_id": string, "ref": string }`. Returns `201` with the sanitized
-codespace, which may still be pending. The route refreshes grants behind the normal TTL
-before it checks repository authorization. For a provider that requires personal billing,
-creation first reads GitHub's `billable_owner` for that repository and ref. An
-organization repository is allowed when GitHub would bill the connected personal
-account; an organization payer returns `422 CODESPACE_BILLING_UNSUPPORTED` before
-any codespace is created. Local creation requires the selected device's active
-generation, enabled unexpired local policy, approved repository and a heartbeat
-within the last minute. Cloud input cannot select a host path, runtime binary,
-machine enlargement or another device. `400` for malformed input; `503`
-`CODESPACE_NOT_CONFIGURED` with `settings_url` when the feature is not configured.
+After a lost reply, retain the original request and assigned device. Collect through
+`GET /api/integrations/local/devices/:deviceId/operations/:requestId` or MCP
+`codespace({action:"operation",device_id,request_id})`, including before a resource ID
+is known. Collection reads the original receipt and never repeats a mutation.
+`pending_request_ids` restore unfinished identities after reload. An uncertain
+creation cannot be replaced by another create merely because provider discovery is empty.
 
-### GET /api/integrations/github/codespaces/:codespaceId
-
-Returns one owned sanitized codespace. Command state and output belong to the workspace,
-not this management resource projection. Unknown, malformed and foreign IDs return `404 CODESPACE_NOT_FOUND`.
-
-### POST /api/integrations/github/codespaces/:codespaceId/start | /stop
-
-Records the desired running or stopped state and returns the codespace with
-`data_preserved: true`. Stop keeps the repository data. Starting a codespace whose provider
-resource is not identified yet returns `409 CODESPACE_CREATE_PENDING`; starting one left
-ambiguous returns `409 CODESPACE_NOT_RUNNING`.
-
-### DELETE /api/integrations/github/codespaces/:codespaceId
-
-Body: `{ "confirm_delete": true, "expected_generation": number }`. Without both the
-route returns `400 CODESPACE_DELETE_CONFIRMATION_REQUIRED` and calls no service. A
-stale generation returns `409 CODESPACE_GENERATION_CONFLICT`. The response returns the
-codespace with `data_preserved: false`; deletion is terminal only after verified absence of the
-exact provider resource, and an unresolved outcome remains delete-pending.
-
-For a local codespace, the admitted owner's browser confirmation atomically records an
-owner-delete intent for the current generation and exact active device/connection binding.
-Local web-control opt-in is required; agent `allowDelete`, enabled work and an unexpired work
-lease are not. The companion authorizes only exact observation and deletion. MCP deletion
-retains ordinary agent permissions, with preflight refusals occurring before a new intent is
-recorded. An old refused or snapshot-only delete intent can receive a fresh owner confirmation;
-an existing destructive dispatch with an unknown outcome keeps its original identity and generation.
-
-Domain errors handled by these routes map as follows: `CODESPACE_NOT_FOUND` → 404;
-`CODESPACE_GENERATION_CONFLICT`, `CODESPACE_NOT_RUNNING`,
-`CODESPACE_CREATE_PENDING` and `CODESPACE_AUTHORIZATION_REQUIRED` → 409;
-`CODESPACE_CREATE_REJECTED` and `CODESPACE_BILLING_UNSUPPORTED` → 422;
-`CODESPACE_POLICY_LIMIT` → 429; `CODESPACE_PROVIDER_DISABLED` and
-`CODESPACE_PROVIDER_UNAVAILABLE` → 503; `CODESPACE_START_TIMEOUT` → 504; and
-`CODESPACE_RESOURCE_INVALID` → 400. A message
-is the code's fixed safe text, followed by the error's bounded detail when it carries
-one. That detail may be the provider's own refusal reason, reduced to one line, capped
-and dropped whole when anything credential-shaped appears in it, under the rules
-`CODESPACES.md` states once; no other provider output, argv, path or credential
-reaches the response.
-
-Authentication: Required
+Known refusals retain their typed code and controlled message. Invalid input is 400;
+generation/authorization/state conflicts are 409; confirmed create/billing refusals
+are 422; provider unavailability and `WORKSPACE_OUTCOME_UNCONFIRMED` are 503.
+Validated `provider_failure` evidence distinguishes transport, HTTP and invalid-reply
+failures, with safe status/request ID/reason where available. It does not certify that
+an uncertain effect did not happen. Responses can retain original `request_id`,
+`device_id`, `codespace_id` and a separate `security_request_id`; credentials, raw
+provider bodies, URLs and command arguments are never returned.
 
 ### GET /api/admin/codespaces
 
-Administrator readiness and kill switches. Mounted behind the admin namespace guard.
-
-```typescript
-{
-  success: true;
-  data: {
-    readiness: CodespaceReadinessView;
-    controls: Array<{
-      scope: "global" | `provider:${string}`;
-      disabled: boolean;
-      reason: string | null;
-      updated_at: number | null;
-    }>;
-  }
-}
-```
-
-### PUT /api/admin/codespaces/controls/:scope
-
-Body: `{ "disabled": boolean, "reason"?: string }` (reason at most 500 characters).
-Scope is `global` or `provider:github-codespaces`. Disabling refuses new codespace
-creation, start and agent operations and requests stop for persistent codespaces; it
-never deletes data. Returns the updated readiness and controls. `400` for an invalid
-body or a scope the provider does not manage; `503 CODESPACE_NOT_CONFIGURED` while
-the feature is not configured. Every change is audited as
-`CODESPACE_CONTROL_UPDATE`.
-
-Authentication: Required (administrator)
+Administrator-only configuration observation returns
+`{success:true,data:{readiness}}`. There is no administrative resource-control PUT,
+mass-stop request, connector probe or reconciliation gauge in this contract.
 
 ## Workspace streaming transport
 
 The backend owns `/api/workspaces/connect` and `/api/workspaces/calls/:callId`
-as authenticated HTTP/1.1 Upgrade endpoints using `moira-workspace/1`.
-These are not browser management or public file-capability APIs. Fixed provider bootstrap
-issues an opaque credential whose digest is stored with user/resource, generation and
-measured guest-life bindings. Local authority additionally retains device/repository
-grants and finite owner lease.
+as authenticated HTTP/1.1 Upgrade endpoints using `moira-workspace/2`.
+The transport distinguishes `controller` and `workspace` endpoint kinds.
+A Local controller authenticates the paired user/device generation and pairing
+connection UUID without inventing a guest identity. Workspace credentials retain
+resource, stable route generation and measured guest-life bindings. Local workspace
+authority additionally checks device/repository grants and finite lease.
+Current account, assigned actor and resource authority gate routing. A paired controller
+can remain available without Local VM configuration; no administrative cloud kill-switch
+is an operational authority.
 
-The guest opens outbound HTTPS CONTROL carrying bounded call identities. For each call it
-opens an authenticated DATA tunnel scoped to that live control connection and random call
-identity. Raw HTTP request/response bytes are forwarded to the same private Unix service
-used by the terminal CLI. Native stream backpressure avoids whole binary body buffering.
-The supported ingress routes this namespace directly to the backend through Traefik.
+The owner opens outbound HTTPS CONTROL with bounded call identities. Each call opens
+an authenticated DATA tunnel scoped to that live control incarnation and random call
+identity. Raw HTTP streams to the owner's private Unix service with backpressure;
+ingress routes this namespace directly to the backend through Traefik. Endpoint-kind
+and endpoint-identity handshake checks distinguish the controller from a guest.
 
-Backend/MCP processes use the protected cloud Unix socket through `getWorkspaceClient()`;
-trusted filesystem access supplies user/resource headers, and routing rechecks current
-authority. Server-owned revalidation and exact expiry close CONTROL and all DATA on
-revocation, generation/life change or lease expiry independently of peer heartbeats.
-Closing observer streams does not cancel/replay the workspace command.
+Backend/MCP clients use the protected cloud Unix socket through
+`getWorkspaceClient()` or the controller client. Controller routing removes caller
+versions of `x-moira-user-id`, `x-moira-device-id`, `x-moira-device-generation` and
+`x-moira-connection-id` and injects the authenticated binding. Current authority,
+server-owned revalidation and exact expiry fence CONTROL and DATA independently of
+peer heartbeats. Observer loss does not cancel accepted work or replay an effect.
 
-The service exposes exec, operation collection/cancel/output, raw input, stat/search/read
-and guarded write/patch through its Unix HTTP API. Mutations require
-`ws1-<lowercase UUID>`; bare legacy IDs are not translated or dispatched. Accepted
-immutable input and receipts remain in the workspace. Cloud has no command queue/result
-journal. Known pre-dispatch refusal is distinct from lost post-dispatch outcome; after
-reply loss explicitly collect the original request without command resubmission.
+The Local controller's private API provides:
 
-Commands have no implicit Moira runtime deadline. Explicit execution timeouts,
-caller-selected response windows, filesystem safeguards and provider/owner lifetime
-constraints remain distinct. Established raw data streams have no inherited request-body
-timeout. There is no scoped file setup/mint/chunk/status protocol; native attachments
-stream directly to/from the common owner, with download publication separately below.
+| Method and path                            | Contract                                                                                   |
+| ------------------------------------------ | ------------------------------------------------------------------------------------------ |
+| `GET /v1/controller/health`                | Pairing `connectionId` and live `incarnation`                                              |
+| `GET /v1/controller`                       | Current policy, control, resource observations and unfinished original IDs                 |
+| `PUT /v1/controller/settings`              | `{requestId,expectedGeneration,expectedRevision,settings}`                                 |
+| `POST /v1/controller/repositories`         | Exact delegated repository admission with identity/revision guards                         |
+| `POST /v1/resources/:resourceId/lifecycle` | Create/start/stop/delete/snapshot with original `requestId` and exact `expectedGeneration` |
+| `GET /v1/controller/operations/:requestId` | Inspect the original receipt; no effect dispatch                                           |
 
-## Codespace Transfer Download API
+The device controller owns physical VM lifecycle, settings and their durable journals.
+Resource admission serializes validation, generation change and durable binding before
+native execution; stop can retire an admitted start while preparation is pending.
+A late start completion cannot replace newer admitted state. Existing VM bindings,
+disks and grants remain owned; archived uncertain receipts never enter active dispatch.
 
-### GET /api/codespaces/transfers/:token
+The workspace service separately owns exec, collection/cancel/output, raw input,
+stat/search/read and guarded write/patch. Active mutation identities use
+`ws1-<lowercase UUID>`; bare archived IDs are not translated or dispatched.
+Immutable input and receipts remain with the relevant owner. Cloud has no Local
+lifecycle/settings queue or command-result journal. A confirmed pre-dispatch refusal
+differs from an unconfirmed post-dispatch outcome; collect the original identity.
 
-Deliver one private codespace file published by the MCP `codespace` tool's `download` action. The tool
-returns this URL to the agent as an MCP `resource_link`; the token in the path is the only
-authorization, so the URL must not be logged or shared.
+Commands have no implicit Moira runtime deadline. Explicit timeouts, reply windows,
+filesystem safeguards and provider/owner lifetimes remain distinct. Established raw
+DATA streams have no inherited request-body timeout. Native attachment streaming and
+private download publication retain their separate contracts below.
 
-The download is a complete regular file streamed from the workspace and separately
-published in private storage. An optional caller `max_bytes` rejects an oversized
-complete file before publication; it never publishes a prefix as a complete attachment.
-Empty files are valid. Image preview retains its own nonempty format/dimension validation.
-Workspace file reads and publication are separate from command/file mutation receipts.
+## Materialize Delivery API
 
-Success returns the exact stored bytes as an attachment with the published MIME type and file
-name and these headers:
+`GET /api/public/executions/materialize/:token` authorizes the current paused
+materialize node and execution context through its presentation grant. Cloud resolution
+produces authorized `{path,content:string}` outputs using existing Note/Playbook text
+semantics, then rechecks node and context after asynchronous rendering. It does not encode
+file bytes or construct a tar archive.
 
-```http
-Cache-Control: private, no-store, max-age=0
-X-Content-Type-Options: nosniff
-X-Robots-Tag: noindex, nofollow, noarchive
-Referrer-Policy: no-referrer
-```
+The first archive request atomically binds the grant to a complete current controller
+scope and an original ws1 request ID. That owner encodes UTF-8, creates `materialize.tar`,
+stages and publishes its immutable bytes. Repeated requests collect the same original
+receipt before any text resolution; they cannot select another owner, rerender or
+resubmit the archive. Current grant/node/context authority is checked again before
+streaming the publication. The cloud forwards the live stream without a file buffer.
 
-The capability is consumed after complete or interrupted delivery, so a second request, an
-expired capability, a malformed token and an unknown token all return
-`404 { "error": "codespace_transfer_not_found" }`. Objects expire after
-`CODESPACE_TRANSFER_TTL_MINUTES`. Publication retains checked private filesystem
-ownership, size/digest and one-use claim semantics; it imposes no workspace binary quota.
+An incomplete or uncertain receipt returns 409
+`COMMUNICATION_OUTCOME_UNCONFIRMED` with the original `request_id`. A completed owner
+refusal returns 422; unavailable owner selection returns 503; invalid archive input
+returns 400. A fresh presentation can explicitly retry under current authority.
+An unresolved archive is never automatically replayed.
 
-The route runs in the MCP process; both nginx variants proxy the `/api/codespaces/transfers/`
-prefix directly to it without buffering or temporary files and with access/error logging
-disabled. The route is rate-limited.
+The separate in-context fallback remains available without an owner. It returns rendered
+text with a 256 KiB UTF-8 context budget and fails the whole delivery if exceeded, rather
+than truncating files. Archive delivery has no generic file-count, per-file or aggregate
+byte quota; safe relative paths, current authorization and actual owner/storage failures
+still apply.
 
-Authentication: One-use capability token in the path
+## Owner File Publication API
 
-An owned ready private reference may instead be passed to MCP `communication` action `deliver-file`
-with `referenceId`, `message`, media `kind` and optional `channelId`. That explicitly requested delivery
-uses a verified private source and configured channels; it does not fetch a caller URL or consume
-the retained source. The native download link itself does not send a notification or publish an artifact.
+`GET /api/codespaces/files/:resourceId/:token` streams a workspace publication.
+`GET /api/communication/files/:resourceId/:token` streams a controller publication;
+its `resourceId` path parameter identifies the paired device. The token addresses an
+immutable owner-held file. Current account and original owner authority are checked
+before the cloud forwards `GET /v1/publications/:token` to that owner.
 
-## Communication Attachment API
+Publication returns exact file metadata and a live HTTPS resource link. The owner
+retains the bytes, file identity and digest. Authorized requests can read the same
+immutable publication repeatedly until expiry or revocation; the original owner
+must remain available. The cloud stores no publication bytes or one-use claim.
+Caller-selected whole-file bounds refuse an oversized complete file rather than
+publishing a prefix.
 
-### POST /api/communication/attachments
+Publishing does not send a message. Explicit MCP communication delivery uses the
+same immutable reference and its separate original delivery receipt, without a
+cloud re-upload. The single-use progress-image grant is a distinct execution-bound
+authorization layered over an owner publication.
 
-Redeem a grant returned by MCP `communication({ action: "attachment-token", ... })` and deliver one
-binary image or document through the authenticated user's configured communication channels.
+## Communication Owner API
 
-Required headers:
+MCP `communication` authenticates the user through the ordinary MCP boundary. `send` delivers text without a file owner. `deliver-file` requires a caller-selected original `request_id` in `ws1-<lowercase UUID>` form and exactly one native `file` descriptor or immutable `referenceId`. A publication remains with the workspace or controller named by its `owner-file://` reference. Native and other nonworkspace sources use the explicit `device_id`, or the sole eligible live paired controller. An unavailable or ambiguous controller refuses before admission; the cloud does not queue delivery.
 
-```http
-Authorization: Bearer <the user's OAuth access token or persistent MCP token>
-X-Moira-Communication-Grant: <grant returned by the MCP tool>
-Content-Type: <the exact MIME type declared while minting>
-Content-Length: <the exact declared byte count>
-```
+Collect with `communication({action:"operation",request_id,device_id})` or the original `codespace_id`, without source or message fields. Retain the assigned owner identity even after a lost reply. The owner returns its original `absent`, `accepted`, `completed` or `unconfirmed` receipt, immutable outcome and channel stages. Collection does not acquire the source again or resend a file. A completed receipt can retain an uncertain failure. Neither absence nor uncertainty authorizes automatic replay.
 
-The request body is the raw file bytes. The independent Bearer credential must identify the same
-user that minted the grant. Missing, expired, claimed, completed, random, and foreign-user grants
-all return the same `401 { "error": "invalid_grant" }` response.
+The trusted owner uses private endpoints under `/api/communication/owner` with its existing device or workspace Bearer credential. User MCP tokens and browser cookies are not owner credentials. Workspace scope binds the resource, resource and authorization generations and measured environment identity; controller scope binds the user, device, device generation and pairing connection. Current account and actor authority are checked independently of the delivery journal.
 
-An attachment is limited to 20 MiB. A user may hold at most ten unexpired pending or claimed grants
-and may admit at most two concurrent uploads totalling 40 MiB. The installation admits at most one
-thousand outstanding grants. Grant creation prunes expired state before checking those issuance
-quotas.
+| Method and relative path            | Contract                                                                                                                                                                                                                       |
+| ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `POST /prepare`                     | Strict `communicationOwnerPrepareSchema`: scope, original `requestId`, optional `channelIds`, exact file metadata, kind/text/format/silent and optional workflow frame; returns configured channel descriptors without secrets |
+| `POST /send`                        | Framed `communicationOwnerSendSchema` followed by the original opaque file stream; returns sanitized `delivered`, `refused` or `unconfirmed` vendor status                                                                     |
+| `GET /artifacts/:channelId/:digest` | Authenticated current channel and scope resolve the exact installed immutable binary-extension artifact; scope travels in `x-moira-communication-scope`                                                                        |
 
-Validation happens before provider delivery. Missing `Content-Length` returns 411; an incorrect
-declared or received size, MIME mismatch, or invalid PNG/JPEG signature returns 400 or 413; exhausted
-in-flight capacity returns 429. These pre-delivery failures release the reservation, so a corrected
-request may reuse the grant until its five-minute expiry. Once provider delivery begins, the grant
-is terminal even if every channel fails or the provider result is ambiguous; a replay cannot start a
-second provider attempt.
+`/send` uses `Content-Type: application/vnd.moira.owner-stream`. Its body is a four-byte unsigned big-endian JSON byte length, the UTF-8 JSON control and the opaque file bytes. `Content-Length` must equal four plus the JSON byte length plus the declared file size. `encodeOwnerFrame`, `readOwnerFrame` and `settleOwnerFrame` in `packages/workspace-service/src/stream-frame.mjs` own this format and response/ingress lifetime. Authentication happens before reading the metadata frame; typed scope authorization follows parsing. File bytes never enter the JSON parser, temporary cloud storage or a whole-file buffer. A known refusal is flushed before unread ingress is closed.
 
-Success returns the grant correlation ID and the same sanitized aggregate delivery result as the
-common communication service. A total attempted delivery failure returns 502 with that aggregate;
-full or partial delivery returns 200. Raw ingress streams into an owner-only verified temporary
-private object under the communication admission limits and private filesystem guards. Provider delivery opens checked,
-independently reopenable streams, and the temporary object is discarded on exit. Telegram streams
-multipart bytes with size/digest and cancellation checks; buffered-only extension adapters refuse
-streamed sources rather than loading the complete file. The route fetches or executes no remote content.
+The cloud resolves the current registered channel, configured recipient, fixed endpoint and granted secret. Owners cannot supply a destination, URL, arbitrary header or credential. Configuration and installed-artifact digests must still match at dispatch; workflow frame revision and task identity are rechecked before vendor submission. The cloud constructs fixed raw or multipart vendor framing around the stream. Provider refusal is distinct from a lost or incomplete dispatched result.
 
-Authentication: Required through an OAuth or persistent MCP Bearer credential; the grant alone is
-not authentication.
+Telegram applies its provider-specific photo/document sizes, PNG/JPEG image MIME and text/caption limits. A long message uses separate owner-journal stages for file upload and text; a failed later stage cannot repeat the accepted upload. Extension binary operations use their installed declaration and the same source stream. Public HTML artifacts have a separate contract.
 
 ## User Profile API
 
@@ -4089,7 +4043,7 @@ Authentication: Required (admin role)
 
 ### POST /api/admin/users/:id/block
 
-Block user account and revoke all sessions.
+Block user account, revoke application sessions and retire known scoped GitHub children.
 
 Parameters:
 
@@ -4134,11 +4088,38 @@ Behavior:
 - Creates audit log entry with revocation counts
 - Admin cannot block themselves (400 error)
 
+The account fence is committed before scoped credential retirement. If retirement
+cannot be confirmed, the route returns 503 `SCOPED_CREDENTIAL_DISPOSAL_PENDING`
+with `{id,blocked:true,credentialRetirementPending:true}` in `data`; the account
+remains blocked and encrypted custody is retained for recovery. This response does
+not restore access or claim completed revocation.
+
 Errors:
 
 - 400: Self-blocking attempt or user already blocked
 - 403: Non-admin user
 - 404: User not found
+
+Authentication: Required (admin role)
+
+### DELETE /api/admin/users/:id
+
+Delete an account only after its existing managed resources and provider credentials
+are retired. Complete authorized workspace deletion before requesting account deletion:
+the deletion attempt blocks the account and revokes sessions/OAuth access and consents
+before provider retirement, so that account cannot then use ordinary browser cleanup.
+The route does not implicitly delete external VM disks or create an administrator VM
+cleanup interface. Administrators cannot delete themselves.
+
+Success returns `{success:true,data:{id,deleted:true},timestamp}`. Unresolved scoped
+issuance/custody, pending child or parent retirement, or a connected parent prevents
+the account cascade and returns 409 `ACCOUNT_CREDENTIAL_RETIREMENT_PENDING`.
+Nondeleted managed resources or unsettled repository creation return 409
+`ACCOUNT_RESOURCE_RETIREMENT_PENDING`. Both retain the account with
+`blocked:true`, `deleted:false` and the corresponding
+`credentialRetirementPending` or `resourceRetirementPending` flag. Exact encrypted
+custody and ownership survive; a later confirmed retirement can complete deletion.
+Only terminal owned resource metadata is removed transactionally with the account.
 
 Authentication: Required (admin role)
 

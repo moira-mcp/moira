@@ -14,7 +14,6 @@ export class TelegramCommunicationAdapter implements CommunicationChannelAdapter
     image: true,
     document: true,
     trusted: false,
-    streamingAttachments: true,
   } as const;
   readonly metadata = {
     title: "Telegram",
@@ -54,55 +53,6 @@ export class TelegramCommunicationAdapter implements CommunicationChannelAdapter
       if (!client) throw new CommunicationChannelError("provider_unavailable");
       const parseMode =
         request.format === "markdown" ? "Markdown" : request.format === "html" ? "HTML" : undefined;
-      if (request.attachment?.kind === "image") {
-        if (
-          request.attachment.mimeType !== "image/png" &&
-          request.attachment.mimeType !== "image/jpeg"
-        )
-          throw new CommunicationChannelError("invalid_attachment_type");
-        const caption = request.text.length <= 1024 ? request.text || undefined : undefined;
-        await client.sendPhoto({
-          chatId,
-          photo: request.attachment.source ?? request.attachment.bytes,
-          signal,
-          filename: request.attachment.filename,
-          mimeType: request.attachment.mimeType,
-          caption,
-          parseMode,
-          disableNotification: request.silent,
-        });
-        if (!caption && request.text)
-          await client.sendMessage({
-            chatId,
-            text: request.text,
-            parseMode,
-            disableNotification: request.silent,
-            disableLinkPreview: true,
-          });
-        return;
-      }
-      if (request.attachment?.kind === "document") {
-        const caption = request.text.length <= 1024 ? request.text || undefined : undefined;
-        await client.sendDocument({
-          chatId,
-          document: request.attachment.source ?? request.attachment.bytes,
-          signal,
-          filename: request.attachment.filename,
-          mimeType: request.attachment.mimeType,
-          caption,
-          parseMode,
-          disableNotification: request.silent,
-        });
-        if (!caption && request.text)
-          await client.sendMessage({
-            chatId,
-            text: request.text,
-            parseMode,
-            disableNotification: request.silent,
-            disableLinkPreview: true,
-          });
-        return;
-      }
       await client.sendMessage({
         chatId,
         text: request.text,

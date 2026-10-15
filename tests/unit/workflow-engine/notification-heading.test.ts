@@ -32,6 +32,11 @@ import {
 import { UniversalGraphExecutor } from "../../../packages/workflow-engine/src/core/universal-graph-executor.js";
 import { InMemoryRepository } from "../../../packages/workflow-engine/src/storage/in-memory-repository.js";
 import { metadataRevision } from "@mcp-moira/shared";
+import { communicationOwnerFixture } from "../../fixtures/communication-owner.js";
+import {
+  notificationLiveRun,
+  notificationDeliveryRequestId,
+} from "../../../packages/workflow-engine/src/services/notification-frame.js";
 
 const RUN = "0d7c5a9e-2f4b-4c1d-9a8e-3b6f1c2d4e5f";
 
@@ -150,19 +155,18 @@ describe("current identity at notification delivery", () => {
           key === "telegram.bot_token" ? "123:token" : key === "telegram.chat_id" ? "42" : null,
       } as unknown as IDataRepository;
       const delivered: Array<{ text: string; picture?: string }> = [];
-      const renderer = async (_graph: WorkflowGraph, run: WorkflowExecution) => {
-        const title = run.taskIdentity!.title;
-        if (phase === "render" && title === "Before") rename();
+      const fileOwner = communicationOwnerFixture((input) => {
+        if (input.action !== "deliver" || input.source.type !== "progress")
+          throw new Error("unexpected source");
+        const run = input.source.descriptor.run as unknown as WorkflowExecution;
         expect(run.globalContext.variables.tasks).toEqual([{ title: "Unsaved plan" }]);
-        return {
-          buffer: Buffer.from(title),
-          mimeType: "image/png" as const,
-          width: 1,
-          height: 1,
-          workflowVersion: "1.0.0",
-          executionRevision: 1,
-        };
-      };
+        if (phase === "render" || phase === "availability") {
+          rename();
+          // The actual fixed transport rechecks this workflow frame before vendor dispatch.
+          throw new Error("workflow_frame_changed");
+        }
+        delivered.push({ text: input.text, picture: run.taskIdentity!.title });
+      });
       const communication = new CommunicationService([
         {
           id: "capture",
@@ -176,9 +180,6 @@ describe("current identity at notification delivery", () => {
           deliver: async (message) => {
             delivered.push({
               text: message.text,
-              picture: message.attachment
-                ? Buffer.from(message.attachment.bytes!).toString()
-                : undefined,
             });
           },
         },
@@ -188,10 +189,9 @@ describe("current identity at notification delivery", () => {
           () =>
             ({
               getDefaultChatId: () => "42",
-              sendPhoto: async (message: { caption: string; photo: Uint8Array }) => {
+              sendMessage: async (message: { text: string }) => {
                 delivered.push({
-                  text: message.caption,
-                  picture: Buffer.from(message.photo).toString(),
+                  text: message.text,
                 });
                 return { ok: true };
               },
@@ -200,8 +200,8 @@ describe("current identity at notification delivery", () => {
       try {
         const handler =
           kind === "user"
-            ? new UserNotificationHandler(communication, renderer)
-            : new TelegramNotificationHandler(renderer);
+            ? new UserNotificationHandler(communication, fileOwner.owner)
+            : new TelegramNotificationHandler(fileOwner.owner);
         await handler.execute(
           node as never,
           context,
@@ -210,7 +210,7 @@ describe("current identity at notification delivery", () => {
           {} as IGraphExecutionEngine,
           undefined,
           undefined,
-          () => live,
+          notificationLiveRun({ execution: live }, [], context.variables, "notify"),
         );
       } finally {
         resetClientFactory();
@@ -219,7 +219,7 @@ describe("current identity at notification delivery", () => {
       expect(delivered[0].text).toContain("Own flow · Current task");
       expect(delivered[0].text).toContain("Unsaved plan");
       expect(delivered[0].text).not.toContain("Not a task title");
-      expect(delivered[0].picture).toBe("Current task");
+      expect(delivered[0].picture).toBe(phase === "graph" ? "Current task" : undefined);
     },
   );
 });
@@ -587,6 +587,46 @@ describe("a notification reads the run as of the node that sends it", () => {
       ],
     } as unknown as WorkflowGraph;
   }
+
+  test("original binary identity survives retry but distinguishes the next actual visit", async () => {
+    const execution = {
+      executionId: RUN,
+      workflowId: "wf",
+      userId: "user",
+      revision: 3,
+      globalContext: { variables: {}, nodeStates: {} },
+      visits: [],
+    } as unknown as WorkflowExecution;
+    const repository = { getExecution: async () => execution } as unknown as IDataRepository;
+    const origin = { execution };
+    const initial = notificationLiveRun(origin, [], { value: "first" }, "notify");
+    const retried = notificationLiveRun(origin, [], { value: "retried" }, "notify");
+    const first = await notificationDeliveryRequestId(repository, "notify", initial);
+    expect(await notificationDeliveryRequestId(repository, "notify", retried)).toBe(first);
+    const next = notificationLiveRun(
+      origin,
+      [
+        {
+          nodeId: "notify",
+          exitKey: "default",
+          changes: {},
+          waited: false,
+          enteredAt: 1,
+          leftAt: 2,
+        },
+      ],
+      {},
+      "notify",
+    );
+    expect(await notificationDeliveryRequestId(repository, "notify", next)).not.toBe(first);
+    await expect(
+      notificationDeliveryRequestId(repository, "notify", () => execution),
+    ).rejects.toThrow("binary_invocation_unavailable");
+    execution.revision++;
+    await expect(notificationDeliveryRequestId(repository, "notify", initial)).rejects.toThrow(
+      "binary_invocation_unavailable",
+    );
+  });
 
   test("independent task identity accompanies the unsaved live plan; arbitrary notes never head it", async () => {
     const repository = new InMemoryRepository();

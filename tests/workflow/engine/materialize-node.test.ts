@@ -4,17 +4,12 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, test } from "@jest/globals";
-import { extract } from "tar-stream";
 import { DatabaseError } from "@mcp-moira/shared";
 import {
   AgentMessageQueue,
-  createMaterializeTar,
   GraphValidator,
   InMemoryRepository,
   MaterializeHandler,
-  MATERIALIZE_MAX_FILE_BYTES,
-  MATERIALIZE_MAX_FILES,
-  MATERIALIZE_MAX_TOTAL_BYTES,
   quotePosixShellArgument,
   renderMaterializeFiles,
   UniversalGraphExecutor,
@@ -46,28 +41,6 @@ const registry: VariableRegistry = {
   name: { type: "string", description: "Name", default: "default name" },
   folder: { type: "string", description: "Destination folder", default: "generated" },
 };
-
-async function untar(buffer: Buffer): Promise<Map<string, Buffer>> {
-  const result = new Map<string, Buffer>();
-  const parser = extract();
-  const completed = new Promise<void>((resolve, reject) => {
-    parser.on("entry", (header, stream, next) => {
-      const chunks: Buffer[] = [];
-      stream.on("data", (chunk: Buffer) => chunks.push(chunk));
-      stream.once("end", () => {
-        result.set(header.name, Buffer.concat(chunks));
-        next();
-      });
-      stream.once("error", reject);
-      stream.resume();
-    });
-    parser.once("finish", resolve);
-    parser.once("error", reject);
-  });
-  parser.end(buffer);
-  await completed;
-  return result;
-}
 
 /**
  * A deliberately invalid edit to a cloned graph.
@@ -115,18 +88,12 @@ describe("materialize node", () => {
     };
     expect((await new GraphValidator().validateUnified(workflow)).valid).toBe(true);
 
-    const exactCount = structuredClone(workflow);
-    materializeNodeOf(exactCount).files = Array.from(
-      { length: MATERIALIZE_MAX_FILES },
-      (_, index) => ({
-        path: `${index}.txt`,
-        from: "readme",
-      }),
-    );
-    expect((await new GraphValidator().validateUnified(exactCount)).valid).toBe(true);
-    const overCount = structuredClone(exactCount);
-    materializeNodeOf(overCount).files.push({ path: "overflow.txt", from: "readme" });
-    expect((await new GraphValidator().validateUnified(overCount)).valid).toBe(false);
+    const manyFiles = structuredClone(workflow);
+    materializeNodeOf(manyFiles).files = Array.from({ length: 101 }, (_, index) => ({
+      path: index + ".txt",
+      from: "readme",
+    }));
+    expect((await new GraphValidator().validateUnified(manyFiles)).valid).toBe(true);
 
     const inlineContent = structuredClone(workflow);
     breakMaterializeNode(inlineContent, { files: [{ path: "inline", content: "inline data" }] });
@@ -205,7 +172,7 @@ describe("materialize node", () => {
     }
   });
 
-  test("renders registry source, a large Markdown template, and a valid tar", async () => {
+  test("renders exact registry Markdown text without encoding a cloud archive", async () => {
     const markdownBody = `# Engineering standards
 
 - outer item
@@ -270,12 +237,8 @@ const owner = "Moira";
       },
     );
     expect(files[0].path).toBe("generated/large.md");
-    expect(files[0].content.toString()).toBe(expectedMarkdown);
+    expect(files[0].content).toBe(expectedMarkdown);
     expect(files[1].content).toHaveLength(0);
-
-    const archive = await untar(await createMaterializeTar(files));
-    expect(archive.get("generated/large.md")?.toString()).toBe(files[0].content.toString());
-    expect(archive.get("plans/.keep")).toHaveLength(0);
   });
 
   test("rejects raw traversal, rendered traversal, and rendered collisions", async () => {
@@ -317,61 +280,23 @@ const owner = "Moira";
     ).rejects.toThrow("collision");
   });
 
-  test("enforces exact file count, per-file, and aggregate limits", async () => {
-    const atCount = Array.from({ length: MATERIALIZE_MAX_FILES }, (_, index) => ({
-      path: `${index}.txt`,
-      from: "small",
-    }));
-    await expect(
-      renderMaterializeFiles(
-        { ...node, files: atCount },
-        { small: { type: "string", description: "small", default: "x" } },
-        context,
-      ),
-    ).resolves.toHaveLength(MATERIALIZE_MAX_FILES);
-    await expect(
-      renderMaterializeFiles(
-        { ...node, files: [...atCount, { path: "overflow.txt", from: "small" }] },
-        { small: { type: "string", description: "small", default: "x" } },
-        context,
-      ),
-    ).rejects.toThrow(`${MATERIALIZE_MAX_FILES}`);
-
-    const exact = "x".repeat(MATERIALIZE_MAX_FILE_BYTES);
-    await expect(
-      renderMaterializeFiles(
-        { ...node, files: [{ path: "exact", from: "exact" }] },
-        { exact: { type: "string", description: "exact", default: exact } },
-        context,
-      ),
-    ).resolves.toHaveLength(1);
-    await expect(
-      renderMaterializeFiles(
-        { ...node, files: [{ path: "overflow", from: "overflow" }] },
-        { overflow: { type: "string", description: "overflow", default: `${exact}x` } },
-        context,
-      ),
-    ).rejects.toThrow(`${MATERIALIZE_MAX_FILE_BYTES}`);
-
-    const aggregateFiles = Array.from({ length: 10 }, (_, index) => ({
-      path: `${index}.bin`,
-      from: "exact",
-    }));
-    await expect(
-      renderMaterializeFiles(
-        { ...node, files: aggregateFiles },
-        { exact: { type: "string", description: "exact", default: exact } },
-        context,
-      ),
-    ).resolves.toHaveLength(10);
-    expect(10 * MATERIALIZE_MAX_FILE_BYTES).toBe(MATERIALIZE_MAX_TOTAL_BYTES);
-    await expect(
-      renderMaterializeFiles(
-        { ...node, files: [...aggregateFiles, { path: "overflow.bin", from: "exact" }] },
-        { exact: { type: "string", description: "exact", default: exact } },
-        context,
-      ),
-    ).rejects.toThrow(`${MATERIALIZE_MAX_TOTAL_BYTES}`);
+  test("prepares more than the former file and byte ceilings as text", async () => {
+    const body = "Я".repeat(1024 * 1024);
+    const files = await renderMaterializeFiles(
+      {
+        ...node,
+        files: Array.from({ length: 101 }, (_, index) => ({
+          path: index + ".md",
+          ...(index < 6 ? { from: "large" } : { content: "" as const }),
+        })),
+      },
+      { large: { type: "string", description: "Text source", default: body } },
+      context,
+    );
+    expect(files).toHaveLength(101);
+    expect(files[0].content).toBe(body);
+    expect(files[5].content).toBe(body);
+    expect(files[100].content).toBe("");
   });
 
   test("offers the fallback under a condition while the command stays the primary instruction", async () => {

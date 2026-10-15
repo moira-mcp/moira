@@ -65,7 +65,7 @@ export class LocalRepositoryAdmissionService {
   }
 
   async listDevices(userId: string) {
-    const owned = this.dependencies.devices.listOwned(userId);
+    const owned = await this.dependencies.devices.listOwned(userId);
     let installations: Array<{
       installation_id: string;
       owner: string;
@@ -88,20 +88,31 @@ export class LocalRepositoryAdmissionService {
         device_id: device.deviceId,
         label: device.label,
         status: device.status,
-        enabled: device.policy.enabled,
-        lease_until: device.policy.leaseUntil,
-        delegation: device.control?.appliedAgentRepositoryManagement ?? null,
-        control_status: device.control?.status ?? "not-enabled",
-        revision: device.control?.revision ?? 0,
-        applied_revision: device.control?.appliedRevision ?? 0,
+        owner_available: device.owner.state === "available",
+        local:
+          device.owner.state !== "available"
+            ? { state: "unavailable" as const }
+            : device.owner.local.state === "unconfigured"
+              ? { state: "unconfigured" as const }
+              : {
+                  state: "configured" as const,
+                  enabled: device.owner.local.policy.enabled,
+                  lease_until: device.owner.local.policy.leaseUntil,
+                  delegation: device.owner.local.control.appliedAgentRepositoryManagement ?? null,
+                  control_status: device.owner.local.control.status,
+                  revision: device.owner.local.control.revision,
+                  applied_revision: device.owner.local.control.appliedRevision,
+                },
       })),
     };
   }
 
   private result(device: LocalDeviceView, requestId: string): LocalRepositoryAdmissionResult {
-    const control = device.control!;
+    if (device.owner.state !== "available" || device.owner.local.state !== "configured")
+      throw new LocalDeviceError("LOCAL_UNAVAILABLE", "The device owner is unavailable.");
+    const control = device.owner.local.control;
     const receipt = control.repositoryAdmissions!.find((entry) => entry.requestId === requestId)!;
-    const granted = device.policy.repositories.find(
+    const granted = device.owner.local.policy.repositories.find(
       (repository) => repository.id === receipt.localRepositoryId,
     );
     const applied =
@@ -155,8 +166,8 @@ export class LocalRepositoryAdmissionService {
     creationRequestId?: string,
   ): Promise<LocalRepositoryAdmissionResult> {
     const input = localRepositoryAdmissionInputSchema.parse(value);
-    let device = this.dependencies.devices.getActiveDevice(userId, input.deviceId);
-    const previous = device.control?.repositoryAdmissions?.find(
+    let device = await this.dependencies.devices.getActiveDevice(userId, input.deviceId);
+    const previous = device.owner.local.control?.repositoryAdmissions?.find(
       (entry) => entry.requestId === input.requestId,
     );
     if (previous) {
@@ -164,7 +175,7 @@ export class LocalRepositoryAdmissionService {
         throw new LocalDeviceError("LOCAL_CONFLICT", "Repository request identity changed.");
       return this.result(device, input.requestId);
     }
-    const delegation = device.control?.appliedAgentRepositoryManagement;
+    const delegation = device.owner.local.control?.appliedAgentRepositoryManagement;
     if (
       !delegation ||
       !(creationRequestId ? delegation.allowNewPrivate : delegation.allowExistingPrivate)
@@ -174,8 +185,8 @@ export class LocalRepositoryAdmissionService {
         "Enable and apply agent repository management in Moira Settings first.",
       );
     const verified = await this.dependencies.verifyRepository(userId, input.repositoryId);
-    device = this.dependencies.devices.getActiveDevice(userId, input.deviceId);
-    const raced = device.control?.repositoryAdmissions?.find(
+    device = await this.dependencies.devices.getActiveDevice(userId, input.deviceId);
+    const raced = device.owner.local.control?.repositoryAdmissions?.find(
       (entry) => entry.requestId === input.requestId,
     );
     if (raced) {
@@ -184,7 +195,7 @@ export class LocalRepositoryAdmissionService {
       return this.result(device, input.requestId);
     }
     if (
-      JSON.stringify(device.control?.appliedAgentRepositoryManagement) !==
+      JSON.stringify(device.owner.local.control?.appliedAgentRepositoryManagement) !==
         JSON.stringify(delegation) ||
       verified.githubUserId !== delegation.githubUserId ||
       verified.owner.toLowerCase() !== delegation.owner.toLowerCase() ||
@@ -197,21 +208,25 @@ export class LocalRepositoryAdmissionService {
         "LOCAL_UNAUTHORIZED",
         "The repository or connected account exceeds the applied delegation.",
       );
-    const added = this.dependencies.devices.requestRepositoryAdmission(userId, input.deviceId, {
-      requestId: input.requestId,
-      githubRepositoryId: input.repositoryId,
-      deviceGeneration: device.deviceGeneration,
-      expectedRevision: device.control!.revision,
-      ...(creationRequestId ? { creationRequestId } : {}),
-      repository: {
-        id: randomUUID(),
-        fullName: verified.fullName,
-        private: true,
-        allowPush: delegation.allowPush,
-        allowDelete: false,
-        allowPullRequests: false,
+    const added = await this.dependencies.devices.requestRepositoryAdmission(
+      userId,
+      input.deviceId,
+      {
+        requestId: input.requestId,
+        githubRepositoryId: input.repositoryId,
+        deviceGeneration: device.deviceGeneration,
+        expectedRevision: device.owner.local.control.revision,
+        ...(creationRequestId ? { creationRequestId } : {}),
+        repository: {
+          id: randomUUID(),
+          fullName: verified.fullName,
+          private: true,
+          allowPush: delegation.allowPush,
+          allowDelete: false,
+          allowPullRequests: false,
+        },
       },
-    });
+    );
     return this.result(added, input.requestId);
   }
 }

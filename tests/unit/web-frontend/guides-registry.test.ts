@@ -164,13 +164,7 @@ describe("the walkthroughs the guides replaced", () => {
       "tokens",
       "preferences",
     ]);
-    expect(stepIds("settings-github")).toEqual([
-      "steps",
-      "connect",
-      "codespaces",
-      "limits",
-      "autopause",
-    ]);
+    expect(stepIds("settings-github")).toEqual(["steps", "connect", "codespaces", "autopause"]);
     expect(stepIds("settings-telegram")).toEqual(["bot", "chat", "enable", "test"]);
   });
 

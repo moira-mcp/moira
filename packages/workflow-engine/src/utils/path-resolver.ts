@@ -3,8 +3,6 @@
  * Unified implementation for dot-notation and array indexing support
  */
 
-import { createLogger } from "@mcp-moira/shared";
-
 export interface PathSegment {
   type: "property" | "index";
   key?: string;
@@ -12,7 +10,6 @@ export interface PathSegment {
 }
 
 export class PathResolver {
-  private static logger = createLogger({ component: "PathResolver" });
   private static readonly FORBIDDEN_PROPERTY_KEYS = new Set([
     "__proto__",
     "prototype",

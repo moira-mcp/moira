@@ -80,6 +80,28 @@ afterAll(async () => {
 });
 
 describe("The runner provides what the bundle declares", () => {
+  test("the cloud runner refuses file bytes rather than retaining its buffered binary execution path", async () => {
+    const response = await fetch(`http://127.0.0.1:${runner.port}/channels/deliver`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        channelId: "channel-probe.notifications",
+        timeoutMs: 5000,
+        message: {
+          text: "portable text",
+          attachment: {
+            kind: "document",
+            data: "cmVwb3J0",
+            encoding: "base64",
+            filename: "report.txt",
+            mimeType: "text/plain",
+          },
+        },
+      }),
+    });
+    expect(response.status).toBe(400);
+    expect(await healthy()).toBe(true);
+  });
   test("declarations reach Moira as metadata and schemas", async () => {
     const extensions = await client.listExtensions();
 
@@ -112,12 +134,6 @@ describe("The runner provides what the bundle declares", () => {
         timeoutMs: 5_000,
         message: {
           text: "portable text",
-          attachment: {
-            kind: "document",
-            bytes: new TextEncoder().encode("report"),
-            filename: "report.txt",
-            mimeType: "text/plain",
-          },
         },
         settings: {
           "channel-probe.destination": "configured",
@@ -160,12 +176,6 @@ describe("The runner provides what the bundle declares", () => {
         ...channelRequest("portable text"),
         message: {
           text: "portable text",
-          attachment: {
-            kind: "document",
-            bytes: new TextEncoder().encode("report"),
-            filename: "report.txt",
-            mimeType: "text/plain",
-          },
         },
       }),
     ).resolves.toBeUndefined();
@@ -194,12 +204,6 @@ describe("The runner provides what the bundle declares", () => {
       {
         userId: "runner-user",
         text: "portable text",
-        attachment: {
-          kind: "document",
-          bytes: new TextEncoder().encode("report"),
-          filename: "report.txt",
-          mimeType: "text/plain",
-        },
       },
       repository,
     );

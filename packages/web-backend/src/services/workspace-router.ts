@@ -12,21 +12,26 @@ import { connect as connectUnix } from "node:net";
 import { once, EventEmitter } from "node:events";
 import { dirname } from "node:path";
 import type { Duplex, Readable } from "node:stream";
-import { CodespaceResourceError } from "@mcp-moira/shared";
+import { CodespaceResourceError } from "@mcp-moira/shared/codespace-resource-types";
 import {
   WORKSPACE_HEARTBEAT_INTERVAL_MS,
   WORKSPACE_UPGRADE,
+  type WorkspaceEndpointKind,
 } from "@mcp-moira/shared/workspace-transport";
 
 export { WORKSPACE_UPGRADE };
-export interface WorkspaceBinding {
+interface WorkspacePrincipal {
   userId: string;
   resourceId: string;
   resourceGeneration: number;
   authorizationGeneration: number;
-  environmentIdentity: string;
   expiresAt?: number | null;
 }
+export type WorkspaceBinding = WorkspacePrincipal &
+  (
+    | { kind: "workspace"; environmentIdentity: string }
+    | { kind: "controller"; connectionId: string }
+  );
 export interface WorkspaceRequest {
   method: string;
   path: string;
@@ -67,14 +72,18 @@ interface Pending {
   resolve(socket: Duplex): void;
   reject(error: Error): void;
 }
-const key = (binding: WorkspaceBinding) => `${binding.userId}:${binding.resourceId}`;
+const key = (binding: WorkspaceBinding) =>
+  `${binding.kind}:${binding.userId}:${binding.resourceId}`;
+const endpointIdentity = (binding: WorkspaceBinding) =>
+  binding.kind === "workspace" ? binding.environmentIdentity : binding.connectionId;
 const identity = (binding: WorkspaceBinding) =>
   JSON.stringify([
     binding.userId,
+    binding.kind,
     binding.resourceId,
     binding.resourceGeneration,
     binding.authorizationGeneration,
-    binding.environmentIdentity,
+    endpointIdentity(binding),
   ]);
 const uuid = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
 
@@ -89,7 +98,12 @@ export class WorkspaceRouter extends EventEmitter {
   constructor(
     private readonly authority: {
       credential(value: string): Promise<WorkspaceBinding>;
-      request(userId: string, resourceId: string, signal?: AbortSignal): Promise<WorkspaceBinding>;
+      request(
+        userId: string,
+        resourceId: string,
+        signal?: AbortSignal,
+        kind?: WorkspaceEndpointKind,
+      ): Promise<WorkspaceBinding>;
     },
   ) {
     super();
@@ -196,8 +210,11 @@ export class WorkspaceRouter extends EventEmitter {
     )?.[1];
     if (!token) throw new Error("Workspace credential required");
     const binding = await this.authority.credential(token);
-    if (request.headers["x-moira-environment-identity"] !== binding.environmentIdentity)
-      throw new Error("Workspace life changed");
+    if (
+      request.headers["x-moira-endpoint-kind"] !== binding.kind ||
+      request.headers["x-moira-endpoint-identity"] !== endpointIdentity(binding)
+    )
+      throw new Error("Owner endpoint identity changed");
     if (socket.destroyed) return;
     if (call) {
       const pending = this.pending.get(call[1]);
@@ -298,6 +315,7 @@ export class WorkspaceRouter extends EventEmitter {
     resourceId: string,
     input: WorkspaceRequest,
     signal?: AbortSignal,
+    kind: WorkspaceEndpointKind = "workspace",
   ): Promise<WorkspaceResponse> {
     signal?.throwIfAborted();
     if (
@@ -307,7 +325,7 @@ export class WorkspaceRouter extends EventEmitter {
       input.path.includes("\n")
     )
       throw new CodespaceResourceError("CODESPACE_RESOURCE_INVALID", "Invalid workspace request");
-    const binding = await this.requestAuthority(userId, resourceId, signal);
+    const binding = await this.requestAuthority(userId, resourceId, signal, kind);
     const connection = this.connections.get(key(binding));
     if (!connection || identity(connection.binding) !== identity(binding))
       throw new CodespaceResourceError(
@@ -352,7 +370,7 @@ export class WorkspaceRouter extends EventEmitter {
     });
     // Authentication can change while the agent is opening its data connection.
     try {
-      const current = await this.requestAuthority(userId, resourceId, signal);
+      const current = await this.requestAuthority(userId, resourceId, signal, kind);
       if (
         identity(current) !== identity(binding) ||
         this.connections.get(key(binding)) !== connection
@@ -365,12 +383,39 @@ export class WorkspaceRouter extends EventEmitter {
       socket.destroy();
       throw error;
     }
-    return sendHttp(input, signal, (ready) => ready(null, socket));
+    const headers = { ...input.headers };
+    for (const name of [
+      "x-moira-user-id",
+      "x-moira-device-id",
+      "x-moira-device-generation",
+      "x-moira-connection-id",
+      "x-moira-endpoint-kind",
+      "x-moira-endpoint-identity",
+    ])
+      delete headers[name];
+    if (binding.kind === "controller") {
+      headers["x-moira-user-id"] = binding.userId;
+      headers["x-moira-device-id"] = binding.resourceId;
+      headers["x-moira-device-generation"] = String(binding.resourceGeneration);
+      headers["x-moira-connection-id"] = binding.connectionId;
+    }
+    return sendHttp({ ...input, headers }, signal, (ready) => ready(null, socket));
   }
 
-  private async requestAuthority(userId: string, resourceId: string, signal?: AbortSignal) {
+  private async requestAuthority(
+    userId: string,
+    resourceId: string,
+    signal?: AbortSignal,
+    kind: WorkspaceEndpointKind = "workspace",
+  ) {
     try {
-      return await this.authority.request(userId, resourceId, signal);
+      const binding = await this.authority.request(userId, resourceId, signal, kind);
+      if (binding.kind !== kind)
+        throw new CodespaceResourceError(
+          "CODESPACE_AUTHORIZATION_REQUIRED",
+          "Owner endpoint kind does not match its authority",
+        );
+      return binding;
     } catch (error) {
       if (error instanceof CodespaceResourceError || signal?.aborted) throw error;
       throw new CodespaceResourceError(
@@ -433,6 +478,12 @@ export class WorkspaceRouter extends EventEmitter {
             "Workspace principal required",
           );
         const headers = { ...request.headers };
+        const kind = headers["x-moira-endpoint-kind"] ?? "workspace";
+        if (kind !== "workspace" && kind !== "controller")
+          throw new CodespaceResourceError(
+            "CODESPACE_RESOURCE_INVALID",
+            "Invalid owner endpoint kind",
+          );
         delete headers["x-moira-user-id"];
         delete headers["x-moira-resource-id"];
         const result = await this.request(
@@ -440,6 +491,7 @@ export class WorkspaceRouter extends EventEmitter {
           resourceId,
           { method: request.method ?? "GET", path: request.url ?? "", headers, body: request },
           controller.signal,
+          kind,
         );
         response.writeHead(result.statusCode, result.headers);
         result.body.once("error", () => response.destroy());

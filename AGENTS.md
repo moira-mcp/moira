@@ -321,8 +321,16 @@ for the registrations.
 Local VMs and GitHub Codespaces run the same `workspace-service` payload with its own runtime.
 Commands, sessions, guarded file mutations and durable results belong to that guest service;
 `moira-workspace` reaches it through a private Unix socket. Authenticated MCP calls reach the same
-owner through live streaming routing. Cloud Moira owns authorization and provider lifecycle,
-while attachment publication has its separate storage owner. Archived uncertain receipts are
+owner through live streaming routing. Cloud Moira owns authorization, revocation and minimal
+Local route bindings; the always-on Local controller owns physical lifecycle, settings and
+their original-operation journals. The selected paired controller owns GitHub lifecycle admission,
+fixed bootstrap and explicit adoption; cloud services retain current account/repository
+authority, routing identity, billing and unresolved retirement witnesses. Workspace calls
+require the already enrolled live owner and do not trigger cloud SSH or startup.
+Existing offline Local work retains its owner grants and finite lease; fresh creation
+requires cloud route registration and initial credential authority. Controller management
+retains separate account/device and local approval guards. File bytes, immutable publications
+and original delivery receipts remain with their workspace or controller owner. Archived uncertain receipts are
 not dispatched or replayed.
 
 The companion runs on the user's machine and retains physical VM custody, local repository

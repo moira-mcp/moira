@@ -10,6 +10,7 @@ interface ToolResultLike {
   success: boolean;
   data?: unknown;
   error?: string;
+  code?: string;
 }
 
 type ToolInvocationResult = CallToolResult | ToolResultLike;
@@ -25,6 +26,14 @@ function isToolResultLike(result: ToolInvocationResult): result is ToolResultLik
 
 function renderToolResult(result: ToolResultLike, policy: ToolResponsePolicy): CallToolResult {
   if (!result.success) {
+    if (result.code) {
+      const error = result.error ?? "Unknown error";
+      return {
+        content: [{ type: "text", text: `Error: ${result.code}: ${error}` }],
+        structuredContent: { success: false, code: result.code, error },
+        isError: true,
+      };
+    }
     return { content: [{ type: "text", text: `Error: ${result.error ?? "Unknown error"}` }] };
   }
   const text =

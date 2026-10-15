@@ -2,19 +2,12 @@ import { afterEach, beforeEach, describe, expect, jest, test } from "@jest/globa
 import { mkdtemp, realpath, rm, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { randomBytes, randomUUID, createHash } from "node:crypto";
-import {
-  LocalWebControl,
-  LocalCompanion,
-  controlSettings,
-} from "../../../packages/local/src/web-control.js";
+import { randomBytes, randomUUID } from "node:crypto";
+import { LocalWebControl, controlSettings } from "../../../packages/local/src/web-control.js";
 import { LocalManager } from "../../../packages/local/src/manager.js";
 import { PrivateState } from "../../../packages/local/src/private-state.js";
 import { LocalRelay } from "../../../packages/local/src/relay.js";
 import { main } from "../../../packages/local/src/cli.js";
-import { RequestJournal } from "../../../packages/local/src/journal.js";
-import { localEnvelopeSchema } from "../../../packages/local/src/rpc.js";
-import { canonicalJson } from "../../../packages/shared/src/utils/canonical-json.js";
 import { GiB, LocalRefusal, publicPolicy } from "../../../packages/local/src/policy.js";
 import { localFixture } from "./fixtures.js";
 import {
@@ -82,7 +75,7 @@ describe("Locally pinned owner web control", () => {
         ...before,
         ceiling: next,
       });
-      expect(reports.at(-1)).toMatchObject({ control: { ceiling: next, appliedRevision: 5 } });
+      expect(reports.at(-1)).toEqual({});
       expect(await f.records.policy()).toEqual(f.policy);
     } finally {
       stdout.mockRestore();
@@ -187,7 +180,7 @@ describe("Locally pinned owner web control", () => {
       expect(await readFile(join(directory, "web-control.json"))).toEqual(before);
     },
   );
-  test("a lost reapproval heartbeat response is repaired by reporting the same persisted approval again", async () => {
+  test("lost device authority observation leaves the locally persisted approval unchanged", async () => {
     const f = await fixture(),
       control = new LocalWebControl(f.records);
     await control.optIn(f.connection, f.ceiling, true);
@@ -208,12 +201,12 @@ describe("Locally pinned owner web control", () => {
       });
     };
     await expect(new LocalRelay(f.records, transport).confirmed()).rejects.toThrow(
-      "Fixture response lost after accepting the report",
+      "Device authority service is unavailable.",
     );
     await new LocalRelay(f.records, transport).confirmed();
     expect(reports).toHaveLength(2);
     expect(reports[1]).toEqual(reports[0]);
-    expect(reports[1]).toMatchObject({ control: { ceiling: next, appliedRevision: 0 } });
+    expect(reports[1]).toEqual({});
     expect(await readFile(join(directory, "web-control.json"))).toEqual(before);
   });
   test.each(["existing", "created"])(
@@ -269,7 +262,7 @@ describe("Locally pinned owner web control", () => {
             },
           ],
         };
-        expect(await control.apply(view, manager)).toBe("live");
+        expect(await control.apply(view, manager, "repository")).toBe("live");
         expect(await f.records.get(f.space.id)).toEqual(beforeSpace);
         expect((await f.records.authorize(f.authorization))?.repository).toEqual(
           beforeGrant?.repository,
@@ -283,7 +276,7 @@ describe("Locally pinned owner web control", () => {
             repositories: view.settings.repositories,
           },
         });
-        expect(await control.apply(view, manager)).toBe(false);
+        expect(await control.apply(view, manager, "repository")).toBe(false);
         expect((await f.records.policy()).repositories).toHaveLength(2);
       } finally {
         await manager.close();
@@ -327,7 +320,7 @@ describe("Locally pinned owner web control", () => {
       ],
     };
     try {
-      expect(await control.apply(view, manager)).toBe(false);
+      expect(await control.apply(view, manager, "repository")).toBe(false);
       expect(await f.records.policy()).toEqual(f.policy);
       expect(await f.records.get(f.space.id)).toEqual(beforeSpace);
       expect(await f.state.read("control-intent.json", (value) => value)).toBeNull();
@@ -343,6 +336,7 @@ describe("Locally pinned owner web control", () => {
             repositoryAdmissions: [{ ...view.repositoryAdmissions![0], revision: 2 }],
           },
           manager,
+          "repository",
         ),
       ).toBe(false);
       expect(await f.records.policy()).toEqual(f.policy);
@@ -398,79 +392,85 @@ describe("Locally pinned owner web control", () => {
       await manager.close();
     }
   });
-  test("idle expired companion accepts a web renewal then returns to management-only on expiry", async () => {
-    const f = await fixture();
-    f.policy.enabled = false;
-    f.policy.leaseUntil = 0;
-    await f.state.write("policy.json", f.policy);
-    const manager = new LocalManager(f.records);
-    let opened = 0,
-      claims = 0,
-      heartbeats = 0;
-    manager.open = async () => {
-      opened++;
+  test("human settings replace more than 64 grants and delegation through confirmed stop, even with an old admission receipt", async () => {
+    const f = await fixture(),
+      manager = new LocalManager(f.records);
+    const repositories = [
+      f.policy.repositories[0],
+      ...Array.from({ length: 64 }, (_, index) => ({
+        ...f.policy.repositories[0],
+        id: randomUUID(),
+        fullName: `owner/project-${index}`,
+      })),
+    ];
+    const delegation = {
+      githubUserId: "42",
+      owner: "owner",
+      allowExistingPrivate: true,
+      allowNewPrivate: true,
+      allowPush: true,
     };
+    let stopped = false,
+      replacements = 0;
     manager.stopWork = async () => {
-      const s = await f.records.get(f.space.id);
-      s!.desiredState = "stopped";
-      s!.phase = "stopped";
-      await f.records.put(s!);
+      const space = (await f.records.get(f.space.id))!;
+      space.desiredState = "stopped";
+      space.phase = "stopped";
+      await f.records.put(space);
+      stopped = true;
+    };
+    manager.appendRepositoryPolicy = async () => {
+      throw new Error("Human replacement cannot enter delegated append");
     };
     const control = new LocalWebControl(f.records, {
       replacePolicy: async (records, next) => {
+        expect(stopped).toBe(true);
+        replacements++;
         await records.state.write("policy.json", next);
       },
     });
     await control.optIn(f.connection, f.ceiling, true);
-    let desired: LocalDeviceControlView | undefined;
-    const transport: typeof fetch = async (url) => {
-      if (String(url).endsWith("/heartbeat")) {
-        heartbeats++;
-        return Response.json({
-          success: true,
-          data: {
-            ...f.connection,
-            status: "active",
-            policy: publicPolicy(await f.records.policy()),
-            ...(desired ? { control: desired } : {}),
-          },
-        });
-      }
-      if (String(url).endsWith("/relay/claim")) {
-        claims++;
-        return Response.json({ success: true, data: { requests: [] } });
-      }
-      throw new Error("unexpected fixture route");
-    };
-    const companion = new LocalCompanion(manager, new LocalRelay(f.records, transport), control);
     try {
-      expect(await companion.cycle()).toBe(false);
-      expect(opened).toBe(0);
-      expect(claims).toBe(0);
-      desired = {
-        optedIn: true,
-        revision: 1,
-        appliedRevision: 0,
-        status: "pending",
-        settings: {
-          ...controlSettings(f.policy),
-          enabled: true,
-          leaseUntil: Date.now() + MAX_LOCAL_WORK_LEASE_MS - 1000,
-        },
-        ceiling: f.ceiling,
-        error: null,
-      };
-      expect(await companion.cycle()).toBe(true);
-      expect(opened).toBe(1);
-      expect(claims).toBe(1);
-      const expired = await f.records.policy();
-      expired.leaseUntil = Date.now() - 1;
-      await f.state.write("policy.json", expired);
-      expect(await companion.cycle()).toBe(false);
-      expect(opened).toBe(1);
-      expect(claims).toBe(2);
-      expect(heartbeats).toBe(6);
-      expect((await f.records.get(f.space.id))?.desiredState).toBe("stopped");
+      expect(
+        await control.apply(
+          {
+            optedIn: true,
+            revision: 1,
+            appliedRevision: 0,
+            status: "pending",
+            ceiling: f.ceiling,
+            error: null,
+            settings: {
+              ...controlSettings(f.policy),
+              repositories,
+              agentRepositoryManagement: delegation,
+            },
+            repositoryAdmissions: [
+              {
+                requestId: randomUUID(),
+                githubRepositoryId: "77",
+                localRepositoryId: repositories[1].id,
+                revision: 1,
+                deviceGeneration: 1,
+                connectionId: f.connection.connectionId,
+                repository: repositories[1],
+              },
+            ],
+          },
+          manager,
+        ),
+      ).toBe(true);
+      expect(replacements).toBe(1);
+      expect((await f.records.policy()).repositories).toEqual(repositories);
+      expect(await control.report(f.connection)).toMatchObject({
+        appliedRevision: 1,
+        settings: { agentRepositoryManagement: delegation },
+      });
+      expect(await f.records.get(f.space.id)).toMatchObject({
+        runtimeId: f.space.runtimeId,
+        brokerToken: f.space.brokerToken,
+        desiredState: "stopped",
+      });
     } finally {
       await manager.close();
     }
@@ -516,91 +516,6 @@ describe("Locally pinned owner web control", () => {
       await manager.close();
     }
   });
-  test("initial private Git requires our known creating manifest and exact live relay intent, not same-name adoption", async () => {
-    const f = await fixture();
-    f.space.phase = "creating";
-    await f.records.put(f.space);
-    const resourceId = randomUUID(),
-      requestId = randomUUID();
-    const message = localEnvelopeSchema.parse({
-      version: 1,
-      id: requestId,
-      expiresAt: Date.now() + 60000,
-      request: {
-        action: "create",
-        repositoryId: f.space.repositoryId,
-        operationMarker: f.space.operationMarker,
-        ref: f.space.ref,
-      },
-    });
-    const digest = createHash("sha256").update(canonicalJson(message)).digest("hex");
-    let admitted!: () => void, release!: () => void;
-    const entered = new Promise<void>((done) => {
-      admitted = done;
-    });
-    const held = new Promise<void>((done) => {
-      release = done;
-    });
-    const accepted = new RequestJournal(f.state).run(
-      requestId,
-      message.expiresAt,
-      message.request,
-      async () => {
-        admitted();
-        await held;
-        return { ok: true, result: { spaceId: f.space.id } };
-      },
-    );
-    await entered;
-    await f.state.write(`relay-space-${resourceId}.json`, {
-      resourceId,
-      deviceId: f.connection.deviceId,
-      userId: f.connection.userId,
-      connectionId: f.connection.connectionId,
-      deviceGeneration: 1,
-      serverGeneration: 4,
-      localSpaceId: null,
-      localGeneration: null,
-      createMarker: f.space.operationMarker,
-      repositoryId: f.space.repositoryId,
-      createRequestId: requestId,
-      createDigest: digest,
-    });
-    await f.state.write(`lifecycle-request-${requestId}.json`, {
-      digest,
-      resourceId,
-      deviceGeneration: 1,
-      connectionId: f.connection.connectionId,
-      serverGeneration: 4,
-      message,
-    });
-    const transport: typeof fetch = async () =>
-      Response.json({
-        success: true,
-        data: { ...f.connection, status: "active", policy: publicPolicy(await f.records.policy()) },
-      });
-    const relay = new LocalRelay(f.records, transport);
-    try {
-      expect(await relay.gitAuthority(f.space.id, f.space.repositoryId)).toMatchObject({
-        resourceId,
-        resourceGeneration: 4,
-      });
-      f.space.runtimeId = null;
-      await f.records.put(f.space);
-      await expect(relay.gitAuthority(f.space.id, f.space.repositoryId)).rejects.toMatchObject({
-        code: "LOCAL_CREATE_UNKNOWN",
-      });
-    } finally {
-      release();
-      await accepted;
-    }
-    f.space.runtimeId = "known-fixture-runtime";
-    await f.records.put(f.space);
-    await f.state.remove(`lifecycle-request-${requestId}.json`);
-    await expect(relay.gitAuthority(f.space.id, f.space.repositoryId)).rejects.toMatchObject({
-      code: "LOCAL_CREATE_UNKNOWN",
-    });
-  });
   test("opt-in is explicit, keeps existing connection, and expired disabled heartbeat reports without SDK work", async () => {
     const f = await fixture(),
       control = new LocalWebControl(f.records);
@@ -621,10 +536,7 @@ describe("Locally pinned owner web control", () => {
       });
     };
     await new LocalRelay(f.records, transport).confirmed();
-    expect(sent).toMatchObject({
-      policy: { enabled: false, leaseUntil: 0 },
-      control: { appliedRevision: 0, ceiling: f.ceiling },
-    });
+    expect(sent).toEqual({});
     expect(await readFile(join(directory, "connection.json"))).toEqual(original);
     await expect(control.report({ ...f.connection, userId: "other" })).rejects.toMatchObject({
       code: "LOCAL_IDENTITY_CHANGED",

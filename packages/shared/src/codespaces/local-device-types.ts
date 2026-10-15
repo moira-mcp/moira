@@ -1,7 +1,7 @@
 import { z } from "zod";
 import type { CodespaceMachine } from "./resource-types.js";
 import type { LocalDeviceControlView } from "./local-management-types.js";
-import type { LocalLifecycleEnvelope, LocalLifecycleReply } from "./local-protocol.js";
+import type { GitHubControllerResource } from "./local-controller-protocol.js";
 
 export const CODESPACE_PROVIDER_LOCAL = "local-sandboxes" as const;
 const identifier = z.string().uuid();
@@ -17,7 +17,7 @@ export function parseLocalRepositoryTargetId(value: string): {
   return { deviceId: identifier.parse(deviceId), repositoryId: identifier.parse(repositoryId) };
 }
 const integer = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
-const safeLabel = z
+export const localDeviceLabelSchema = z
   .string()
   .trim()
   .min(1)
@@ -30,11 +30,21 @@ const safeLabel = z
       }),
     "Invalid device label",
   );
+export const localMachineSchema = z
+  .object({
+    name: z.literal("local-approved"),
+    displayName: localDeviceLabelSchema,
+    operatingSystem: z.literal("linux"),
+    cpuCores: z.number().int().positive().safe(),
+    memoryBytes: z.number().int().positive().safe(),
+    storageBytes: z.number().int().positive().safe(),
+  })
+  .strict();
 export const localPublicPolicySchema = z
   .object({
     version: z.literal(1),
     deviceId: identifier,
-    label: safeLabel,
+    label: localDeviceLabelSchema,
     enabled: z.boolean(),
     leaseUntil: integer,
     repositories: z.array(
@@ -52,16 +62,7 @@ export const localPublicPolicySchema = z
         })
         .strict(),
     ),
-    machine: z
-      .object({
-        name: z.literal("local-approved"),
-        displayName: safeLabel,
-        operatingSystem: z.literal("linux"),
-        cpuCores: z.number().int().positive().safe(),
-        memoryBytes: z.number().int().positive().safe(),
-        storageBytes: z.number().int().positive().safe(),
-      })
-      .strict(),
+    machine: localMachineSchema,
   })
   .strict()
   .superRefine((policy, ctx) => {
@@ -79,11 +80,20 @@ export interface LocalDeviceAuth {
   deviceGeneration: number;
   connectionId: string;
 }
+export type LocalDeviceOwnerView =
+  | {
+      state: "available";
+      observedAt: number;
+      local:
+        | { state: "configured"; policy: LocalPublicPolicy; control: LocalDeviceControlView }
+        | { state: "unconfigured" };
+      github: { resources: GitHubControllerResource[] };
+    }
+  | { state: "unavailable" };
 export interface LocalDeviceView extends LocalDeviceAuth {
-  control?: LocalDeviceControlView;
   label: string;
   status: "pending" | "active" | "revoked";
-  policy: LocalPublicPolicy;
+  owner: LocalDeviceOwnerView;
   lastSeenAt: number | null;
   createdAt: number;
 }
@@ -99,34 +109,6 @@ export interface LocalResourceBinding extends LocalDeviceAuth {
   repositoryId: string;
   profileId: string;
 }
-export type LocalRelayStatus =
-  "queued" | "claimed" | "completed" | "refused" | "expired" | "revoked";
-export interface LocalRelayRequest extends LocalDeviceAuth {
-  authority?: "owner-delete";
-  requestId: string;
-  resourceId: string;
-  resourceGeneration: number;
-  digest: string;
-  payload: LocalLifecycleEnvelope;
-  deadlineAt: number;
-}
-export interface LocalRelayClaim extends LocalRelayRequest {
-  claimId: string;
-  claimExpiresAt: number;
-}
-export interface LocalRelayResult {
-  requestId: string;
-  digest: string;
-  status: LocalRelayStatus;
-  outcome: LocalLifecycleReply | null;
-}
-export interface LocalRelayAcknowledgement {
-  requestId: string;
-  digest: string;
-  claimId: string;
-  status: "completed" | "refused";
-  outcome: LocalLifecycleReply;
-}
 export interface LocalApprovedRepository {
   id: string;
   fullName: string;
@@ -135,8 +117,15 @@ export interface LocalApprovedRepository {
 }
 export class LocalDeviceError extends Error {
   constructor(
-    readonly code: "LOCAL_UNAUTHORIZED" | "LOCAL_CONFLICT" | "LOCAL_EXPIRED" | "LOCAL_INVALID",
+    readonly code:
+      | "LOCAL_UNAUTHORIZED"
+      | "LOCAL_CONFLICT"
+      | "LOCAL_EXPIRED"
+      | "LOCAL_INVALID"
+      | "LOCAL_UNAVAILABLE"
+      | "LOCAL_OUTCOME_UNCONFIRMED",
     message: string,
+    readonly requestId?: string,
   ) {
     super(message);
     this.name = "LocalDeviceError";

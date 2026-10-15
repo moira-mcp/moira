@@ -30,7 +30,7 @@ beforeAll(async () => {
   userCookie = await signIn({ email: user.email, password: user.password });
 });
 
-describe("codespace management and controls on a default-disabled installation", () => {
+describe("codespace management on a default-disabled installation", () => {
   test("lists a disabled readiness decision with no codespaces and no secrets", async () => {
     const response = await fetch(`${baseUrl}/api/integrations/github/codespaces`, {
       headers: { Cookie: userCookie },
@@ -40,21 +40,15 @@ describe("codespace management and controls on a default-disabled installation",
     expect(body.data).toMatchObject({
       readiness: {
         state: "disabled",
-        reason: "NOT_CONFIGURED",
+        reason: null,
         configuration: "absent",
-        connector: { state: "not_applicable" },
       },
       connection: { state: "disabled" },
       repositories: [],
       codespaces: [],
-      // The user's limits are present even while the feature is off: nothing held, and provider
-      // billing reported as unavailable rather than as a number.
-      limits: {
-        codespaces: { held: 0 },
-        lifecycle: { idle: { provider_max_minutes: 240 } },
-        provider: { billing: "unavailable" },
-      },
+      provider_billing: "unavailable",
     });
+    expect(body.data).not.toHaveProperty("limits");
     expect(JSON.stringify(body)).not.toMatch(/accessToken|refreshToken|clientSecret|vaultKey/);
   });
 
@@ -94,17 +88,16 @@ describe("codespace management and controls on a default-disabled installation",
     expect(statusBody.data.systemHealth.backendStatus).toBe("healthy");
   });
 
-  test("exposes the codespace gauges on the internal metrics endpoint", async () => {
+  test("reports connection and refusal metrics without obsolete cloud execution gauges", async () => {
     const metrics = dockerExecSync(["curl", "-s", "http://localhost:9090/metrics"]);
-    expect(metrics).toContain('moira_codespace_ready{provider="github-codespaces"} 0');
-    expect(metrics).toContain(
-      'moira_codespace_connector_available{provider="github-codespaces"} 0',
+    expect(metrics).toContain("moira_codespace_connection_events_total");
+    expect(metrics).toContain("moira_codespace_rejections_total");
+    expect(metrics).not.toMatch(
+      /moira_codespace_(ready|connector_available|reconciliation_due|active)\b/,
     );
-    expect(metrics).toMatch(/moira_codespace_reconciliation_due\{kind="resource"\} \d+/);
-    expect(metrics).toMatch(/moira_codespace_active\{kind="resource"\} \d+/);
   });
 
-  test("keeps kill switches administrator-only and fail-closed while unconfigured", async () => {
+  test("keeps configuration observation administrator-only and has no mass-stop mutation route", async () => {
     const forbidden = await fetch(`${baseUrl}/api/admin/codespaces`, {
       headers: { Cookie: userCookie },
     });
@@ -115,19 +108,13 @@ describe("codespace management and controls on a default-disabled installation",
     });
     expect(controls.status).toBe(200);
     const controlsBody = await controls.json();
-    expect(controlsBody.data.controls).toEqual([
-      expect.objectContaining({ scope: "global", disabled: false }),
-      expect.objectContaining({ scope: "provider:github-codespaces", disabled: false }),
-    ]);
+    expect(controlsBody.data).not.toHaveProperty("controls");
 
     const update = await fetch(`${baseUrl}/api/admin/codespaces/controls/global`, {
       method: "PUT",
       headers: { "Content-Type": "application/json", Cookie: adminCookie },
       body: JSON.stringify({ disabled: true, reason: "api probe" }),
     });
-    expect(update.status).toBe(503);
-    await expect(update.json()).resolves.toMatchObject({
-      error: { code: "CODESPACE_NOT_CONFIGURED" },
-    });
+    expect(update.status).toBe(404);
   });
 });

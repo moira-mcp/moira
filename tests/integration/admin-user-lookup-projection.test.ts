@@ -1,4 +1,4 @@
-import { expect, test } from "@jest/globals";
+import { expect, jest, test } from "@jest/globals";
 import { randomUUID } from "node:crypto";
 import Database from "better-sqlite3";
 import { eq, inArray } from "drizzle-orm";
@@ -11,6 +11,8 @@ import { requireAuth } from "../../packages/web-backend/src/middleware/auth-midd
 import { requireAdmin } from "../../packages/web-backend/src/middleware/admin-middleware.js";
 import { setupErrorMiddleware } from "../../packages/web-backend/src/middleware/error-middleware.js";
 import { adminRoutes } from "../../packages/web-backend/src/routes/admin.js";
+import { getScopedCredentialService } from "../../packages/web-backend/src/services/scoped-credential-factory.js";
+import { getCodespaceConnectionService } from "../../packages/web-backend/src/services/codespace-services.js";
 
 test("admin user lookup stays compact, revalidates current identity and never bypasses current admin authorization", async () => {
   const app = express();
@@ -107,6 +109,211 @@ test("admin user lookup stays compact, revalidates current identity and never by
   } finally {
     second?.close();
     if (ids.length) {
+      await db.delete(schema.auditLog).where(inArray(schema.auditLog.userId, ids));
+      await db.delete(schema.user).where(inArray(schema.user.id, ids));
+    }
+  }
+});
+
+test("admin block and deletion fence access before retirement and retain pending parent custody", async () => {
+  const db = getDatabase();
+  const ids: string[] = [];
+  const app = express();
+  app.use(express.json());
+  app.use("/api/admin", requireAuth, requireAdmin, adminRoutes);
+  app.use(setupErrorMiddleware());
+  const register = async (isAdmin: boolean) => {
+    const response = await auth.handler(
+      new Request("http://localhost/api/auth/sign-up/email", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email: `retirement-${randomUUID()}@example.test`,
+          name: "Credential retirement",
+          password: "RetirementProtocol123!",
+          acceptedTermsAt: new Date().toISOString(),
+          acceptedNotRussianResidentAt: new Date().toISOString(),
+        }),
+      }),
+    );
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as { user: { id: string } };
+    ids.push(body.user.id);
+    await db
+      .update(schema.user)
+      .set({ isAdmin, emailVerified: true, approvedAt: new Date().toISOString() })
+      .where(eq(schema.user.id, body.user.id));
+    return { id: body.user.id, cookie: response.headers.get("set-cookie")!.split(";")[0] };
+  };
+  const issuer = getScopedCredentialService();
+  const connection = getCodespaceConnectionService();
+  const originalDisconnect = connection.disconnect.bind(connection);
+  const retirement = jest.spyOn(issuer, "disposeUser");
+  const disconnect = jest.spyOn(connection, "disconnect");
+  const resourceId = randomUUID();
+  try {
+    const admin = await register(true);
+    const target = await register(false);
+    const connectionId = randomUUID();
+    await db.insert(schema.codespaceConnection).values({
+      id: connectionId,
+      userId: target.id,
+      provider: "github-codespaces",
+      externalAccountId: "fixture-account",
+      externalLogin: "fixture",
+      status: "connected",
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+    await db.insert(schema.codespaceCredentialVault).values({
+      connectionId,
+      envelopeVersion: 2,
+      keyVersion: "fixture",
+      iv: "fixture-iv",
+      authTag: "fixture-tag",
+      ciphertext: "retained-private-parent",
+      generation: 1,
+      updatedAt: new Date(),
+    });
+    const fenced = async () => {
+      expect(
+        (await db.select().from(schema.user).where(eq(schema.user.id, target.id)))[0].blocked,
+      ).toBe(true);
+      expect(
+        await db.select().from(schema.session).where(eq(schema.session.userId, target.id)),
+      ).toHaveLength(0);
+    };
+    retirement.mockImplementation(async (id) => {
+      expect(id).toBe(target.id);
+      await fenced();
+      throw new Error("provider-secret-must-not-escape");
+    });
+    const blocked = await request(app)
+      .post(`/api/admin/users/${target.id}/block`)
+      .set("Cookie", admin.cookie)
+      .send({ reason: "security retirement" });
+    expect(blocked.status).toBe(503);
+    expect(blocked.body.data).toMatchObject({ blocked: true, credentialRetirementPending: true });
+    expect(blocked.text).not.toContain("provider-secret-must-not-escape");
+    expect(disconnect).not.toHaveBeenCalled();
+    const failedChild = await request(app)
+      .delete(`/api/admin/users/${target.id}`)
+      .set("Cookie", admin.cookie);
+    expect(failedChild.status).toBe(409);
+    expect(failedChild.body.data.deleted).toBe(false);
+    expect(
+      (
+        await db
+          .select()
+          .from(schema.codespaceCredentialVault)
+          .where(eq(schema.codespaceCredentialVault.connectionId, connectionId))
+      )[0].ciphertext,
+    ).toBe("retained-private-parent");
+    retirement.mockImplementation(async () => {
+      await fenced();
+    });
+    await db.insert(schema.githubResourceIdentity).values({
+      id: resourceId,
+      userId: target.id,
+      connectionId,
+      authorizationGeneration: 1,
+      repositoryId: "201",
+      repositoryFullName: "fixture/project",
+      requestedRef: "main",
+      operationMarker: randomUUID(),
+      providerResourceName: `fixture-stopped-${resourceId}`,
+      externalOwnerId: "101",
+      billableOwnerId: "101",
+      generation: 1,
+      retirement: "owned",
+      createdAt: Date.now(),
+    });
+    disconnect.mockImplementation(async (id, options) => {
+      expect(options).toEqual({ securityOnly: true });
+      await fenced();
+      return originalDisconnect(id, options);
+    });
+    const pendingResource = await request(app)
+      .delete(`/api/admin/users/${target.id}`)
+      .set("Cookie", admin.cookie);
+    expect(pendingResource.status).toBe(409);
+    expect(pendingResource.body.error.code).toBe("ACCOUNT_RESOURCE_RETIREMENT_PENDING");
+    expect(pendingResource.body.data).toMatchObject({
+      blocked: true,
+      deleted: false,
+      resourceRetirementPending: true,
+    });
+    expect(
+      (
+        await db
+          .select()
+          .from(schema.githubResourceIdentity)
+          .where(eq(schema.githubResourceIdentity.id, resourceId))
+      )[0].retirement,
+    ).toBe("owned");
+    expect(
+      (
+        await db
+          .select()
+          .from(schema.codespaceCredentialVault)
+          .where(eq(schema.codespaceCredentialVault.connectionId, connectionId))
+      )[0].ciphertext,
+    ).toBe("retained-private-parent");
+    // Simulate the separately authorized existing workspace deletion, not an account API effect.
+    await db
+      .update(schema.githubResourceIdentity)
+      .set({ retirement: "retired" })
+      .where(eq(schema.githubResourceIdentity.id, resourceId));
+    disconnect.mockImplementation(async (id, options) => {
+      expect(id).toBe(target.id);
+      expect(options).toEqual({ securityOnly: true });
+      await fenced();
+      return { state: "revocation_pending" } as ReturnType<typeof connection.getStatus>;
+    });
+    const pendingParent = await request(app)
+      .delete(`/api/admin/users/${target.id}`)
+      .set("Cookie", admin.cookie);
+    expect(pendingParent.status).toBe(409);
+    expect(pendingParent.body.data).toMatchObject({
+      blocked: true,
+      deleted: false,
+      credentialRetirementPending: true,
+    });
+    expect(await db.select().from(schema.user).where(eq(schema.user.id, target.id))).toHaveLength(
+      1,
+    );
+    expect(
+      await db
+        .select()
+        .from(schema.codespaceCredentialVault)
+        .where(eq(schema.codespaceCredentialVault.connectionId, connectionId)),
+    ).toHaveLength(1);
+    disconnect.mockImplementation(async () => {
+      await fenced();
+      await db
+        .delete(schema.codespaceCredentialVault)
+        .where(eq(schema.codespaceCredentialVault.connectionId, connectionId));
+      await db
+        .update(schema.codespaceConnection)
+        .set({ status: "disconnected" })
+        .where(eq(schema.codespaceConnection.id, connectionId));
+      return { state: "disconnected" } as ReturnType<typeof connection.getStatus>;
+    });
+    const deleted = await request(app)
+      .delete(`/api/admin/users/${target.id}`)
+      .set("Cookie", admin.cookie);
+    expect(deleted.status).toBe(200);
+    expect(deleted.body.data.deleted).toBe(true);
+    expect(await db.select().from(schema.user).where(eq(schema.user.id, target.id))).toHaveLength(
+      0,
+    );
+  } finally {
+    retirement.mockRestore();
+    disconnect.mockRestore();
+    if (ids.length) {
+      await db
+        .delete(schema.githubResourceIdentity)
+        .where(eq(schema.githubResourceIdentity.id, resourceId));
       await db.delete(schema.auditLog).where(inArray(schema.auditLog.userId, ids));
       await db.delete(schema.user).where(inArray(schema.user.id, ids));
     }

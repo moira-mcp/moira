@@ -1,7 +1,7 @@
 import { request as httpsRequest } from "node:https";
 import { request as httpRequest } from "node:http";
-import { connect as connectTls } from "node:tls";
-import { connect, isIP } from "node:net";
+import { connect } from "node:net";
+import { connectHttps } from "./tls-transport.mjs";
 import type { Duplex } from "node:stream";
 import {
   WORKSPACE_HEARTBEAT_INTERVAL_MS,
@@ -10,20 +10,31 @@ import {
 
 const protocol = WORKSPACE_UPGRADE;
 const uuid = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
-export interface WorkspaceRemoteOptions {
+interface WorkspaceRemoteTransport {
   socketPath: string;
   origin: string;
   credential: string;
-  environmentIdentity: string;
   proxy?: string;
   signal?: AbortSignal;
 }
+export type WorkspaceRemoteOptions = WorkspaceRemoteTransport &
+  (
+    | { kind?: "workspace"; environmentIdentity: string }
+    | { kind: "controller"; connectionId: string }
+  );
+
+class WorkspaceAuthorityRefusal extends Error {}
 
 /** Outbound byte transport only. Reconnection never resubmits an operation. */
 export function startWorkspaceRemote(options: WorkspaceRemoteOptions) {
   const origin = new URL(options.origin);
-  if (!/^[a-f0-9]{64}$/.test(options.environmentIdentity))
-    throw new Error("Workspace measured life required");
+  const kind = options.kind ?? "workspace";
+  const endpointIdentity =
+    options.kind === "controller" ? options.connectionId : options.environmentIdentity;
+  if (
+    !(kind === "controller" ? uuid.test(endpointIdentity) : /^[a-f0-9]{64}$/.test(endpointIdentity))
+  )
+    throw new Error("Owner endpoint identity required");
   if (
     origin.protocol !== "https:" ||
     origin.username ||
@@ -38,6 +49,15 @@ export function startWorkspaceRemote(options: WorkspaceRemoteOptions) {
   let closed = false;
   let retry: NodeJS.Timeout | undefined;
   let heartbeat: NodeJS.Timeout | undefined;
+  let connected: Duplex | undefined;
+  let authorityRefusal: WorkspaceAuthorityRefusal | undefined;
+  const readiness = new Set<{ resolve(): void; reject(error: Error): void }>();
+  const whenConnected = () => {
+    if (authorityRefusal) return Promise.reject(authorityRefusal);
+    if (closed) return Promise.reject(new Error("Workspace transport closed before readiness"));
+    if (connected && !connected.destroyed) return Promise.resolve();
+    return new Promise<void>((resolve, reject) => readiness.add({ resolve, reject }));
+  };
   const track = (socket: Duplex) => {
     sockets.add(socket);
     socket.on("error", () => socket.destroy());
@@ -45,79 +65,16 @@ export function startWorkspaceRemote(options: WorkspaceRemoteOptions) {
     if (closed) socket.destroy();
     return socket;
   };
-  const tlsSocket = (ready: (error: Error | null, socket?: Duplex) => void) => {
-    let delivered = false;
-    const finish = (error: Error | null, socket?: Duplex) => {
-      if (delivered) {
-        socket?.destroy();
-        return;
-      }
-      delivered = true;
-      ready(error, socket);
-    };
-    const target = {
-      host: origin.hostname,
-      port: Number(origin.port || 443),
-      ...(isIP(origin.hostname) ? {} : { servername: origin.hostname }),
-      ALPNProtocols: ["http/1.1"],
-    };
-    const secure = (socket?: Duplex) => {
-      const tls = track(connectTls({ ...target, ...(socket ? { socket } : {}) }));
-      let returned = false;
-      tls.once("error", () => {
-        if (!returned) {
-          returned = true;
-          finish(new Error("Workspace TLS connection failed"));
-        }
-      });
-      tls.once("secureConnect", () => {
-        if (!returned) {
-          returned = true;
-          finish(null, tls);
-        }
-      });
-    };
-    if (!options.proxy) return secure();
-    const proxy = new URL(options.proxy);
-    if (
-      proxy.protocol !== "http:" ||
-      proxy.hostname !== "127.0.0.1" ||
-      proxy.port !== "3437" ||
-      !proxy.username ||
-      !proxy.password ||
-      proxy.pathname !== "/" ||
-      proxy.search ||
-      proxy.hash
-    )
-      return finish(new Error("Invalid workspace CONNECT proxy"));
-    const request = httpRequest({
-      host: proxy.hostname,
-      port: Number(proxy.port || 80),
-      method: "CONNECT",
-      path: `${origin.hostname}:${origin.port || 443}`,
-      agent: false,
-      signal: shutdown.signal,
-      headers: {
-        ...(proxy.username || proxy.password
-          ? {
-              "proxy-authorization": `Basic ${Buffer.from(`${decodeURIComponent(proxy.username)}:${decodeURIComponent(proxy.password)}`).toString("base64")}`,
-            }
-          : {}),
-      },
-    });
-    request.once("error", () => finish(new Error("Workspace CONNECT admission failed")));
-    request.once("connect", (response, socket, head) => {
-      if (response.statusCode !== 200 || head.length) {
-        socket.destroy();
-        finish(new Error("Workspace CONNECT was refused"));
-        return;
-      }
-      secure(track(socket));
-    });
-    request.end();
-  };
-  const upgrade = (path: string, controlId?: string): Promise<Duplex> =>
-    new Promise((resolve, reject) => {
+  const upgrade = async (path: string, controlId?: string): Promise<Duplex> => {
+    const socket = track(
+      await connectHttps({
+        hostname: origin.hostname,
+        port: Number(origin.port || 443),
+        proxy: options.proxy,
+        signal: shutdown.signal,
+      }),
+    );
+    return new Promise((resolve, reject) => {
       const request = httpsRequest({
         hostname: origin.hostname,
         port: Number(origin.port || 443),
@@ -126,26 +83,24 @@ export function startWorkspaceRemote(options: WorkspaceRemoteOptions) {
         signal: shutdown.signal,
         headers: {
           authorization: `Bearer ${options.credential}`,
-          "x-moira-environment-identity": options.environmentIdentity,
+          "x-moira-endpoint-kind": kind,
+          "x-moira-endpoint-identity": endpointIdentity,
           connection: "Upgrade",
           upgrade: protocol,
           ...(controlId ? { "x-moira-control-id": controlId } : {}),
         },
-        createConnection: (_options, ready) => {
-          tlsSocket((error, socket) => {
-            if (socket) ready(error, socket);
-            else
-              queueMicrotask(() =>
-                request.destroy(error ?? new Error("Workspace TLS connection failed")),
-              );
-          });
-          return undefined;
-        },
+        createConnection: () => socket,
       });
       request.once("error", () => reject(new Error("Workspace connection failed")));
       request.once("response", (response) => {
         response.resume();
-        reject(new Error(`Workspace connection refused (${response.statusCode ?? 0})`));
+        const message = `Workspace connection refused (${response.statusCode ?? 0})`;
+        reject(
+          path === "/api/workspaces/connect" &&
+            (response.statusCode === 401 || response.statusCode === 403)
+            ? new WorkspaceAuthorityRefusal(message)
+            : new Error(message),
+        );
       });
       request.once("upgrade", (response, socket, head) => {
         if (response.statusCode !== 101 || response.headers.upgrade !== protocol || closed) {
@@ -159,6 +114,7 @@ export function startWorkspaceRemote(options: WorkspaceRemoteOptions) {
       });
       request.end();
     });
+  };
   const data = async (callId: string, controlId: string) => {
     const remote = await upgrade(`/api/workspaces/calls/${callId}`, controlId);
     if (closed) return remote.destroy();
@@ -185,7 +141,7 @@ export function startWorkspaceRemote(options: WorkspaceRemoteOptions) {
       const request = httpRequest(
         {
           socketPath: options.socketPath,
-          path: "/v1/health",
+          path: kind === "controller" ? "/v1/controller/health" : "/v1/health",
           agent: false,
           signal: shutdown.signal,
         },
@@ -199,14 +155,19 @@ export function startWorkspaceRemote(options: WorkspaceRemoteOptions) {
           response.once("error", reject);
           response.once("end", () => {
             try {
-              const health = JSON.parse(json) as { environmentIdentity?: unknown };
+              const health = JSON.parse(json) as {
+                environmentIdentity?: unknown;
+                connectionId?: unknown;
+              };
+              const measured =
+                kind === "controller" ? health.connectionId : health.environmentIdentity;
               if (
                 response.statusCode !== 200 ||
-                typeof health.environmentIdentity !== "string" ||
-                !/^[a-f0-9]{64}$/.test(health.environmentIdentity)
+                typeof measured !== "string" ||
+                !(kind === "controller" ? uuid.test(measured) : /^[a-f0-9]{64}$/.test(measured))
               )
                 throw new Error();
-              resolve(health.environmentIdentity);
+              resolve(measured);
             } catch {
               reject(new Error("Workspace life observation refused"));
             }
@@ -216,10 +177,14 @@ export function startWorkspaceRemote(options: WorkspaceRemoteOptions) {
       request.once("error", reject);
       request.end();
     });
+  const retireRefusedAuthority = (error: WorkspaceAuthorityRefusal) => {
+    authorityRefusal ??= error;
+    return close();
+  };
   const control = async () => {
     try {
-      if ((await measuredLife()) !== options.environmentIdentity)
-        throw new Error("Workspace life changed; bootstrap required");
+      if ((await measuredLife()) !== endpointIdentity)
+        throw new Error("Owner endpoint identity changed; enrollment required");
       const socket = await upgrade("/api/workspaces/connect");
       let id: string | undefined;
       let buffered = "";
@@ -241,6 +206,9 @@ export function startWorkspaceRemote(options: WorkspaceRemoteOptions) {
               !id
             ) {
               id = message.connectionId;
+              connected = socket;
+              for (const waiter of readiness) waiter.resolve();
+              readiness.clear();
               heartbeat = setInterval(
                 () => socket.write('{"ping":true}\n'),
                 WORKSPACE_HEARTBEAT_INTERVAL_MS,
@@ -258,17 +226,23 @@ export function startWorkspaceRemote(options: WorkspaceRemoteOptions) {
         if (Buffer.byteLength(buffered) > 4096) socket.destroy();
       });
       socket.once("close", () => {
+        if (connected === socket) connected = undefined;
         if (heartbeat) clearInterval(heartbeat);
         heartbeat = undefined;
         reconnect();
       });
       socket.resume();
-    } catch {
-      reconnect();
+    } catch (error) {
+      if (error instanceof WorkspaceAuthorityRefusal) await retireRefusedAuthority(error);
+      else reconnect();
     }
   };
   const close = async () => {
     closed = true;
+    connected = undefined;
+    for (const waiter of readiness)
+      waiter.reject(authorityRefusal ?? new Error("Workspace transport closed before readiness"));
+    readiness.clear();
     shutdown.abort();
     if (retry) clearTimeout(retry);
     if (heartbeat) clearInterval(heartbeat);
@@ -286,5 +260,5 @@ export function startWorkspaceRemote(options: WorkspaceRemoteOptions) {
   options.signal?.addEventListener("abort", close, { once: true });
   if (options.signal?.aborted) void close();
   else void control();
-  return { close };
+  return { close, whenConnected };
 }

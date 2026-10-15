@@ -11,7 +11,7 @@ import type { WorkflowGraph } from "../interfaces/core-interfaces.js";
 import type { WorkflowExecution } from "../types/base-types.js";
 import type { AgentDirectiveNode, HumanGate } from "../types/graph-nodes.js";
 import { isAgentDirectiveNode } from "../types/graph-nodes.js";
-import { evaluateStructuredCondition } from "../services/node-routing.js";
+import { evaluateStructuredCondition } from "../services/structured-condition.js";
 import { humanGateDurationMs } from "@mcp-moira/shared/utils/human-gate-duration";
 
 /** The execution facts a gate decision reads. */

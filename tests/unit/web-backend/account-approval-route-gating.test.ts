@@ -126,8 +126,7 @@ jest.unstable_mockModule("@mcp-moira/shared", () => ({
   isEmailConfigured: jest.fn(),
   isRateLimitDisabled: () => true,
   isTestEnvironment: () => true,
-  isCodespaceReadinessDegraded: (view: { state: string }) =>
-    view.state === "misconfigured" || view.state === "connector_unavailable",
+  isCodespaceReadinessDegraded: (view: { state: string }) => view.state === "misconfigured",
   logAuditEvent: jest.fn(),
 }));
 
@@ -174,17 +173,6 @@ jest.unstable_mockModule(
         provider: "github-codespaces",
         configuration: "absent",
         resources_enabled: false,
-        controls: [],
-        connector: { state: "not_applicable", reason: null },
-        reconciliation: { due_resources: 0, due_operations: 0, oldest_due_age_ms: null },
-        usage: {
-          active_resources: 0,
-          max_active_resources: 0,
-          active_operations: 0,
-          max_active_operations: 20,
-          transfer_live_bytes: 0,
-          max_transfer_live_bytes: 1024 ** 3,
-        },
         checked_at: 0,
       }),
     }),

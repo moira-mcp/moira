@@ -119,6 +119,20 @@ export class ExtensionCommunicationChannelAdapter implements CommunicationChanne
     return (await this.resolveConfiguration(configuration)).configured;
   }
 
+  /** Only the cloud fixed transport may use secrets; owner-facing settings are explicitly separate. */
+  async resolveBinaryConfiguration(configuration: CommunicationConfigurationResolver) {
+    const resolved = await this.resolveConfiguration(configuration);
+    if (!resolved.configured || !this.registered.declaration.binaryTransport)
+      throw new CommunicationChannelError("configuration_changed");
+    return { ...resolved, declaration: this.registered.declaration };
+  }
+
+  async ownerBinaryArtifact() {
+    if (!this.registered.declaration.binaryTransport || !this.client.binaryArtifact)
+      throw new CommunicationChannelError("runner_incompatible");
+    return this.client.binaryArtifact(this.id);
+  }
+
   async checkRunner(signal: AbortSignal): Promise<void> {
     if (!this.client.checkCommunicationChannel) {
       throw new CommunicationChannelError("runner_incompatible");
@@ -149,7 +163,6 @@ export class ExtensionCommunicationChannelAdapter implements CommunicationChanne
     configuration: CommunicationConfigurationResolver,
     signal: AbortSignal,
   ): Promise<void> {
-    if (message.attachment?.source) throw new CommunicationChannelError("streaming_unsupported");
     const resolved = await this.resolveConfiguration(configuration);
     if (!resolved.configured) throw new CommunicationChannelError("configuration_changed");
     if (!this.client.deliverCommunicationChannel) {
@@ -162,14 +175,6 @@ export class ExtensionCommunicationChannelAdapter implements CommunicationChanne
         text: message.text,
         format: message.format,
         silent: message.silent,
-        attachment: message.attachment
-          ? {
-              kind: message.attachment.kind,
-              bytes: message.attachment.bytes!,
-              filename: message.attachment.filename,
-              mimeType: message.attachment.mimeType,
-            }
-          : undefined,
       },
       ...(Object.keys(resolved.settings).length ? { settings: resolved.settings } : {}),
       ...(Object.keys(resolved.secrets).length ? { secrets: resolved.secrets } : {}),

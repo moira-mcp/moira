@@ -1,11 +1,22 @@
 import { afterEach, expect, jest, test } from "@jest/globals";
 import { createWorkspaceRequestId } from "@mcp-moira/shared/workspace-request-id";
 import { createServer } from "node:https";
+import { createServer as createHttpServer } from "node:http";
 import { request as httpsRequest } from "node:https";
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { once } from "node:events";
-import { mkdtemp, mkdir, readFile, writeFile, rm, stat, realpath } from "node:fs/promises";
+import {
+  chmod,
+  mkdtemp,
+  mkdir,
+  readFile,
+  writeFile,
+  rm,
+  stat,
+  realpath,
+  readdir,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -15,7 +26,10 @@ import {
   WORKSPACE_UPGRADE,
   type WorkspaceBinding,
 } from "../../packages/web-backend/src/services/workspace-router.js";
-import { createWorkspaceClient } from "../../packages/web-backend/src/services/workspace-client.js";
+import {
+  createControllerClient,
+  createWorkspaceClient,
+} from "../../packages/web-backend/src/services/workspace-client.js";
 
 const disposals: Array<() => Promise<void>> = [];
 afterEach(async () => {
@@ -44,6 +58,15 @@ const childProgram = `
     }
     else if(line==='disconnect'){await remote.close();process.stdout.write('disconnected\\n');}
     else if(line==='reconnect'){remote=startWorkspaceRemote(c.remote);}
+    else if(line==='when-ready'){
+      process.stdout.write('awaiting-connection\\n');
+      try{await remote.whenConnected();process.stdout.write('connection-ready\\n');}
+      catch(error){process.stdout.write('connection-cancelled\\nconnection-error:'+error.message+'\\n');}
+    }
+    else if(line.startsWith('owner:')){
+      await remote.close();
+      remote=startWorkspaceRemote(JSON.parse(line.slice('owner:'.length)));
+    }
   });
   process.on('SIGTERM',async()=>{await remote?.close();await service.close();process.exit(0)});
   process.stdout.write('ready\\n');
@@ -168,8 +191,7 @@ async function fixture(expiresAt: number | null = null) {
   const ready = once(child.stdout!, "data");
   let childDiagnostic = "";
   child.stderr!.on("data", (bytes) => {
-    if (childDiagnostic.length < 4096)
-      childDiagnostic += String(bytes).slice(0, 4096 - childDiagnostic.length);
+    childDiagnostic = (childDiagnostic + String(bytes)).slice(-4096);
   });
   const failed = new Promise<never>((_done, reject) => {
     child.once("exit", (code) =>
@@ -190,22 +212,37 @@ async function fixture(expiresAt: number | null = null) {
       await exited;
     }
   });
-  expect(String((await Promise.race([ready, failed]))[0]).trim()).toBe("ready");
-  const health = await Promise.race([
-    createWorkspaceClient(config.service.socketPath).json(principal.userId, principal.resourceId, {
-      method: "GET",
-      path: "/v1/health",
-    }),
-    failed,
-  ]);
-  const life = health.environmentIdentity;
-  if (typeof life !== "string" || !/^[a-f0-9]{64}$/.test(life))
-    throw new Error("Fixture service did not report its measured life");
-  const measuredBinding = { ...principal, environmentIdentity: life };
-  binding = measuredBinding;
-  const connected = once(router, "connected");
-  child.stdin!.write(`connect:${life}\n`);
-  await Promise.race([connected, failed]);
+  let setupStage = "owner process ready";
+  let measuredBinding: WorkspaceBinding;
+  try {
+    expect(String((await Promise.race([ready, failed]))[0]).trim()).toBe("ready");
+    setupStage = "direct Unix health before enrollment";
+    const health = await Promise.race([
+      createWorkspaceClient(config.service.socketPath).json(
+        principal.userId,
+        principal.resourceId,
+        {
+          method: "GET",
+          path: "/v1/health",
+        },
+      ),
+      failed,
+    ]);
+    const life = health.environmentIdentity;
+    if (typeof life !== "string" || !/^[a-f0-9]{64}$/.test(life))
+      throw new Error("Fixture service did not report its measured life");
+    measuredBinding = { kind: "workspace" as const, ...principal, environmentIdentity: life };
+    binding = measuredBinding;
+    setupStage = "TLS control enrollment";
+    const connected = once(router, "connected");
+    child.stdin!.write(`connect:${life}\n`);
+    await Promise.race([connected, failed]);
+  } catch (error) {
+    throw new Error(
+      `Workspace setup failed during ${setupStage}; child evidence: ${childDiagnostic.replaceAll(credential, "[fixture credential]")}`,
+      { cause: error },
+    );
+  }
   return {
     root,
     project,
@@ -215,7 +252,11 @@ async function fixture(expiresAt: number | null = null) {
     ca,
     binding: measuredBinding,
     credential,
+    diagnostics: () => childDiagnostic.replaceAll(credential, "[fixture credential]"),
     client: createWorkspaceClient(join(root, "router", "router.sock")),
+    replaceBinding: (next: WorkspaceBinding) => {
+      binding = next;
+    },
     revoke: () => {
       allowed = false;
     },
@@ -237,99 +278,249 @@ async function disconnect(child: ChildProcess) {
   expect(String((await ended)[0]).trim()).toBe("disconnected");
 }
 
+test("owner readiness requires authenticated control registration and pending readiness rejects on close", async () => {
+  const f = await fixture();
+  const observe = (marker: string) =>
+    new Promise<string>((resolve) => {
+      let output = "";
+      const collect = (bytes: Buffer) => {
+        output += bytes.toString();
+        if (output.includes(marker)) {
+          f.child.stdout!.off("data", collect);
+          resolve(output);
+        }
+      };
+      f.child.stdout!.on("data", collect);
+    });
+  const ready = observe("connection-ready\n");
+  f.child.stdin!.write("when-ready\n");
+  expect(await ready).toContain("awaiting-connection\n");
+  await disconnect(f.child);
+  // A temporary transport outage must remain pending until explicit close;
+  // a definitive credential refusal is tested separately below.
+  const unavailable = (_request: unknown, socket: { destroy(): void }) => socket.destroy();
+  f.server.prependListener("upgrade", unavailable);
+  const attempted = once(f.server, "upgrade");
+  const waiting = observe("awaiting-connection\n");
+  let prematurelyReady = false;
+  const premature = (bytes: Buffer) => {
+    if (bytes.toString().includes("connection-ready")) prematurelyReady = true;
+  };
+  f.child.stdout!.on("data", premature);
+  try {
+    f.child.stdin!.write("reconnect\nwhen-ready\n");
+    await waiting;
+    await attempted;
+    // The guest is locally healthy, but refused cloud enrollment cannot satisfy readiness.
+    expect(
+      await createWorkspaceClient(join(f.root, "service.sock")).json(
+        f.binding.userId,
+        f.binding.resourceId,
+        { method: "GET", path: "/v1/health" },
+      ),
+    ).toMatchObject({ version: 1 });
+    expect(prematurelyReady).toBe(false);
+    const cancelled = observe("connection-cancelled\n");
+    f.child.stdin!.write("disconnect\n");
+    await cancelled;
+    expect(prematurelyReady).toBe(false);
+  } finally {
+    f.server.off("upgrade", unavailable);
+    f.child.stdout!.off("data", premature);
+  }
+});
+
+test.each([401, 403])(
+  "a definitive HTTPS %s owner enrollment refusal rejects startup readiness without retrying its credential",
+  async (status) => {
+    const f = await fixture();
+    await disconnect(f.child);
+    f.server.removeAllListeners("upgrade");
+    let refusals = 0;
+    let observed!: () => void;
+    const refused = new Promise<void>((resolve) => {
+      observed = resolve;
+    });
+    f.server.on("upgrade", (request, socket) => {
+      expect(request.url).toBe("/api/workspaces/connect");
+      refusals++;
+      socket.end(`HTTP/1.1 ${status} Refused\r\nConnection: close\r\nContent-Length: 0\r\n\r\n`);
+      observed();
+    });
+    const outcome = () =>
+      new Promise<string>((resolve) => {
+        let output = "";
+        const collect = (bytes: Buffer) => {
+          output += bytes.toString();
+          if (output.includes("connection-error:")) {
+            f.child.stdout!.off("data", collect);
+            resolve(output);
+          }
+        };
+        f.child.stdout!.on("data", collect);
+      });
+    const failed = outcome();
+    f.child.stdin!.write("reconnect\nwhen-ready\n");
+    await refused;
+    expect(await failed).toContain(`Workspace connection refused (${status})`);
+    expect(f.router.isConnected(f.binding)).toBe(false);
+    // A later waiter observes the same terminal refusal, rather than making a
+    // new connection or requiring shutdown to release its readiness promise.
+    const repeated = outcome();
+    f.child.stdin!.write("when-ready\n");
+    expect(await repeated).toContain(`Workspace connection refused (${status})`);
+    expect(refusals).toBe(1);
+  },
+);
+
 test("TLS outbound tunnels preserve large raw bytes and detached identity across observation reconnect", async () => {
   const f = await fixture();
-  const { userId, resourceId } = f.binding;
-  expect(
-    await f.client.json(userId, resourceId, { method: "GET", path: "/v1/health" }),
-  ).toMatchObject({ version: 1, repositoryFullName: "owner/project" });
-  const payload = Buffer.alloc(8 * 1024 * 1024 + 31, 0xfe),
-    requestId = createWorkspaceRequestId();
-  const input = await f.client.request(userId, resourceId, {
-    method: "PUT",
-    path: `/v1/operations/${requestId}/input`,
-    body: payload,
-  });
-  expect(input.statusCode).toBe(200);
-  expect(JSON.parse((await bytes(input.body)).toString())).toEqual({
-    size: payload.length,
-    sha256: createHash("sha256").update(payload).digest("hex"),
-  });
-  const command = {
-    requestId,
-    inputReady: true,
-    argv: [
-      process.execPath,
-      "-e",
-      "const f=require('node:fs');f.appendFileSync('effects','once\\n');process.stdin.pipe(process.stdout);const t=setInterval(()=>{if(f.existsSync('release'))clearInterval(t)},10)",
-    ],
-  };
-  let effectObserved!: () => void;
-  const effect = new Promise<void>((done) => {
-    effectObserved = done;
-  });
-  const inspectEffect = async () => {
-    if ((await readFile(join(f.project, "effects"), "utf8").catch(() => null)) === "once\n")
-      effectObserved();
-  };
-  const watcher = watch(f.project, () => {
-    void inspectEffect();
-  });
+  let stage = "initial health";
   try {
-    const admitted = await f.client.json(userId, resourceId, {
-      method: "POST",
-      path: "/v1/exec",
-      body: command,
+    const { userId, resourceId } = f.binding;
+    expect(
+      await f.client.json(userId, resourceId, { method: "GET", path: "/v1/health" }),
+    ).toMatchObject({ version: 1, repositoryFullName: "owner/project" });
+    const payload = Buffer.alloc(8 * 1024 * 1024 + 31, 0xfe),
+      requestId = createWorkspaceRequestId();
+    stage = "large stdin request headers";
+    const input = await f.client.request(userId, resourceId, {
+      method: "PUT",
+      path: `/v1/operations/${requestId}/input`,
+      body: payload,
     });
-    expect(["starting", "running"]).toContain(admitted.state);
-    await inspectEffect();
-    await effect;
-  } finally {
-    watcher.close();
-  }
-  const observing = once(f.child.stdout!, "data");
-  const lostObserver = f.client.json(userId, resourceId, {
-    method: "GET",
-    path: `/v1/operations/${requestId}?waitMs=60000`,
-  });
-  // Attach rejection handling before deliberately closing the observed data tunnel.
-  const lostOutcome = expect(lostObserver).rejects.toMatchObject({
-    details: { error: { code: "WORKSPACE_OUTCOME_UNKNOWN" } },
-  });
-  expect(String((await observing)[0]).trim()).toBe("observing");
-  await disconnect(f.child);
-  await lostOutcome;
-  await expect(
-    f.client.json(userId, resourceId, { method: "GET", path: `/v1/operations/${requestId}` }),
-  ).rejects.toThrow();
-  await writeFile(join(f.project, "release"), "release");
-  const connected = once(f.router, "connected");
-  f.child.stdin!.write("reconnect\n");
-  await connected;
-  let result = await f.client.json(userId, resourceId, {
-    method: "GET",
-    path: `/v1/operations/${requestId}?waitMs=1000`,
-  });
-  while (result.state === "running" || result.state === "starting")
-    result = await f.client.json(userId, resourceId, {
+    expect(input.statusCode).toBe(200);
+    stage = "large stdin receipt body";
+    expect(JSON.parse((await bytes(input.body)).toString())).toEqual({
+      size: payload.length,
+      sha256: createHash("sha256").update(payload).digest("hex"),
+    });
+    const command = {
+      requestId,
+      inputReady: true,
+      argv: [
+        process.execPath,
+        "-e",
+        "const f=require('node:fs');f.appendFileSync('effects','once\\n');process.stdin.pipe(process.stdout);const t=setInterval(()=>{if(f.existsSync('release'))clearInterval(t)},10)",
+      ],
+    };
+    let effectObserved!: () => void;
+    const effect = new Promise<void>((done) => {
+      effectObserved = done;
+    });
+    const inspectEffect = async () => {
+      if ((await readFile(join(f.project, "effects"), "utf8").catch(() => null)) === "once\n")
+        effectObserved();
+    };
+    const watcher = watch(f.project, () => {
+      void inspectEffect();
+    });
+    try {
+      stage = "command admission";
+      const admitted = await f.client.json(userId, resourceId, {
+        method: "POST",
+        path: "/v1/exec",
+        body: command,
+      });
+      expect(["starting", "running"]).toContain(admitted.state);
+      stage = "physical command effect";
+      await inspectEffect();
+      await effect;
+    } finally {
+      watcher.close();
+    }
+    const observing = once(f.child.stdout!, "data");
+    stage = "observer disconnect";
+    const lostObserver = f.client.json(userId, resourceId, {
+      method: "GET",
+      path: `/v1/operations/${requestId}?waitMs=60000`,
+    });
+    // Attach rejection handling before deliberately closing the observed data tunnel.
+    const lostOutcome = expect(lostObserver).rejects.toMatchObject({
+      details: { error: { code: "WORKSPACE_OUTCOME_UNKNOWN" } },
+    });
+    expect(String((await observing)[0]).trim()).toBe("observing");
+    await disconnect(f.child);
+    await lostOutcome;
+    stage = "offline observation refusal";
+    await expect(
+      f.client.json(userId, resourceId, { method: "GET", path: `/v1/operations/${requestId}` }),
+    ).rejects.toThrow();
+    await writeFile(join(f.project, "release"), "release");
+    const connected = once(f.router, "connected");
+    f.child.stdin!.write("reconnect\n");
+    await connected;
+    stage = "reconnected completion observation";
+    let result = await f.client.json(userId, resourceId, {
       method: "GET",
       path: `/v1/operations/${requestId}?waitMs=1000`,
     });
-  expect(result.state).toBe("succeeded");
-  const response = await f.client.request(userId, resourceId, {
-    method: "GET",
-    path: `/v1/operations/${requestId}/output`,
+    while (result.state === "running" || result.state === "starting")
+      result = await f.client.json(userId, resourceId, {
+        method: "GET",
+        path: `/v1/operations/${requestId}?waitMs=1000`,
+      });
+    expect(result.state).toBe("succeeded");
+    stage = "large output request headers";
+    const response = await f.client.request(userId, resourceId, {
+      method: "GET",
+      path: `/v1/operations/${requestId}/output`,
+    });
+    // Leave the large response unread while an independent call uses a different tunnel.
+    stage = "independent health with large output paused";
+    expect(
+      await f.client.json(userId, resourceId, { method: "GET", path: "/v1/health" }),
+    ).toMatchObject({ version: 1 });
+    stage = "large output body after independent health";
+    expect((await bytes(response.body)).equals(payload)).toBe(true);
+    stage = "terminal receipt after large output";
+    expect(
+      await f.client.json(userId, resourceId, {
+        method: "GET",
+        path: `/v1/operations/${requestId}`,
+      }),
+    ).toMatchObject({ requestId, state: "succeeded" });
+    stage = "accepted command replay";
+    await f.client.json(userId, resourceId, { method: "POST", path: "/v1/exec", body: command });
+    expect(await readFile(join(f.project, "effects"), "utf8")).toBe("once\n");
+  } catch (error) {
+    throw new Error(
+      `Workspace transport fixture failed during ${stage}; child evidence: ${f.diagnostics()}`,
+      { cause: error },
+    );
+  }
+});
+
+test("a cancelled data rendezvous reconnects the same valid owner instead of retiring its credential", async () => {
+  const f = await fixture();
+  const abort = new AbortController();
+  const reconnected = once(f.router, "connected");
+  const attempted = once(f.server, "upgrade");
+  f.server.prependOnceListener("upgrade", (request) => {
+    expect(request.url).toMatch(/^\/api\/workspaces\/calls\//);
+    // The real router removes this original pending call synchronously. Its
+    // incoming data handshake then receives 403 for the missing rendezvous,
+    // although the same credential still authorizes control registration.
+    abort.abort();
   });
-  // Leave the large response unread while an independent call uses a different tunnel.
+  const pending = f.router.request(
+    f.binding.userId,
+    f.binding.resourceId,
+    { method: "GET", path: "/v1/health" },
+    abort.signal,
+  );
+  const cancelled = expect(pending).rejects.toThrow("Workspace call cancelled before dispatch");
+  await attempted;
+  await cancelled;
+  await reconnected;
+  expect(f.router.isConnected(f.binding)).toBe(true);
   expect(
-    await f.client.json(userId, resourceId, { method: "GET", path: "/v1/health" }),
-  ).toMatchObject({ version: 1 });
-  expect((await bytes(response.body)).equals(payload)).toBe(true);
-  expect(
-    await f.client.json(userId, resourceId, { method: "GET", path: `/v1/operations/${requestId}` }),
-  ).toMatchObject({ requestId, state: "succeeded" });
-  await f.client.json(userId, resourceId, { method: "POST", path: "/v1/exec", body: command });
-  expect(await readFile(join(f.project, "effects"), "utf8")).toBe("once\n");
+    await f.client.json(f.binding.userId, f.binding.resourceId, {
+      method: "GET",
+      path: "/v1/health",
+    }),
+  ).toMatchObject({ version: 1, repositoryFullName: "owner/project" });
+  expect(await readdir(join(f.root, "state", "requests"))).toEqual([]);
 });
 
 test("control loss before HTTP dispatch refuses admission without creating a guest operation", async () => {
@@ -436,7 +627,8 @@ test("unknown data IDs, wrong principals and revoked authority never reach the U
           connection: "Upgrade",
           upgrade: WORKSPACE_UPGRADE,
           "x-moira-control-id": randomUUID(),
-          "x-moira-environment-identity": f.binding.environmentIdentity,
+          "x-moira-endpoint-kind": "workspace",
+          "x-moira-endpoint-identity": f.binding.environmentIdentity,
         },
       },
       (reply) => {
@@ -464,4 +656,86 @@ test("unknown data IDs, wrong principals and revoked authority never reach the U
     f.client.json(f.binding.userId, f.binding.resourceId, { method: "GET", path: "/v1/service" }),
   ).rejects.toThrow();
   await expect(readFile(join(f.project, "effects"))).rejects.toThrow();
+});
+
+test("controller routes use device authority without guest readiness and replace forged identity headers", async () => {
+  const f = await fixture();
+  await disconnect(f.child);
+  const binding: WorkspaceBinding = {
+    kind: "controller",
+    userId: f.binding.userId,
+    resourceId: f.binding.resourceId,
+    resourceGeneration: 7,
+    authorizationGeneration: 7,
+    connectionId: randomUUID(),
+  };
+  f.replaceBinding(binding);
+  const socketPath = join(f.root, "controller.sock");
+  const owner = createHttpServer((request, response) => {
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(
+      JSON.stringify(
+        request.url === "/v1/controller/health"
+          ? { connectionId: binding.connectionId }
+          : {
+              userId: request.headers["x-moira-user-id"],
+              deviceId: request.headers["x-moira-device-id"],
+              generation: request.headers["x-moira-device-generation"],
+              connectionId: request.headers["x-moira-connection-id"],
+            },
+      ),
+    );
+  });
+  await new Promise<void>((done, reject) => {
+    owner.once("error", reject);
+    owner.listen(socketPath, done);
+  });
+  await chmod(socketPath, 0o600);
+  disposals.push(async () => {
+    owner.closeAllConnections();
+    await new Promise<void>((done) => owner.close(() => done()));
+  });
+  const connected = once(f.router, "connected");
+  f.child.stdin!.write(
+    `owner:${JSON.stringify({
+      kind: "controller",
+      socketPath,
+      origin: "https://127.0.0.1:3100",
+      credential: f.credential,
+      connectionId: binding.connectionId,
+    })}\n`,
+  );
+  await connected;
+  const client = createControllerClient(join(f.root, "router", "router.sock"));
+  expect(
+    await client.json(binding.userId, binding.resourceId, {
+      method: "GET",
+      path: "/v1/controller/identity",
+      headers: {
+        "x-moira-device-id": randomUUID(),
+        "x-moira-device-generation": "999",
+        "x-moira-connection-id": randomUUID(),
+      },
+    }),
+  ).toEqual({
+    userId: binding.userId,
+    deviceId: binding.resourceId,
+    generation: "7",
+    connectionId: binding.connectionId,
+  });
+  await expect(
+    f.client.json(binding.userId, binding.resourceId, {
+      method: "GET",
+      path: "/v1/controller/identity",
+    }),
+  ).rejects.toMatchObject({
+    details: { error: { code: "CODESPACE_AUTHORIZATION_REQUIRED" } },
+  });
+  f.revoke();
+  await expect(
+    client.json(binding.userId, binding.resourceId, {
+      method: "GET",
+      path: "/v1/controller/identity",
+    }),
+  ).rejects.toThrow();
 });

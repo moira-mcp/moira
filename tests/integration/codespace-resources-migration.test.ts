@@ -15,14 +15,14 @@ const resourceTables = [
   "codespaceResource",
 ];
 
-function copyBeforeResourceMigration(directory: string): string {
-  const target = path.join(directory, "before-resources");
+function copyBeforeResourceMigration(directory: string, tag = "0028_workspace_resources"): string {
+  const target = path.join(directory, `before-${tag}`);
   fs.cpSync(migrations, target, { recursive: true });
   const journalPath = path.join(target, "meta/_journal.json");
   const journal = JSON.parse(fs.readFileSync(journalPath, "utf8")) as {
     entries: Array<{ tag: string }>;
   };
-  const index = journal.entries.findIndex((entry) => entry.tag === "0028_workspace_resources");
+  const index = journal.entries.findIndex((entry) => entry.tag === tag);
   expect(index).toBeGreaterThan(0);
   journal.entries = journal.entries.slice(0, index);
   fs.writeFileSync(journalPath, `${JSON.stringify(journal, null, 2)}\n`);
@@ -36,7 +36,7 @@ function hasTable(sqlite: Database.Database, name: string): boolean {
 }
 
 describe("codespace resource migration", () => {
-  test("upgrades Unit 1 data without credentials or partial ownership authority", () => {
+  test("historical resource migration adds credential-free ownership before the controller transition", () => {
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), "moira-resource-migration-"));
     const before = copyBeforeResourceMigration(directory);
     const sqlite = new Database(path.join(directory, "moira.db"));
@@ -59,7 +59,9 @@ describe("codespace resource migration", () => {
         )
         .run();
 
-      migrate(drizzle(sqlite), { migrationsFolder: migrations });
+      migrate(drizzle(sqlite), {
+        migrationsFolder: copyBeforeResourceMigration(directory, "0061_local_controller_authority"),
+      });
       expect(resourceTables.every((table) => hasTable(sqlite, table))).toBe(true);
       expect(sqlite.prepare("SELECT externalLogin FROM codespaceConnection").get()).toEqual({
         externalLogin: "owner",

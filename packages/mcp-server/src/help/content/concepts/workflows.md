@@ -130,9 +130,20 @@ teleport, materialize or subgraph wait is the agent's); the attached image
 shows the same state. The deprecated `telegram-notification` compatibility node supports
 the same attachment for existing provider-specific workflows.
 
-Engine integrations with a workflow and execution use `renderExecutionProgressImage(...)`. It
-returns `null` when progress is absent, otherwise the PNG buffer, MIME type, dimensions, workflow
-version, and execution revision; rendering failures stay errors.
+The PNG is rendered and published by a live paired controller. Select it with `device_id` on
+`session({ action: "progress-image-token", executionId, device_id })`; omission requires exactly
+one eligible live controller. `COMMUNICATION_OWNER_UNAVAILABLE` is a coded MCP failure and HTTP
+503 on mint/public read. Restore the paired connection rather than recreating a VM.
+Ordinary progress reads and text notifications need no owner; an unavailable optional
+notification image is omitted while text is attempted independently.
+
+The one-use progress URL and the immutable owner publication have different lifetimes.
+Successful HTTP completion consumes the progress grant; rendering/stream failure releases
+its claim, and an error response finishing does not consume it. The publication supports
+repeated reads until its own expiry under current authority.
+
+Cloud notifications send the graph/run descriptor to the owner; PNG rendering uses the shipped
+owner renderer and does not require project packages.
 
 The flow page (see the _Reading and editing a flow_ guide) shows the derived process of the
 definition itself and lets its owner edit it in place. On the run page (see the _Reading a run_

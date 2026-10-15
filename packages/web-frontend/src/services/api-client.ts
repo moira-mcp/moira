@@ -46,7 +46,6 @@ export type {
 } from "@mcp-moira/shared/execution-management";
 import type {
   CodespaceConnectionView,
-  CodespaceControlView,
   CodespaceReadinessView,
   CodespaceSummaryView,
   AnalyticsQuery,
@@ -65,6 +64,7 @@ import type {
   LocalDeviceView,
   LocalDeviceSettingsValue,
   LocalPairingView,
+  ControllerOperation,
 } from "@mcp-moira/shared";
 
 /** The latest notification about the wait a run stands in: what the run page shows under its banner. */
@@ -989,10 +989,33 @@ export class MoiraApiClient {
     expectedGeneration: number,
     expectedRevision: number,
     settings: LocalDeviceSettingsValue,
+    requestId: string,
   ): Promise<LocalDeviceView> {
     const response = await this.client.put<ApiResponse<LocalDeviceView>>(
       `/integrations/local/devices/${encodeURIComponent(deviceId)}/settings`,
-      { expectedGeneration, expectedRevision, settings },
+      { expectedGeneration, expectedRevision, settings, requestId },
+    );
+    return response.data.data!;
+  }
+
+  async getLocalDeviceSettingsOperation(
+    deviceId: string,
+    requestId: string,
+  ): Promise<{
+    state: "absent" | "accepted" | "completed" | "unconfirmed";
+    requestId: string;
+    result?: LocalDeviceView;
+    outcome?: { ok: boolean };
+  }> {
+    const response = await this.client.get<
+      ApiResponse<{
+        state: "absent" | "accepted" | "completed" | "unconfirmed";
+        requestId: string;
+        result?: LocalDeviceView;
+        outcome?: { ok: boolean };
+      }>
+    >(
+      `/integrations/local/devices/${encodeURIComponent(deviceId)}/settings/operations/${encodeURIComponent(requestId)}`,
     );
     return response.data.data!;
   }
@@ -1000,6 +1023,16 @@ export class MoiraApiClient {
   async refreshGitHubCodespaceRepositories(): Promise<CodespaceConnectionView> {
     const response = await this.client.post<ApiResponse<CodespaceConnectionView>>(
       "/integrations/github/refresh",
+    );
+    return response.data.data!;
+  }
+
+  async getLocalControllerOperation(
+    deviceId: string,
+    requestId: string,
+  ): Promise<ControllerOperation> {
+    const response = await this.client.get<ApiResponse<ControllerOperation>>(
+      `/integrations/local/devices/${encodeURIComponent(deviceId)}/operations/${encodeURIComponent(requestId)}`,
     );
     return response.data.data!;
   }
@@ -1035,6 +1068,9 @@ export class MoiraApiClient {
   async createGitHubCodespace(input: {
     repository_id: string;
     ref: string;
+    request_id: string;
+    device_id?: string;
+    devcontainer_path?: string;
   }): Promise<CodespaceSummaryView> {
     const response = await this.client.post<ApiResponse<{ codespace: CodespaceSummaryView }>>(
       "/integrations/github/codespaces",
@@ -1043,16 +1079,26 @@ export class MoiraApiClient {
     return response.data.data!.codespace;
   }
 
-  async startGitHubCodespace(codespaceId: string): Promise<CodespaceSummaryView> {
+  async startGitHubCodespace(
+    codespaceId: string,
+    requestId: string,
+    generation: number,
+  ): Promise<CodespaceSummaryView> {
     const response = await this.client.post<ApiResponse<{ codespace: CodespaceSummaryView }>>(
       `/integrations/github/codespaces/${encodeURIComponent(codespaceId)}/start`,
+      { request_id: requestId, expected_generation: generation },
     );
     return response.data.data!.codespace;
   }
 
-  async stopGitHubCodespace(codespaceId: string): Promise<CodespaceSummaryView> {
+  async stopGitHubCodespace(
+    codespaceId: string,
+    requestId: string,
+    generation: number,
+  ): Promise<CodespaceSummaryView> {
     const response = await this.client.post<ApiResponse<{ codespace: CodespaceSummaryView }>>(
       `/integrations/github/codespaces/${encodeURIComponent(codespaceId)}/stop`,
+      { request_id: requestId, expected_generation: generation },
     );
     return response.data.data!.codespace;
   }
@@ -1060,33 +1106,58 @@ export class MoiraApiClient {
   async deleteGitHubCodespace(
     codespaceId: string,
     expectedGeneration: number,
+    requestId: string,
   ): Promise<CodespaceSummaryView> {
     const response = await this.client.delete<ApiResponse<{ codespace: CodespaceSummaryView }>>(
       `/integrations/github/codespaces/${encodeURIComponent(codespaceId)}`,
-      { data: { confirm_delete: true, expected_generation: expectedGeneration } },
+      {
+        data: {
+          confirm_delete: true,
+          expected_generation: expectedGeneration,
+          request_id: requestId,
+        },
+      },
     );
     return response.data.data!.codespace;
   }
 
   async getAdminCodespaces(): Promise<{
     readiness: CodespaceReadinessView;
-    controls: CodespaceControlView[];
   }> {
     const response =
-      await this.client.get<
-        ApiResponse<{ readiness: CodespaceReadinessView; controls: CodespaceControlView[] }>
-      >("/admin/codespaces");
+      await this.client.get<ApiResponse<{ readiness: CodespaceReadinessView }>>(
+        "/admin/codespaces",
+      );
     return response.data.data!;
   }
 
-  async setAdminCodespaceControl(
-    scope: string,
-    input: { disabled: boolean; reason: string | null },
-  ): Promise<{ readiness: CodespaceReadinessView; controls: CodespaceControlView[] }> {
-    const response = await this.client.put<
-      ApiResponse<{ readiness: CodespaceReadinessView; controls: CodespaceControlView[] }>
-    >(`/admin/codespaces/controls/${encodeURIComponent(scope)}`, input);
-    return response.data.data!;
+  async adoptGitHubCodespace(
+    input:
+      | {
+          codespace_id: string;
+          expected_generation: number;
+          request_id: string;
+          device_id?: string;
+        }
+      | {
+          provider_resource_name: string;
+          request_id: string;
+          device_id?: string;
+        },
+  ): Promise<CodespaceSummaryView> {
+    const response = await this.client.post<ApiResponse<{ codespace: CodespaceSummaryView }>>(
+      "codespace_id" in input
+        ? `/integrations/github/codespaces/${encodeURIComponent(input.codespace_id)}/adopt`
+        : "/integrations/github/codespaces/adopt",
+      "codespace_id" in input
+        ? {
+            request_id: input.request_id,
+            expected_generation: input.expected_generation,
+            ...(input.device_id ? { device_id: input.device_id } : {}),
+          }
+        : input,
+    );
+    return response.data.data!.codespace;
   }
 
   /**

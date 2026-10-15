@@ -4,16 +4,24 @@ import {
   GitHubCodespaceRepository,
   GitHubCodespaceTokenResponse,
   GitHubCodespaceUser,
-  CODESPACE_PROVIDER_CONTRACT_VERSION,
-  CODESPACE_PROVIDER_GITHUB,
   type CodespaceAvailableBillingView,
   type CodespaceMachine,
-  type CodespaceProviderAdapter,
+  type GitHubProviderCreateInput,
+  type CodespaceCreateProviderResult,
   type CodespaceProviderGuidance,
   type CodespaceProviderResource,
   type CodespaceProviderState,
   type CodespaceRepositoryTarget,
   type CodespaceGitHubConfigStatus,
+  type GitHubScopedCredentialClient,
+  type ScopedCredentialPermissions,
+  type ScopedCredentialCandidate,
+  ScopedCredentialIssuanceRefused,
+  GITHUB_PROVIDER_REASON_MAX_LENGTH,
+  providerFailureSchema,
+  providerReplySchema,
+  isConfirmedGitHubCreationRefusalStatus,
+  type GitHubProviderFailure,
 } from "@mcp-moira/shared";
 
 type AvailableConfig = Extract<CodespaceGitHubConfigStatus, { state: "available" }>;
@@ -65,8 +73,6 @@ export function githubCodespaceGuidance(
         "Repair the GitHub authorization in Moira settings and follow any displayed revocation or reconnection step.",
       repository_not_approved:
         "Approve this repository for the Moira GitHub App installation. For a new personal private repository, use repository_create with applied owner delegation on a local device, or create it on GitHub and approve it.",
-      ceiling_reached:
-        "You have reached a codespace limit; delete one you no longer need, or wait for capacity to become available.",
       ready: "GitHub is connected and the repositories you granted are available.",
     },
   };
@@ -82,6 +88,7 @@ export class GitHubCodespaceClientError extends Error {
      * sees exactly what it saw before this existed: the status alone.
      */
     public readonly providerMessage?: string,
+    public readonly providerFailure?: GitHubProviderFailure,
   ) {
     super(message);
     this.name = "GitHubCodespaceClientError";
@@ -89,7 +96,7 @@ export class GitHubCodespaceClientError extends Error {
 }
 
 /** Longest provider message kept. Long enough for GitHub's sentences, short enough to store. */
-const PROVIDER_MESSAGE_LIMIT = 300;
+const PROVIDER_MESSAGE_LIMIT = GITHUB_PROVIDER_REASON_MAX_LENGTH;
 
 /**
  * Patterns that must never survive into a stored record. A refusal body is provider text, and text
@@ -97,8 +104,8 @@ const PROVIDER_MESSAGE_LIMIT = 300;
  * is still a secret, and an audit row is read long after the request is gone.
  */
 const SECRET_SHAPED = [
-  /\bgh[pousr]_[A-Za-z0-9]{8,}/, // GitHub token prefixes
-  /\bgithub_pat_[A-Za-z0-9_]{8,}/,
+  /\bgh[pousr]_[A-Za-z0-9_-]+/, // Also reject shortened or partially echoed credentials.
+  /\bgithub_pat_[A-Za-z0-9_-]+/,
   /\b(?:bearer|token|authorization|secret|password)\b\s*[:=]?\s*\S+/i,
   /\bey[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/, // JWT-shaped
   /https?:\/\/\S+/i,
@@ -350,17 +357,9 @@ function repositoryPath(fullName: string): string {
   return fullName.split("/").map(encodeURIComponent).join("/");
 }
 
-export class HttpGitHubCodespaceClient implements GitHubCodespaceClient, CodespaceProviderAdapter {
-  readonly id = CODESPACE_PROVIDER_GITHUB;
-  readonly contractVersion = CODESPACE_PROVIDER_CONTRACT_VERSION;
-  readonly capabilities = {
-    disposable: true,
-    persistent: true,
-    exactLifecycle: true,
-    personalBillingOnly: true,
-    connector: "github-cli-ssh",
-  } as const;
-
+export class HttpGitHubCodespaceClient
+  implements GitHubCodespaceClient, GitHubScopedCredentialClient
+{
   /**
    * GitHub's own answer to "what must the user do, and where". Moira decides which situation applies;
    * the words and the destinations are the provider's, so a second provider supplies its own instead
@@ -374,27 +373,7 @@ export class HttpGitHubCodespaceClient implements GitHubCodespaceClient, Codespa
     private readonly config: AvailableConfig,
     private readonly fetchImpl: Fetch = fetch,
     private readonly now: () => number = Date.now,
-    private readonly connectorHealth: () => Promise<{
-      ok: boolean;
-      reason: string | null;
-    }> = async () => ({
-      ok: false,
-      reason: "Connector health probe is not configured",
-    }),
-    private readonly connectorProbe: (
-      accessToken: string,
-      resourceName: string,
-    ) => Promise<void> = async () => {
-      throw new Error("Connector capability probe is not configured");
-    },
   ) {}
-
-  async health(): Promise<{ state: "available" | "unavailable"; reason: string | null }> {
-    const result = await this.connectorHealth();
-    return result.ok
-      ? { state: "available", reason: null }
-      : { state: "unavailable", reason: result.reason ?? "Connector tooling is unavailable" };
-  }
 
   private async tokenRequest(parameters: URLSearchParams): Promise<GitHubCodespaceTokenResponse> {
     const response = await this.fetchImpl(TOKEN_URL, {
@@ -464,6 +443,7 @@ export class HttpGitHubCodespaceClient implements GitHubCodespaceClient, Codespa
       throw new GitHubCodespaceClientError("GitHub pagination left the API origin", 502);
     }
     let response: Response;
+    const signal = AbortSignal.timeout(REQUEST_TIMEOUT_MS);
     try {
       response = await this.fetchImpl(parsed, {
         ...init,
@@ -475,11 +455,15 @@ export class HttpGitHubCodespaceClient implements GitHubCodespaceClient, Codespa
           "User-Agent": "Moira-Codespace-Connector",
         },
         redirect: "error",
-        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+        signal,
       });
     } catch (error) {
       if (error instanceof GitHubCodespaceClientError) throw error;
-      throw new GitHubCodespaceClientError("GitHub API request failed", 503);
+      throw new GitHubCodespaceClientError("GitHub API request failed", 503, undefined, {
+        kind: "transport",
+        phase: "request",
+        cause: signal.aborted ? "timeout" : "request_failed",
+      });
     }
     if (!(acceptedStatuses?.includes(response.status) ?? response.ok)) {
       // The body is where the provider says which rule was broken; reading it here means every
@@ -491,23 +475,96 @@ export class HttpGitHubCodespaceClient implements GitHubCodespaceClient, Codespa
         `GitHub API request failed (HTTP ${response.status})`,
         response.status,
         providerRefusalMessage(failureBody),
+        this.replyEvidence(response, "http", "request", providerRefusalMessage(failureBody)),
       );
     }
-    const body =
-      response.status === 204 || response.status === 304
-        ? undefined
-        : maximumResponseBytes
-          ? await this.boundedResponseJSON(response, maximumResponseBytes)
-          : await response.json().catch(() => undefined);
+    let body: unknown;
+    if (response.status !== 204 && response.status !== 304) {
+      let text: string;
+      try {
+        text = maximumResponseBytes
+          ? await this.boundedResponseBody(response, maximumResponseBytes)
+          : await response.text();
+      } catch (error) {
+        if (error instanceof GitHubCodespaceClientError && error.status === 502)
+          throw new GitHubCodespaceClientError(
+            "GitHub returned an invalid response body",
+            502,
+            undefined,
+            this.replyEvidence(
+              response,
+              "reply_invalid",
+              "json",
+              providerRefusalMessage(JSON.stringify({ message: error.message })),
+            ),
+          );
+        throw new GitHubCodespaceClientError(
+          "GitHub response was interrupted",
+          503,
+          undefined,
+          providerFailureSchema.parse({
+            kind: "transport",
+            phase: "body",
+            cause: signal.aborted ? "timeout" : "request_failed",
+            ...this.replyMetadata(response),
+          }),
+        );
+      }
+      try {
+        body = text.trim() ? JSON.parse(text) : undefined;
+      } catch {
+        throw new GitHubCodespaceClientError(
+          "GitHub returned an invalid JSON response",
+          502,
+          undefined,
+          this.replyEvidence(response, "reply_invalid", "json"),
+        );
+      }
+    }
     return { body: body as T, response };
   }
 
-  private async boundedResponseJSON(response: Response, maximum: number): Promise<unknown> {
-    const body = await this.boundedResponseBody(response, maximum);
+  private replyMetadata(response: Response) {
+    const requestId = providerReplySchema.shape.githubRequestId.safeParse(
+        response.headers.get("x-github-request-id") ?? undefined,
+      ),
+      safeRequestId = requestId.success ? requestId.data : undefined;
+    return providerReplySchema.parse({
+      status: response.status,
+      ...(safeRequestId ? { githubRequestId: safeRequestId } : {}),
+    });
+  }
+  private replyEvidence(
+    response: Response,
+    kind: "http" | "reply_invalid",
+    phase: "request" | "json" | "projection",
+    reason?: string,
+  ): GitHubProviderFailure {
+    return providerFailureSchema.parse({
+      kind,
+      phase,
+      ...this.replyMetadata(response),
+      ...(reason ? { reason } : {}),
+    });
+  }
+
+  private projectReply<T>(
+    reply: { body: unknown; response: Response },
+    project: (body: unknown) => T,
+  ): T {
     try {
-      return JSON.parse(body);
-    } catch {
-      throw new GitHubCodespaceClientError("GitHub returned malformed repository JSON", 502);
+      return project(reply.body);
+    } catch (error) {
+      const reason =
+        error instanceof GitHubCodespaceClientError
+          ? providerRefusalMessage(JSON.stringify({ message: error.message }))
+          : undefined;
+      throw new GitHubCodespaceClientError(
+        "GitHub returned an invalid provider resource",
+        502,
+        undefined,
+        this.replyEvidence(reply.response, "reply_invalid", "projection", reason),
+      );
     }
   }
 
@@ -537,10 +594,6 @@ export class HttpGitHubCodespaceClient implements GitHubCodespaceClient, Codespa
     }
   }
 
-  private async api<T>(path: string, accessToken: string): Promise<T> {
-    return (await this.apiResponse<T>(path, accessToken)).body;
-  }
-
   private async paginated<T>(
     path: string,
     accessToken: string,
@@ -548,32 +601,59 @@ export class HttpGitHubCodespaceClient implements GitHubCodespaceClient, Codespa
   ): Promise<T[]> {
     const collected: T[] = [];
     let next: string | null = path;
-    for (let page = 0; next && page < 20; page++) {
+    const visited = new Set<string>(),
+      endpoint = new URL(path, API_ORIGIN);
+    while (next) {
+      const current = new URL(next, API_ORIGIN);
+      if (
+        current.origin !== endpoint.origin ||
+        current.pathname !== endpoint.pathname ||
+        visited.has(current.href)
+      )
+        throw new GitHubCodespaceClientError(
+          "GitHub returned an invalid pagination continuation",
+          502,
+        );
+      visited.add(current.href);
       const result: { body: Record<string, unknown>; response: Response } = await this.apiResponse<
         Record<string, unknown>
       >(next, accessToken);
-      if (!result.body || typeof result.body !== "object") {
-        throw new GitHubCodespaceClientError("GitHub returned an invalid JSON response", 502);
-      }
-      collected.push(...items(result.body));
-      const link: string = result.response.headers.get("link") ?? "";
-      const match: RegExpMatchArray | null = link.match(/<([^>]+)>;\s*rel="next"/);
-      next = match?.[1] ?? null;
+      collected.push(
+        ...this.projectReply(result, (body) => {
+          if (!body || typeof body !== "object")
+            throw new GitHubCodespaceClientError("GitHub returned an invalid JSON response", 502);
+          return items(body as Record<string, unknown>);
+        }),
+      );
+      next = this.projectReply(result, () => {
+        const link = result.response.headers.get("link") ?? "",
+          continuation = link.match(/<([^>]+)>;\s*rel="next"/)?.[1] ?? null;
+        if (continuation) {
+          const target = new URL(continuation, API_ORIGIN);
+          if (
+            target.origin !== endpoint.origin ||
+            target.pathname !== endpoint.pathname ||
+            visited.has(target.href)
+          )
+            throw new GitHubCodespaceClientError(
+              "GitHub returned an invalid pagination continuation",
+              502,
+            );
+        }
+        return continuation;
+      });
     }
-    if (next) throw new GitHubCodespaceClientError("GitHub pagination exceeded its bound", 502);
     return collected;
   }
 
   async getUser(accessToken: string): Promise<GitHubCodespaceUser> {
-    const body = await this.api<Record<string, unknown>>("/user", accessToken);
-    if (!body || typeof body !== "object") {
-      throw new GitHubCodespaceClientError("GitHub returned an invalid JSON response", 502);
-    }
-    return { id: decimalId(body.id), login: requiredString(body.login, "login") };
-  }
-
-  getIdentity(accessToken: string): Promise<GitHubCodespaceUser> {
-    return this.getUser(accessToken);
+    const reply = await this.apiResponse<Record<string, unknown>>("/user", accessToken);
+    return this.projectReply(reply, (body) => {
+      if (!body || typeof body !== "object" || Array.isArray(body))
+        throw new GitHubCodespaceClientError("GitHub returned an invalid JSON response", 502);
+      const user = body as Record<string, unknown>;
+      return { id: decimalId(user.id), login: requiredString(user.login, "login") };
+    });
   }
 
   private parseRepositoryIdentity(value: unknown): GitHubPrivateRepositoryIdentity {
@@ -613,7 +693,9 @@ export class HttpGitHubCodespaceClient implements GitHubCodespaceClient, Codespa
       [200, 404],
       256 * 1024,
     );
-    return result.response.status === 404 ? null : this.parseRepositoryIdentity(result.body);
+    return result.response.status === 404
+      ? null
+      : this.projectReply(result, (body) => this.parseRepositoryIdentity(body));
   }
 
   async inspectRepositoryById(
@@ -628,7 +710,7 @@ export class HttpGitHubCodespaceClient implements GitHubCodespaceClient, Codespa
       [200],
       256 * 1024,
     );
-    return this.parseRepositoryIdentity(result.body);
+    return this.projectReply(result, (body) => this.parseRepositoryIdentity(body));
   }
 
   async createPrivateRepository(
@@ -658,7 +740,7 @@ export class HttpGitHubCodespaceClient implements GitHubCodespaceClient, Codespa
       [201],
       256 * 1024,
     );
-    return this.parseRepositoryIdentity(result.body);
+    return this.projectReply(result, (body) => this.parseRepositoryIdentity(body));
   }
 
   async addRepositoryToInstallation(
@@ -681,15 +763,17 @@ export class HttpGitHubCodespaceClient implements GitHubCodespaceClient, Codespa
     accessToken: string,
     expectedPayer: GitHubCodespaceUser,
   ): Promise<CodespaceAvailableBillingView> {
-    const profile = await this.api<Record<string, unknown>>("/user", accessToken);
-    if (!profile || typeof profile !== "object") {
-      throw new GitHubCodespaceClientError("GitHub returned an invalid billing identity", 502);
-    }
-    const payerId = decimalId(profile.id);
-    const payerLogin = requiredString(profile.login, "billing account login");
-    if (payerId !== expectedPayer.id || !/^[A-Za-z0-9-]{1,39}$/.test(payerLogin)) {
-      throw new GitHubCodespaceClientError("GitHub returned a different billing account", 502);
-    }
+    const profileReply = await this.apiResponse<Record<string, unknown>>("/user", accessToken);
+    const { payerLogin, planName } = this.projectReply(profileReply, (body) => {
+      if (!body || typeof body !== "object" || Array.isArray(body))
+        throw new GitHubCodespaceClientError("GitHub returned an invalid billing identity", 502);
+      const profile = body as Record<string, unknown>,
+        payerId = decimalId(profile.id),
+        payerLogin = requiredString(profile.login, "billing account login");
+      if (payerId !== expectedPayer.id || !/^[A-Za-z0-9-]{1,39}$/.test(payerLogin))
+        throw new GitHubCodespaceClientError("GitHub returned a different billing account", 502);
+      return { payerLogin, planName: (profile.plan as Record<string, unknown> | undefined)?.name };
+    });
     const startedAt = this.now();
     if (!Number.isSafeInteger(startedAt) || startedAt < 0) {
       throw new GitHubCodespaceClientError("Billing retrieval time is invalid", 502);
@@ -698,15 +782,16 @@ export class HttpGitHubCodespaceClient implements GitHubCodespaceClient, Codespa
     const year = date.getUTCFullYear();
     const month = date.getUTCMonth() + 1;
     const path = `/users/${encodeURIComponent(payerLogin)}/settings/billing/usage/summary?year=${year}&month=${month}`;
-    const summary = await this.api<unknown>(path, accessToken);
-    const plan = profile.plan as Record<string, unknown> | undefined;
-    return projectGitHubCodespaceBillingSummary(summary, {
-      payerLogin,
-      year,
-      month,
-      retrievedAt: this.now(),
-      planName: plan?.name,
-    });
+    const summary = await this.apiResponse<unknown>(path, accessToken);
+    return this.projectReply(summary, (body) =>
+      projectGitHubCodespaceBillingSummary(body, {
+        payerLogin,
+        year,
+        month,
+        retrievedAt: this.now(),
+        planName,
+      }),
+    );
   }
 
   private parseMachine(value: unknown): CodespaceMachine {
@@ -776,10 +861,13 @@ export class HttpGitHubCodespaceClient implements GitHubCodespaceClient, Codespa
     // GitHub answers per ref: the machines available on a branch are not always the ones available on
     // the default branch, and asking without the ref quietly answers the wrong question.
     const path = `/repos/${repositoryPath(repository.fullName)}/codespaces/machines?ref=${encodeURIComponent(ref)}`;
-    const body = await this.api<Record<string, unknown>>(path, accessToken);
-    return (Array.isArray(body.machines) ? body.machines : []).map((machine) =>
-      this.parseMachine(machine),
-    );
+    const result = await this.apiResponse<Record<string, unknown>>(path, accessToken);
+    return this.projectReply(result, (body) => {
+      const value = body as Record<string, unknown>;
+      if (!value || !Array.isArray(value.machines))
+        throw new GitHubCodespaceClientError("GitHub returned an invalid machines list", 502);
+      return value.machines.map((machine) => this.parseMachine(machine));
+    });
   }
 
   async preflightCreate(
@@ -788,18 +876,20 @@ export class HttpGitHubCodespaceClient implements GitHubCodespaceClient, Codespa
     ref: string,
   ): Promise<{ billableOwnerId: string }> {
     const path = `/repos/${repositoryPath(repository.fullName)}/codespaces/new?ref=${encodeURIComponent(ref)}`;
-    const body = await this.api<Record<string, unknown>>(path, accessToken);
-    if (!body || typeof body !== "object") {
-      throw new GitHubCodespaceClientError("GitHub returned an invalid codespace preflight", 502);
-    }
-    const billableOwner = body.billable_owner as Record<string, unknown> | undefined;
-    return { billableOwnerId: decimalId(billableOwner?.id) };
+    const result = await this.apiResponse<Record<string, unknown>>(path, accessToken);
+    return this.projectReply(result, (body) => {
+      if (!body || typeof body !== "object")
+        throw new GitHubCodespaceClientError("GitHub returned an invalid codespace preflight", 502);
+      const billableOwner = (body as Record<string, unknown>).billable_owner as
+        Record<string, unknown> | undefined;
+      return { billableOwnerId: decimalId(billableOwner?.id) };
+    });
   }
 
   async create(
     accessToken: string,
-    input: Parameters<CodespaceProviderAdapter["create"]>[1],
-  ): Promise<Awaited<ReturnType<CodespaceProviderAdapter["create"]>>> {
+    input: GitHubProviderCreateInput,
+  ): Promise<CodespaceCreateProviderResult> {
     const path = `/repos/${repositoryPath(input.repository.fullName)}/codespaces`;
     try {
       const result = await this.apiResponse<Record<string, unknown>>(
@@ -813,26 +903,29 @@ export class HttpGitHubCodespaceClient implements GitHubCodespaceClient, Codespa
             display_name: input.operationMarker,
             idle_timeout_minutes: input.idleTimeoutMinutes,
             retention_period_minutes: input.retentionMinutes,
+            ...(input.devcontainerPath ? { devcontainer_path: input.devcontainerPath } : {}),
           }),
         },
         [201, 202],
       );
       return {
         outcome: "accepted",
+        providerReply: this.replyMetadata(result.response),
         resource:
           result.body && Object.keys(result.body).length > 0
-            ? this.parseCodespace(result.body)
+            ? this.projectReply(result, (body) => this.parseCodespace(body))
             : null,
       };
     } catch (error) {
       if (
         error instanceof GitHubCodespaceClientError &&
-        [400, 403, 404, 409, 422, 429].includes(error.status)
+        isConfirmedGitHubCreationRefusalStatus(error.status)
       ) {
         return {
           outcome: "rejected",
           reason: `github_status_${error.status}`,
           ...(error.providerMessage ? { detail: error.providerMessage } : {}),
+          ...(error.providerFailure ? { providerFailure: error.providerFailure } : {}),
         };
       }
       throw error;
@@ -840,12 +933,15 @@ export class HttpGitHubCodespaceClient implements GitHubCodespaceClient, Codespa
   }
 
   async listOwned(accessToken: string): Promise<CodespaceProviderResource[]> {
-    const values = await this.paginated<Record<string, unknown>>(
+    return this.paginated<CodespaceProviderResource>(
       "/user/codespaces?per_page=100",
       accessToken,
-      (body) => (Array.isArray(body.codespaces) ? body.codespaces : []),
+      (body) => {
+        if (!Array.isArray(body.codespaces))
+          throw new GitHubCodespaceClientError("GitHub returned an invalid codespaces list", 502);
+        return body.codespaces.map((value) => this.parseCodespace(value));
+      },
     );
-    return values.map((value) => this.parseCodespace(value));
   }
 
   async getExact(
@@ -858,7 +954,9 @@ export class HttpGitHubCodespaceClient implements GitHubCodespaceClient, Codespa
       {},
       [200, 404],
     );
-    return response.response.status === 404 ? null : this.parseCodespace(response.body);
+    return response.response.status === 404
+      ? null
+      : this.projectReply(response, (body) => this.parseCodespace(body));
   }
 
   private async lifecycle(
@@ -893,42 +991,47 @@ export class HttpGitHubCodespaceClient implements GitHubCodespaceClient, Codespa
     return this.lifecycle(accessToken, resourceName, "delete");
   }
 
-  probeConnector(accessToken: string, resourceName: string): Promise<void> {
-    return this.connectorProbe(accessToken, resourceName);
-  }
-
   async listInstallations(accessToken: string): Promise<GitHubCodespaceInstallation[]> {
-    const installations = await this.paginated<Record<string, unknown>>(
+    return this.paginated<GitHubCodespaceInstallation>(
       "/user/installations?per_page=100",
       accessToken,
-      (body) => (Array.isArray(body.installations) ? body.installations : []),
+      (body) => {
+        if (!Array.isArray(body.installations))
+          throw new GitHubCodespaceClientError(
+            "GitHub returned an invalid installations list",
+            502,
+          );
+        return body.installations.map((installation) => {
+          const account = installation.account as Record<string, unknown> | undefined;
+          return {
+            id: decimalId(installation.id),
+            accountId: decimalId(account?.id),
+            accountLogin: requiredString(account?.login, "installation account login"),
+            targetType: requiredString(installation.target_type, "installation target type"),
+            repositorySelection: installation.repository_selection === "all" ? "all" : "selected",
+          };
+        });
+      },
     );
-    return installations.map((installation) => {
-      const account = installation.account as Record<string, unknown> | undefined;
-      return {
-        id: decimalId(installation.id),
-        accountId: decimalId(account?.id),
-        accountLogin: requiredString(account?.login, "installation account login"),
-        targetType: requiredString(installation.target_type, "installation target type"),
-        repositorySelection: installation.repository_selection === "all" ? "all" : "selected",
-      };
-    });
   }
 
   async listInstallationRepositories(
     accessToken: string,
     installationId: string,
   ): Promise<GitHubCodespaceRepository[]> {
-    const repositories = await this.paginated<Record<string, unknown>>(
+    return this.paginated<GitHubCodespaceRepository>(
       `/user/installations/${encodeURIComponent(installationId)}/repositories?per_page=100`,
       accessToken,
-      (body) => (Array.isArray(body.repositories) ? body.repositories : []),
+      (body) => {
+        if (!Array.isArray(body.repositories))
+          throw new GitHubCodespaceClientError("GitHub returned an invalid repositories list", 502);
+        return body.repositories.map((repository) => ({
+          id: decimalId(repository.id),
+          fullName: requiredString(repository.full_name, "repository name"),
+          private: repository.private === true,
+        }));
+      },
     );
-    return repositories.map((repository) => ({
-      id: decimalId(repository.id),
-      fullName: requiredString(repository.full_name, "repository name"),
-      private: repository.private === true,
-    }));
   }
 
   private async revoke(kind: "token" | "grant", accessToken: string): Promise<void> {
@@ -951,6 +1054,90 @@ export class HttpGitHubCodespaceClient implements GitHubCodespaceClient, Codespa
     if (!response.ok && response.status !== 404) {
       throw new GitHubCodespaceClientError("GitHub credential revocation failed", response.status);
     }
+  }
+
+  async createScopedToken(
+    parentToken: string,
+    input: { repositoryId: number; target: string; permissions: ScopedCredentialPermissions },
+  ): Promise<ScopedCredentialCandidate> {
+    let response: Response;
+    try {
+      response = await this.fetchImpl(
+        `${API_ORIGIN}/applications/${encodeURIComponent(this.config.clientId)}/token/scoped`,
+        {
+          method: "POST",
+          headers: {
+            Accept: "application/vnd.github+json",
+            Authorization: `Basic ${Buffer.from(`${this.config.clientId}:${this.config.clientSecret}`).toString("base64")}`,
+            "Content-Type": "application/json",
+            "X-GitHub-Api-Version": API_VERSION,
+            "User-Agent": "Moira-Codespace-Connector",
+          },
+          body: JSON.stringify({
+            access_token: parentToken,
+            target: input.target,
+            repository_ids: [input.repositoryId],
+            permissions: input.permissions,
+          }),
+          redirect: "error",
+          signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+        },
+      );
+    } catch {
+      throw new GitHubCodespaceClientError("Scoped credential outcome unconfirmed", 502);
+    }
+    if ([401, 403, 404, 422].includes(response.status))
+      throw new ScopedCredentialIssuanceRefused(response.status);
+    if (response.status !== 200)
+      throw new GitHubCodespaceClientError(
+        "Scoped credential outcome unconfirmed",
+        response.status,
+      );
+    let metadata: unknown;
+    try {
+      metadata = await response.json();
+    } catch {
+      throw new GitHubCodespaceClientError("Scoped credential outcome unconfirmed", 502);
+    }
+    const body =
+      metadata && typeof metadata === "object" ? (metadata as Record<string, unknown>) : null;
+    if (typeof body?.token !== "string" || !body.token)
+      throw new GitHubCodespaceClientError("Scoped credential outcome unconfirmed", 502);
+    const expiresAt = typeof body.expires_at === "string" ? Date.parse(body.expires_at) : NaN;
+    return {
+      token: body.token,
+      expiresAt: Number.isSafeInteger(expiresAt) ? expiresAt : null,
+      metadata,
+    };
+  }
+
+  async revokeScopedToken(token: string): Promise<void> {
+    let response: Response;
+    try {
+      response = await this.fetchImpl(
+        `${API_ORIGIN}/applications/${encodeURIComponent(this.config.clientId)}/token`,
+        {
+          method: "DELETE",
+          headers: {
+            Accept: "application/vnd.github+json",
+            Authorization: `Basic ${Buffer.from(`${this.config.clientId}:${this.config.clientSecret}`).toString("base64")}`,
+            "Content-Type": "application/json",
+            "X-GitHub-Api-Version": API_VERSION,
+            "User-Agent": "Moira-Codespace-Connector",
+          },
+          body: JSON.stringify({ access_token: token }),
+          redirect: "error",
+          signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+        },
+      );
+    } catch {
+      throw new GitHubCodespaceClientError("Scoped credential disposal unconfirmed", 502);
+    }
+    if (response.status !== 204)
+      throw new GitHubCodespaceClientError(
+        "Scoped credential disposal unconfirmed",
+        response.status,
+      );
   }
 
   revokeToken(accessToken: string): Promise<void> {

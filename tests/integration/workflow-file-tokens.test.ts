@@ -11,10 +11,12 @@ import {
   getSqliteInstance,
   metadataRevision,
   TokenManager,
+  type CommunicationOwnerScope,
 } from "@mcp-moira/shared";
 import type { WorkflowExecution, WorkflowGraph } from "@mcp-moira/workflow-engine";
 import { ProgressImageService, type IDataRepository } from "@mcp-moira/workflow-engine";
 import { createExecutionMaterializeRoutes } from "../../packages/web-backend/src/routes/execution-materialize.js";
+import { communicationOwnerFixture } from "../fixtures/communication-owner.js";
 
 describe("Workflow File Tokens", () => {
   let tokenManager: TokenManager;
@@ -386,7 +388,8 @@ describe("Workflow File Tokens", () => {
         };
       },
     } as unknown as IDataRepository;
-    const service = new ProgressImageService(repository, tokenManager);
+    const fileOwner = communicationOwnerFixture();
+    const service = new ProgressImageService(repository, tokenManager, undefined, fileOwner.owner);
     const minted = await service.mint("progress-token-execution", testUserId);
     const token = minted.downloadUrl.split("/").at(-1)!;
     const reserve = tokenManager.reserveProgressImageToken.bind(tokenManager);
@@ -395,6 +398,7 @@ describe("Workflow File Tokens", () => {
       return reserve(value, claim);
     });
     expect(await service.redeem(token)).toBeNull();
+    expect(fileOwner.submitted).toHaveLength(0);
     expect(tokenManager.getTokenData(token)).toMatchObject({ used: false, claimId: null });
   });
 
@@ -514,6 +518,70 @@ describe("Workflow File Tokens", () => {
     expect(tokenManager.validateToken(token, "materialize")).not.toBeNull();
   });
 
+  test("archive assignment keeps one original pairing tuple and refuses a changed SQL context", () => {
+    seedMaterializeExecution();
+    const db = getSqliteInstance();
+    const context = { variables: { guide: "private rendered source stays outside token storage" } };
+    db.prepare("UPDATE workflowExecution SET context = ? WHERE executionId = ?").run(
+      JSON.stringify(context),
+      "materialize-token-execution",
+    );
+    const revision = metadataRevision(context);
+    const token = tokenManager.createMaterializeToken(
+      "materialize-token-execution",
+      "materialize",
+      testUserId,
+      revision,
+    );
+    const owner: Extract<CommunicationOwnerScope, { kind: "controller" }> = {
+      kind: "controller",
+      userId: testUserId,
+      deviceId: "620b1509-24ea-48d4-a73e-063fae51e166",
+      deviceGeneration: 2,
+      connectionId: "620b1509-24ea-48d4-a73e-063fae51e167",
+    };
+    const original = { owner, requestId: "ws1-11111111-1111-4111-8111-111111111111" };
+    const bind = (candidate = original) =>
+      tokenManager.bindMaterializeArchive(
+        token,
+        "materialize-token-execution",
+        "materialize",
+        testUserId,
+        revision,
+        candidate,
+      );
+    expect(bind()).toEqual({ created: true, archive: original });
+    expect(
+      bind({
+        owner: { ...owner, deviceGeneration: 3 },
+        requestId: "ws1-22222222-2222-4222-8222-222222222222",
+      }),
+    ).toEqual({ created: false, archive: original });
+    expect(tokenManager.getMaterializeArchive(token)).toEqual(original);
+    const stored = tokenManager.getTokenData(token)!;
+    expect(JSON.parse(stored.optionsJson!)).toEqual({
+      contextRevision: revision,
+      archive: original,
+    });
+    expect(stored.optionsJson).not.toContain("private rendered source");
+    db.prepare("UPDATE workflowExecution SET context = ? WHERE executionId = ?").run(
+      JSON.stringify({ variables: { guide: "changed" } }),
+      "materialize-token-execution",
+    );
+    expect(
+      tokenManager.authorizeMaterializeToken(
+        token,
+        "materialize-token-execution",
+        "materialize",
+        testUserId,
+        revision,
+      ),
+    ).toBe(false);
+    expect(bind()).toBeNull();
+    expect(tokenManager.getMaterializeArchive(token)).toEqual(original);
+    expect(tokenManager.getTokenData(token)?.used).toBe(false);
+  });
+
   test("one materialize URL downloads repeatedly through HTTP until expiry or node transition", async () => {
     seedMaterializeExecution();
     const graph: WorkflowGraph = {
@@ -553,9 +621,25 @@ describe("Workflow File Tokens", () => {
       getExecution: async () => execution,
       getWorkflowGraph: async () => graph,
     };
+    getSqliteInstance()
+      .prepare("UPDATE workflowExecution SET context = ? WHERE executionId = ?")
+      .run(JSON.stringify(execution.globalContext), execution.executionId);
+    const fileOwner = communicationOwnerFixture();
+    Object.assign(fileOwner.file, { fileName: "materialize.tar", mimeType: "application/x-tar" });
+    let receipt: Record<string, unknown> = {};
+    const owner = {
+      ...fileOwner.owner,
+      async submit(...args: Parameters<typeof fileOwner.owner.submit>) {
+        receipt = await fileOwner.owner.submit(...args);
+        return receipt;
+      },
+      async collect() {
+        return receipt;
+      },
+    };
     const app = express().use(
       "/api/public/executions",
-      createExecutionMaterializeRoutes(tokenManager, repository),
+      createExecutionMaterializeRoutes(tokenManager, repository, owner),
     );
     const token = tokenManager.createMaterializeToken(
       "materialize-token-execution",
@@ -569,6 +653,12 @@ describe("Workflow File Tokens", () => {
       .get(url)
       .expect(200)
       .expect("Content-Type", /application\/x-tar/);
+
+    expect(fileOwner.submitted).toHaveLength(1);
+    expect(tokenManager.getMaterializeArchive(token)).toEqual({
+      requestId: fileOwner.submitted[0].requestId,
+      owner: await owner.select(testUserId),
+    });
     await request(app)
       .get(url)
       .expect(200)

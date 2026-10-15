@@ -6,7 +6,7 @@
 
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import { describe, expect, test } from "@jest/globals";
+import { describe, expect, test, jest } from "@jest/globals";
 import sharp from "sharp";
 import {
   AgentMessageQueue,
@@ -28,7 +28,9 @@ import {
   type UserCommunicationService,
   type WorkflowExecution,
   type WorkflowGraph,
+  notificationLiveRun,
 } from "@mcp-moira/workflow-engine";
+import { communicationOwnerFixture } from "../../fixtures/communication-owner.js";
 
 /** Every text of a picture is at least this many CSS pixels when a 390 px wide phone shows it. */
 const LEGIBLE_PX = 11;
@@ -274,8 +276,8 @@ describe("state", () => {
   });
 });
 
-describe("the notification attaches the steps picture", () => {
-  test("rendered from the live run at the phone width, sharp at phone density", async () => {
+describe("the notification hands the steps picture to its owner", () => {
+  test("the owner receives the live plan descriptor at phone width and density", async () => {
     const graph = {
       ...longFlow(),
       nodes: [
@@ -295,66 +297,107 @@ describe("the notification attaches the steps picture", () => {
     const live = run(graph, [{ seq: 0, nodeId: "start", exitKey: "default", changes: { items } }], {
       items,
     });
-    const attachments: Array<{ bytes: Uint8Array }> = [];
-    const handler = new UserNotificationHandler({
-      deliver: async (request: { attachment?: { bytes: Uint8Array } }) => {
-        if (request.attachment) attachments.push(request.attachment);
-        return { status: "delivered", configuredChannels: 1, deliveredChannels: 1, channels: [] };
-      },
-      maxTextLength: 4096,
-    } as unknown as UserCommunicationService);
+    const pictures: ProgressStepsModel[] = [];
+    const widths: number[] = [];
+    const fixture = communicationOwnerFixture(async (input) => {
+      if (input.source.type !== "progress") throw new Error("Expected owner progress descriptor");
+      const descriptor = input.source.descriptor;
+      const ownerGraph = descriptor.graph as unknown as WorkflowGraph;
+      const ownerRun = descriptor.run as unknown as WorkflowExecution;
+      pictures.push(buildProgressStepsModel(projectExecutionRun(ownerGraph, ownerRun)!));
+      const image = await renderExecutionProgressStepsImage(ownerGraph, ownerRun);
+      widths.push((await sharp(image!.buffer).metadata()).width!);
+    });
+    const text = jest.fn<UserCommunicationService["deliver"]>(async () => ({
+      status: "delivered",
+      configuredChannels: 1,
+      deliveredChannels: 1,
+      channels: [],
+    }));
+    const handler = new UserNotificationHandler(
+      { deliver: text, maxTextLength: 4096 } as unknown as UserCommunicationService,
+      fixture.owner,
+    );
     const repository = {
       getWorkflow: async () => ({ metadata: graph.metadata }),
       getWorkflowGraph: async () => graph,
-      // Nothing is saved yet: the plan exists only in the live run.
-      getExecution: async () => null,
+      getExecution: async () => live,
     } as unknown as IDataRepository;
-    await handler.execute(
+    const result = await handler.execute(
       graph.nodes[1] as never,
-      { variables: { items }, nodeStates: {}, executionId: "run", workflowId: "wf", userId: "u" },
-      new AgentMessageQueue(),
-      repository,
-      {} as IGraphExecutionEngine,
-      undefined,
-      undefined,
-      () => live,
-    );
-    expect(attachments).toHaveLength(1);
-    const meta = await sharp(Buffer.from(attachments[0].bytes)).metadata();
-    expect(meta.width).toBe(PROGRESS_STEPS_WIDTH * PROGRESS_STEPS_DENSITY);
-
-    // What that picture shows: the plan written in this cycle, on the block the run is in.
-    let pictured: ProgressStepsModel | null = null;
-    const inspecting = new UserNotificationHandler(
       {
-        deliver: async () => ({
-          status: "delivered",
-          configuredChannels: 1,
-          deliveredChannels: 1,
-          channels: [],
-        }),
-        maxTextLength: 4096,
-      } as unknown as UserCommunicationService,
-      async (workflow, execution) => {
-        pictured = buildProgressStepsModel(projectExecutionRun(workflow, execution)!);
-        return renderExecutionProgressStepsImage(workflow, execution);
+        variables: { items },
+        nodeStates: {},
+        executionId: live.executionId,
+        workflowId: live.workflowId,
+        userId: live.userId,
       },
-    );
-    await inspecting.execute(
-      graph.nodes[1] as never,
-      { variables: { items }, nodeStates: {}, executionId: "run", workflowId: "wf", userId: "u" },
       new AgentMessageQueue(),
       repository,
       {} as IGraphExecutionEngine,
       undefined,
       undefined,
-      () => live,
+      notificationLiveRun({ execution: live }, [], { items }, "notify"),
     );
-    expect(pictured!.rows[1].tone).toBe("active");
-    expect(pictured!.rows[1].list!.lines).toEqual(["0/1: Written this cycle"]);
+    expect(result.data?.attachmentStatus).toBe("delivered");
+    expect(text).not.toHaveBeenCalled();
+    expect(fixture.submitted).toHaveLength(1);
+    expect(widths).toEqual([PROGRESS_STEPS_WIDTH * PROGRESS_STEPS_DENSITY]);
+    expect(pictures[0].rows[1].tone).toBe("active");
+    expect(pictures[0].rows[1].list!.lines).toEqual(["0/1: Written this cycle"]);
   });
 
-  test("the deprecated telegram-notification sends the same picture by default", async () => {
+  test("an unsaved live run keeps its text without claiming restart-safe image delivery", async () => {
+    const graph = longFlow();
+    const live = run(graph, [{ seq: 0, nodeId: "start", exitKey: "default", changes: {} }]);
+    const fixture = communicationOwnerFixture();
+    const text = jest.fn<UserCommunicationService["deliver"]>(async () => ({
+      status: "delivered",
+      configuredChannels: 1,
+      deliveredChannels: 1,
+      channels: [],
+    }));
+    const handler = new UserNotificationHandler(
+      { deliver: text, maxTextLength: 4096 } as unknown as UserCommunicationService,
+      fixture.owner,
+    );
+    const repository = {
+      getWorkflow: async () => ({ metadata: graph.metadata }),
+      getWorkflowGraph: async () => graph,
+      getExecution: async () => null,
+    } as unknown as IDataRepository;
+    const result = await handler.execute(
+      {
+        id: "notify",
+        type: "user-notification",
+        message: "Plan ready",
+        attachProgressImage: true,
+        connections: { default: "end" },
+      },
+      {
+        variables: {},
+        nodeStates: {},
+        executionId: live.executionId,
+        workflowId: live.workflowId,
+        userId: live.userId,
+      },
+      new AgentMessageQueue(),
+      repository,
+      {} as IGraphExecutionEngine,
+      undefined,
+      undefined,
+      () => live,
+    );
+    expect(result.data).toMatchObject({
+      userNotificationStatus: "delivered",
+      attachmentStatus: "unavailable",
+    });
+    expect(fixture.submitted).toEqual([]);
+    expect(text).toHaveBeenCalledTimes(1);
+    expect(text.mock.calls[0][0]).not.toHaveProperty("attachment");
+  });
+
+  test("the deprecated Telegram node hands the same phone-sized picture to its owner", async () => {
     const graph = {
       ...longFlow(),
       nodes: [
@@ -371,40 +414,48 @@ describe("the notification attaches the steps picture", () => {
       ],
     } as unknown as WorkflowGraph;
     const live = run(graph, [{ seq: 0, nodeId: "start", exitKey: "default", changes: {} }]);
-    const photos: Uint8Array[] = [];
-    setTestClientFactory(
-      () =>
-        ({
-          getDefaultChatId: () => "42",
-          sendPhoto: async (params: { photo: Uint8Array }) => {
-            photos.push(params.photo);
-            return { ok: true };
-          },
-        }) as never,
-    );
+    const widths: number[] = [];
+    const fixture = communicationOwnerFixture(async (input) => {
+      if (input.source.type !== "progress") throw new Error("Expected owner progress descriptor");
+      const { graph: ownerGraph, run: ownerRun } = input.source.descriptor;
+      const image = await renderExecutionProgressStepsImage(
+        ownerGraph as unknown as WorkflowGraph,
+        ownerRun as unknown as WorkflowExecution,
+      );
+      widths.push((await sharp(image!.buffer).metadata()).width!);
+    });
+    const text = jest.fn(async () => ({ ok: true }));
+    setTestClientFactory(() => ({ getDefaultChatId: () => "42", sendMessage: text }) as never);
     try {
       const repository = {
-        getSetting: async (_userId: string, key: string) =>
+        getSetting: async (_user: string, key: string) =>
           key === "telegram.bot_token" ? "123:token" : key === "telegram.chat_id" ? "42" : null,
         getWorkflow: async () => ({ metadata: graph.metadata }),
         getWorkflowGraph: async () => graph,
-        getExecution: async () => null,
+        getExecution: async () => live,
       } as unknown as IDataRepository;
-      await new TelegramNotificationHandler().execute(
+      const result = await new TelegramNotificationHandler(fixture.owner).execute(
         graph.nodes[1] as never,
-        { variables: {}, nodeStates: {}, executionId: "run", workflowId: "wf", userId: "u" },
+        {
+          variables: {},
+          nodeStates: {},
+          executionId: live.executionId,
+          workflowId: live.workflowId,
+          userId: live.userId,
+        },
         new AgentMessageQueue(),
         repository,
         {} as IGraphExecutionEngine,
         undefined,
         undefined,
-        () => live,
+        notificationLiveRun({ execution: live }, [], {}, "notify"),
       );
+      expect(result.data?.telegramNotificationSent).toBe(true);
+      expect(text).not.toHaveBeenCalled();
+      expect(fixture.submitted).toHaveLength(1);
+      expect(widths).toEqual([PROGRESS_STEPS_WIDTH * PROGRESS_STEPS_DENSITY]);
     } finally {
       resetClientFactory();
     }
-    expect(photos).toHaveLength(1);
-    const meta = await sharp(Buffer.from(photos[0])).metadata();
-    expect(meta.width).toBe(PROGRESS_STEPS_WIDTH * PROGRESS_STEPS_DENSITY);
   });
 });

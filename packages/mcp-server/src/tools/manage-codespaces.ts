@@ -1,28 +1,25 @@
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import {
   CodespaceConnectionError,
+  ScopedCredentialError,
   LocalDeviceError,
   CodespaceResourceError,
   createLogger,
-  projectCodespaceSummary,
   recordCodespaceRejection,
   localCodespaceFailureGuidance,
-  LOCAL_WORKER_REQUEST_TIMEOUT_MS,
-  type CodespaceObservabilityService,
+  parseLocalRepositoryTargetId,
+  providerFailureSchema,
+  type GitHubProviderFailure,
   type CodespaceConnectionService,
   type CodespaceGuidanceSituation,
   type CodespaceProviderGuidance,
-  type CodespaceResourceRecord,
-  type CodespaceResourceService,
+  type CodespaceSummaryView,
+  type CodespaceProviderBillingView,
 } from "@mcp-moira/shared";
 import { z } from "zod";
 import { WORKSPACE_REQUEST_ID_PATTERN } from "@mcp-moira/shared/workspace-request-id";
 import { getUserContext } from "../core/request-context.js";
-import {
-  executeWorkspaceAction,
-  type WorkspaceToolClient,
-  type WorkspaceAttachments,
-} from "./codespace-workspace.js";
+import { executeWorkspaceAction, type WorkspaceToolClient } from "./codespace-workspace.js";
 import {
   codespaceGetSchema,
   CODESPACE_ACTIONS,
@@ -121,6 +118,10 @@ export function parseCodespaceToolParams(params: unknown): CodespaceCall {
 }
 
 export interface CodespaceToolServices {
+  billing?: (userId: string) => Promise<CodespaceProviderBillingView>;
+  localController?: {
+    getOperation: (userId: string, deviceId: string, requestId: string) => Promise<unknown>;
+  };
   localRepositoryCreation?: {
     createRepository: (
       userId: string,
@@ -139,19 +140,6 @@ export interface CodespaceToolServices {
       input: { deviceId: string; repositoryId: string; requestId: string },
     ) => Promise<unknown>;
   };
-  github?: {
-    createOwnedPullRequest: (
-      userId: string,
-      resourceId: string,
-      input: { head: string; base: string; title: string; body?: string; draft?: boolean },
-    ) => Promise<unknown>;
-    getOwnedPullRequest: (userId: string, resourceId: string, number: number) => Promise<unknown>;
-    findOwnedPullRequests: (
-      userId: string,
-      resourceId: string,
-      input: { head: string; base: string },
-    ) => Promise<unknown>;
-  };
   provider?: string;
   providers?: CodespaceToolServices[];
   select?: (
@@ -159,28 +147,56 @@ export interface CodespaceToolServices {
     input: { repositoryId?: string; codespaceId?: string },
   ) => CodespaceToolServices;
   connection: Pick<CodespaceConnectionService, "getStatus" | "refreshGrants">;
-  observability: Pick<CodespaceObservabilityService, "readiness" | "limitsWithBilling">;
+  observability: Pick<
+    ReturnType<
+      typeof import("@mcp-moira/web-backend/services").getCodespaceProviderServices
+    >["observability"],
+    "readiness"
+  >;
   guidance: (situation: CodespaceGuidanceSituation) => {
     provider: string;
     situation: CodespaceGuidanceSituation;
     instruction: string | null;
     links: CodespaceProviderGuidance["links"];
   };
-  resource: Pick<
-    CodespaceResourceService,
-    | "listRepositories"
-    | "setupSituation"
-    | "listResources"
-    | "refreshProviderState"
-    | "getCodespace"
-    | "create"
-    | "startCodespace"
-    | "stopCodespace"
-    | "deleteCodespace"
-    | "waitForState"
-  > | null;
+  resource:
+    | (Pick<
+        NonNullable<
+          ReturnType<
+            typeof import("@mcp-moira/web-backend/services").getCodespaceProviderServices
+          >["resource"]
+        >,
+        | "listRepositories"
+        | "setupSituation"
+        | "listResources"
+        | "refreshProviderState"
+        | "getCodespace"
+        | "startCodespace"
+        | "stopCodespace"
+        | "deleteCodespace"
+      > & {
+        create: (
+          userId: string,
+          repositoryId: string,
+          ref: string,
+          requestId: string,
+          options?: { deviceId?: string; devcontainerPath?: string },
+        ) => Promise<CodespaceSummaryView>;
+        adopt?: (
+          userId: string,
+          id: string,
+          requestId: string,
+          expectedGeneration: number,
+          options: { deviceId?: string },
+        ) => Promise<CodespaceSummaryView>;
+        registerExisting?: (
+          userId: string,
+          providerName: string,
+          options: { requestId: string; deviceId?: string },
+        ) => Promise<CodespaceSummaryView>;
+      })
+    | null;
   workspace: WorkspaceToolClient;
-  attachments?: WorkspaceAttachments;
 }
 
 const PROVIDER_REFUSAL_CODES: ReadonlySet<string> = new Set([
@@ -208,6 +224,8 @@ const SAFE_ERROR_MESSAGES: Record<string, string> = {
   CODESPACE_BILLING_UNSUPPORTED:
     "GitHub would bill an organization for this repository; Moira supports only personally billed Codespaces.",
   CODESPACE_CREATE_PENDING: "Codespace creation or cleanup is still pending.",
+  WORKSPACE_OUTCOME_UNCONFIRMED:
+    "The result is not confirmed. Collect the original request_id with the operation action and its assigned device_id before submitting another mutation.",
   CODESPACE_NOT_RUNNING: "The codespace is not ready and running.",
   CODESPACE_START_TIMEOUT:
     "The codespace was started for this call but is still starting; retry the same call shortly.",
@@ -238,12 +256,17 @@ function jsonResult(data: Record<string, unknown>): CallToolResult {
   };
 }
 
-function retainedOutcomeError(response: CallToolResult, codespaceId?: string): CallToolResult {
-  if (!codespaceId) return response;
+function retainedOutcomeError(
+  response: CallToolResult,
+  codespaceId?: string,
+  identity: { request_id?: string; device_id?: string; security_request_id?: string } = {},
+): CallToolResult {
+  if (!codespaceId && !identity.request_id) return response;
   return {
     ...jsonResult({
       ...(response.structuredContent as Record<string, unknown>),
       ...(codespaceId ? { codespace_id: codespaceId } : {}),
+      ...identity,
     }),
     isError: true,
   };
@@ -259,38 +282,32 @@ const repositoryAdmissionResultSchema = z.object({
   links: z.object({ settings: z.string(), installation: z.string().nullable() }).optional(),
 });
 
-/** Repeat only the same durable admission request; its service never repeats GitHub creation. */
+/** Admission executes once on the owner; an incomplete receipt preserves its original identity. */
 async function completedRepositoryAdmission(read: () => Promise<unknown>): Promise<CallToolResult> {
-  const deadline = Date.now() + LOCAL_WORKER_REQUEST_TIMEOUT_MS + 120_000;
-  for (;;) {
-    const result = repositoryAdmissionResultSchema.parse(await read());
-    if (result.status === "applied" && result.local_repository_id) {
-      return jsonResult({
-        repository_id: result.local_repository_id,
-        ...(result.full_name ? { name: result.full_name } : {}),
-      });
-    }
-    if (result.status !== "pending" || Date.now() >= deadline) {
-      const error = result.error ?? {
-        code: "LOCAL_ADMISSION_UNCONFIRMED",
-        message:
-          result.instruction ??
-          "The computer has not confirmed repository access. Recover this same request without creating another repository.",
-      };
-      return {
-        ...jsonResult({
-          error: {
-            code: error.code,
-            message: error.message,
-            ...(result.links?.settings ? { settings_url: result.links.settings } : {}),
-          },
-          request_id: result.request_id,
-        }),
-        isError: true,
-      };
-    }
-    await new Promise((resolve) => setTimeout(resolve, 500));
+  const result = repositoryAdmissionResultSchema.parse(await read());
+  if (result.status === "applied" && result.local_repository_id) {
+    return jsonResult({
+      repository_id: result.local_repository_id,
+      ...(result.full_name ? { name: result.full_name } : {}),
+    });
   }
+  const error = result.error ?? {
+    code: "LOCAL_ADMISSION_UNCONFIRMED",
+    message:
+      result.instruction ??
+      "The computer has not confirmed repository access. Recover this same request without creating another repository.",
+  };
+  return {
+    ...jsonResult({
+      error: {
+        code: error.code,
+        message: error.message,
+        ...(result.links?.settings ? { settings_url: result.links.settings } : {}),
+      },
+      request_id: result.request_id,
+    }),
+    isError: true,
+  };
 }
 
 /** Codes whose refusal a user can act on, and which therefore carry the provider's links. */
@@ -306,6 +323,7 @@ export function errorResult(
   retryable = false,
   detail?: string,
   links: CodespaceProviderGuidance["links"] = [],
+  providerFailure?: GitHubProviderFailure,
 ): CallToolResult {
   const safeMessage =
     localCodespaceFailureGuidance(code)?.message ??
@@ -318,6 +336,7 @@ export function errorResult(
     code,
     message: detail ? `${safeMessage} ${detail}` : safeMessage,
     retryable,
+    ...(providerFailure ? { provider_failure: providerFailure } : {}),
     ...(settingsUrl && SETUP_ERROR_CODES.has(code) ? { settings_url: settingsUrl } : {}),
     ...(guided.length > 0
       ? { links: guided.map((link) => ({ id: link.id, url: link.url, label: link.label })) }
@@ -330,14 +349,21 @@ export function errorResult(
   };
 }
 
-function projectCodespace(codespace: CodespaceResourceRecord): Record<string, unknown> {
-  const summary = projectCodespaceSummary(codespace);
+function projectCodespace(summary: CodespaceSummaryView): Record<string, unknown> {
   const failure = summary.lifecycle_error;
   return {
-    codespace_id: codespace.id,
-    repository: codespace.repositoryFullName,
-    ref: codespace.observedRef ?? codespace.requestedRef,
-    state: codespace.state,
+    codespace_id: summary.codespace_id,
+    repository: summary.repository,
+    ref: summary.current_ref ?? summary.requested_ref,
+    state: summary.state,
+    provider: summary.provider,
+    generation: summary.generation,
+    pending_request_ids: summary.pending_request_ids ?? [],
+    ...(summary.device_id
+      ? { device_id: summary.device_id }
+      : summary.provider === "local-sandboxes"
+        ? { device_id: parseLocalRepositoryTargetId(summary.repository_id).deviceId }
+        : {}),
     ...(failure
       ? {
           error: {
@@ -355,20 +381,15 @@ function projectCodespace(codespace: CodespaceResourceRecord): Record<string, un
 async function loadServices(): Promise<CodespaceToolServices> {
   const services = await import("@mcp-moira/web-backend/services");
   const providers = services.getCodespaceProviderBundles();
-  const github = services.getLocalGitHubDeliveryService();
   const preferred =
     providers.find((provider) => provider.provider === "github-codespaces" && provider.resource) ??
     providers.find((provider) => provider.resource)!;
   return {
     ...preferred,
     providers,
-    github,
     workspace: services.getWorkspaceClient(),
-    attachments: {
-      fetcher: services.getCodespaceNativeReferenceFetcher(),
-      publisher: services.getCodespaceTransferService(),
-    },
     localRepositories: services.getLocalRepositoryAdmissionService(),
+    localController: services.getLocalDeviceService(),
     localRepositoryCreation: services.getLocalPrivateRepositoryCreationService(),
     select: services.selectCodespaceProviderServices,
   };
@@ -454,6 +475,28 @@ export async function executeCodespaceTool(
 ): Promise<CallToolResult> {
   const { action } = call;
   const params = call.request as CodespaceToolParams[CodespaceAction];
+  if (action === "operation") {
+    if (!services.localController) return errorResult("CODESPACE_NOT_CONFIGURED");
+    const input = call.request as CodespaceToolParams["operation"];
+    try {
+      const operation = await services.localController.getOperation(
+        userId,
+        input.device_id,
+        input.request_id,
+      );
+      return jsonResult(operation as Record<string, unknown>);
+    } catch (error) {
+      return error instanceof LocalDeviceError
+        ? {
+            ...jsonResult({
+              error: { code: error.code, message: error.message },
+              request_id: input.request_id,
+            }),
+            isError: true,
+          }
+        : errorResult("CODESPACE_PROVIDER_UNAVAILABLE");
+    }
+  }
   // Admission is device-scoped, before repository-provider selection: its GitHub ID is not yet
   // an approved local repository ID. Only owner-applied delegation can grant that authority.
   if (action === "local_devices" || action === "repository_add" || action === "repository_create") {
@@ -473,7 +516,13 @@ export async function executeCodespaceTool(
       if (!services.localRepositories) return errorResult("CODESPACE_NOT_CONFIGURED");
       if (action === "local_devices") {
         const discovery = (await services.localRepositories.listDevices(userId)) as {
-          devices: Array<{ device_id: string; label?: string; status?: string; enabled?: boolean }>;
+          devices: Array<{
+            device_id: string;
+            label?: string;
+            status?: string;
+            enabled?: boolean;
+            owner_available: boolean;
+          }>;
           installations?: Array<{ installation_id: string; owner: string }>;
           github_setup_required?: boolean;
         };
@@ -482,6 +531,7 @@ export async function executeCodespaceTool(
             device_id: device.device_id,
             ...(device.label !== undefined ? { label: device.label } : {}),
             ...(device.status !== undefined ? { status: device.status } : {}),
+            owner_available: device.owner_available,
             ...(device.enabled !== undefined ? { enabled: device.enabled } : {}),
           })),
           ...(discovery.installations
@@ -553,6 +603,13 @@ export async function executeCodespaceTool(
     const key = action === "list" ? "codespaces" : "repositories";
     return jsonResult({
       [key]: projections.flatMap((entry) => (entry[key] ?? []) as unknown[]),
+      ...(action === "list"
+        ? {
+            provider_billing:
+              projections.find((entry) => entry.provider === "github-codespaces")
+                ?.provider_billing ?? "unavailable",
+          }
+        : {}),
       ...(projections.some((entry) => entry.warning)
         ? {
             warning:
@@ -563,21 +620,37 @@ export async function executeCodespaceTool(
   }
   if (services.select && ("repository_id" in params || "codespace_id" in params)) {
     try {
-      const github = services.github;
-      const attachments = services.attachments;
+      const workspace = services.workspace;
       services = {
         ...services.select(userId, {
           ...("repository_id" in params ? { repositoryId: params.repository_id } : {}),
           ...("codespace_id" in params ? { codespaceId: params.codespace_id } : {}),
         }),
-        github,
-        attachments,
+        workspace,
       };
     } catch (error) {
       if (error instanceof CodespaceResourceError) return errorResult(error.code);
       reportUnexpectedFailure(action, error);
       return errorResult("INTERNAL_ERROR");
     }
+  }
+  if (
+    [
+      "exec",
+      "stat",
+      "search",
+      "read",
+      "write",
+      "apply_patch",
+      "upload",
+      "download",
+      "preview_image",
+      "pull_request_create",
+      "pull_request_get",
+      "pull_request_find",
+    ].includes(action)
+  ) {
+    return await executeWorkspaceAction(call, userId, services.workspace);
   }
   let status: ReturnType<CodespaceConnectionService["getStatus"]>;
   try {
@@ -588,6 +661,13 @@ export async function executeCodespaceTool(
   }
   let guidanceLinks: CodespaceProviderGuidance["links"] = [];
   let acceptedCodespaceId: string | undefined;
+  const lifecycleIdentity =
+    ["create", "start", "stop", "delete", "adopt"].includes(action) && "request_id" in params
+      ? {
+          request_id: params.request_id,
+          ...("device_id" in params && params.device_id ? { device_id: params.device_id } : {}),
+        }
+      : {};
   try {
     // The provider's destinations, read once: a refusal the user can act on carries the same set the
     // guidance action returns, so the two can never disagree.
@@ -606,16 +686,22 @@ export async function executeCodespaceTool(
           : { stale: listInput.refresh === true && grants.stale };
       status = services.connection.getStatus(userId);
       return jsonResult({
+        ...(action === "list" && services.billing
+          ? { provider_billing: await services.billing(userId) }
+          : {}),
         ...(action === "repositories"
           ? {
               repositories:
-                services.resource?.listRepositories(userId).map((repository) => ({
+                (await services.resource?.listRepositories(userId))?.map((repository) => ({
                   repository_id: repository.id,
                   name: repository.fullName,
                   private: repository.private,
                 })) ?? [],
             }
-          : { codespaces: services.resource?.listResources(userId).map(projectCodespace) ?? [] }),
+          : {
+              codespaces:
+                (await services.resource?.listResources(userId))?.map(projectCodespace) ?? [],
+            }),
         ...(grants.stale || resources.stale
           ? {
               warning:
@@ -634,10 +720,10 @@ export async function executeCodespaceTool(
       const input = params as CodespaceToolParams["setup_help"];
       const situation: CodespaceGuidanceSituation = !services.resource
         ? "not_configured"
-        : instance.state === "disabled" || instance.state === "control_disabled"
+        : instance.state === "disabled"
           ? "instance_disabled"
           : status.state === "connected"
-            ? services.resource.setupSituation(userId, input.repository_id)
+            ? await services.resource.setupSituation(userId, input.repository_id)
             : status.reason === "INSTALLATION_REQUIRED"
               ? "installation_required"
               : status.state === "refresh_failed" || status.state === "revocation_pending"
@@ -665,7 +751,7 @@ export async function executeCodespaceTool(
         );
       const input = params as CodespaceToolParams["get"];
       return jsonResult(
-        projectCodespace(services.resource.getCodespace(userId, input.codespace_id)),
+        projectCodespace(await services.resource.getCodespace(userId, input.codespace_id)),
       );
     }
 
@@ -674,7 +760,28 @@ export async function executeCodespaceTool(
       status = services.connection.getStatus(userId);
     }
 
+    if (
+      ["create", "start", "stop", "delete", "adopt"].includes(action) &&
+      !("request_id" in params && params.request_id)
+    )
+      return errorResult(
+        "CODESPACE_REQUEST_INVALID",
+        undefined,
+        false,
+        "Lifecycle changes require a caller-selected ws1 request_id.",
+      );
+
     const ready = requireReady(status, guidanceLinks);
+    if (
+      ["start", "stop", "delete"].includes(action) &&
+      !("generation" in params && params.generation)
+    )
+      return errorResult(
+        "CODESPACE_REQUEST_INVALID",
+        undefined,
+        false,
+        "Lifecycle changes require the observed resource generation.",
+      );
     if (isErrorResult(ready)) return ready;
     if (!services.resource) {
       return errorResult(
@@ -686,96 +793,134 @@ export async function executeCodespaceTool(
       );
     }
 
-    if (
-      [
-        "exec",
-        "stat",
-        "search",
-        "read",
-        "write",
-        "apply_patch",
-        "upload",
-        "download",
-        "preview_image",
-      ].includes(action)
-    ) {
-      return await executeWorkspaceAction(call, userId, services.workspace, {
-        attachments: services.attachments,
-      });
-    }
-
+    const observeLifecycle = (resourceId: string) =>
+      services.resource!.getCodespace(userId, resourceId);
     switch (action) {
-      case "pull_request_create": {
-        const { codespace_id, ...input } = params as CodespaceToolParams["pull_request_create"];
-        if (!services.github) return errorResult("CODESPACE_NOT_CONFIGURED", status.settingsUrl);
-        return jsonResult({
-          pull_request: await services.github.createOwnedPullRequest(userId, codespace_id, input),
-        });
-      }
-      case "pull_request_get": {
-        const input = params as CodespaceToolParams["pull_request_get"];
-        if (!services.github) return errorResult("CODESPACE_NOT_CONFIGURED", status.settingsUrl);
-        return jsonResult({
-          pull_request: await services.github.getOwnedPullRequest(
-            userId,
-            input.codespace_id,
-            input.pull_request_number,
-          ),
-        });
-      }
-      case "pull_request_find": {
-        const { codespace_id, ...input } = params as CodespaceToolParams["pull_request_find"];
-        if (!services.github) return errorResult("CODESPACE_NOT_CONFIGURED", status.settingsUrl);
-        return jsonResult({
-          pull_requests: await services.github.findOwnedPullRequests(userId, codespace_id, input),
-        });
-      }
       case "create": {
         const input = params as CodespaceToolParams["create"];
-        const created = await services.resource.create(userId, input.repository_id, input.ref);
-        acceptedCodespaceId = created.resource.id;
-        return jsonResult(
-          projectCodespace(
-            await services.resource.waitForState(userId, created.resource.id, "usable"),
-          ),
+        if (services.provider === "local-sandboxes" && (input.device_id || input.devcontainer_path))
+          return errorResult(
+            "CODESPACE_REQUEST_INVALID",
+            undefined,
+            false,
+            "GitHub provisioning options do not apply to Local repository targets.",
+          );
+        const created = await services.resource.create(
+          userId,
+          input.repository_id,
+          input.ref,
+          input.request_id,
+          services.provider === "github-codespaces"
+            ? { deviceId: input.device_id, devcontainerPath: input.devcontainer_path }
+            : undefined,
         );
+        acceptedCodespaceId = created.codespace_id;
+        return jsonResult({ ...projectCodespace(created), request_id: input.request_id });
+      }
+      case "adopt": {
+        if (services.provider !== "github-codespaces" || !services.resource.adopt)
+          return errorResult(
+            "CODESPACE_REQUEST_INVALID",
+            undefined,
+            false,
+            "Adoption applies to an owned GitHub Codespace.",
+          );
+        const input = params as CodespaceToolParams["adopt"];
+        let resourceId: string, generation: number;
+        if ("codespace_id" in input) {
+          resourceId = input.codespace_id;
+          generation = input.generation;
+        } else {
+          if (!services.resource.registerExisting)
+            return errorResult("CODESPACE_PROVIDER_UNAVAILABLE");
+          const registered = await services.resource.registerExisting(
+            userId,
+            input.provider_resource_name,
+            { requestId: input.request_id, deviceId: input.device_id },
+          );
+          resourceId = registered.codespace_id;
+          generation = registered.generation;
+        }
+        acceptedCodespaceId = resourceId;
+        const adopted = await services.resource.adopt(
+          userId,
+          resourceId,
+          input.request_id,
+          generation,
+          { deviceId: input.device_id },
+        );
+        return jsonResult({ ...projectCodespace(adopted), request_id: input.request_id });
       }
       case "start": {
         const input = params as CodespaceToolParams["start"];
-        await services.resource.startCodespace(userId, input.codespace_id);
-        acceptedCodespaceId = input.codespace_id;
-        return jsonResult(
-          projectCodespace(
-            await services.resource.waitForState(userId, input.codespace_id, "usable"),
-          ),
+        await services.resource.startCodespace(
+          userId,
+          input.codespace_id,
+          input.request_id,
+          input.generation,
         );
+        acceptedCodespaceId = input.codespace_id;
+        return jsonResult({
+          ...projectCodespace(await observeLifecycle(input.codespace_id)),
+          request_id: input.request_id,
+        });
       }
       case "stop": {
         const input = params as CodespaceToolParams["stop"];
-        await services.resource.stopCodespace(userId, input.codespace_id);
-        acceptedCodespaceId = input.codespace_id;
-        return jsonResult(
-          projectCodespace(
-            await services.resource.waitForState(userId, input.codespace_id, "stopped"),
-          ),
+        await services.resource.stopCodespace(
+          userId,
+          input.codespace_id,
+          input.request_id,
+          input.generation,
         );
+        acceptedCodespaceId = input.codespace_id;
+        return jsonResult({
+          ...projectCodespace(await observeLifecycle(input.codespace_id)),
+          request_id: input.request_id,
+        });
       }
       case "delete": {
         const input = params as CodespaceToolParams["delete"];
-        const current = services.resource.getCodespace(userId, input.codespace_id);
-        await services.resource.deleteCodespace(userId, input.codespace_id, current.generation);
+        await services.resource.deleteCodespace(userId, input.codespace_id, input.generation, {
+          requestId: input.request_id,
+        });
         acceptedCodespaceId = input.codespace_id;
-        return jsonResult(
-          projectCodespace(
-            await services.resource.waitForState(userId, input.codespace_id, "deleted"),
-          ),
-        );
+        return jsonResult({
+          ...projectCodespace(await observeLifecycle(input.codespace_id)),
+          request_id: input.request_id,
+        });
       }
     }
     // `list` and `get` answered above, before the readiness gate; the compiler knows they cannot
     // reach this switch, which is why they are not cases of it.
     return errorResult("CODESPACE_REQUEST_INVALID");
   } catch (error) {
+    if (error instanceof ScopedCredentialError)
+      return retainedOutcomeError(
+        {
+          ...jsonResult({
+            error: { code: error.code, message: error.message, retryable: false },
+          }),
+          isError: true,
+        },
+        z.string().uuid().safeParse(error.resourceId).success
+          ? error.resourceId
+          : acceptedCodespaceId,
+        {
+          ...lifecycleIdentity,
+          ...(typeof error.requestId === "string" &&
+          WORKSPACE_REQUEST_ID_PATTERN.test(error.requestId)
+            ? { request_id: error.requestId }
+            : {}),
+          ...(z.string().uuid().safeParse(error.deviceId).success
+            ? { device_id: error.deviceId }
+            : {}),
+          ...(typeof error.securityRequestId === "string" &&
+          WORKSPACE_REQUEST_ID_PATTERN.test(error.securityRequestId)
+            ? { security_request_id: error.securityRequestId }
+            : {}),
+        },
+      );
     if (error instanceof LocalDeviceError)
       return retainedOutcomeError(
         {
@@ -785,8 +930,13 @@ export async function executeCodespaceTool(
           isError: true,
         },
         acceptedCodespaceId,
+        lifecycleIdentity,
       );
     if (error instanceof CodespaceConnectionError || error instanceof CodespaceResourceError) {
+      const providerFailure =
+        error instanceof CodespaceResourceError
+          ? providerFailureSchema.safeParse(error.providerFailure)
+          : null;
       recordCodespaceRejection(error.code);
       if (PROVIDER_REFUSAL_CODES.has(error.code)) {
         // The bounded internal message names only the provider's HTTP status; operators need
@@ -811,12 +961,32 @@ export async function executeCodespaceTool(
           // bounded detail it already declared safe and never derives one from the error code.
           error instanceof CodespaceResourceError ? error.detail : undefined,
           guidanceLinks,
+          providerFailure?.success ? providerFailure.data : undefined,
         ),
-        acceptedCodespaceId,
+        error instanceof CodespaceResourceError &&
+          z.string().uuid().safeParse(error.resourceId).success
+          ? error.resourceId
+          : acceptedCodespaceId,
+        {
+          ...lifecycleIdentity,
+          ...(error instanceof CodespaceResourceError &&
+          typeof error.requestId === "string" &&
+          WORKSPACE_REQUEST_ID_PATTERN.test(error.requestId)
+            ? { request_id: error.requestId }
+            : {}),
+          ...(error instanceof CodespaceResourceError &&
+          z.string().uuid().safeParse(error.deviceId).success
+            ? { device_id: error.deviceId }
+            : {}),
+        },
       );
     }
     reportUnexpectedFailure(action, error);
-    return retainedOutcomeError(errorResult("INTERNAL_ERROR"), acceptedCodespaceId);
+    return retainedOutcomeError(
+      errorResult("INTERNAL_ERROR"),
+      acceptedCodespaceId,
+      lifecycleIdentity,
+    );
   }
 }
 

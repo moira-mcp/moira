@@ -11,8 +11,9 @@ and pauses on the node for retry. Communication channels are transports used by 
 `user-notification` node and by Moira's own «waiting for you» notifications and reminders; they are
 not node types and never receive workflow or user identity.
 
-Extension code never runs in the Moira application processes. The runner imports each bundle in a
-separate child process. This contains crashes and deadlines, but it is not a hostile-code sandbox:
+Extension code never runs in the Moira application processes. Ordinary node and text handlers
+run in separate runner child processes; binary handlers run beside the source at its file owner.
+These process boundaries contain crashes but are not a hostile-code sandbox:
 administrators must install only code they trust.
 
 ## Bundle layout
@@ -264,11 +265,76 @@ const notifications = defineChannel({
 export default defineExtension({ communicationChannels: [notifications] });
 ```
 
-The handler receives a portable message, the schema-checked non-secret settings, an abort signal,
-and only `fetch` and `secret`. It has no logging or artifact service. If the handler repeats
-`configurationSchema` in `defineChannel`, it must exactly match the manifest. Text is always
-available; declare image or document support only when the handler handles the optional binary
-attachment and its filename and MIME type. One generic attachment is limited to 20 MiB.
+The ordinary text handler receives a portable message, schema-checked nonsecret settings,
+an abort signal and only `fetch` and `secret`. It has no logging or artifact service.
+If `defineChannel` repeats `configurationSchema`, it must exactly match the manifest.
+
+### Streaming binary delivery
+
+A channel supporting images or documents additionally declares `binaryTransport` and exports
+`binaryHandler`. Set its image/document capabilities only for supported types. Add this
+fragment inside the channel declaration; retain the declared token/default_chat settings
+and grant `api.example.com` in the channel's `permissions.network`:
+
+```json
+{
+  "binaryTransport": {
+    "operations": [
+      {
+        "id": "upload",
+        "endpoint": { "url": "https://api.example.com/files" },
+        "method": "POST",
+        "credential": {
+          "header": "authorization",
+          "secret": "corporate-messenger.token",
+          "scheme": "Bearer"
+        },
+        "recipient": {
+          "field": "chat",
+          "setting": "corporate-messenger.default_chat"
+        },
+        "body": {
+          "mode": "multipart",
+          "fileField": "file",
+          "controls": { "caption": "caption", "format": "format", "silent": "silent" }
+        }
+      }
+    ]
+  }
+}
+```
+
+Add this method to the existing `defineChannel` object alongside the ordinary text `handler`:
+
+```typescript
+async binaryHandler({ message, signal, services }) {
+  signal.throwIfAborted();
+  await services.send("upload", {
+    caption: message.text,
+    format: message.format,
+    silent: message.silent,
+  });
+}
+```
+
+The binary handler receives nonsecret settings, cancellation and `message.attachment` metadata:
+`kind`, `filename`, `mimeType`, `size`, `sha256`, plus `open()` returning a
+`ReadableStream<Uint8Array>`. It runs beside the immutable source at the selected workspace
+or paired controller, not in the ordinary text runner. It receives no cloud secret or arbitrary
+authenticated fetch.
+
+`services.send` chooses a declared operation and streams that captured source. Cloud Moira
+resolves the current secret and recipient and constructs vendor framing. The handler cannot
+supply a URL, request headers, credentials, destination or prebuilt multipart.
+An endpoint may instead use a declared nonsecret `baseUrlSetting` plus a fixed path;
+the resolved host must still be granted. Raw mode uses the declared recipient header,
+which must not collide with authentication or framing headers. Multipart recipient, file
+and control fields must be distinct.
+
+The original owner delivery ID binds the installed bundle and channel configuration.
+Changes refuse stale delivery rather than redirecting it. After a vendor stage may have
+started, uncertain results remain uncertain; collection never repeats a stage. An observer
+disconnect is not evidence that no delivery occurred.
 
 ## Trusted delivery approval
 

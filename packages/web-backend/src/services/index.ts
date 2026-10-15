@@ -6,10 +6,20 @@ export { TokenManager, type WorkflowToken } from "@mcp-moira/shared";
 export { WorkflowValidationService } from "./validation-service.js";
 export { getCodespaceConnectionService } from "./codespace-connection-service.js";
 export { getCodespaceResourceService } from "./codespace-resource-service.js";
-export { getWorkspaceClient } from "./workspace-client.js";
-export { issueWorkspaceAgentCredential } from "./workspace-services.js";
-export { getCodespaceTransferService } from "./codespace-transfer-service.js";
-export { getLocalGitHubDeliveryService } from "./local-github-delivery-factory.js";
+export { getWorkspaceClient, getControllerClient } from "./workspace-client.js";
+export {
+  issueWorkspaceAgentCredential,
+  authorizeWorkspacePublication,
+} from "./workspace-services.js";
+export { initializeCommunicationFileOwner } from "./communication-file-owner.js";
+export { CommunicationOwnerTransport } from "./communication-owner-transport.js";
+export {
+  authenticateCommunicationOwner,
+  authorizeCommunicationOwner,
+  authorizeControllerPublication,
+} from "./communication-owner-authority.js";
+export { createCommunicationOwnerRoutes } from "../routes/communication-owner.js";
+export { getLocalGitIdentityService } from "./local-git-identity-factory.js";
 export { getLocalRepositoryAdmissionService } from "./local-repository-admission-factory.js";
 export { getLocalPrivateRepositoryCreationService } from "./local-private-repository-creation-factory.js";
 export {
@@ -19,5 +29,4 @@ export {
   getCodespaceProviderBundles,
   selectCodespaceProviderServices,
   getLocalDeviceService,
-  getCodespaceNativeReferenceFetcher,
 } from "./codespace-services.js";

@@ -5,13 +5,17 @@ import { randomUUID } from "node:crypto";
 /** The image, provider installers and CLI consume these same complete programs. */
 export async function buildWorkspaceService(output = "packages/workspace-service/dist") {
   await mkdir(output, { recursive: true });
-  for (const entry of ["daemon", "cli", "local-bootstrap", "guest-proxy"]) {
+  const entries = {
+    daemon: "packages/workspace-service/src/daemon.mjs",
+    cli: "packages/workspace-service/src/cli.mjs",
+    "local-bootstrap": "packages/workspace-service/src/local-bootstrap.mjs",
+    "guest-proxy": "packages/local/src/guest-proxy.ts",
+    "owner-renderer": "packages/workspace-service/src/owner-renderer.mjs",
+    "extension-handler-host": "packages/extension-runner/src/binary-handler-host.mjs",
+  };
+  for (const [entry, entryPoint] of Object.entries(entries)) {
     const result = await build({
-      entryPoints: [
-        entry === "guest-proxy"
-          ? "packages/local/src/guest-proxy.ts"
-          : `packages/workspace-service/src/${entry}.mjs`,
-      ],
+      entryPoints: [entryPoint],
       bundle: true,
       platform: "node",
       target: "node24",
@@ -19,6 +23,7 @@ export async function buildWorkspaceService(output = "packages/workspace-service
       write: false,
       sourcemap: false,
       legalComments: "none",
+      external: ["sharp", "tar-stream"],
       outfile: `${output}/${entry}.mjs`,
     });
     const target = `${output}/${entry}.mjs`;

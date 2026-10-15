@@ -10,6 +10,7 @@ import * as http from "http";
 import Ajv, { type ValidateFunction } from "ajv";
 import { scanExtensionBundles, type BundleScanResult } from "./bundle-loader.js";
 import { ExtensionHost } from "./extension-host.js";
+import { compileBinaryExtensionArtifact, type BinaryExtensionArtifact } from "./binary-artifact.js";
 import {
   EXTENSION_RUNNER_API_VERSION,
   type RunnerChannelCheckRequest,
@@ -38,7 +39,6 @@ export interface RunningRunner {
 }
 
 const MAX_BODY_BYTES = 1_000_000;
-const MAX_COMMUNICATION_BODY_BYTES = 28 * 1024 * 1024;
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
@@ -61,23 +61,11 @@ function validCommunicationDelivery(request: RunnerChannelDeliverRequest): boole
     )
       return false;
   }
-  const attachment = request.message.attachment;
-  if (!attachment) return true;
-  if (
-    !isPlainRecord(attachment) ||
-    (attachment.kind !== "image" && attachment.kind !== "document") ||
-    attachment.encoding !== "base64" ||
-    typeof attachment.data !== "string" ||
-    typeof attachment.filename !== "string" ||
-    typeof attachment.mimeType !== "string" ||
-    attachment.data.length % 4 !== 0 ||
-    !/^[A-Za-z0-9+/]*={0,2}$/.test(attachment.data)
-  )
-    return false;
-  return Buffer.from(attachment.data, "base64").toString("base64") === attachment.data;
+  return request.message.attachment === undefined;
 }
 
 export class ExtensionRunnerService {
+  private binaryArtifacts = new Map<string, Promise<BinaryExtensionArtifact>>();
   private hosts = new Map<string, ExtensionHost>();
   private hostByNodeType = new Map<string, ExtensionHost>();
   private hostByCommunicationChannelId = new Map<string, ExtensionHost>();
@@ -135,6 +123,21 @@ export class ExtensionRunnerService {
         permissions: host.manifest.permissions,
       })),
     };
+  }
+
+  async binaryArtifact(channelId: string): Promise<BinaryExtensionArtifact> {
+    const bundle = this.scan.bundles.find((value) =>
+      value.manifest.communicationChannels?.some(
+        (channel) => channel.id === channelId && channel.binaryTransport,
+      ),
+    );
+    if (!bundle) throw new Error("No installed binary channel provides this artifact");
+    let artifact = this.binaryArtifacts.get(bundle.manifest.name);
+    if (!artifact) {
+      artifact = compileBinaryExtensionArtifact(bundle);
+      this.binaryArtifacts.set(bundle.manifest.name, artifact);
+    }
+    return artifact;
   }
 
   async invoke(request: RunnerInvokeRequest, signal?: AbortSignal): Promise<RunnerInvokeResponse> {
@@ -306,6 +309,28 @@ export async function startExtensionRunner(options: RunnerOptions): Promise<Runn
 
     const url = new URL(request.url ?? "/", "http://runner.local");
 
+    const artifactPath = /^\/channels\/([^/]+)\/binary-artifact$/.exec(url.pathname);
+    if (request.method === "GET" && artifactPath) {
+      void service
+        .binaryArtifact(decodeURIComponent(artifactPath[1]))
+        .then((artifact) => {
+          response.writeHead(200, {
+            "content-type": "application/octet-stream",
+            "content-length": artifact.bytes.byteLength,
+            "x-moira-artifact-digest": artifact.digest,
+          });
+          response.end(artifact.bytes);
+        })
+        .catch(() =>
+          send(422, {
+            ok: false,
+            kind: "invalid-input",
+            message: "Installed extension cannot be packaged for owner binary delivery",
+          }),
+        );
+      return;
+    }
+
     if (request.method === "GET" && url.pathname === "/health") {
       send(200, service.health());
       return;
@@ -355,9 +380,7 @@ export async function startExtensionRunner(options: RunnerOptions): Promise<Runn
       response.once("close", () => {
         if (!response.writableEnded) controller.abort();
       });
-      const maxBytes =
-        url.pathname === "/channels/deliver" ? MAX_COMMUNICATION_BODY_BYTES : MAX_BODY_BYTES;
-      void readBody(request, maxBytes)
+      void readBody(request)
         .then(async (raw) => {
           let parsed: RunnerChannelCheckRequest | RunnerChannelDeliverRequest;
           try {

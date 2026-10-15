@@ -109,6 +109,18 @@ metadata, separate from its own flow name and arbitrary note. A progress read re
 identity and execution state without inventing a process or route. Explicit naming does not
 create blocks for a graph-only flow.
 
+The PNG is rendered and published by a live paired controller. Select it with `device_id` on
+`session({ action: "progress-image-token", executionId, device_id })`; omission requires exactly
+one eligible live controller. `COMMUNICATION_OWNER_UNAVAILABLE` is a coded MCP failure and HTTP
+503 on mint/public read. Restore the paired connection rather than recreating a VM.
+Ordinary progress reads and text notifications need no owner; an unavailable optional
+notification image is omitted while text is attempted independently.
+
+The one-use progress URL and the immutable owner publication have different lifetimes.
+Successful HTTP completion consumes the progress grant; rendering/stream failure releases
+its claim, and an error response finishing does not consume it. The publication supports
+repeated reads until its own expiry under current authority.
+
 ## Making a workflow readable
 
 Name blocks for what a person would call the stage, keep descriptions to one sentence, label

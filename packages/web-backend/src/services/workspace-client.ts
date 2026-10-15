@@ -4,11 +4,19 @@ import { jsonResponse, sendHttp } from "./workspace-router.js";
 
 export const WORKSPACE_ROUTER_SOCKET = "/tmp/moira-workspace-router/router.sock";
 
-export function createWorkspaceClient(socketPath = WORKSPACE_ROUTER_SOCKET): WorkspaceClient {
+export function createWorkspaceClient(
+  socketPath = WORKSPACE_ROUTER_SOCKET,
+  kind: "workspace" | "controller" = "workspace",
+): WorkspaceClient {
   const request: WorkspaceClient["request"] = (userId, resourceId, input, signal) => {
     const outgoing: WorkspaceRequest = {
       ...input,
-      headers: { ...input.headers, "x-moira-user-id": userId, "x-moira-resource-id": resourceId },
+      headers: {
+        ...input.headers,
+        "x-moira-user-id": userId,
+        "x-moira-resource-id": resourceId,
+        "x-moira-endpoint-kind": kind,
+      },
     };
     return sendHttp(outgoing, signal, (ready) => {
       const socket = connect({ path: socketPath });
@@ -49,6 +57,13 @@ export function createWorkspaceClient(socketPath = WORKSPACE_ROUTER_SOCKET): Wor
 }
 
 let client: WorkspaceClient | undefined;
+let controllerClient: WorkspaceClient | undefined;
+export function createControllerClient(socketPath = WORKSPACE_ROUTER_SOCKET): WorkspaceClient {
+  return createWorkspaceClient(socketPath, "controller");
+}
+export function getControllerClient(): WorkspaceClient {
+  return (controllerClient ??= createControllerClient());
+}
 export function getWorkspaceClient(): WorkspaceClient {
   return (client ??= createWorkspaceClient());
 }

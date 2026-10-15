@@ -67,13 +67,14 @@ export async function initializeLocal(
       "This local device is already initialized.",
     );
   const binary = await findRuntime(options.binary, environment);
-  const deviceId = randomUUID();
+  const identity = await new LocalRecords(state).deviceIdentity();
+  const deviceId = identity?.deviceId ?? randomUUID();
   const capacity = (options.storageGiB ?? 32) * GiB;
   const storageRoot = options.storageRoot ?? join(state.root, "storage");
   const policy = localPolicySchema.parse({
     version: 1,
     deviceId,
-    label: options.label ?? hostname(),
+    label: options.label ?? identity?.label ?? hostname(),
     enabled: false,
     leaseUntil: 0,
     runtime: {

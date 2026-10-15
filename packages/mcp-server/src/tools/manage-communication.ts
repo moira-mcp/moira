@@ -1,109 +1,52 @@
 import {
   AuditAction,
-  CommunicationAttachmentGrantService,
-  CommunicationGrantQuotaError,
-  CodespaceResourceError,
-  getBaseUrl,
   logAuditEventDirect,
-  type CodespaceTransferService,
+  communicationOwnerReceiptSchema,
 } from "@mcp-moira/shared";
-import { DatabaseRepository, getActiveUserCommunicationService } from "@mcp-moira/workflow-engine";
+import {
+  DatabaseRepository,
+  getActiveCommunicationFileOwner,
+  getActiveUserCommunicationService,
+  type CommunicationFileOwner,
+} from "@mcp-moira/workflow-engine";
 import { getUserContext } from "../core/request-context.js";
 import type { z } from "zod";
 import type { communicationSchema } from "./tool-schemas.js";
 import type { ToolCallResult } from "./tool-bindings.js";
 
 type CommunicationInput = z.infer<typeof communicationSchema>;
-
 export interface ManageCommunicationDependencies {
-  communicationService: Pick<ReturnType<typeof getActiveUserCommunicationService>, "deliver"> &
-    Partial<Pick<ReturnType<typeof getActiveUserCommunicationService>, "deliverChannel">>;
-  transfers?: Pick<CodespaceTransferService, "getOwnedSource">;
+  communicationService: Pick<ReturnType<typeof getActiveUserCommunicationService>, "deliver">;
+  owner?: CommunicationFileOwner;
   repository: DatabaseRepository;
-  grantService: CommunicationAttachmentGrantService;
-  baseUrl: string;
   audit: typeof logAuditEventDirect;
 }
-
 function result(value: unknown, isError = false): ToolCallResult {
   return {
     content: [{ type: "text", text: JSON.stringify(value, null, 2) }],
     ...(isError && { isError: true }),
   };
 }
-
+function ownerResult(value: unknown): ToolCallResult {
+  const receipt = communicationOwnerReceiptSchema.passthrough().parse(value);
+  return result(value, receipt.state === "unconfirmed" || receipt.outcome?.ok === false);
+}
 export function createManageCommunication(dependencies: ManageCommunicationDependencies) {
   return async (input: CommunicationInput): Promise<ToolCallResult> => {
     const { userId } = getUserContext();
-    const { communicationService, repository, grantService, baseUrl, audit } = dependencies;
-    if (input.action === "deliver-file") {
-      if (
-        !input.referenceId ||
-        !dependencies.transfers ||
-        [input.filename, input.mimeType, input.sizeBytes].some((field) => field !== undefined)
-      ) {
-        return result({ status: "rejected", reason: "private_file_reference_required" }, true);
-      }
-      let owned: Awaited<ReturnType<CodespaceTransferService["getOwnedSource"]>>;
-      try {
-        owned = await dependencies.transfers.getOwnedSource(userId, input.referenceId);
-      } catch (error) {
-        if (error instanceof CodespaceResourceError) {
-          return result({ status: "rejected", reason: "private_file_unavailable" }, true);
-        }
-        throw error;
-      }
-      const kind = input.kind ?? "document";
-      if (
-        (kind === "image" && !["image/png", "image/jpeg"].includes(owned.record.mimeType)) ||
-        (kind === "document" && owned.record.mimeType.startsWith("image/"))
-      ) {
-        return result({ status: "rejected", reason: "attachment_kind_mime_mismatch" }, true);
-      }
-      const request = {
-        userId,
-        text: input.message,
-        format: input.format,
-        silent: input.silent,
-        purpose: "notification" as const,
-        attachment: {
-          kind,
-          source: owned.source,
-          filename: owned.record.fileName,
-          mimeType: owned.record.mimeType,
-        },
-      };
-      const delivery = input.channelId
-        ? await communicationService.deliverChannel?.(input.channelId, request, repository)
-        : await communicationService.deliver(request, repository);
-      if (!delivery) return result({ status: "rejected", reason: "channel_unavailable" }, true);
-      await audit(repository, {
-        userId,
-        action: AuditAction.MCP_COMMUNICATION_ATTACHMENT_DELIVER,
-        resource: "communication",
-        resourceId: owned.record.id,
-        metadata: {
-          kind,
-          declaredSize: owned.source.size,
-          status: delivery.status,
-          configuredChannels: delivery.configuredChannels,
-          deliveredChannels: delivery.deliveredChannels,
-        },
-      });
-      return result(delivery, delivery.status === "all_failed");
-    }
-    if (input.referenceId || input.channelId) {
-      return result({ status: "rejected", reason: "private_file_fields_not_allowed" }, true);
-    }
     if (input.action === "send") {
       if (
-        [input.kind, input.filename, input.mimeType, input.sizeBytes].some(
-          (field) => field !== undefined,
-        )
-      ) {
-        return result({ status: "rejected", reason: "attachment_fields_not_allowed" }, true);
-      }
-      const delivery = await communicationService.deliver(
+        !input.message ||
+        input.referenceId ||
+        input.file ||
+        input.kind ||
+        input.channelId ||
+        input.request_id ||
+        input.device_id ||
+        input.codespace_id
+      )
+        return result({ status: "rejected", reason: "text_fields_required" }, true);
+      const delivery = await dependencies.communicationService.deliver(
         {
           userId,
           text: input.message,
@@ -111,9 +54,9 @@ export function createManageCommunication(dependencies: ManageCommunicationDepen
           silent: input.silent,
           purpose: "notification",
         },
-        repository,
+        dependencies.repository,
       );
-      await audit(repository, {
+      await dependencies.audit(dependencies.repository, {
         userId,
         action: AuditAction.MCP_COMMUNICATION_SEND,
         resource: "communication",
@@ -125,64 +68,94 @@ export function createManageCommunication(dependencies: ManageCommunicationDepen
       });
       return result(delivery, delivery.status === "all_failed");
     }
-
+    if (!input.request_id)
+      return result({ status: "rejected", reason: "original_request_id_required" }, true);
+    if (
+      input.action === "operation" &&
+      ((!input.device_id && !input.codespace_id) ||
+        (input.device_id && input.codespace_id) ||
+        input.file ||
+        input.referenceId ||
+        input.message !== undefined ||
+        input.kind ||
+        input.channelId ||
+        input.format ||
+        input.silent !== undefined)
+    )
+      return result({ status: "rejected", reason: "original_owner_identity_required" }, true);
     try {
-      if (!input.kind || !input.filename || !input.mimeType || input.sizeBytes === undefined) {
-        return result({ status: "rejected", reason: "attachment_metadata_required" }, true);
+      const owner = dependencies.owner ?? getActiveCommunicationFileOwner();
+      if (input.action === "operation") {
+        return ownerResult(
+          await owner.collect(userId, input.request_id, {
+            deviceId: input.device_id,
+            resourceId: input.codespace_id,
+          }),
+        );
       }
-      const mimeType = input.mimeType.toLowerCase();
       if (
-        (input.kind === "image" && !["image/png", "image/jpeg"].includes(mimeType)) ||
-        (input.kind === "document" && mimeType.startsWith("image/"))
-      ) {
-        return result({ status: "rejected", reason: "attachment_kind_mime_mismatch" }, true);
-      }
-      const created = grantService.create({
+        (!input.file && !input.referenceId) ||
+        (input.file && input.referenceId) ||
+        input.codespace_id
+      )
+        return result({ status: "rejected", reason: "one_owner_source_required" }, true);
+      const source = input.file
+        ? {
+            type: "native" as const,
+            file: {
+              fileId: input.file.file_id,
+              downloadUrl: input.file.download_url,
+              fileName: input.file.file_name,
+              mimeType: input.file.mime_type,
+              declaredSize: input.file.size_bytes,
+            },
+          }
+        : { type: "publication" as const, referenceId: input.referenceId! };
+      const receipt = await owner.submit(
         userId,
-        message: input.message,
-        format: input.format,
-        silent: input.silent,
-        kind: input.kind,
-        filename: input.filename,
-        mimeType,
-        declaredSize: input.sizeBytes,
-      });
-      await audit(repository, {
-        userId,
-        action: AuditAction.MCP_COMMUNICATION_GRANT_CREATE,
-        resource: "communication",
-        resourceId: created.correlationId,
-        metadata: { kind: input.kind, declaredSize: input.sizeBytes },
-      });
-      return result({
-        uploadUrl: `${baseUrl}/api/communication/attachments`,
-        grant: created.grant,
-        expiresAt: new Date(created.expiresAt).toISOString(),
-        correlationId: created.correlationId,
-        requiredHeaders: {
-          Authorization: "Bearer <valid MCP credential for the same user>",
-          "X-Moira-Communication-Grant": "<grant>",
-          "Content-Type": mimeType,
-          "Content-Length": input.sizeBytes,
+        {
+          action: "deliver",
+          requestId: input.request_id,
+          source,
+          kind: input.kind ?? "document",
+          text: input.message ?? "",
+          format: input.format,
+          silent: input.silent,
+          ...(input.channelId ? { channelIds: [input.channelId] } : {}),
         },
-      });
+        input.device_id,
+      );
+      return ownerResult(receipt);
     } catch (error) {
-      if (error instanceof CommunicationGrantQuotaError) {
-        return result({ status: "rejected", reason: "outstanding_grant_quota" }, true);
-      }
-      throw error;
+      const code =
+        error && typeof error === "object" && "code" in error && typeof error.code === "string"
+          ? error.code
+          : "COMMUNICATION_OUTCOME_UNCONFIRMED";
+      return result(
+        {
+          status: code === "COMMUNICATION_OWNER_UNAVAILABLE" ? "unavailable" : "unconfirmed",
+          error: {
+            code,
+            message:
+              code === "COMMUNICATION_OWNER_UNAVAILABLE"
+                ? "The selected owner is unavailable; no delivery was admitted."
+                : "The delivery outcome is unconfirmed. Collect the original request before another explicit action.",
+          },
+          request_id: input.request_id,
+          ...(input.device_id ? { device_id: input.device_id } : {}),
+          ...(input.codespace_id ? { codespace_id: input.codespace_id } : {}),
+        },
+        true,
+      );
     }
   };
 }
-
 export async function manageCommunication(input: CommunicationInput): Promise<ToolCallResult> {
-  const { getCodespaceTransferService } = await import("@mcp-moira/web-backend/services");
+  const { initializeCommunicationFileOwner } = await import("@mcp-moira/web-backend/services");
+  initializeCommunicationFileOwner();
   return createManageCommunication({
     communicationService: getActiveUserCommunicationService(),
     repository: new DatabaseRepository(),
-    grantService: new CommunicationAttachmentGrantService(),
-    baseUrl: getBaseUrl(),
     audit: logAuditEventDirect,
-    ...(input.action === "deliver-file" ? { transfers: getCodespaceTransferService() } : {}),
   })(input);
 }

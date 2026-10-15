@@ -30,7 +30,7 @@ import {
   type ProgressTheme,
 } from "./execution-progress-visual.js";
 import type { RenderedExecutionProgressImage } from "./execution-progress-image.js";
-import { projectExecutionRun } from "./execution-run-projection.js";
+import { projectExecutionRun } from "./execution-run-projection-core.js";
 import { listProgressLabel } from "./progress-facts.js";
 
 /** The width a phone shows a picture at, in CSS pixels; the picture is drawn at exactly this. */
@@ -271,8 +271,11 @@ export async function renderProgressStepsPng(
 export async function renderExecutionProgressStepsImage(
   workflow: WorkflowGraph,
   execution: WorkflowExecution,
+  renderContext?: { runUrl: string },
 ): Promise<RenderedExecutionProgressImage | null> {
-  const progress = projectExecutionRun(workflow, execution);
+  const progress = projectExecutionRun(workflow, execution, {
+    resolveRunUrl: renderContext ? () => renderContext.runUrl : undefined,
+  });
   if (!progress) return null;
   const { png, model } = await renderProgressStepsPng(progress);
   return {

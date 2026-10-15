@@ -2,142 +2,89 @@ import { randomBytes, randomUUID } from "node:crypto";
 import { test, expect } from "./fixtures.js";
 import { createTestUser, login } from "./helpers/auth-helper.js";
 import { getTestBaseUrl } from "../utils/test-config.js";
-import {
-  MAX_LOCAL_WORK_LEASE_MS,
-  type LocalControlCeiling,
-  type LocalDeviceSettingsValue,
-  type LocalPublicPolicy,
-} from "@mcp-moira/shared";
 
-/** The browser owns a typed request; a controlled companion reports application through real HTTP. */
-test("local computer settings keep requested and applied week policy distinct through the real owner API", async ({
+/** No simulated heartbeat: the paired controller is offline throughout this browser check. */
+test("an offline computer exposes no current permissions and refuses settings before admission", async ({
   page,
   request,
 }) => {
-  const base = getTestBaseUrl();
-  const email = `local-editor-${randomUUID()}@example.test`;
-  await createTestUser(email, "LocalEditor123!", "Local editor owner", true);
+  const base = getTestBaseUrl(),
+    email = "local-offline-" + randomUUID() + "@example.test";
+  await createTestUser(email, "LocalEditor123!", "Offline owner", true);
   await login(page, email, "LocalEditor123!");
-  const deviceId = randomUUID();
-  const credential = randomBytes(32).toString("base64url");
-  const GiB = 1024 ** 3;
-  let policy: LocalPublicPolicy = {
-    version: 1,
-    deviceId,
-    label: "Browser test computer",
-    enabled: true,
-    leaseUntil: Date.now() + 3600000,
-    machine: {
-      name: "local-approved",
-      displayName: "Local approved",
-      operatingSystem: "linux",
-      cpuCores: 2,
-      memoryBytes: 2 * GiB,
-      storageBytes: 8 * GiB,
-    },
-    repositories: [
-      {
-        id: randomUUID(),
-        fullName: "owner/project",
-        private: true,
-        allowPush: false,
-        allowDelete: false,
-      },
-    ],
-  };
-  const settings: LocalDeviceSettingsValue = {
-    label: policy.label,
-    enabled: true,
-    leaseUntil: policy.leaseUntil,
-    cpuCores: 2,
-    memoryBytes: 2 * GiB,
-    storageBytes: 8 * GiB,
-    dockerBytes: 2 * GiB,
-    repositories: policy.repositories,
-    gitAuthor: null,
-    agentRepositoryManagement: null,
-  };
-  const ceiling: LocalControlCeiling = {
-    cpuCores: 4,
-    memoryBytes: 8 * GiB,
-    storageBytes: 32 * GiB,
-    dockerBytes: 8 * GiB,
-    maxLeaseMs: MAX_LOCAL_WORK_LEASE_MS,
-  };
-  const begin = await page.request.post(`${base}/api/integrations/local/pairings`, { data: {} });
+  const deviceId = randomUUID(),
+    credential = randomBytes(32).toString("base64url");
+  const begin = await page.request.post(base + "/api/integrations/local/pairings", { data: {} });
   expect(begin.status()).toBe(201);
   const pairing = (await begin.json()).data;
-  const enroll = await request.post(`${base}/api/local-devices/enroll`, {
-    data: { pairingId: pairing.pairingId, pairingToken: pairing.pairingToken, credential, policy },
+  const enrolled = await request.post(base + "/api/local-devices/enroll", {
+    data: {
+      pairingId: pairing.pairingId,
+      pairingToken: pairing.pairingToken,
+      credential,
+      deviceId,
+      label: "Offline browser computer",
+    },
   });
-  expect(enroll.status()).toBe(201);
-  await page.goto(`${base}/settings?lang=en#integrations-local`);
-  const device = page.getByTestId(`local-device-${deviceId}`);
+  expect(enrolled.status()).toBe(201);
+  await page.goto(base + "/settings?lang=en#integrations-local");
+  const device = page.getByTestId("local-device-" + deviceId);
+  const ownerStatus = device
+    .getByRole("status")
+    .filter({ hasText: "Current settings and permissions cannot be confirmed" });
   await device.getByRole("button", { name: "Confirm computer" }).click();
   await page.getByRole("alertdialog").getByRole("button", { name: "Confirm computer" }).click();
   await expect(page.getByRole("alertdialog")).toBeHidden();
-  const heartbeat = (next: LocalDeviceSettingsValue, appliedRevision: number) =>
-    request.post(`${base}/api/local-devices/heartbeat`, {
-      headers: { Authorization: `Bearer ${credential}` },
-      data: { policy, control: { ceiling, settings: next, appliedRevision } },
-    });
-  expect((await heartbeat(settings, 0)).status()).toBe(200);
   try {
     await page.getByRole("button", { name: "Refresh computers" }).click();
-    await device.getByRole("button", { name: "Computer settings and access" }).click();
-    const name = device.getByLabel("Computer name");
-    await expect(name).toHaveValue(policy.label);
-    await name.fill("Edited local computer");
-    await device.getByLabel("RAM (GiB)").fill("4");
-    await device.getByLabel("Push commits").check();
-    await device.getByLabel("Create pull requests").check();
-    await device.getByRole("button", { name: "Allow seven days" }).click();
-    await page.getByRole("tab", { name: "GitHub connection", exact: true }).click();
-    await page.getByRole("tab", { name: "Local computers", exact: true }).click();
-    await expect(name).toHaveValue("Edited local computer");
-    const save = page.waitForResponse(
-      (response) =>
-        response.request().method() === "PUT" &&
-        new URL(response.url()).pathname.endsWith(`/devices/${deviceId}/settings`),
+    await expect(ownerStatus).toContainText("Current settings and permissions cannot be confirmed");
+    await expect(device.getByRole("button", { name: "Request settings change" })).toHaveCount(0);
+    const requestId = "ws1-" + randomUUID();
+    const saved = await page.request.put(
+      base + "/api/integrations/local/devices/" + deviceId + "/settings",
+      {
+        headers: { Origin: new URL(base).origin },
+        data: {
+          requestId,
+          expectedRevision: 0,
+          expectedGeneration: 1,
+          settings: {
+            label: "Must not be queued",
+            enabled: false,
+            leaseUntil: 0,
+            cpuCores: 1,
+            memoryBytes: 1024 ** 3,
+            storageBytes: 32 * 1024 ** 3,
+            dockerBytes: 4 * 1024 ** 3,
+            repositories: [],
+            gitAuthor: null,
+            agentRepositoryManagement: null,
+          },
+        },
+      },
     );
-    await device.getByRole("button", { name: "Request settings change" }).click();
-    const saved = await save;
-    expect(saved.status()).toBe(200);
-    const requested = (await saved.json()).data.control;
-    await expect(device).toContainText(
-      `Requested revision ${requested.revision}; applied revision 0.`,
-    );
-    await expect(device).toContainText("Push: not allowed · Delete: not allowed");
-    expect(requested.settings.memoryBytes).toBe(4 * GiB);
-    expect(requested.settings.repositories[0].allowPullRequests).toBe(true);
-    expect(requested.settings.leaseUntil - Date.now()).toBeGreaterThan(6 * 24 * 3600000);
-    expect(requested.settings.leaseUntil - Date.now()).toBeLessThanOrEqual(MAX_LOCAL_WORK_LEASE_MS);
-    policy = {
-      ...policy,
-      label: requested.settings.label,
-      leaseUntil: requested.settings.leaseUntil,
-      repositories: requested.settings.repositories,
-      machine: { ...policy.machine, memoryBytes: 4 * GiB },
-    };
-    expect((await heartbeat(requested.settings, requested.revision)).status()).toBe(200);
-    await page.getByRole("button", { name: "Refresh computers" }).click();
-    await expect(device).toContainText(`Applied revision ${requested.revision}.`);
-    await expect(device).toContainText("Push: allowed · Delete: not allowed");
+    expect(saved.status()).toBe(503);
+    expect((await saved.json()).error.code).toBe("LOCAL_UNAVAILABLE");
     await page.reload();
-    await device.getByRole("button", { name: "Computer settings and access" }).click();
-    await expect(device.getByLabel("RAM (GiB)")).toHaveValue("4");
-    await expect(device.getByLabel("Computer name")).toHaveValue("Edited local computer");
-  } finally {
-    const response = await page.request.get(`${base}/api/integrations/local/devices`);
-    expect(response.status()).toBe(200);
+    await expect(ownerStatus).toContainText("Current settings and permissions cannot be confirmed");
+    const response = await page.request.get(base + "/api/integrations/local/devices");
     const own = (await response.json()).data.devices.find(
       (entry: { deviceId: string }) => entry.deviceId === deviceId,
     );
-    expect(own).toBeTruthy();
-    const revoked = await page.request.delete(
-      `${base}/api/integrations/local/devices/${deviceId}`,
-      { data: { expectedGeneration: own.deviceGeneration } },
+    expect(own.owner).toEqual({ state: "unavailable" });
+    expect(own).not.toHaveProperty("policy");
+    expect(own).not.toHaveProperty("control");
+  } finally {
+    const response = await page.request.get(base + "/api/integrations/local/devices");
+    const own = (await response.json()).data.devices.find(
+      (entry: { deviceId: string }) => entry.deviceId === deviceId,
     );
-    expect(revoked.status()).toBe(200);
+    expect(
+      (
+        await page.request.delete(base + "/api/integrations/local/devices/" + deviceId, {
+          data: { expectedGeneration: own.deviceGeneration },
+        })
+      ).status(),
+    ).toBe(200);
   }
 });

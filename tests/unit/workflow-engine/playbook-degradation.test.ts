@@ -171,7 +171,7 @@ describe("a materialized file that cannot read a playbook", () => {
     // The placeholder names the playbook and is impossible to mistake for content; which of the
     // two forms it takes depends on whether the registry answered "no such playbook" or could not
     // be reached at all, and both are degradation.
-    expect(delivery.files[0].content.toString("utf8")).toMatch(
+    expect(delivery.files[0].content).toMatch(
       /\[PLAYBOOK (NOT AVAILABLE|ERROR): missing-standard\]/,
     );
     expect(appended).toHaveLength(1);

@@ -162,10 +162,13 @@ Use the root runners for focused checks:
 
 ```bash
 npm run test:unit -- --file tests/unit/workspace-service/service.test.cjs
+npm run test:unit -- --file tests/unit/local/controller.test.ts
+npm run test:unit -- --file tests/unit/local/controller-state.test.ts
 npm run test:integration -- --file tests/integration/workspace-router.test.ts
 npm run test:integration -- --file tests/integration/codespace-mcp-client-flow.test.ts
 npm run test:integration -- --file tests/integration/local/runtime-api.test.ts
 npm run test:integration -- --file tests/integration/local-codespace-provider.test.ts
+npm run test:integration -- --file tests/integration/local-device-control.test.ts
 ```
 
 Host service fixtures require Git and ripgrep; the TLS router fixture also uses OpenSSL
@@ -190,29 +193,59 @@ The TLS router fixture runs the actual service and outbound adapter in another p
 CONTROL carries call identifiers; each DATA channel pipes one raw HTTP call to the Unix service.
 It checks raw binary backpressure, independent calls while a response is unread, reconnect
 without replay, pre-dispatch refusal, and authority expiry/revocation closing CONTROL and
-DATA without cancelling admitted work. Workspace authority cases use migrated SQLite for
-scoped credential rotation, server-owned bootstrap after generation changes and account denial.
+DATA without cancelling admitted work. Controller and guest connections have separate
+endpoint identities; trusted routing headers replace caller-supplied authority, and controller
+routing does not start a guest. Workspace authority cases use migrated SQLite for scoped
+credential rotation, current Local route/device authority and account denial. GitHub bootstrap
+remains a separate provider responsibility.
 
 The registered MCP fixture combines the real registry, lifecycle authority, attachment
-publisher and Unix service. It edits and executes repository code, checks native binary
-upload/download and single-use publication, preserves files across restart and refuses
+publication owner and Unix service. It edits and executes repository code, checks native binary
+upload/download and repeatable immutable publication, preserves files across restart and refuses
 foreign owners. Container-backed MCP cases check the advertised actions, `ws1-` command
-identities, strict action forms, setup guidance, normal path-based download and private
-attachment delivery through the application origin without a configured provider.
+identities, strict action forms, setup guidance, normal path-based download and original-ID communication refusal/collection through the application origin without a configured provider.
 
-Local integration cases cover lifecycle journals, policy, broker/relay authority, SDK
+Local integration cases cover owner lifecycle receipts, policy, broker/device authority, SDK
 protocols, credential-store preparation, storage custody and independent shutdown.
 SDK and keychain responses are substituted; native guard cases use controlled real
 processes and sockets rather than a physical microVM. Darwin custody cases are excluded
 on unsupported platforms. Integration setup runs `npm run local:build` before preparing
 its migrated database.
 
-Provider and device/relay cases retain repository/device/account/grant authority, exact
-create/stop/delete receipts and verified observation times. The host relay handles
-lifecycle work; historical command intents and unknown receipts remain untouched and
-nonrunnable. Host CLI cases refuse unsupported create, start and raw-request admission
-before creating private state. Journal cases check canonical-target serialization,
-failure cleanup, receipt reuse and archived bytes without command-output reservations.
+The real private Unix controller owns Local lifecycle and settings effects. Provider and
+browser-authorized settings routes retain repository/device/account/grant authority and
+collect the caller's original `ws1-` request after a lost reply without another effect.
+Lifecycle requests carry the observed owner generation; settings carry the owner revision.
+Stale generations are refused, while stable route authority remains separate from lifecycle
+generation fencing. Live views preserve the admitted VM profile when defaults for new VMs change.
+Owner receipts expose unresolved request IDs for collection after reload. Cloud storage
+retains minimal authentication/routing metadata; migration cases preserve retired control,
+relay and operational rows in inaccessible archives without replay.
+
+Local storage checks inspect the actual `localResourceIdentity` columns and the absence
+of the active `codespaceResource` table, rather than inferring minimal storage from an
+unchanged public response. Populated migration cases compare complete archived rows,
+approved device bindings and existing guest credentials. Changed owner defaults must
+appear on a newly admitted VM while an existing VM keeps its admitted profile and
+unchanged stored route; an offline owner must not certify historical SQL state.
+Original uncertain creation receipts retain their
+request/device/resource identities on repeated collection without another native effect.
+Account-deletion cases distinguish confirmed resource retirement from access revocation:
+a revoked binding with unresolved disk custody must still prevent metadata deletion.
+
+The browser fixture pairs and confirms its own device but does not connect a controller.
+It checks honest offline state, absence of effective settings, pre-admission write refusal
+and the same unavailable state after reload. UI unit cases separately check retained drafts,
+actual applied consent and original-ID recovery. Neither fixture claims a complete browser
+settings effect on a physical VM.
+
+Host CLI cases refuse unsupported raw requests before creating private state. Supported
+create/start against an initialized but unpaired owner refuse without SDK contact or state
+changes. A new host-owned creation requires checked cloud route registration and initial
+Git authority; transport loss does not revoke an existing paired owner's locally admitted
+work. Journal cases check canonical-target serialization, failure cleanup and private
+custody; controller receipt cases cover durable original-ID collection and uncertainty
+after restarting an accepted request without replay.
 
 Native recovery cases distinguish SDK/Engine custody from guest readiness, preserve
 peer state and unknown receipts, and exercise lease expiry, parent loss and emergency
@@ -223,11 +256,17 @@ and later revocation/lease closure. Network admission has no socket-count or tra
 workload quota; authority remains mandatory. Local physical budgets and cloud billing
 capacity have separate fixtures.
 
-Private attachment storage is a separate publication contract. Its cases observe streamed
-bytes, MIME/name/size checks, held-inode/digest validation, source closure, claim ownership,
-expiry cleanup and single use. Communication uses independent sources. A real local
-multipart receiver checks Telegram transport bytes without sending to Telegram or
-certifying that service's filename interpretation.
+Native APFS resize coverage requires Darwin and the explicit
+`MOIRA_LOCAL_NATIVE_STORAGE_TESTS=1` opt-in. Unsupported-platform and unrequested physical
+cases are skips, not proof of native storage behavior. Controlled process/socket and storage
+fixtures do not replace the disposable real-VM acceptance below.
+
+Owner communication fixtures distinguish source acquisition before admission from retained delivery uncertainty. The common service cases observe original-ID submit/collect, per-channel stages, source consumption and physical settlement, scope changes, separate long-message stages and no resend after a lost result. Framing cases exercise large Unicode control, coalesced prefix/file chunks and cancellation of a held original read. Actual HTTP refusal/replay fixtures require the complete known response before unread ingress closes.
+
+`tests/integration/extension-owner.test.ts` exercises a real compiled installed binary handler, immutable artifact admission, demand-driven byte pipes, held vendor/source work and supervised completion. Fixed transport fixtures verify declared endpoint/recipient/secret authority, exact raw/multipart file bytes and early vendor completion without real provider sends. Migration fixtures compare the complete immutable transfer/grant archives and preserve retained bytes without replay.
+
+Progress tests retain run/context/task/version guards, explicit owner-unavailable MCP/HTTP errors and positive PNG rendering through a real owned publication fixture. `workspace:verify:guest` additionally executes the shipped renderer with its private native/font closure and packaged extension handler in the network-disabled guest. These observations do not certify real Telegram delivery or live GitHub compatibility. Text/PIN/reminder tests remain independent of a file owner.
+
 See [COVERAGE-MAP.md](COVERAGE-MAP.md#codespace-connections) for suite responsibilities.
 
 To check the packaged common service:
@@ -244,6 +283,22 @@ Container compatibility and `npm run verify:docker` do not establish physical sb
 ownership or host/LAN/VPN/metadata/other-VM isolation.
 
 ### Real sbx acceptance
+
+Fixed Git and pull-request fixtures exercise the shared owner broker with controlled TLS/HTTP
+endpoints, exact repository/action authority, physical upstream closure and original PR receipt
+collection. Actual CLI subprocess cases distinguish a confirmed source refusal from retained
+credential custody/disposal uncertainty and an unknown post-dispatch PR effect, preserving both
+recovery identities without redispatch. Migrated issuer/account cases check encrypted candidate
+custody, pure security collection without mint, retirement cutoffs and retention of unresolved
+credentials/resources before account cascade. These fixtures do not prove live GitHub permissions.
+
+The packaged Linux guest check also observes the actual GH daemon's inherited kernel lock,
+competing-lock refusal while the owner lives, and process absence plus lock availability after
+stop. Its network-disabled container cannot certify direct private GitHub fetch/push or PR delivery.
+External acceptance uses an approved disposable repository/branch and the trusted owner broker:
+verify private read/write, another-repository and wrong-permission refusal, original-ID recovery
+after a lost release response, and provider-confirmed revocation without repeating Git effects.
+Local physical VM/network acceptance remains separate below.
 
 Use the supported macOS runtime described in [CODESPACES.md](../docs/CODESPACES.md) with
 an explicitly approved disposable profile and repository. Validate usable mountless

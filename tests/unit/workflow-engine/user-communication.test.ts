@@ -19,6 +19,7 @@ import {
   getActiveUserCommunicationService,
   resetClientFactory,
   setTestClientFactory,
+  notificationLiveRun,
 } from "@mcp-moira/workflow-engine";
 import type {
   CommunicationChannelAdapter,
@@ -26,8 +27,10 @@ import type {
   IGraphExecutionEngine,
   PortableCommunicationMessage,
   UserNotificationNode,
+  WorkflowExecution,
+  WorkflowGraph,
+  CommunicationFileOwner,
 } from "@mcp-moira/workflow-engine";
-import { ownedByteStream } from "../../helpers/owned-byte-stream.js";
 
 const repository = {} as IDataRepository;
 
@@ -58,151 +61,6 @@ function adapter(
 }
 
 describe("UserCommunicationService", () => {
-  test.each(["ролик.mp4", 'film "final".mp4', `${"é".repeat(125)}a.bin`])(
-    "delivers checked sources with the exact safe basename %s",
-    async (filename) => {
-      const bytes = Uint8Array.of(1, 2, 3, 4);
-      const observed: Array<{ filename: string; bytes: number[] }> = [];
-      const service = new UserCommunicationService([
-        adapter(
-          "stream",
-          async (message) => {
-            const received: number[] = [];
-            for await (const chunk of await message.attachment!.source!.open())
-              received.push(...chunk);
-            observed.push({ filename: message.attachment!.filename, bytes: received });
-          },
-          true,
-          { streamingAttachments: true },
-        ),
-      ]);
-      const result = await service.deliver(
-        {
-          userId: "u",
-          text: "Film",
-          attachment: {
-            kind: "document",
-            filename,
-            mimeType: "application/octet-stream",
-            source: {
-              size: bytes.length,
-              sha256: "9f64a747e1b97f131fabb6b447296c9b6f0201e79fb3c5356e6c77e89b6a806a",
-              async open() {
-                return ownedByteStream(
-                  (async function* () {
-                    yield bytes;
-                  })(),
-                );
-              },
-            },
-          },
-        },
-        repository,
-      );
-      expect(result.status).toBe("delivered");
-      expect(observed).toEqual([{ filename, bytes: [...bytes] }]);
-    },
-  );
-
-  test.each([
-    "",
-    ".",
-    "..",
-    "../film.mp4",
-    "dir\\film.mp4",
-    "film\n.mp4",
-    "film\0.mp4",
-    "film\u007f.mp4",
-    `${"é".repeat(126)}.bin`,
-  ])(
-    "refuses unsafe or oversized attachment basename %j before source delivery",
-    async (filename) => {
-      const deliver = jest.fn(async () => undefined);
-      const service = new UserCommunicationService([
-        adapter("stream", deliver, true, { streamingAttachments: true }),
-      ]);
-      await expect(
-        service.deliver(
-          {
-            userId: "u",
-            text: "Film",
-            attachment: {
-              kind: "document",
-              filename,
-              mimeType: "application/octet-stream",
-              bytes: Uint8Array.of(1),
-            },
-          },
-          repository,
-        ),
-      ).rejects.toThrow("filename is invalid");
-      expect(deliver).not.toHaveBeenCalled();
-    },
-  );
-
-  test("delivers checked attachment sources independently and skips non-streaming channels", async () => {
-    const bytes = Uint8Array.of(1, 2, 3, 4);
-    const observed: number[][] = [];
-    let opens = 0;
-    const source = {
-      size: bytes.length,
-      sha256: "9f64a747e1b97f131fabb6b447296c9b6f0201e79fb3c5356e6c77e89b6a806a",
-      async open() {
-        opens++;
-        return ownedByteStream(
-          (async function* () {
-            yield bytes;
-          })(),
-        );
-      },
-    };
-    const streaming = (id: string) =>
-      adapter(
-        id,
-        async (message) => {
-          const result: number[] = [];
-          for await (const chunk of await message.attachment!.source!.open()) result.push(...chunk);
-          observed.push(result);
-        },
-        true,
-        { streamingAttachments: true },
-      );
-    const unsupported = jest.fn(async () => undefined);
-    const service = new UserCommunicationService([
-      streaming("first"),
-      streaming("second"),
-      adapter("legacy", unsupported),
-    ]);
-    const result = await service.deliver(
-      {
-        userId: "u",
-        text: "Report",
-        attachment: {
-          kind: "document",
-          source,
-          filename: "report.bin",
-          mimeType: "application/octet-stream",
-        },
-      },
-      repository,
-    );
-    expect(result).toMatchObject({
-      status: "partial",
-      deliveredChannels: 2,
-      channels: [
-        { channelId: "first", status: "delivered" },
-        { channelId: "second", status: "delivered" },
-        { channelId: "legacy", status: "unsupported" },
-      ],
-    });
-    expect(observed).toEqual([
-      [1, 2, 3, 4],
-      [1, 2, 3, 4],
-    ]);
-    expect(opens).toBe(2);
-    expect(unsupported).not.toHaveBeenCalled();
-  });
-
   test("prepares mutable content after channel configuration and validates it before handoff", async () => {
     let title = "Old";
     const texts: string[] = [];
@@ -345,7 +203,7 @@ describe("UserCommunicationService", () => {
     expect(availability).toHaveBeenCalledTimes(2);
   });
 
-  test("bounds a stuck adapter with a deadline and rejects unsupported payloads", async () => {
+  test("bounds a stuck text adapter with a deadline and retains its concurrency fence", async () => {
     const service = new UserCommunicationService(
       [
         adapter("text-only", async () => new Promise<void>(() => undefined), true, {
@@ -357,26 +215,6 @@ describe("UserCommunicationService", () => {
     await expect(service.deliver({ userId: "u", text: "x" }, repository)).resolves.toMatchObject({
       status: "all_failed",
       channels: [{ status: "timed_out" }],
-    });
-    await expect(
-      service.deliver(
-        {
-          userId: "u2",
-          text: "x",
-          attachment: {
-            kind: "image",
-            bytes: Uint8Array.of(1),
-            filename: "x.png",
-            mimeType: "image/png",
-          },
-        },
-        repository,
-      ),
-    ).resolves.toEqual({
-      status: "no_configured_channels",
-      configuredChannels: 1,
-      deliveredChannels: 0,
-      channels: [{ channelId: "text-only", status: "unsupported" }],
     });
     await expect(
       service.deliver({ userId: "u", text: "again" }, repository),
@@ -392,60 +230,14 @@ describe("UserCommunicationService", () => {
     });
   });
 
-  test("rejects text and attachment bytes beyond configured quotas before delivery", async () => {
+  test("rejects text beyond its configured limit before delivery", async () => {
     const deliver = jest.fn(async () => undefined);
     const service = new UserCommunicationService([adapter("bounded", deliver)], {
       maxTextLength: 3,
-      maxAttachmentBytes: 2,
     });
     await expect(service.deliver({ userId: "u", text: "four" }, repository)).rejects.toThrow(
       "text exceeds",
     );
-    await expect(
-      service.deliver(
-        {
-          userId: "u",
-          text: "ok",
-          attachment: {
-            kind: "document",
-            bytes: Uint8Array.of(1, 2, 3),
-            filename: "x.bin",
-            mimeType: "application/octet-stream",
-          },
-        },
-        repository,
-      ),
-    ).rejects.toThrow("attachment exceeds");
-    await expect(
-      service.deliver(
-        {
-          userId: "u",
-          text: "ok",
-          attachment: {
-            kind: "document",
-            bytes: Uint8Array.of(1),
-            filename: "../secret",
-            mimeType: "application/octet-stream",
-          },
-        },
-        repository,
-      ),
-    ).rejects.toThrow("filename is invalid");
-    await expect(
-      service.deliver(
-        {
-          userId: "u",
-          text: "ok",
-          attachment: {
-            kind: "document",
-            bytes: Uint8Array.of(1),
-            filename: "safe.bin",
-            mimeType: "not-a-mime",
-          },
-        },
-        repository,
-      ),
-    ).rejects.toThrow("MIME type is invalid");
     expect(deliver).not.toHaveBeenCalled();
   });
 
@@ -648,14 +440,6 @@ describe("TelegramCommunicationAdapter", () => {
           calls.push({ method: "text", chatId, disableLinkPreview });
           return { ok: true };
         },
-        sendPhoto: async ({ chatId, filename }: { chatId: string; filename: string }) => {
-          calls.push({ method: "photo", chatId, filename });
-          return { ok: true };
-        },
-        sendDocument: async ({ chatId, filename }: { chatId: string; filename: string }) => {
-          calls.push({ method: "document", chatId, filename });
-          return { ok: true };
-        },
       } as never;
     });
     const repo = {
@@ -670,92 +454,11 @@ describe("TelegramCommunicationAdapter", () => {
     const service = new UserCommunicationService([telegram]);
 
     await service.deliver({ userId: "u", text: "hello" }, repo);
-    await service.deliver(
-      {
-        userId: "u",
-        text: "image",
-        attachment: {
-          kind: "image",
-          bytes: Uint8Array.of(1),
-          filename: "progress.png",
-          mimeType: "image/png",
-        },
-      },
-      repo,
-    );
-    await service.deliver(
-      {
-        userId: "u",
-        text: "document",
-        attachment: {
-          kind: "document",
-          bytes: Uint8Array.of(2),
-          filename: "report.pdf",
-          mimeType: "application/pdf",
-        },
-      },
-      repo,
-    );
 
     expect(calls).toEqual([
       { method: "text", chatId: "private-recipient", disableLinkPreview: true },
-      { method: "photo", chatId: "private-recipient", filename: "progress.png" },
-      { method: "document", chatId: "private-recipient", filename: "report.pdf" },
     ]);
   });
-
-  test.each(["image", "document"] as const)(
-    "preserves text above the Telegram caption limit for a %s",
-    async (kind) => {
-      const calls: Array<{ method: string; text?: string; caption?: string }> = [];
-      setTestClientFactory(
-        () =>
-          ({
-            sendMessage: async ({ text }: { text: string }) => {
-              calls.push({ method: "text", text });
-              return { ok: true };
-            },
-            sendPhoto: async ({ caption }: { caption?: string }) => {
-              calls.push({ method: "image", caption });
-              return { ok: true };
-            },
-            sendDocument: async ({ caption }: { caption?: string }) => {
-              calls.push({ method: "document", caption });
-              return { ok: true };
-            },
-          }) as never,
-      );
-      const repo = {
-        getSetting: async (_userId: string, key: string) => {
-          if (key === "telegram.enabled") return true;
-          if (key === "telegram.bot_token") return "123:token";
-          if (key === "telegram.chat_id") return "recipient";
-          return null;
-        },
-      } as unknown as IDataRepository;
-      const text = "x".repeat(1025);
-      const result = await new UserCommunicationService([
-        new TelegramCommunicationAdapter(),
-      ]).deliver(
-        {
-          userId: "u",
-          text,
-          attachment: {
-            kind,
-            bytes: Uint8Array.of(1),
-            filename: kind === "image" ? "x.png" : "x.pdf",
-            mimeType: kind === "image" ? "image/png" : "application/pdf",
-          },
-        },
-        repo,
-      );
-      expect(result.status).toBe("delivered");
-      expect(calls).toEqual([
-        { method: kind, caption: undefined },
-        { method: "text", text },
-      ]);
-    },
-  );
 
   test("maps provider errors to a stable reason without returning provider text", async () => {
     setTestClientFactory(
@@ -929,22 +632,13 @@ describe("UserNotificationHandler", () => {
   test("routes a skipped unsupported channel through default but an attempted failure through error", async () => {
     const skippedDeliver = jest.fn(async () => undefined);
     const skippedHandler = new UserNotificationHandler(
-      new UserCommunicationService([
-        adapter("text-only", skippedDeliver, true, { document: false }),
-      ]),
+      new UserCommunicationService([adapter("non-text", skippedDeliver, true, { text: false })]),
     );
     const repo = { getWorkflow: async () => null } as unknown as IDataRepository;
     const node: UserNotificationNode = {
       type: "user-notification",
       id: "notify",
       message: "x",
-      attachment: {
-        kind: "document",
-        data: "eA==",
-        encoding: "base64",
-        filename: "x.txt",
-        mimeType: "text/plain",
-      },
       connections: { default: "end", error: "failed" },
     };
     const context = {
@@ -968,20 +662,14 @@ describe("UserNotificationHandler", () => {
           throw new Error("provider failed");
         }),
       ]),
-    ).execute(
-      { ...node, attachment: undefined },
-      context,
-      new AgentMessageQueue(),
-      repo,
-      {} as IGraphExecutionEngine,
-    );
+    ).execute(node, context, new AgentMessageQueue(), repo, {} as IGraphExecutionEngine);
 
     expect(skipped.outputPath).toBe("default");
     expect(skipped.data).toMatchObject({
       userNotificationStatus: "no_configured_channels",
       configuredChannels: 1,
       deliveredChannels: 0,
-      channels: [{ channelId: "text-only", status: "unsupported" }],
+      channels: [{ channelId: "non-text", status: "unsupported" }],
     });
     expect(skippedDeliver).not.toHaveBeenCalled();
     expect(failed.outputPath).toBe("error");
@@ -1039,7 +727,7 @@ describe("UserNotificationHandler", () => {
     }
   });
 
-  test("renders portable progress attachment and routes a partial result through default", async () => {
+  test("hands the current progress descriptor to its owner and preserves partial text delivery when the optional image is unavailable", async () => {
     const deliver = jest.fn<UserCommunicationService["deliver"]>(async () => ({
       status: "partial" as const,
       configuredChannels: 2,
@@ -1057,26 +745,33 @@ describe("UserNotificationHandler", () => {
     const pictures: string[] = [];
     const handler = new UserNotificationHandler(
       { deliver, maxTextLength: 4096 } as unknown as UserCommunicationService,
-      async (workflow, execution) => {
-        pictures.push(
-          renderProgressStepsSvg(
-            buildProgressStepsModel(projectExecutionRun(workflow, execution)!),
-          ),
-        );
-        renderedFor.push({
-          currentNodeId: execution.currentNodeId,
-          waitingOn: execution.waitingForInputNodeId ?? null,
-          lastVisitNode: execution.visits?.at(-1)?.nodeId,
-        });
-        return {
-          buffer: Buffer.from("png"),
-          mimeType: "image/png",
-          width: 10,
-          height: 10,
-          workflowVersion: "1.0.0",
-          executionRevision: 1,
-        };
-      },
+      {
+        select: async () => {
+          throw new Error("unused selection");
+        },
+        collect: async () => {
+          throw new Error("unused collection");
+        },
+        openPublication: async () => {
+          throw new Error("unused publication");
+        },
+        async submit(_userId, input) {
+          if (input.source.type !== "progress") throw new Error("Expected progress source");
+          const workflow = input.source.descriptor.graph as unknown as WorkflowGraph;
+          const execution = input.source.descriptor.run as unknown as WorkflowExecution;
+          pictures.push(
+            renderProgressStepsSvg(
+              buildProgressStepsModel(projectExecutionRun(workflow, execution)!),
+            ),
+          );
+          renderedFor.push({
+            currentNodeId: execution.currentNodeId,
+            waitingOn: execution.waitingForInputNodeId ?? null,
+            lastVisitNode: execution.visits?.at(-1)?.nodeId,
+          });
+          throw new Error("Controlled unavailable owner; no image delivery admitted");
+        },
+      } satisfies CommunicationFileOwner,
     );
     const node: UserNotificationNode = {
       type: "user-notification",
@@ -1094,6 +789,11 @@ describe("UserNotificationHandler", () => {
     const repo = {
       getWorkflowGraph: async () => graph,
       getExecution: async () => ({
+        executionId: "12345678-rest",
+        workflowId: "workflow-id",
+        userId: "user-1",
+        createdAt: 0,
+        updatedAt: 0,
         revision: 1,
         status: "running",
         currentNodeId: "previous-wait",
@@ -1103,6 +803,12 @@ describe("UserNotificationHandler", () => {
       }),
       getWorkflow: async () => ({ metadata: graph.metadata }),
     } as unknown as IDataRepository;
+    const liveRun = notificationLiveRun(
+      { execution: (await repo.getExecution("12345678-rest"))! },
+      [],
+      {},
+      "notify",
+    );
     const result = await handler.execute(
       node,
       {
@@ -1115,6 +821,9 @@ describe("UserNotificationHandler", () => {
       new AgentMessageQueue(),
       repo,
       {} as IGraphExecutionEngine,
+      undefined,
+      undefined,
+      liveRun,
     );
 
     expect(result.outputPath).toBe("default");
@@ -1122,24 +831,24 @@ describe("UserNotificationHandler", () => {
       userNotificationStatus: "partial",
       configuredChannels: 2,
       deliveredChannels: 1,
+      attachmentStatus: "unavailable",
     });
     expect(deliver).toHaveBeenCalledWith(
       expect.objectContaining({
         userId: "user-1",
         text: expect.stringContaining("Done success"),
         format: "markdown",
-        attachment: expect.objectContaining({ kind: "image", filename: "workflow-progress.png" }),
       }),
       repo,
       expect.any(Function),
     );
-    // The image is rendered as of this node, not of the wait the persisted route still ends on.
+    expect(deliver.mock.calls[0][0]).not.toHaveProperty("attachment");
+    // The owner descriptor names this node, not the wait the persisted route still ends on.
     // The graph has no successor node for `notify`, so nothing is waited on.
     expect(renderedFor).toEqual([
       { currentNodeId: "notify", waitingOn: null, lastVisitNode: "notify" },
     ]);
-    // A notification that leads to a lock gate renders its image from the same copy the message
-    // describes: the run waiting on the gate.
+    // A notification leading to a lock gives the owner the same waiting run the text describes.
     renderedFor.length = 0;
     const gated = {
       ...graph,
@@ -1173,13 +882,16 @@ describe("UserNotificationHandler", () => {
       new AgentMessageQueue(),
       { ...repo, getWorkflowGraph: async () => gated } as unknown as IDataRepository,
       {} as IGraphExecutionEngine,
+      undefined,
+      undefined,
+      liveRun,
     );
     expect(renderedFor).toEqual([
       { currentNodeId: "pin-gate", waitingOn: "pin-gate", lastVisitNode: "pin-gate" },
     ]);
     const gatedText = (deliver.mock.calls as unknown as Array<[{ text: string }]>).at(-1)![0].text;
     expect(gatedText).toContain("🙋 waiting for you: Progress");
-    // The picture attached to that message says the same: the gate's block waits for the reader.
+    // Rendering that descriptor would tell the same story even though this owner is unavailable.
     expect(pictures.at(-1)).toContain("waiting for you");
     expect(pictures.at(-1)).not.toContain("agent on the step");
   });

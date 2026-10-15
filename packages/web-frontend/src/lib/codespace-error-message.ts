@@ -50,6 +50,13 @@ export function codespaceErrorMessage(error: unknown, t: TFunction, fallbackKey:
     typeof error === "object" && error !== null && "code" in error
       ? (error as { code?: unknown }).code
       : undefined;
+  if (
+    code === "WORKSPACE_OUTCOME_UNCONFIRMED" ||
+    code === "SCOPED_CREDENTIAL_OUTCOME_UNCONFIRMED" ||
+    code === "SCOPED_CREDENTIAL_CUSTODY_UNCONFIRMED" ||
+    code === "SCOPED_CREDENTIAL_DISPOSAL_PENDING"
+  )
+    return t("localDevices.editor.unconfirmed");
   return typeof code === "string" && KNOWN.has(code)
     ? t(`common.codespaceErrors.${code}`)
     : t(fallbackKey);

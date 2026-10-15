@@ -94,6 +94,23 @@ describe("sanitizeInput", () => {
       const input = { message: "private report", filename: "customer.pdf", kind: "document" };
       expect(sanitizeInput(input).inputData).toEqual({ kind: "document" });
     });
+
+    it("removes native file capability descriptors from communication logging", () => {
+      const input = {
+        action: "deliver-file",
+        request_id: "original-request",
+        file: {
+          file_id: "private-file",
+          download_url: "https://files.oaiusercontent.com/private?signature=secret",
+          file_name: "private.png",
+          mime_type: "image/png",
+        },
+      };
+      const sanitized = JSON.stringify(sanitizeInput(input));
+      expect(sanitized).toContain("deliver-file");
+      expect(sanitized).toContain("image/png");
+      expect(sanitized).not.toMatch(/private-file|private\.png|signature|oaiusercontent/);
+    });
   });
 
   describe("email masking", () => {

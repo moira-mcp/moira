@@ -2,9 +2,8 @@ import { afterAll, beforeAll, describe, expect, test } from "@jest/globals";
 import type { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { CallToolResultSchema } from "@modelcontextprotocol/sdk/types.js";
 import { createAuthenticatedMCPClient } from "../utils/mcp-auth.js";
-import { getAdminCredentials, getTestBaseUrl } from "../utils/test-config.js";
+import { getTestBaseUrl } from "../utils/test-config.js";
 import { dockerExecSync } from "../utils/docker-command.js";
-import { createHash } from "node:crypto";
 import { createWorkspaceRequestId } from "@mcp-moira/shared/workspace-request-id";
 
 const codespaceId = "00000000-0000-4000-8000-000000000162";
@@ -12,9 +11,11 @@ const processId = createWorkspaceRequestId();
 const requestId = createWorkspaceRequestId();
 const actions = [
   "create",
+  "adopt",
   "list",
   "repositories",
   "local_devices",
+  "operation",
   "repository_add",
   "repository_create",
   "preview_image",
@@ -35,66 +36,6 @@ const actions = [
   "pull_request_get",
   "pull_request_find",
 ];
-
-// Run the baked service against its actual database and transfer directory. No
-// capability is written to disk or included in a thrown Docker command error.
-function transferFixtureCommand(action: "seed" | "seed-large" | "cleanup", value: string): string {
-  const target = new URL(getTestBaseUrl());
-  if (
-    process.env.REMOTE_DOCKER_CONTEXT ||
-    target.protocol !== "http:" ||
-    !["localhost", "127.0.0.1", "[::1]"].includes(target.hostname)
-  ) {
-    throw new Error("Codespace transfer fixture requires a local test container");
-  }
-  const script = `
-    const { CodespaceTransferRepository, CodespaceTransferService, getSqliteInstance,
-      getCodespaceResourcePolicy, getDbPath } = await import('@mcp-moira/shared');
-    const { dirname, join } = await import('node:path');
-    const db = getSqliteInstance();
-    const service = new CodespaceTransferService({
-      repository: new CodespaceTransferRepository(db), policy: getCodespaceResourcePolicy,
-      root: join(dirname(getDbPath()), 'codespace-transfers'),
-    });
-    if (process.argv[1].startsWith('seed')) {
-      const user = db.prepare('SELECT id FROM user WHERE email = ?').get(process.argv[2]);
-      if (!user) throw new Error('Explicit authenticated fixture owner missing');
-      const large = process.argv[1] === 'seed-large';
-      const size = large ? 5 * 1024 * 1024 + 7 : 6;
-      const handle = await service.ingestStream(user.id, {
-        fileName: 'codespace-http-probe.bin', mimeType: 'application/octet-stream', size,
-        body: (async function* () {
-          if (!large) { yield Buffer.from([0, 255, 1, 128, 10, 42]); return; }
-          const chunk = Buffer.alloc(256 * 1024, 0xa7);
-          for (let offset = 0; offset < size; offset += chunk.length)
-            yield chunk.subarray(0, Math.min(chunk.length, size - offset));
-        })(),
-      });
-      const { record } = await service.getOwnedSource(user.id, handle.referenceId);
-      process.stdout.write('TRANSFER_FIXTURE:' + JSON.stringify({
-        id: record.id, referenceId: handle.referenceId,
-      }));
-    } else {
-      const record = db.prepare('SELECT * FROM codespaceTransfer WHERE id = ?').get(process.argv[2]);
-      if (record) await service.discard(record);
-    }
-    db.close();
-  `;
-  try {
-    return dockerExecSync([
-      "node",
-      "--import",
-      "tsx",
-      "--input-type=module",
-      "-e",
-      script,
-      action,
-      value,
-    ]);
-  } catch {
-    throw new Error(`Codespace transfer HTTP fixture ${action} failed`);
-  }
-}
 
 function expectSettingsLink(value: unknown) {
   expect(typeof value).toBe("string");
@@ -201,8 +142,8 @@ describe("Codespace MCP HTTP contract without configured GitHub or paired Local"
         confirm_delete: expect.any(Object),
         head: expect.objectContaining({ type: "string", minLength: 1, maxLength: 255 }),
         base: expect.objectContaining({ type: "string", minLength: 1, maxLength: 255 }),
-        title: expect.objectContaining({ type: "string", minLength: 1, maxLength: 256 }),
-        body: expect.objectContaining({ type: "string", maxLength: 65536 }),
+        title: expect.objectContaining({ type: "string", minLength: 1 }),
+        body: expect.objectContaining({ type: "string" }),
         draft: expect.objectContaining({ type: "boolean" }),
         pull_request_number: expect.objectContaining({ type: "integer", exclusiveMinimum: 0 }),
       }),
@@ -328,74 +269,20 @@ describe("Codespace MCP HTTP contract without configured GitHub or paired Local"
     expect(health.status).toBe("healthy");
   });
 
-  test("should route an invalid public download capability to the private transfer handler", async () => {
+  test("should refuse an owner publication without a current authorized resource", async () => {
     const response = await fetch(
-      `${getTestBaseUrl()}/api/codespaces/transfers/${"invalid-http-route-canary".padEnd(43, "x")}`,
+      getTestBaseUrl() +
+        "/api/codespaces/files/" +
+        codespaceId +
+        "/" +
+        "invalid-http-route-canary".padEnd(43, "x"),
     );
     expect(response.status).toBe(404);
-    await expect(response.json()).resolves.toEqual({ error: "codespace_transfer_not_found" });
+    await expect(response.json()).resolves.toEqual({ error: "workspace_publication_unavailable" });
   });
 
-  test.each(["seed", "seed-large"] as const)(
-    "should deliver exact private bytes once through the public application origin (%s)",
-    async (action) => {
-      const output = transferFixtureCommand(action, getAdminCredentials().email);
-      const marker = "TRANSFER_FIXTURE:";
-      if (!output.includes(marker))
-        throw new Error("Codespace transfer fixture did not return a handle");
-      const fixture = JSON.parse(output.slice(output.lastIndexOf(marker) + marker.length)) as {
-        id: string;
-        referenceId: string;
-      };
-      try {
-        // Keep the capability out of assertion diagnostics, logs and test artifacts.
-        const token = fixture.referenceId.slice("codespace-file://".length);
-        const url = `${getTestBaseUrl()}/api/codespaces/transfers/${encodeURIComponent(token)}`;
-        const response = await fetch(url);
-        expect(response.status).toBe(200);
-        const expected = createHash("sha256");
-        const size = action === "seed-large" ? 5 * 1024 * 1024 + 7 : 6;
-        const chunk =
-          action === "seed-large"
-            ? Buffer.alloc(256 * 1024, 0xa7)
-            : Buffer.from([0, 255, 1, 128, 10, 42]);
-        for (let offset = 0; offset < size; offset += chunk.length)
-          expected.update(chunk.subarray(0, Math.min(chunk.length, size - offset)));
-        const observed = createHash("sha256");
-        let received = 0;
-        if (!response.body) throw new Error("Native download body is missing");
-        const reader = response.body.getReader();
-        try {
-          while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            received += value.byteLength;
-            observed.update(value);
-          }
-        } finally {
-          reader.releaseLock();
-        }
-        expect(received).toBe(size);
-        expect(observed.digest("hex")).toBe(expected.digest("hex"));
-        expect(response.headers.get("content-type")).toBe("application/octet-stream");
-        expect(response.headers.get("content-disposition")).toContain(
-          'attachment; filename="codespace-http-probe.bin"',
-        );
-        expect(response.headers.get("cache-control")).toBe("private, no-store, max-age=0");
-        expect(response.headers.get("x-content-type-options")).toBe("nosniff");
-        expect(response.headers.get("x-robots-tag")).toBe("noindex, nofollow, noarchive");
-        expect(response.headers.get("referrer-policy")).toBe("no-referrer");
-        const replay = await fetch(url);
-        expect(replay.status).toBe(404);
-        await expect(replay.json()).resolves.toEqual({ error: "codespace_transfer_not_found" });
-      } finally {
-        transferFixtureCommand("cleanup", fixture.id);
-      }
-    },
-  );
-
   test.each([
-    ["create", { repository_id: "162", ref: "master" }],
+    ["create", { repository_id: "162", ref: "master", request_id: requestId }],
     [
       "exec",
       { codespace_id: codespaceId, request_id: requestId, argv: ["pwd"], timeout_seconds: 10 },
@@ -439,13 +326,22 @@ describe("Codespace MCP HTTP contract without configured GitHub or paired Local"
     ["preview_image", { codespace_id: codespaceId, path: "screenshot.png" }],
     [
       "pull_request_create",
-      { codespace_id: codespaceId, head: "feat/игра", base: "main", title: "Change" },
+      {
+        codespace_id: codespaceId,
+        request_id: requestId,
+        head: "feat/игра",
+        base: "main",
+        title: "Change",
+      },
     ],
     ["pull_request_get", { codespace_id: codespaceId, pull_request_number: 7 }],
     ["pull_request_find", { codespace_id: codespaceId, head: "feat/игра", base: "main" }],
-    ["start", { codespace_id: codespaceId }],
-    ["stop", { codespace_id: codespaceId }],
-    ["delete", { codespace_id: codespaceId, confirm_delete: true }],
+    ["start", { codespace_id: codespaceId, request_id: requestId, generation: 1 }],
+    ["stop", { codespace_id: codespaceId, request_id: requestId, generation: 1 }],
+    [
+      "delete",
+      { codespace_id: codespaceId, request_id: requestId, generation: 1, confirm_delete: true },
+    ],
     ["stat", { codespace_id: codespaceId, path: "package.json" }],
     ["search", { codespace_id: codespaceId, path: ".", query: "TODO" }],
     ["read", { codespace_id: codespaceId, path: "package.json" }],

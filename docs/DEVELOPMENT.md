@@ -54,20 +54,60 @@ Host runtime validation requires the supported macOS SDK and locally approved
 state. Linux VM execution fails closed before creation.
 
 The common workspace service owns ordinary command/file/session execution in both providers.
-Local lifecycle RPC and GitHub SSH perform only fixed trusted bootstrap and provider management;
-they are not command transports. Changes to lifecycle or guest behavior must preserve
+The Local controller owns physical lifecycle/settings through private Unix HTTP and live routing;
+The selected paired controller performs GitHub fixed trusted bootstrap and provider management;
+cloud services do not run an SSH connector.
+Neither is a command transport. Changes to lifecycle or guest behavior must preserve
 durable replay receipts, independent kernel ownership and unknown-outcome fences;
 an injected test runtime does not establish physical SDK isolation. Use root
 Testfold scripts for focused tests in `tests/integration/local/` and device/provider
 integration tests. Integration global setup runs `local:build` before database
 migration, so source consumers use current packaged native and guest assets on a
 clean checkout. This build prerequisite does not run the SDK or validate a microVM.
-Host `create`, `start` and raw `request` are refused before state/VM admission. Use paired Moira
-lifecycle actions, retain host `stop/remove/recover` custody and run ordinary work through MCP or
-the guest `~/.local/bin/moira-workspace` CLI. Active command/mutation IDs use `ws1-<lowercase UUID>`;
-repository-admission UUIDs are a different domain.
+Host `create OWNER/REPO --ref BRANCH`, `start SPACE_ID`, `stop SPACE_ID` and
+`remove SPACE_ID --confirm` use the running owner controller. Raw `request` envelopes are
+unsupported. Supply `--request-id ws1-<lowercase UUID>` to choose a lifecycle identity;
+otherwise the CLI chooses one and prints it before observing the effect. After a lost reply,
+run `collect REQUEST_ID` with that original identity instead of repeating the mutation.
+Existing owner-admitted VMs and their `~/.local/bin/moira-workspace` CLI remain subject to
+local grants and leases while cloud transport is unavailable. Confirmed authority refusal
+does not permit offline fallback. Fresh host create requires cloud route registration and
+initial Git credential authority; a verified Git identity cache is restricted to existing
+VMs. MCP requires a live authenticated owner and queues no offline lifecycle/settings work.
+Current account/device/repository authority gates remote admission and routing. Controller
+management retains its own local approval guards; existing offline work retains its finite
+owner grants, while fresh creation requires cloud registration. Readiness is configuration
+observation, not an administrative stop/control surface.
+Use host `recover` for explicit local custody recovery. Active lifecycle/command/mutation IDs
+use ws1; repository-admission UUIDs are a different domain.
+
+The Local build bundles the common fixed Git/typed PR primitive into the trusted host
+broker. It uses private repository/action-scoped child credentials from the live issuer;
+Git bytes go directly to GitHub, not through a cloud Git executor. Preserve the existing
+Basic guest-to-host admission, repository/grant checks and network budget when changing
+this adapter. There is no manual `git-token` setup or broad-token fallback. Old private
+token bytes are not active authority and must not be erased during binding migration.
+
+`moira-local status --json` lists token-free `credentialRequests`.
+`moira-local collect ORIGINAL_SECURITY_REQUEST_ID` uses pure issuer collection, never
+new issuance or Git/PR replay. Collection of a live stream is metadata-only; orphan
+retirement requires the existing runner-lock and confirmed owner-absence proof.
+Retain original identities across custody/outcome/disposal uncertainty and await actual
+upstream closure before disposal. Do not describe a local lease deadline as provider
+expiry or assume that parent revocation automatically revokes a derived child.
 
 ### Common workspace payload
+
+Materialize resolution in the workflow engine produces authorized path/content strings.
+Keep Note/Playbook expansion and the final paused-node/context recheck in that text boundary.
+The owner alone encodes those strings, writes the tar through its packaged `tar-stream`
+runtime, stages and publishes the immutable result. Repeat archive requests collect the
+original scope-bound receipt before resolving text; the context fallback remains owner-free
+with its 256 KiB budget. Do not restore cloud Buffer files or archive quotas.
+
+The owner release also carries `owner-renderer.mjs`, the binary extension handler host and process-group supervisor. Renderer dependencies are private packaged Sharp/libvips and font assets, independent of project `node_modules` and cloud authentication/database configuration. `renderOwnerProgress` sets its packaged font configuration before loading the rasterizer. Local host assets use the `owner-runtime` directory; the guest uses its installed `service` assets. Preserve the complete release and asset manifest rather than copying a JavaScript entry alone.
+
+Binary-extension packaging uses the existing esbuild/registry path: installed handler code, canonical manifest and declared regular assets form one immutable artifact. The private owner installs only its checked digest and runs `binaryHandler` under the packaged supervisor. Native/platform or unresolved dynamic dependencies that cannot form the supported owner artifact are refused before delivery admission.
 
 ```bash
 npm run workspace:build
@@ -86,8 +126,32 @@ the Feature. Provider bootstrap also installs/upgrades an existing environment i
 container recreation or VM-disk replacement. Root and nonroot guests require repository ownership
 to equal the service UID. Confirmed startup checks the selected release and Unix service health.
 
+The same package contains the GitHub trusted broker and typed PR client. Ordinary
+workspace `git fetch`/`git push` use its managed fixed origin; the broker verifies both
+canonical and effective fetch/push destinations before binding. Original OAuth/refresh
+credentials remain cloud-private; repository/action-scoped children remain broker memory
+and are excluded from project files, command arguments, environment and logs. The guest
+uses the existing same-UID trust boundary, not a sandbox against authorized commands.
+
+The installed `moira-workspace` CLI supports:
+
+```bash
+moira-workspace pull-request-create --request-id ws1-00000000-0000-4000-8000-000000000001 pr-input.json
+# Collect the original result without resubmitting the create input:
+moira-workspace pull-request-create --request-id ws1-00000000-0000-4000-8000-000000000001
+moira-workspace pull-request-get 1
+moira-workspace pull-request-find feature/example main
+```
+
+Choose a fresh original ID for each authorized create. `pr-input.json` contains
+`head`, `base`, `title`, optional `body` and `draft`; it contains no token, repository
+override or provider URL. An uncertain creation requires original receipt collection
+and exact head/base inspection, not automatic recreation. Security acquisition has its
+own original request identity; its uncertainty before vendor dispatch is not a PR
+mutation result. Direct CLI calls and MCP use the same owner operations and receipts.
+
 See [System architecture](SYSTEM.md#local-codespace-composition-and-ownership),
-[API contracts](API.md#local-device-enrollment-and-relay-api) and
+[API contracts](API.md#local-device-enrollment-and-controller-api) and
 [Codespaces](CODESPACES.md) for runtime setup and recovery.
 
 ### Code Quality
@@ -449,10 +513,13 @@ NodeResultBuilder.error(nodeId, errorMessage); // Fail execution
 
 ### UserNotificationHandler
 
-- **Auto-execution** - renders a portable message and invokes `UserCommunicationService`
+- **Auto-execution** - delegates ordinary text to `UserCommunicationService` and binary sources to the selected communication owner
 - **Channel selection** - the service selects enabled configured adapters for the execution user
 - **Aggregate result** - stores sanitized delivery, partial, no-channel, or total-failure state under the node ID
 - **Routing** - total attempted failure follows `connections.error` when authored; other outcomes use `default`
+- **Recovery** - invocation/visit-bound original delivery IDs retain owner channel stages without resending after uncertainty
+- **Attachments** - the owner decodes inline bytes and renders progress; optional progress failure preserves text delivery, while explicit attachment failure cannot claim file delivery
+- **Frame** - current execution revision and task identity are revalidated before vendor dispatch
 - **Authority boundary** - generic nodes cannot choose a provider, recipient, destination, or credential
 
 ### EndNodeHandler

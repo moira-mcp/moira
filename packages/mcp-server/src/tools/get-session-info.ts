@@ -45,6 +45,7 @@ import {
   queryExecutionVariables,
   ExecutionStopService,
   readExecutionManagement,
+  CommunicationChannelOwnerUnavailableError,
 } from "@mcp-moira/workflow-engine";
 import { MCPEngine } from "../core/mcp-engine.js";
 import { ERRORS, formatDomainError, formatError } from "../messages/index.js";
@@ -1014,16 +1015,23 @@ export async function getSessionInfo(
         }
         const { ProgressImageService } = await import("@mcp-moira/workflow-engine");
         try {
-          const data = await new ProgressImageService(repository).mint(executionId, userId, {
-            theme: params.theme,
-            viewportWidth: params.viewportWidth,
-            view: params.view,
-            hide: params.hide,
-            collapse: params.collapse,
-          });
+          const data = await new ProgressImageService(repository).mint(
+            executionId,
+            userId,
+            {
+              theme: params.theme,
+              viewportWidth: params.viewportWidth,
+              view: params.view,
+              hide: params.hide,
+              collapse: params.collapse,
+            },
+            params.device_id,
+          );
           return { success: true, data };
         } catch (error) {
           if (error instanceof ValidationError) return { success: false, error: error.message };
+          if (error instanceof CommunicationChannelOwnerUnavailableError)
+            return { success: false, code: error.code, error: error.message };
           return { success: false, error: "Progress image could not be created" };
         }
       }

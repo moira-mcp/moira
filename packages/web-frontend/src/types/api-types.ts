@@ -4,10 +4,10 @@
 
 import type {
   CodespaceConnectionView,
-  CodespaceLimitsView,
   CodespacePublicReadinessView,
   CodespaceReadinessView,
   CodespaceSummaryView,
+  CodespaceProviderBillingView,
 } from "@mcp-moira/shared";
 
 /** Website codespace management view returned by GET /api/integrations/github/codespaces. */
@@ -27,14 +27,15 @@ export interface CodespaceManagementView {
     readiness: CodespaceReadinessView;
     connection: CodespaceConnectionView;
     repositories: CodespaceManagementView["repositories"];
-    limits: CodespaceLimitsView;
+    provider_billing?: CodespaceProviderBillingView;
     repositories_stale: boolean;
     resources_stale: boolean;
   }>;
   repositories_stale: boolean;
   resources_stale: boolean;
   codespaces: CodespaceSummaryView[];
-  limits: CodespaceLimitsView;
+  provider_billing?: CodespaceProviderBillingView;
+  controllers?: Array<{ device_id: string; label: string; available: boolean }>;
 }
 import { WorkflowValidationStatus } from "./react-flow-types";
 import { WorkflowGraph, ValidationResult, WorkflowFileInfo } from "./workflow-types";

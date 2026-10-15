@@ -40,6 +40,8 @@ import {
 import * as sharedEmail from "@mcp-moira/shared";
 import { isCodespaceReadinessDegraded } from "@mcp-moira/shared";
 import { getCodespaceObservabilityService } from "../services/codespace-services.js";
+import { getCodespaceConnectionService } from "../services/codespace-services.js";
+import { getScopedCredentialService } from "../services/scoped-credential-factory.js";
 import { sendConditionalRead } from "../utils/conditional-read.js";
 import { executionTaskTitles, withExecutionTaskTitles } from "../utils/execution-task-titles.js";
 import { executionDisplayStatus } from "@mcp-moira/shared/execution-management";
@@ -491,6 +493,21 @@ router.post(
         revokedOAuthConsents: deletedOAuthConsents.length,
       },
     });
+
+    try {
+      await getScopedCredentialService().disposeUser(id);
+    } catch {
+      res.status(503).json({
+        success: false,
+        error: {
+          code: "SCOPED_CREDENTIAL_DISPOSAL_PENDING",
+          message: "The account is blocked. GitHub credential retirement is still pending.",
+        },
+        data: { id, blocked: true, credentialRetirementPending: true },
+        timestamp: new Date().toISOString(),
+      });
+      return;
+    }
 
     res.json({
       success: true,
@@ -976,16 +993,83 @@ router.delete(
       throw createApiError.badRequest("Cannot delete your own account");
     }
 
-    const { user, getDatabase, deleteUserAccount } = await import("@mcp-moira/shared");
+    const {
+      user,
+      session,
+      oauthAccessToken,
+      oauthConsent,
+      getDatabase,
+      deleteUserAccount,
+      AccountCredentialRetirementRequiredError,
+      AccountResourceRetirementRequiredError,
+      CodespaceConnectionRepository,
+      CODESPACE_PROVIDER_GITHUB,
+    } = await import("@mcp-moira/shared");
     const { eq } = await import("drizzle-orm");
     const db = getDatabase();
 
     // Get user email for audit
     const [userData] = await db.select().from(user).where(eq(user.id, id)).limit(1);
+    if (!userData) throw createApiError.notFound(`User not found: ${id}`, { userId: id });
     const userEmail = userData?.email || "unknown";
 
-    // Delete user (cascades to workflows, runs and settings; the change feed records the runs)
-    deleteUserAccount(db, id);
+    // Fence the account before retiring capabilities. Failed retirement must never restore access
+    // or cascade away the original encrypted custody needed to finish provider revocation.
+    await db
+      .update(user)
+      .set({ blocked: true, blockedAt: new Date().toISOString(), blockedBy: currentUserId })
+      .where(eq(user.id, id));
+    await db.delete(session).where(eq(session.userId, id));
+    await db.delete(oauthAccessToken).where(eq(oauthAccessToken.userId, id));
+    await db.delete(oauthConsent).where(eq(oauthConsent.userId, id));
+    const retirementPending = (resourcePending = false) => {
+      res.status(409).json({
+        success: false,
+        error: {
+          code: resourcePending
+            ? "ACCOUNT_RESOURCE_RETIREMENT_PENDING"
+            : "ACCOUNT_CREDENTIAL_RETIREMENT_PENDING",
+          message: resourcePending
+            ? "The account remains blocked. Delete its managed workspaces before deleting the account."
+            : "The account remains blocked. Deletion requires completed GitHub credential retirement.",
+        },
+        data: {
+          id,
+          blocked: true,
+          deleted: false,
+          ...(resourcePending
+            ? { resourceRetirementPending: true }
+            : { credentialRetirementPending: true }),
+        },
+        timestamp: new Date().toISOString(),
+      });
+    };
+    try {
+      await getScopedCredentialService().disposeUser(id);
+      const connections = new CodespaceConnectionRepository(getSqliteInstance());
+      const parent = connections.getConnection(id, CODESPACE_PROVIDER_GITHUB);
+      if (
+        (parent && parent.status !== "disconnected") ||
+        connections.getCredential(id, CODESPACE_PROVIDER_GITHUB) ||
+        connections.getPendingRevocations(id, CODESPACE_PROVIDER_GITHUB).length > 0
+      )
+        await getCodespaceConnectionService().disconnect(id, { securityOnly: true });
+    } catch (error) {
+      retirementPending(error instanceof AccountResourceRetirementRequiredError);
+      return;
+    }
+    try {
+      // The shared deletion guard also refuses unresolved issuance and parent custody.
+      deleteUserAccount(db, id);
+    } catch (error) {
+      if (
+        !(error instanceof AccountCredentialRetirementRequiredError) &&
+        !(error instanceof AccountResourceRetirementRequiredError)
+      )
+        throw error;
+      retirementPending(error instanceof AccountResourceRetirementRequiredError);
+      return;
+    }
 
     // Audit logging
     await logAuditEvent(repository, req, {

@@ -1,138 +1,158 @@
-/* eslint-disable no-control-regex -- control-byte rejection is part of this broker boundary. */
-import { request as httpsRequest } from "node:https";
-import { checkServerIdentity } from "node:tls";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import type { BrokerGrant } from "./broker.js";
+import {
+  serveOwnerGit,
+  ownerPullRequest,
+  readOwnerPullRequestInput,
+  GitHubOwnerError,
+  type GitHubOwnerAction,
+  type GitHubOwnerAuthority,
+  type GitHubOwnerLease,
+} from "../../workspace-service/src/github-owner.mjs";
+import type { BrokerGrant, BrokerOptions } from "./broker.js";
 import { NetworkBudget } from "./network-budget.js";
-import { resolvePublicTarget, type ResolveHost } from "./network.js";
+import { LocalRefusal } from "./policy.js";
+import { LocalScopedCredentialFailure } from "./relay.js";
+import { scopedCredentialFailureOutcome } from "../../shared/src/codespaces/scoped-credential-types.js";
 
-/** GitHub smart HTTP only: no arbitrary URL, API call, redirect, host Git process or credential export. */
+type LocalGitLease = Extract<GitHubOwnerLease, { mode: "scoped" }> & {
+  validate(signal?: AbortSignal): Promise<void>;
+};
+type Acquire = (
+  grant: BrokerGrant,
+  action: GitHubOwnerAction,
+  signal?: AbortSignal,
+) => Promise<LocalGitLease>;
+
+/** Host admission/custody adapter; fixed Git/PR execution and TLS belong to the common owner. */
 export function gitBroker(
   budget: NetworkBudget,
   onFault: (error: unknown) => void,
-  resolve?: ResolveHost,
-  requestHttps: typeof httpsRequest = httpsRequest,
-) {
-  return async (
+  acquire: Acquire,
+  operations = { git: serveOwnerGit, pullRequest: ownerPullRequest },
+): Pick<BrokerOptions, "git" | "pullRequest"> {
+  const run = async (
     request: IncomingMessage,
     response: ServerResponse,
     grant: BrokerGrant,
-  ): Promise<void> => {
+    work: (authority: GitHubOwnerAuthority) => Promise<void>,
+  ) => {
     if (response.destroyed) return;
-    const prefix = `/git/${grant.repository.fullName}.git/`;
-    if (!request.url?.startsWith(prefix) || /[\\%\x00-\x20]/.test(request.url)) {
-      response.writeHead(403, { connection: "close" }).end();
-      return;
-    }
-    const relative = request.url.slice(prefix.length);
-    const url = new URL(`https://github.com/${grant.repository.fullName}.git/${relative}`);
-    const tail = url.pathname.split("/").at(-1);
-    const service = tail === "info" ? "" : url.searchParams.get("service");
-    const info =
-      relative.startsWith("info/refs?") && request.method === "GET" && url.searchParams.size === 1;
-    const fetch =
-      (info && service === "git-upload-pack") ||
-      (relative === "git-upload-pack" && request.method === "POST");
-    const push =
-      (info && service === "git-receive-pack") ||
-      (relative === "git-receive-pack" && request.method === "POST");
-    if (
-      (!fetch && !push) ||
-      (push && !grant.repository.allowPush) ||
-      (grant.repository.private && !grant.gitCredential)
-    ) {
-      response.writeHead(403, { connection: "close" }).end();
-      return;
-    }
     const reservation = await budget.reserve(grant.policy, grant.admission);
     if (response.destroyed) {
       await reservation.release().catch(onFault);
       return;
     }
-    let released = false;
-    const release = () => {
-      if (released) return;
-      released = true;
-      void reservation.release().catch(onFault);
+    const controller = new AbortController();
+    const signal = grant.admission?.signal
+      ? AbortSignal.any([grant.admission.signal, controller.signal])
+      : controller.signal;
+    const authority: GitHubOwnerAuthority = {
+      repositoryFullName: grant.repository.fullName,
+      signal,
+      acquire: async (action, admissionSignal) => {
+        if (
+          (action === "push" && !grant.repository.allowPush) ||
+          (action === "pull_request_create" && grant.repository.allowPullRequests !== true)
+        )
+          throw new LocalRefusal(
+            "LOCAL_REPOSITORY_DENIED",
+            "This repository action is not approved.",
+          );
+        if (
+          action === "fetch" &&
+          !grant.repository.private &&
+          !grant.repository.allowPush &&
+          grant.repository.allowPullRequests !== true
+        )
+          return {
+            mode: "anonymous",
+            repositoryFullName: grant.repository.fullName,
+            useUntil: grant.policy.leaseUntil,
+            dispose: async () => {},
+          };
+        return acquire(grant, action, admissionSignal);
+      },
     };
-    response.once("close", release);
     try {
-      if (
-        (push && !grant.repository.allowPush) ||
-        (grant.repository.private && !grant.gitCredential)
-      ) {
-        response.writeHead(403, { connection: "close" }).end();
-        release();
+      await work(authority);
+    } catch (error) {
+      if (response.headersSent) {
+        response.destroy();
         return;
       }
-      const target = await resolvePublicTarget("github.com", resolve);
-      if (response.destroyed) {
-        release();
-        return;
-      }
-      const headers: Record<string, string> = {
-        host: "github.com",
-        "user-agent": "Moira-Local/1",
-        accept: "*/*",
-      };
-      if (request.method === "POST") {
-        headers["content-type"] =
-          `application/x-${push ? "git-receive-pack" : "git-upload-pack"}-request`;
-      }
-      if (request.headers["git-protocol"] === "version=2") headers["git-protocol"] = "version=2";
-      if (grant.gitCredential)
-        headers.authorization = `Basic ${Buffer.from(`x-access-token:${grant.gitCredential}`).toString("base64")}`;
-      const upstream = requestHttps(
-        {
-          hostname: target.address,
-          family: target.family,
-          servername: "github.com",
-          checkServerIdentity: (_host, certificate) =>
-            checkServerIdentity("github.com", certificate),
-          method: request.method,
-          path: url.pathname + url.search,
-          headers,
-          agent: false,
-          timeout: 15_000,
-          maxHeaderSize: 8192,
-        },
-        (reply) => {
-          const status = reply.statusCode ?? 502;
-          if (status >= 300 && status < 400) {
-            reply.destroy();
-            response.writeHead(502, { connection: "close" }).end();
-            return;
-          }
-          const contentType = reply.headers["content-type"];
-          response.writeHead(status, {
-            "content-type":
-              typeof contentType === "string" ? contentType : "application/octet-stream",
-            "cache-control": "no-store",
-            connection: "close",
-          });
-          reply.on("error", () => response.destroy());
-          reply.pipe(response);
-        },
-      );
-      upstream.once("socket", (socket) => {
-        socket.once("secureConnect", () => upstream.setTimeout(0));
+      const publicCode =
+        error instanceof GitHubOwnerError
+          ? error.publicCode
+          : error instanceof LocalRefusal && /^[A-Z][A-Z0-9_]{1,79}$/.test(error.code)
+            ? error.code
+            : "CODESPACE_PROVIDER_UNAVAILABLE";
+      const uncertain =
+        publicCode === "WORKSPACE_OUTCOME_UNCONFIRMED" ||
+        publicCode === "WORKSPACE_OUTCOME_UNKNOWN" ||
+        scopedCredentialFailureOutcome(publicCode) === "unconfirmed" ||
+        (error instanceof LocalScopedCredentialFailure && error.outcome === "unconfirmed");
+      const securityRequestId =
+        error &&
+        typeof error === "object" &&
+        "securityRequestId" in error &&
+        typeof error.securityRequestId === "string" &&
+        /^ws1-[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(
+          error.securityRequestId,
+        )
+          ? error.securityRequestId
+          : undefined;
+      response.writeHead(uncertain ? 503 : error instanceof GitHubOwnerError ? error.status : 403, {
+        "content-type": "application/json",
+        "cache-control": "no-store",
+        connection: "close",
       });
-      const lifetime = setTimeout(
-        () => upstream.destroy(),
-        Math.max(1, grant.policy.leaseUntil - Date.now()),
+      response.end(
+        JSON.stringify({
+          error: {
+            code: publicCode,
+            ...(securityRequestId ? { security_request_id: securityRequestId } : {}),
+            message: uncertain
+              ? "The GitHub outcome is unconfirmed. Inspect the original owner request before repeating a mutation."
+              : "The approved GitHub operation is unavailable or refused.",
+          },
+        }),
       );
-      upstream.once("close", () => clearTimeout(lifetime));
-      upstream.once("timeout", () => upstream.destroy());
-      upstream.once("error", () => {
-        if (!response.headersSent) response.writeHead(502, { connection: "close" });
-        response.end();
-      });
-      request.once("aborted", () => upstream.destroy());
-      response.once("close", () => upstream.destroy());
-      request.pipe(upstream);
-    } catch {
-      response.writeHead(502, { connection: "close" }).end();
-      release();
+    } finally {
+      controller.abort();
+      await reservation.release().catch(onFault);
     }
+  };
+  return {
+    git: (request, response, grant) =>
+      run(request, response, grant, (authority) =>
+        operations.git(request, response, { ...authority, allowPush: grant.repository.allowPush }),
+      ),
+    pullRequest: async (request, response, grant) => {
+      const match = /^\/github\/(pull_request_create|pull_request_get|pull_request_find)$/.exec(
+        request.url ?? "",
+      );
+      if (!match || request.method !== "POST") {
+        response.writeHead(403, { connection: "close" }).end();
+        return;
+      }
+      await run(request, response, grant, async (authority) => {
+        const action = match[1] as "pull_request_create" | "pull_request_get" | "pull_request_find";
+        const result = await operations.pullRequest(
+          action,
+          await readOwnerPullRequestInput(request),
+          authority,
+        );
+        response.writeHead(200, {
+          "content-type": "application/json",
+          "cache-control": "no-store",
+          connection: "close",
+        });
+        response.end(
+          JSON.stringify(
+            action === "pull_request_find" ? { pull_requests: result } : { pull_request: result },
+          ),
+        );
+      });
+    },
   };
 }

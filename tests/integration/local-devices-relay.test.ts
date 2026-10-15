@@ -5,177 +5,56 @@ import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
-import { createHash, randomBytes, randomUUID } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import express, { type Request, type Response, type NextFunction } from "express";
 import httpRequest from "supertest";
 import {
   LocalDeviceRepository,
   LocalDeviceService,
+  LocalResourceRepository,
+  WorkspaceAuthRepository,
   localRepositoryTargetId,
-  CodespaceResourceRepository,
-  CodespaceResourceService,
-  CodespaceProviderRegistry,
-  canonicalJson,
-  LOCAL_REQUEST_MAX_WINDOW_MS,
-  getFeatureResolver,
-  setFeatureResolver,
-  ModeFeatureResolver,
-  type LocalPublicPolicy,
   type LocalDeviceView,
-  type LocalLifecycleEnvelope,
-  type LocalRelayRequest,
-  type CodespaceResourcePolicy,
+  ScopedCredentialError,
 } from "@mcp-moira/shared";
 import {
   createLocalDeviceManagementRoutes,
   createLocalDeviceRoutes,
 } from "../../packages/web-backend/src/routes/local-devices.js";
-import { LocalCodespaceRelay } from "../../packages/web-backend/src/services/local-codespace-relay.js";
 
 let sqlite: Database.Database, service: LocalDeviceService, now: number;
 const repositoryId = "b4ba0360-a0bf-4b80-a739-8a62671c403a";
-const serverPolicy: CodespaceResourcePolicy = {
-  enabled: true,
-  maxCpuCores: 4,
-  maxMemoryBytes: 8 * 1024 ** 3,
-  maxStorageBytes: 16 * 1024 ** 3,
-  maxActivePerUser: 8,
-  maxActiveGlobal: 16,
-  createThrottleMs: 0,
-  startWaitMs: 60_000,
-  createDeadlineMs: 60_000,
-  cleanupDeadlineMs: 60_000,
-  claimLeaseMs: 30_000,
-  reconcileIntervalMs: 30_000,
-};
-function policy(deviceId = randomUUID()): LocalPublicPolicy {
-  return {
-    version: 1,
-    deviceId,
-    label: "My computer",
-    enabled: true,
-    leaseUntil: now + 3600_000,
-    repositories: [
-      {
-        id: repositoryId,
-        fullName: "owner/project",
-        private: true,
-        allowPush: false,
-        allowDelete: false,
-      },
-    ],
-    machine: {
-      name: "local-approved",
-      displayName: "My computer",
-      operatingSystem: "linux",
-      cpuCores: 2,
-      memoryBytes: 4 * 1024 ** 3,
-      storageBytes: 8 * 1024 ** 3,
-    },
-  };
-}
-function enroll(userId = "user-a", input = policy()) {
+async function enroll(userId = "user-a") {
   const pair = service.beginEnrollment(userId),
     credential = randomBytes(32).toString("base64url");
-  const device = service.approveLocalEnrollment({
+  const pending = service.approveLocalEnrollment({
     pairingId: pair.pairingId,
     pairingToken: pair.pairingToken,
     credential,
-    policy: input,
+    deviceId: randomUUID(),
+    label: "My computer",
   });
-  const pending = service.pairingStatus({
-    pairingId: pair.pairingId,
-    pairingToken: pair.pairingToken,
-  });
-  const active = service.confirmEnrollment(userId, pair.pairingId, pending.pairing.revision);
-  return { device: active, credential, pair, pending: device };
+  const device = await service.confirmEnrollment(userId, pair.pairingId, 2);
+  return { device, credential, pair, pending };
 }
 function bind(device: LocalDeviceView) {
   const resourceId = randomUUID();
-  sqlite
-    .prepare(
-      `INSERT INTO codespaceResource(id,userId,connectionId,authorizationGeneration,provider,repositoryId,repositoryFullName,requestedRef,
-    operationMarker,machineName,machineDisplayName,machineOperatingSystem,machineCpuCores,machineMemoryBytes,machineStorageBytes,
-    state,generation,createDeadlineAt,remoteExpiresAt,createdAt,updatedAt)
-    VALUES(?,?,?,1,'local-sandboxes',?,'owner/project','main',?,'local-approved','My computer','linux',2,?,?, 'usable',1,?,?,?,?)`,
-    )
-    .run(
-      resourceId,
-      device.userId,
-      device.connectionId,
-      localRepositoryTargetId(device.deviceId, repositoryId),
-      `moira-${randomBytes(12).toString("hex")}`,
-      4 * 1024 ** 3,
-      8 * 1024 ** 3,
-      now + 60_000,
-      now + 3600_000,
-      now,
-      now,
-    );
-  service.bindResource({ ...device, resourceId, repositoryId, profileId: "local-approved" });
-  return resourceId;
-}
-function payload(): LocalLifecycleEnvelope {
-  return {
-    version: 1,
-    id: randomUUID(),
-    expiresAt: now + 300_000,
-    request: { action: "snapshot" },
-  };
-}
-function digestOf(value: unknown): string {
-  return createHash("sha256").update(canonicalJson(value)).digest("hex");
-}
-function newRequest(
-  original: LocalRelayRequest,
-  deadlineAt = original.deadlineAt,
-): LocalRelayRequest {
-  const envelope = { ...original.payload, id: randomUUID(), expiresAt: deadlineAt };
-  return {
-    ...original,
-    requestId: envelope.id,
-    deadlineAt,
-    payload: envelope,
-    digest: digestOf(envelope),
-  };
-}
-function queue(device: LocalDeviceView, resourceId: string, envelope = payload()) {
-  const request = {
+  new LocalResourceRepository(sqlite).reserve({
+    id: resourceId,
     userId: device.userId,
-    deviceId: device.deviceId,
-    deviceGeneration: device.deviceGeneration,
     connectionId: device.connectionId,
-    requestId: envelope.id,
-    resourceId,
-    resourceGeneration: 1,
-    digest: digestOf(envelope),
-    payload: envelope,
-    deadlineAt: envelope.expiresAt,
-  };
-  service.enqueue(request);
-  return request;
-}
-function githubResource(localResourceId: string): string {
-  sqlite
-    .prepare(
-      `INSERT INTO codespaceConnection(id,userId,provider,externalAccountId,externalLogin,status,credentialGeneration,createdAt,updatedAt)
-    VALUES('github','user-a','github-codespaces','github-owner','owner','connected',1,1,1)`,
-    )
-    .run();
-  const resourceId = randomUUID();
-  sqlite
-    .prepare(
-      `INSERT INTO codespaceResource(id,userId,connectionId,authorizationGeneration,provider,repositoryId,repositoryFullName,requestedRef,
-    operationMarker,machineName,machineDisplayName,machineOperatingSystem,machineCpuCores,machineMemoryBytes,machineStorageBytes,
-    state,generation,createDeadlineAt,remoteExpiresAt,createdAt,updatedAt)
-    SELECT ?,userId,'github',authorizationGeneration,'github-codespaces','100',repositoryFullName,requestedRef,
-    ?,machineName,machineDisplayName,machineOperatingSystem,machineCpuCores,machineMemoryBytes,machineStorageBytes,
-    'create_pending',generation,createDeadlineAt,remoteExpiresAt,createdAt,updatedAt+1 FROM codespaceResource WHERE id=?`,
-    )
-    .run(resourceId, `marker-${resourceId}`, localResourceId);
-  sqlite
-    .prepare("UPDATE codespaceResource SET state='create_pending' WHERE id=?")
-    .run(localResourceId);
+    authorizationGeneration: 1,
+    repositoryId: localRepositoryTargetId(device.deviceId, repositoryId),
+    repositoryFullName: "owner/project",
+    requestedRef: "main",
+    operationMarker: `moira-${randomBytes(12).toString("hex")}`,
+    routeGeneration: 1,
+    createdAt: now,
+    retiredAt: null,
+    retiredGeneration: null,
+    retiredRequestId: null,
+  });
+  service.bindResource({ ...device, resourceId, repositoryId, profileId: "local-approved" });
   return resourceId;
 }
 beforeEach(() => {
@@ -196,686 +75,55 @@ afterEach(() => {
   sqlite.close();
 });
 
-describe("Durable local device enrollment and relay", () => {
-  test("enrollment and settings retain the exact owner budget without Moira hardware ceilings", () => {
-    const approved = policy();
-    approved.machine = {
-      ...approved.machine,
-      cpuCores: 64,
-      memoryBytes: 128 * 1024 ** 3,
-      storageBytes: 2 * 1024 ** 4,
-    };
-    const { device, credential } = enroll("user-a", approved);
-    expect(device.policy.machine).toEqual(approved.machine);
-    expect(service.getActiveDevice("user-a", device.deviceId).policy.machine).toEqual(
-      approved.machine,
+describe("Local registration, revocation and owner routing", () => {
+  test("device revocation fences its bearer before a refused remote child disposal", async () => {
+    const first = await enroll(),
+      second = await enroll();
+    service = new LocalDeviceService(
+      new LocalDeviceRepository(sqlite),
+      () => now,
+      undefined,
+      async () => {
+        expect(() => service.authenticateDevice(first.credential)).toThrow("Device access denied");
+        throw new ScopedCredentialError("SCOPED_CREDENTIAL_DISPOSAL_PENDING", 503);
+      },
     );
-    const settings = {
-      label: approved.label,
-      enabled: approved.enabled,
-      leaseUntil: approved.leaseUntil,
-      cpuCores: approved.machine.cpuCores,
-      memoryBytes: approved.machine.memoryBytes,
-      storageBytes: approved.machine.storageBytes,
-      dockerBytes: 256 * 1024 ** 3,
-      repositories: approved.repositories,
-      gitAuthor: null,
-      agentRepositoryManagement: null,
-    };
-    const ceiling = {
-      cpuCores: 64,
-      memoryBytes: 256 * 1024 ** 3,
-      storageBytes: 3 * 1024 ** 4,
-      dockerBytes: 512 * 1024 ** 3,
-      maxLeaseMs: 3600_000,
-    };
-    service.heartbeat(service.authenticateDevice(credential), approved, {
-      settings,
-      ceiling,
-      appliedRevision: 0,
+    await expect(service.revokeOwned("user-a", first.device.deviceId, 1)).rejects.toMatchObject({
+      code: "SCOPED_CREDENTIAL_DISPOSAL_PENDING",
     });
-    const next = { ...settings, cpuCores: 48, memoryBytes: 192 * 1024 ** 3 + 512 * 1024 ** 2 };
-    const accepted = service.requestSettings("user-a", device.deviceId, {
-      expectedGeneration: device.deviceGeneration,
-      expectedRevision: 0,
-      settings: next,
-    });
-    expect(accepted.control).toMatchObject({
-      revision: 1,
-      status: "pending",
-      settings: next,
-      ceiling,
-    });
-    expect(accepted.policy).toEqual(approved);
-    expect(() =>
-      service.requestSettings("user-a", device.deviceId, {
-        expectedGeneration: device.deviceGeneration,
-        expectedRevision: 1,
-        settings: { ...next, cpuCores: ceiling.cpuCores + 1 },
-      }),
-    ).toThrow("locally approved envelope");
-    expect(service.getActiveDevice("user-a", device.deviceId)).toEqual(accepted);
+    expect(service.getDeviceIdentity("user-a", first.device.deviceId).status).toBe("revoked");
+    expect(service.authenticateDevice(second.credential).deviceId).toBe(second.device.deviceId);
   });
-  test("legacy private-part relay archives are neither replayed nor pruned by inline lifecycle", () => {
-    const { device, credential } = enroll();
-    const resourceId = bind(device);
-    const current = queue(device, resourceId);
-    const archivedId = randomUUID();
-    const archive = {
-      parts: [{ transferId: randomUUID(), sha256: "a".repeat(64), size: 7 }],
-      size: 7,
-      sha256: "a".repeat(64),
-    };
-    sqlite
-      .prepare(
-        `INSERT INTO codespaceLocalRelay(requestId,userId,deviceId,deviceGeneration,connectionId,resourceId,resourceGeneration,digest,inputReference,status,deadlineAt,createdAt,updatedAt)
-      SELECT ?,userId,deviceId,deviceGeneration,connectionId,resourceId,resourceGeneration,digest,?,'queued',?,?,? FROM codespaceLocalRelay WHERE requestId=?`,
-      )
-      .run(
-        archivedId,
-        canonicalJson(archive),
-        now - 1,
-        now - 7200_000,
-        now - 7200_000,
-        current.requestId,
-      );
-    const before = sqlite
-      .prepare("SELECT * FROM codespaceLocalRelay WHERE requestId=?")
-      .get(archivedId);
-    service.listOwned("user-a");
-    expect(
-      service.claim(service.authenticateDevice(credential), 8).map((entry) => entry.requestId),
-    ).toEqual([current.requestId]);
-    expect(service.getRequest("user-a", archivedId)).toBeNull();
-    expect(
-      sqlite.prepare("SELECT * FROM codespaceLocalRelay WHERE requestId=?").get(archivedId),
-    ).toEqual(before);
-  });
-  test("an accepted lifecycle receipt settles after160 seconds without restoring expired work authority", async () => {
-    const { device, credential } = enroll();
-    const resourceId = bind(device);
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), "moira-late-append-receipt-"));
-    const request = queue(device, resourceId, { ...payload(), expiresAt: now + 150_000 });
-    const auth = service.authenticateDevice(credential);
-    const claim = service.claim(auth, 2).find((entry) => entry.requestId === request.requestId)!;
-    const effect = path.join(root, "actual-append.txt");
-    fs.appendFileSync(effect, "one actual effect\n");
-    const receipt = { ok: true as const, result: { observation: fs.readFileSync(effect, "utf8") } };
-    const app = express();
-    app.use("/api/local-devices", createLocalDeviceRoutes(service, "https://moira.example"));
-    try {
-      now += 160_000;
-      service.listOwned("user-a");
-      expect(service.getResult("user-a", request.requestId)?.status).toBe("expired");
-      expect(() => service.renewClaim(auth, request.requestId, claim.claimId)).toThrow();
-      const ack = {
-        requestId: request.requestId,
-        claimId: claim.claimId,
-        digest: request.digest,
-        status: "completed",
-        outcome: receipt,
-      };
-      const response = await httpRequest(app)
-        .post("/api/local-devices/relay/ack")
-        .set("Authorization", `Bearer ${credential}`)
-        .send(ack);
-      expect(response.status).toBe(200);
-      expect(response.body.data.status).toBe("completed");
-      expect(service.getResult("user-a", request.requestId)?.outcome).toEqual(receipt);
-      expect(fs.readFileSync(effect, "utf8")).toBe("one actual effect\n");
-      expect(() => service.authorizePayload(auth, request.requestId, claim.claimId)).toThrow();
-      const terminalRow = sqlite
-        .prepare("SELECT * FROM codespaceLocalRelay WHERE requestId=?")
-        .get(request.requestId);
-      expect(service.renewClaim(auth, request.requestId, claim.claimId)).toMatchObject({
-        claimId: claim.claimId,
-        claimExpiresAt: claim.claimExpiresAt,
-        deadlineAt: claim.deadlineAt,
-      });
-      expect(
-        sqlite
-          .prepare("SELECT * FROM codespaceLocalRelay WHERE requestId=?")
-          .get(request.requestId),
-      ).toEqual(terminalRow);
-      const duplicate = await httpRequest(app)
-        .post("/api/local-devices/relay/ack")
-        .set("Authorization", `Bearer ${credential}`)
-        .send(ack);
-      expect(duplicate.status).toBe(200);
-      const changed = await httpRequest(app)
-        .post("/api/local-devices/relay/ack")
-        .set("Authorization", `Bearer ${credential}`)
-        .send({ ...ack, status: "refused" });
-      expect(changed.status).toBe(409);
-    } finally {
-      fs.rmSync(root, { recursive: true, force: true });
-    }
-  });
-
-  test("an expired never-claimed request has no result-only settlement authority", () => {
-    const { device, credential } = enroll();
-    const request = queue(device, bind(device));
-    now = request.deadlineAt + 1;
-    service.listOwned("user-a");
-    expect(() =>
-      service.authorizeResult(
-        service.authenticateDevice(credential),
-        request.requestId,
-        randomUUID(),
-      ),
-    ).toThrow();
-  });
-  test.each(["create", "snapshot"] as const)(
-    "reserves clock headroom for a fresh full-window %s without changing retained identity",
-    async (action) => {
-      const { device } = enroll(),
-        resourceId = bind(device);
-      sqlite
-        .prepare("UPDATE codespaceResource SET createDeadlineAt=? WHERE id=?")
-        .run(now + LOCAL_REQUEST_MAX_WINDOW_MS, resourceId);
-      const resource = new CodespaceResourceRepository(sqlite).getOwned("user-a", resourceId)!;
-      const directory = fs.mkdtempSync(path.join(os.tmpdir(), "moira-relay-clock-window-"));
-      try {
-        const relay = new LocalCodespaceRelay(service, () => now);
-        const input =
-          action === "create"
-            ? { action, repositoryId, ref: "main", operationMarker: resource.operationMarker }
-            : { action };
-        const options = { mutation: true, waitMs: LOCAL_REQUEST_MAX_WINDOW_MS };
-        const queued = await relay.retain(resource, input, options);
-        expect(queued.payload.expiresAt).toBe(now + 870_000);
-        now += 5000;
-        const repeated = await relay.retain(resource, input, options);
-        expect(repeated).toEqual(queued);
-        expect(repeated.payload).toEqual(queued.payload);
-      } finally {
-        fs.rmSync(directory, { recursive: true, force: true });
-      }
-    },
-  );
-  test.each(["short request", "resource deadline", "device lease"] as const)(
-    "clock headroom preserves the tighter %s boundary",
-    async (boundary) => {
-      const approved = policy();
-      if (boundary === "device lease") approved.leaseUntil = now + 20_000;
-      const { device } = enroll("user-a", approved),
-        resourceId = bind(device);
-      const createDeadline = now + (boundary === "resource deadline" ? 15_000 : 900_000);
-      sqlite
-        .prepare("UPDATE codespaceResource SET createDeadlineAt=? WHERE id=?")
-        .run(createDeadline, resourceId);
-      const resource = new CodespaceResourceRepository(sqlite).getOwned("user-a", resourceId)!;
-      const directory = fs.mkdtempSync(path.join(os.tmpdir(), "moira-relay-short-window-"));
-      try {
-        const input =
-          boundary === "resource deadline"
-            ? {
-                action: "create",
-                repositoryId,
-                ref: "main",
-                operationMarker: resource.operationMarker,
-              }
-            : { action: "snapshot" };
-        const queued = await new LocalCodespaceRelay(service, () => now).retain(resource, input, {
-          waitMs: boundary === "short request" ? 2000 : LOCAL_REQUEST_MAX_WINDOW_MS,
-        });
-        const expectedDeadline =
-          boundary === "short request"
-            ? now + 2000
-            : boundary === "resource deadline"
-              ? createDeadline
-              : approved.leaseUntil;
-        expect(queued.payload.expiresAt).toBe(expectedDeadline);
-      } finally {
-        fs.rmSync(directory, { recursive: true, force: true });
-      }
-    },
-  );
-  test.each(["snapshot-only", "accepted-delete"] as const)(
-    "owner recovery distinguishes %s from an unknown destructive dispatch",
-    async (scope) => {
-      const { device, credential } = enroll(),
-        resourceId = bind(device);
-      const repository = new CodespaceResourceRepository(sqlite);
-      const pending = repository.requestDelete("user-a", resourceId, 1, now);
-      if (!pending || typeof pending === "string") throw new Error("Expected pending deletion");
-      repository.recordLifecycleFailure(
-        resourceId,
-        pending.generation,
-        "CODESPACE_RESOURCE_INVALID",
-        now,
-      );
-      const directory = fs.mkdtempSync(path.join(os.tmpdir(), "moira-owner-recovery-"));
-      try {
-        const relay = new LocalCodespaceRelay(service, () => now);
-        const queued = await relay.retain(
-          pending,
-          scope === "snapshot-only"
-            ? { action: "snapshot" }
-            : { action: "delete", spaceId: pending.id, generation: pending.generation },
-          { mutation: scope === "accepted-delete", waitMs: LOCAL_REQUEST_MAX_WINDOW_MS },
-        );
-        if (scope === "snapshot-only") {
-          const output = { ok: true, result: { observation: "saved scoped observation" } };
-          sqlite
-            .prepare(
-              "UPDATE codespaceLocalRelay SET status='completed',outputReference=? WHERE requestId=?",
-            )
-            .run(canonicalJson(output), queued.requestId);
-        } else
-          expect(service.claim(service.authenticateDevice(credential))[0].requestId).toBe(
-            queued.requestId,
-          );
-        const settings = {
-          label: device.label,
-          enabled: true,
-          leaseUntil: device.policy.leaseUntil,
-          cpuCores: 2,
-          memoryBytes: 4 * 1024 ** 3,
-          storageBytes: 8 * 1024 ** 3,
-          dockerBytes: 2 * 1024 ** 3,
-          repositories: device.policy.repositories,
-          gitAuthor: null,
-          agentRepositoryManagement: null,
-        };
-        sqlite.prepare("UPDATE codespaceLocalDevice SET control=? WHERE id=?").run(
-          canonicalJson({
-            optedIn: true,
-            revision: 1,
-            appliedRevision: 1,
-            status: "applied",
-            settings,
-            ceiling: null,
-            error: null,
-          }),
-          device.deviceId,
-        );
-        const recovered = repository.requestDelete(
-          "user-a",
-          resourceId,
-          pending.generation,
-          now,
-          true,
-        );
-        expect(recovered).toMatchObject({
-          generation: pending.generation + (scope === "snapshot-only" ? 1 : 0),
-          state: "delete_pending",
-        });
-        if (!recovered || typeof recovered === "string")
-          throw new Error("Expected retained resource");
-        expect(repository.isOwnerDeleteIntent("user-a", resourceId, recovered.generation)).toBe(
-          scope === "snapshot-only",
-        );
-        const cleanup = await relay.retain(
-          recovered,
-          { action: "delete", spaceId: recovered.id, generation: recovered.generation },
-          { mutation: true, waitMs: LOCAL_REQUEST_MAX_WINDOW_MS },
-        );
-        expect(cleanup.payload.expiresAt).toBe(now + 870_000);
-        expect(cleanup.authority).toBe(scope === "snapshot-only" ? "owner-delete" : undefined);
-      } finally {
-        fs.rmSync(directory, { recursive: true, force: true });
-      }
-    },
-  );
-  test.each([
-    ["self-host", "approved", 0, 0, true],
-    ["saas", null, 1, 0, true],
-    ["saas", null, 0, 0, false],
-    ["self-host", "approved", 1, 1, false],
-  ] as const)(
-    "atomic owner cleanup respects %s account admission with approved=%s email=%s blocked=%s",
-    (mode, approvedAt, emailVerified, blocked, admitted) => {
-      const { device } = enroll(),
-        resourceId = bind(device);
-      const settings = {
-        label: device.label,
-        enabled: true,
-        leaseUntil: device.policy.leaseUntil,
-        cpuCores: 2,
-        memoryBytes: 4 * 1024 ** 3,
-        storageBytes: 8 * 1024 ** 3,
-        dockerBytes: 2 * 1024 ** 3,
-        repositories: device.policy.repositories,
-        gitAuthor: null,
-        agentRepositoryManagement: null,
-      };
-      sqlite.prepare("UPDATE codespaceLocalDevice SET control=? WHERE id=?").run(
-        JSON.stringify({
-          optedIn: true,
-          revision: 1,
-          appliedRevision: 1,
-          status: "applied",
-          settings,
-          ceiling: null,
-          error: null,
-        }),
-        device.deviceId,
-      );
-      sqlite
-        .prepare("UPDATE user SET approvedAt=?,emailVerified=?,blocked=? WHERE id='user-a'")
-        .run(approvedAt, emailVerified, blocked);
-      const previousMode = process.env.DEPLOYMENT_MODE,
-        resolver = getFeatureResolver();
-      try {
-        process.env.DEPLOYMENT_MODE = mode;
-        setFeatureResolver(new ModeFeatureResolver());
-        const result = new CodespaceResourceRepository(sqlite).requestDelete(
-          "user-a",
-          resourceId,
-          1,
-          now,
-          true,
-        );
-        if (admitted) expect(result).toMatchObject({ generation: 2, state: "delete_pending" });
-        else expect(result).toBe("unauthorized");
-      } finally {
-        if (previousMode === undefined) delete process.env.DEPLOYMENT_MODE;
-        else process.env.DEPLOYMENT_MODE = previousMode;
-        setFeatureResolver(resolver);
-      }
-    },
-  );
-  test("owner deletion authority survives an expired work lease without widening agent grants", () => {
-    const { device, credential } = enroll(),
-      resourceId = bind(device);
-    const originalPolicy = JSON.stringify(device.policy);
-    const repository = new CodespaceResourceRepository(sqlite);
-    expect(repository.requestDelete("user-a", resourceId, 1, now, true)).toBe("unauthorized");
-    expect(repository.getOwned("user-a", resourceId)).toMatchObject({
-      generation: 1,
-      state: "usable",
-    });
-    const ordinary = queue(device, resourceId);
-    expect(() => service.enqueue({ ...newRequest(ordinary), authority: "owner-delete" })).toThrow(
-      "Relay authority does not match its mutation",
-    );
-    expect(service.getRequest("user-a", ordinary.requestId)).not.toHaveProperty("authority");
-    const settings = {
-      label: device.label,
-      enabled: false,
-      leaseUntil: now - 1,
-      cpuCores: 2,
-      memoryBytes: 4 * 1024 ** 3,
-      storageBytes: 8 * 1024 ** 3,
-      dockerBytes: 2 * 1024 ** 3,
-      repositories: device.policy.repositories,
-      gitAuthor: null,
-      agentRepositoryManagement: null,
-    };
-    sqlite.prepare("UPDATE codespaceLocalDevice SET control=? WHERE id=?").run(
-      JSON.stringify({
-        optedIn: true,
-        revision: 1,
-        appliedRevision: 1,
-        status: "applied",
-        settings,
-        ceiling: null,
-        error: null,
-      }),
-      device.deviceId,
-    );
-    const requested = repository.requestDelete("user-a", resourceId, 1, now, true);
-    expect(requested).toMatchObject({ generation: 2, state: "delete_pending" });
-    now = device.policy.leaseUntil + 1;
-    expect(service.claim(service.authenticateDevice(credential))).toEqual([]);
-    const reference: LocalLifecycleEnvelope = {
-      ...payload(),
-      expiresAt: now + 120_000,
-      authority: "owner-delete",
-      request: { action: "delete", spaceId: resourceId, generation: 2 },
-    };
-    const request = {
-      userId: device.userId,
-      deviceId: device.deviceId,
-      deviceGeneration: device.deviceGeneration,
-      connectionId: device.connectionId,
-      requestId: reference.id,
-      resourceId,
-      resourceGeneration: 2,
-      authority: "owner-delete" as const,
-      digest: digestOf(reference),
-      payload: reference,
-      deadlineAt: reference.expiresAt,
-    };
-    service.enqueue(request);
-    service = new LocalDeviceService(new LocalDeviceRepository(sqlite), () => now);
-    expect(service.getRequest("user-a", request.requestId)?.authority).toBe("owner-delete");
-    const auth = service.authenticateDevice(credential);
-    const claim = service.claim(auth)[0];
-    expect(claim.authority).toBe("owner-delete");
-    expect(service.authorizePayload(auth, request.requestId, claim.claimId).authority).toBe(
-      "owner-delete",
-    );
-    expect(service.renewClaim(auth, request.requestId, claim.claimId).claimExpiresAt).toBe(
-      now + 30_000,
-    );
-    const output = { ok: true as const, result: { removed: resourceId } };
-    const ack = {
-      requestId: request.requestId,
-      digest: request.digest,
-      claimId: claim.claimId,
-      status: "completed" as const,
-      outcome: output,
-    };
-    expect(service.acknowledge(auth, ack).status).toBe("completed");
-    now = request.deadlineAt + 1;
-    expect(service.acknowledge(auth, ack).status).toBe("completed");
-    expect(JSON.stringify(service.getActiveDevice("user-a", device.deviceId).policy)).toBe(
-      originalPolicy,
-    );
-    expect(() =>
-      service.enqueue({ ...request, requestId: randomUUID(), authority: undefined }),
-    ).toThrow();
-    sqlite.prepare("UPDATE codespaceLocalDevice SET control=NULL WHERE id=?").run(device.deviceId);
-    expect(() => service.acknowledge(auth, ack)).toThrow();
-  });
-  test("requires local approval and a fresh owner confirmation; persists only credential digests", () => {
+  test("requires local approval and a fresh owner confirmation; persists only credential digests", async () => {
     const pair = service.beginEnrollment("user-a"),
       credential = randomBytes(32).toString("base64url");
-    expect(() => service.confirmEnrollment("user-a", pair.pairingId, 1)).toThrow(
+    await expect(service.confirmEnrollment("user-a", pair.pairingId, 1)).rejects.toThrow(
       "Read the current device",
     );
     const input = {
       pairingId: pair.pairingId,
       pairingToken: pair.pairingToken,
       credential,
-      policy: policy(),
+      deviceId: randomUUID(),
+      label: "My computer",
     };
     const device = service.approveLocalEnrollment(input);
     expect(device.status).toBe("pending");
     expect(() => service.authenticateDevice(credential)).toThrow("Device access denied");
-    expect(() => service.confirmEnrollment("user-b", pair.pairingId, 2)).toThrow("Pairing expired");
-    expect(() => service.confirmEnrollment("user-a", pair.pairingId, 1)).toThrow(
+    await expect(service.confirmEnrollment("user-b", pair.pairingId, 2)).rejects.toThrow(
+      "Pairing expired",
+    );
+    await expect(service.confirmEnrollment("user-a", pair.pairingId, 1)).rejects.toThrow(
       "Read the current device",
     );
-    service.confirmEnrollment("user-a", pair.pairingId, 2);
+    const active = await service.confirmEnrollment("user-a", pair.pairingId, 2);
+    expect(active.owner).toEqual({ state: "unavailable" });
     expect(service.authenticateDevice(credential).deviceId).toBe(device.deviceId);
     expect(service.approveLocalEnrollment(input).status).toBe("active");
     const stored = sqlite.serialize();
     expect(stored.includes(Buffer.from(credential))).toBe(false);
     expect(stored.includes(Buffer.from(pair.pairingToken))).toBe(false);
   });
-  test("qualifies repository targets per device and revokes one without invalidating its sibling", () => {
-    const first = enroll(),
-      second = enroll();
-    expect(first.device.connectionId).toBe(second.device.connectionId);
-    const grants = sqlite
-      .prepare(
-        "SELECT externalRepositoryId,externalInstallationId FROM codespaceConnectionRepository ORDER BY externalRepositoryId",
-      )
-      .all() as { externalRepositoryId: string; externalInstallationId: string }[];
-    expect(grants).toHaveLength(2);
-    expect(grants.map((g) => g.externalInstallationId).sort()).toEqual(
-      [first.device.deviceId, second.device.deviceId].sort(),
-    );
-    const resource = bind(first.device),
-      request = queue(first.device, resource);
-    service.revokeOwned("user-a", first.device.deviceId, 1);
-    expect(service.getResult("user-a", request.requestId)?.status).toBe("revoked");
-    expect(() => service.authenticateDevice(first.credential)).toThrow();
-    expect(service.authenticateDevice(second.credential).deviceGeneration).toBe(1);
-    expect(
-      sqlite.prepare("SELECT COUNT(*) count FROM codespaceConnectionRepository").get(),
-    ).toEqual({ count: 1 });
-    expect(
-      sqlite
-        .prepare("SELECT credentialGeneration FROM codespaceConnection WHERE id=?")
-        .get(second.device.connectionId),
-    ).toEqual({ credentialGeneration: 1 });
-  });
-  test("rejects resource rebinding and cross-user lifecycle requests before inserting a request", () => {
-    const first = enroll(),
-      second = enroll(),
-      resource = bind(first.device);
-    expect(() =>
-      service.bindResource({
-        userId: "user-a",
-        deviceId: second.device.deviceId,
-        deviceGeneration: 1,
-        connectionId: second.device.connectionId,
-        resourceId: resource,
-        repositoryId,
-        profileId: "local-approved",
-      }),
-    ).toThrow();
-    expect(() => queue(enroll("user-b").device, resource)).toThrow();
-    expect(sqlite.prepare("SELECT COUNT(*) count FROM codespaceLocalRelay").get()).toEqual({
-      count: 0,
-    });
-  });
-  test("replays exact persisted identity after receipt loss and refuses changed input", () => {
-    const { device } = enroll(),
-      resource = bind(device),
-      request = queue(device, resource);
-    expect(service.enqueue(request).status).toBe("queued");
-    expect(service.getRequest("user-a", request.requestId)).toEqual(request);
-    expect(service.getRequest("user-b", request.requestId)).toBeNull();
-    const changed = { ...request.payload, request: { action: "stop" as const, spaceId: resource } };
-    expect(() =>
-      service.enqueue({ ...request, payload: changed, digest: digestOf(changed) }),
-    ).toThrow("Relay request identity changed");
-    expect(sqlite.prepare("SELECT COUNT(*) count FROM codespaceLocalRelay").get()).toEqual({
-      count: 1,
-    });
-    const columns = (
-      sqlite.prepare("PRAGMA table_info(codespaceLocalRelay)").all() as { name: string }[]
-    ).map((r) => r.name);
-    expect(columns).not.toEqual(
-      expect.arrayContaining(["argv", "stdin", "payload", "stdout", "credential"]),
-    );
-  });
-  test("renews one claim and fences stale acknowledgements after redelivery", () => {
-    const { device, credential } = enroll(),
-      resource = bind(device),
-      request = queue(device, resource),
-      auth = service.authenticateDevice(credential);
-    const first = service.claim(auth)[0];
-    expect(first.requestId).toBe(request.requestId);
-    now += 20_000;
-    expect(service.renewClaim(auth, request.requestId, first.claimId).claimExpiresAt).toBe(
-      now + 30_000,
-    );
-    now += 31_000;
-    const second = service.claim(auth)[0];
-    expect(second.claimId).not.toBe(first.claimId);
-    const output = { ok: true as const, result: { observed: true } };
-    expect(() =>
-      service.acknowledge(auth, {
-        requestId: request.requestId,
-        digest: request.digest,
-        claimId: first.claimId,
-        status: "completed",
-        outcome: output,
-      }),
-    ).toThrow("acknowledgement changed");
-    const ack = {
-      requestId: request.requestId,
-      digest: request.digest,
-      claimId: second.claimId,
-      status: "completed" as const,
-      outcome: output,
-    };
-    expect(service.acknowledge(auth, ack).status).toBe("completed");
-    expect(service.acknowledge(auth, ack).outcome).toEqual(output);
-    expect(service.claim(auth)).toEqual([]);
-  });
-  test("rejects another request's digest and stops a revoked in-flight acknowledgement", () => {
-    const { device, credential } = enroll(),
-      resource = bind(device),
-      auth = service.authenticateDevice(credential);
-    const first = queue(device, resource),
-      second = queue(device, resource),
-      claims = service.claim(auth, 2);
-    const firstClaim = claims.find((c) => c.requestId === first.requestId)!,
-      secondClaim = claims.find((c) => c.requestId === second.requestId)!;
-    const output = { ok: true as const, result: { observed: true } };
-    expect(() =>
-      service.acknowledge(auth, {
-        requestId: second.requestId,
-        digest: first.digest,
-        claimId: secondClaim.claimId,
-        status: "completed",
-        outcome: output,
-      }),
-    ).toThrow();
-    service.revokeOwned("user-a", device.deviceId, 1);
-    expect(() =>
-      service.acknowledge(auth, {
-        requestId: first.requestId,
-        digest: first.digest,
-        claimId: firstClaim.claimId,
-        status: "completed",
-        outcome: output,
-      }),
-    ).toThrow("generation is no longer active");
-    expect(service.getResult("user-a", first.requestId)?.status).toBe("revoked");
-  });
-  test("admits work across lifecycle changes while enforcing local lease and owner blocking", () => {
-    const { device, credential } = enroll(),
-      resource = bind(device),
-      auth = service.authenticateDevice(credential),
-      request = queue(device, resource);
-    sqlite.prepare("UPDATE codespaceResource SET generation=2 WHERE id=?").run(resource);
-    const claim = service.claim(auth)[0];
-    expect(claim.requestId).toBe(request.requestId);
-    expect(service.authorizePayload(auth, request.requestId, claim.claimId)).toMatchObject({
-      resourceId: resource,
-    });
-    sqlite.prepare("UPDATE codespaceResource SET generation=3 WHERE id=?").run(resource);
-    expect(service.authorizeResult(auth, request.requestId, claim.claimId)).toMatchObject({
-      resourceId: resource,
-    });
-    now = device.policy.leaseUntil;
-    expect(() => service.claim(auth)).toThrow("Renew the device work lease");
-    sqlite.prepare("UPDATE user SET blocked=1 WHERE id='user-a'").run();
-    expect(() => service.authenticateDevice(credential)).toThrow("Account access");
-  });
-  test.each(["repository grant", "device"] as const)(
-    "lifecycle changes never bypass revoked %s access to accepted input or output",
-    (revocation) => {
-      const { device, credential } = enroll();
-      const resource = bind(device),
-        auth = service.authenticateDevice(credential);
-      const request = queue(device, resource),
-        claim = service.claim(auth)[0];
-      sqlite.prepare("UPDATE codespaceResource SET generation=2 WHERE id=?").run(resource);
-      expect(service.authorizeResult(auth, request.requestId, claim.claimId)).toMatchObject({
-        resourceId: resource,
-      });
-      if (revocation === "repository grant")
-        sqlite
-          .prepare("DELETE FROM codespaceConnectionRepository WHERE connectionId=?")
-          .run(device.connectionId);
-      else service.revokeOwned("user-a", device.deviceId, device.deviceGeneration);
-      expect(() => service.authorizePayload(auth, request.requestId, claim.claimId)).toThrow(
-        expect.objectContaining({ code: "LOCAL_UNAUTHORIZED" }),
-      );
-      expect(() => service.authorizeResult(auth, request.requestId, claim.claimId)).toThrow(
-        expect.objectContaining({ code: "LOCAL_UNAUTHORIZED" }),
-      );
-    },
-  );
   test("expires an unused pairing and preserves existing GitHub connection data", () => {
     sqlite
       .prepare(
@@ -890,7 +138,8 @@ describe("Durable local device enrollment and relay", () => {
         pairingId: pair.pairingId,
         pairingToken: pair.pairingToken,
         credential: randomBytes(32).toString("base64url"),
-        policy: policy(),
+        deviceId: randomUUID(),
+        label: "My computer",
       }),
     ).toThrow("expired");
     expect(
@@ -925,7 +174,8 @@ describe("Durable local device enrollment and relay", () => {
       pairingId: pair.pairingId,
       pairingToken: pair.pairingToken,
       credential,
-      policy: policy(),
+      deviceId: randomUUID(),
+      label: "My computer",
     });
     expect(enrollResponse.status).toBe(201);
     expect(enrollResponse.body.data.status).toBe("pending");
@@ -938,44 +188,44 @@ describe("Durable local device enrollment and relay", () => {
       .send({ expectedRevision: pending.body.data.pairing.revision });
     expect(confirmed.status).toBe(200);
     expect(confirmed.body.data.status).toBe("active");
-    const unauthenticated = await httpRequest(app).post("/api/local-devices/relay/claim").send({});
+    const unauthenticated = await httpRequest(app).post("/api/local-devices/heartbeat").send({});
     expect(unauthenticated.status).toBe(401);
     const authenticated = await httpRequest(app)
-      .post("/api/local-devices/relay/claim")
+      .post("/api/local-devices/heartbeat")
       .set("Authorization", `Bearer ${credential}`)
       .send({});
     expect(authenticated.status).toBe(200);
-    expect(authenticated.body.data).toEqual({ requests: [] });
+    expect(authenticated.body.data).toMatchObject({
+      status: "active",
+      deviceId: confirmed.body.data.deviceId,
+    });
+    expect(authenticated.body.data).not.toHaveProperty("policy");
+    expect(authenticated.body.data).not.toHaveProperty("control");
+    expect(confirmed.body.data.owner).toEqual({ state: "unavailable" });
     expect(JSON.stringify(confirmed.body)).not.toContain(credential);
   });
-  test("a provider resource reconciler claims only its provider even when another provider is older", async () => {
-    const { device } = enroll(),
-      localId = bind(device),
-      githubId = githubResource(localId);
-    const repository = new CodespaceResourceRepository(sqlite);
-    const claimed = repository.claimDue(
-      "github-claim",
-      now,
-      now + 30_000,
-      undefined,
-      "github-codespaces",
-    );
-    expect(claimed?.id).toBe(githubId);
-    expect(repository.getOwned("user-a", localId)?.claimId).toBeNull();
-    repository.releaseClaim(githubId, 1, "github-claim", "retry", now);
-    const resourceService = new CodespaceResourceService({
-      repository,
-      registry: new CodespaceProviderRegistry(),
-      credentials: { getCredential: async () => "unused" },
-      repositories: repository,
-      providerId: "github-codespaces",
-      requiredCapabilities: {},
-      policy: () => serverPolicy,
-      now: () => now,
-    });
-    expect(await resourceService.reconcileOnce()).toBe(true);
-    expect(repository.getOwned("user-a", githubId)?.state).toBe("rejected");
-    expect(repository.getOwned("user-a", localId)?.state).toBe("create_pending");
+  test("authenticated heartbeat preserves an unresolved Local route without restoring cloud lifecycle dispatch", async () => {
+    const { device, credential } = await enroll(),
+      resourceId = bind(device);
+    const before = sqlite.prepare("SELECT * FROM localResourceIdentity WHERE id=?").get(resourceId);
+    const app = express();
+    app.use("/api/local-devices", createLocalDeviceRoutes(service, "https://moira.example"));
+    const response = await httpRequest(app)
+      .post("/api/local-devices/heartbeat")
+      .set("Authorization", `Bearer ${credential}`)
+      .send({});
+    expect(response.status).toBe(200);
+    expect(
+      sqlite.prepare("SELECT * FROM localResourceIdentity WHERE id=?").get(resourceId),
+    ).toEqual(before);
+    expect(service.getBinding("user-a", resourceId)?.deviceId).toBe(device.deviceId);
+    expect(
+      sqlite
+        .prepare(
+          "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('codespaceProviderMutation','codespaceOperation','codespacePolicyUsage')",
+        )
+        .all(),
+    ).toEqual([]);
   });
   test("upgrades the actual master journal without changing existing GitHub metadata or credentials", () => {
     const temp = fs.mkdtempSync(path.join(os.tmpdir(), "moira-local-upgrade-")),
@@ -988,14 +238,16 @@ describe("Durable local device enrollment and relay", () => {
         journal = JSON.parse(fs.readFileSync(journalPath, "utf8")) as {
           entries: { tag: string }[];
         };
-      const newIndex = journal.entries.findIndex((row) => row.tag === "0054_local_devices_relay");
+      const newIndex = journal.entries.findIndex(
+        (row) => row.tag === "0061_local_controller_authority",
+      );
       expect(newIndex).toBeGreaterThan(0);
       journal.entries = journal.entries.slice(0, newIndex);
       fs.writeFileSync(journalPath, JSON.stringify(journal));
       migrate(drizzle(upgraded), { migrationsFolder: before });
       upgraded
         .prepare(
-          "INSERT INTO user(id,email,handle,createdAt,updatedAt) VALUES('existing','existing@example.test','existing','before','before')",
+          "INSERT INTO user(id,email,handle,createdAt,updatedAt,approvedAt,emailVerified) VALUES('existing','existing@example.test','existing','before','before','approved',1)",
         )
         .run();
       upgraded
@@ -1010,7 +262,174 @@ describe("Durable local device enrollment and relay", () => {
         VALUES('existing-github',2,'key','iv','tag','encrypted-existing',7,1)`,
         )
         .run();
+      const deviceId = randomUUID(),
+        resourceId = randomUUID(),
+        githubResourceId = randomUUID(),
+        requestId = randomUUID(),
+        transferId = randomUUID();
+      upgraded
+        .prepare(
+          `INSERT INTO codespaceConnection(id,userId,provider,externalAccountId,externalLogin,status,credentialGeneration,createdAt,updatedAt)
+        VALUES('old-local','existing','local-sandboxes','existing','Local devices','connected',1,1,1)`,
+        )
+        .run();
+      upgraded
+        .prepare(
+          `INSERT INTO codespaceLocalDevice(id,userId,connectionId,label,generation,status,credentialDigest,policy,policyDigest,control,createdAt,updatedAt)
+        VALUES(?,'existing','old-local','Historical device',1,'active','old-digest',?,'old-policy-digest',?,1,1)`,
+        )
+        .run(deviceId, '{"historical":"policy bytes"}', '{"historical":"control bytes"}');
+      upgraded
+        .prepare(
+          `INSERT INTO codespaceConnectionRepository(connectionId,externalInstallationId,externalRepositoryId,fullName,private,createdAt)
+        VALUES('old-local',?,?,'owner/old',1,1)`,
+        )
+        .run(deviceId, "old-repository");
+      upgraded
+        .prepare(
+          `INSERT INTO codespaceResource(id,userId,connectionId,authorizationGeneration,provider,repositoryId,repositoryFullName,requestedRef,operationMarker,
+        machineName,machineDisplayName,machineOperatingSystem,machineCpuCores,machineMemoryBytes,machineStorageBytes,state,generation,createDeadlineAt,remoteExpiresAt,createdAt,updatedAt)
+        VALUES(?,'existing','old-local',1,'local-sandboxes','old-repository','owner/old','main','moira-old','local-approved','Old','linux',2,4096,8192,'usable',1,1,1,1,1)`,
+        )
+        .run(resourceId);
+      upgraded
+        .prepare(
+          `INSERT INTO codespaceResource(id,userId,connectionId,authorizationGeneration,provider,repositoryId,repositoryFullName,requestedRef,operationMarker,
+        machineName,machineDisplayName,machineOperatingSystem,machineCpuCores,machineMemoryBytes,machineStorageBytes,state,generation,createDeadlineAt,remoteExpiresAt,createdAt,updatedAt)
+        SELECT ?,'existing','existing-github',7,'github-codespaces','123','owner/unknown','main','moira-historical-unknown',
+        machineName,machineDisplayName,machineOperatingSystem,machineCpuCores,machineMemoryBytes,machineStorageBytes,'create_submitted',4,1,1,1,1 FROM codespaceResource WHERE id=?`,
+        )
+        .run(githubResourceId, resourceId);
+      upgraded
+        .prepare(
+          `INSERT INTO codespaceLocalRelay(requestId,userId,deviceId,deviceGeneration,connectionId,resourceId,resourceGeneration,digest,inputReference,status,deadlineAt,createdAt,updatedAt)
+        VALUES(?,'existing',?,1,'old-local',?,1,'old-digest',?,'claimed',1,1,1)`,
+        )
+        .run(requestId, deviceId, resourceId, '{"unknown":"never replay"}');
+      upgraded
+        .prepare(
+          `INSERT INTO codespaceTransfer(id,tokenDigest,userId,purpose,state,fileName,mimeType,declaredSize,objectKey,ownerPid,expiresAt,createdAt,updatedAt)
+        VALUES(?,'old-transfer-digest','existing','local-relay','ready','old.bin','application/octet-stream',7,'old-object',1,1,1,1)`,
+        )
+        .run(transferId);
+      upgraded
+        .prepare(
+          "INSERT INTO codespaceLocalRelayPart(transferId,requestId,claimId) VALUES(?,?,'old-claim')",
+        )
+        .run(transferId, requestId);
+      upgraded
+        .prepare(
+          "INSERT INTO codespaceProviderMutation(id,resourceId,userId,provider,generation,kind,attempt,createdAt) VALUES('old-local-effect',?,'existing','local-sandboxes',1,'delete',1,1)",
+        )
+        .run(resourceId);
+      upgraded
+        .prepare(
+          "INSERT INTO codespaceProviderMutation(id,resourceId,userId,provider,generation,kind,attempt,createdAt) VALUES('old-github-effect',?,'existing','github-codespaces',7,'start',1,1)",
+        )
+        .run(resourceId);
+      upgraded
+        .prepare(
+          "INSERT INTO codespacePolicyUsage(userId,provider,utcDay,requiredCleanupOperations,updatedAt) VALUES('existing','local-sandboxes','2026-10-13',9,1),('existing','github-codespaces','2026-10-13',3,1)",
+        )
+        .run();
+      const operationalSources = [
+        "codespaceProviderMutation",
+        "codespacePolicyUsage",
+        "codespaceResource",
+      ];
+      const localOperational = operationalSources.map((table) =>
+        upgraded.prepare("SELECT * FROM " + table + " WHERE provider='local-sandboxes'").all(),
+      );
+      const githubOperational = operationalSources.map((table) =>
+        upgraded.prepare("SELECT * FROM " + table + " WHERE provider='github-codespaces'").all(),
+      );
+      const sources = [
+        "codespaceLocalDevice",
+        "codespaceLocalRelay",
+        "codespaceLocalRelayPart",
+        "codespaceConnectionRepository",
+      ];
+      const preserved = sources.map((table) => upgraded.prepare("SELECT * FROM " + table).all());
       migrate(drizzle(upgraded), { migrationsFolder: migrations });
+      const operationalArchives = [
+        "archiveLocalProviderMutation",
+        "archiveLocalPolicyUsage",
+        "archiveLocalResourceOperational",
+      ];
+      expect(
+        operationalArchives.map((table) => upgraded.prepare("SELECT * FROM " + table).all()),
+      ).toEqual(localOperational);
+      const githubArchives = [
+        "archiveCodespaceProviderMutation",
+        "archiveCodespacePolicyUsage",
+        "archiveGithubResourceOperational",
+      ];
+      expect(
+        githubArchives.map((table) => upgraded.prepare("SELECT * FROM " + table).all()),
+      ).toEqual(githubOperational);
+      expect(
+        upgraded
+          .prepare(
+            "SELECT id,generation,authorizationGeneration,providerResourceName,retirement,deviceId FROM githubResourceIdentity WHERE id=?",
+          )
+          .get(githubResourceId),
+      ).toEqual({
+        id: githubResourceId,
+        generation: 4,
+        authorizationGeneration: 7,
+        providerResourceName: null,
+        retirement: "unknown",
+        deviceId: null,
+      });
+      for (const table of [...operationalArchives, ...githubArchives])
+        expect(() => upgraded.prepare("DELETE FROM " + table).run()).toThrow(
+          "Read-only historical archive",
+        );
+      for (const table of operationalSources.slice(0, 2))
+        expect(
+          upgraded
+            .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name=?")
+            .all(table),
+        ).toEqual([]);
+      expect(
+        upgraded.prepare("SELECT name FROM sqlite_master WHERE name='codespaceResource'").get(),
+      ).toBeUndefined();
+      const archives = [
+        "archiveCodespaceLocalDevice",
+        "archiveCodespaceLocalRelay",
+        "archiveCodespaceLocalRelayPart",
+        "archiveLocalConnectionRepository",
+      ];
+      expect(archives.map((table) => upgraded.prepare("SELECT * FROM " + table).all())).toEqual(
+        preserved,
+      );
+      for (const table of archives) {
+        expect(() => upgraded.prepare("DELETE FROM " + table).run()).toThrow(
+          "Read-only historical archive",
+        );
+        expect(upgraded.prepare("SELECT * FROM " + table).all()).toEqual(
+          preserved[archives.indexOf(table)],
+        );
+      }
+      expect(
+        upgraded
+          .prepare(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('codespaceLocalRelay','codespaceLocalRelayPart')",
+          )
+          .all(),
+      ).toEqual([]);
+      expect(
+        upgraded
+          .prepare("SELECT * FROM codespaceConnectionRepository WHERE connectionId='old-local'")
+          .all(),
+      ).toEqual([]);
+      const upgradedService = new LocalDeviceService(
+        new LocalDeviceRepository(upgraded),
+        () => now,
+      );
+      expect(upgradedService.listRegistered("existing").devices).toEqual([
+        expect.objectContaining({ deviceId, owner: { state: "unavailable" } }),
+      ]);
       expect(
         upgraded
           .prepare(
@@ -1026,8 +445,159 @@ describe("Durable local device enrollment and relay", () => {
           .get(),
       ).toEqual({ ciphertext: "encrypted-existing", generation: 7 });
       expect(upgraded.prepare("SELECT COUNT(*) count FROM codespaceLocalDevice").get()).toEqual({
-        count: 0,
+        count: 1,
       });
+      expect(upgraded.pragma("foreign_key_check")).toEqual([]);
+    } finally {
+      upgraded.close();
+      fs.rmSync(temp, { recursive: true, force: true });
+    }
+  });
+  test("minimal Local migration preserves current bindings and guest authority without reviving historical unknown effects", () => {
+    const temp = fs.mkdtempSync(path.join(os.tmpdir(), "moira-local-identity-upgrade-")),
+      upgraded = new Database(":memory:"),
+      migrations = path.resolve("packages/web-backend/drizzle");
+    try {
+      upgraded.pragma("foreign_keys=ON");
+      fs.cpSync(migrations, temp, { recursive: true });
+      const journalPath = path.join(temp, "meta/_journal.json"),
+        journal = JSON.parse(fs.readFileSync(journalPath, "utf8")) as {
+          entries: { tag: string }[];
+        },
+        index = journal.entries.findIndex((entry) => entry.tag === "0064_local_resource_identity");
+      expect(index).toBeGreaterThan(0);
+      journal.entries = journal.entries.slice(0, index);
+      fs.writeFileSync(journalPath, JSON.stringify(journal));
+      migrate(drizzle(upgraded), { migrationsFolder: temp });
+      upgraded
+        .prepare(
+          "INSERT INTO user(id,email,handle,createdAt,updatedAt) VALUES('existing','existing@example.test','existing','before','before')",
+        )
+        .run();
+      upgraded
+        .prepare(
+          "INSERT INTO codespaceConnection(id,userId,provider,externalAccountId,externalLogin,status,credentialGeneration,createdAt,updatedAt) VALUES('local','existing','local-sandboxes','existing','Local','connected',3,1,1)",
+        )
+        .run();
+      const deviceId = randomUUID(),
+        localRepository = randomUUID(),
+        resourceId = randomUUID();
+      upgraded
+        .prepare(
+          "INSERT INTO codespaceLocalDevice(id,userId,connectionId,label,generation,status,credentialDigest,createdAt,updatedAt) VALUES(?,'existing','local','Same device',7,'active','original-digest',1,1)",
+        )
+        .run(deviceId);
+      const insert = upgraded.prepare(`INSERT INTO codespaceResource
+        (id,userId,connectionId,authorizationGeneration,provider,repositoryId,repositoryFullName,requestedRef,operationMarker,
+         machineName,machineDisplayName,machineOperatingSystem,machineCpuCores,machineMemoryBytes,machineStorageBytes,
+         state,generation,createDeadlineAt,remoteExpiresAt,lastOutcome,createdAt,updatedAt)
+        VALUES(?,'existing','local',3,'local-sandboxes',?,'owner/project','main',?,'local-approved','Old machine','linux',2,4096,8192,?,4,5,6,?,7,8)`);
+      for (const [id, state] of [
+        [resourceId, "usable"],
+        ["revoked", "ambiguous"],
+        ["unbound", "create_submitted"],
+        ["deleted", "deleted"],
+      ])
+        insert.run(
+          id,
+          localRepositoryTargetId(deviceId, localRepository),
+          "moira-" + id,
+          state,
+          state === "create_submitted" ? "UNKNOWN-original" : null,
+        );
+      const bind = upgraded.prepare(
+        "INSERT INTO codespaceLocalResourceBinding(resourceId,userId,deviceId,deviceGeneration,repositoryId,profileId,revokedAt) VALUES(?,'existing',?,7,?,'local-approved',?)",
+      );
+      bind.run(resourceId, deviceId, localRepository, null);
+      bind.run("revoked", deviceId, localRepository, 123);
+      const auth = new WorkspaceAuthRepository(upgraded),
+        credential = auth.issue(
+          {
+            userId: "existing",
+            resourceId,
+            resourceGeneration: 4,
+            authorizationGeneration: 3,
+            environmentIdentity: "a".repeat(64),
+          },
+          null,
+        );
+      const rows = upgraded.prepare("SELECT * FROM codespaceResource ORDER BY id").all(),
+        bindings = upgraded
+          .prepare("SELECT * FROM codespaceLocalResourceBinding ORDER BY resourceId")
+          .all(),
+        guest = upgraded.prepare("SELECT * FROM workspaceAgentCredential").all(),
+        oldArchive = upgraded.prepare("SELECT * FROM archiveLocalResourceOperational").all();
+      migrate(drizzle(upgraded), { migrationsFolder: migrations });
+      expect(
+        upgraded.prepare("SELECT * FROM archiveLocalResourceLegacyCurrent ORDER BY id").all(),
+      ).toEqual(rows);
+      expect(
+        upgraded
+          .prepare("SELECT * FROM archiveLocalResourceBindingLegacyCurrent ORDER BY resourceId")
+          .all(),
+      ).toEqual(bindings);
+      expect(
+        upgraded.prepare("SELECT * FROM codespaceLocalResourceBinding ORDER BY resourceId").all(),
+      ).toEqual(bindings);
+      expect(upgraded.prepare("SELECT * FROM workspaceAgentCredential").all()).toEqual(guest);
+      expect(auth.authenticate(credential)).toMatchObject({
+        resourceId,
+        resourceGeneration: 4,
+        authorizationGeneration: 3,
+        environmentIdentity: "a".repeat(64),
+      });
+      expect(upgraded.prepare("SELECT * FROM archiveLocalResourceOperational").all()).toEqual(
+        oldArchive,
+      );
+      expect(
+        upgraded.prepare("SELECT name FROM sqlite_master WHERE name='codespaceResource'").get(),
+      ).toBeUndefined();
+      expect(
+        (
+          upgraded.prepare("PRAGMA table_info(localResourceIdentity)").all() as { name: string }[]
+        ).map((row) => row.name),
+      ).toEqual([
+        "id",
+        "userId",
+        "connectionId",
+        "authorizationGeneration",
+        "repositoryId",
+        "repositoryFullName",
+        "requestedRef",
+        "operationMarker",
+        "routeGeneration",
+        "createdAt",
+        "retiredAt",
+        "retiredGeneration",
+        "retiredRequestId",
+      ]);
+      expect(
+        upgraded
+          .prepare(
+            "SELECT id,retiredAt,retiredGeneration,retiredRequestId FROM localResourceIdentity ORDER BY id",
+          )
+          .all(),
+      ).toEqual(
+        [resourceId, "revoked", "unbound", "deleted"].sort().map((id) => ({
+          id,
+          retiredAt: id === "deleted" ? 8 : null,
+          retiredGeneration: id === "deleted" ? 4 : null,
+          retiredRequestId: null,
+        })),
+      );
+      expect(
+        new LocalDeviceService(new LocalDeviceRepository(upgraded), () => now).getBinding(
+          "existing",
+          resourceId,
+        ),
+      ).toMatchObject({ deviceId, deviceGeneration: 7, repositoryId: localRepository });
+      for (const table of [
+        "archiveLocalResourceLegacyCurrent",
+        "archiveLocalResourceBindingLegacyCurrent",
+      ])
+        expect(() => upgraded.prepare("DELETE FROM " + table).run()).toThrow(
+          "Read-only historical archive",
+        );
       expect(upgraded.pragma("foreign_key_check")).toEqual([]);
     } finally {
       upgraded.close();
@@ -1061,27 +631,98 @@ describe("Durable local device enrollment and relay", () => {
       expect(response.text).not.toContain("SYNTHETIC_PRIVATE_CANARY");
     },
   );
-  test("HTTP enrollment accepts more than 64 repository grants within its transport envelope", async () => {
-    const pair = service.beginEnrollment("user-a"),
-      base = policy();
-    const full = {
-      ...base,
-      repositories: Array.from({ length: 65 }, (_, index) => ({
-        ...base.repositories[0],
-        id: randomUUID(),
-        fullName: `owner/project-${index}`,
-      })),
-    };
-    const body = {
-      pairingId: pair.pairingId,
-      pairingToken: pair.pairingToken,
-      credential: randomBytes(32).toString("base64url"),
-      policy: full,
-    };
-    const app = express();
+  test("offline registry stores identity only and cannot accept operational settings", async () => {
+    const { device } = await enroll();
+    expect((await service.listOwned("user-a")).devices).toEqual([device]);
+    expect(device.owner).toEqual({ state: "unavailable" });
+    const columns = (
+      sqlite.prepare("PRAGMA table_info(codespaceLocalDevice)").all() as { name: string }[]
+    ).map((row) => row.name);
+    expect(columns).not.toEqual(expect.arrayContaining(["policy", "policyDigest", "control"]));
+    const requestId = "ws1-" + randomUUID();
+    await expect(
+      service.requestSettings("user-a", device.deviceId, {
+        requestId,
+        expectedGeneration: 1,
+        expectedRevision: 0,
+        settings: {
+          label: "Draft",
+          enabled: true,
+          leaseUntil: now + 3600000,
+          cpuCores: 2,
+          memoryBytes: 4 * 1024 ** 3,
+          storageBytes: 8 * 1024 ** 3,
+          dockerBytes: 4 * 1024 ** 3,
+          repositories: [],
+          gitAuthor: null,
+          agentRepositoryManagement: null,
+        },
+      }),
+    ).rejects.toMatchObject({ code: "LOCAL_UNAVAILABLE" });
+    expect(service.listRegistered("user-a").devices).toEqual([device]);
+    expect(sqlite.prepare("SELECT * FROM codespaceConnectionRepository").all()).toEqual([]);
+  });
+  test("tenant access and device revocation remain isolated from sibling registration", async () => {
+    const first = await enroll(),
+      second = await enroll(),
+      other = await enroll("user-b");
+    expect(first.device.connectionId).toBe(second.device.connectionId);
+    expect(service.listRegistered("user-a").devices.map((d) => d.deviceId)).toEqual(
+      expect.arrayContaining([first.device.deviceId, second.device.deviceId]),
+    );
+    expect(service.listRegistered("user-a").devices).toHaveLength(2);
+    expect(() => service.getDeviceIdentity("user-b", first.device.deviceId)).toThrow(
+      "Device access denied",
+    );
+    await expect(service.revokeOwned("user-b", first.device.deviceId, 1)).rejects.toThrow(
+      "Device access denied",
+    );
+    await expect(
+      service.getOperation("user-b", first.device.deviceId, "ws1-" + randomUUID()),
+    ).rejects.toMatchObject({ code: "LOCAL_UNAUTHORIZED" });
+    await expect(service.revokeOwned("user-a", first.device.deviceId, 2)).rejects.toThrow(
+      "Device generation changed",
+    );
+    const revoked = await service.revokeOwned("user-a", first.device.deviceId, 1);
+    expect(revoked).toMatchObject({
+      status: "revoked",
+      deviceGeneration: 2,
+      owner: { state: "unavailable" },
+    });
+    expect(() => service.authenticateDevice(first.credential)).toThrow("Device access denied");
+    expect(service.authenticateDevice(second.credential).deviceGeneration).toBe(1);
+    expect(service.authenticateDevice(other.credential).userId).toBe("user-b");
+    expect(
+      sqlite
+        .prepare("SELECT status,credentialGeneration FROM codespaceConnection WHERE id=?")
+        .get(second.device.connectionId),
+    ).toEqual({ status: "connected", credentialGeneration: 1 });
+    sqlite.prepare("UPDATE user SET blocked=1 WHERE id='user-a'").run();
+    expect(() => service.authenticateDevice(second.credential)).toThrow("Account access");
+  });
+  test("resource binding refuses reparenting and tenant crossover", async () => {
+    const first = await enroll(),
+      second = await enroll(),
+      other = await enroll("user-b"),
+      resourceId = bind(first.device);
+    const original = service.getBinding("user-a", resourceId);
+    expect(service.getBinding("user-b", resourceId)).toBeNull();
+    for (const device of [second.device, other.device])
+      expect(() =>
+        service.bindResource({ ...device, resourceId, repositoryId, profileId: "local-approved" }),
+      ).toThrow();
+    expect(service.getBinding("user-a", resourceId)).toEqual(original);
+  });
+  test("removed dispatcher routes cannot resurrect a queued lifecycle request", async () => {
+    const { credential } = await enroll(),
+      app = express();
     app.use("/api/local-devices", createLocalDeviceRoutes(service, "https://moira.example"));
-    const response = await httpRequest(app).post("/api/local-devices/enroll").send(body);
-    expect(response.status).toBe(201);
-    expect(response.body.data.policy.repositories).toHaveLength(65);
+    for (const route of ["/relay/claim", "/relay/ack", "/relay/" + randomUUID() + "/renew"]) {
+      const response = await httpRequest(app)
+        .post("/api/local-devices" + route)
+        .set("Authorization", "Bearer " + credential)
+        .send({});
+      expect(response.status).toBe(404);
+    }
   });
 });

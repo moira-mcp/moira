@@ -19,9 +19,6 @@ ENV WEB_FRONTEND_PORT=3002
 # Install system dependencies
 RUN apk add --no-cache \
     git \
-    github-cli=2.97.0-r1 \
-    openssh-client-default=10.3_p1-r1 \
-    util-linux-misc=2.42.3-r1 \
     curl \
     nginx \
     supervisor \
@@ -110,12 +107,7 @@ FROM base AS backend-build
 
 COPY packages/web-backend/ ./packages/web-backend/
 COPY packages/mcp-server/ ./packages/mcp-server/
-COPY packages/local/src/ ./packages/local/src/
 COPY packages/workspace-service/ ./packages/workspace-service/
-COPY scripts/build-workspace-service.js scripts/package-workspace-service.js ./scripts/
-ARG GIT_COMMIT=unknown
-RUN WORKSPACE_SOURCE_COMMIT=${GIT_COMMIT} node scripts/package-workspace-service.js --arch x64 && \
-    WORKSPACE_SOURCE_COMMIT=${GIT_COMMIT} node scripts/package-workspace-service.js --arch arm64
 RUN npx tsc --noEmit --project packages/mcp-server/tsconfig.json
 
 RUN npx tsc --noEmit --project packages/web-backend/tsconfig.json

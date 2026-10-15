@@ -38,6 +38,7 @@ export const ApiErrorCode = {
   HANDLE_CONFLICT: "HANDLE_CONFLICT",
   INVALID_HANDLE: "INVALID_HANDLE",
   ACCESS_DENIED: "ACCESS_DENIED",
+  COMMUNICATION_OWNER_UNAVAILABLE: "COMMUNICATION_OWNER_UNAVAILABLE",
 } as const;
 
 export type ApiErrorCode = (typeof ApiErrorCode)[keyof typeof ApiErrorCode];

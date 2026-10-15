@@ -39,7 +39,7 @@ consent, email verification, and the broader multi-user administration surface.
 - **packages/workflow-engine/** - Core node-graph execution engine
 - **packages/extension-sdk/** - Typed authoring contract for custom nodes and communication channels
 - **packages/extension-runner/** - Isolated companion service for installed extension bundles
-- **packages/local/** - User-owned Docker Sandboxes companion for local codespaces
+- **packages/local/** - Paired controller for workspace provisioning and optional Docker Sandboxes microVMs
 - **packages/workspace-service/** - Common guest command, file and session service with its Unix-socket CLI
 - **packages/mcp-server/** - MCP protocol HTTP server with tools
 - **packages/web-backend/** - Express API for workflow management
@@ -75,9 +75,10 @@ directly to backend port 3001 and ordinary traffic to nginx 80, without Docker s
 Its application `TRUST_PROXY` default is 2; configure explicit trusted proxy addresses for another
 ingress topology. A standalone frontend-port mapping is not the supported workspace stream route.
 
-The image is pulled from the public registry by default. Data (SQLite, execution
-storage and private codespace transfer objects) persists in `./data`. Private objects live in
-`data/codespace-transfers`; keep them with their database when backing up retained transfers.
+The image is pulled from the public registry by default. Cloud account, workflow and execution
+data persists in `./data`. Workspace files, operation results and immutable file publications stay
+in the workspace service or paired controller's private storage. Back up those owner stores with
+their VM disks; a cloud database backup does not contain their file bytes.
 See [Self-Hosting](#self-host-recommended) or the in-app docs
 at `/docs/` for the full reference.
 
@@ -123,7 +124,7 @@ up -d` without `--build` — which is the recommended self-host path.)
 
 ### Extensions (optional)
 
-Custom node and communication-channel bundles run in the separate extension runner and are disabled by default. Enabling them
+Custom node and ordinary text-channel handlers run in the separate extension runner and are disabled by default. File-capable channels additionally declare a fixed `binaryTransport` and run their streaming `binaryHandler` beside the source at its workspace or paired controller. Enabling extensions
 requires this source checkout because the runner image is built locally; the published Moira image
 does not import or package bundle code.
 
@@ -145,13 +146,16 @@ default-off profile and read-only bundle mount.
 
 ### Local codespaces on your computer
 
-Moira Local connects your computer to your Moira account through outbound HTTPS. It runs approved
-repositories in persistent, mountless Docker Sandboxes microVMs. GitHub Codespaces remains a separate
-provider. Public read-only local work needs no GitHub App connection; enrolled private Git and
-write operations use the account's server-held GitHub authorization.
+Moira Local connects a paired controller to your Moira account through outbound HTTPS. The controller
+can provision the common service in GitHub Codespaces and can run locally approved repositories in
+persistent, mountless Docker Sandboxes microVMs. Enrollment and controller startup require no Local
+VM initialization or Docker sign-in. Public read-only Local work needs no GitHub App connection;
+private Git and write operations use repository-scoped credentials derived from the account's
+server-held GitHub authorization.
 
-The companion requires Node.js 24, macOS on Apple silicon and the pinned Docker Sandboxes
-`sbx` 0.46.0 runtime. Linux execution is refused. From this source checkout:
+The controller requires Node.js 24. Its optional physical Local VM capability requires macOS on
+Apple silicon and the pinned Docker Sandboxes `sbx` 0.46.0 runtime; Linux Local VM execution is
+refused. From this source checkout:
 
 ```bash
 npm ci
@@ -159,16 +163,18 @@ npm run local:build
 npm run local -- --help
 ```
 
-The package is private and is not a published global npm installer. Configure local repository
-rights and a finite work lease before connecting **Settings → Development → Local computers**.
-The pairing token goes to the companion through stdin; review the computer's grants in the browser
-before confirming. See [Codespaces: Moira Local](docs/CODESPACES.md#moira-local-companion)
+The package is private and is not a published global npm installer. Pair the controller through
+**Settings → Development → Local computers**; the pairing token reaches the companion through stdin.
+For Local VM work, initialize the physical capability and approve repository rights and a finite
+work lease on that computer. Review effective owner grants in the browser before remote work.
+See [Codespaces: Moira Local](docs/CODESPACES.md#moira-local-companion)
 for setup, run, stop, recovery and the limits of isolation evidence. Codespace contents are visible
 to Moira; review returned code before executing it on your computer. The `moira-local` MCP connection
 name in the examples below is independent of the companion executable.
 
 The same workspace service owns commands, files, sessions and output in Local and GitHub guests.
-The provider installs it in place with its own Node.js 24.21.0 and ripgrep 15.2.0, independent of
+The Local owner prepares its guest; the paired controller performs fixed GitHub provisioning or
+explicit in-place adoption. The service includes its own Node.js 24.21.0 and ripgrep 15.2.0, independent of
 project Node/PATH. Inside a prepared workspace, `~/.local/bin/moira-workspace --help` exposes the
 direct Unix-socket CLI. Choose `ws1-<lowercase UUID>` for command and mutation requests; plain UUIDs
 remain repository-admission identities. Inspect the original identity after a lost reply before
@@ -180,8 +186,25 @@ the separately requested `communication` action `deliver-file`. See
 for current authority, link expiry and guarded target replacement. The common OCI image is
 `ghcr.io/moira-mcp/moira-workspace-service`; a project keeping its own Linux Dev Container can use
 the optional `ghcr.io/moira-mcp/features/workspace-service` Feature with a published release tag.
-Host `moira-local create`, `start` and raw `request` are unsupported; creation/start belong to the
-paired Moira account, while host `stop`, `remove` and `recover` remain custody tools.
+Host `moira-local create`, `start`, `stop` and `remove` call the running owner controller with the
+observed generation and an original request ID; `collect` inspects that ID without repeating work.
+Creation also needs cloud route registration and initial Git authority. Existing owner-admitted
+Local work and its guest CLI remain subject to current local grants and leases during a temporary
+cloud outage. A confirmed authority refusal does not grant offline access. Raw host `request` and
+credential-export commands are unsupported; `recover` remains an explicit custody action.
+
+For GitHub, a repository without the workspace Feature needs an online assigned controller for
+fixed installation. An existing environment uses explicit adoption without replacement; a checked-in
+Feature is an opt-in startup path. Guest readiness requires authenticated outbound registration.
+A definitive registration refusal fails startup, while temporary network loss reconnects observation
+without replaying commands or lifecycle operations.
+
+Workflow materialization resolves authorized text in Moira and creates its UTF-8 tar at a selected
+paired controller. The download grant pins that controller and original publication request; repeated
+reads collect the same immutable archive without rendering again or choosing another owner. If the
+first publication is unconfirmed, collect that grant or request a fresh current-step presentation for
+an explicit retry. The in-context `session materialize` fallback requires no file owner and retains
+its separate response-size budget.
 
 ### Testing
 
@@ -453,13 +476,23 @@ token {"action": "download", "workflowId": "workflow-id", "ttlMinutes": 60}
 
 # User Communication
 communication {"action": "send", "message": "The report is ready."}
-communication {"action": "attachment-token", "message": "Report", "kind": "document", "filename": "report.pdf", "mimeType": "application/pdf", "sizeBytes": 12000}
+communication {"action": "deliver-file", "request_id": "ws1-11111111-1111-4111-8111-111111111111", "referenceId": "<file.reference_id>", "message": "Report", "kind": "document"}
+communication {"action": "operation", "request_id": "ws1-11111111-1111-4111-8111-111111111111", "device_id": "<device_id returned for that delivery>"}
 
 # Documentation
 help
 help {"topic": "tools"}
 help {"topic": "step"}
 ```
+
+File delivery requires a live source owner and a caller-chosen original `request_id`.
+Keep the returned owner identity and collect that same request after uncertainty; for a
+workspace owner, use `codespace_id` instead of `device_id`. Collection never sends again.
+Owner publications contain immutable bytes and support repeated reads until expiry under
+current authority. Ordinary text, waiting reminders and trusted lock PIN delivery need no
+file owner. Optional workflow progress images can be omitted while text sends independently;
+an explicit file delivery cannot silently succeed as text. Progress-image mint/read reports
+`COMMUNICATION_OWNER_UNAVAILABLE` with HTTP 503 when its paired controller is unavailable.
 
 ## File Structure
 

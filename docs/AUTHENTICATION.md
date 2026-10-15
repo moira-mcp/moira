@@ -406,13 +406,13 @@ approving it and explicitly unblocking it.
 
 Local devices have separate credentials from browser sessions, MCP OAuth and
 persistent API tokens. An admitted user creates a short-lived pairing in Settings;
-the companion supplies its locally generated credential and public policy using
-the pairing secret, then the same user confirms that policy in the browser.
+the companion supplies its locally generated credential, device ID and label using
+the pairing secret, then the same user confirms the device binding in the browser.
 Only credential and pairing-token digests are stored on the server. Later
 companion calls authenticate the active device generation and its owning account
 through `/api/local-devices`; they cannot act as another device or user.
 
-Repository, resource, claim and generation checks remain additional authority
+Repository, resource, connection and generation checks remain additional authority
 boundaries. Device revocation invalidates its requests without revoking other
 devices. It does not promise instantaneous physical stop on an offline host:
 the independent companion guard enforces the locally granted finite work lease
@@ -423,26 +423,60 @@ Owner web control requires a separate, explicit local `web-control --confirm`
 approval pinned to the server, user, device and connection, with finite ceilings.
 `PUT /api/integrations/local/devices/:id/settings` accepts only an admitted browser
 session with the configured Origin and current device generation/revision. Device
-Bearer credentials, API tokens and MCP calls cannot write those settings. Companion
-heartbeats may report and receive management settings while work is disabled or
-expired; that authentication does not authorize jobs or Git operations.
+Bearer credentials, API tokens and MCP calls cannot write those settings. Operational
+policy, approved ceilings and settings revisions belong to the always-on controller,
+not cloud enrollment or heartbeat state. A settings write carries its caller-selected
+ws1 request ID and reaches the live owner; unavailable refuses before dispatch instead
+of queuing a request or authorizing from cached policy. Approved management access
+remains available while work is disabled or expired without authorizing jobs or Git.
+Original operation collection does not repeat accepted or uncertain work. Observer
+disconnect does not revoke a previously admitted effect.
+
+The global cloud control is an additional remote admission gate: it can refuse Local
+create/start and workspace routing while the device remains paired and its local policy
+remains valid. It does not block the controller management route, request physical Local
+stop or revoke existing offline owner grants. Account/device revocation and the owner's
+finite lease remain separate authority boundaries.
 
 An admitted browser session can confirm deletion of one owned local codespace at its current
 generation while the paired device and web-control approval remain active. The existing durable
-mutation records this owner confirmation. Relay binds its cleanup authority to the exact user,
+owner journal records this confirmation. Controller routing binds cleanup authority to the exact user,
 device, connection, resource and generation, and the companion rechecks local approval. Only exact
 observation and deletion are authorized; enabled agent work, its lease and agent deletion grants
 are not prerequisites for this cleanup and are not changed by it. MCP callers and a bare request
 flag cannot grant owner cleanup authority.
 
-For enrolled private Git, push and pull-request creation, the server uses the
-connected user's expiring GitHub App OAuth credential from its vault and rechecks
-the exact approved repository and resource generation. Neither that credential
-nor the device credential reaches the guest. Public read-only Git needs no App
-grant. Pull-request creation additionally requires `allowPullRequests`; reads and
-exact head/base lookup use repository read authority. A refused enrolled broker
-request never falls back to a host repository token.
-See [Local Device Enrollment and Relay API](API.md#local-device-enrollment-and-relay-api)
+For private Git, push and typed pull requests, the cloud retains the original
+GitHub App OAuth/refresh credential in its vault and derives a child limited to
+the exact approved repository and action. The trusted Local host or GitHub guest
+broker receives only that child and performs fixed Git/PR requests directly over
+verified HTTPS. The issuer checks current account, parent generation, App grant
+and device/resource authority; Local uses its stable route-authority generation,
+while the separately observed lifecycle generation guards start/stop/delete.
+The original OAuth/refresh credential and Local device credential never reach
+project commands. Derived tokens remain broker-private memory and must not enter
+project files, argv, environment, logs or agent output. This is the existing
+trusted same-UID guest model, not an OS sandbox against an authorized agent.
+
+Local public read-only fetch needs no App grant only on its explicitly approved
+anonymous branch; a private/write issuer failure never enables anonymous or host
+token fallback. Push requires `allowPush`; PR creation requires
+`allowPullRequests`; PR reads and exact head/base lookup use repository read authority.
+Canonical and effective Git remote origins must match the admitted repository.
+
+The broker durably records token-free security metadata before acquiring a child.
+After a lost reply or restart, collect that original ws1 identity; pure collection
+does not mint or refresh, and even confirmed absence does not automatically
+reacquire. Custody/outcome/disposal uncertainty remains uncertain with the same
+identity. PR creation has its own original mutation receipt; credential failure
+before dispatch does not prove a PR effect. Known children are disposed after the
+physical upstream closes and on authority retirement. Local usage expiry is not
+proof of GitHub expiry enforcement or parent-to-child revocation cascade.
+Existing owner-admitted VMs and direct local CLI access retain only their current
+local grants and finite lease when cloud transport is unavailable. A confirmed
+authorization refusal does not enable fallback; fresh creation needs cloud route
+registration and initial Git authority.
+See [Local Device Enrollment and Controller API](API.md#local-device-enrollment-and-controller-api)
 for endpoints and [Codespaces](CODESPACES.md) for local setup and recovery.
 
 ## MCP Authentication
@@ -538,11 +572,9 @@ and preserves the predecessor's catalog state. Authentication failures and block
 otherwise denied accounts retain their normal 401/403 responses and cannot use initialize to bypass
 admission.
 
-The binary communication endpoint accepts the same OAuth access tokens and persistent MCP tokens
-through the shared principal resolver. Its one-time communication grant is additional request
-authority, not authentication: the Bearer credential must belong to the user that minted the grant.
-This endpoint does not register MCP tools or read, accept, or stamp `toolsVersion`; catalog revision
-negotiation remains exclusive to the MCP JSON-RPC endpoint.
+MCP communication uses the caller's ordinary OAuth or persistent MCP credential and catalog admission. Its binary effect is assigned to the original workspace owner or a live paired controller. Private `/api/communication/owner` endpoints require that actor's existing device or workspace credential, not the caller's MCP token. Controller scope binds user/device/generation/connection; workspace scope binds resource/resource-generation/authorization-generation/measured-life. The current account and actor are authenticated before reading framed control, then the complete scope and current configured channel are authorized. A channel descriptor grants no caller-selected recipient, endpoint, header or secret. The cloud injects provider credentials only into its fixed authorized request; binary extension handlers and project commands receive none.
+
+Public progress-image grants remain run-bound authorization, distinct from both MCP identity and private owner credentials. Minting requires a selected or unique live owner; absence returns `COMMUNICATION_OWNER_UNAVAILABLE`, not an authentication failure or a claimed image. Existing task/context/step/version binding and response-finish consumption remain enforced.
 
 **Client setup instructions:**
 
@@ -697,6 +729,15 @@ Blocked users cannot access the system through any method.
 - The next rejected product call starts cleanup of its observed session; it cannot
   sign out or redirect a replacement account
 
+Blocking commits the account fence before retiring known scoped GitHub children.
+If disposal remains uncertain, the block API returns
+`SCOPED_CREDENTIAL_DISPOSAL_PENDING` while the account stays blocked and encrypted
+custody remains available for recovery. Account deletion also refuses unresolved
+child/parent custody, uncertain issuance and nondeleted managed workspaces. Complete
+authorized resource deletion before requesting account deletion; a pending attempt
+blocks ordinary account access and does not implicitly delete VM disks.
+See [account deletion](API.md#delete-apiadminusersid) for its pending responses.
+
 ## API Client Error Handling
 
 Frontend API client (packages/web-frontend/src/services/api-client.ts) intercepts 401/403 responses:
@@ -761,7 +802,7 @@ account's screen or terminate its session.
 - Set temporary password: Replaces the credential, sets the reset flag, and
   revokes sessions, persistent API tokens, OAuth tokens, OAuth consents, and
   linked-provider tokens
-- Block user: Sets flag + deletes sessions + deletes OAuth tokens + deletes consents
+- Block user: Commits the access fence, revokes sessions/OAuth access/consents and retires known scoped GitHub children; pending disposal retains custody and does not undo the block
 - Revoke sessions: Deletes sessions + deletes OAuth tokens + deletes consents
 - All revocations audited with counts
 

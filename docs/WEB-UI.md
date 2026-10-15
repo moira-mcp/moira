@@ -117,7 +117,7 @@ frontend/src/
 │   │   ├── LocalDeviceSettings.tsx      # Pair, review, configure and revoke local devices
 │   │   ├── LocalDeviceEditor.tsx        # Requested owner settings within approved local ceilings
 │   │   ├── CodespaceAutoPause.tsx # Automatic pause card (idle settings)
-│   │   ├── CodespaceLimitsPanel.tsx # Your limits card
+│   │   ├── CodespaceBillingPanel.tsx # GitHub billing card
 │   │   ├── OAuthSettings.tsx    # Connected apps (OAuth consents): search, paging, revoke
 │   │   ├── ApiTokensSettings.tsx # API token management (create, list, revoke)
 │   │   ├── PreferencesSettings.tsx # Theme, interface language, and the beginner-panel switches
@@ -845,7 +845,7 @@ and typed handle open, with the normalized string or API error message inside th
 | `account`                  | Account                         | `settings-section-profile`      | `ProfileSettings`: name, email with verification badge, handle with a help popover on why changing it breaks links and a confirmation                                                                                                                                                                                                                       |
 | `security`                 | Security & sign-in              | `settings-section-security`     | `SecuritySettings`: the change-password form, or for an account that signs in only through a social provider, how it signs in and a set-password form; an Active Sessions subsection (`settings-section-sessions`, help popover) with `SessionsSettings`                                                                                                    |
 | `notifications`            | Notifications                   | `settings-section-dynamic`      | One `CommunicationChannelCard` per channel, a help popover, the **Telegram setup** tour button when Telegram is present, an empty state without channels                                                                                                                                                                                                    |
-| `development-environments` | Development → Environments      | `settings-section-integrations` | Shared GitHub/local environment management, selected-provider limits and Automatic pause under one `GitHubCodespacesProvider`                                                                                                                                                                                                                               |
+| `development-environments` | Development → Environments      | `settings-section-integrations` | Shared GitHub/local environment management, paired-controller selection and provider Automatic pause under one `GitHubCodespacesProvider`                                                                                                                                                                                                                   |
 | `integrations-github`      | Development → GitHub connection | `settings-section-integrations` | Connection, installation/grants stepper, help, **Setup guide** and GitHub billing                                                                                                                                                                                                                                                                           |
 | `integrations-local`       | Development → Local computers   | `settings-section-integrations` | Local pairing, effective permissions, owner settings requests and revocation                                                                                                                                                                                                                                                                                |
 | `connected-apps`           | Connected apps                  | `settings-section-oauth`        | `OAuthSettings` with a help popover                                                                                                                                                                                                                                                                                                                         |
@@ -870,7 +870,7 @@ the Quick Start card and the notification channel cards use it. `lib/codespace-e
 the reader's language: each stable error `code` has its own message under `common.codespaceErrors`,
 and anything else, including a network failure, shows the caller's localized generic message; the
 server's English detail is never shown. The shared codespaces card and the admin Codespaces
-controls use it for their failure toasts.
+configuration view use it for their failure toasts.
 
 Admin lists and cards that show a user's email (executions, artifacts, the audit log and the
 execution inspector) receive `null` for a user that no longer exists and show the localized
@@ -887,35 +887,51 @@ execution inspector) receive `null` for a user that no longer exists and show th
   `npm run local -- enroll --server … --pairing-id …` command and a separately copied
   pairing token, which the companion reads from stdin rather than command arguments.
   The token remains page-local and is absent from later device-list responses.
-  After local enrollment, the confirmation dialog displays the device's repository
-  grants, push/delete permissions, domains, CPU/memory/storage limits and finite
-  lease. Confirmation uses the pairing revision; revoke uses the device generation.
+  After local enrollment, confirmation binds the device ID and label using the pairing
+  revision; revoke uses the device generation. Current repository permissions, resource
+  settings and lease are read from the live owner's configured `owner.local.policy` and
+  `owner.local.control`. A neutral paired controller has `owner.local.state:"unconfigured"`:
+  its connection and GitHub capability remain visible without fabricated Local settings.
   A refused decision keeps the selected device and accessible local error inside
   `ConfirmDialog`. Owner guards retire delayed actions after identity changes.
   Device cards show localized pending/active/revoked status and nullable last-seen
   time. Revocation fences server access; local lease expiry and disable enforce
   physical stop when a device cannot reach Moira.
+  An unavailable owner shows explicit local feedback rather than cached policy as current;
+  that state does not mean the device has no grants. Registry last-seen time remains separate.
   `LocalDeviceEditor` edits the name, enabled state, finite lease, CPU/RAM, bounded disk and guest
-  Docker capacity, operation/network limits, repository read/push/PR/delete permissions and
-  public domains, and Git commit identity. It validates through the pure
+  Docker capacity, repository read/push/PR/delete permissions, repository-management delegation
+  and Git commit identity. It validates through the pure
   `@mcp-moira/shared/local-management-types` export. Web control requires explicit local
   `web-control --confirm` approval; numeric ceilings remain locally owned and the lease cannot
-  exceed seven days. A PUT carries the expected device generation and control revision.
-  Requested settings and pending/applied/rejected revisions stay separate from effective policy;
-  offline requests stay pending until the companion applies and acknowledges them. A refusal
+  exceed seven days. A PUT carries a fresh ws1 request ID, expected device generation and control revision.
+  Admitted owner settings and pending/applied/rejected revisions stay separate from effective policy;
+  offline saves are refused before dispatch and drafts remain editable. A refusal
   exposes its reason while preserving fields. Fresh accepted settings update untouched fields;
   a pending save cannot discard a newer draft, including when submitted text is normalized.
   CPU/RAM/Docker defaults apply to new environments; existing environments retain their admitted
   profile. Bounded disk changes require stopped owned work and companion verification.
+  Owner `pendingRequestId` restores **Check settings result** after reload; it collects only the
+  original receipt, without restoring or resending a saved draft. A known rejection allows a
+  corrected request against the newly observed revision; an unresolved physical change remains blocked.
 - Codespace provider choice: the existing `GitHubCodespaceManagement` card offers
-  GitHub and Local providers. Readiness, connection and create limits use the selected
-  provider's facts. Repository choices are filtered by provider, local targets also
+  GitHub and Local providers. Readiness and connection use the selected provider's facts.
+  Readiness reports configuration as `disabled|misconfigured|ready`, not cached guest health
+  or administrative controls. Local physical ceilings remain in current owner settings.
+  GitHub creation selects an explicit live paired controller, or the sole eligible one;
+  creation is refused before admission when none is eligible; multiple owners require selection.
+  Repository choices are filtered by provider, local targets also
   show their device label, and a repository selected under another provider cannot
-  be submitted. Local operation requires a confirmed locally enabled companion;
+  be submitted. Local agent work requires a live confirmed owner and enabled finite local lease;
   it does not require a GitHub App connection. The combined codespace list retains
   provider context and the existing Start/Stop/Delete controls. Creation and actions
   use the shared management endpoints under `/api/integrations/github/codespaces`;
-  the prefix does not restrict routing to GitHub. Provider-specific disclosures
+  the prefix does not restrict routing to GitHub. Every create chooses a ws1 request ID before
+  dispatch; Start/Stop/Delete also send the observed resource generation. A stale action is refused
+  and requires a fresh observation and decision. **Check state again** collects the original
+  pending IDs from the owner journal, or refreshes state when none is pending; it does not repeat
+  lifecycle mutations. Pending identities survive page reload through owner observations.
+  Provider-specific disclosures
   explain that local work stays inside locally approved bounds and lease. The
   Settings screen tour includes the local-device anchor; the GitHub task tour
   retains its separate GitHub setup steps. English and Russian local-device text
@@ -933,37 +949,26 @@ execution inspector) receive `null` for a user that no longer exists and show th
 - API tokens: the token list inside a card with status badges (Active/Expired/Revoked); a create
   dialog with name and expiration (30d/90d/365d/never); a one-time token display with copy and
   warning; revoke through `ConfirmDialog` (variant="destructive").
-- Development: `GitHubCodespacesProvider` loads the connection view and the codespace view
-  (repositories and `limits`) independently and reloads what a change can affect. Local pending,
-  failure and retry retain the other view and form drafts. The connection card
-  shows the `GitHubSetupSteps` stepper (connect GitHub, install the Moira App, grant repositories;
-  each done, current, not started or unavailable on this instance). The App can be installed on the
-  connected user's account or an organization, but Codespace creation requires GitHub to bill the
-  connected personal account; an organization-billed repository is rejected before creation. The
-  shared codespaces card shows
-  instance readiness, the agent-authority disclosure, the create form whose hint says how many
-  codespaces the user holds of the per-user ceiling and that stopped ones count, and per-codespace
-  cards with repository and current branch (`current_ref`, falling back to `requested_ref`),
-  provider and machine context, a plain-language state badge and a collapsed Technical details block
-  (requested and current ref, lifecycle, last update, codespace ID); Start/Stop/Delete are disabled
-  while pending, and delete goes through `ConfirmDialog`. `CodespaceAutoPause` edits
-  `codespaces.auto_stop_enabled` and `codespaces.idle_timeout_minutes` (a switch and a timeout select
-  within the server's 5–240 range) and states that only agent activity through Moira counts and that
-  GitHub stops a codespace after 240 minutes regardless. `CodespaceLimitsPanel` shows the current
-  month's GitHub Codespaces compute, storage and billed amount in the GitHub connection view.
-  The Environments view shows the selected provider's separate Moira limits and Automatic pause.
-  Billing shows an unavailable state if the App lacks `Plan: read`
-  permission or GitHub's billing API cannot be read; Codespace management and local limits remain
-  available. For an existing connection, **Update GitHub permissions** opens GitHub's App user consent
-  through `GET /api/integrations/github/reauthorize` to grant a new account permission without
-  disconnecting or stopping managed Codespaces. The user must approve `Plan: read` on GitHub;
-  Refresh cannot grant it to the existing token. The local limits show meters for codespaces held,
-  commands running and file transfers plus a collapsed list of other limits.
+- Development: `GitHubCodespacesProvider` loads connection and environment observations
+  independently; a failed refresh retains the other view and form drafts. The connection card
+  shows the connection/installation/repository-grant stepper. GitHub creation requires personal
+  billing; organization payers are refused before creation. Environment cards show repository,
+  nullable current ref (falling back to requested ref), observed machine when available,
+  state and technical details. Start/Stop/Delete carry the observed owner generation and
+  original ws1 identity; Delete uses `ConfirmDialog`. GitHub adoption preserves an existing VM
+  while the assigned controller settles old custody and performs fixed preparation.
+  `CodespaceAutoPause` edits `codespaces.auto_stop_enabled` and
+  `codespaces.idle_timeout_minutes` within the server's provider range. This is provider idle
+  policy, not a cloud Moira stop timer. `CodespaceBillingPanel` displays current-month GitHub
+  compute, storage and billed amount, with an unavailable state when Plan read permission
+  or the provider read is unavailable. There are no cloud held-resource, command or transfer
+  quota meters. **Update GitHub permissions** opens App user consent through
+  `GET /api/integrations/github/reauthorize`; Refresh cannot grant new permissions.
 
-The administrator counterpart lives on the admin page, not here: Admin Settings → Codespaces
-(`AdminCodespaceControls.tsx`) shows readiness facts (configuration, resource creation, connector,
-reconciliation backlog, active resources/operations and transfer bytes against limits) and the
-global/provider kill switches with a reason field and confirmed stop/resume.
+The administrator counterpart, `AdminCodespaceControls.tsx`, is a read-only configuration
+view in Admin Settings → Codespaces. It reports disabled, misconfigured or ready provider
+configuration. It has no kill-switch form, connector probe, operational backlog or mass-stop
+action.
 
 **Dynamic settings:**
 
@@ -1005,7 +1010,7 @@ the submitted draft: a newer edit to that same field stays dirty for the next sa
 
 **Implementation:** Settings.tsx → ProfileSettings.tsx, SecuritySettings.tsx, SessionsSettings.tsx,
 GitHubCodespacesData.tsx, GitHubCodespaceSettings.tsx, GitHubCodespaceManagement.tsx, LocalDeviceSettings.tsx, LocalDeviceEditor.tsx,
-CodespaceAutoPause.tsx, CodespaceLimitsPanel.tsx, OAuthSettings.tsx, ApiTokensSettings.tsx,
+CodespaceAutoPause.tsx, CodespaceBillingPanel.tsx, OAuthSettings.tsx, ApiTokensSettings.tsx,
 PreferencesSettings.tsx
 
 - Loads user profile via GET /api/user/profile
@@ -1023,7 +1028,7 @@ PreferencesSettings.tsx
 - Handle change via PATCH /api/user/handle
 - GitHub codespace connection via GET /api/integrations/github, browser navigation to GET /api/integrations/github/start or GET /api/integrations/github/reauthorize for a connected account, and DELETE /api/integrations/github; the page reports every `?github=<outcome>` redirect as a localized toast (an unknown outcome as the generic authorization failure), and in `installation_required` the card shows Install GitHub App and Check installation (`github-codespace-check-installation`, a forced refresh) instead of Reconnect
 - External GitHub grant recovery via DELETE /api/integrations/github/external-revocation after the user revokes the grant in GitHub; this covers unreadable credentials and an untracked refresh successor
-- Automatic ten-minute installation and repository-grant refresh on Settings load plus an explicit connection-card Refresh button backed by `POST /api/integrations/github/refresh`; a provider failure keeps the saved repositories visible with a stale warning. The Cloud codespaces card's Refresh calls `POST /api/integrations/github/codespaces/refresh` to force that grant refresh, reconcile stored codespaces against GitHub's current resource state, and re-read monthly billing; repository and resource refresh failures have separate stale warnings, while the local list remains visible
+- Installation and repository-grant refresh on Settings load plus the connection-card Refresh use `POST /api/integrations/github/refresh`; a failed provider read retains saved grants with a stale warning. Environment Refresh uses `POST /api/integrations/github/codespaces/refresh` for current grants, provider/owner resource observations and monthly billing. These reads do not reconcile or replay lifecycle effects; original pending operations are collected separately.
 
 **Password Strength Indicator (Progress component):**
 
@@ -2231,7 +2236,7 @@ Returning to a source-backed section refreshes its data without discarding dirty
 definition/value/prompt/codespace region owns its initial loader, retained result, error and retry.
 Prompt scopes retain their own drafts and reject late answers for another selection. Maintenance
 still offers confirmed vacuum and a real database-backup download; definition schema import/export,
-value import/export/history and codespace availability controls retain their separate operations.
+value import/export/history and codespace configuration observations retain their separate operations.
 
 ### System Settings Page
 

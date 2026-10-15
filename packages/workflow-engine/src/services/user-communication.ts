@@ -1,25 +1,11 @@
 import type { IDataRepository } from "../interfaces/data-repository.js";
-import type { CodespaceVerifiedByteSource } from "@mcp-moira/shared";
-import { isSafeAttachmentFilename } from "@mcp-moira/shared/validation/attachment-filename";
 
 export type CommunicationFormat = "plain" | "markdown" | "html";
 export type CommunicationPurpose = "notification" | "trusted";
-export type CommunicationAttachmentKind = "image" | "document";
-
-interface CommunicationAttachmentMetadata {
-  kind: CommunicationAttachmentKind;
-  filename: string;
-  mimeType: string;
-}
-
-export type CommunicationAttachment = CommunicationAttachmentMetadata &
-  ({ bytes: Uint8Array; source?: never } | { source: CodespaceVerifiedByteSource; bytes?: never });
-
 export interface PortableCommunicationMessage {
   text: string;
   format?: CommunicationFormat;
   silent?: boolean;
-  attachment?: CommunicationAttachment;
   purpose?: CommunicationPurpose;
 }
 
@@ -36,8 +22,6 @@ export interface CommunicationChannelCapabilities {
   image: boolean;
   document: boolean;
   trusted: boolean;
-  /** The adapter consumes checked sources without materializing the complete attachment. */
-  streamingAttachments?: boolean;
 }
 
 export interface CommunicationChannelMetadata {
@@ -183,7 +167,6 @@ export interface UserCommunicationLimits {
   maxConcurrentPerProvider: number;
   deadlineMs: number;
   maxTextLength: number;
-  maxAttachmentBytes: number;
   maxLimiterKeys: number;
 }
 
@@ -194,7 +177,6 @@ const DEFAULT_LIMITS: UserCommunicationLimits = {
   maxConcurrentPerProvider: 8,
   deadlineMs: 10_000,
   maxTextLength: 4096,
-  maxAttachmentBytes: 20 * 1024 * 1024,
   maxLimiterKeys: 10_000,
 };
 
@@ -238,7 +220,6 @@ export class UserCommunicationService {
       text: request.text,
       format: request.format,
       silent: request.silent,
-      attachment: request.attachment,
       purpose: request.purpose,
     };
     const availability = await Promise.all(
@@ -316,7 +297,6 @@ export class UserCommunicationService {
         text: request.text,
         format: request.format,
         silent: request.silent,
-        attachment: request.attachment,
         purpose: request.purpose,
       },
       configuration,
@@ -437,31 +417,9 @@ export class UserCommunicationService {
 
   private validateRequest(request: UserCommunicationRequest): void {
     if (!request.userId) throw new Error("User communication requires an authenticated user");
-    if (!request.text && !request.attachment)
-      throw new Error("User communication requires text or an attachment");
+    if (!request.text) throw new Error("User communication requires text");
     if (request.text.length > this.limits.maxTextLength)
       throw new Error("User communication text exceeds the configured limit");
-    if (request.attachment) {
-      const size = request.attachment.source?.size ?? request.attachment.bytes!.byteLength;
-      if (!Number.isSafeInteger(size) || size <= 0)
-        throw new Error("User communication attachment is empty");
-      if (size > this.limits.maxAttachmentBytes)
-        throw new Error("User communication attachment exceeds the configured limit");
-      if (
-        request.attachment.source &&
-        (!/^[a-f0-9]{64}$/.test(request.attachment.source.sha256) ||
-          typeof request.attachment.source.open !== "function")
-      )
-        throw new Error("User communication attachment source is invalid");
-      if (!isSafeAttachmentFilename(request.attachment.filename))
-        throw new Error("User communication attachment filename is invalid");
-      if (
-        !/^[a-zA-Z0-9][a-zA-Z0-9!#$&^_.+-]*\/[a-zA-Z0-9][a-zA-Z0-9!#$&^_.+-]*$/.test(
-          request.attachment.mimeType,
-        )
-      )
-        throw new Error("User communication attachment MIME type is invalid");
-    }
   }
 
   private supports(
@@ -469,11 +427,7 @@ export class UserCommunicationService {
     message: PortableCommunicationMessage,
   ): boolean {
     if (message.purpose === "trusted" && !adapter.capabilities.trusted) return false;
-    if (!message.attachment) return adapter.capabilities.text;
-    if (message.attachment.source && !adapter.capabilities.streamingAttachments) return false;
-    return message.attachment.kind === "image"
-      ? adapter.capabilities.image
-      : adapter.capabilities.document;
+    return adapter.capabilities.text;
   }
 
   private async deliverToAdapter(

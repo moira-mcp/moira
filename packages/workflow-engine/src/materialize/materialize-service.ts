@@ -1,30 +1,20 @@
 import { Buffer } from "node:buffer";
 import { posix } from "node:path";
-import { pack } from "tar-stream";
 import type { ExecutionContext, MaterializeNode, VariableRegistry } from "../types/index.js";
 import {
   GraphTemplateProcessor,
   type UnresolvedPlaybookReference,
 } from "../templates/graph-template-processor.js";
-import { ValidationError } from "@mcp-moira/shared";
-
-export const MATERIALIZE_MAX_FILES = 100;
-export const MATERIALIZE_MAX_FILE_BYTES = 1024 * 1024;
-export const MATERIALIZE_MAX_TOTAL_BYTES = 10 * 1024 * 1024;
+import { materializeTextFilesSchema, ValidationError } from "@mcp-moira/shared";
 
 /**
  * Ceiling for a materialize set delivered into an agent's context instead of onto a filesystem.
- *
- * The archive bound above protects a disk and is three orders of magnitude larger than anything
- * that belongs in a context window. This ceiling is several times larger than the biggest set the
- * bundled catalog materializes, so no bundled workflow is refused, while a set that would flood the
- * caller still is.
  */
 export const MATERIALIZE_CONTEXT_MAX_TOTAL_BYTES = 256 * 1024;
 
 export interface RenderedMaterializeFile {
   path: string;
-  content: Buffer;
+  content: string;
 }
 
 function createTemplateContext(
@@ -81,9 +71,6 @@ export async function renderMaterializePaths(
 ): Promise<string[]> {
   if (!Array.isArray(node.files) || node.files.length === 0) {
     throw new ValidationError("Materialize requires at least one file");
-  }
-  if (node.files.length > MATERIALIZE_MAX_FILES) {
-    throw new ValidationError(`Materialize supports at most ${MATERIALIZE_MAX_FILES} files`);
   }
 
   const processor = new GraphTemplateProcessor();
@@ -160,7 +147,6 @@ async function renderMaterializeFilesWith(
   const context = createTemplateContext(registry, executionContext);
   const renderedPaths = await renderMaterializePaths(node, registry, executionContext);
   const rendered: RenderedMaterializeFile[] = [];
-  let totalBytes = 0;
 
   for (const [index, file] of node.files.entries()) {
     const hasFrom = typeof file.from === "string" && file.from.length > 0;
@@ -177,22 +163,16 @@ async function renderMaterializeFilesWith(
 
     const report = await processor.processDirectiveAsyncWithReport(source, context);
     unresolvedPlaybooks?.push(...report.unresolvedPlaybooks);
-    const renderedContent = report.text;
-    const content = Buffer.from(renderedContent, "utf8");
-    if (content.byteLength > MATERIALIZE_MAX_FILE_BYTES) {
-      throw new ValidationError(
-        `Materialize file '${renderedPath}' exceeds ${MATERIALIZE_MAX_FILE_BYTES} bytes`,
-      );
-    }
-    totalBytes += content.byteLength;
-    if (totalBytes > MATERIALIZE_MAX_TOTAL_BYTES) {
-      throw new ValidationError(
-        `Materialize archive exceeds ${MATERIALIZE_MAX_TOTAL_BYTES} uncompressed bytes`,
-      );
-    }
-    rendered.push({ path: renderedPath, content });
+    rendered.push({ path: renderedPath, content: report.text });
   }
 
+  // Validate the same final text contract as the owner submission before an
+  // archive grant can acquire an immutable original operation assignment.
+  const validated = materializeTextFilesSchema.safeParse(rendered);
+  if (!validated.success) {
+    throw new ValidationError("Materialize files do not satisfy the owner source contract");
+  }
+  // renderMaterializePaths already performs the contract's slash normalization.
   return rendered;
 }
 
@@ -204,7 +184,10 @@ async function renderMaterializeFilesWith(
  * knowledge of what it received accurate.
  */
 export function assertMaterializeContextBudget(files: RenderedMaterializeFile[]): void {
-  const totalBytes = files.reduce((total, file) => total + file.content.byteLength, 0);
+  const totalBytes = files.reduce(
+    (total, file) => total + Buffer.byteLength(file.content, "utf8"),
+    0,
+  );
   if (totalBytes > MATERIALIZE_CONTEXT_MAX_TOTAL_BYTES) {
     throw new ValidationError(
       `Materialize set is ${totalBytes} bytes, which exceeds the ` +
@@ -212,29 +195,4 @@ export function assertMaterializeContextBudget(files: RenderedMaterializeFile[])
         `Download the archive with the presented command instead.`,
     );
   }
-}
-
-export async function createMaterializeTar(files: RenderedMaterializeFile[]): Promise<Buffer> {
-  const archive = pack();
-  const chunks: Buffer[] = [];
-  archive.on("data", (chunk: unknown) => {
-    if (Buffer.isBuffer(chunk)) {
-      chunks.push(chunk);
-      return;
-    }
-    if (chunk instanceof Uint8Array) {
-      chunks.push(Buffer.from(chunk));
-      return;
-    }
-    archive.destroy(new TypeError("Materialize tar stream emitted a non-binary chunk"));
-  });
-  const completed = new Promise<Buffer>((resolve, reject) => {
-    archive.once("end", () => resolve(Buffer.concat(chunks)));
-    archive.once("error", reject);
-  });
-  for (const file of files) {
-    archive.entry({ name: file.path, size: file.content.byteLength, mode: 0o644 }, file.content);
-  }
-  archive.finalize();
-  return completed;
 }

@@ -22,7 +22,6 @@ import {
 import { startBroker } from "./broker.js";
 import { startBrokerTunnel } from "./broker-tunnel.js";
 import { gitBroker } from "./git-broker.js";
-import { cloudGitBroker } from "./cloud-git-broker.js";
 import { LocalRelay } from "./relay.js";
 import { NetworkBudget } from "./network-budget.js";
 import { guestAssets } from "./assets.js";
@@ -100,6 +99,7 @@ export class LocalManager {
       const release = await this.records.state.lock({ recoverStale: true });
       try {
         await requireRuntimeOwnerAbsent(this.records);
+        await new LocalRelay(this.records).markOrphanedGitCredentials();
         this.releaseLock = release;
       } catch (error) {
         await release();
@@ -109,6 +109,7 @@ export class LocalManager {
   }
   async open(): Promise<void> {
     await this.holdRunnerLock();
+    if (this.broker && this.tunnel) return;
     try {
       const policy = await this.records.policy();
       if (this.dependencies.storage) await this.dependencies.storage(policy);
@@ -118,28 +119,19 @@ export class LocalManager {
       const onFault = this.dependencies.onFault ?? (() => undefined);
       const budget = new NetworkBudget();
       const relay = new LocalRelay(this.records);
-      const direct = gitBroker(budget, onFault);
-      const cloud = cloudGitBroker(
-        (...args) => relay.gitAuthority(...args),
-        budget,
-        onFault,
-        direct,
-      );
+      const github = gitBroker(budget, onFault, (grant, action, signal) => {
+        if (!grant.spaceId)
+          throw new LocalRefusal(
+            "LOCAL_IDENTITY_CHANGED",
+            "Git requires its original locally owned sandbox.",
+          );
+        return relay.acquireGitCredential(grant.spaceId, grant.repository.id, action, signal);
+      });
       this.broker = await startBroker(
         {
           authorize: (credential) => this.records.authorize(credential, this.now()),
           budget,
-          git: async (request, response, grant) => {
-            if (
-              !grant.repository.private &&
-              !grant.repository.allowPush &&
-              grant.repository.allowPullRequests !== true
-            )
-              return direct(request, response, { ...grant, gitCredential: null });
-            const connected = await this.records.state.read("connection.json", (value) => value);
-            if (!connected && grant.gitCredential !== null) return direct(request, response, grant);
-            return cloud(request, response, grant);
-          },
+          ...github,
           onFault,
         },
         this.dependencies.brokerPorts?.http,
@@ -249,7 +241,7 @@ export class LocalManager {
     repositoryId: string,
     ref: string,
     operationMarker: string,
-    onAdmitted?: () => void,
+    onAdmitted?: () => void | Promise<void>,
   ): Promise<LocalSpace> {
     const admitted = await this.serial(`create:${operationMarker}`, async () => {
       const policy = await this.records.policy();
@@ -268,7 +260,19 @@ export class LocalManager {
           );
         return { space: duplicate, created: false };
       }
-      await new LocalRelay(this.records).assertCreationOpen(repositoryId, operationMarker);
+      for (const key of await this.records.state.keys("controller-resource-")) {
+        const binding = await this.records.state.read(key, (value) =>
+          z
+            .object({ operationMarker: z.string(), creationClosed: z.boolean() })
+            .passthrough()
+            .parse(value),
+        );
+        if (binding?.operationMarker === operationMarker && binding.creationClosed)
+          throw new LocalRefusal(
+            "LOCAL_CREATE_UNKNOWN",
+            "Archived creation admission is closed; it cannot be replayed.",
+          );
+      }
       await (this.dependencies.storage ?? admitStorage)(policy);
       const id = randomUUID();
       const space: LocalSpace = {
@@ -299,7 +303,7 @@ export class LocalManager {
       // creation occurs before that owner, and the parent never overwrites its outcome.
       return { space, created: true };
     });
-    onAdmitted?.();
+    await onAdmitted?.();
     return admitted.created ? this.prepare(admitted.space, true) : admitted.space;
   }
 
@@ -307,7 +311,7 @@ export class LocalManager {
     space: LocalSpace,
     clone: boolean,
     activate = false,
-    onAdmitted?: () => void,
+    onAdmitted?: () => void | Promise<void>,
   ): Promise<LocalSpace> {
     if (!this.tunnel)
       throw new LocalRefusal("LOCAL_NOT_RUNNING", "Start the local companion first.");
@@ -315,8 +319,8 @@ export class LocalManager {
       throw new LocalRefusal("LOCAL_SETUP_INCOMPLETE", "The local setup phase changed.");
     const guard = await (await this.owner()).space(space.id, activate);
     this.guards.set(space.id, guard);
-    onAdmitted?.();
     try {
+      await onAdmitted?.();
       await guard.prepare();
       return await this.require(space.id);
     } catch (error) {
@@ -338,7 +342,7 @@ export class LocalManager {
 
   async start(
     id: string,
-    onAdmitted?: () => void,
+    onAdmitted?: () => void | Promise<void>,
     workspaceReleases?: { x64: string; arm64: string },
   ): Promise<LocalSpace> {
     return this.serial(`space:${id}`, async () => {
@@ -373,6 +377,7 @@ export class LocalManager {
             "The independent owner is completing local shutdown.",
           );
         try {
+          await onAdmitted?.();
           await guard.validate();
           await guard.prepare();
           return this.require(id);
@@ -589,6 +594,8 @@ export class LocalManager {
         createdAt: space.createdAt,
         lastStartedAt: space.lastStartedAt,
         generation: space.generation,
+        desiredState: space.desiredState,
+        machine: publicPolicy(policyForSpace(policy, space)).machine,
         state:
           actual?.status ??
           (!admitted || observationFailure

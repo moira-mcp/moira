@@ -60,10 +60,7 @@ export async function deliverMaterializeToContext(
     return {
       success: true,
       data: {
-        files: delivery.files.map((file) => ({
-          path: file.path,
-          content: file.content.toString("utf8"),
-        })),
+        files: delivery.files,
       },
     };
   } catch (error) {

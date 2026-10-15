@@ -1,19 +1,16 @@
-import { Buffer } from "node:buffer";
-import express from "express";
 import { describe, expect, test } from "@jest/globals";
-import request from "supertest";
-import { extract } from "tar-stream";
 import { TokenManager, ValidationError, type WorkflowToken } from "@mcp-moira/shared";
 import {
   assertMaterializeContextBudget,
+  authorizeMaterializeDelivery,
   MATERIALIZE_CONTEXT_MAX_TOTAL_BYTES,
   resolveMaterializeDelivery,
   type RenderedMaterializeFile,
   type WorkflowExecution,
   type WorkflowGraph,
 } from "@mcp-moira/workflow-engine";
+import { deliverMaterializeToContext } from "../../../packages/mcp-server/src/tools/deliver-materialize.js";
 import { formatMaterializeDelivery } from "../../../packages/mcp-server/src/messages/index.js";
-import { createExecutionMaterializeRoutes } from "../../../packages/web-backend/src/routes/execution-materialize.js";
 
 const grant: WorkflowToken = {
   token: "grant",
@@ -93,71 +90,55 @@ function repositoryFor(
   };
 }
 
-async function tarEntries(buffer: Buffer): Promise<Map<string, Buffer>> {
-  const parser = extract();
-  const entries = new Map<string, Buffer>();
-  return new Promise((resolve, reject) => {
-    parser.on("entry", (header, stream, next) => {
-      const chunks: Buffer[] = [];
-      stream.on("data", (chunk: Buffer) => chunks.push(chunk));
-      stream.once("end", () => {
-        entries.set(header.name, Buffer.concat(chunks));
-        next();
-      });
-      stream.once("error", reject);
-      stream.resume();
-    });
-    parser.once("finish", () => resolve(entries));
-    parser.once("error", reject);
-    parser.end(buffer);
-  });
-}
-
-function binaryParser(
-  response: NodeJS.ReadableStream,
-  callback: (error: Error | null, body?: Buffer) => void,
-): void {
-  const chunks: Buffer[] = [];
-  response.on("data", (chunk: Buffer) => chunks.push(chunk));
-  response.once("end", () => callback(null, Buffer.concat(chunks)));
-  response.once("error", callback);
-}
-
 function fileOfSize(bytes: number): RenderedMaterializeFile {
-  return { path: "big.md", content: Buffer.alloc(bytes, "x") };
+  return { path: "big.md", content: "x".repeat(bytes) };
 }
 
 describe("materialize context delivery", () => {
-  test("delivers the same bytes the archive channel serves for the same grant", async () => {
-    const definition = graph("guide body for {{name}}");
+  test("delivers authorized materialize strings directly into context without a file owner", async () => {
+    const result = await deliverMaterializeToContext("execution-1", "user-1", {
+      tokens: { ...alwaysAuthorized, getCurrentMaterializeGrant: () => grant },
+      repository: repositoryFor(execution, graph("guide body for {{name}}")),
+    });
+    expect(result).toEqual({
+      success: true,
+      data: {
+        files: [
+          { path: "guide.md", content: "guide body for runtime" },
+          { path: "nested/second.md", content: "second body for runtime" },
+        ],
+      },
+    });
+  });
 
-    const delivery = await resolveMaterializeDelivery(
+  test("authorization alone does not render sources or resolve references", async () => {
+    const definition = graph("{{note:private-source}}");
+    // A missing registry default would fail rendering; authorization only inspects the paused node.
+    delete definition.variableRegistry!.source.default;
+    const authorization = await authorizeMaterializeDelivery(
       "grant",
       alwaysAuthorized,
       repositoryFor(execution, definition),
     );
+    expect(authorization).toMatchObject({
+      authorized: true,
+      executionId: "execution-1",
+      nodeId: "materialize",
+      userId: "user-1",
+    });
+  });
 
-    const app = express().use(
-      "/api/public/executions",
-      createExecutionMaterializeRoutes(alwaysAuthorized, repositoryFor(execution, definition)),
-    );
-    const archived = await request(app)
-      .get("/api/public/executions/materialize/grant")
-      .buffer(true)
-      .parse(binaryParser as unknown as (str: string) => unknown);
-    expect(archived.status).toBe(200);
-    const entries = await tarEntries(archived.body as Buffer);
-
-    expect(delivery.authorized).toBe(true);
-    if (!delivery.authorized) return;
-    expect(delivery.files.map((file) => file.path)).toEqual(["guide.md", "nested/second.md"]);
-    for (const file of delivery.files) {
-      const archivedContent = entries.get(file.path);
-      expect(archivedContent).toBeDefined();
-      // Byte equality, not name equality: a separately rendered body would pass a name check.
-      expect(file.content.equals(archivedContent!)).toBe(true);
-    }
-    expect(delivery.files[0]!.content.toString("utf8")).toBe("guide body for runtime");
+  test("a same-node context change during asynchronous preparation refuses the old text", async () => {
+    let reads = 0;
+    const changed = {
+      ...execution,
+      globalContext: { ...execution.globalContext, variables: { name: "replacement" } },
+    };
+    const delivery = await resolveMaterializeDelivery("grant", alwaysAuthorized, {
+      getExecution: async () => (++reads === 1 ? execution : changed),
+      getWorkflowGraph: async () => graph("guide body for {{name}}"),
+    });
+    expect(delivery).toEqual({ authorized: false, reason: "execution_binding_mismatch" });
   });
 
   test("refuses when the execution has moved past the materialize node", async () => {
@@ -203,9 +184,13 @@ describe("materialize context delivery", () => {
   });
 
   test("refuses when authorization is lost between rendering and delivery", async () => {
+    let authorizationChecks = 0;
     const delivery = await resolveMaterializeDelivery(
       "grant",
-      { validateToken: () => grant, authorizeMaterializeToken: () => false },
+      {
+        validateToken: () => grant,
+        authorizeMaterializeToken: () => ++authorizationChecks === 1,
+      },
       repositoryFor(execution, graph("body")),
     );
     expect(delivery).toEqual({ authorized: false, reason: "authorization_lost" });
@@ -219,16 +204,24 @@ describe("materialize context delivery", () => {
     const oversized = [fileOfSize(MATERIALIZE_CONTEXT_MAX_TOTAL_BYTES + 1)];
     expect(() => assertMaterializeContextBudget(oversized)).toThrow(ValidationError);
     // The rejected set is untouched: refusal must not be implemented as a shortened delivery.
-    expect(oversized[0]!.content.byteLength).toBe(MATERIALIZE_CONTEXT_MAX_TOTAL_BYTES + 1);
+    expect(oversized[0]!.content).toBe("x".repeat(MATERIALIZE_CONTEXT_MAX_TOTAL_BYTES + 1));
   });
 
   test("counts the budget across files, not per file", () => {
     const half = Math.ceil(MATERIALIZE_CONTEXT_MAX_TOTAL_BYTES / 2) + 1;
     expect(() =>
       assertMaterializeContextBudget([
-        { path: "a.md", content: Buffer.alloc(half, "a") },
-        { path: "b.md", content: Buffer.alloc(half, "b") },
+        { path: "a.md", content: "a".repeat(half) },
+        { path: "b.md", content: "b".repeat(half) },
       ]),
+    ).toThrow(ValidationError);
+  });
+
+  test("counts UTF-8 observation bytes rather than JavaScript character count", () => {
+    const content = "😀".repeat(MATERIALIZE_CONTEXT_MAX_TOTAL_BYTES / 4);
+    expect(() => assertMaterializeContextBudget([{ path: "unicode.md", content }])).not.toThrow();
+    expect(() =>
+      assertMaterializeContextBudget([{ path: "unicode.md", content: content + "я" }]),
     ).toThrow(ValidationError);
   });
 

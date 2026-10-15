@@ -3,7 +3,10 @@ import Database from "better-sqlite3";
 import { readFileSync } from "node:fs";
 import { randomUUID, createHash } from "node:crypto";
 import { WorkspaceAuthRepository } from "../../../packages/shared/src/codespaces/workspace-auth-repository.js";
-import { CodespaceResourceRepository } from "../../../packages/shared/src/codespaces/resource-repository.js";
+import { LocalDeviceRepository } from "../../../packages/shared/src/codespaces/local-device-repository.js";
+import { LocalDeviceService } from "../../../packages/shared/src/codespaces/local-device-service.js";
+import { LocalResourceRepository } from "../../../packages/shared/src/codespaces/local-resource-repository.js";
+import { GitHubResourceRepository } from "../../../packages/shared/src/codespaces/github-resource-repository.js";
 import { CodespaceResourceError } from "../../../packages/shared/src/codespaces/resource-types.js";
 import { getAccountAccessDenial } from "../../../packages/shared/src/auth/account-admission.js";
 import {
@@ -17,30 +20,30 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import type { Duplex } from "node:stream";
+import { once } from "node:events";
+import express from "express";
+import supertest from "supertest";
+import { createWorkspacePublicationHandler } from "../../../packages/mcp-server/src/workspace-publication-route.js";
+import { WORKSPACE_UPGRADE } from "../../../packages/shared/src/codespaces/workspace-transport.js";
+import { CODESPACE_PROVIDER_GITHUB } from "../../../packages/shared/src/codespaces/types.js";
 
 let authorityDb: Database.Database;
-const ensureRunning = jest.fn<(userId: string, resourceId: string) => Promise<void>>();
+let providerEnabled = true;
 jest.unstable_mockModule("@mcp-moira/shared", () => ({
-  CodespaceResourceRepository,
+  LocalResourceRepository,
+  GitHubResourceRepository,
+  CODESPACE_PROVIDER_GITHUB,
   CodespaceResourceError,
   CODESPACE_PROVIDER_LOCAL,
   localPublicPolicySchema,
   getAccountAccessDenial,
   WorkspaceAuthRepository,
+  LocalDeviceRepository,
+  LocalDeviceService,
   getSqliteInstance: () => authorityDb,
-  getCodespaceResourcePolicy: () => ({ enabled: true }),
+  getCodespaceResourcePolicy: () => ({ enabled: providerEnabled }),
   getBaseUrl: () => "https://workspace.example.test",
 }));
-jest.unstable_mockModule(
-  "../../../packages/web-backend/src/services/codespace-services.js",
-  () => ({
-    getCodespaceProviderServices: () => ({ resource: { ensureRunning } }),
-    getCodespaceConnectionService: () => ({ getAccessToken: async () => "fixture-provider-token" }),
-    bootstrapLocalWorkspace: async () => {
-      throw new Error("Unexpected Local bootstrap");
-    },
-  }),
-);
 
 test("opaque workspace credentials rotate one scoped binding without persisting clear credentials", () => {
   const db = new Database(":memory:");
@@ -94,10 +97,20 @@ test("opaque workspace credentials rotate one scoped binding without persisting 
   }
 });
 
-test.each(["start generation", "authorization generation", "expired credential"] as const)(
-  "production router refreshes a connected stale binding after %s before dispatch",
+test.each([
+  "current enrollment",
+  "resource generation",
+  "authorization generation",
+  "expired credential",
+  "missing enrollment",
+  "revoked resource",
+  "disabled provider",
+  "owner disconnect after publication authorization",
+] as const)(
+  "production router requires current live enrollment (%s) without lifecycle or bootstrap effects",
   async (change) => {
     authorityDb = new Database(":memory:");
+    providerEnabled = true;
     const directory = await mkdtemp(join(tmpdir(), "workspace-authority-"));
     const socketPath = join(directory, "control.sock");
     const sockets = new Set<Duplex>();
@@ -105,15 +118,17 @@ test.each(["start generation", "authorization generation", "expired credential"]
       res.writeHead(404);
       res.end();
     });
-    const { getWorkspaceRouter, issueWorkspaceAgentCredential, stopWorkspaceRouter } =
-      await import("../../../packages/web-backend/src/services/workspace-services.js");
-    const { GitHubCodespacesConnector } =
-      await import("../../../packages/web-backend/src/services/github-codespaces-connector.js");
+    const {
+      getWorkspaceRouter,
+      issueWorkspaceAgentCredential,
+      stopWorkspaceRouter,
+      authorizeWorkspacePublication,
+    } = await import("../../../packages/web-backend/src/services/workspace-services.js");
     const userId = randomUUID(),
       resourceId = randomUUID(),
-      connectionId = randomUUID();
-    let probe: ReturnType<typeof jest.spyOn> | undefined;
-    let install: ReturnType<typeof jest.spyOn> | undefined;
+      connectionId = randomUUID(),
+      deviceId = randomUUID(),
+      deviceConnectionId = randomUUID();
     try {
       authorityDb.pragma("foreign_keys=ON");
       migrate(drizzle(authorityDb), { migrationsFolder: resolve("packages/web-backend/drizzle") });
@@ -134,20 +149,50 @@ test.each(["start generation", "authorization generation", "expired credential"]
         .run(connectionId);
       authorityDb
         .prepare(
-          `INSERT INTO codespaceResource(id,userId,connectionId,authorizationGeneration,provider,repositoryId,repositoryFullName,requestedRef,operationMarker,machineName,machineDisplayName,machineOperatingSystem,machineCpuCores,machineMemoryBytes,machineStorageBytes,state,retentionPolicy,desiredState,observedState,generation,providerResourceName,externalOwnerId,billableOwnerId,createDeadlineAt,remoteExpiresAt,createdAt,updatedAt)
-        VALUES(?,?,?,1,'github-codespaces','301','owner/project','main','moira-aaaaaaaaaaaaaaaaaaaaaaaa','machine','machine','linux',2,1024,1024,'usable','persistent','running','running',1,'owned-workspace','101','101',1,1,1,1)`,
+          "INSERT INTO codespaceConnection(id,userId,provider,externalAccountId,externalLogin,status,credentialGeneration,createdAt,updatedAt) VALUES(?,?,'local-sandboxes','local','local','connected',1,1,1)",
         )
-        .run(resourceId, userId, connectionId);
+        .run(deviceConnectionId, userId);
+      authorityDb
+        .prepare(
+          "INSERT INTO codespaceLocalDevice(id,userId,connectionId,label,generation,status,credentialDigest,createdAt,updatedAt) VALUES(?,?,?,'Controller',1,'active',?,1,1)",
+        )
+        .run(deviceId, userId, deviceConnectionId, "a".repeat(64));
+      new GitHubResourceRepository(authorityDb).reserve({
+        id: resourceId,
+        userId,
+        connectionId,
+        authorizationGeneration: 1,
+        repositoryId: "301",
+        repositoryFullName: "owner/project",
+        requestedRef: "main",
+        devcontainerPath: null,
+        operationMarker: "moira-" + "a".repeat(24),
+        providerResourceName: "owned-workspace",
+        externalOwnerId: "101",
+        billableOwnerId: "101",
+        deviceId,
+        deviceGeneration: 1,
+        deviceConnectionId,
+        generation: 1,
+        retirement: "owned",
+        revokedAt: null,
+        createdAt: 1,
+      });
       const router = getWorkspaceRouter();
       router.attach(server);
+      let ownerSocket: Duplex | undefined;
+      server.on("upgrade", (_request, socket) => {
+        ownerSocket = socket;
+      });
       await new Promise<void>((done, reject) => {
         server.once("error", reject);
         server.listen(socketPath, done);
       });
-      let dispatched!: (callId: string) => void;
-      const dispatch = new Promise<string>((done) => {
-        dispatched = done;
+      let observeDispatch!: () => void;
+      const dispatch = new Promise<void>((resolve) => {
+        observeDispatch = resolve;
       });
+      const dispatched = jest.fn((_callId: string) => observeDispatch());
       async function connectControl(remote: { credential: string; environmentIdentity: string }) {
         return new Promise<void>((done, reject) => {
           const req = httpRequest({
@@ -155,9 +200,10 @@ test.each(["start generation", "authorization generation", "expired credential"]
             path: "/api/workspaces/connect",
             headers: {
               connection: "Upgrade",
-              upgrade: "moira-workspace/1",
+              upgrade: WORKSPACE_UPGRADE,
               authorization: `Bearer ${remote.credential}`,
-              "x-moira-environment-identity": remote.environmentIdentity,
+              "x-moira-endpoint-kind": "workspace",
+              "x-moira-endpoint-identity": remote.environmentIdentity,
             },
           });
           req.once("error", reject);
@@ -191,85 +237,91 @@ test.each(["start generation", "authorization generation", "expired credential"]
       }
       const original = issueWorkspaceAgentCredential(userId, resourceId, "a".repeat(64));
       await connectControl(original);
-      if (change === "start generation")
+      const originalDigest = createHash("sha256").update(original.credential).digest("hex");
+      if (change === "resource generation")
         authorityDb
-          .prepare(
-            "UPDATE codespaceResource SET state='stopped',desiredState='stopped',generation=2 WHERE id=?",
-          )
+          .prepare("UPDATE githubResourceIdentity SET generation=2 WHERE id=?")
           .run(resourceId);
-      ensureRunning.mockImplementation(async () => {
-        if (change === "start generation")
-          authorityDb
-            .prepare(
-              "UPDATE codespaceResource SET state='usable',desiredState='running',generation=3 WHERE id=?",
-            )
-            .run(resourceId);
-        else if (change === "authorization generation") {
-          authorityDb
-            .prepare("UPDATE codespaceConnection SET credentialGeneration=2 WHERE id=?")
-            .run(connectionId);
-          authorityDb
-            .prepare("UPDATE codespaceResource SET authorizationGeneration=2 WHERE id=?")
-            .run(resourceId);
-        } else
-          authorityDb
-            .prepare("UPDATE workspaceAgentCredential SET expiresAt=0 WHERE resourceId=?")
-            .run(resourceId);
-      });
-      probe = jest.spyOn(GitHubCodespacesConnector.prototype, "probeWorkspace").mockResolvedValue({
-        environmentIdentity: "a".repeat(64),
-        architecture: "x64",
-        rootBase64: Buffer.from("/workspaces/project").toString("base64"),
-      });
-      install = jest
-        .spyOn(GitHubCodespacesConnector.prototype, "bootstrapWorkspace")
-        .mockImplementation(async (_token, _name, input) => {
-          if (!input.remote || typeof input.remote !== "object")
-            throw new Error("Missing bootstrap credential");
-          const remote = input.remote as Record<string, unknown>;
-          if (
-            typeof remote.credential !== "string" ||
-            typeof remote.environmentIdentity !== "string"
-          )
-            throw new Error("Invalid bootstrap credential");
-          await connectControl({
-            credential: remote.credential,
-            environmentIdentity: remote.environmentIdentity,
-          });
-          return {
-            version: 1,
-            environmentIdentity: remote.environmentIdentity,
-            repositoryFullName: input.repositoryFullName,
-          };
-        });
-      const abort = new AbortController();
-      const refusal = router
-        .request(userId, resourceId, { method: "GET", path: "/v1/health" }, abort.signal)
-        .then(
-          () => null,
-          (error: unknown) => error,
+      else if (change === "authorization generation") {
+        authorityDb
+          .prepare("UPDATE codespaceConnection SET authorityGeneration=2 WHERE id=?")
+          .run(connectionId);
+        authorityDb
+          .prepare("UPDATE githubResourceIdentity SET authorizationGeneration=2 WHERE id=?")
+          .run(resourceId);
+      } else if (change === "expired credential")
+        authorityDb
+          .prepare("UPDATE workspaceAgentCredential SET expiresAt=0 WHERE resourceId=?")
+          .run(resourceId);
+      else if (change === "missing enrollment")
+        new WorkspaceAuthRepository(authorityDb).revoke(resourceId);
+      else if (change === "revoked resource")
+        authorityDb
+          .prepare("UPDATE githubResourceIdentity SET revokedAt=1 WHERE id=?")
+          .run(resourceId);
+      else if (change === "disabled provider") providerEnabled = false;
+      if (change === "current enrollment") {
+        const abort = new AbortController();
+        const outcome = router
+          .request(userId, resourceId, { method: "GET", path: "/v1/health" }, abort.signal)
+          .catch((error: unknown) => error);
+        await dispatch;
+        abort.abort(new Error("Fixture observer closed after authorized dispatch"));
+        expect(await outcome).toBeInstanceOf(Error);
+      } else if (change === "owner disconnect after publication authorization") {
+        const app = express();
+        let disconnectedAfterAuthorization = false;
+        app.get(
+          "/api/codespaces/files/:resourceId/:token",
+          createWorkspacePublicationHandler({
+            async authorize(id) {
+              const owner = authorizeWorkspacePublication(id);
+              expect(owner).toBe(userId);
+              if (!ownerSocket) throw new Error("Missing actual owner control");
+              const closed = once(ownerSocket, "close");
+              ownerSocket.destroy();
+              await closed;
+              expect(
+                router.isConnected({
+                  kind: "workspace",
+                  ...new WorkspaceAuthRepository(authorityDb).getOwned(userId, resourceId)!,
+                }),
+              ).toBe(false);
+              disconnectedAfterAuthorization = true;
+              return owner;
+            },
+            workspace: router,
+          }),
         );
-      expect(await dispatch).toMatch(/^[a-f0-9-]{36}$/);
-      abort.abort(new Error("Observer closed after current authorized dispatch"));
-      expect(await refusal).toBeInstanceOf(Error);
-      const current = new WorkspaceAuthRepository(authorityDb).getOwned(userId, resourceId)!;
-      expect(current.credentialDigest).not.toBe(
-        createHash("sha256").update(original.credential).digest("hex"),
-      );
-      expect(current.resourceGeneration).toBe(change === "start generation" ? 3 : 1);
-      expect(current.authorizationGeneration).toBe(change === "authorization generation" ? 2 : 1);
-      expect(router.isConnected(current)).toBe(true);
-      expect(probe).toHaveBeenCalledTimes(1);
-      expect(install).toHaveBeenCalledTimes(1);
+        const response = await supertest(app).get(
+          `/api/codespaces/files/${resourceId}/${"A".repeat(43)}`,
+        );
+        expect(response.status).toBe(404);
+        expect(response.body).toEqual({ error: "workspace_publication_unavailable" });
+        expect(disconnectedAfterAuthorization).toBe(true);
+      } else {
+        await expect(
+          router.request(userId, resourceId, { method: "GET", path: "/v1/health" }),
+        ).rejects.toMatchObject({
+          code:
+            change === "resource generation" || change === "authorization generation"
+              ? "CODESPACE_GENERATION_CONFLICT"
+              : change === "revoked resource"
+                ? "CODESPACE_AUTHORIZATION_REQUIRED"
+                : change === "disabled provider"
+                  ? "CODESPACE_PROVIDER_DISABLED"
+                  : "CODESPACE_PROVIDER_UNAVAILABLE",
+        });
+      }
+      expect(dispatched).toHaveBeenCalledTimes(change === "current enrollment" ? 1 : 0);
+      const current = new WorkspaceAuthRepository(authorityDb).getOwned(userId, resourceId);
+      if (change === "missing enrollment") expect(current).toBeNull();
+      else expect(current?.credentialDigest).toBe(originalDigest);
       authorityDb.prepare("UPDATE user SET blocked=1 WHERE id=?").run(userId);
       await expect(
         router.request(userId, resourceId, { method: "GET", path: "/v1/health" }),
       ).rejects.toMatchObject({ code: "CODESPACE_AUTHORIZATION_REQUIRED" });
-      expect(install).toHaveBeenCalledTimes(1);
     } finally {
-      probe?.mockRestore();
-      install?.mockRestore();
-      ensureRunning.mockReset();
       for (const socket of sockets) socket.destroy();
       await stopWorkspaceRouter();
       server.closeAllConnections();

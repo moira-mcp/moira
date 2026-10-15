@@ -44,19 +44,11 @@ export interface RunnerNodesResponse {
   }>;
 }
 
-export interface RunnerCommunicationAttachment {
-  kind: "image" | "document";
-  data: string;
-  encoding: "base64";
-  filename: string;
-  mimeType: string;
-}
-
 export interface RunnerCommunicationMessage {
   text: string;
   format?: "plain" | "markdown" | "html";
   silent?: boolean;
-  attachment?: RunnerCommunicationAttachment;
+  attachment?: never;
 }
 
 export interface RunnerChannelCheckRequest {

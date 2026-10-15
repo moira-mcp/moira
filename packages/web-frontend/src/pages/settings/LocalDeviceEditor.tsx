@@ -28,9 +28,15 @@ const numericFields: Array<{ key: NumericKey; scale: number }> = [
 export function LocalDeviceEditor({
   device,
   onSave,
+  onCollect,
 }: {
   device: LocalDeviceView;
-  onSave: (settings: LocalDeviceSettingsValue, expectedRevision: number) => Promise<void>;
+  onSave: (
+    settings: LocalDeviceSettingsValue,
+    expectedRevision: number,
+    requestId: string,
+  ) => Promise<void>;
+  onCollect: (requestId: string) => Promise<boolean>;
 }) {
   const { t } = useTranslation();
   const guard = useReadOwnerGuard();
@@ -40,11 +46,33 @@ export function LocalDeviceEditor({
     !connectionLoading && !connectionError && connection?.state === "connected"
       ? connection.account
       : null;
-  const control = device.control;
+  const local =
+    device.owner.state === "available" && device.owner.local.state === "configured"
+      ? device.owner.local
+      : null;
+  const online = local !== null;
+  const lastControl = useRef(local?.control);
+  if (device.owner.state === "available") lastControl.current = local?.control;
+  const control = lastControl.current;
   const [draft, setDraft] = useState<LocalDeviceSettingsValue | null>(control?.settings ?? null);
   const dirty = useRef(new Set<keyof LocalDeviceSettingsValue>());
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [unconfirmed, setUnconfirmed] = useState<{
+    requestId: string;
+    settings?: LocalDeviceSettingsValue;
+    draft?: LocalDeviceSettingsValue;
+    restoredFromOwner?: true;
+  } | null>(null);
+  useEffect(() => {
+    if (online && control?.pendingRequestId) {
+      setUnconfirmed(
+        (current) => current ?? { requestId: control.pendingRequestId!, restoredFromOwner: true },
+      );
+    } else if (online && control?.status === "applied") {
+      setUnconfirmed((current) => (current?.restoredFromOwner ? null : current));
+    }
+  }, [online, control?.pendingRequestId, control?.status]);
   useEffect(() => {
     if (!control) return;
     setDraft((previous) =>
@@ -70,7 +98,7 @@ export function LocalDeviceEditor({
   };
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
-    if (!draft || !control?.optedIn || pending) return;
+    if (!draft || !control?.optedIn || pending || !online || unconfirmed) return;
     if (
       draft.agentRepositoryManagement &&
       (!account ||
@@ -95,10 +123,11 @@ export function LocalDeviceEditor({
     const owned = guard(false);
     const snapshot = draft;
     const submitted = parsed.data;
+    const requestId = `ws1-${crypto.randomUUID()}`;
     setPending(true);
     setError(null);
     try {
-      await onSave(submitted, control.revision);
+      await onSave(submitted, control.revision, requestId);
       if (!owned()) return;
       setDraft((current) => {
         if (!current) return current;
@@ -113,13 +142,58 @@ export function LocalDeviceEditor({
           }),
         ) as LocalDeviceSettingsValue;
       });
-    } catch {
-      if (owned()) setError(t("localDevices.actionFailed"));
+    } catch (caught) {
+      if (owned()) {
+        const code =
+          caught && typeof caught === "object" && "code" in caught ? String(caught.code) : "";
+        const refused = [
+          "LOCAL_CONFLICT",
+          "LOCAL_INVALID",
+          "LOCAL_UNAUTHORIZED",
+          "LOCAL_EXPIRED",
+          "LOCAL_UNAVAILABLE",
+        ].includes(code);
+        if (!refused) setUnconfirmed({ requestId, settings: submitted, draft: snapshot });
+        setError(t(refused ? "localDevices.actionFailed" : "localDevices.editor.unconfirmed"));
+      }
     } finally {
       if (owned()) setPending(false);
     }
   };
   const prefix = `local-control-${device.deviceId}`;
+  const collect = async () => {
+    if (!unconfirmed || pending || !online) return;
+    const owned = guard(false);
+    const submitted = unconfirmed;
+    setPending(true);
+    try {
+      const applied = await onCollect(submitted.requestId);
+      if (!owned()) return;
+      setUnconfirmed(null);
+      setError(applied ? null : t("localDevices.actionFailed"));
+      if (!applied || !submitted.draft || !submitted.settings) return;
+      const acceptedDraft = submitted.draft;
+      const acceptedSettings = submitted.settings;
+      setDraft((current) =>
+        current
+          ? (Object.fromEntries(
+              Object.entries(current).map(([field, value]) => {
+                const key = field as keyof LocalDeviceSettingsValue;
+                if (JSON.stringify(value) !== JSON.stringify(acceptedDraft[key]))
+                  return [key, value];
+                dirty.current.delete(key);
+                return [key, acceptedSettings[key]];
+              }),
+            ) as LocalDeviceSettingsValue)
+          : current,
+      );
+    } catch {
+      if (owned()) setError(t("localDevices.editor.unconfirmed"));
+    } finally {
+      if (owned()) setPending(false);
+    }
+  };
+  if (!online && !control) return <p role="status">{t("localDevices.ownerUnavailable")}</p>;
   if (!control?.optedIn || !control.ceiling || !draft)
     return <p className="text-sm text-muted-foreground">{t("localDevices.editor.optIn")}</p>;
   const ceiling = control.ceiling;
@@ -147,6 +221,7 @@ export function LocalDeviceEditor({
       className="space-y-5 border-t pt-4"
       aria-label={t("localDevices.editor.title", { label: device.label })}
     >
+      {!online && <p role="status">{t("localDevices.ownerUnavailable")}</p>}
       <div className="space-y-1">
         <h4 className="font-medium">{t("localDevices.editor.title", { label: device.label })}</h4>
         <p role="status" className="text-sm">
@@ -162,254 +237,270 @@ export function LocalDeviceEditor({
           <InlineError title={t("localDevices.editor.rejected")} message={control.error.message} />
         )}
       </div>
-      <div className="grid gap-4 sm:grid-cols-2">
-        <div className="space-y-1.5">
-          <Label htmlFor={`${prefix}-label`}>{t("localDevices.editor.label")}</Label>
-          <Input
-            id={`${prefix}-label`}
-            value={draft.label}
-            onChange={(event) => change("label", event.currentTarget.value)}
-          />
+      <fieldset disabled={!online || Boolean(unconfirmed)} className="space-y-5">
+        <div className="grid gap-4 sm:grid-cols-2">
+          <div className="space-y-1.5">
+            <Label htmlFor={`${prefix}-label`}>{t("localDevices.editor.label")}</Label>
+            <Input
+              id={`${prefix}-label`}
+              value={draft.label}
+              onChange={(event) => change("label", event.currentTarget.value)}
+            />
+          </div>
+          <div className="flex items-center gap-2">
+            <Checkbox
+              id={`${prefix}-enabled`}
+              checked={draft.enabled}
+              onCheckedChange={(value) => change("enabled", value === true)}
+            />
+            <Label htmlFor={`${prefix}-enabled`}>{t("localDevices.editor.enabled")}</Label>
+          </div>
+          {numeric()}
+          <div className="space-y-1.5">
+            <Label htmlFor={`${prefix}-lease`}>{t("localDevices.editor.lease")}</Label>
+            <Input
+              id={`${prefix}-lease`}
+              type="datetime-local"
+              value={
+                Number.isFinite(draft.leaseUntil)
+                  ? new Date(
+                      draft.leaseUntil - new Date(draft.leaseUntil).getTimezoneOffset() * 60_000,
+                    )
+                      .toISOString()
+                      .slice(0, 16)
+                  : ""
+              }
+              onChange={(event) =>
+                change("leaseUntil", new Date(event.currentTarget.value).getTime())
+              }
+            />
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={control.ceiling.maxLeaseMs < MAX_LOCAL_WORK_LEASE_MS}
+              onClick={() => change("leaseUntil", Date.now() + MAX_LOCAL_WORK_LEASE_MS)}
+            >
+              {t("localDevices.editor.week")}
+            </Button>
+            <p className="text-xs text-muted-foreground">
+              {t("localDevices.editor.leaseCeiling", {
+                hours: control.ceiling.maxLeaseMs / 3600_000,
+              })}
+            </p>
+          </div>
         </div>
-        <div className="flex items-center gap-2">
-          <Checkbox
-            id={`${prefix}-enabled`}
-            checked={draft.enabled}
-            onCheckedChange={(value) => change("enabled", value === true)}
-          />
-          <Label htmlFor={`${prefix}-enabled`}>{t("localDevices.editor.enabled")}</Label>
-        </div>
-        {numeric()}
-        <div className="space-y-1.5">
-          <Label htmlFor={`${prefix}-lease`}>{t("localDevices.editor.lease")}</Label>
-          <Input
-            id={`${prefix}-lease`}
-            type="datetime-local"
-            value={
-              Number.isFinite(draft.leaseUntil)
-                ? new Date(
-                    draft.leaseUntil - new Date(draft.leaseUntil).getTimezoneOffset() * 60_000,
-                  )
-                    .toISOString()
-                    .slice(0, 16)
-                : ""
-            }
-            onChange={(event) =>
-              change("leaseUntil", new Date(event.currentTarget.value).getTime())
-            }
-          />
+        <fieldset className="space-y-3 rounded-md border p-4">
+          <legend className="px-1 font-medium">{t("localDevices.editor.agent.title")}</legend>
+          <p className="text-sm text-muted-foreground">{t("localDevices.editor.agent.hint")}</p>
+          <p className="text-sm" role="status">
+            {control.appliedAgentRepositoryManagement
+              ? t("localDevices.editor.agent.applied", {
+                  owner: control.appliedAgentRepositoryManagement.owner,
+                  existing: t(
+                    control.appliedAgentRepositoryManagement.allowExistingPrivate
+                      ? "localDevices.yes"
+                      : "localDevices.no",
+                  ),
+                  created: t(
+                    control.appliedAgentRepositoryManagement.allowNewPrivate
+                      ? "localDevices.yes"
+                      : "localDevices.no",
+                  ),
+                  push: t(
+                    control.appliedAgentRepositoryManagement.allowPush
+                      ? "localDevices.yes"
+                      : "localDevices.no",
+                  ),
+                })
+              : t("localDevices.editor.agent.disabled")}
+          </p>
+          <div className="flex items-center gap-2">
+            <Checkbox
+              id={`${prefix}-agent-enabled`}
+              checked={Boolean(draft.agentRepositoryManagement)}
+              disabled={!draft.agentRepositoryManagement && !account}
+              onCheckedChange={(value) =>
+                change(
+                  "agentRepositoryManagement",
+                  value === true && account
+                    ? {
+                        githubUserId: account.id,
+                        owner: account.login,
+                        allowExistingPrivate: true,
+                        allowNewPrivate: false,
+                        allowPush: false,
+                      }
+                    : null,
+                )
+              }
+            />
+            <Label htmlFor={`${prefix}-agent-enabled`}>
+              {t("localDevices.editor.agent.enable")}
+            </Label>
+          </div>
+          <p className="text-sm text-muted-foreground">
+            {account
+              ? t("localDevices.editor.agent.account", { owner: account.login })
+              : t("localDevices.editor.agent.accountRequired")}
+          </p>
           <Button
             type="button"
             variant="outline"
             size="sm"
-            disabled={control.ceiling.maxLeaseMs < MAX_LOCAL_WORK_LEASE_MS}
-            onClick={() => change("leaseUntil", Date.now() + MAX_LOCAL_WORK_LEASE_MS)}
+            disabled={connectionLoading}
+            onClick={() => void reloadConnection()}
           >
-            {t("localDevices.editor.week")}
+            {t(
+              connectionLoading
+                ? "localDevices.editor.agent.refreshing"
+                : "localDevices.editor.agent.refresh",
+            )}
           </Button>
-          <p className="text-xs text-muted-foreground">
-            {t("localDevices.editor.leaseCeiling", {
-              hours: control.ceiling.maxLeaseMs / 3600_000,
-            })}
-          </p>
-        </div>
-      </div>
-      <fieldset className="space-y-3 rounded-md border p-4">
-        <legend className="px-1 font-medium">{t("localDevices.editor.agent.title")}</legend>
-        <p className="text-sm text-muted-foreground">{t("localDevices.editor.agent.hint")}</p>
-        <p className="text-sm" role="status">
-          {control.appliedAgentRepositoryManagement
-            ? t("localDevices.editor.agent.applied", {
-                owner: control.appliedAgentRepositoryManagement.owner,
-                existing: t(
-                  control.appliedAgentRepositoryManagement.allowExistingPrivate
-                    ? "localDevices.yes"
-                    : "localDevices.no",
-                ),
-                created: t(
-                  control.appliedAgentRepositoryManagement.allowNewPrivate
-                    ? "localDevices.yes"
-                    : "localDevices.no",
-                ),
-                push: t(
-                  control.appliedAgentRepositoryManagement.allowPush
-                    ? "localDevices.yes"
-                    : "localDevices.no",
-                ),
-              })
-            : t("localDevices.editor.agent.disabled")}
-        </p>
-        <div className="flex items-center gap-2">
-          <Checkbox
-            id={`${prefix}-agent-enabled`}
-            checked={Boolean(draft.agentRepositoryManagement)}
-            disabled={!draft.agentRepositoryManagement && !account}
-            onCheckedChange={(value) =>
-              change(
-                "agentRepositoryManagement",
-                value === true && account
-                  ? {
-                      githubUserId: account.id,
-                      owner: account.login,
-                      allowExistingPrivate: true,
-                      allowNewPrivate: false,
-                      allowPush: false,
-                    }
-                  : null,
-              )
-            }
-          />
-          <Label htmlFor={`${prefix}-agent-enabled`}>{t("localDevices.editor.agent.enable")}</Label>
-        </div>
-        <p className="text-sm text-muted-foreground">
-          {account
-            ? t("localDevices.editor.agent.account", { owner: account.login })
-            : t("localDevices.editor.agent.accountRequired")}
-        </p>
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          disabled={connectionLoading}
-          onClick={() => void reloadConnection()}
-        >
-          {t(
-            connectionLoading
-              ? "localDevices.editor.agent.refreshing"
-              : "localDevices.editor.agent.refresh",
-          )}
-        </Button>
-        {draft.agentRepositoryManagement && (
-          <div className="space-y-3">
-            <p className="text-sm">
-              {t("localDevices.editor.agent.requested", {
-                owner: draft.agentRepositoryManagement.owner,
-              })}
-            </p>
-            <div className="flex flex-wrap gap-4">
-              {(["allowExistingPrivate", "allowNewPrivate", "allowPush"] as const).map((key) => (
-                <div key={key} className="flex items-center gap-2">
-                  <Checkbox
-                    id={`${prefix}-agent-${key}`}
-                    checked={draft.agentRepositoryManagement?.[key] === true}
-                    onCheckedChange={(value) =>
-                      change("agentRepositoryManagement", {
-                        ...draft.agentRepositoryManagement!,
-                        [key]: value === true,
-                      })
-                    }
-                  />
-                  <Label htmlFor={`${prefix}-agent-${key}`}>
-                    {t(`localDevices.editor.agent.${key}`)}
-                  </Label>
-                </div>
-              ))}
+          {draft.agentRepositoryManagement && (
+            <div className="space-y-3">
+              <p className="text-sm">
+                {t("localDevices.editor.agent.requested", {
+                  owner: draft.agentRepositoryManagement.owner,
+                })}
+              </p>
+              <div className="flex flex-wrap gap-4">
+                {(["allowExistingPrivate", "allowNewPrivate", "allowPush"] as const).map((key) => (
+                  <div key={key} className="flex items-center gap-2">
+                    <Checkbox
+                      id={`${prefix}-agent-${key}`}
+                      checked={draft.agentRepositoryManagement?.[key] === true}
+                      onCheckedChange={(value) =>
+                        change("agentRepositoryManagement", {
+                          ...draft.agentRepositoryManagement!,
+                          [key]: value === true,
+                        })
+                      }
+                    />
+                    <Label htmlFor={`${prefix}-agent-${key}`}>
+                      {t(`localDevices.editor.agent.${key}`)}
+                    </Label>
+                  </div>
+                ))}
+              </div>
             </div>
-          </div>
-        )}
-        <p className="text-sm text-muted-foreground">{t("localDevices.editor.agent.revokeHint")}</p>
-      </fieldset>
-      <fieldset className="space-y-3">
-        <legend className="font-medium">{t("localDevices.repositories")}</legend>
-        {draft.repositories.map((repository, index) => {
-          const update = (next: typeof repository) =>
-            change(
-              "repositories",
-              draft.repositories.map((current, at) => (at === index ? next : current)),
+          )}
+          <p className="text-sm text-muted-foreground">
+            {t("localDevices.editor.agent.revokeHint")}
+          </p>
+        </fieldset>
+        <fieldset className="space-y-3">
+          <legend className="font-medium">{t("localDevices.repositories")}</legend>
+          {draft.repositories.map((repository, index) => {
+            const update = (next: typeof repository) =>
+              change(
+                "repositories",
+                draft.repositories.map((current, at) => (at === index ? next : current)),
+              );
+            return (
+              <div key={repository.id} className="space-y-3 rounded-md border p-3">
+                <Label htmlFor={`${prefix}-repo-${repository.id}`}>
+                  {t("localDevices.editor.repository")}
+                </Label>
+                <Input
+                  id={`${prefix}-repo-${repository.id}`}
+                  value={repository.fullName}
+                  placeholder={t("localDevices.editor.repositoryPlaceholder")}
+                  onChange={(event) =>
+                    update({ ...repository, fullName: event.currentTarget.value })
+                  }
+                />
+                <div className="flex flex-wrap gap-x-5 gap-y-3">
+                  {(["private", "allowPush", "allowPullRequests", "allowDelete"] as const).map(
+                    (key) => (
+                      <div key={key} className="flex items-center gap-2">
+                        <Checkbox
+                          id={`${prefix}-${repository.id}-${key}`}
+                          checked={repository[key] === true}
+                          onCheckedChange={(value) =>
+                            update({ ...repository, [key]: value === true })
+                          }
+                        />
+                        <Label htmlFor={`${prefix}-${repository.id}-${key}`}>
+                          {t(`localDevices.editor.${key}`)}
+                        </Label>
+                      </div>
+                    ),
+                  )}
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() =>
+                    change(
+                      "repositories",
+                      draft.repositories.filter((_, at) => at !== index),
+                    )
+                  }
+                >
+                  {t("localDevices.editor.removeRepository")}
+                </Button>
+              </div>
             );
-          return (
-            <div key={repository.id} className="space-y-3 rounded-md border p-3">
-              <Label htmlFor={`${prefix}-repo-${repository.id}`}>
-                {t("localDevices.editor.repository")}
+          })}
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() =>
+              change("repositories", [
+                ...draft.repositories,
+                {
+                  id: crypto.randomUUID(),
+                  fullName: "",
+                  private: false,
+                  allowPush: false,
+                  allowDelete: false,
+                  allowPullRequests: false,
+                },
+              ])
+            }
+          >
+            {t("localDevices.editor.addRepository")}
+          </Button>
+        </fieldset>
+        <fieldset className="grid gap-3 sm:grid-cols-2">
+          <legend className="mb-2 font-medium">{t("localDevices.editor.gitAuthor")}</legend>
+          <p className="text-sm text-muted-foreground sm:col-span-2">
+            {t("localDevices.editor.authorHint")}
+          </p>
+          {(["name", "email"] as const).map((key) => (
+            <div key={key} className="space-y-1.5">
+              <Label htmlFor={`${prefix}-author-${key}`}>
+                {t(`localDevices.editor.author${key === "name" ? "Name" : "Email"}`)}
               </Label>
               <Input
-                id={`${prefix}-repo-${repository.id}`}
-                value={repository.fullName}
-                placeholder={t("localDevices.editor.repositoryPlaceholder")}
-                onChange={(event) => update({ ...repository, fullName: event.currentTarget.value })}
+                id={`${prefix}-author-${key}`}
+                value={draft.gitAuthor?.[key] ?? ""}
+                onChange={(event) => {
+                  const next = {
+                    name: draft.gitAuthor?.name ?? "",
+                    email: draft.gitAuthor?.email ?? "",
+                    [key]: event.currentTarget.value,
+                  };
+                  change("gitAuthor", !next.name && !next.email ? null : next);
+                }}
               />
-              <div className="flex flex-wrap gap-x-5 gap-y-3">
-                {(["private", "allowPush", "allowPullRequests", "allowDelete"] as const).map(
-                  (key) => (
-                    <div key={key} className="flex items-center gap-2">
-                      <Checkbox
-                        id={`${prefix}-${repository.id}-${key}`}
-                        checked={repository[key] === true}
-                        onCheckedChange={(value) =>
-                          update({ ...repository, [key]: value === true })
-                        }
-                      />
-                      <Label htmlFor={`${prefix}-${repository.id}-${key}`}>
-                        {t(`localDevices.editor.${key}`)}
-                      </Label>
-                    </div>
-                  ),
-                )}
-              </div>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() =>
-                  change(
-                    "repositories",
-                    draft.repositories.filter((_, at) => at !== index),
-                  )
-                }
-              >
-                {t("localDevices.editor.removeRepository")}
-              </Button>
             </div>
-          );
-        })}
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          onClick={() =>
-            change("repositories", [
-              ...draft.repositories,
-              {
-                id: crypto.randomUUID(),
-                fullName: "",
-                private: false,
-                allowPush: false,
-                allowDelete: false,
-                allowPullRequests: false,
-              },
-            ])
-          }
-        >
-          {t("localDevices.editor.addRepository")}
-        </Button>
-      </fieldset>
-      <fieldset className="grid gap-3 sm:grid-cols-2">
-        <legend className="mb-2 font-medium">{t("localDevices.editor.gitAuthor")}</legend>
-        <p className="text-sm text-muted-foreground sm:col-span-2">
-          {t("localDevices.editor.authorHint")}
-        </p>
-        {(["name", "email"] as const).map((key) => (
-          <div key={key} className="space-y-1.5">
-            <Label htmlFor={`${prefix}-author-${key}`}>
-              {t(`localDevices.editor.author${key === "name" ? "Name" : "Email"}`)}
-            </Label>
-            <Input
-              id={`${prefix}-author-${key}`}
-              value={draft.gitAuthor?.[key] ?? ""}
-              onChange={(event) => {
-                const next = {
-                  name: draft.gitAuthor?.name ?? "",
-                  email: draft.gitAuthor?.email ?? "",
-                  [key]: event.currentTarget.value,
-                };
-                change("gitAuthor", !next.name && !next.email ? null : next);
-              }}
-            />
-          </div>
-        ))}
+          ))}
+        </fieldset>
       </fieldset>
       {error && <InlineError title={t("common.errors.failedToLoad")} message={error} />}
-      <Button type="submit" disabled={pending || dirty.current.size === 0}>
+      {unconfirmed && (
+        <Button type="button" disabled={pending || !online} onClick={() => void collect()}>
+          {t("localDevices.editor.collect")}
+        </Button>
+      )}
+      <Button
+        type="submit"
+        disabled={pending || !online || Boolean(unconfirmed) || dirty.current.size === 0}
+      >
         {t(pending ? "localDevices.editor.saving" : "localDevices.editor.save")}
       </Button>
     </form>

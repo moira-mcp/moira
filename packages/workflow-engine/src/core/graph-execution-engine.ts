@@ -50,11 +50,11 @@ import { GraphTemplateProcessor } from "../templates/graph-template-processor.js
 import { SchemaValidator } from "../utils/schema-validator.js";
 import {
   diffVariables,
-  liveExecution,
   snapshotVariables,
   type CycleOrigin,
   type EngineVisit,
 } from "../utils/execution-visits.js";
+import { notificationLiveRun } from "../services/notification-frame.js";
 
 import {
   IGraphExecutionEngine,
@@ -339,7 +339,9 @@ export class GraphExecutionEngine implements IGraphExecutionEngine {
           this,
           nodeInput,
           graph.variableRegistry,
-          origin ? () => liveExecution(origin, visits, updatedContext.variables) : undefined,
+          origin
+            ? notificationLiveRun(origin, visits, updatedContext.variables, currentNode.id)
+            : undefined,
         );
       } catch (handlerError) {
         // Handler threw exception - this is the boundary for handler errors

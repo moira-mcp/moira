@@ -2,7 +2,6 @@
  * Telegram Bot API Type Definitions
  * Type-safe interfaces for Telegram notification functionality
  */
-import type { CodespaceVerifiedByteSource } from "@mcp-moira/shared";
 
 /**
  * Configuration for Telegram Bot integration
@@ -38,35 +37,12 @@ export interface SendMessageParams {
   replyMarkup?: ReplyMarkup;
 }
 
-export interface SendPhotoParams {
-  chatId: string;
-  photo: Uint8Array | CodespaceVerifiedByteSource;
-  signal?: AbortSignal;
-  filename: string;
-  mimeType: "image/png" | "image/jpeg";
-  caption?: string;
-  parseMode?: "Markdown" | "HTML";
-  disableNotification?: boolean;
-  replyMarkup?: ReplyMarkup;
-}
-
-export interface SendDocumentParams {
-  chatId: string;
-  document: Uint8Array | CodespaceVerifiedByteSource;
-  signal?: AbortSignal;
-  filename: string;
-  mimeType: string;
-  caption?: string;
-  parseMode?: "Markdown" | "HTML";
-  disableNotification?: boolean;
-  replyMarkup?: ReplyMarkup;
-}
-
 /** The longest message text and the longest photo or document caption the Bot API accepts. */
 export const TELEGRAM_TEXT_MAX_LENGTH = 4096;
 export const TELEGRAM_CAPTION_MAX_LENGTH = 1024;
 export const TELEGRAM_PHOTO_MAX_BYTES = 10 * 1024 * 1024;
-export const TELEGRAM_DOCUMENT_MAX_BYTES = 20 * 1024 * 1024;
+/** Multipart Bot API upload limit: https://core.telegram.org/bots/api#sending-files */
+export const TELEGRAM_DOCUMENT_MAX_BYTES = 50 * 1024 * 1024;
 
 /**
  * Response from Telegram Bot API

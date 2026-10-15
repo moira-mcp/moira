@@ -110,7 +110,9 @@ describe("persistent codespace operation migration", () => {
       });
       insertLegacyResource(sqlite);
 
-      migrate(drizzle(sqlite), { migrationsFolder: migrations });
+      migrate(drizzle(sqlite), {
+        migrationsFolder: copyBeforeMigration(directory, "0058_codespace_operation_acceptance"),
+      });
 
       expect(
         sqlite
@@ -196,7 +198,9 @@ describe("persistent codespace operation migration", () => {
       const historical = sqlite.prepare("SELECT * FROM codespaceOperation ORDER BY id").all();
       const relays = sqlite.prepare("SELECT * FROM codespaceLocalRelay ORDER BY requestId").all();
 
-      migrate(drizzle(sqlite), { migrationsFolder: migrations });
+      migrate(drizzle(sqlite), {
+        migrationsFolder: copyBeforeMigration(directory, "0061_local_controller_authority"),
+      });
 
       expect(historical).toHaveLength(2);
       for (const row of historical as Array<{ id: string }>) {

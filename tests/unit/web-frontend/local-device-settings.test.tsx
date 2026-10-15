@@ -30,7 +30,15 @@ import { GitHubCodespacesProvider } from "../../../packages/web-frontend/src/pag
 const deviceId = "11111111-1111-4111-8111-111111111111";
 const pairingId = "22222222-2222-4222-8222-222222222222";
 const pairingToken = "x".repeat(43);
-const device: LocalDeviceView = {
+type AvailableDevice = LocalDeviceView & {
+  owner: Extract<LocalDeviceView["owner"], { state: "available" }> & {
+    local: Extract<
+      Extract<LocalDeviceView["owner"], { state: "available" }>["local"],
+      { state: "configured" }
+    >;
+  };
+};
+const device: AvailableDevice = {
   deviceId,
   userId: "owner",
   connectionId: "33333333-3333-4333-8333-333333333333",
@@ -39,29 +47,57 @@ const device: LocalDeviceView = {
   status: "pending",
   lastSeenAt: null,
   createdAt: 0,
-  policy: {
-    version: 1,
-    deviceId,
-    label: "Approved laptop",
-    enabled: true,
-    leaseUntil: Date.now() + 600000,
-    machine: {
-      name: "local-approved",
-      displayName: "Local approved",
-      operatingSystem: "linux",
-      cpuCores: 2,
-      memoryBytes: 2 * 1024 ** 3,
-      storageBytes: 8 * 1024 ** 3,
-    },
-    repositories: [
-      {
-        id: "44444444-4444-4444-8444-444444444444",
-        fullName: "owner/project",
-        private: true,
-        allowPush: false,
-        allowDelete: false,
+  owner: {
+    state: "available",
+    observedAt: 0,
+    github: { resources: [] },
+    local: {
+      state: "configured",
+      control: {
+        optedIn: false,
+        revision: 0,
+        appliedRevision: 0,
+        status: "not-enabled",
+        ceiling: null,
+        error: null,
+        settings: {
+          label: "Approved laptop",
+          enabled: true,
+          leaseUntil: Date.now() + 600000,
+          cpuCores: 2,
+          memoryBytes: 2 * 1024 ** 3,
+          storageBytes: 8 * 1024 ** 3,
+          dockerBytes: 2 * 1024 ** 3,
+          repositories: [],
+          gitAuthor: null,
+          agentRepositoryManagement: null,
+        },
       },
-    ],
+      policy: {
+        version: 1,
+        deviceId,
+        label: "Approved laptop",
+        enabled: true,
+        leaseUntil: Date.now() + 600000,
+        machine: {
+          name: "local-approved",
+          displayName: "Local approved",
+          operatingSystem: "linux",
+          cpuCores: 2,
+          memoryBytes: 2 * 1024 ** 3,
+          storageBytes: 8 * 1024 ** 3,
+        },
+        repositories: [
+          {
+            id: "44444444-4444-4444-8444-444444444444",
+            fullName: "owner/project",
+            private: true,
+            allowPush: false,
+            allowDelete: false,
+          },
+        ],
+      },
+    },
   },
 };
 const pair: LocalPairingView = {
@@ -71,7 +107,7 @@ const pair: LocalPairingView = {
   state: "waiting_confirmation",
   expiresAt: Date.now() + 600000,
 };
-let devices: LocalDeviceView[];
+let devices: AvailableDevice[];
 let pairings: LocalPairingView[];
 let refuse = false;
 let heldBegin: Promise<unknown> | undefined;
@@ -133,14 +169,20 @@ beforeEach(async () => {
       if (config.url?.endsWith("/settings")) {
         if (heldSettings) await heldSettings;
         const current = devices[0];
-        if (!current.control) throw new Error("Missing control fixture");
-        const next: LocalDeviceView = {
+        if (!current.owner.local.control) throw new Error("Missing control fixture");
+        const next: AvailableDevice = {
           ...current,
-          control: {
-            ...current.control,
-            status: "pending",
-            revision: current.control.revision + 1,
-            settings: body.settings,
+          owner: {
+            ...current.owner,
+            local: {
+              ...current.owner.local,
+              control: {
+                ...current.owner.local.control,
+                status: "pending",
+                revision: current.owner.local.control.revision + 1,
+                settings: body.settings,
+              },
+            },
           },
         };
         devices = [next];
@@ -155,7 +197,7 @@ beforeEach(async () => {
       const next = {
         ...device,
         status: config.method === "delete" ? "revoked" : "active",
-      } as LocalDeviceView;
+      } as AvailableDevice;
       devices = [next];
       pairings = [];
       data = next;
@@ -169,6 +211,7 @@ beforeEach(async () => {
     "confirmLocalEnrollment",
     "revokeLocalDevice",
     "updateLocalDeviceSettings",
+    "getLocalDeviceSettingsOperation",
   ] as const)
     jest.spyOn(apiClient, method).mockImplementation(client[method].bind(client) as never);
   jest
@@ -179,7 +222,6 @@ beforeEach(async () => {
     repositories: [],
     readiness: { state: "ready" },
     connection: { state: "connected" },
-    limits: { codespaces: { held: 0, max_per_user: null } },
   } as never);
 });
 afterEach(() => {
@@ -239,6 +281,35 @@ function localCodespace(
   };
 }
 
+test("a connected neutral GitHub controller has no fabricated Local settings or VM grants", async () => {
+  const neutral: LocalDeviceView = {
+    ...device,
+    status: "active",
+    owner: {
+      state: "available",
+      observedAt: 1,
+      local: { state: "unconfigured" },
+      github: { resources: [] },
+    },
+  };
+  jest.mocked(apiClient.getLocalDevices).mockResolvedValue({ devices: [neutral], pairings: [] });
+  await show();
+  const computer = await screen.findByTestId(`local-device-${deviceId}`);
+  expect(computer).toHaveTextContent("Connected");
+  expect(within(computer).getByRole("status")).toHaveTextContent(
+    "This computer is connected for GitHub environments. Local virtual machines have not been configured.",
+  );
+  expect(within(computer).getByRole("button", { name: "Disconnect computer" })).toBeEnabled();
+  expect(
+    within(computer).queryByRole("button", { name: "Computer settings and access" }),
+  ).toBeNull();
+  expect(within(computer).queryByRole("form")).toBeNull();
+  expect(within(computer).queryByLabelText("CPU cores")).toBeNull();
+  expect(within(computer).queryByText("owner/project")).toBeNull();
+  expect(within(computer).queryByText("Push: not allowed · Delete: not allowed")).toBeNull();
+  expect(requests.filter((request) => request.method !== "get")).toEqual([]);
+});
+
 test("computers with equal labels contain only their codespaces and separate VM identities of the same repository", async () => {
   const secondId = "55555555-5555-4555-8555-555555555555";
   devices = [
@@ -248,7 +319,13 @@ test("computers with equal labels contain only their codespaces and separate VM 
       deviceId: secondId,
       status: "active",
       label: "Duplicate label",
-      policy: { ...device.policy, deviceId: secondId },
+      owner: {
+        ...device.owner,
+        local: {
+          ...device.owner.local,
+          policy: { ...device.owner.local.policy, deviceId: secondId },
+        },
+      },
     },
   ];
   const first = localCodespace(deviceId, "66666666-6666-4666-8666-666666666666");
@@ -265,7 +342,6 @@ test("computers with equal labels contain only their codespaces and separate VM 
     connection: { state: "connected" },
     repositories: [],
     codespaces: [first, sibling, second, cloud],
-    limits: { codespaces: { held: 4, max_per_user: null } },
   };
   jest.mocked(apiClient.getGitHubCodespaces).mockResolvedValue(fixture as never);
   const stop = jest
@@ -293,7 +369,11 @@ test("computers with equal labels contain only their codespaces and separate VM 
   await within(firstComputer).findByText(
     "The computer could not confirm the codespace state. Check its connection and try again.",
   );
-  expect(stop).toHaveBeenCalledWith(sibling.codespace_id);
+  expect(stop).toHaveBeenCalledWith(
+    sibling.codespace_id,
+    expect.stringMatching(/^ws1-/),
+    sibling.generation,
+  );
   expect(
     within(firstComputer).getByTestId(`github-codespace-stop-${first.codespace_id}`),
   ).toBeEnabled();
@@ -308,42 +388,13 @@ test("computers with equal labels contain only their codespaces and separate VM 
     updated_at: 9000,
     lifecycle_error: null,
   };
-  let settleStop!: (value: CodespaceSummaryView) => void;
-  stop.mockImplementationOnce(
-    () =>
-      new Promise((resolve) => {
-        settleStop = resolve;
-      }),
-  );
-  let settleList!: (value: Awaited<ReturnType<typeof apiClient.getGitHubCodespaces>>) => void;
-  jest.mocked(apiClient.getGitHubCodespaces).mockImplementationOnce(
-    () =>
-      new Promise((resolve) => {
-        settleList = resolve;
-      }),
-  );
   const readonlyRefresh = jest
     .spyOn(apiClient, "refreshGitHubCodespaces")
-    .mockResolvedValue(fixture as never);
+    .mockResolvedValue({ ...fixture, codespaces: [first, sibling, confirmed, cloud] } as never);
   fireEvent.click(within(pending).getByTestId(`codespace-reconcile-${second.codespace_id}`));
-  await waitFor(() => expect(stop).toHaveBeenLastCalledWith(second.codespace_id));
-  expect(within(firstComputer).getByTestId(`local-codespaces-${deviceId}-region`)).toHaveAttribute(
-    "aria-busy",
-    "false",
-  );
-  expect(within(pending).getByTestId(`codespace-reconcile-${second.codespace_id}`)).toBeDisabled();
-  await act(async () => settleStop(confirmed));
   await within(secondComputer).findByText("Stopped (data kept)");
-  // The companion mutation's accepted result is visible while its silent list read is pending;
-  // a read-only refresh returning the old pending state cannot pass this assertion.
-  expect(readonlyRefresh).not.toHaveBeenCalled();
-  expect(within(firstComputer).getByTestId(`local-codespaces-${deviceId}-region`)).toHaveAttribute(
-    "aria-busy",
-    "false",
-  );
-  await act(async () =>
-    settleList({ ...fixture, codespaces: [first, sibling, confirmed, cloud] } as never),
-  );
+  expect(stop).toHaveBeenCalledTimes(1);
+  expect(readonlyRefresh).toHaveBeenCalledTimes(1);
   const timestamp = within(secondComputer).getByText(/^State confirmed/);
   expect(timestamp).toHaveTextContent(new Date(3000).toLocaleString("en"));
   expect(within(secondComputer).queryByText("State has not been confirmed yet")).toBeNull();
@@ -392,7 +443,6 @@ test.each([
       connection: { state: "connected" },
       repositories: [],
       codespaces: [row],
-      limits: { codespaces: { held: 1, max_per_user: null } },
     };
     jest.mocked(apiClient.getGitHubCodespaces).mockResolvedValue(fixture as never);
     const remove = jest
@@ -426,7 +476,11 @@ test.each([
     expect(await within(dialog).findByRole("alert")).toHaveTextContent(
       "Confirm deletion of this same codespace in Moira Settings → Development → Local computers.",
     );
-    expect(remove).toHaveBeenCalledWith(row.codespace_id, row.generation);
+    expect(remove).toHaveBeenCalledWith(
+      row.codespace_id,
+      row.generation,
+      expect.stringMatching(/^ws1-/),
+    );
     expect(card).toBeInTheDocument();
     expect(success).not.toHaveBeenCalled();
     remove.mockResolvedValueOnce({
@@ -444,7 +498,11 @@ test.each([
     await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
     expect(card).toBeInTheDocument();
     expect(success).not.toHaveBeenCalled();
-    expect(remove).toHaveBeenLastCalledWith(row.codespace_id, row.generation + 1);
+    expect(remove).toHaveBeenLastCalledWith(
+      row.codespace_id,
+      row.generation + 1,
+      expect.stringMatching(/^ws1-/),
+    );
   },
 );
 
@@ -456,7 +514,6 @@ test("an adapter domain403 keeps the session and unlocks cancellation while gene
     connection: { state: "connected" },
     repositories: [],
     codespaces: [row],
-    limits: { codespaces: { held: 1, max_per_user: null } },
   };
   jest.mocked(apiClient.getGitHubCodespaces).mockResolvedValue(fixture as never);
   axios.defaults.adapter = async (config) => {
@@ -506,7 +563,11 @@ test("an adapter domain403 keeps the session and unlocks cancellation while gene
     {
       method: "delete",
       url: `/integrations/github/codespaces/${row.codespace_id}`,
-      body: { confirm_delete: true, expected_generation: row.generation },
+      body: {
+        confirm_delete: true,
+        expected_generation: row.generation,
+        request_id: expect.stringMatching(/^ws1-/),
+      },
     },
   ]);
   fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
@@ -523,6 +584,7 @@ test("an adapter domain403 keeps the session and unlocks cancellation while gene
   expect(requests.filter((entry) => entry.method === "delete")[1].body).toEqual({
     confirm_delete: true,
     expected_generation: row.generation,
+    request_id: expect.stringMatching(/^ws1-/),
   });
   await waitFor(() =>
     expect(within(reopened).getByRole("button", { name: "Cancel" })).toBeEnabled(),
@@ -534,8 +596,8 @@ test.each(["disabled", "expired"] as const)(
   "owner deletion remains available with %s agent work permission",
   async (policy) => {
     const computer = editableDevice();
-    computer.policy = {
-      ...computer.policy,
+    computer.owner.local.policy = {
+      ...computer.owner.local.policy,
       ...(policy === "disabled" ? { enabled: false } : { leaseUntil: 0 }),
     };
     devices = [computer];
@@ -545,7 +607,6 @@ test.each(["disabled", "expired"] as const)(
       connection: { state: "connected" },
       repositories: [],
       codespaces: [row],
-      limits: { codespaces: { held: 1, max_per_user: null } },
     } as never);
     const remove = jest
       .spyOn(apiClient, "deleteGitHubCodespace")
@@ -559,18 +620,21 @@ test.each(["disabled", "expired"] as const)(
     expect(remove).not.toHaveBeenCalled();
     fireEvent.click(within(dialog).getByRole("button", { name: "Delete" }));
     await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
-    expect(remove).toHaveBeenCalledWith(row.codespace_id, row.generation);
-    expect(computer.policy.repositories[0].allowDelete).toBe(false);
+    expect(remove).toHaveBeenCalledWith(
+      row.codespace_id,
+      row.generation,
+      expect.stringMatching(/^ws1-/),
+    );
+    expect(computer.owner.local.policy.repositories[0].allowDelete).toBe(false);
   },
 );
 
-test.each(["revoked", "pending", "no-control", "control-disabled"] as const)(
+test.each(["revoked", "pending", "control-disabled"] as const)(
   "%s computer does not offer owner deletion",
   async (condition) => {
     const computer = editableDevice();
     if (condition === "revoked" || condition === "pending") computer.status = condition;
-    else if (condition === "no-control") delete computer.control;
-    else computer.control!.optedIn = false;
+    else computer.owner.local.control!.optedIn = false;
     devices = [computer];
     const row = localCodespace(deviceId, "66666666-6666-4666-8666-666666666666");
     jest.mocked(apiClient.getGitHubCodespaces).mockResolvedValue({
@@ -578,7 +642,6 @@ test.each(["revoked", "pending", "no-control", "control-disabled"] as const)(
       connection: { state: "connected" },
       repositories: [],
       codespaces: [row],
-      limits: { codespaces: { held: 1, max_per_user: null } },
     } as never);
     await show({ openSettings: false });
     const card = await screen.findByTestId(`github-codespace-${row.codespace_id}`);
@@ -597,7 +660,6 @@ test("checking an old delete intent requires a new destructive confirmation", as
     connection: { state: "connected" },
     repositories: [],
     codespaces: [row],
-    limits: { codespaces: { held: 1, max_per_user: null } },
   } as never);
   const remove = jest
     .spyOn(apiClient, "deleteGitHubCodespace")
@@ -608,11 +670,15 @@ test("checking an old delete intent requires a new destructive confirmation", as
   expect(remove).not.toHaveBeenCalled();
   fireEvent.click(within(dialog).getByRole("button", { name: "Delete" }));
   await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
-  expect(remove).toHaveBeenCalledWith(row.codespace_id, row.generation);
+  expect(remove).toHaveBeenCalledWith(
+    row.codespace_id,
+    row.generation,
+    expect.stringMatching(/^ws1-/),
+  );
 });
 
 test.each(["generation", "observation", "outcome"] as const)(
-  "a newer %s from list refresh retires the old request failure",
+  "a newer %s retires stale failure text but cannot settle the original mutation identity",
   async (change) => {
     devices = [{ ...device, status: "active" }];
     const row = localCodespace(deviceId, "66666666-6666-4666-8666-666666666666");
@@ -621,10 +687,9 @@ test.each(["generation", "observation", "outcome"] as const)(
       connection: { state: "connected" },
       repositories: [],
       codespaces: [row],
-      limits: { codespaces: { held: 1, max_per_user: null } },
     };
     jest.mocked(apiClient.getGitHubCodespaces).mockResolvedValue(fixture as never);
-    jest
+    const stop = jest
       .spyOn(apiClient, "stopGitHubCodespace")
       .mockRejectedValue({ code: "CODESPACE_LOCAL_RUNTIME_ERROR" });
     await show({ openSettings: false });
@@ -651,7 +716,20 @@ test.each(["generation", "observation", "outcome"] as const)(
       .mockResolvedValue({ ...fixture, codespaces: [next] } as never);
     fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
     await waitFor(() => expect(within(card).queryByRole("alert")).toBeNull());
-    expect(within(card).queryByRole("button", { name: "Check state again" })).toBeNull();
+    const requestId = stop.mock.calls[0][1]!;
+    const collect = jest
+      .spyOn(apiClient, "getLocalControllerOperation")
+      .mockResolvedValue({ requestId, state: "completed", outcome: { ok: true, result: {} } });
+    expect(within(card).getByRole("button", { name: "Check state again" })).toBeEnabled();
+    expect(
+      within(card).getByRole("button", { name: change === "outcome" ? "Start" : "Stop" }),
+    ).toBeDisabled();
+    fireEvent.click(within(card).getByRole("button", { name: "Check state again" }));
+    await waitFor(() =>
+      expect(within(card).queryByRole("button", { name: "Check state again" })).toBeNull(),
+    );
+    expect(collect).toHaveBeenCalledWith(deviceId, requestId);
+    expect(stop).toHaveBeenCalledTimes(1);
   },
 );
 
@@ -663,7 +741,6 @@ test("failed delete generation refresh blocks confirmation until a read-only ret
     connection: { state: "connected" },
     repositories: [],
     codespaces: [row],
-    limits: { codespaces: { held: 1, max_per_user: null } },
   };
   jest.mocked(apiClient.getGitHubCodespaces).mockResolvedValue(fixture as never);
   const remove = jest.spyOn(apiClient, "deleteGitHubCodespace").mockImplementationOnce(async () => {
@@ -690,7 +767,11 @@ test("failed delete generation refresh blocks confirmation until a read-only ret
   remove.mockResolvedValueOnce({ ...row, generation: row.generation + 1, state: "deleted" });
   fireEvent.click(within(dialog).getByRole("button", { name: "Delete" }));
   await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
-  expect(remove).toHaveBeenLastCalledWith(row.codespace_id, row.generation + 1);
+  expect(remove).toHaveBeenLastCalledWith(
+    row.codespace_id,
+    row.generation + 1,
+    expect.stringMatching(/^ws1-/),
+  );
 });
 
 test("a failed state check renders one concrete error and retry while keeping deletion available", async () => {
@@ -704,10 +785,10 @@ test("a failed state check renders one concrete error and retry while keeping de
     connection: { state: "connected" },
     repositories: [],
     codespaces: [row],
-    limits: { codespaces: { held: 1, max_per_user: null } },
   } as never);
+  const stop = jest.spyOn(apiClient, "stopGitHubCodespace");
   jest
-    .spyOn(apiClient, "stopGitHubCodespace")
+    .spyOn(apiClient, "refreshGitHubCodespaces")
     .mockRejectedValue({ code: "CODESPACE_LOCAL_RUNTIME_ERROR" });
   await show({ openSettings: false });
   const card = await screen.findByTestId(`github-codespace-${row.codespace_id}`);
@@ -723,6 +804,7 @@ test("a failed state check renders one concrete error and retry while keeping de
   expect(card).not.toHaveTextContent("Check the repository and the branch");
   expect(within(card).getAllByRole("button", { name: "Check state again" })).toHaveLength(1);
   expect(within(card).getByRole("button", { name: "Delete" })).toBeEnabled();
+  expect(stop).not.toHaveBeenCalled();
 });
 
 test("incomplete preparation blocks Start while permitting confirmed deletion of the stopped codespace", async () => {
@@ -736,7 +818,6 @@ test("incomplete preparation blocks Start while permitting confirmed deletion of
     connection: { state: "connected" },
     repositories: [],
     codespaces: [row],
-    limits: { codespaces: { held: 1, max_per_user: null } },
   } as never);
   const start = jest.spyOn(apiClient, "startGitHubCodespace").mockResolvedValue(row);
   const remove = jest
@@ -757,7 +838,11 @@ test("incomplete preparation blocks Start while permitting confirmed deletion of
   expect(remove).not.toHaveBeenCalled();
   fireEvent.click(within(dialog).getByRole("button", { name: "Delete" }));
   await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
-  expect(remove).toHaveBeenCalledWith(row.codespace_id, row.generation);
+  expect(remove).toHaveBeenCalledWith(
+    row.codespace_id,
+    row.generation,
+    expect.stringMatching(/^ws1-/),
+  );
 });
 
 test.each(["running", "stopped"] as const)(
@@ -774,7 +859,6 @@ test.each(["running", "stopped"] as const)(
       connection: { state: "connected" },
       repositories: [],
       codespaces: [row],
-      limits: { codespaces: { held: 1, max_per_user: null } },
     };
     jest.mocked(apiClient.getGitHubCodespaces).mockResolvedValue(fixture as never);
     const start = jest.spyOn(apiClient, "startGitHubCodespace").mockResolvedValue(row);
@@ -809,7 +893,6 @@ test("create requires an explicit repository ref and pending creation is not ann
       { repository_id: row.repository_id, name: row.repository, provider: "local-sandboxes" },
     ],
     codespaces: [],
-    limits: { codespaces: { held: 0, max_per_user: null } },
   };
   jest.mocked(apiClient.getGitHubCodespaces).mockResolvedValue(fixture as never);
   const create = jest.spyOn(apiClient, "createGitHubCodespace").mockResolvedValue(row);
@@ -822,7 +905,11 @@ test("create requires an explicit repository ref and pending creation is not ann
   fireEvent.change(ref, { target: { value: "master" } });
   fireEvent.click(submit);
   await waitFor(() =>
-    expect(create).toHaveBeenCalledWith({ repository_id: row.repository_id, ref: "master" }),
+    expect(create).toHaveBeenCalledWith({
+      repository_id: row.repository_id,
+      ref: "master",
+      request_id: expect.stringMatching(/^ws1-/),
+    }),
   );
   await waitFor(() => expect(submit).toBeEnabled());
   expect(success).not.toHaveBeenCalled();
@@ -900,7 +987,7 @@ test("an earlier enrollment response cannot expose its pairing token after accou
   expect(screen.queryByLabelText("One-time pairing token")).toBeNull();
 });
 
-function editableDevice(): LocalDeviceView {
+function editableDevice(): AvailableDevice {
   const settings: LocalDeviceSettingsValue = {
     label: device.label,
     enabled: true,
@@ -909,27 +996,33 @@ function editableDevice(): LocalDeviceView {
     memoryBytes: 2 * 1024 ** 3,
     storageBytes: 8 * 1024 ** 3,
     dockerBytes: 2 * 1024 ** 3,
-    repositories: device.policy.repositories.map((repository) => ({ ...repository })),
+    repositories: device.owner.local.policy.repositories.map((repository) => ({ ...repository })),
     gitAuthor: null,
     agentRepositoryManagement: null,
   };
   return {
     ...device,
     status: "active",
-    control: {
-      optedIn: true,
-      revision: 3,
-      appliedRevision: 3,
-      status: "applied",
-      settings,
-      ceiling: {
-        cpuCores: 4,
-        memoryBytes: 8 * 1024 ** 3,
-        storageBytes: 32 * 1024 ** 3,
-        dockerBytes: 8 * 1024 ** 3,
-        maxLeaseMs: MAX_LOCAL_WORK_LEASE_MS,
+    owner: {
+      ...device.owner,
+      local: {
+        ...device.owner.local,
+        control: {
+          optedIn: true,
+          revision: 3,
+          appliedRevision: 3,
+          status: "applied",
+          settings,
+          ceiling: {
+            cpuCores: 4,
+            memoryBytes: 8 * 1024 ** 3,
+            storageBytes: 32 * 1024 ** 3,
+            dockerBytes: 8 * 1024 ** 3,
+            maxLeaseMs: MAX_LOCAL_WORK_LEASE_MS,
+          },
+          error: null,
+        },
       },
-      error: null,
     },
   };
 }
@@ -962,7 +1055,9 @@ test("agent consent sends only the verified owner and rights and stays pending u
   expect(screen.queryByText("Operation and network limits")).toBeNull();
   expect(screen.getByLabelText("Allow agents to work with local codespaces")).toBeChecked();
   fireEvent.click(screen.getByRole("button", { name: "Request settings change" }));
-  await screen.findByText("Requested revision 4; applied revision 3. Waiting for the computer.");
+  await screen.findByText(
+    "Local revision 4 is not confirmed as applied; last confirmed applied revision 3. Check the original settings result.",
+  );
   const sent = (
     requests.find((entry) => entry.method === "put")!.body as { settings: LocalDeviceSettingsValue }
   ).settings;
@@ -973,17 +1068,23 @@ test("agent consent sends only the verified owner and rights and stays pending u
     allowNewPrivate: false,
     allowPush: true,
   });
-  expect(sent.repositories).toEqual(editableDevice().control!.settings.repositories);
+  expect(sent.repositories).toEqual(editableDevice().owner.local.control!.settings.repositories);
   expect(
     screen.getByText("Applied permission: agent repository additions are disabled."),
   ).toBeInTheDocument();
   devices = [
     {
       ...devices[0],
-      control: {
-        ...devices[0].control!,
-        status: "rejected",
-        error: { code: "LOCAL_POLICY_LIMIT", message: "Local consent rejected" },
+      owner: {
+        ...devices[0].owner,
+        local: {
+          ...devices[0].owner.local,
+          control: {
+            ...devices[0].owner.local.control!,
+            status: "rejected",
+            error: { code: "LOCAL_POLICY_LIMIT", message: "Local consent rejected" },
+          },
+        },
       },
     },
   ];
@@ -995,12 +1096,18 @@ test("agent consent sends only the verified owner and rights and stays pending u
   devices = [
     {
       ...devices[0],
-      control: {
-        ...devices[0].control!,
-        status: "applied",
-        appliedRevision: 4,
-        appliedAgentRepositoryManagement: sent.agentRepositoryManagement,
-        error: null,
+      owner: {
+        ...devices[0].owner,
+        local: {
+          ...devices[0].owner.local,
+          control: {
+            ...devices[0].owner.local.control!,
+            status: "applied",
+            appliedRevision: 4,
+            appliedAgentRepositoryManagement: sent.agentRepositoryManagement,
+            error: null,
+          },
+        },
       },
     },
   ];
@@ -1030,7 +1137,9 @@ test.each([
     if (!existing) fireEvent.click(screen.getByLabelText("Add existing private repositories"));
     if (created) fireEvent.click(screen.getByLabelText("Create and add new private repositories"));
     fireEvent.click(screen.getByRole("button", { name: "Request settings change" }));
-    await screen.findByText("Requested revision 4; applied revision 3. Waiting for the computer.");
+    await screen.findByText(
+      "Local revision 4 is not confirmed as applied; last confirmed applied revision 3. Check the original settings result.",
+    );
     const sent = (
       requests.find((entry) => entry.method === "put")!.body as {
         settings: LocalDeviceSettingsValue;
@@ -1043,18 +1152,24 @@ test.each([
       allowNewPrivate: created,
       allowPush: false,
     });
-    expect(sent.repositories).toEqual(device.policy.repositories);
+    expect(sent.repositories).toEqual(device.owner.local.policy.repositories);
     expect(
       screen.getByText("Applied permission: agent repository additions are disabled."),
     ).toBeInTheDocument();
     devices = [
       {
         ...devices[0],
-        control: {
-          ...devices[0].control!,
-          status: "applied",
-          appliedRevision: 4,
-          appliedAgentRepositoryManagement: sent.agentRepositoryManagement,
+        owner: {
+          ...devices[0].owner,
+          local: {
+            ...devices[0].owner.local,
+            control: {
+              ...devices[0].owner.local.control!,
+              status: "applied",
+              appliedRevision: 4,
+              appliedAgentRepositoryManagement: sent.agentRepositoryManagement,
+            },
+          },
         },
       },
     ];
@@ -1082,18 +1197,20 @@ test("revoking agent additions preserves existing grants and effective consent u
     allowNewPrivate: false,
     allowPush: true,
   };
-  current.control!.settings.agentRepositoryManagement = consent;
-  current.control!.appliedAgentRepositoryManagement = consent;
+  current.owner.local.control!.settings.agentRepositoryManagement = consent;
+  current.owner.local.control!.appliedAgentRepositoryManagement = consent;
   devices = [current];
   await show();
   fireEvent.click(await screen.findByLabelText("Allow agents to add repositories"));
   fireEvent.click(screen.getByRole("button", { name: "Request settings change" }));
-  await screen.findByText("Requested revision 4; applied revision 3. Waiting for the computer.");
+  await screen.findByText(
+    "Local revision 4 is not confirmed as applied; last confirmed applied revision 3. Check the original settings result.",
+  );
   const sent = (
     requests.find((entry) => entry.method === "put")!.body as { settings: LocalDeviceSettingsValue }
   ).settings;
   expect(sent.agentRepositoryManagement).toBeNull();
-  expect(sent.repositories).toEqual(current.control!.settings.repositories);
+  expect(sent.repositories).toEqual(current.owner.local.control!.settings.repositories);
   expect(
     screen.getByText(
       "Applied permission: verified-owner; existing private allowed; new private not allowed; push allowed.",
@@ -1102,11 +1219,17 @@ test("revoking agent additions preserves existing grants and effective consent u
   devices = [
     {
       ...devices[0],
-      control: {
-        ...devices[0].control!,
-        status: "applied",
-        appliedRevision: 4,
-        appliedAgentRepositoryManagement: null,
+      owner: {
+        ...devices[0].owner,
+        local: {
+          ...devices[0].owner.local,
+          control: {
+            ...devices[0].owner.local.control!,
+            status: "applied",
+            appliedRevision: 4,
+            appliedAgentRepositoryManagement: null,
+          },
+        },
       },
     },
   ];
@@ -1148,7 +1271,7 @@ test("changed GitHub identity cannot authorize an old consent draft and failed a
   await screen.findByText("Verified connected account: replacement");
   fireEvent.click(screen.getByRole("button", { name: "Request settings change" }));
   expect(requests.filter((entry) => entry.method === "put")).toHaveLength(0);
-  expect(screen.getByText("Requested owner: verified-owner")).toBeInTheDocument();
+  expect(screen.getByText("GitHub account in this draft: verified-owner")).toBeInTheDocument();
 });
 
 test("owner settings request carries revision, week, machine and repository rights but keeps actual grants until local acknowledgement", async () => {
@@ -1175,7 +1298,9 @@ test("owner settings request carries revision, week, machine and repository righ
   });
   fireEvent.click(screen.getByRole("button", { name: "Allow seven days" }));
   fireEvent.click(screen.getByRole("button", { name: "Request settings change" }));
-  await screen.findByText("Requested revision 4; applied revision 3. Waiting for the computer.");
+  await screen.findByText(
+    "Local revision 4 is not confirmed as applied; last confirmed applied revision 3. Check the original settings result.",
+  );
   expect(screen.getByText("Push: not allowed · Delete: not allowed")).toBeInTheDocument();
   const request = requests.find((entry) => entry.method === "put")!;
   expect(request.body).toMatchObject({
@@ -1195,8 +1320,17 @@ test("owner settings request carries revision, week, machine and repository righ
   devices = [
     {
       ...devices[0],
-      policy: { ...devices[0].policy, machine: { ...devices[0].policy.machine, cpuCores: 4 } },
-      control: { ...devices[0].control!, status: "applied", appliedRevision: 4 },
+      owner: {
+        ...devices[0].owner,
+        local: {
+          ...devices[0].owner.local,
+          policy: {
+            ...devices[0].owner.local.policy,
+            machine: { ...devices[0].owner.local.policy.machine, cpuCores: 4 },
+          },
+          control: { ...devices[0].owner.local.control!, status: "applied", appliedRevision: 4 },
+        },
+      },
     },
   ];
   fireEvent.click(screen.getByRole("button", { name: "Refresh computers" }));
@@ -1226,12 +1360,25 @@ test("a settings conflict and failed source refresh preserve the focused draft f
   failRead = false;
   refuse = false;
   devices = [
-    { ...devices[0], control: { ...devices[0].control!, revision: 5, status: "pending" } },
+    {
+      ...devices[0],
+      owner: {
+        ...devices[0].owner,
+        local: {
+          ...devices[0].owner.local,
+          control: { ...devices[0].owner.local.control!, revision: 5, status: "pending" },
+        },
+      },
+    },
   ];
   fireEvent.click(screen.getByRole("button", { name: "Retry" }));
-  await screen.findByText("Requested revision 5; applied revision 3. Waiting for the computer.");
+  await screen.findByText(
+    "Local revision 5 is not confirmed as applied; last confirmed applied revision 3. Check the original settings result.",
+  );
   fireEvent.click(screen.getByRole("button", { name: "Request settings change" }));
-  await screen.findByText("Requested revision 6; applied revision 3. Waiting for the computer.");
+  await screen.findByText(
+    "Local revision 6 is not confirmed as applied; last confirmed applied revision 3. Check the original settings result.",
+  );
   expect(
     requests
       .filter((request) => request.method === "put")
@@ -1253,12 +1400,16 @@ test("a newer device draft survives an earlier successful settings request", asy
   await waitFor(() => expect(requests.some((entry) => entry.method === "put")).toBe(true));
   fireEvent.change(input, { target: { value: "Newer unsaved name" } });
   await act(async () => release());
-  await screen.findByText("Requested revision 4; applied revision 3. Waiting for the computer.");
+  await screen.findByText(
+    "Local revision 4 is not confirmed as applied; last confirmed applied revision 3. Check the original settings result.",
+  );
   expect(input).toHaveValue("Newer unsaved name");
   expect(screen.getByRole("button", { name: "Request settings change" })).toBeEnabled();
   heldSettings = undefined;
   fireEvent.click(screen.getByRole("button", { name: "Request settings change" }));
-  await screen.findByText("Requested revision 5; applied revision 3. Waiting for the computer.");
+  await screen.findByText(
+    "Local revision 5 is not confirmed as applied; last confirmed applied revision 3. Check the original settings result.",
+  );
   expect(
     (
       requests.filter((entry) => entry.method === "put")[1].body as {
@@ -1281,13 +1432,17 @@ test("a successful trimmed settings value becomes clean while a newer independen
   await waitFor(() => expect(requests.some((entry) => entry.method === "put")).toBe(true));
   fireEvent.change(screen.getByLabelText("CPU cores"), { target: { value: "3" } });
   await act(async () => release());
-  await screen.findByText("Requested revision 4; applied revision 3. Waiting for the computer.");
+  await screen.findByText(
+    "Local revision 4 is not confirmed as applied; last confirmed applied revision 3. Check the original settings result.",
+  );
   expect(name).toHaveValue("Trimmed computer");
   expect(screen.getByLabelText("CPU cores")).toHaveValue(3);
   expect(screen.getByRole("button", { name: "Request settings change" })).toBeEnabled();
   heldSettings = undefined;
   fireEvent.click(screen.getByRole("button", { name: "Request settings change" }));
-  await screen.findByText("Requested revision 5; applied revision 3. Waiting for the computer.");
+  await screen.findByText(
+    "Local revision 5 is not confirmed as applied; last confirmed applied revision 3. Check the original settings result.",
+  );
   expect(screen.getByRole("button", { name: "Request settings change" })).toBeDisabled();
   const sent = requests
     .filter((entry) => entry.method === "put")
@@ -1318,8 +1473,8 @@ test("local ceiling and expired or longer-than-week work permission refuse a req
 
 test("a companion rejection discloses the reason and retains applied grants and the owner's independent draft", async () => {
   const next = editableDevice();
-  next.control = {
-    ...next.control!,
+  next.owner.local.control = {
+    ...next.owner.local.control!,
     status: "rejected",
     revision: 4,
     error: { code: "LOCAL_CONTROL_CAPACITY", message: "Disk resize refused" },
@@ -1341,4 +1496,222 @@ test("a companion rejection discloses the reason and retains applied grants and 
   expect(screen.getByLabelText("Computer name")).toBe(input);
   expect(input).toHaveValue("Still editing after refusal");
   expect(input).toHaveFocus();
+});
+
+test("an offline owner hides effective grants, disables changes and retains the existing draft for reconnect", async () => {
+  devices = [editableDevice()];
+  await show();
+  const input = await screen.findByLabelText("Computer name");
+  fireEvent.change(input, { target: { value: "Offline draft" } });
+  const unavailable: LocalDeviceView = { ...devices[0], owner: { state: "unavailable" } };
+  jest
+    .mocked(apiClient.getLocalDevices)
+    .mockResolvedValueOnce({ devices: [unavailable], pairings: [] });
+  fireEvent.click(screen.getByRole("button", { name: "Refresh computers" }));
+  await screen.findAllByText(
+    "The computer's local service is unavailable. Current settings and permissions cannot be confirmed. Unsaved changes stay on this page; reconnect the service and refresh before saving.",
+  );
+  expect(screen.queryByText("Push: not allowed · Delete: not allowed")).toBeNull();
+  expect(input).toHaveValue("Offline draft");
+  expect(screen.getByRole("button", { name: "Request settings change" })).toBeDisabled();
+  fireEvent.submit(screen.getByRole("form", { name: "Settings for Approved laptop" }));
+  expect(requests.filter((entry) => entry.method === "put")).toHaveLength(0);
+  fireEvent.click(screen.getByRole("button", { name: "Refresh computers" }));
+  await waitFor(() =>
+    expect(screen.getByRole("button", { name: "Request settings change" })).toBeEnabled(),
+  );
+  expect(input).toHaveValue("Offline draft");
+});
+
+test("a lost settings reply collects the caller's original identity without a second save", async () => {
+  devices = [editableDevice()];
+  await show();
+  const input = await screen.findByLabelText("Computer name");
+  fireEvent.change(input, { target: { value: "Submitted change" } });
+  const write = jest
+    .mocked(apiClient.updateLocalDeviceSettings)
+    .mockRejectedValueOnce(new Error("Reply lost"));
+  fireEvent.click(screen.getByRole("button", { name: "Request settings change" }));
+  await screen.findByText(
+    "The result is not confirmed. Check the original request before making another change.",
+  );
+  expect(screen.getByRole("button", { name: "Request settings change" })).toBeDisabled();
+  const requestId = write.mock.calls[0][4];
+  const accepted = editableDevice();
+  accepted.owner.local.control.settings.label = "Submitted change";
+  devices = [accepted];
+  const outcome = { ok: true, result: accepted } as const;
+  const collect = jest.mocked(apiClient.getLocalDeviceSettingsOperation).mockResolvedValueOnce({
+    state: "completed",
+    requestId,
+    outcome,
+    result: accepted,
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Check settings result" }));
+  await waitFor(() =>
+    expect(screen.queryByRole("button", { name: "Check settings result" })).toBeNull(),
+  );
+  expect(collect).toHaveBeenCalledWith(deviceId, requestId);
+  expect(write).toHaveBeenCalledTimes(1);
+  expect(input).toHaveValue("Submitted change");
+});
+
+test("a live pending owner request restores recovery after reload and confirmed application clears it", async () => {
+  const pending = editableDevice();
+  pending.owner.local.control.status = "pending";
+  pending.owner.local.control.revision = 4;
+  pending.owner.local.control.pendingRequestId = "ws1-99999999-9999-4999-8999-999999999999";
+  devices = [pending];
+  await show();
+  expect(await screen.findByRole("button", { name: "Check settings result" })).toBeEnabled();
+  const applied = editableDevice();
+  applied.owner.local.control.revision = 4;
+  applied.owner.local.control.appliedRevision = 4;
+  devices = [applied];
+  fireEvent.click(screen.getByRole("button", { name: "Refresh computers" }));
+  await screen.findByText("Applied revision 4.");
+  await waitFor(() =>
+    expect(screen.queryByRole("button", { name: "Check settings result" })).toBeNull(),
+  );
+  expect(requests.filter((entry) => entry.method === "put")).toHaveLength(0);
+});
+
+test("Local Stop sends the displayed generation through the real HTTP client contract", async () => {
+  devices = [editableDevice()];
+  const row = localCodespace(deviceId, "88888888-8888-4888-8888-888888888888");
+  const view = {
+    readiness: { state: "ready" },
+    connection: { state: "connected" },
+    repositories: [],
+    codespaces: [row],
+  };
+  jest.mocked(apiClient.getGitHubCodespaces).mockResolvedValue(view as never);
+  const adapter = axios.defaults.adapter as import("axios").AxiosAdapter;
+  axios.defaults.adapter = async (config) => {
+    if (!config.url?.endsWith("/stop")) return adapter(config);
+    const body = JSON.parse(String(config.data));
+    requests.push({ method: config.method!, url: config.url, body });
+    if (body.expected_generation !== row.generation || "generation" in body)
+      throw new Error("Caller observed generation was lost");
+    const stopped: CodespaceSummaryView = {
+      ...row,
+      state: "stopped",
+      desired_state: "stopped",
+      observed_state: "stopped",
+      generation: row.generation + 1,
+    };
+    jest.mocked(apiClient.getGitHubCodespaces).mockResolvedValue({
+      ...view,
+      codespaces: [stopped],
+    } as never);
+    return {
+      config,
+      status: 200,
+      statusText: "OK",
+      headers: {},
+      data: {
+        success: true,
+        data: {
+          codespace: stopped,
+        },
+      },
+    };
+  };
+  const client = new MoiraApiClient();
+  jest
+    .spyOn(apiClient, "stopGitHubCodespace")
+    .mockImplementation(client.stopGitHubCodespace.bind(client));
+  await show({ openSettings: false });
+  const card = await screen.findByTestId(`github-codespace-${row.codespace_id}`);
+  fireEvent.click(within(card).getByRole("button", { name: "Stop" }));
+  await within(card).findByText("Stopped (data kept)");
+  expect(requests.find((request) => request.url.endsWith("/stop"))?.body).toEqual({
+    request_id: expect.stringMatching(/^ws1-/),
+    expected_generation: row.generation,
+  });
+});
+
+test("reload collects all owner journal lifecycle identities without creating new mutations", async () => {
+  devices = [editableDevice()];
+  const requestIds = [
+    "ws1-11111111-1111-4111-8111-111111111111",
+    "ws1-22222222-2222-4222-8222-222222222222",
+  ];
+  const row = {
+    ...localCodespace(deviceId, "77777777-7777-4777-8777-777777777777"),
+    pending_request_ids: requestIds,
+  };
+  const view = {
+    readiness: { state: "ready" },
+    connection: { state: "connected" },
+    repositories: [],
+    codespaces: [row],
+  };
+  jest.mocked(apiClient.getGitHubCodespaces).mockResolvedValue(view as never);
+  const stop = jest.spyOn(apiClient, "stopGitHubCodespace");
+  const start = jest.spyOn(apiClient, "startGitHubCodespace");
+  const collect = jest
+    .spyOn(apiClient, "getLocalControllerOperation")
+    .mockImplementation(async (_device, requestId) => ({
+      requestId,
+      state: "completed",
+      outcome: { ok: true, result: {} },
+    }));
+  jest.spyOn(apiClient, "refreshGitHubCodespaces").mockResolvedValue({
+    ...view,
+    codespaces: [
+      {
+        ...row,
+        pending_request_ids: [],
+        state: "stopped",
+        desired_state: "stopped",
+        observed_state: "stopped",
+      },
+    ],
+  } as never);
+  await show({ openSettings: false });
+  const card = await screen.findByTestId(`github-codespace-${row.codespace_id}`);
+  expect(within(card).getByRole("button", { name: "Stop" })).toBeDisabled();
+  fireEvent.click(within(card).getByRole("button", { name: "Check state again" }));
+  await within(card).findByText("Stopped (data kept)");
+  expect(collect.mock.calls).toEqual(requestIds.map((requestId) => [deviceId, requestId]));
+  expect(stop).not.toHaveBeenCalled();
+  expect(start).not.toHaveBeenCalled();
+});
+
+test("an uncertain stop collects the original controller operation without submitting stop again", async () => {
+  devices = [editableDevice()];
+  const row = localCodespace(deviceId, "66666666-6666-4666-8666-666666666666");
+  const view = {
+    readiness: { state: "ready" },
+    connection: { state: "connected" },
+    repositories: [],
+    codespaces: [row],
+  };
+  jest.mocked(apiClient.getGitHubCodespaces).mockResolvedValue(view as never);
+  const stop = jest
+    .spyOn(apiClient, "stopGitHubCodespace")
+    .mockRejectedValueOnce(new Error("Reply lost"));
+  const collect = jest
+    .spyOn(apiClient, "getLocalControllerOperation")
+    .mockImplementation(async (_device, requestId) => ({
+      requestId,
+      state: "completed",
+      outcome: { ok: true, result: {} },
+    }));
+  jest.spyOn(apiClient, "refreshGitHubCodespaces").mockResolvedValue({
+    ...view,
+    codespaces: [{ ...row, state: "stopped", desired_state: "stopped", observed_state: "stopped" }],
+  } as never);
+  await show({ openSettings: false });
+  const card = await screen.findByTestId(`github-codespace-${row.codespace_id}`);
+  fireEvent.click(within(card).getByRole("button", { name: "Stop" }));
+  await within(card).findByRole("alert");
+  const requestId = stop.mock.calls[0][1]!;
+  expect(stop.mock.calls[0][2]).toBe(row.generation);
+  expect(within(card).getByRole("button", { name: "Stop" })).toBeDisabled();
+  fireEvent.click(within(card).getByRole("button", { name: "Check state again" }));
+  await within(card).findByText("Stopped (data kept)");
+  expect(collect).toHaveBeenCalledWith(deviceId, requestId);
+  expect(stop).toHaveBeenCalledTimes(1);
 });

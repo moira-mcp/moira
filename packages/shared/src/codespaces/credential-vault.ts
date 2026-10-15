@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import type { CodespaceCredentialEnvelope, CodespaceCredentialPayload } from "./types.js";
+import type { ScopedCredentialPayload } from "./scoped-credential-types.js";
 
 const ALGORITHM = "aes-256-gcm";
 const CURRENT_ENVELOPE_VERSION = 2 as const;
@@ -37,6 +38,16 @@ export class CodespaceCredentialVault {
     generation: number,
     payload: CodespaceCredentialPayload,
   ): CodespaceCredentialEnvelope {
+    return this.encryptPayload(userId, provider, connectionId, generation, payload);
+  }
+
+  private encryptPayload(
+    userId: string,
+    provider: string,
+    connectionId: string,
+    generation: number,
+    payload: CodespaceCredentialPayload | ScopedCredentialPayload,
+  ): CodespaceCredentialEnvelope {
     const iv = crypto.randomBytes(12);
     const cipher = crypto.createCipheriv(ALGORITHM, this.key, iv);
     cipher.setAAD(authenticatedContext(CURRENT_ENVELOPE_VERSION, userId, provider, connectionId));
@@ -61,6 +72,58 @@ export class CodespaceCredentialVault {
     connectionId: string,
     envelope: CodespaceCredentialEnvelope,
   ): CodespaceCredentialPayload {
+    const payload = this.decryptPayload(
+      userId,
+      provider,
+      connectionId,
+      envelope,
+    ) as Partial<CodespaceCredentialPayload>;
+    if (
+      typeof payload.accessToken !== "string" ||
+      typeof payload.refreshToken !== "string" ||
+      !Number.isSafeInteger(payload.accessTokenExpiresAt) ||
+      !Number.isSafeInteger(payload.refreshTokenExpiresAt)
+    )
+      throw new Error("Codespace credential decryption failed");
+    return payload as CodespaceCredentialPayload;
+  }
+
+  encryptScoped(
+    userId: string,
+    provider: string,
+    credentialId: string,
+    generation: number,
+    payload: ScopedCredentialPayload,
+  ): CodespaceCredentialEnvelope {
+    return this.encryptPayload(userId, provider, `scoped:${credentialId}`, generation, payload);
+  }
+
+  decryptScoped(
+    userId: string,
+    provider: string,
+    credentialId: string,
+    envelope: CodespaceCredentialEnvelope,
+  ): ScopedCredentialPayload {
+    const payload = this.decryptPayload(
+      userId,
+      provider,
+      `scoped:${credentialId}`,
+      envelope,
+    ) as Partial<ScopedCredentialPayload>;
+    if (
+      (payload.token !== null && typeof payload.token !== "string") ||
+      (payload.expiresAt !== null && !Number.isSafeInteger(payload.expiresAt))
+    )
+      throw new Error("Scoped credential decryption failed");
+    return payload as ScopedCredentialPayload;
+  }
+
+  private decryptPayload(
+    userId: string,
+    provider: string,
+    connectionId: string,
+    envelope: CodespaceCredentialEnvelope,
+  ): unknown {
     if (
       ![1, CURRENT_ENVELOPE_VERSION].includes(envelope.envelopeVersion) ||
       envelope.keyVersion !== this.keyVersion
@@ -81,16 +144,7 @@ export class CodespaceCredentialVault {
         decipher.update(Buffer.from(envelope.ciphertext, "base64url")),
         decipher.final(),
       ]).toString("utf8");
-      const payload = JSON.parse(plaintext) as Partial<CodespaceCredentialPayload>;
-      if (
-        typeof payload.accessToken !== "string" ||
-        typeof payload.refreshToken !== "string" ||
-        !Number.isSafeInteger(payload.accessTokenExpiresAt) ||
-        !Number.isSafeInteger(payload.refreshTokenExpiresAt)
-      ) {
-        throw new Error("Invalid codespace credential payload");
-      }
-      return payload as CodespaceCredentialPayload;
+      return JSON.parse(plaintext) as unknown;
     } catch {
       throw new Error("Codespace credential decryption failed");
     }

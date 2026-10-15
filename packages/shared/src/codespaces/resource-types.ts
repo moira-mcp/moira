@@ -1,5 +1,6 @@
-export const CODESPACE_PROVIDER_CONTRACT_VERSION = 6 as const;
 /** Idle timeout bounds and default, in minutes: GitHub's own idle-timeout range. */
+import type { GitHubProviderFailure, providerReplySchema } from "./local-controller-protocol.js";
+import type { z } from "zod";
 export const CODESPACE_IDLE_TIMEOUT_MINUTES = { minimum: 5, maximum: 240, default: 30 } as const;
 
 export interface CodespaceRepositoryTarget {
@@ -76,13 +77,22 @@ export interface CodespaceProviderResource {
 }
 
 export type CodespaceCreateProviderResult =
-  | { outcome: "accepted"; resource: CodespaceProviderResource | null }
+  | {
+      outcome: "accepted";
+      resource: CodespaceProviderResource | null;
+      providerReply?: z.infer<typeof providerReplySchema>;
+    }
   /**
    * `reason` is the stable machine-readable code that routing reads. `detail` is what the provider
    * itself said about the refusal, already redacted and bounded by the adapter; it is absent when the
    * provider said nothing usable, and nothing may infer a cause from its absence.
    */
-  | { outcome: "rejected"; reason: string; detail?: string };
+  | {
+      outcome: "rejected";
+      reason: string;
+      detail?: string;
+      providerFailure?: GitHubProviderFailure;
+    };
 
 /**
  * What the provider can tell a user who must act outside Moira: the links that take them to the right
@@ -109,145 +119,29 @@ export type CodespaceGuidanceSituation =
   | "installation_required"
   | "authorization_repair_required"
   | "repository_not_approved"
-  | "ceiling_reached"
   | "ready";
 
-export interface CodespaceProviderAdapter {
-  readonly id: string;
-  readonly contractVersion: typeof CODESPACE_PROVIDER_CONTRACT_VERSION;
-  readonly capabilities: Readonly<{
-    disposable: boolean;
-    persistent: boolean;
-    exactLifecycle: boolean;
-    personalBillingOnly: boolean;
-    connector: string;
-  }>;
-  health(): Promise<{ state: CodespaceProviderHealthState; reason: string | null }>;
-  getIdentity(credential: string): Promise<{ id: string; login: string }>;
-  /**
-   * Machine types the provider offers for this repository at this ref. The ref is part of the question:
-   * a provider may offer different machines on different branches, and asking without one silently
-   * answers for the default branch.
-   */
-  listMachines(
-    credential: string,
-    repository: CodespaceRepositoryTarget,
-    ref: string,
-  ): Promise<CodespaceMachine[]>;
-  /**
-   * Read the provider's billing owner for a create request before any resource is created. A
-   * provider that cannot identify the payer must fail this read, not guess from repository owner.
-   */
-  preflightCreate(
-    credential: string,
-    repository: CodespaceRepositoryTarget,
-    ref: string,
-  ): Promise<{ billableOwnerId: string }>;
-  create(
-    credential: string,
-    input: {
-      repository: CodespaceRepositoryTarget;
-      ref: string;
-      machine: CodespaceMachine;
-      operationMarker: string;
-      idleTimeoutMinutes: number;
-      retentionMinutes: number;
-    },
-  ): Promise<CodespaceCreateProviderResult>;
-  listOwned(credential: string): Promise<CodespaceProviderResource[]>;
-  /** Exact reserved creation identity; absence means creation has settled without a resource. */
-  inspectCreation?(
-    credential: string,
-    input: { resourceId: string; operationMarker: string; repositoryId: string },
-  ): Promise<{ outcome: "found"; resource: CodespaceProviderResource } | { outcome: "absent" }>;
-  getExact(credential: string, resourceName: string): Promise<CodespaceProviderResource | null>;
-  startExact(credential: string, resourceName: string): Promise<"accepted" | "absent">;
-  stopExact(credential: string, resourceName: string): Promise<"accepted" | "absent">;
-  deleteExact(credential: string, resourceName: string): Promise<"accepted" | "absent">;
-  preflightDelete?(
-    credential: string,
-    input: { resourceId: string; ownerConfirmed: boolean },
-  ): Promise<void>;
-  probeConnector(credential: string, resourceName: string): Promise<void>;
-  /** The provider's own links and sentences for a user who must act outside Moira. */
-  guidance(): CodespaceProviderGuidance;
+export interface GitHubProviderCreateInput {
+  repository: CodespaceRepositoryTarget;
+  ref: string;
+  machine: CodespaceMachine;
+  operationMarker: string;
+  idleTimeoutMinutes: number;
+  retentionMinutes: number;
+  devcontainerPath?: string;
 }
 
 export interface CodespaceResourcePolicy {
   enabled: boolean;
-  maxCpuCores: number;
-  maxMemoryBytes: number;
-  maxStorageBytes: number;
-  maxActivePerUser: number;
-  maxActiveGlobal: number;
-  createThrottleMs: number;
-  /** How long an operation may wait for a stopped codespace it started to become usable. */
-  startWaitMs: number;
-  persistentRetentionMs?: number;
-  createDeadlineMs: number;
-  cleanupDeadlineMs: number;
-  claimLeaseMs: number;
-  reconcileIntervalMs: number;
-  /** Expiry of separately published native attachment links, not workspace results. */
-  transferTtlMs?: number;
+  persistentRetentionMs: number;
 }
 
-export interface CodespaceResourceRecord {
-  id: string;
-  userId: string;
-  connectionId: string;
-  authorizationGeneration: number;
-  provider: string;
-  repositoryId: string;
-  repositoryFullName: string;
-  requestedRef: string;
-  /** The ref the provider last reported checked out; `null` until observed or when detached. */
-  observedRef: string | null;
-  operationMarker: string;
-  providerResourceName: string | null;
-  externalOwnerId: string | null;
-  billableOwnerId: string | null;
-  machine: CodespaceMachine;
-  state: CodespaceResourceState;
-  retentionPolicy: "legacy_disposable" | "persistent";
-  desiredState: "running" | "stopped" | "deleted";
-  observedState:
-    | "unknown"
-    | "created"
-    | "provisioning"
-    | "running"
-    | "stopped"
-    | "deleting"
-    | "absent"
-    | "failed";
-  generation: number;
-  createDeadlineAt: number;
-  /**
-   * When a legacy disposable codespace expires, stamped when it was created. A persistent codespace
-   * never expires; the column holds its creation time and is not read for it.
-   */
-  remoteExpiresAt: number;
-  cleanupDeadlineAt: number | null;
-  claimId: string | null;
-  /**
-   * While `claimId` is null, the earliest time the reconciler may take the record again: a record
-   * whose reconciliation did not converge is deferred rather than retried on every tick.
-   */
-  claimExpiresAt: number | null;
-  /** Consecutive reconciler passes that left the record unconverged; drives the retry backoff. */
-  reconcileFailures: number;
-  /** Last work Moira did in the codespace; `null` until any. */
-  lastActivityAt: number | null;
-  /** The provider's last start time as last observed, for display only; `null` until observed. */
-  providerLastUsedAt: number | null;
-  /** Last verified provider observation, independent of bookkeeping and retry timestamps. */
-  observedAt: number | null;
-  lastOutcome: string | null;
-  createdAt: number;
-  updatedAt: number;
-}
-
+export type CodespaceRetentionPolicy = "legacy_disposable" | "persistent";
+export type CodespaceDesiredState = "running" | "stopped" | "deleted";
+export type CodespaceObservedState =
+  "unknown" | "created" | "provisioning" | "running" | "stopped" | "deleting" | "absent" | "failed";
 export type CodespaceResourceErrorCode =
+  | "WORKSPACE_OUTCOME_UNCONFIRMED"
   | "CODESPACE_PROVIDER_DISABLED"
   | "CODESPACE_PROVIDER_UNAVAILABLE"
   | "CODESPACE_POLICY_LIMIT"
@@ -272,6 +166,7 @@ export function codespaceLifecycleErrorCode(
 ): CodespaceResourceErrorCode | null {
   const code = outcome?.startsWith("refused:") ? outcome.slice("refused:".length) : outcome;
   switch (code) {
+    case "WORKSPACE_OUTCOME_UNCONFIRMED":
     case "CODESPACE_PROVIDER_DISABLED":
     case "CODESPACE_PROVIDER_UNAVAILABLE":
     case "CODESPACE_POLICY_LIMIT":
@@ -299,63 +194,11 @@ export interface CodespaceTransportAvailability {
   health(): Promise<{ ok: boolean; reason: string | null }>;
 }
 
-export interface CodespaceNativeFileReference {
-  fileId: string;
-  downloadUrl: string;
-  fileName?: string;
-  mimeType?: string;
-  declaredSize?: number;
-}
-
-/** Each open verifies content before delivery and owns a separate bounded descriptor lifecycle. */
-export interface CodespaceVerifiedByteSource {
-  readonly size: number;
-  readonly sha256: string;
-  open(signal?: AbortSignal): Promise<CodespaceVerifiedByteStream>;
-}
-
-export interface CodespaceVerifiedByteStream extends AsyncIterable<Uint8Array> {
-  readonly settled: Promise<void>;
-  close(): Promise<void>;
-}
-
-export interface CodespaceTransferRecord {
-  id: string;
-  requestId?: string | null;
-  requestDigest?: string | null;
-  direction?: "guest_to_server" | "server_to_guest" | null;
-  resourceId?: string | null;
-  provider?: string | null;
-  resourceGeneration?: number | null;
-  authorizationGeneration?: number | null;
-  environmentIdentity?: string | null;
-  expectedSha256?: string | null;
-  uploadedBytes?: number;
-  userId: string;
-  purpose:
-    | "codespace_input"
-    | "codespace_download"
-    | "local_relay_input"
-    | "local_relay_output"
-    | "operation_input"
-    | "operation_result";
-  state: "reserved" | "ready" | "claimed" | "consumed";
-  fileName: string;
-  mimeType: string;
-  declaredSize: number;
-  observedSize: number | null;
-  sha256: string | null;
-  objectKey: string;
-  ownerPid: number;
-  ownerStartTime: string | null;
-  claimId: string | null;
-  claimExpiresAt: number | null;
-  expiresAt: number;
-  createdAt: number;
-  updatedAt: number;
-}
-
 export class CodespaceResourceError extends Error {
+  requestId?: string;
+  deviceId?: string;
+  resourceId?: string;
+  providerFailure?: GitHubProviderFailure;
   /**
    * `message` stays the operator-facing sentence that reaches logs and audit. `detail` is the
    * optional agent-safe addition: the refusing code decides what a caller may be told about its

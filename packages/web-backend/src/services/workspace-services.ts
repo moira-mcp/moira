@@ -1,31 +1,26 @@
 import {
-  CodespaceResourceRepository,
+  LocalResourceRepository,
+  GitHubResourceRepository,
+  CODESPACE_PROVIDER_GITHUB,
   CodespaceResourceError,
   CODESPACE_PROVIDER_LOCAL,
   getBaseUrl,
   getSqliteInstance,
   getCodespaceResourcePolicy,
-  localPublicPolicySchema,
+  LocalDeviceService,
+  LocalDeviceRepository,
   getAccountAccessDenial,
   WorkspaceAuthRepository,
   type WorkspaceAgentBinding,
 } from "@mcp-moira/shared";
-import {
-  getCodespaceProviderServices,
-  getCodespaceConnectionService,
-  bootstrapLocalWorkspace,
-} from "./codespace-services.js";
-import { GitHubCodespacesConnector } from "./github-codespaces-connector.js";
 import { WorkspaceRouter } from "./workspace-router.js";
+import type { WorkspaceBinding } from "./workspace-router.js";
 import { WORKSPACE_ROUTER_SOCKET } from "./workspace-client.js";
 
 let router: WorkspaceRouter | undefined;
-const bootstrapping = new Map<string, Promise<void>>();
 
-function currentAuthority(userId: string, resourceId: string, requireRunning = true) {
+function requireAccount(userId: string) {
   const sqlite = getSqliteInstance();
-  const resources = new CodespaceResourceRepository(sqlite);
-  const resource = resources.getOwned(userId, resourceId);
   const account = sqlite
     .prepare("SELECT id userId,blocked,approvedAt,emailVerified FROM user WHERE id=?")
     .get(userId) as
@@ -40,52 +35,75 @@ function currentAuthority(userId: string, resourceId: string, requireRunning = t
         emailVerified: Boolean(account.emailVerified),
       },
       { requireEmailVerified: true },
-    ) ||
-    !resource ||
-    !resources.hasCurrentAuthorization(userId, resourceId) ||
-    (requireRunning && resource.desiredState !== "running") ||
-    ["deleted", "delete_pending", "rejected", "cleanup_pending", "stop_pending"].includes(
-      resource.state,
     )
+  )
+    throw new CodespaceResourceError(
+      "CODESPACE_AUTHORIZATION_REQUIRED",
+      "Account authority refused",
+    );
+}
+
+function currentAuthority(userId: string, resourceId: string) {
+  const sqlite = getSqliteInstance();
+  const resources = new LocalResourceRepository(sqlite);
+  const githubResources = new GitHubResourceRepository(sqlite),
+    github = githubResources.getOwned(userId, resourceId),
+    local = github ? null : resources.getOwned(userId, resourceId),
+    resource = github
+      ? { ...github, provider: CODESPACE_PROVIDER_GITHUB }
+      : local
+        ? { ...local, provider: CODESPACE_PROVIDER_LOCAL, generation: local.routeGeneration }
+        : null;
+  requireAccount(userId);
+  if (
+    !resource ||
+    (local?.retiredAt !== undefined && local.retiredAt !== null) ||
+    (resource.provider !== CODESPACE_PROVIDER_LOCAL &&
+      (!githubResources.hasCurrentAuthorization(userId, resourceId) ||
+        github?.retirement === "retired"))
   )
     throw new CodespaceResourceError(
       "CODESPACE_AUTHORIZATION_REQUIRED",
       "Workspace authority refused",
     );
-  const disabled = sqlite
-    .prepare("SELECT 1 FROM codespaceProviderControl WHERE disabled=1 AND scope IN ('global',?)")
-    .get(`provider:${resource.provider}`);
-  if (
-    disabled ||
-    (resource.provider !== CODESPACE_PROVIDER_LOCAL && !getCodespaceResourcePolicy().enabled)
-  )
+  if (resource.provider !== CODESPACE_PROVIDER_LOCAL && !getCodespaceResourcePolicy().enabled)
     throw new CodespaceResourceError("CODESPACE_PROVIDER_DISABLED", "Workspace provider disabled");
-  let expiresAt: number | null = null;
+  const expiresAt: number | null = null;
+  if (github) {
+    if (!github.deviceId)
+      throw new CodespaceResourceError(
+        "CODESPACE_AUTHORIZATION_REQUIRED",
+        "A controller must prove this workspace assignment",
+      );
+    const device = new LocalDeviceService(new LocalDeviceRepository(sqlite)).getDeviceIdentity(
+      userId,
+      github.deviceId,
+    );
+    if (
+      device.status !== "active" ||
+      device.deviceGeneration !== github.deviceGeneration ||
+      device.connectionId !== github.deviceConnectionId
+    )
+      throw new CodespaceResourceError(
+        "CODESPACE_AUTHORIZATION_REQUIRED",
+        "Assigned controller authority changed",
+      );
+  }
   if (resource.provider === CODESPACE_PROVIDER_LOCAL) {
     const device = sqlite
       .prepare(
-        `SELECT d.policy,b.repositoryId,b.profileId FROM codespaceLocalResourceBinding b
-      JOIN codespaceLocalDevice d ON d.id=b.deviceId AND d.userId=b.userId AND d.generation=b.deviceGeneration
-      WHERE b.resourceId=? AND b.userId=? AND d.status='active'`,
+        `SELECT b.repositoryId,b.profileId FROM codespaceLocalResourceBinding b
+      JOIN localResourceIdentity r ON r.id=b.resourceId AND r.userId=b.userId
+      JOIN codespaceLocalDevice d ON d.id=b.deviceId AND d.userId=b.userId AND d.generation=b.deviceGeneration AND d.connectionId=r.connectionId
+      JOIN codespaceConnection c ON c.id=r.connectionId AND c.userId=r.userId AND c.status='connected'
+      WHERE b.resourceId=? AND b.userId=? AND b.revokedAt IS NULL AND d.status='active' AND r.retiredAt IS NULL`,
       )
-      .get(resourceId, userId) as
-      { policy: string; repositoryId: string; profileId: string } | undefined;
+      .get(resourceId, userId) as { repositoryId: string; profileId: string } | undefined;
     if (!device)
       throw new CodespaceResourceError(
         "CODESPACE_AUTHORIZATION_REQUIRED",
         "Workspace device authority refused",
       );
-    const policy = localPublicPolicySchema.parse(JSON.parse(device.policy));
-    if (
-      !policy.enabled ||
-      policy.leaseUntil <= Date.now() ||
-      !policy.repositories.some((r) => r.id === device.repositoryId)
-    )
-      throw new CodespaceResourceError(
-        "CODESPACE_AUTHORIZATION_REQUIRED",
-        "Workspace device grant expired",
-      );
-    expiresAt = policy.leaseUntil;
   }
   return { resource, expiresAt };
 }
@@ -110,6 +128,7 @@ export function issueWorkspaceAgentCredential(
   return {
     version: 1 as const,
     origin: new URL(getBaseUrl()).origin,
+    publicOrigin: getBaseUrl(),
     resourceId,
     resourceGeneration: binding.resourceGeneration,
     authorizationGeneration: binding.authorizationGeneration,
@@ -129,6 +148,7 @@ function requireBinding(binding: WorkspaceAgentBinding, credentialExpiresAt: num
       "Workspace generation changed",
     );
   return {
+    kind: "workspace" as const,
     ...binding,
     expiresAt:
       credentialExpiresAt === null
@@ -139,10 +159,96 @@ function requireBinding(binding: WorkspaceAgentBinding, credentialExpiresAt: num
   };
 }
 
+/** Scoped Git credentials require the current enrolled life and connected owner. */
+export function authorizeWorkspaceAgentCredential(
+  credential: string,
+  resourceId: string,
+  resourceGeneration: number,
+) {
+  const record = new WorkspaceAuthRepository(getSqliteInstance()).authenticate(credential);
+  if (record.resourceId !== resourceId || record.resourceGeneration !== resourceGeneration)
+    throw new CodespaceResourceError(
+      "CODESPACE_GENERATION_CONFLICT",
+      "Workspace credential identity changed",
+    );
+  const binding = requireBinding(record, record.expiresAt);
+  if (!getWorkspaceRouter().isConnected(binding))
+    throw new CodespaceResourceError(
+      "CODESPACE_PROVIDER_UNAVAILABLE",
+      "Workspace owner unavailable",
+    );
+  return binding;
+}
+
+/** A public owner capability can route only to an already enrolled, currently authorized guest. */
+export function authorizeWorkspacePublication(resourceId: string): string {
+  const sqlite = getSqliteInstance();
+  const route = sqlite
+    .prepare(
+      "SELECT userId FROM localResourceIdentity WHERE id=@resourceId UNION ALL SELECT userId FROM githubResourceIdentity WHERE id=@resourceId",
+    )
+    .get({ resourceId }) as { userId: string } | undefined;
+  if (!route)
+    throw new CodespaceResourceError("CODESPACE_NOT_FOUND", "Publication route unavailable");
+  currentAuthority(route.userId, resourceId);
+  const record = new WorkspaceAuthRepository(sqlite).getOwned(route.userId, resourceId);
+  if (!record)
+    throw new CodespaceResourceError(
+      "CODESPACE_PROVIDER_UNAVAILABLE",
+      "Publication owner unavailable",
+    );
+  const binding = requireBinding(record, record.expiresAt);
+  if (!getWorkspaceRouter().isConnected(binding))
+    throw new CodespaceResourceError(
+      "CODESPACE_PROVIDER_UNAVAILABLE",
+      "Publication owner unavailable",
+    );
+  return route.userId;
+}
+
+function currentControllerAuthority(userId: string, deviceId: string): WorkspaceBinding {
+  requireAccount(userId);
+  const device = new LocalDeviceService(
+    new LocalDeviceRepository(getSqliteInstance()),
+  ).getDeviceIdentity(userId, deviceId);
+  if (device.status !== "active")
+    throw new CodespaceResourceError(
+      "CODESPACE_AUTHORIZATION_REQUIRED",
+      "Controller device authority refused",
+    );
+  return {
+    kind: "controller",
+    userId: device.userId,
+    resourceId: device.deviceId,
+    resourceGeneration: device.deviceGeneration,
+    authorizationGeneration: device.deviceGeneration,
+    connectionId: device.connectionId,
+    expiresAt: null,
+  };
+}
+
 export function getWorkspaceRouter(): WorkspaceRouter {
   return (router ??= new WorkspaceRouter({
     async credential(value) {
-      const record = new WorkspaceAuthRepository(getSqliteInstance()).authenticate(value);
+      let record;
+      try {
+        record = new WorkspaceAuthRepository(getSqliteInstance()).authenticate(value);
+      } catch {
+        const device = new LocalDeviceService(
+          new LocalDeviceRepository(getSqliteInstance()),
+        ).authenticateDevice(value);
+        const binding = currentControllerAuthority(device.userId, device.deviceId);
+        if (
+          binding.kind !== "controller" ||
+          binding.resourceGeneration !== device.deviceGeneration ||
+          binding.connectionId !== device.connectionId
+        )
+          throw new CodespaceResourceError(
+            "CODESPACE_AUTHORIZATION_REQUIRED",
+            "Controller device generation changed",
+          );
+        return binding;
+      }
       return requireBinding(
         {
           userId: record.userId,
@@ -154,88 +260,22 @@ export function getWorkspaceRouter(): WorkspaceRouter {
         record.expiresAt,
       );
     },
-    async request(userId, resourceId, signal) {
-      const { resource } = currentAuthority(userId, resourceId, false);
-      const lifecycle = getCodespaceProviderServices(resource.provider).resource;
-      if (!lifecycle)
+    async request(userId, resourceId, _signal, kind = "workspace") {
+      if (kind === "controller") return currentControllerAuthority(userId, resourceId);
+      currentAuthority(userId, resourceId);
+      const record = new WorkspaceAuthRepository(getSqliteInstance()).getOwned(userId, resourceId);
+      if (!record || (record.expiresAt !== null && record.expiresAt <= Date.now()))
         throw new CodespaceResourceError(
           "CODESPACE_PROVIDER_UNAVAILABLE",
-          "Workspace provider unavailable",
+          "Workspace owner has not enrolled a current service; no operation was dispatched",
         );
-      await lifecycle.ensureRunning(userId, resourceId);
-      const currentResource = currentAuthority(userId, resourceId).resource;
-      let record = new WorkspaceAuthRepository(getSqliteInstance()).getOwned(userId, resourceId);
-      if (
-        !record ||
-        record.resourceGeneration !== currentResource.generation ||
-        record.authorizationGeneration !== currentResource.authorizationGeneration ||
-        (record.expiresAt !== null && record.expiresAt <= Date.now()) ||
-        !getWorkspaceRouter().isConnected(record)
-      ) {
-        const key = `${userId}:${resourceId}`;
-        let pending = bootstrapping.get(key);
-        if (!pending) {
-          pending = (async () => {
-            const original = currentAuthority(userId, resourceId).resource;
-            if (original.provider === CODESPACE_PROVIDER_LOCAL) {
-              await bootstrapLocalWorkspace(userId, resourceId);
-            } else {
-              if (!original.providerResourceName)
-                throw new Error("Workspace provider identity unavailable");
-              const connector = new GitHubCodespacesConnector();
-              const access = await getCodespaceConnectionService().getAccessToken(userId);
-              const measured = await connector.probeWorkspace(
-                access,
-                original.providerResourceName,
-              );
-              const current = currentAuthority(userId, resourceId).resource;
-              if (
-                current.generation !== original.generation ||
-                current.authorizationGeneration !== original.authorizationGeneration
-              )
-                throw new Error("Workspace bootstrap authority changed");
-              const root = Buffer.from(measured.rootBase64, "base64").toString("utf8");
-              if (
-                !root.startsWith("/") ||
-                root.includes("\0") ||
-                Buffer.from(root).toString("base64") !== measured.rootBase64
-              )
-                throw new Error("Invalid workspace root observation");
-              const remote = issueWorkspaceAgentCredential(
-                userId,
-                resourceId,
-                measured.environmentIdentity,
-              );
-              await connector.bootstrapWorkspace(access, original.providerResourceName, {
-                version: 1,
-                repositoryFullName: original.repositoryFullName,
-                root,
-                remote,
-              });
-            }
-            const current = new WorkspaceAuthRepository(getSqliteInstance()).getOwned(
-              userId,
-              resourceId,
-            );
-            if (!current) throw new Error("Workspace bootstrap did not establish authority");
-            requireBinding(current);
-          })().finally(() => bootstrapping.delete(key));
-          bootstrapping.set(key, pending);
-        }
-        await pending;
-        record = new WorkspaceAuthRepository(getSqliteInstance()).getOwned(userId, resourceId);
-      }
-      if (!record || (record.expiresAt !== null && record.expiresAt <= Date.now()))
-        throw new Error("Workspace is not bootstrapped");
-      const binding = requireBinding({
-        userId,
-        resourceId,
-        resourceGeneration: record.resourceGeneration,
-        authorizationGeneration: record.authorizationGeneration,
-        environmentIdentity: record.environmentIdentity,
-      });
-      await getWorkspaceRouter().waitForConnection(binding, signal);
-      return requireBinding(binding);
+      const binding = requireBinding(record, record.expiresAt);
+      if (!getWorkspaceRouter().isConnected(binding))
+        throw new CodespaceResourceError(
+          "CODESPACE_PROVIDER_UNAVAILABLE",
+          "Workspace service is offline; no operation was dispatched",
+        );
+      return binding;
     },
   }));
 }

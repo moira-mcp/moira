@@ -35,7 +35,6 @@ import { ModeFeatureResolver, type FeatureResolver } from "../config/feature-res
 import { ExecutionRetentionService } from "./execution-retention-service.js";
 
 export { TokenManager, type WorkflowToken } from "./token-manager.js";
-export * from "./communication-attachment-grant-service.js";
 export {
   WorkflowService,
   type SaveWorkflowOptions,

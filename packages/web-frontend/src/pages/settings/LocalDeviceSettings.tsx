@@ -25,7 +25,11 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 
 function DevicePermissions({ device }: { device: LocalDeviceView }) {
   const { t, i18n } = useTranslation();
-  const policy = device.policy;
+  if (device.owner.state !== "available")
+    return <p role="status">{t("localDevices.ownerUnavailable")}</p>;
+  if (device.owner.local.state === "unconfigured")
+    return <p role="status">{t("localDevices.localUnconfigured")}</p>;
+  const policy = device.owner.local.policy;
   return (
     <div className="space-y-2 text-sm [overflow-wrap:anywhere]">
       <p>
@@ -76,7 +80,10 @@ export function LocalDeviceSettings({ active = true }: { active?: boolean }) {
   const reloadDevices = resource.refresh;
   useRefreshOnActivation(active, resource.refresh);
   const appliedVersions = resource.data?.devices
-    .map((device) => `${device.deviceId}:${device.control?.appliedRevision ?? 0}`)
+    .map(
+      (device) =>
+        `${device.deviceId}:${device.owner.state === "available" && device.owner.local.state === "configured" ? (device.owner.local.control?.appliedRevision ?? 0) : "unavailable"}`,
+    )
     .join("|");
   const previousAppliedVersions = useRef<string | undefined>(undefined);
   useEffect(() => {
@@ -163,6 +170,7 @@ export function LocalDeviceSettings({ active = true }: { active?: boolean }) {
     device: LocalDeviceView,
     settings: LocalDeviceSettingsValue,
     expectedRevision: number,
+    requestId: string,
   ) => {
     const owned = guard(false);
     const next = await apiClient.updateLocalDeviceSettings(
@@ -170,6 +178,7 @@ export function LocalDeviceSettings({ active = true }: { active?: boolean }) {
       device.deviceGeneration,
       expectedRevision,
       settings,
+      requestId,
     );
     if (!owned()) throw new Error("Retired local device operation");
     resource.update((value) => ({
@@ -180,6 +189,27 @@ export function LocalDeviceSettings({ active = true }: { active?: boolean }) {
     }));
     await resource.refresh();
     if (owned()) await reloadManagement({ silent: true });
+  };
+  const collectSettings = async (device: LocalDeviceView, requestId: string) => {
+    const owned = guard(false);
+    const receipt = await apiClient.getLocalDeviceSettingsOperation(device.deviceId, requestId);
+    if (!owned()) throw new Error("Retired local device operation");
+    if (
+      receipt.state === "absent" ||
+      (receipt.state === "completed" && receipt.outcome?.ok === false)
+    )
+      return false;
+    if (receipt.state !== "completed" || !receipt.result)
+      throw new Error("Settings outcome is not confirmed");
+    resource.update((value) => ({
+      ...value,
+      devices: value.devices.map((current) =>
+        current.deviceId === receipt.result!.deviceId ? receipt.result! : current,
+      ),
+    }));
+    await resource.refresh();
+    if (owned()) await reloadManagement({ silent: true });
+    return true;
   };
 
   return (
@@ -266,34 +296,42 @@ export function LocalDeviceSettings({ active = true }: { active?: boolean }) {
                   </div>
                   <p className="text-sm font-medium">{t("localDevices.editor.appliedGrants")}</p>
                   <DevicePermissions device={device} />
-                  <CodespaceManagement scope={{ provider: "local-sandboxes", computer: device }} />
-                  {device.status === "active" && (
-                    <Collapsible
-                      open={openSettings.has(device.deviceId)}
-                      onOpenChange={(open) =>
-                        setOpenSettings((previous) => {
-                          const next = new Set(previous);
-                          if (open) next.add(device.deviceId);
-                          else next.delete(device.deviceId);
-                          return next;
-                        })
-                      }
-                    >
-                      <CollapsibleTrigger asChild>
-                        <Button type="button" variant="outline" size="sm">
-                          {t("localDevices.codespaces.computerSettings")}
-                        </Button>
-                      </CollapsibleTrigger>
-                      <CollapsibleContent forceMount hidden={!openSettings.has(device.deviceId)}>
-                        <LocalDeviceEditor
-                          device={device}
-                          onSave={(settings, expectedRevision) =>
-                            saveSettings(device, settings, expectedRevision)
-                          }
-                        />
-                      </CollapsibleContent>
-                    </Collapsible>
-                  )}
+                  {device.owner.state === "unavailable" ||
+                  device.owner.local.state === "configured" ? (
+                    <CodespaceManagement
+                      scope={{ provider: "local-sandboxes", computer: device }}
+                    />
+                  ) : null}
+                  {device.status === "active" &&
+                    (device.owner.state === "unavailable" ||
+                      device.owner.local.state === "configured") && (
+                      <Collapsible
+                        open={openSettings.has(device.deviceId)}
+                        onOpenChange={(open) =>
+                          setOpenSettings((previous) => {
+                            const next = new Set(previous);
+                            if (open) next.add(device.deviceId);
+                            else next.delete(device.deviceId);
+                            return next;
+                          })
+                        }
+                      >
+                        <CollapsibleTrigger asChild>
+                          <Button type="button" variant="outline" size="sm">
+                            {t("localDevices.codespaces.computerSettings")}
+                          </Button>
+                        </CollapsibleTrigger>
+                        <CollapsibleContent forceMount hidden={!openSettings.has(device.deviceId)}>
+                          <LocalDeviceEditor
+                            device={device}
+                            onSave={(settings, expectedRevision, requestId) =>
+                              saveSettings(device, settings, expectedRevision, requestId)
+                            }
+                            onCollect={(requestId) => collectSettings(device, requestId)}
+                          />
+                        </CollapsibleContent>
+                      </Collapsible>
+                    )}
                   <p className="text-xs text-muted-foreground">
                     {t("localDevices.lastSeen", {
                       date:

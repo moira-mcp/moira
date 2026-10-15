@@ -1,6 +1,9 @@
 import { build } from "esbuild";
 import { mkdir, chmod, copyFile } from "node:fs/promises";
 import { packageWorkspaceService } from "./package-workspace-service.js";
+import { packageControllerDependencies } from "./package-controller-dependencies.js";
+import { buildWorkspaceService } from "./build-workspace-service.js";
+import { packageOwnerDependencies } from "./package-owner-dependencies.js";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
@@ -8,7 +11,7 @@ const execute = promisify(execFile);
 
 const output = "packages/local/dist";
 await mkdir(output, { recursive: true });
-for (const entry of ["cli", "guard", "runtime-api", "config"]) {
+for (const entry of ["cli", "guard", "runtime-api", "config", "github-provisioner"]) {
   await build({
     bundle: true,
     platform: "node",
@@ -21,9 +24,14 @@ for (const entry of ["cli", "guard", "runtime-api", "config"]) {
     banner: entry === "cli" ? { js: "#!/usr/bin/env node" } : undefined,
   });
 }
-await packageWorkspaceService({
+for (const architecture of ["x64", "arm64"])
+  await packageWorkspaceService({ architecture, output: `${output}/workspace-payload` });
+await packageControllerDependencies(`${output}/github-toolchain`);
+await buildWorkspaceService(`${output}/owner-runtime`);
+await packageOwnerDependencies({
+  directory: `${output}/owner-runtime`,
+  platform: process.platform,
   architecture: process.arch,
-  output: `${output}/workspace-payload`,
 });
 await mkdir(`${output}/workspace-payload/service`, { recursive: true });
 await copyFile(
@@ -32,6 +40,21 @@ await copyFile(
 );
 await chmod(`${output}/cli.js`, 0o755);
 if (process.platform === "darwin" || process.platform === "linux") {
+  await execute(
+    process.platform === "darwin" ? "/usr/bin/clang" : "cc",
+    [
+      "-std=c11",
+      "-O2",
+      "-Wall",
+      "-Wextra",
+      "-Werror",
+      "packages/local/src/process-group-helper.c",
+      "-o",
+      `${output}/process-group-helper`,
+    ],
+    { maxBuffer: 64 * 1024 },
+  );
+  await chmod(`${output}/process-group-helper`, 0o755);
   await execute(
     process.platform === "darwin" ? "/usr/bin/clang" : "cc",
     [

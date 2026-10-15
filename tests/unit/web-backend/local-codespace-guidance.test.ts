@@ -1,7 +1,6 @@
 import { describe, expect, it } from "@jest/globals";
-import type { CodespaceResourceRepository } from "@mcp-moira/shared";
+import type { LocalResourceRepository, LocalDeviceService } from "@mcp-moira/shared";
 import { LocalCodespaceProvider } from "../../../packages/web-backend/src/services/local-codespace-provider.js";
-import type { LocalCodespaceRelay } from "../../../packages/web-backend/src/services/local-codespace-relay.js";
 import { localCodespaceSettingsUrl } from "../../../packages/web-backend/src/services/local-codespace-services.js";
 
 describe("local codespace setup guidance", () => {
@@ -17,8 +16,8 @@ describe("local codespace setup guidance", () => {
   );
   it("explains instance enablement and local enrollment without suggesting a policy override", () => {
     const provider = new LocalCodespaceProvider(
-      {} as LocalCodespaceRelay,
-      {} as CodespaceResourceRepository,
+      {} as LocalDeviceService,
+      {} as LocalResourceRepository,
       "https://moira.example/app/settings#integrations-local",
     );
     const guidance = provider.guidance();

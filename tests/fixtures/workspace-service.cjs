@@ -64,7 +64,7 @@ async function start(value) {
     stdio: ["pipe", "pipe", "pipe"],
   });
   value.child = child;
-  const errors = [];
+  const errors = (value.diagnostics ??= []);
   child.stderr.on("data", (bytes) => errors.push(bytes));
   const ready = new Promise((resolveReady, reject) => {
     child.stdout.once("data", (bytes) =>
@@ -76,7 +76,12 @@ async function start(value) {
     );
   });
   child.stdin.end(`import {startWorkspaceService} from ${JSON.stringify(serviceUrl)};
-    const service=await startWorkspaceService(${JSON.stringify({ socketPath: value.socketPath, stateRoot: value.stateRoot, binding: value.binding, searchExecutable: value.searchExecutable })});
+    const options=${JSON.stringify({ socketPath: value.socketPath, stateRoot: value.stateRoot, binding: value.binding, searchExecutable: value.searchExecutable, publicationScope: value.publicationScope })};
+    const sourceFixture=${JSON.stringify(value.sourceFixture ?? null)};
+    if(sourceFixture){const {createSourceOpener}=await import(sourceFixture.moduleUrl);options.sourceOpener=createSourceOpener({socketPath:sourceFixture.socketPath});}
+    const pullRequestFixture=${JSON.stringify(value.pullRequestFixture ?? null)};
+    if(pullRequestFixture)options.pullRequest=(await import(pullRequestFixture)).pullRequest;
+    const service=await startWorkspaceService(options);
     process.on('SIGTERM',async()=>{await service.close();process.exit(0)});process.stdout.write('ready\\n');`);
   await ready;
 }

@@ -34,6 +34,19 @@ function legacyEnvelope(): CodespaceCredentialEnvelope {
 }
 
 describe("CodespaceCredentialVault", () => {
+  test("scoped child custody cannot be decoded as a parent or rebound to another child", () => {
+    const vault = new CodespaceCredentialVault(key, "v1");
+    const child = { token: "ghu_child", expiresAt: 2_000_000 };
+    const envelope = vault.encryptScoped("user-a", "github-codespaces", "child-a", 3, child);
+    expect(vault.decryptScoped("user-a", "github-codespaces", "child-a", envelope)).toEqual(child);
+    expect(JSON.stringify(envelope)).not.toContain(child.token);
+    expect(() => vault.decrypt("user-a", "github-codespaces", "child-a", envelope)).toThrow(
+      "decryption failed",
+    );
+    expect(() => vault.decryptScoped("user-a", "github-codespaces", "child-b", envelope)).toThrow(
+      "decryption failed",
+    );
+  });
   test("round-trips one versioned credential without placing plaintext in its envelope", () => {
     const vault = new CodespaceCredentialVault(key, "v1");
     const envelope = vault.encrypt("user-a", "github-codespaces", "connection-a", 3, payload);

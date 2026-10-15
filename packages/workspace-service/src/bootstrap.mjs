@@ -7,6 +7,8 @@ import { join } from "node:path";
 
 /** A provider runs this fixed program, never a caller-selected shell command. */
 export const WORKSPACE_INSTALL_SCRIPT = String.raw`set -eu
+PATH=/usr/bin:/bin
+export PATH
 umask 077
 IFS=' ' read -r release archive_sha architecture bytes
 case "$release:$archive_sha" in *[!a-f0-9:]*) echo 'Invalid workspace payload header' >&2; exit 1;; esac
@@ -40,7 +42,8 @@ test "$(sha256sum "$temporary/payload.tar.gz" | cut -d ' ' -f1)" = "$archive_sha
 tar -tzf "$temporary/payload.tar.gz" >"$temporary/names"
 test -z "$(sort "$temporary/names" | uniq -d)"
 while IFS= read -r name; do
-  case "$name" in runtime/|runtime/bin/|runtime/ripgrep/|service/|runtime/bin/node|runtime/bin/rg|runtime/LICENSE|runtime/ripgrep/LICENSE-MIT|runtime/ripgrep/UNLICENSE|runtime/ripgrep/COPYING|service/daemon.mjs|service/cli.mjs|service/local-bootstrap.mjs|service/guest-proxy.mjs|release.json) ;; *) echo 'Unsafe workspace archive member' >&2; exit 1;; esac
+  case "$name" in /*|../*|*/../*|*/..|./*|*/./*|*//*) echo 'Unsafe workspace archive member' >&2; exit 1;; esac
+  case "$name" in runtime/|runtime/bin/|runtime/ripgrep/|service/|runtime/bin/node|runtime/bin/rg|runtime/LICENSE|runtime/ripgrep/LICENSE-MIT|runtime/ripgrep/UNLICENSE|runtime/ripgrep/COPYING|service/daemon.mjs|service/cli.mjs|service/local-bootstrap.mjs|service/guest-proxy.mjs|service/owner-renderer.mjs|service/extension-handler-host.mjs|service/process-group-helper|service/node_modules/|service/node_modules/*|service/fonts/|service/fonts/*|release.json) ;; *) echo 'Unsafe workspace archive member' >&2; exit 1;; esac
 done <"$temporary/names"
 tar -tvzf "$temporary/payload.tar.gz" | awk 'substr($0,1,1)!="-"&&substr($0,1,1)!="d"{exit 1}'
 mkdir "$temporary/release"
@@ -63,10 +66,16 @@ printf '#!/bin/sh\nset -eu\nIFS= read -r release <"$HOME/.local/share/moira-work
 chmod 700 "$temporary/moira-workspace"
 test ! -L "$HOME/.local/bin/moira-workspace"
 mv "$temporary/moira-workspace" "$HOME/.local/bin/moira-workspace"
+printf '#!/bin/sh\nset -eu\nIFS= read -r release <"$HOME/.local/share/moira-workspace/current"\ncase "$release" in *[!a-f0-9]*) exit 1;; esac\ntest "${"$"}{#release}" = 64\nexec "$HOME/.local/share/moira-workspace/releases/$release/runtime/bin/node" "$HOME/.local/share/moira-workspace/releases/$release/service/daemon.mjs" --start-if-configured\n' >"$temporary/moira-workspace-service"
+chmod 700 "$temporary/moira-workspace-service"
+test ! -L "$HOME/.local/bin/moira-workspace-service"
+mv "$temporary/moira-workspace-service" "$HOME/.local/bin/moira-workspace-service"
 printf '{"installed":true,"releaseIdentity":"%s","architecture":"%s"}\n' "$release" "$architecture"
 `;
 
 export const WORKSPACE_PROBE_SCRIPT = String.raw`set -eu
+PATH=/usr/bin:/bin
+export PATH
 boot=$(cat /proc/sys/kernel/random/boot_id)
 record=$(cat /proc/1/stat)
 start=$(printf '%s\n' "${"$"}{record##*) }" | awk '{print $20}')
@@ -84,6 +93,7 @@ program="$HOME/.local/share/moira-workspace/releases/$release"
 export const WORKSPACE_CONFIGURE_SCRIPT = `${RELEASE_SELECTION}\nexec "$program/runtime/bin/node" "$program/service/daemon.mjs" --configure`;
 export const WORKSPACE_LOCAL_BOOTSTRAP_SCRIPT = `${RELEASE_SELECTION}\nexec "$program/runtime/bin/node" "$program/service/local-bootstrap.mjs"`;
 export const WORKSPACE_HEALTH_SCRIPT = `${RELEASE_SELECTION}\nexec "$program/runtime/bin/node" "$program/service/daemon.mjs" --health`;
+export const WORKSPACE_GITHUB_PROOF_SCRIPT = `${RELEASE_SELECTION}\nexec "$program/runtime/bin/node" "$program/service/daemon.mjs" --github-proof`;
 export const WORKSPACE_START_SCRIPT = `${RELEASE_SELECTION}\n"$program/runtime/bin/node" "$program/service/daemon.mjs" --stop\nexec "$program/runtime/bin/node" "$program/service/daemon.mjs" --start`;
 
 export async function loadWorkspacePayload(directory, architecture) {

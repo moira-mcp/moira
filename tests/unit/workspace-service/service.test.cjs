@@ -1358,6 +1358,68 @@ test("directory publication failure refuses admission before any command effect 
   expect(readFileSync(join(value.root, "durable-effect"), "utf8")).toBe("once");
 });
 
+test.each(["patch", "command-refusal"])(
+  "failed result publication after accepted %s remains uncertain and replay cannot repeat effects",
+  async (kind) => {
+    const value = fixture();
+    const requestId = createWorkspaceRequestId();
+    const directory = join(value.stateRoot, "requests", requestId);
+    const armed = join(value.directory, "result-fault-armed");
+    const observed = join(value.directory, "result-fault-observed");
+    const fault = join(value.directory, "result-fault.cjs");
+    writeFileSync(
+      fault,
+      `const fs=require('node:fs');const path=require('node:path');const promises=require('node:fs/promises');const original=promises.rename;promises.rename=async(from,to)=>{if(path.basename(String(to))==='result.json'&&fs.existsSync(${JSON.stringify(armed)})&&fs.realpathSync(path.dirname(String(to)))===${JSON.stringify(directory)}){fs.writeFileSync(${JSON.stringify(observed)},'result-publication');throw Object.assign(new Error('injected result storage failure'),{code:'EIO'})}return original(from,to)};require('node:module').syncBuiltinESMExports();`,
+    );
+    value.environment = { NODE_OPTIONS: `--require=${fault}` };
+    writeFileSync(join(value.root, "target"), "original");
+    await start(value);
+    const body =
+      kind === "patch"
+        ? {
+            requestId,
+            files: [
+              {
+                path: "target",
+                expected: { exists: true },
+                edits: [{ start: 0, end: 8, text: "changed" }],
+              },
+            ],
+          }
+        : { requestId, argv: [] };
+    const route = kind === "patch" ? "/v1/files/patch" : "/v1/exec";
+    writeFileSync(armed, "armed");
+    const response = await call(value, "POST", route, body);
+    expect(response.status).toBe(503);
+    expect(JSON.parse(response.bytes.toString())).toEqual({
+      error: { code: "WORKSPACE_OUTCOME_UNCONFIRMED" },
+    });
+    expect(readFileSync(observed, "utf8")).toBe("result-publication");
+    expect(existsSync(join(directory, "accepted.json"))).toBe(true);
+    expect(existsSync(join(directory, "result.json"))).toBe(false);
+    const target = join(value.root, "target");
+    expect(readFileSync(target, "utf8")).toBe(kind === "patch" ? "changed" : "original");
+    const published = statSync(target);
+    unlinkSync(armed);
+    expect(await control(value, "POST", route, body)).toMatchObject({
+      requestId,
+      state: "unknown",
+    });
+    expect(await control(value, "GET", `/v1/operations/${requestId}`)).toMatchObject({
+      requestId,
+      state: "unknown",
+    });
+    expect(statSync(target).ino).toBe(published.ino);
+    expect(readFileSync(target, "utf8")).toBe(kind === "patch" ? "changed" : "original");
+    const conflict = await call(value, "POST", route, {
+      ...body,
+      ...(kind === "patch" ? { files: [] } : { argv: ["true"] }),
+    });
+    expect(conflict.status).toBe(409);
+    expect(JSON.parse(conflict.bytes.toString()).error.code).toBe("REQUEST_ID_CONFLICT");
+  },
+);
+
 test("retained output fsync failure is observable before a durable terminal success", async () => {
   const value = fixture();
   const requestId = createWorkspaceRequestId();

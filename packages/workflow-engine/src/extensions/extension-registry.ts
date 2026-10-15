@@ -21,6 +21,7 @@ import {
   settingNamespaceOf,
 } from "./extension-contract.js";
 import { declaredSchemaProblem } from "./declared-schema.js";
+import { binaryTransportProblems } from "./binary-transport.js";
 import { prepareExtensionSettingValue } from "./extension-setting-values.js";
 import {
   isCommunicationChannelIdentity,
@@ -258,6 +259,10 @@ export function validateExtensionManifest(candidate: unknown): ExtensionManifest
           }
         }
 
+        for (const problem of binaryTransportProblems(
+          declaration as ExtensionCommunicationChannelDeclaration,
+        ))
+          reasons.push(`${where}.binaryTransport: ${problem}`);
         const secretAliases = new Set<string>();
         const permissions = declaration.permissions;
         if (permissions !== undefined) {
