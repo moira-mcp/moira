@@ -87,6 +87,11 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Enable ARM64 guest package builds
+        uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
+        with:
+          platforms: arm64
+
       - name: Install host test dependencies
         run: |
           sudo apt-get update
