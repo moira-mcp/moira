@@ -2,7 +2,7 @@ import { beforeAll, describe, expect, test } from "@jest/globals";
 import { createHash } from "node:crypto";
 import { crc32 } from "node:zlib";
 import sharp from "sharp";
-import { previewImageBytes } from "../../../packages/mcp-server/src/tools/codespace-image-preview.js";
+import { previewImageBytes } from "../../../packages/workspace-service/src/image-preview.mjs";
 
 let png: Buffer;
 let jpeg: Buffer;
@@ -44,16 +44,20 @@ describe("workspace image preview projection", () => {
   );
 
   test.each([
-    [0, 2],
     [8193, 1],
     [1, 8193],
     [4001, 4000],
-  ])("declared dimensions %i×%i exceed the trusted preview bounds", (width, height) => {
-    expect(previewImageBytes(changedPngDimensions(width, height)).isError).toBe(true);
-  });
+  ])(
+    "structurally valid declared dimensions %i×%i have no invented owner preview ceiling",
+    (width, height) => {
+      expect(
+        previewImageBytes(changedPngDimensions(width, height)).structuredContent,
+      ).toMatchObject({ width, height });
+    },
+  );
 
-  test("full finite image bounds reject large bytes before projection", () => {
-    expect(previewImageBytes(Buffer.alloc(4 * 1024 * 1024 + 1)).isError).toBe(true);
+  test("zero declared dimensions are structurally invalid", () => {
+    expect(previewImageBytes(changedPngDimensions(0, 2)).isError).toBe(true);
   });
 
   test.each([

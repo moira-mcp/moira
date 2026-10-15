@@ -1,12 +1,9 @@
-import { Buffer } from "node:buffer";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { describe, expect, test } from "@jest/globals";
-import { extract } from "tar-stream";
 import {
   AgentMessageQueue,
-  createMaterializeTar,
   GraphExecutionEngine,
   MaterializeHandler,
   renderMaterializeFiles,
@@ -876,28 +873,6 @@ const scenarios: TestScenario[] = [
   ),
 ];
 
-async function untar(buffer: Buffer): Promise<Map<string, Buffer>> {
-  const entries = new Map<string, Buffer>();
-  const parser = extract();
-  const complete = new Promise<void>((resolvePromise, reject) => {
-    parser.on("entry", (header, stream, next) => {
-      const chunks: Buffer[] = [];
-      stream.on("data", (chunk: Buffer) => chunks.push(chunk));
-      stream.once("end", () => {
-        entries.set(header.name, Buffer.concat(chunks));
-        next();
-      });
-      stream.once("error", reject);
-      stream.resume();
-    });
-    parser.once("finish", resolvePromise);
-    parser.once("error", reject);
-  });
-  parser.end(buffer);
-  await complete;
-  return entries;
-}
-
 describe("execution-retrospective validation packet", () => {
   test("all semantic archetypes, nodes, conditions, and repair routes execute", async () => {
     const results = [];
@@ -1048,7 +1023,7 @@ describe("execution-retrospective validation packet", () => {
     }
   });
 
-  test("exact registry defaults render to a two-file archive without entering the directive body", async () => {
+  test("exact registry defaults render to authorized text files without entering the directive body", async () => {
     const materialize = workflow.nodes.find(
       (node) => node.id === "materialize-retrospective-bootstrap",
     ) as MaterializeNode;
@@ -1068,13 +1043,8 @@ describe("execution-retrospective validation packet", () => {
       "process-id.txt",
       "retrospective-reference.md",
     ]);
-    expect(rendered[0].content.toString()).toBe(context.executionId);
-    expect(rendered[1].content.toString()).toBe(reference);
-    const archive = await untar(await createMaterializeTar(rendered));
-    expect([...archive.keys()]).toEqual(["process-id.txt", "retrospective-reference.md"]);
-    expect(archive.get("process-id.txt")?.toString()).toBe(context.executionId);
-    expect(archive.get("retrospective-reference.md")?.toString()).toBe(reference);
-
+    expect(rendered[0].content).toBe(context.executionId);
+    expect(rendered[1].content).toBe(reference);
     const queue = new AgentMessageQueue();
     const handler = new MaterializeHandler(
       { createMaterializeToken: () => "exact-candidate-token" },

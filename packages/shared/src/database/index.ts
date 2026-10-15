@@ -47,12 +47,7 @@ export {
   type StoredCodespaceCredential,
   type StoredCodespaceRevocation,
 } from "../codespaces/connection-repository.js";
-export {
-  CodespaceResourceRepository,
-  digestCodespaceCapability,
-  type ReserveCodespaceResult,
-} from "../codespaces/resource-repository.js";
-export { CodespaceTransferRepository } from "../codespaces/transfer-repository.js";
+export { CodespaceRepositorySettings } from "../codespaces/resource-repository.js";
 export type { AccountApprovalTransitionResult } from "./repositories/account-approval-repository.js";
 export {
   WorkflowReconciliationRepository,

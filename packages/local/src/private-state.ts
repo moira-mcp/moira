@@ -1,6 +1,6 @@
 import { constants } from "node:fs";
 import { lstat, mkdir, open, readdir, realpath, rename, unlink } from "node:fs/promises";
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { dirname, join, resolve } from "node:path";
 import { LocalRefusal } from "./policy.js";
 import { PassThrough } from "node:stream";
@@ -63,6 +63,30 @@ async function acquireGate(root: string): Promise<() => Promise<void>> {
 /** Only locally selected state lives here; callers never supply cloud-controlled paths. */
 export class PrivateState {
   private constructor(readonly root: string) {}
+
+  /** Unix endpoints use a short, owned namespace bound to this exact state inode. */
+  async ipcDirectory(): Promise<PrivateState> {
+    const uid = process.getuid?.();
+    if (uid === undefined)
+      throw new LocalRefusal(
+        "LOCAL_STATE_UNSAFE",
+        "Private Unix endpoints require an owned Unix state.",
+      );
+    const metadata = await lstat(this.root, { bigint: true });
+    if (
+      !metadata.isDirectory() ||
+      metadata.isSymbolicLink() ||
+      metadata.mode & 0o077n ||
+      metadata.uid !== BigInt(uid) ||
+      (await realpath(this.root)) !== this.root
+    )
+      throw new LocalRefusal("LOCAL_STATE_UNSAFE", "Unsafe controller state directory.");
+    const identity = createHash("sha256")
+      .update(JSON.stringify([this.root, String(metadata.dev), String(metadata.ino)]))
+      .digest("base64url");
+    const base = await realpath(process.platform === "darwin" ? "/private/tmp" : "/tmp");
+    return PrivateState.open(join(base, `mi-${uid}-${identity}`));
+  }
 
   static async open(path: string): Promise<PrivateState> {
     const resolved = resolve(path);

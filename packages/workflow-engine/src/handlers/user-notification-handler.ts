@@ -2,6 +2,8 @@ import {
   createLogger,
   InternalError,
   metadataRevision,
+  communicationOwnerReceiptSchema,
+  type CommunicationOwnerSubmit,
   type WorkflowLogger,
 } from "@mcp-moira/shared";
 import type { INodeHandler } from "../interfaces/core-interfaces.js";
@@ -17,19 +19,19 @@ import type {
 import { isUserNotificationNode } from "../types/index.js";
 import { NodeResultBuilder, type NodeExecutionResult } from "../types/node-execution.js";
 import type { AgentMessageQueue } from "../services/agent-message-queue.js";
-import { getActiveUserCommunicationService } from "../services/user-communication-provider.js";
-import type {
-  UserCommunicationService,
-  CommunicationAttachment,
-} from "../services/user-communication.js";
-import { renderExecutionProgressStepsImage } from "../utils/execution-progress-steps.js";
+import {
+  getActiveUserCommunicationService,
+  getActiveCommunicationFileOwner,
+  type CommunicationFileOwner,
+} from "../services/user-communication-provider.js";
+import type { UserCommunicationService } from "../services/user-communication.js";
 import { withInFlightPause } from "../utils/execution-visits.js";
 import { textEscaper } from "../utils/notification-text.js";
 import {
   frameNotification,
   resolveNotificationFrame,
   prepareNotificationFrame,
-  type NotificationFrame,
+  notificationDeliveryRequestId,
 } from "../services/notification-frame.js";
 
 export class UserNotificationHandler implements INodeHandler {
@@ -39,7 +41,7 @@ export class UserNotificationHandler implements INodeHandler {
 
   constructor(
     private readonly communication: UserCommunicationService = getActiveUserCommunicationService(),
-    private readonly progressImageRenderer: typeof renderExecutionProgressStepsImage = renderExecutionProgressStepsImage,
+    private readonly fileOwner?: CommunicationFileOwner,
   ) {}
 
   getNodeType(): string {
@@ -68,34 +70,13 @@ export class UserNotificationHandler implements INodeHandler {
     try {
       const body = this.messageProcessor(node.format).processDirective(node.message, context);
       const frame = await resolveNotificationFrame(repository, context, node.id, liveRun);
-      let attachment: CommunicationAttachment | undefined;
-      if (node.attachment) {
-        const encoded = this.templateProcessor.processDirective(node.attachment.data, context);
-        if (encoded.length % 4 !== 0 || !/^[A-Za-z0-9+/]*={0,2}$/.test(encoded))
-          throw new Error("attachment_encoding_invalid");
-        attachment = {
-          kind: node.attachment.kind,
-          bytes: Uint8Array.from(Buffer.from(encoded, "base64")),
-          filename: node.attachment.filename,
-          mimeType: node.attachment.mimeType,
-        } as const;
-      }
-      let attachmentIdentity: string | undefined;
       const prepare = async () => {
         const prepared = await prepareNotificationFrame(
           repository,
           context,
           node.id,
           frame,
-          async (current) => {
-            if (!node.attachProgressImage) return attachment;
-            const identity = metadataRevision(current.run?.taskIdentity ?? null);
-            if (identity !== attachmentIdentity) {
-              attachment = await this.renderProgressAttachment(node, current);
-              attachmentIdentity = identity;
-            }
-            return attachment;
-          },
+          async () => null,
         );
         return {
           text: frameNotification(prepared.frame, body, {
@@ -105,11 +86,116 @@ export class UserNotificationHandler implements INodeHandler {
           }),
           format: node.format,
           silent: node.silent,
-          attachment: prepared.value,
           purpose: "notification" as const,
+          frame: prepared.frame,
         };
       };
       const prepared = await prepare();
+      let attachmentStatus: string | undefined;
+      let originalRequestId: string | undefined;
+      let originalOwner: { device_id?: string; codespace_id?: string } = {};
+      if (node.attachment || node.attachProgressImage) {
+        try {
+          originalRequestId = await notificationDeliveryRequestId(repository, node.id, liveRun);
+          const current = prepared.frame;
+          let source: CommunicationOwnerSubmit["source"];
+          if (node.attachment)
+            source = {
+              type: "inline",
+              data: this.templateProcessor.processDirective(node.attachment.data, context),
+              fileName: node.attachment.filename,
+              mimeType: node.attachment.mimeType,
+            };
+          else {
+            if (!current.graph?.progress || !current.run) throw new Error("progress_unavailable");
+            source = {
+              type: "progress",
+              descriptor: {
+                kind: "steps",
+                graph: current.graph as unknown as Record<string, unknown>,
+                run: withInFlightPause(current.graph, current.run, node.id) as unknown as Record<
+                  string,
+                  unknown
+                >,
+                renderContext: { runUrl: current.url },
+              },
+            };
+          }
+          const raw = await (this.fileOwner ?? getActiveCommunicationFileOwner()).submit(
+            context.userId,
+            {
+              action: "deliver",
+              requestId: originalRequestId,
+              source,
+              kind: node.attachment?.kind ?? "image",
+              text: prepared.text,
+              format: node.format,
+              silent: node.silent,
+              workflowFrame: current.run
+                ? {
+                    executionId: context.executionId,
+                    workflowId: context.workflowId,
+                    revision: current.run.revision,
+                    taskIdentityRevision: metadataRevision(current.run.taskIdentity ?? null),
+                  }
+                : undefined,
+            },
+          );
+          const receipt = communicationOwnerReceiptSchema.passthrough().parse(raw);
+          originalOwner = {
+            ...(typeof raw.device_id === "string" ? { device_id: raw.device_id } : {}),
+            ...(typeof raw.codespace_id === "string" ? { codespace_id: raw.codespace_id } : {}),
+          };
+          if (receipt.outcome?.ok) {
+            const delivery = receipt.outcome.result;
+            return NodeResultBuilder.continue(node.id, "default", {
+              userNotificationStatus: delivery.status,
+              configuredChannels: delivery.channels?.length ?? 0,
+              deliveredChannels:
+                delivery.channels?.filter((stage) => stage.status === "delivered").length ?? 0,
+              channels: delivery.channels ?? [],
+              communicationRequestId: originalRequestId,
+              ...originalOwner,
+              attachmentStatus:
+                delivery.status === "no_configured_channels" ? "not_delivered" : "delivered",
+              notificationTimestamp: Date.now(),
+              executionTime: timer.elapsed(),
+            });
+          }
+          const outcomeError =
+            receipt.outcome && "error" in receipt.outcome ? receipt.outcome.error : undefined;
+          attachmentStatus =
+            receipt.state === "accepted" ||
+            receipt.state === "unconfirmed" ||
+            outcomeError?.code === "WORKSPACE_OUTCOME_UNCONFIRMED"
+              ? "unconfirmed"
+              : "refused";
+        } catch {
+          attachmentStatus = "unavailable";
+        }
+        if (node.attachment) {
+          const failure = this.failure(
+            node,
+            messageQueue,
+            "attachment_unavailable",
+            timer.elapsed(),
+          );
+          return {
+            ...failure,
+            data: {
+              ...failure.data,
+              attachmentStatus,
+              communicationRequestId: originalRequestId,
+              ...originalOwner,
+            },
+          };
+        }
+        messageQueue.addNotification(
+          node.id,
+          "The optional progress image was omitted; the text notification is still delivered independently.",
+          "attachment_unavailable",
+        );
+      }
       const result = await this.communication.deliver(
         {
           userId: context.userId,
@@ -139,6 +225,9 @@ export class UserNotificationHandler implements INodeHandler {
         deliveredChannels: result.deliveredChannels,
         channels: result.channels,
         notificationTimestamp: Date.now(),
+        ...(attachmentStatus
+          ? { attachmentStatus, communicationRequestId: originalRequestId, ...originalOwner }
+          : {}),
         executionTime: timer.elapsed(),
       });
     } catch {
@@ -171,22 +260,5 @@ export class UserNotificationHandler implements INodeHandler {
       this.valueTemplateProcessors.set(format, processor);
     }
     return processor;
-  }
-
-  private async renderProgressAttachment(node: UserNotificationNode, frame: NotificationFrame) {
-    const { graph, run } = frame;
-    if (!graph?.progress || !run) throw new Error("progress_unavailable");
-    // The phone steps picture of the run as of this node.
-    const rendered = await this.progressImageRenderer(
-      graph,
-      withInFlightPause(graph, run, node.id),
-    );
-    if (!rendered) throw new Error("progress_unavailable");
-    return {
-      kind: "image" as const,
-      bytes: rendered.buffer,
-      filename: "workflow-progress.png",
-      mimeType: "image/png",
-    };
   }
 }

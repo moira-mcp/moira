@@ -372,7 +372,7 @@ full-dumps, which can expose the entire variable bag.
 
 ## Materialize Validation
 
-A `materialize` node is accepted only when `basePath` is non-empty, `files` contains 1–100 entries,
+A `materialize` node is accepted only when `basePath` is non-empty, `files` contains at least one entry,
 and `connections.success` is present. Every declared `files[].path` must be a normalized relative
 path without NUL, absolute roots, backslash roots, empty segments, `.`, or `..`; declared paths must
 be unique. Each entry declares exactly one of:
@@ -381,11 +381,12 @@ be unique. Each entry declares exactly one of:
 - `content: ""`: an empty skeleton file. Non-empty inline content is rejected.
 
 Because paths can contain templates, the same safety and collision checks run again after
-rendering against the current execution context. Runtime rendering additionally enforces 1 MiB per
-file and 10 MiB total uncompressed content. A failure while preparing the step routes through the
+rendering against the current execution context. Archive delivery has no generic count or byte ceiling;
+the selected controller validates paths, encodes text and retains the immutable tar publication. A failure while preparing the step routes through the
 optional `connections.error`; otherwise it is raised. Every HTTP download revalidates the
-five-minute grant and its user/execution/node binding; repeats are accepted only while the bound
-execution remains waiting on that node. Context delivery revalidates the same bindings and adds one
+five-minute grant and its user/execution/node/context binding, including after asynchronous work.
+The first submission pins the verified controller scope and original request ID; repeats only collect
+that publication and cannot render or submit it again. A changed pairing cannot replace its scope. Context delivery revalidates the same bindings and adds one
 further bound: a set over 256 KiB in total is refused rather than truncated.
 
 ## Best Practices

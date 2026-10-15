@@ -1,6 +1,8 @@
 import { createHash, randomUUID } from "node:crypto";
 import type Database from "better-sqlite3";
+import type { ScopedCredentialState } from "./scoped-credential-types.js";
 import { getSqliteInstance } from "../database/connection.js";
+import { assertAccountResourcesRetired } from "../database/account-resource-retirement.js";
 import type {
   CodespaceConnectionErrorCode,
   CodespaceConnectionSnapshot,
@@ -42,6 +44,12 @@ export interface StoredCodespaceRevocation {
   envelope: CodespaceCredentialEnvelope;
 }
 
+export interface StoredScopedCredential extends StoredCodespaceRevocation {
+  requestId: string;
+  state: ScopedCredentialState;
+  scopeMetadata: string;
+}
+
 export interface ConnectedCodespaceInput {
   connectionId: string;
   userId: string;
@@ -70,6 +78,26 @@ export function digestCodespaceAuthorizationValue(value: string): string {
 
 export class CodespaceConnectionRepository {
   constructor(private readonly sqlite: Database.Database = getSqliteInstance()) {}
+
+  getAuthorityGeneration(userId: string, connectionId: string): number {
+    const row = this.sqlite
+      .prepare("SELECT authorityGeneration FROM codespaceConnection WHERE userId=? AND id=?")
+      .get(userId, connectionId) as { authorityGeneration: number } | undefined;
+    if (!row) throw new Error("Connection authorization identity is missing");
+    return row.authorityGeneration;
+  }
+
+  assertAccountResourcesRetired(userId: string): void {
+    assertAccountResourcesRetired(
+      this.sqlite
+        .prepare<{ userId: string }, { state: string }>(
+          `SELECT CASE WHEN retiredAt IS NOT NULL THEN 'deleted' ELSE 'unknown' END AS state FROM localResourceIdentity WHERE userId = @userId
+           UNION ALL SELECT CASE WHEN retirement IN ('retired','uncreated') THEN 'deleted' ELSE 'unknown' END AS state
+           FROM githubResourceIdentity WHERE userId = @userId`,
+        )
+        .all({ userId }),
+    );
+  }
 
   storeAuthorizationState(input: {
     stateHash: string;
@@ -263,6 +291,7 @@ export class CodespaceConnectionRepository {
         .prepare(
           `UPDATE codespaceConnection
            SET externalAccountId = ?, externalLogin = ?, status = ?, credentialGeneration = ?,
+               authorityGeneration = authorityGeneration + 1,
                refreshLeaseId = NULL, refreshLeaseExpiresAt = NULL, lastErrorCode = NULL,
                updatedAt = ?
            WHERE id = ? AND userId = ?`,
@@ -508,6 +537,21 @@ export class CodespaceConnectionRepository {
     };
   }
 
+  /** No network work runs while the parent credential and grant witness share this read snapshot. */
+  readCredentialAuthority(userId: string, provider: string) {
+    return this.sqlite
+      .transaction(() => {
+        const stored = this.getCredential(userId, provider),
+          connection = this.getConnection(userId, provider);
+        return {
+          stored,
+          connection,
+          grants: connection ? this.grantSnapshot(connection.id) : null,
+        };
+      })
+      .deferred();
+  }
+
   storePendingRevocation(input: {
     id: string;
     userId: string;
@@ -542,7 +586,7 @@ export class CodespaceConnectionRepository {
       .prepare(
         `SELECT id, userId, provider, envelopeVersion, keyVersion, iv, authTag, ciphertext, generation
          FROM codespaceCredentialRevocation
-         WHERE userId = ? AND provider = ? ORDER BY createdAt, id`,
+         WHERE userId = ? AND provider = ? AND credentialKind='parent' ORDER BY createdAt, id`,
       )
       .all(userId, provider) as Array<{ id: string; userId: string; provider: string } & VaultRow>;
     return rows.map((row) => ({
@@ -569,6 +613,124 @@ export class CodespaceConnectionRepository {
         )
         .run(id, userId, provider).changes === 1
     );
+  }
+
+  getScopedCredential(
+    userId: string,
+    provider: string,
+    identity: { requestId: string } | { credentialId: string },
+  ): StoredScopedCredential | null {
+    const row = this.sqlite
+      .prepare(
+        `SELECT id,userId,provider,requestId,state,scopeMetadata,envelopeVersion,keyVersion,iv,authTag,ciphertext,generation FROM codespaceCredentialRevocation WHERE userId=? AND provider=? AND credentialKind='scoped' AND ${"requestId" in identity ? "requestId" : "id"}=?`,
+      )
+      .get(
+        userId,
+        provider,
+        "requestId" in identity ? identity.requestId : identity.credentialId,
+      ) as (StoredScopedCredential & VaultRow) | undefined;
+    if (!row) return null;
+    return {
+      id: row.id,
+      userId: row.userId,
+      provider: row.provider,
+      requestId: row.requestId,
+      state: row.state,
+      scopeMetadata: row.scopeMetadata,
+      envelope: {
+        envelopeVersion: row.envelopeVersion as 1 | 2,
+        keyVersion: row.keyVersion,
+        iv: row.iv,
+        authTag: row.authTag,
+        ciphertext: row.ciphertext,
+        generation: row.generation,
+      },
+    };
+  }
+
+  reserveScopedCredential(input: {
+    id: string;
+    userId: string;
+    provider: string;
+    requestId: string;
+    scopeMetadata: string;
+    envelope: CodespaceCredentialEnvelope;
+    now: number;
+  }): boolean {
+    return (
+      this.sqlite
+        .prepare(
+          `INSERT INTO codespaceCredentialRevocation (id,userId,provider,credentialKind,state,requestId,scopeMetadata,envelopeVersion,keyVersion,iv,authTag,ciphertext,generation,createdAt,updatedAt) VALUES (?,?,?,'scoped','issuing',?,?,?,?,?,?,?,?,?,?) ON CONFLICT DO NOTHING`,
+        )
+        .run(
+          input.id,
+          input.userId,
+          input.provider,
+          input.requestId,
+          input.scopeMetadata,
+          input.envelope.envelopeVersion,
+          input.envelope.keyVersion,
+          input.envelope.iv,
+          input.envelope.authTag,
+          input.envelope.ciphertext,
+          input.envelope.generation,
+          input.now,
+          input.now,
+        ).changes === 1
+    );
+  }
+
+  updateScopedCredential(input: {
+    id: string;
+    userId: string;
+    provider: string;
+    expectedState: ScopedCredentialState;
+    state: ScopedCredentialState;
+    envelope: CodespaceCredentialEnvelope;
+    now: number;
+  }): boolean {
+    return (
+      this.sqlite
+        .prepare(
+          `UPDATE codespaceCredentialRevocation SET state=?,envelopeVersion=?,keyVersion=?,iv=?,authTag=?,ciphertext=?,generation=?,updatedAt=? WHERE id=? AND userId=? AND provider=? AND credentialKind='scoped' AND state=?`,
+        )
+        .run(
+          input.state,
+          input.envelope.envelopeVersion,
+          input.envelope.keyVersion,
+          input.envelope.iv,
+          input.envelope.authTag,
+          input.envelope.ciphertext,
+          input.envelope.generation,
+          input.now,
+          input.id,
+          input.userId,
+          input.provider,
+          input.expectedState,
+        ).changes === 1
+    );
+  }
+
+  getScopedCredentials(userId: string, provider: string): StoredScopedCredential[] {
+    const ids = this.sqlite
+      .prepare(
+        `SELECT id FROM codespaceCredentialRevocation WHERE userId=? AND provider=? AND credentialKind='scoped' AND state NOT IN ('disposed','refused') ORDER BY createdAt,id`,
+      )
+      .all(userId, provider) as { id: string }[];
+    return ids.flatMap(({ id }) => {
+      const row = this.getScopedCredential(userId, provider, { credentialId: id });
+      return row ? [row] : [];
+    });
+  }
+
+  getScopedCredentialUsers(provider: string): string[] {
+    return (
+      this.sqlite
+        .prepare(
+          `SELECT DISTINCT userId FROM codespaceCredentialRevocation WHERE provider=? AND credentialKind='scoped' AND state NOT IN ('disposed','refused')`,
+        )
+        .all(provider) as { userId: string }[]
+    ).map((row) => row.userId);
   }
 
   claimRefresh(input: {
@@ -712,19 +874,6 @@ export class CodespaceConnectionRepository {
       if (vaultResult.changes !== 1) {
         throw new Error("Codespace credential generation changed during refresh");
       }
-      this.sqlite
-        .prepare(
-          `UPDATE codespaceResource SET authorizationGeneration = ?, updatedAt = ?
-           WHERE connectionId = ? AND userId = ? AND authorizationGeneration = ?
-             AND state NOT IN ('deleted', 'rejected')`,
-        )
-        .run(
-          input.envelope.generation,
-          input.now,
-          input.connectionId,
-          input.userId,
-          input.expectedGeneration,
-        );
       return true;
     });
     return tx();
@@ -815,6 +964,7 @@ export class CodespaceConnectionRepository {
           .prepare(
             `UPDATE codespaceConnection
              SET status = 'disconnected', credentialGeneration = credentialGeneration + 1,
+                 authorityGeneration = authorityGeneration + 1,
                  lastErrorCode = NULL, refreshLeaseId = NULL, refreshLeaseExpiresAt = NULL,
                  updatedAt = ?
              WHERE id = ? AND userId = ? AND provider = ?`,
@@ -833,7 +983,9 @@ export class CodespaceConnectionRepository {
           .run(input.connectionId);
       }
       const pending = this.sqlite
-        .prepare("DELETE FROM codespaceCredentialRevocation WHERE userId = ? AND provider = ?")
+        .prepare(
+          "DELETE FROM codespaceCredentialRevocation WHERE userId = ? AND provider = ? AND credentialKind='parent'",
+        )
         .run(input.userId, input.provider);
       return changed + pending.changes > 0;
     });
@@ -864,6 +1016,7 @@ export class CodespaceConnectionRepository {
         .prepare(
           `UPDATE codespaceConnection
            SET status = 'disconnected', credentialGeneration = credentialGeneration + 1,
+               authorityGeneration = authorityGeneration + 1,
                lastErrorCode = NULL, updatedAt = ?
            WHERE id = ? AND userId = ? AND status = 'revocation_pending'`,
         )

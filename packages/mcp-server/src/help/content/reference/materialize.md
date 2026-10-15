@@ -1,6 +1,6 @@
 ---
 title: Materialize Files
-description: Deliver bounded registry-backed files through a short-lived reusable tar grant
+description: Deliver registry-backed text through an immutable owner archive or the context fallback
 ---
 
 A `materialize` node delivers workflow-authored files to the agent filesystem, keeping their rendered
@@ -46,7 +46,7 @@ Store reusable text in a string entry of `variableRegistry`, then reference it w
 | Property              | Required | Contract                                                                                           |
 | --------------------- | -------- | -------------------------------------------------------------------------------------------------- |
 | `basePath`            | Yes      | Templated destination directory; its rendered value must be non-empty and contain no NUL character |
-| `files`               | Yes      | Between 1 and 100 archive entries                                                                  |
+| `files`               | Yes      | One or more archive entries                                                                        |
 | `files[].path`        | Yes      | Templated safe path relative to `basePath`                                                         |
 | `files[].from`        | One of   | Name of a string registry entry whose current `default` supplies the file body                     |
 | `files[].content`     | One of   | Must be exactly `""`; creates an empty skeleton file                                               |
@@ -66,8 +66,8 @@ mkdir -p -- '<basePath>' && curl -sSf -- '<reusable-url>' | tar -x -C '<basePath
 ```
 
 Run the emitted command exactly. The URL is an opaque bearer credential: do not reconstruct, edit,
-log, or share it. The same command may be retried during its five-minute lifetime while the
-execution is still waiting on this node. After extraction succeeds, complete the step with `null`
+log, or share it. Repeating the command during its five-minute lifetime collects the original
+publication while the execution still waits on this node; it never resubmits an uncertain publication. After extraction succeeds, complete the step with `null`
 or `{}`. No other input shape is accepted.
 
 The generated directive states the lifetime and retry behavior, warns that advancing the execution
@@ -79,20 +79,25 @@ materialized file it uses.
 
 ## Archive and path contract
 
-Moira reloads the current workflow when the URL is requested. It renders each path and each
-registry-backed body using the execution context bound to the grant, then creates an uncompressed tar
-archive. An edit made after the command was issued can therefore change archive paths or contents,
-but cannot change the destination embedded in that command.
+The first download resolves current registry defaults, own Notes and Playbooks as authorized text.
+A live paired controller encodes that text as UTF-8, streams the tar and retains its immutable
+publication. Cloud Moira does not build or spool the archive. The controller may run without a Local
+VM or Local SDK work lease; connect it before downloading.
+
+The grant pins that controller's full user/device/generation/connection identity and an original
+`ws1-<lowercase UUID>` request ID before submission. Every repeat collects that same owner's
+receipt before rendering or resolving sources again. A later definition edit does not change the
+published bytes. A re-pairing cannot replace the pinned authority. If the original dispatch is absent
+or unconfirmed, collection does not resend or switch owners; request a fresh `current_step`
+presentation only for a separate explicit retry.
 
 Archive entries contain only paths relative to `basePath`; the destination itself is not included.
 Both declared and rendered paths must be normalized, non-empty, relative, and unique. Moira rejects
 NUL characters, absolute or backslash-rooted paths, empty segments, and `.` or `..` segments.
 
-Resource limits are enforced on rendered UTF-8 content:
-
-- no more than 100 files;
-- no more than 1 MiB per file;
-- no more than 10 MiB total uncompressed content.
+Archive delivery has no generic file-count, individual-file or aggregate-byte ceiling.
+The source owner's available storage and current authority still apply. The separate context
+fallback below refuses text sets larger than 256 KiB.
 
 Files are emitted with mode `0644`. The engine validates `basePath`, but it does not confine the
 destination to a project directory. Workflow authors must derive it from a trusted workspace path,
@@ -115,9 +120,16 @@ logging redacts the credential from the materialize URL.
 | -------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | Invalid node definition, rendered destination, configuration, database access, or grant issuance while presenting the step | Follow `connections.error` when present; otherwise the execution surfaces the error                                                                    |
 | Invalid, expired, or incorrectly bound URL                                                                                 | HTTP 401 with `Invalid or expired materialize token`                                                                                                   |
-| Invalid rendered archive path, missing registry source, template failure, or size-limit violation                          | HTTP 400 with `Materialize archive could not be generated`                                                                                             |
+| Invalid rendered archive path, missing registry source, or template failure                                                | HTTP 400 with `Materialize archive could not be generated`                                                                                             |
 | Local `curl`, pipe, filesystem, or `tar` failure                                                                           | Unreachable network qualifies for the context fallback; a local filesystem or `tar` failure is a blocker the agent reports without completing the step |
 | Context delivery of a set larger than 256 KiB                                                                              | The tool answers with a named refusal and delivers no files                                                                                            |
+
+An unavailable controller returns HTTP 503 with `COMMUNICATION_OWNER_UNAVAILABLE`.
+An absent, accepted or unconfirmed original receipt returns HTTP 409 with
+`COMMUNICATION_OUTCOME_UNCONFIRMED` and `request_id`; repeat the same grant to collect.
+A completed owner refusal returns HTTP 422 with its safe code and original `request_id`.
+These responses do not prove a file was delivered. Current user/node/context authority is checked
+after asynchronous text resolution and again before streaming.
 
 :::caution
 `connections.error` cannot catch a download or extraction failure because those operations happen
@@ -132,8 +144,9 @@ A host that cannot run a shell command or reach the network in the current turn 
 session({ action: "materialize", executionId: "<process-id>" })
 ```
 
-It returns the same rendered bodies the archive would have contained, one text block per file headed
-by that file's path, and writes nothing to a filesystem. It takes no grant: the server resolves the
+It resolves current authorized workflow text directly, one text block per file headed by that file's
+path, and writes nothing to a filesystem. It requires no file owner and does not create or collect
+an archive. It takes no grant parameter: the server resolves the
 grant of the node's current presentation from the caller's own execution, so the archive URL never
 has to travel through the response.
 
@@ -146,7 +159,7 @@ message that does not say which condition failed, so a refusal never reveals whe
 belongs to someone else.
 
 Because the bodies land in a context window rather than on a disk, this route also refuses a set
-larger than 256 KiB in total, well below the archive limits above. It refuses rather than truncating:
+larger than 256 KiB in total. This is a context-response budget, not an archive quota. It refuses rather than truncating:
 a shortened file is indistinguishable from a complete one to the agent reading it, and the emitted
 command remains available for a set that large.
 

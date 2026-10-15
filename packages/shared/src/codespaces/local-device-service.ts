@@ -1,71 +1,138 @@
-import { randomBytes, createHash } from "node:crypto";
-import { canonicalJson } from "../utils/canonical-json.js";
-import { localLifecycleEnvelopeSchema, localLifecycleReplySchema } from "./local-protocol.js";
+import { randomBytes } from "node:crypto";
 import { z } from "zod";
+import { canonicalJson } from "../utils/canonical-json.js";
 import { LocalDeviceRepository, digestLocalSecret } from "./local-device-repository.js";
 import {
-  localControlReportSchema,
   localControlRequestSchema,
-  type LocalControlReport,
+  localDeviceControlViewSchema,
+  assertAgentRepositoryAdmission,
   type LocalRepositoryAdmissionReceipt,
 } from "./local-management-types.js";
 import {
   LocalDeviceError,
   localPublicPolicySchema,
+  localDeviceLabelSchema,
   type LocalDeviceAuth,
-  type LocalPublicPolicy,
-  type LocalRelayAcknowledgement,
-  type LocalRelayRequest,
+  type LocalDeviceView,
   type LocalResourceBinding,
 } from "./local-device-types.js";
+import {
+  controllerOperationSchema,
+  controllerRequestIdSchema,
+  githubControllerResourceSchema,
+  type ControllerOperation,
+} from "./local-controller-protocol.js";
+import { type ControllerLifecycle } from "./local-controller-protocol.js";
+import { CodespaceResourceError } from "./resource-types.js";
+import { scopedCredentialFailureOutcome } from "./scoped-credential-types.js";
 
 const secret = z.string().regex(/^[A-Za-z0-9_-]{43}$/);
 const id = z.string().uuid();
-const generation = z.number().int().min(1).max(Number.MAX_SAFE_INTEGER);
+const generation = z.number().int().positive().safe();
 export const localEnrollmentSchema = z
   .object({
     pairingId: id,
     pairingToken: secret,
     credential: secret,
-    policy: localPublicPolicySchema,
-  })
-  .strict();
-export const localAcknowledgementSchema = z
-  .object({
-    requestId: id,
-    digest: z.string().regex(/^[a-f0-9]{64}$/),
-    claimId: id,
-    status: z.enum(["completed", "refused"]),
-    outcome: localLifecycleReplySchema,
-  })
-  .strict();
-const relayRequestSchema = z
-  .object({
-    userId: z.string().min(1).max(128),
     deviceId: id,
-    deviceGeneration: generation,
-    connectionId: id,
-    requestId: id,
-    resourceId: id,
-    resourceGeneration: generation,
-    authority: z.literal("owner-delete").optional(),
-    digest: z.string().regex(/^[a-f0-9]{64}$/),
-    payload: localLifecycleEnvelopeSchema,
-    deadlineAt: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
+    label: localDeviceLabelSchema,
   })
   .strict();
+export interface LocalControllerClient {
+  json(
+    userId: string,
+    deviceId: string,
+    input: { method: string; path: string; body?: unknown },
+    signal?: AbortSignal,
+  ): Promise<Record<string, unknown>>;
+}
+const localSnapshotSchema = z
+  .object({
+    state: z.literal("configured"),
+    policy: localPublicPolicySchema,
+    control: localDeviceControlViewSchema,
+    observedAt: z.number().int().nonnegative().safe(),
+    resources: z.array(
+      z
+        .object({
+          resourceId: id,
+          resourceGeneration: generation,
+          routeGeneration: generation,
+          repositoryId: id,
+          profileId: z.string(),
+          space: z.record(z.string(), z.unknown()).nullable(),
+          creationClosed: z.boolean(),
+          pendingRequestIds: z.array(controllerRequestIdSchema),
+        })
+        .strict(),
+    ),
+    resourceObservation: z
+      .object({ state: z.enum(["available", "unavailable"]), code: z.string().optional() })
+      .strict(),
+    pendingResourceOperations: z.array(
+      z.object({ resourceId: id, requestIds: z.array(controllerRequestIdSchema) }).strict(),
+    ),
+  })
+  .strict();
+const snapshotSchema = z
+  .object({
+    version: z.literal(1),
+    deviceId: id,
+    userId: z.string().min(1),
+    deviceGeneration: generation,
+    ownerConnectionId: id,
+    connectionId: id,
+    observedAt: z.number().int().nonnegative().safe(),
+    local: z.discriminatedUnion("state", [
+      localSnapshotSchema,
+      z.object({ state: z.literal("unconfigured") }).strict(),
+    ]),
+    github: z.object({ resources: z.array(githubControllerResourceSchema) }).strict(),
+  })
+  .strict();
+export type ControllerSnapshot = z.infer<typeof snapshotSchema>;
+export type LocalControllerSnapshot = Extract<
+  ControllerSnapshot["local"],
+  { state?: "configured" }
+> &
+  Omit<ControllerSnapshot, "local" | "github">;
+type ActiveDevice = LocalDeviceView & {
+  owner: Extract<LocalDeviceView["owner"], { state: "available" }> & {
+    local: Extract<
+      Extract<LocalDeviceView["owner"], { state: "available" }>["local"],
+      { state: "configured" }
+    >;
+  };
+};
+export type LocalCredentialRetirement =
+  | { kind: "device" }
+  | { kind: "settings"; throughRevision: number }
+  | { kind: "resource"; resourceId: string; throughGeneration: number };
 
-/** Shared authority service used by Settings, outbound relay and the local provider. */
+/** Registration remains cloud-owned; all operational reads and mutations go to the live owner. */
 export class LocalDeviceService {
   constructor(
     readonly repository: LocalDeviceRepository,
     private readonly now: () => number = Date.now,
+    readonly controller?: LocalControllerClient,
+    private readonly retireDeviceCredentials?: (
+      userId: string,
+      deviceId: string,
+      retirement: LocalCredentialRetirement,
+    ) => Promise<void>,
   ) {}
-  isOwnerDeleteIntent(userId: string, resourceId: string, generation: number): boolean {
-    return this.repository.isOwnerDeleteIntent(userId, resourceId, generation);
+  getDeviceIdentity(userId: string, deviceId: string) {
+    return this.repository.getDeviceIdentity(userId, id.parse(deviceId));
   }
-  listOwned(userId: string) {
+  listRegistered(userId: string) {
     return this.repository.listOwned(userId, this.now());
+  }
+  async listOwned(userId: string) {
+    const registered = this.listRegistered(userId);
+    return {
+      ...registered,
+      devices: await Promise.all(registered.devices.map((device) => this.project(device))),
+    };
   }
   beginEnrollment(userId: string) {
     const pairingToken = randomBytes(32).toString("base64url");
@@ -81,7 +148,8 @@ export class LocalDeviceService {
         pairingId: input.pairingId,
         tokenDigest: digestLocalSecret(input.pairingToken),
         credentialDigest: digestLocalSecret(input.credential),
-        policy: input.policy,
+        deviceId: input.deviceId,
+        label: input.label,
       },
       this.now(),
     );
@@ -94,12 +162,14 @@ export class LocalDeviceService {
       this.now(),
     );
   }
-  confirmEnrollment(userId: string, pairingId: string, expectedRevision: number) {
-    return this.repository.confirmEnrollment(
-      userId,
-      id.parse(pairingId),
-      generation.parse(expectedRevision),
-      this.now(),
+  async confirmEnrollment(userId: string, pairingId: string, expectedRevision: number) {
+    return this.project(
+      this.repository.confirmEnrollment(
+        userId,
+        id.parse(pairingId),
+        generation.parse(expectedRevision),
+        this.now(),
+      ),
     );
   }
   authenticateDevice(credential: string): LocalDeviceAuth {
@@ -107,135 +177,401 @@ export class LocalDeviceService {
       throw new LocalDeviceError("LOCAL_UNAUTHORIZED", "Device access denied.");
     return this.repository.authenticateDevice(digestLocalSecret(credential), this.now());
   }
-  heartbeat(auth: LocalDeviceAuth, policy: LocalPublicPolicy, report?: LocalControlReport) {
-    return this.repository.heartbeat(
-      auth,
-      localPublicPolicySchema.parse(policy),
-      this.now(),
-      report ? localControlReportSchema.parse(report) : undefined,
-    );
-  }
-  requestSettings(userId: string, deviceId: string, value: unknown) {
-    const input = localControlRequestSchema.parse(value);
-    return this.repository.requestSettings(
-      userId,
-      id.parse(deviceId),
-      input.expectedGeneration,
-      input.expectedRevision,
-      input.settings,
-      this.now(),
-    );
-  }
-  revokeOwned(userId: string, deviceId: string, expectedGeneration: number) {
-    return this.repository.revokeOwned(
+  async revokeOwned(userId: string, deviceId: string, expectedGeneration: number) {
+    const revoked = this.repository.revokeOwned(
       userId,
       id.parse(deviceId),
       generation.parse(expectedGeneration),
       this.now(),
     );
+    // Owner access is fenced even when remote child disposal remains pending.
+    await this.retireDeviceCredentials?.(userId, deviceId, { kind: "device" });
+    return revoked;
   }
-  requestRepositoryAdmission(
+  async snapshot(userId: string, deviceId: string): Promise<ControllerSnapshot> {
+    const identity = this.getDeviceIdentity(userId, deviceId);
+    if (identity.status !== "active")
+      throw new LocalDeviceError("LOCAL_UNAUTHORIZED", "Device access denied.");
+    if (!this.controller)
+      throw new LocalDeviceError("LOCAL_UNAVAILABLE", "The device owner is unavailable.");
+    let value: Record<string, unknown>;
+    try {
+      value = await this.controller.json(userId, deviceId, {
+        method: "GET",
+        path: "/v1/controller",
+      });
+    } catch {
+      throw new LocalDeviceError("LOCAL_UNAVAILABLE", "The device owner is unavailable.");
+    }
+    const snapshot = snapshotSchema.parse(value);
+    const current = this.getDeviceIdentity(userId, deviceId);
+    if (
+      current.status !== "active" ||
+      snapshot.userId !== userId ||
+      snapshot.deviceId !== deviceId ||
+      snapshot.deviceGeneration !== current.deviceGeneration ||
+      snapshot.ownerConnectionId !== current.connectionId ||
+      snapshot.connectionId !== current.connectionId ||
+      (snapshot.local.state === "configured" && snapshot.local.policy.deviceId !== deviceId)
+    )
+      throw new LocalDeviceError(
+        "LOCAL_UNAUTHORIZED",
+        "Device authority changed during observation.",
+      );
+    return snapshot;
+  }
+  async localSnapshot(userId: string, deviceId: string): Promise<LocalControllerSnapshot> {
+    const snapshot = await this.snapshot(userId, deviceId);
+    if (snapshot.local.state !== "configured")
+      throw new LocalDeviceError(
+        "LOCAL_UNAVAILABLE",
+        "Local capability is not configured on this controller.",
+      );
+    return {
+      ...snapshot.local,
+      version: snapshot.version,
+      userId: snapshot.userId,
+      deviceId: snapshot.deviceId,
+      deviceGeneration: snapshot.deviceGeneration,
+      ownerConnectionId: snapshot.ownerConnectionId,
+      connectionId: snapshot.connectionId,
+      observedAt: snapshot.observedAt,
+    };
+  }
+  private async project(device: LocalDeviceView): Promise<LocalDeviceView> {
+    if (device.status !== "active") return device;
+    try {
+      const snapshot = await this.snapshot(device.userId, device.deviceId);
+      return {
+        ...device,
+        label: snapshot.local.state === "configured" ? snapshot.local.policy.label : device.label,
+        owner: {
+          state: "available",
+          observedAt: snapshot.observedAt,
+          local:
+            snapshot.local.state === "configured"
+              ? {
+                  state: "configured",
+                  policy: snapshot.local.policy,
+                  control: snapshot.local.control,
+                }
+              : { state: "unconfigured" },
+          github: { resources: snapshot.github.resources! },
+        },
+      };
+    } catch (error) {
+      if (!(error instanceof LocalDeviceError) || error.code !== "LOCAL_UNAVAILABLE") throw error;
+      return { ...device, owner: { state: "unavailable" } };
+    }
+  }
+  async getActiveDevice(userId: string, deviceId: string): Promise<ActiveDevice> {
+    const device = await this.project(this.repository.getActiveDevice(userId, id.parse(deviceId)));
+    if (device.owner.state !== "available" || device.owner.local.state !== "configured")
+      throw new LocalDeviceError("LOCAL_UNAVAILABLE", "The device owner is unavailable.");
+    return { ...device, owner: { ...device.owner, local: device.owner.local } };
+  }
+  private async operation(
+    userId: string,
+    deviceId: string,
+    input: { method: string; path: string; body?: unknown },
+    requestId: string,
+  ): Promise<ControllerOperation> {
+    this.repository.getActiveDevice(userId, id.parse(deviceId));
+    if (!this.controller)
+      throw new LocalDeviceError("LOCAL_UNAVAILABLE", "The device owner is unavailable.");
+    let value: Record<string, unknown>;
+    try {
+      value = await this.controller.json(userId, deviceId, input);
+    } catch (error) {
+      const details =
+        error && typeof error === "object" && "details" in error
+          ? z
+              .object({ error: z.object({ code: z.string() }).passthrough() })
+              .safeParse(error.details)
+          : undefined;
+      const code =
+        error instanceof CodespaceResourceError
+          ? error.code
+          : details?.success
+            ? details.data.error.code
+            : error && typeof error === "object" && "code" in error
+              ? error.code
+              : undefined;
+      if (["CODESPACE_PROVIDER_UNAVAILABLE", "ECONNREFUSED", "ENOENT"].includes(String(code)))
+        throw new LocalDeviceError(
+          "LOCAL_UNAVAILABLE",
+          "The device owner is unavailable; no action was dispatched.",
+        );
+      if (["CODESPACE_AUTHORIZATION_REQUIRED", "LOCAL_UNAUTHORIZED"].includes(String(code)))
+        throw new LocalDeviceError(
+          "LOCAL_UNAUTHORIZED",
+          "The owner refused this authority before dispatch.",
+        );
+      if (code === "LOCAL_REQUEST_INVALID")
+        throw new LocalDeviceError(
+          "LOCAL_INVALID",
+          "The owner refused this request before dispatch.",
+        );
+      throw new LocalDeviceError(
+        "LOCAL_OUTCOME_UNCONFIRMED",
+        "Collect the original request identity before repeating this operation.",
+        requestId,
+      );
+    }
+    const operation = controllerOperationSchema.parse(value);
+    if (operation.requestId !== requestId)
+      throw new LocalDeviceError(
+        "LOCAL_CONFLICT",
+        "The owner returned a different request identity.",
+      );
+    return operation;
+  }
+  private completed(operation: ControllerOperation, lifecycle = false): unknown {
+    if (operation.state !== "completed" || !operation.outcome)
+      throw new LocalDeviceError(
+        "LOCAL_OUTCOME_UNCONFIRMED",
+        "Collect the original request identity before repeating this operation.",
+        operation.requestId,
+      );
+    if (operation.outcome.ok === false) {
+      const code = operation.outcome.error.code;
+      if (
+        lifecycle &&
+        ([
+          "WORKSPACE_OUTCOME_UNCONFIRMED",
+          "WORKSPACE_OUTCOME_UNKNOWN",
+          "LOCAL_CUSTODY_UNCONFIRMED",
+        ].includes(code) ||
+          scopedCredentialFailureOutcome(code) === "unconfirmed")
+      )
+        throw new LocalDeviceError(
+          "LOCAL_OUTCOME_UNCONFIRMED",
+          operation.outcome.error.message,
+          operation.requestId,
+        );
+      if (lifecycle && code === "LOCAL_GENERATION_CONFLICT")
+        throw new CodespaceResourceError(
+          "CODESPACE_GENERATION_CONFLICT",
+          operation.outcome.error.message,
+        );
+      throw new LocalDeviceError(
+        code === "LOCAL_UNAUTHORIZED" ||
+          code === "LOCAL_EXPIRED" ||
+          code === "LOCAL_CONFLICT" ||
+          code === "LOCAL_INVALID"
+          ? code
+          : "LOCAL_CONFLICT",
+        operation.outcome.error.message,
+      );
+    }
+    return operation.outcome.result;
+  }
+  resourceOperationResult(operation: ControllerOperation): unknown {
+    return this.completed(operation, true);
+  }
+  async requestSettings(userId: string, deviceId: string, value: unknown) {
+    const input = localControlRequestSchema.parse(value);
+    const identity = this.getDeviceIdentity(userId, deviceId);
+    if (identity.deviceGeneration !== input.expectedGeneration)
+      throw new LocalDeviceError("LOCAL_CONFLICT", "Device generation changed.");
+    this.completed(
+      await this.operation(
+        userId,
+        deviceId,
+        { method: "PUT", path: "/v1/controller/settings", body: input },
+        input.requestId,
+      ),
+    );
+    await this.retireDeviceCredentials?.(userId, deviceId, {
+      kind: "settings",
+      throughRevision: input.expectedRevision,
+    });
+    return this.getActiveDevice(userId, deviceId);
+  }
+  async collectSettings(userId: string, deviceId: string, requestId: string) {
+    controllerRequestIdSchema.parse(requestId);
+    const operation = await this.operation(
+      userId,
+      deviceId,
+      { method: "GET", path: "/v1/controller/operations/" + requestId },
+      requestId,
+    );
+    return operation.state === "completed" && operation.outcome?.ok
+      ? { ...operation, result: await this.getActiveDevice(userId, deviceId) }
+      : operation;
+  }
+  async getOperation(userId: string, deviceId: string, requestId: string) {
+    controllerRequestIdSchema.parse(requestId);
+    return this.operation(
+      userId,
+      deviceId,
+      { method: "GET", path: "/v1/controller/operations/" + requestId },
+      requestId,
+    );
+  }
+  async requestRepositoryAdmission(
     userId: string,
     deviceId: string,
     input: Omit<
       LocalRepositoryAdmissionReceipt,
       "revision" | "connectionId" | "localRepositoryId"
-    > & {
-      expectedRevision: number;
-    },
+    > & { expectedRevision: number },
   ) {
-    return this.repository.requestRepositoryAdmission(
-      userId,
-      id.parse(deviceId),
-      input,
-      this.now(),
+    const device = await this.getActiveDevice(userId, deviceId),
+      control = device.owner.local.control;
+    const previous = control.repositoryAdmissions?.find(
+      (receipt) => receipt.requestId === input.requestId,
     );
+    if (previous) {
+      if (
+        previous.githubRepositoryId !== input.githubRepositoryId ||
+        previous.creationRequestId !== input.creationRequestId ||
+        canonicalJson(previous.repository) !== canonicalJson(input.repository)
+      )
+        throw new LocalDeviceError("LOCAL_CONFLICT", "Repository request identity changed.");
+      // Admission metadata can precede the physical policy write. Its presence is
+      // not a certificate that this original owner operation completed successfully.
+      this.completed(await this.getOperation(userId, deviceId, "ws1-" + input.requestId));
+      const applied = device.owner.local.policy.repositories.find(
+        (repository) => repository.id === previous.localRepositoryId,
+      );
+      if (
+        control.status !== "applied" ||
+        !applied ||
+        canonicalJson(applied) !== canonicalJson(previous.repository)
+      )
+        throw new LocalDeviceError(
+          "LOCAL_CONFLICT",
+          "The original repository grant is not currently applied on its owner.",
+        );
+      if (input.creationRequestId)
+        this.repository.releaseRepositoryCreation(userId, input.creationRequestId, this.now());
+      return device;
+    }
+    if (
+      device.deviceGeneration !== input.deviceGeneration ||
+      control.revision !== input.expectedRevision
+    )
+      throw new LocalDeviceError("LOCAL_CONFLICT", "Device settings changed.");
+    assertAgentRepositoryAdmission(
+      control.appliedAgentRepositoryManagement,
+      input.repository,
+      input.creationRequestId ? "created" : "existing",
+    );
+    if (input.creationRequestId)
+      this.repository.validateRepositoryCreation(userId, device, {
+        creationRequestId: input.creationRequestId,
+        requestId: input.requestId,
+        githubRepositoryId: input.githubRepositoryId,
+        fullName: input.repository.fullName,
+      });
+    const requestId = "ws1-" + input.requestId;
+    this.completed(
+      await this.operation(
+        userId,
+        deviceId,
+        { method: "POST", path: "/v1/controller/repositories", body: { ...input, requestId } },
+        requestId,
+      ),
+    );
+    if (input.creationRequestId)
+      this.repository.releaseRepositoryCreation(userId, input.creationRequestId, this.now());
+    return this.getActiveDevice(userId, deviceId);
   }
-  getActiveDevice(userId: string, deviceId: string) {
-    return this.repository.getActiveDevice(userId, id.parse(deviceId));
+  bindResource(binding: LocalResourceBinding) {
+    return this.repository.bindResource(binding);
   }
-  authorizeGitHubOperation(
+  async executeResourceLifecycle(
+    userId: string,
+    deviceId: string,
+    resourceId: string,
+    input: ControllerLifecycle,
+  ) {
+    const binding = this.getBinding(userId, resourceId);
+    const current = this.getDeviceIdentity(userId, deviceId);
+    if (
+      !binding ||
+      binding.deviceId !== deviceId ||
+      binding.deviceGeneration !== current.deviceGeneration ||
+      binding.connectionId !== current.connectionId ||
+      current.status !== "active"
+    )
+      throw new LocalDeviceError("LOCAL_UNAUTHORIZED", "Resource routing authority changed.");
+    const result = this.resourceOperationResult(
+      await this.operation(
+        userId,
+        deviceId,
+        { method: "POST", path: "/v1/resources/" + resourceId + "/lifecycle", body: input },
+        input.requestId,
+      ),
+    );
+    if (this.retireDeviceCredentials && (input.action === "stop" || input.action === "delete"))
+      await this.retireDeviceCredentials?.(userId, deviceId, {
+        kind: "resource",
+        resourceId,
+        throughGeneration: z.object({ resourceGeneration: generation }).passthrough().parse(result)
+          .resourceGeneration,
+      });
+    return result;
+  }
+  getBinding(userId: string, resourceId: string) {
+    return this.repository.getBinding(userId, resourceId);
+  }
+  async authorizeGitHubOperation(
     auth: LocalDeviceAuth,
     resourceId: string,
     resourceGeneration: number,
     action: "fetch" | "push" | "pull_request",
   ) {
-    return this.repository.authorizeGitHubOperation(
-      auth,
-      id.parse(resourceId),
-      generation.parse(resourceGeneration),
-      action,
-      this.now(),
-    );
+    const current = this.getDeviceIdentity(auth.userId, auth.deviceId);
+    const binding = this.getBinding(auth.userId, resourceId);
+    if (
+      !binding ||
+      current.status !== "active" ||
+      current.deviceGeneration !== auth.deviceGeneration ||
+      current.connectionId !== auth.connectionId ||
+      binding.deviceId !== auth.deviceId
+    )
+      throw new LocalDeviceError("LOCAL_UNAUTHORIZED", "Local resource authority changed.");
+    const snapshot = await this.localSnapshot(auth.userId, auth.deviceId);
+    const resource = snapshot.resources.find((entry) => entry.resourceId === resourceId);
+    const grant = snapshot.policy.repositories.find((repo) => repo.id === binding.repositoryId);
+    if (
+      !resource ||
+      resource.routeGeneration !== resourceGeneration ||
+      resource.repositoryId !== binding.repositoryId ||
+      !grant ||
+      !snapshot.policy.enabled ||
+      snapshot.policy.leaseUntil <= this.now() ||
+      (action === "push" && !grant.allowPush) ||
+      (action === "pull_request" && grant.allowPullRequests !== true)
+    )
+      throw new LocalDeviceError(
+        "LOCAL_UNAUTHORIZED",
+        "The local repository operation is not approved.",
+      );
+    return grant;
   }
-  authorizeOwnedGitHubOperation(
+  async authorizeOwnedGitHubOperation(
     userId: string,
     resourceId: string,
     action: "fetch" | "push" | "pull_request",
   ) {
-    return this.repository.authorizeOwnedGitHubOperation(
-      userId,
-      id.parse(resourceId),
-      action,
-      this.now(),
-    );
-  }
-  bindResource(binding: LocalResourceBinding) {
-    return this.repository.bindResource(binding, this.now());
-  }
-  getBinding(userId: string, resourceId: string) {
-    return this.repository.getBinding(userId, resourceId);
-  }
-  enqueue(request: LocalRelayRequest) {
-    const input = relayRequestSchema.parse(request) as LocalRelayRequest;
-    if (
-      input.digest !== createHash("sha256").update(canonicalJson(input.payload)).digest("hex") ||
-      input.payload.id !== input.requestId ||
-      input.payload.expiresAt !== input.deadlineAt
-    )
-      throw new LocalDeviceError("LOCAL_INVALID", "Payload digest differs from relay identity.");
-    return this.repository.enqueue(input, this.now());
-  }
-  claim(auth: LocalDeviceAuth, limit = 1) {
-    return this.repository.claim(auth, z.number().int().min(1).max(8).parse(limit), this.now());
-  }
-  acknowledge(auth: LocalDeviceAuth, ack: LocalRelayAcknowledgement) {
-    return this.repository.acknowledge(
-      auth,
-      localAcknowledgementSchema.parse(ack) as LocalRelayAcknowledgement,
-      this.now(),
-    );
-  }
-  getResult(userId: string, requestId: string) {
-    return this.repository.getResult(userId, requestId);
-  }
-  getRequest(userId: string, requestId: string) {
-    return this.repository.getRequest(userId, requestId);
-  }
-  authorizePayload(auth: LocalDeviceAuth, requestId: string, claimId: string) {
-    return this.repository.authorizePayload(
-      auth,
-      id.parse(requestId),
-      id.parse(claimId),
-      this.now(),
-    );
-  }
-  authorizeResult(auth: LocalDeviceAuth, requestId: string, claimId: string) {
-    return this.repository.authorizeResult(
-      auth,
-      id.parse(requestId),
-      id.parse(claimId),
-      this.now(),
-    );
-  }
-  renewClaim(auth: LocalDeviceAuth, requestId: string, claimId: string) {
-    return this.repository.renewClaim(auth, id.parse(requestId), id.parse(claimId), this.now());
-  }
-  authorizeOutput(auth: LocalDeviceAuth, ack: LocalRelayAcknowledgement) {
-    return this.repository.authorizeOutput(
-      auth,
-      localAcknowledgementSchema.parse(ack) as LocalRelayAcknowledgement,
-      this.now(),
-    );
+    const binding = this.getBinding(userId, resourceId);
+    if (!binding) throw new LocalDeviceError("LOCAL_UNAUTHORIZED", "Local resource access denied.");
+    const snapshot = await this.localSnapshot(userId, binding.deviceId);
+    const resource = snapshot.resources.find((entry) => entry.resourceId === resourceId);
+    if (!resource)
+      throw new LocalDeviceError("LOCAL_UNAUTHORIZED", "Local resource access denied.");
+    return {
+      auth: binding,
+      resourceGeneration: resource.routeGeneration,
+      repository: await this.authorizeGitHubOperation(
+        binding,
+        resourceId,
+        resource.routeGeneration,
+        action,
+      ),
+    };
   }
 }

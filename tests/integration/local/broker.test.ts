@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, jest, test } from "@jest/globals";
 import { once } from "node:events";
+import supertest from "supertest";
 import { mkdtemp, rm, realpath, writeFile, readFile } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
@@ -15,6 +16,11 @@ import { LocalManager } from "../../../packages/local/src/manager.js";
 import { SbxRuntime } from "../../../packages/local/src/sbx-runtime.js";
 import { adaptSbxRuntime } from "../../../packages/local/src/local-vm-runtime-factory.js";
 import { LocalRefusal } from "../../../packages/local/src/policy.js";
+import { gitBroker } from "../../../packages/local/src/git-broker.js";
+import {
+  serveOwnerGit,
+  type OwnerPullRequest,
+} from "../../../packages/workspace-service/src/github-owner.mjs";
 
 let root: string;
 let state: PrivateState;
@@ -60,6 +66,122 @@ async function exitedPid(): Promise<number> {
 }
 
 describe("local broker authority and address boundary", () => {
+  test("old manual token bytes are preserved but never read into the guest broker grant", async () => {
+    const fixture = await localFixture(state);
+    const legacy = { token: "legacy-not-scoped", malformed: true };
+    const key = `git-${fixture.policy.repositories[0].id}.json`;
+    await state.write(key, legacy);
+    const grant = await fixture.records.authorize(fixture.authorization);
+    expect(grant?.repository.fullName).toBe("owner/project");
+    expect(grant).not.toHaveProperty("gitCredential");
+    expect(await state.read(key, (value) => value)).toEqual(legacy);
+  });
+
+  test.each(["repository rights", "native generation"])(
+    "an active response closes when its admitted %s changes even though Basic access remains valid",
+    async (change) => {
+      const fixture = await localFixture(state);
+      fixture.policy.repositories[0].allowPush = true;
+      await state.write("policy.json", fixture.policy);
+      let observe!: () => void;
+      const observing = new Promise<void>((done) => {
+        observe = done;
+      });
+      const broker = await startBroker({
+        authorize: (header) => fixture.records.authorize(header),
+        budget: new NetworkBudget(),
+        git: async (_request, response) => {
+          observe();
+          await once(response, "close");
+        },
+        onFault: () => {},
+      });
+      closers.push(broker.close);
+      const client = connect({ host: "127.0.0.1", port: broker.port });
+      client.on("error", () => {});
+      const closed = once(client, "close");
+      await once(client, "connect");
+      client.write(
+        `POST /git/owner/project.git/git-receive-pack HTTP/1.1\r\nHost: moira-local\r\nAuthorization: ${fixture.authorization}\r\nContent-Length: 0\r\n\r\n`,
+      );
+      await observing;
+      if (change === "repository rights") {
+        fixture.policy.repositories[0].allowPush = false;
+        await state.write("policy.json", fixture.policy);
+      } else {
+        fixture.space.generation++;
+        await fixture.records.put(fixture.space);
+      }
+      expect(await fixture.records.authorize(fixture.authorization)).not.toBeNull();
+      await closed;
+      expect(client.destroyed).toBe(true);
+    },
+  );
+  test("the fixed host PR route requires current Basic and repository rights and never returns its scoped credential", async () => {
+    const fixture = await localFixture(state);
+    fixture.policy.repositories[0].private = true;
+    await state.write("policy.json", fixture.policy);
+    const effect = join(root, "pull-request-effect");
+    const github = gitBroker(
+      new NetworkBudget(),
+      () => {},
+      async (grant) => ({
+        mode: "scoped",
+        token: "host-only-child",
+        credentialId: randomUUID(),
+        repositoryFullName: grant.repository.fullName,
+        expiresAt: Date.now() + 60000,
+        useUntil: grant.policy.leaseUntil,
+        validate: async () => {},
+        dispose: async () => {},
+      }),
+      {
+        git: serveOwnerGit,
+        pullRequest: async (_action, _input, authority) => {
+          const lease = await authority.acquire("pull_request_create", authority.signal);
+          try {
+            await writeFile(effect, "created");
+            return {
+              number: 7,
+              url: "https://github.com/owner/project/pull/7",
+              head: "feature",
+              base: "main",
+              title: "Approved",
+              draft: false,
+              state: "open",
+            } as OwnerPullRequest;
+          } finally {
+            await lease.dispose();
+          }
+        },
+      },
+    );
+    const broker = await startBroker({
+      authorize: (header) => fixture.records.authorize(header),
+      budget: new NetworkBudget(),
+      ...github,
+      onFault: () => {},
+    });
+    closers.push(broker.close);
+    const body = { head: "feature", base: "main", title: "Approved" };
+    const request = (authorization: string) =>
+      supertest(`http://127.0.0.1:${broker.port}`)
+        .post("/github/pull_request_create")
+        .set("Authorization", authorization)
+        .send(body);
+    expect((await request("Basic invalid")).status).toBe(403);
+    const refusal = await request(fixture.authorization);
+    expect(refusal.status).toBe(403);
+    expect(refusal.body.error.code).toBe("LOCAL_REPOSITORY_DENIED");
+    await expect(readFile(effect)).rejects.toThrow();
+    fixture.policy.repositories[0].allowPullRequests = true;
+    await state.write("policy.json", fixture.policy);
+    const response = await request(fixture.authorization);
+    expect(response.status).toBe(200);
+    expect(response.body.pull_request.url).toBe("https://github.com/owner/project/pull/7");
+    expect(JSON.stringify(response.body)).not.toContain("host-only-child");
+    expect(await readFile(effect, "utf8")).toBe("created");
+  });
   test("fixed tunnel carries simultaneous streams beyond the former socket ceiling", async () => {
     const peers = new Set<Socket>();
     const clients: Socket[] = [];

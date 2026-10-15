@@ -211,18 +211,25 @@ test.describe("Admin settings retained regions", () => {
     await expect(page.getByTestId("tab-values")).toBeVisible();
     await expect(page.getByTestId("mcp-prompt-systemPrompt-input")).toBeVisible();
     await selectTab(page, "codespaces");
-    await expect(page.getByTestId("admin-codespace-control-global")).toBeVisible();
+    await expect(page.getByTestId("admin-codespace-readiness-facts")).toBeVisible();
+    await expect(page.getByTestId("admin-codespace-disable-global")).toHaveCount(0);
   });
 
-  test("a native delayed and refused codespace read retains the same focused reason and neighbouring tab", async ({
+  test("a native delayed and refused codespace read retains readiness and the focused refresh control", async ({
     page,
   }) => {
     await page.goto("/admin/settings?tab=codespaces&lang=en");
     const region = page.getByTestId("admin-codespace-controls");
-    const input = page.locator('[id="codespace-control-reason-global"]');
-    await expect(input).toBeVisible();
-    await input.fill("Unsaved operator reason");
-    const original = await input.elementHandle();
+    const refresh = region.getByRole("button", { name: /Refresh/i });
+    const facts = page.getByTestId("admin-codespace-readiness-facts");
+    await expect(refresh).toBeVisible();
+    const previousFacts = await facts.innerText();
+    const original = await refresh.elementHandle();
+    const methods: string[] = [];
+    page.on("request", (request) => {
+      if (new URL(request.url()).pathname === "/api/admin/codespaces")
+        methods.push(request.method());
+    });
     let release!: () => void;
     let received!: () => void;
     const held = new Promise<void>((resolve) => {
@@ -240,25 +247,37 @@ test.describe("Admin settings retained regions", () => {
       await route.abort("failed");
     });
     try {
-      await region.getByRole("button", { name: /Refresh/i }).click();
+      await refresh.focus();
+      await page.keyboard.press("Enter");
       await arrived;
-      await input.focus();
       await expect(region).toHaveAttribute("aria-busy", "true");
-      await expect(input).toBeFocused();
-      await expect(input).toHaveValue("Unsaved operator reason");
+      await expect(refresh).toBeFocused();
+      await expect.poll(() => facts.innerText()).toBe(previousFacts);
       expect(await original!.evaluate((element) => element.isConnected)).toBe(true);
       release();
       await expect(region.getByRole("button", { name: "Retry", exact: true })).toBeVisible();
-      await expect(input).toBeFocused();
-      await expect(input).toHaveValue("Unsaved operator reason");
+      await expect(refresh).toBeFocused();
+      await expect.poll(() => facts.innerText()).toBe(previousFacts);
+      await page.unroute(pattern);
+      const [retried] = await Promise.all([
+        page.waitForResponse(
+          (response) => new URL(response.url()).pathname === "/api/admin/codespaces",
+        ),
+        region.getByRole("button", { name: "Retry", exact: true }).click(),
+      ]);
+      expect(retried.ok()).toBe(true);
+      await expect(region).toHaveAttribute("aria-busy", "false");
+      await expect(region.getByRole("button", { name: "Retry", exact: true })).toHaveCount(0);
+      expect(await original!.evaluate((element) => element.isConnected)).toBe(true);
       await selectTab(page, "maintenance");
       await expect(page.getByRole("button", { name: "Backup", exact: true })).toBeEnabled();
-      await page.unroute(pattern);
       await selectTab(page, "codespaces");
       await expect(region).toHaveAttribute("aria-busy", "false");
       await expect(region.getByRole("button", { name: "Retry", exact: true })).toHaveCount(0);
-      await expect(input).toHaveValue("Unsaved operator reason");
+      await expect.poll(() => facts.innerText()).toBe(previousFacts);
       expect(await original!.evaluate((element) => element.isConnected)).toBe(true);
+      expect(methods.length).toBeGreaterThanOrEqual(2);
+      expect(methods.every((method) => method === "GET")).toBe(true);
     } finally {
       release();
       await page.unroute(pattern);

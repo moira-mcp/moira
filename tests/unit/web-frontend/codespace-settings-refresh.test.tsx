@@ -6,12 +6,7 @@ import { afterEach, beforeEach, describe, expect, jest, test } from "@jest/globa
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import "@testing-library/jest-dom/jest-globals";
 import { I18nextProvider } from "react-i18next";
-import {
-  evaluateCodespaceResourcePolicy,
-  projectCodespaceLimits,
-  type CodespaceConnectionView,
-  type LocalDeviceView,
-} from "@mcp-moira/shared";
+import { type CodespaceConnectionView, type LocalDeviceView } from "@mcp-moira/shared";
 import i18n from "../../../packages/web-frontend/src/i18n";
 import { GitHubCodespacesProvider } from "../../../packages/web-frontend/src/pages/settings/GitHubCodespacesData";
 import { GitHubCodespaceManagement } from "../../../packages/web-frontend/src/pages/settings/GitHubCodespaceManagement";
@@ -39,13 +34,6 @@ const management: CodespaceManagementView = {
     provider: "github-codespaces",
     configuration: "available",
     resources_enabled: true,
-    controls: [],
-    connector: { state: "available", reason: null },
-    reconciliation: { due_resources: 0, oldest_due_age_ms: null },
-    usage: {
-      active_resources: 1,
-      max_active_resources: 4,
-    },
     checked_at: 1,
   },
   connection,
@@ -79,13 +67,10 @@ const management: CodespaceManagementView = {
       lifecycle_error: null,
     },
   ],
-  limits: projectCodespaceLimits({
-    policy: evaluateCodespaceResourcePolicy(() => undefined),
-    held: 1,
-    instanceHeld: 1,
-    idle: { autoStopEnabled: true, idleTimeoutMinutes: 30 },
-    providerIdleMaxMinutes: 240,
-  }),
+  provider_billing: "unavailable",
+  controllers: [
+    { device_id: "11111111-1111-4111-8111-111111111111", label: "Controller", available: true },
+  ],
 };
 
 const originalReact = (globalThis as typeof globalThis & { React?: typeof React }).React;
@@ -98,7 +83,6 @@ beforeEach(async () => {
   jest.spyOn(apiClient, "refreshGitHubCodespaces").mockResolvedValue({
     ...management,
     codespaces: [],
-    limits: { ...management.limits, codespaces: { ...management.limits.codespaces, held: 0 } },
   });
 });
 
@@ -172,7 +156,7 @@ describe("GitHub Codespaces Settings", () => {
           resources_stale: false,
           connection: disconnected,
           repositories: [],
-          limits: management.limits,
+          provider_billing: "unavailable",
         },
         {
           provider: "local-sandboxes",
@@ -181,7 +165,6 @@ describe("GitHub Codespaces Settings", () => {
           resources_stale: false,
           connection,
           repositories,
-          limits: management.limits,
         },
       ],
     });
@@ -215,7 +198,14 @@ describe("GitHub Codespaces Settings", () => {
             computer: {
               deviceId: computerId,
               status: "active",
-              policy: { enabled: true, leaseUntil: Date.now() + 600_000 },
+              owner: {
+                state: "available",
+                local: {
+                  state: "configured",
+                  policy: { enabled: true, leaseUntil: Date.now() + 600_000 },
+                },
+                github: { resources: [] },
+              },
             } as LocalDeviceView,
           }}
         />,
@@ -230,7 +220,13 @@ describe("GitHub Codespaces Settings", () => {
       });
       fireEvent.click(screen.getByTestId(`local-codespace-${computerId}-create-submit`));
       await waitFor(() =>
-        expect(bodies).toEqual([{ repository_id: second, ref: "feature/local" }]),
+        expect(bodies).toEqual([
+          {
+            repository_id: second,
+            ref: "feature/local",
+            request_id: expect.stringMatching(/^ws1-/),
+          },
+        ]),
       );
       expect(
         screen.queryByText(/Codespaces are billed to your personal GitHub account/),

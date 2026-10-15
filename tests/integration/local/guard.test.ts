@@ -271,6 +271,7 @@ int main(int argc,char **argv){
       "packages/local/src/sbx-runtime.ts",
       "packages/local/src/cli.ts",
       "packages/local/src/manager.ts",
+      "packages/local/src/guest-proxy.ts",
     ],
     outdir: root,
     bundle: true,
@@ -283,18 +284,23 @@ int main(int argc,char **argv){
       {
         name: "isolated-guard-credentials",
         setup(builder) {
-          builder.onLoad({ filter: /[/\\]relay\.ts$/ }, (args) => ({
-            loader: "ts",
-            resolveDir: dirname(args.path),
-            // Workspace credential issuance is the external cloud boundary. Native
-            // guest bootstrap and its request settlement remain real in this fixture.
-            contents: `export const relayOrigin=()=> 'https://workspace.invalid';
-            export class LocalDeviceAuthorityFailure extends Error {}
-            export class LocalRelay {
+          builder.onLoad({ filter: /[/\\]relay\.ts$/ }, async (args) => {
+            const source = await readFile(args.path, "utf8");
+            const declaration = "export class LocalRelay {";
+            if (source.split(declaration).length !== 2)
+              throw new Error("The guard fixture could not isolate the relay credential boundary");
+            return {
+              loader: "ts",
+              resolveDir: dirname(args.path),
+              // Keep the actual connection schema, authority errors and origin validation.
+              // Only external credential issuance is substituted; native guest settlement is real.
+              contents: `${source.replace(declaration, "class GuardFixtureRelayAuthority {")}
+            export class LocalRelay extends GuardFixtureRelayAuthority {
               async workspaceCredential(){return {origin:'https://workspace.invalid',credential:'fixture-workspace-credential'};}
               async gitIdentity(){return {name:'Fixture',email:'fixture@example.invalid'};}
             }`,
-          }));
+            };
+          });
           builder.onLoad({ filter: /[/\\]keychain\.ts$/ }, (args) => ({
             loader: "ts",
             resolveDir: dirname(args.path),
@@ -317,7 +323,6 @@ int main(int argc,char **argv){
     "packages/local/dist/runtime-control-helper",
     join(root, "runtime-control-helper"),
   );
-  await copyFile("packages/local/dist/guest-proxy.js", join(root, "guest-proxy.js"));
   await copyFile("packages/local/dist/runtime-api.js", join(root, "runtime-api.js"));
   const payload = join(root, "workspace-payload");
   await mkdir(join(payload, "service"), { recursive: true, mode: 0o700 });
@@ -336,7 +341,7 @@ int main(int argc,char **argv){
       size: archive.length,
     }),
   );
-  await copyFile("packages/local/dist/guest-proxy.js", join(payload, "service/guest-proxy.mjs"));
+  await copyFile(join(root, "guest-proxy.js"), join(payload, "service/guest-proxy.mjs"));
   await state.write("broker.json", { port: 42500 });
   return { ...local, state, observation, pending, release, sentinel };
 }

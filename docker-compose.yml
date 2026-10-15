@@ -89,18 +89,7 @@ services:
       - CODESPACE_CREDENTIAL_VAULT_KEY=${CODESPACE_CREDENTIAL_VAULT_KEY:-}
       - CODESPACE_CREDENTIAL_VAULT_KEY_VERSION=${CODESPACE_CREDENTIAL_VAULT_KEY_VERSION:-v1}
       - CODESPACE_CODESPACES_ENABLED=${CODESPACE_CODESPACES_ENABLED:-false}
-      - CODESPACE_MAX_CPU_CORES=${CODESPACE_MAX_CPU_CORES:-4}
-      - CODESPACE_MAX_MEMORY_GB=${CODESPACE_MAX_MEMORY_GB:-8}
-      - CODESPACE_MAX_STORAGE_GB=${CODESPACE_MAX_STORAGE_GB:-32}
-      - CODESPACE_MAX_ACTIVE_PER_USER=${CODESPACE_MAX_ACTIVE_PER_USER:-4}
-      - CODESPACE_MAX_ACTIVE_GLOBAL=${CODESPACE_MAX_ACTIVE_GLOBAL:-16}
-      - CODESPACE_CREATE_THROTTLE_SECONDS=${CODESPACE_CREATE_THROTTLE_SECONDS:-60}
       - CODESPACE_PERSISTENT_RETENTION_DAYS=${CODESPACE_PERSISTENT_RETENTION_DAYS:-30}
-      - CODESPACE_CREATE_DEADLINE_MINUTES=${CODESPACE_CREATE_DEADLINE_MINUTES:-15}
-      - CODESPACE_CLEANUP_DEADLINE_MINUTES=${CODESPACE_CLEANUP_DEADLINE_MINUTES:-15}
-      - CODESPACE_CLAIM_LEASE_SECONDS=${CODESPACE_CLAIM_LEASE_SECONDS:-30}
-      - CODESPACE_RECONCILE_INTERVAL_SECONDS=${CODESPACE_RECONCILE_INTERVAL_SECONDS:-30}
-      - CODESPACE_START_WAIT_SECONDS=${CODESPACE_START_WAIT_SECONDS:-180}
       - CODESPACE_TRANSFER_TTL_MINUTES=${CODESPACE_TRANSFER_TTL_MINUTES:-10}
       # Empty keeps extensions disabled. When the optional profile is enabled, point this at the
       # runner service over the Compose network.
@@ -109,9 +98,6 @@ services:
     # The dependency is optional because the runner profile is off by default. When the profile is
     # selected, wait for its catalog endpoint before Moira performs its one-time registry sync.
     depends_on:
-      moira-codespace-connector:
-        condition: service_healthy
-        required: false
       moira-extension-runner:
         condition: service_healthy
         required: false
@@ -122,7 +108,6 @@ services:
     # SQLite database + execution storage persist on the host. Survives rebuilds.
     volumes:
       - ./data:/app/data
-      - codespace_connector_run:/run/moira-codespace-connector
 
     # Internal metrics/health server (9090) is the source of truth for health.
     healthcheck:
@@ -130,77 +115,6 @@ services:
       interval: 30s
       timeout: 10s
       start_period: 40s
-      retries: 3
-
-  # Credential-bearing GitHub CLI/SSH work is isolated from the application,
-  # database, vault and application network. Only this Unix socket is shared.
-  moira-codespace-connector:
-    profiles: ["codespaces"]
-    image: ${MOIRA_IMAGE:-ghcr.io/moira-mcp/moira:latest}
-    # An init process reaps the gh/ssh helpers that jobs leave behind; without it they
-    # stay as zombies under the Node server and exhaust the PID and process limits.
-    init: true
-    entrypoint: ["/usr/local/bin/node", "--experimental-strip-types"]
-    command:
-      - /app/packages/web-backend/src/services/github-codespaces-connector-server.ts
-    restart: "on-failure:3"
-    read_only: true
-    cap_drop: ["ALL"]
-    cap_add: ["SETUID", "SETGID"]
-    security_opt:
-      - no-new-privileges:true
-    pids_limit: 384
-    mem_limit: 640m
-    cpus: 1.0
-    tmpfs:
-      - /tmp:rw,nosuid,nodev,noexec,size=536870912,mode=1777
-    volumes:
-      - codespace_connector_run:/run/moira-codespace-connector
-      - codespace_egress_run:/run/moira-codespace-egress
-    network_mode: none
-    environment:
-      - HTTPS_PROXY=http://127.0.0.1:18080
-      - HTTP_PROXY=http://127.0.0.1:18080
-      - NO_PROXY=
-    depends_on:
-      moira-codespace-egress:
-        condition: service_healthy
-    healthcheck:
-      test:
-        [
-          "CMD-SHELL",
-          'curl --fail --silent --unix-socket /run/moira-codespace-connector/connector.sock http://localhost/health | grep -q ''"state":"available"''',
-        ]
-      interval: 10s
-      timeout: 3s
-      start_period: 10s
-      retries: 3
-
-  # Credential-free CONNECT proxy. It is the connector's only route to the
-  # public network and accepts only reviewed GitHub/Codespaces HTTPS hosts.
-  moira-codespace-egress:
-    profiles: ["codespaces"]
-    image: ${MOIRA_IMAGE:-ghcr.io/moira-mcp/moira:latest}
-    entrypoint: ["/usr/local/bin/node", "--experimental-strip-types"]
-    command:
-      - /app/packages/web-backend/src/services/github-codespaces-egress-proxy.ts
-    restart: "on-failure:3"
-    read_only: true
-    cap_drop: ["ALL"]
-    security_opt:
-      - no-new-privileges:true
-    pids_limit: 128
-    mem_limit: 128m
-    cpus: 0.25
-    volumes:
-      - codespace_egress_run:/run/moira-codespace-egress
-    networks:
-      - codespace_connector_public
-    healthcheck:
-      test: ["CMD", "test", "-S", "/run/moira-codespace-egress/proxy.sock"]
-      interval: 10s
-      timeout: 3s
-      start_period: 5s
       retries: 3
 
   # Extension handlers run in a companion process. The profile is deliberately disabled by
@@ -226,10 +140,3 @@ services:
       timeout: 10s
       start_period: 20s
       retries: 3
-
-volumes:
-  codespace_connector_run:
-  codespace_egress_run:
-
-networks:
-  codespace_connector_public:

@@ -1,10 +1,9 @@
-import { effectiveCodespaceLimits } from "./resource-policy.js";
-import { CODESPACE_PROVIDER_LOCAL } from "./local-device-types.js";
-import { codespaceLifecycleErrorCode } from "./resource-types.js";
 import type {
   CodespaceResourceErrorCode,
-  CodespaceResourcePolicy,
-  CodespaceResourceRecord,
+  CodespaceResourceState,
+  CodespaceDesiredState,
+  CodespaceObservedState,
+  CodespaceRetentionPolicy,
 } from "./resource-types.js";
 
 /**
@@ -31,45 +30,20 @@ export interface CodespaceSummaryView {
     cpu_cores: number;
     memory_bytes: number;
     storage_bytes: number;
-  };
-  state: CodespaceResourceRecord["state"];
-  retention_policy: CodespaceResourceRecord["retentionPolicy"];
-  desired_state: CodespaceResourceRecord["desiredState"];
-  observed_state: CodespaceResourceRecord["observedState"];
+  } | null;
+  state: CodespaceResourceState;
+  retention_policy: CodespaceRetentionPolicy;
+  desired_state: CodespaceDesiredState;
+  observed_state: CodespaceObservedState;
   /** Null until an exact provider observation succeeds; retries do not advance it. */
   observed_at: number | null;
   lifecycle_error: CodespaceResourceErrorCode | null;
   generation: number;
   created_at: number;
   updated_at: number;
-}
-
-export function projectCodespaceSummary(codespace: CodespaceResourceRecord): CodespaceSummaryView {
-  return {
-    codespace_id: codespace.id,
-    provider: codespace.provider,
-    repository_id: codespace.repositoryId,
-    repository: codespace.repositoryFullName,
-    requested_ref: codespace.requestedRef,
-    current_ref: codespace.observedRef,
-    machine: {
-      name: codespace.machine.name,
-      display_name: codespace.machine.displayName,
-      operating_system: codespace.machine.operatingSystem,
-      cpu_cores: codespace.machine.cpuCores,
-      memory_bytes: codespace.machine.memoryBytes,
-      storage_bytes: codespace.machine.storageBytes,
-    },
-    state: codespace.state,
-    retention_policy: codespace.retentionPolicy,
-    desired_state: codespace.desiredState,
-    observed_state: codespace.observedState,
-    observed_at: codespace.observedAt,
-    lifecycle_error: codespaceLifecycleErrorCode(codespace.lastOutcome),
-    generation: codespace.generation,
-    created_at: codespace.createdAt,
-    updated_at: codespace.updatedAt,
-  };
+  pending_request_ids?: string[];
+  device_id?: string;
+  provider_url?: string;
 }
 
 /** GitHub's monthly bill for the connected personal account, separate from Moira's own limits. */
@@ -95,96 +69,16 @@ export interface CodespaceAvailableBillingView {
 
 export type CodespaceProviderBillingView = "unavailable" | CodespaceAvailableBillingView;
 
-/**
- * One user's codespace limits beside their current use, as both the website and the MCP `list`
- * result present them. Every limit is the value Moira enforces (see `effectiveCodespaceLimits`);
- * usage counts only this user's own codespaces, operations and transfers, except the instance-wide
- * codespace count the instance ceiling is measured against, which readiness already reports.
- */
-export interface CodespaceLimitsView {
-  codespaces: {
-    /** Codespaces the user holds; stopped ones and ones still being created or cleaned up count. */
-    held: number;
-    max_per_user: number | null;
-    instance_held: number;
-    max_instance: number | null;
-    create_throttle_seconds: number | null;
-  };
-  machine_ceiling: { cpu_cores: number; memory_bytes: number; storage_bytes: number } | null;
-  lifecycle: {
-    retention_days: number;
-    start_wait_seconds: number;
-    idle: { auto_stop_enabled: boolean; timeout_minutes: number; provider_max_minutes: number };
-  };
-  /** The provider's monthly billing read, independent of limits enforced by Moira. */
-  provider: { billing: CodespaceProviderBillingView };
-}
-
-export function projectCodespaceLimits(input: {
-  provider?: string;
-  policy: CodespaceResourcePolicy;
-  held: number;
-  instanceHeld: number;
-  idle: { autoStopEnabled: boolean; idleTimeoutMinutes: number };
-  providerIdleMaxMinutes: number;
-}): CodespaceLimitsView {
-  const { policy } = input;
-  const local = input.provider === CODESPACE_PROVIDER_LOCAL;
-  const limits = effectiveCodespaceLimits(policy);
-  const seconds = (milliseconds: number) => Math.floor(milliseconds / 1000);
-  return {
-    codespaces: {
-      held: input.held,
-      max_per_user: local ? null : policy.maxActivePerUser,
-      instance_held: input.instanceHeld,
-      max_instance: local ? null : policy.maxActiveGlobal,
-      create_throttle_seconds: local ? null : seconds(policy.createThrottleMs),
-    },
-    machine_ceiling: local
-      ? null
-      : {
-          cpu_cores: policy.maxCpuCores,
-          memory_bytes: policy.maxMemoryBytes,
-          storage_bytes: policy.maxStorageBytes,
-        },
-    lifecycle: {
-      retention_days: Math.floor(limits.persistentRetentionMs / (24 * 60 * 60_000)),
-      start_wait_seconds: seconds(policy.startWaitMs),
-      idle: {
-        auto_stop_enabled: input.idle.autoStopEnabled,
-        timeout_minutes: input.idle.idleTimeoutMinutes,
-        provider_max_minutes: input.providerIdleMaxMinutes,
-      },
-    },
-    provider: { billing: "unavailable" },
-  };
-}
-
-export type CodespaceControlScope = "global" | `provider:${string}`;
-
-/** Durable emergency control as shown to administrators. */
-export interface CodespaceControlView {
-  scope: CodespaceControlScope;
-  disabled: boolean;
-  reason: string | null;
-  updated_at: number | null;
-}
-
-/**
- * The one rule every health surface applies: a disabled or administrator-stopped
- * feature is healthy, while invalid configuration or an unreachable connector degrades
- * the instance.
- */
+/** Disabled configuration is healthy; invalid configuration degrades the instance. */
 export function isCodespaceReadinessDegraded(
   readiness: Pick<CodespaceReadinessView, "state">,
 ): boolean {
-  return readiness.state === "misconfigured" || readiness.state === "connector_unavailable";
+  return readiness.state === "misconfigured";
 }
 
 /**
  * What unauthenticated liveness surfaces may reveal: the readiness state, the
- * provider and whether it degrades the instance. Control reasons, backlog and capacity
- * figures stay on authenticated surfaces.
+ * provider and whether configuration degrades the instance.
  */
 export interface CodespacePublicReadinessView {
   state: CodespaceReadinessState;
@@ -202,8 +96,7 @@ export function projectPublicCodespaceReadiness(
   };
 }
 
-export type CodespaceReadinessState =
-  "disabled" | "misconfigured" | "control_disabled" | "connector_unavailable" | "ready";
+export type CodespaceReadinessState = "disabled" | "misconfigured" | "ready";
 
 /**
  * One instance-level readiness decision shared by the website, administration,
@@ -216,15 +109,5 @@ export interface CodespaceReadinessView {
   provider: string;
   configuration: "absent" | "invalid" | "available";
   resources_enabled: boolean;
-  controls: CodespaceControlView[];
-  connector: { state: "available" | "unavailable" | "not_applicable"; reason: string | null };
-  reconciliation: {
-    due_resources: number;
-    oldest_due_age_ms: number | null;
-  };
-  usage: {
-    active_resources: number;
-    max_active_resources: number | null;
-  };
   checked_at: number;
 }

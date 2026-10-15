@@ -1,8 +1,13 @@
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
+import { spawn, execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { createHash } from "node:crypto";
 import { resolve } from "node:path";
+import { mkdtemp, mkdir, readFile, rm } from "node:fs/promises";
+import { promisify } from "node:util";
+import { build } from "esbuild";
+import sharp from "sharp";
+import tar from "tar-stream";
 import { createWorkspaceRequestId } from "../packages/shared/src/codespaces/workspace-request-id.ts";
 import {
   WORKSPACE_INSTALL_SCRIPT,
@@ -10,10 +15,14 @@ import {
   WORKSPACE_CONFIGURE_SCRIPT,
   WORKSPACE_START_SCRIPT,
   WORKSPACE_HEALTH_SCRIPT,
+  WORKSPACE_GITHUB_PROOF_SCRIPT,
   loadWorkspacePayload,
   workspaceInstallInput,
 } from "../packages/workspace-service/src/bootstrap.mjs";
 import { DEFAULT_TEMPLATE } from "../packages/local/dist/config.js";
+import { sdfWorkflow, sdfExecution } from "../tests/helpers/sdf-progress-fixture.ts";
+import { compileBinaryExtensionArtifact } from "../packages/extension-runner/src/binary-artifact.ts";
+import { scanExtensionBundles } from "../packages/extension-runner/src/bundle-loader.ts";
 
 function docker(argv, input) {
   return new Promise((done, failed) => {
@@ -53,7 +62,29 @@ const payload = await loadWorkspacePayload(
   process.arch,
 );
 let container;
-try {
+let fixtureDirectory;
+verification: try {
+  await mkdir(resolve("../agent_temp_files_local"), { recursive: true });
+  fixtureDirectory = await mkdtemp(resolve("../agent_temp_files_local/guest-router-"));
+  const keyPath = `${fixtureDirectory}/key.pem`,
+    caPath = `${fixtureDirectory}/ca.pem`;
+  await promisify(execFile)("openssl", [
+    "req",
+    "-x509",
+    "-newkey",
+    "rsa:2048",
+    "-nodes",
+    "-days",
+    "1",
+    "-subj",
+    "/CN=localhost",
+    "-addext",
+    "subjectAltName=IP:127.0.0.1",
+    "-keyout",
+    keyPath,
+    "-out",
+    caPath,
+  ]);
   await docker(["image", "inspect", DEFAULT_TEMPLATE, "--format", "{{.Id}}"]);
   container = (
     await docker([
@@ -66,6 +97,8 @@ try {
       "1000:1000",
       "--env",
       "HOME=/home/agent",
+      "--env",
+      "NODE_EXTRA_CA_CERTS=/tmp/owner-ca.pem",
       "--cap-drop",
       "ALL",
       "--security-opt",
@@ -94,6 +127,33 @@ try {
   assert.equal(installed.releaseIdentity, payload.release);
   const program = `/home/agent/.local/share/moira-workspace/releases/${payload.release}`;
   const node = `${program}/runtime/bin/node`;
+  // Execute the shipped renderer, with its private native modules and fonts. A
+  // callback backed by the checkout's Sharp cannot satisfy this observation.
+  const progressGraph = sdfWorkflow();
+  const progressStart = progressGraph.nodes.find((entry) => entry.type === "start");
+  assert.ok(progressStart, "Bundled progress fixture has no start node");
+  const renderedProgress = await docker(
+    [
+      "exec",
+      "--interactive",
+      container,
+      node,
+      "--input-type=module",
+      "-e",
+      "const {renderOwnerProgress}=await import(process.argv[1]);let input='';for await(const chunk of process.stdin)input+=chunk;const descriptor=JSON.parse(input);const bytes=await renderOwnerProgress(descriptor,{cacheRoot:'/tmp/owner-renderer-cache'});process.stdout.write(bytes);",
+      `file://${program}/service/owner-renderer.mjs`,
+    ],
+    JSON.stringify({
+      kind: "steps",
+      graph: progressGraph,
+      run: sdfExecution(progressGraph, progressStart.id),
+      renderContext: { runUrl: "https://moira.example/executions/owner-fixture" },
+    }),
+  );
+  const progressMetadata = await sharp(renderedProgress).metadata();
+  assert.equal(progressMetadata.format, "png");
+  assert.equal(progressMetadata.width, 1170);
+  assert.ok(progressMetadata.height > 0, "Packaged renderer returned an empty progress image");
   const cli = (...args) =>
     docker(["exec", "--interactive", container, "/home/agent/.local/bin/moira-workspace", ...args]);
   await docker([
@@ -104,18 +164,130 @@ try {
     "mkdir /workspaces/project; git init /workspaces/project; git -C /workspaces/project remote add origin https://github.com/owner/project.git",
   ]);
   const measured = JSON.parse(await fixed(WORKSPACE_PROBE_SCRIPT));
+  const resourceId = randomUUID();
+  const extensionBundle = scanExtensionBundles(
+    resolve("tests/fixtures/extension-bundles"),
+  ).bundles.find((bundle) => bundle.manifest.name === "channel-probe");
+  assert.ok(extensionBundle, "Installed binary extension fixture is missing");
+  const extensionArtifact = await compileBinaryExtensionArtifact(extensionBundle);
+  // This disposable authority is confined to the fixture container. It exercises
+  // the actual common-owner router, without provider/account or real-GitHub claims.
+  const routerBundle = await build({
+    stdin: {
+      contents: `
+      import {createServer} from 'node:https';
+      import {readFile} from 'node:fs/promises';
+      import assert from 'node:assert/strict';
+      import {createHash} from 'node:crypto';
+      import {WorkspaceRouter} from ${JSON.stringify(resolve("packages/web-backend/src/services/workspace-router.ts"))};
+      import {readOwnerFrame} from ${JSON.stringify(resolve("packages/workspace-service/src/stream-frame.mjs"))};
+      const input=JSON.parse(await readFile('/tmp/router-input.json','utf8'));
+      const binding={kind:'workspace',userId:input.resourceId,resourceId:input.resourceId,resourceGeneration:1,authorizationGeneration:1,environmentIdentity:input.environmentIdentity};
+      const router=new WorkspaceRouter({credential:async credential=>{if(credential!==input.credential)throw new Error('Fixture credential refused');return binding;},request:async(user,id)=>{if(user!==binding.userId||id!==binding.resourceId)throw new Error('Fixture principal refused');return binding;}});
+      const observed={prepared:0,artifacts:0,sent:0,size:0,sha256:null};
+      const server=createServer({key:await readFile('/tmp/owner-key.pem'),cert:await readFile('/tmp/owner-ca.pem')},async(request,response)=>{
+        const json=value=>{response.writeHead(200,{'content-type':'application/json'});response.end(JSON.stringify(value));};
+        try {
+          if(request.url==='/fixture/connected')return json({connected:router.isConnected(binding)});
+          if(request.url==='/fixture/extension')return json(observed);
+          assert.equal(request.headers.authorization,'Bearer '+input.credential);
+          if(request.method==='GET'&&request.url==='/api/communication/owner/artifacts/channel-probe.notifications/'+input.extensionDigest){
+            observed.artifacts++;
+            response.writeHead(200,{'content-type':'application/octet-stream'});
+            response.end(await readFile('/tmp/extension-artifact.json'));return;
+          }
+          if(request.method==='POST'&&request.url==='/api/communication/owner/prepare'){
+            let text='';for await(const chunk of request)text+=chunk;
+            const value=JSON.parse(text);
+            assert.equal(value.scope.resourceId,input.resourceId);
+            assert.equal(value.scope.environmentIdentity,input.environmentIdentity);
+            assert.deepEqual(value.channelIds,['channel-probe.notifications']);
+            observed.prepared++;
+            return json({channels:[{channelId:'channel-probe.notifications',provider:'extension',authorityDigest:'a'.repeat(64),bundleDigest:input.extensionDigest,settings:{'channel-probe.enabled':true,'channel-probe.destination':'configured'}}]});
+          }
+          if(request.method==='POST'&&request.url==='/api/communication/owner/send'){
+            const frame=await readOwnerFrame(request);
+            assert.equal(frame.control.scope.resourceId,input.resourceId);
+            assert.equal(frame.control.bundleDigest,input.extensionDigest);
+            assert.equal(frame.control.operationId,'upload');
+            assert.deepEqual(frame.control.controls,{caption:'packaged custom binary'});
+            const hash=createHash('sha256');let size=0;
+            for await(const chunk of frame.body){size+=chunk.length;hash.update(chunk);}
+            assert.equal(size,frame.control.file.size);
+            observed.size=size;observed.sha256=hash.digest('hex');observed.sent++;
+            return json({status:'delivered'});
+          }
+          response.writeHead(404);response.end();
+        }catch{response.writeHead(500);response.end();}
+      });
+      router.attach(server);
+      await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(0,'127.0.0.1',resolve);});
+      process.on('SIGTERM',()=>{void router.close().then(()=>{server.closeAllConnections();server.close(()=>process.exit(0));});});
+      process.send({ready:true,origin:'https://127.0.0.1:'+server.address().port,processId:process.pid});
+    `,
+      resolveDir: process.cwd(),
+      sourcefile: "guest-router-fixture.ts",
+      loader: "ts",
+    },
+    bundle: true,
+    platform: "node",
+    target: "node24",
+    format: "esm",
+    write: false,
+  });
+  for (const [path, bytes] of [
+    ["/tmp/owner-key.pem", await readFile(keyPath)],
+    ["/tmp/owner-ca.pem", await readFile(caPath)],
+    ["/tmp/router.mjs", routerBundle.outputFiles[0].contents],
+    ["/tmp/extension-artifact.json", extensionArtifact.bytes],
+    [
+      "/tmp/router-input.json",
+      Buffer.from(
+        JSON.stringify({
+          resourceId,
+          environmentIdentity: measured.environmentIdentity,
+          credential: "x".repeat(43),
+          extensionDigest: extensionArtifact.digest,
+        }),
+      ),
+    ],
+  ]) {
+    await docker(
+      [
+        "exec",
+        "--interactive",
+        container,
+        node,
+        "-e",
+        `require('node:fs').writeFileSync(${JSON.stringify(path)},require('node:fs').readFileSync(0),{mode:384})`,
+      ],
+      bytes,
+    );
+  }
+  const router = JSON.parse(
+    await docker([
+      "exec",
+      container,
+      node,
+      "-e",
+      "const {spawn}=require('node:child_process');const child=spawn(process.execPath,['/tmp/router.mjs'],{detached:true,stdio:['ignore','ignore','inherit','ipc']});child.once('error',()=>process.exit(1));child.once('exit',()=>process.exit(1));child.once('message',value=>{if(!value.ready)process.exit(1);process.stdout.write(JSON.stringify(value));child.disconnect();child.unref();});",
+    ]),
+  );
+  assert.ok(Number.isSafeInteger(router.processId) && router.processId > 1);
   // Missing configuration must fail the actual startup owner. A request to
   // start is not readiness, and offline health must settle without a waiter.
   await assert.rejects(fixed(WORKSPACE_START_SCRIPT));
   await assert.rejects(fixed(WORKSPACE_HEALTH_SCRIPT));
   const configuration = {
     version: 1,
+    repositoryId: "1",
+    resourceId,
     repositoryFullName: "owner/project",
     root: "/workspaces/project",
     remote: {
       version: 1,
-      origin: "https://moira.example.invalid",
-      resourceId: randomUUID(),
+      origin: router.origin,
+      resourceId,
       resourceGeneration: 1,
       authorizationGeneration: 1,
       environmentIdentity: measured.environmentIdentity,
@@ -137,8 +309,97 @@ try {
   const ready = JSON.parse(await fixed(WORKSPACE_START_SCRIPT));
   assert.equal(ready.releaseIdentity, payload.release);
   assert.ok(Number.isSafeInteger(ready.processId) && ready.processId > 1);
+  const registered = JSON.parse(
+    await docker([
+      "exec",
+      container,
+      node,
+      "-e",
+      "const {request}=require('node:https');const fs=require('node:fs');const config=JSON.parse(fs.readFileSync('/home/agent/.local/share/moira-workspace/config.json'));const request_=request(new URL('/fixture/connected',config.remote.origin),{ca:fs.readFileSync('/tmp/owner-ca.pem')},response=>{response.pipe(process.stdout);});request_.once('error',()=>process.exit(1));request_.end();",
+    ]),
+  );
+  assert.equal(registered.connected, true);
+  if (process.argv.includes("--rename-only")) {
+    const renamed = {
+      ...configuration,
+      repositoryFullName: "owner/renamed",
+      previousRepositoryFullName: configuration.repositoryFullName,
+    };
+    for (const refused of [
+      { ...renamed, repositoryId: "2" },
+      {
+        ...renamed,
+        resourceId: randomUUID(),
+        remote: { ...renamed.remote, resourceId: randomUUID() },
+      },
+      { ...renamed, previousRepositoryFullName: "foreign/project" },
+    ]) {
+      await assert.rejects(
+        fixed(WORKSPACE_CONFIGURE_SCRIPT, JSON.stringify(refused)),
+        /WORKSPACE_REPOSITORY_REBIND_UNPROVEN/,
+      );
+    }
+    const proof = JSON.parse(
+      await fixed(
+        WORKSPACE_GITHUB_PROOF_SCRIPT,
+        JSON.stringify({
+          resourceId,
+          repositoryId: "1",
+          repositoryFullName: renamed.repositoryFullName,
+          previousRepositoryFullName: configuration.repositoryFullName,
+        }),
+      ),
+    );
+    assert.equal(proof.root, configuration.root);
+    await fixed(
+      WORKSPACE_CONFIGURE_SCRIPT,
+      JSON.stringify({ ...renamed, rootDevice: proof.rootDevice, rootInode: proof.rootInode }),
+    );
+    await fixed(WORKSPACE_START_SCRIPT);
+    assert.equal(
+      JSON.parse(await fixed(WORKSPACE_HEALTH_SCRIPT)).repositoryFullName,
+      renamed.repositoryFullName,
+    );
+    await docker([
+      "exec",
+      container,
+      node,
+      "-e",
+      "const fs=require('node:fs');const assert=require('node:assert/strict');const {execFileSync}=require('node:child_process');const path='/home/agent/.local/share/moira-workspace/config.json';const config=JSON.parse(fs.readFileSync(path));assert.equal(config.github.repositoryId,'1');assert.equal(config.binding.repositoryFullName,'owner/renamed');assert.equal(execFileSync('/usr/bin/git',['-C','/workspaces/project','config','--get','remote.origin.url'],{encoding:'utf8'}).trim(),'https://github.com/owner/project.git');delete config.github.repositoryId;fs.writeFileSync(path,JSON.stringify(config),{mode:384});",
+    ]);
+    await assert.rejects(
+      fixed(
+        WORKSPACE_CONFIGURE_SCRIPT,
+        JSON.stringify({
+          ...renamed,
+          repositoryFullName: "owner/second-rename",
+          previousRepositoryFullName: renamed.repositoryFullName,
+        }),
+      ),
+      /WORKSPACE_REPOSITORY_REBIND_UNPROVEN/,
+    );
+    console.log(
+      "Verified same numeric/resource guest rename proof and reconfiguration without changing the canonical Git origin; wrong identity/prior-name and legacy unproved rename refuse. This is a disposable Linux owner fixture, not real GitHub provider proof.",
+    );
+    break verification;
+  }
   const health = JSON.parse(await fixed(WORKSPACE_HEALTH_SCRIPT));
   assert.equal(health.processId, ready.processId);
+  const exclusiveOwner = JSON.parse(
+    await docker([
+      "exec",
+      container,
+      node,
+      "-e",
+      "const fs=require('node:fs');const {spawnSync}=require('node:child_process');const base='/home/agent/.local/state/moira/workspace-service';const owner=JSON.parse(fs.readFileSync(base+'/daemon.json'));const fd=fs.statSync('/proc/'+owner.pid+'/fd/4');const lock=fs.statSync(base+'/daemon.lock');const info=fs.readFileSync('/proc/'+owner.pid+'/fdinfo/4','utf8');const attempt=spawnSync('/usr/bin/flock',['--exclusive','--nonblock',base+'/daemon.lock','/bin/true']);process.stdout.write(JSON.stringify({pid:owner.pid,sameInode:fd.dev===lock.dev&&fd.ino===lock.ino,heldKernelLock:info.split('\\n').some(line=>/^lock:\\s+\\S+:\\s+FLOCK\\s+ADVISORY\\s+WRITE\\s+/.test(line)),competingStatus:attempt.status}));",
+    ]),
+  );
+  assert.deepEqual(exclusiveOwner, {
+    pid: ready.processId,
+    sameInode: true,
+    heldKernelLock: true,
+    competingStatus: 1,
+  });
   await assert.rejects(
     docker(["exec", container, node, `${program}/service/daemon.mjs`, "--start"]),
   );
@@ -227,17 +488,295 @@ try {
   );
   await cli("write", "binary.dat", "/tmp/binary");
   assert.deepEqual(await cli("read", "binary.dat"), bytes);
+  const publication = JSON.parse(
+    await cli("publish", "binary.dat", "binary.dat", "application/octet-stream"),
+  );
+  const file = publication.structuredContent?.file;
+  assert.ok(file && !publication.isError, "Packaged CLI publication failed");
+  assert.equal(file.name, "binary.dat");
+  assert.equal(file.mime_type, "application/octet-stream");
+  assert.equal(file.size_bytes, bytes.length);
+  assert.equal(file.sha256, createHash("sha256").update(bytes).digest("hex"));
+  assert.ok(Number.isSafeInteger(file.expires_at) && file.expires_at > Date.now());
+  const prefix = `owner-file://workspace/${configuration.remote.resourceId}/`;
+  assert.ok(
+    typeof file.reference_id === "string" && file.reference_id.startsWith(prefix),
+    "Publication scope differs from the configured resource",
+  );
+  const token = file.reference_id.slice(prefix.length);
+  assert.ok(/^[A-Za-z0-9_-]{43}$/.test(token), "Publication capability is malformed");
+  const link = publication.content?.[0];
+  assert.ok(
+    link?.type === "resource_link" &&
+      link.uri ===
+        `${configuration.remote.origin}/api/codespaces/files/${configuration.remote.resourceId}/${token}`,
+    "Packaged CLI did not return the owner public link",
+  );
+  assert.equal(link.name, file.name);
+  assert.equal(link.mimeType, file.mime_type);
+  assert.equal(link.size, file.size_bytes);
+  // The capability travels through private stdin, never argv or diagnostic output.
+  const publicationBytes = (selectedToken = token) =>
+    docker(
+      [
+        "exec",
+        "--interactive",
+        container,
+        node,
+        "-e",
+        "const fs=require('node:fs');const {request}=require('node:http');const {token}=JSON.parse(fs.readFileSync(0,'utf8'));const req=request({socketPath:'/home/agent/.local/state/moira/workspace-service/service.sock',method:'GET',path:'/v1/publications/'+encodeURIComponent(token)},res=>{if(res.statusCode!==200){res.resume();process.stderr.write('Owner publication refused');process.exitCode=1;return;}res.on('error',()=>{process.stderr.write('Owner publication stream failed');process.exitCode=1;});res.pipe(process.stdout);});req.on('error',()=>{process.stderr.write('Owner publication unavailable');process.exitCode=1;});req.end();",
+      ],
+      JSON.stringify({ token: selectedToken }),
+    );
+  assert.deepEqual(await publicationBytes(), bytes);
+  assert.deepEqual(await publicationBytes(), bytes);
+  // Exercise the shipped daemon, CLI transport export, binary handler and native
+  // supervisor together. Only the vendor authority is a confined TLS fixture.
+  const deliveryRequestId = createWorkspaceRequestId();
+  const deliver = (method, path, body) =>
+    docker(
+      [
+        "exec",
+        "--interactive",
+        container,
+        node,
+        "--input-type=module",
+        "-e",
+        "const {workspaceRequest}=await import(process.argv[1]);let text='';for await(const chunk of process.stdin)text+=chunk;const input=JSON.parse(text);const response=await workspaceRequest('/home/agent/.local/state/moira/workspace-service/service.sock',input.method,input.path,input.body===undefined?undefined:JSON.stringify(input.body),{'content-type':'application/json'});if(response.statusCode!==200)throw new Error('Packaged communication refused');for await(const chunk of response)process.stdout.write(chunk);",
+        `file://${program}/service/cli.mjs`,
+      ],
+      JSON.stringify({ method, path, body }),
+    ).then((value) => JSON.parse(value));
+  const deliveryInput = {
+    action: "deliver",
+    requestId: deliveryRequestId,
+    source: { type: "publication", referenceId: file.reference_id },
+    channelIds: ["channel-probe.notifications"],
+    kind: "document",
+    text: "packaged custom binary",
+  };
+  const delivery = await deliver("POST", "/v1/communication", deliveryInput);
+  assert.equal(delivery.state, "completed");
+  assert.equal(delivery.outcome?.ok, true);
+  assert.equal(delivery.outcome.result.status, "delivered");
+  assert.equal(delivery.stages.length, 1);
+  assert.equal(delivery.stages[0].status, "delivered");
+  assert.deepEqual(await deliver("POST", "/v1/communication", deliveryInput), delivery);
+  assert.deepEqual(
+    await deliver("GET", `/v1/communication/operations/${deliveryRequestId}`),
+    delivery,
+  );
+  const extensionObserved = JSON.parse(
+    await docker([
+      "exec",
+      container,
+      node,
+      "-e",
+      "const https=require('node:https');const fs=require('node:fs');const config=JSON.parse(fs.readFileSync('/home/agent/.local/share/moira-workspace/config.json'));https.get(new URL('/fixture/extension',config.remote.origin),{ca:fs.readFileSync('/tmp/owner-ca.pem')},response=>response.pipe(process.stdout)).once('error',()=>process.exit(1));",
+    ]),
+  );
+  assert.deepEqual(extensionObserved, {
+    prepared: 1,
+    artifacts: 1,
+    sent: 1,
+    size: bytes.length,
+    sha256: createHash("sha256").update(bytes).digest("hex"),
+  });
+  // The actual daemon loads its shipped archive asset and private locked tar
+  // dependency; a host renderer callback cannot satisfy this observation.
+  const materializeRequestId = createWorkspaceRequestId();
+  const materializeFiles = [
+    { path: "guides/инструкция🙂.md", content: "Привет, 世界 🙂\n" },
+    { path: "empty.txt", content: "" },
+  ];
+  const materializeInput = {
+    action: "publish",
+    requestId: materializeRequestId,
+    expectedScope: {
+      kind: "workspace",
+      resourceId,
+      resourceGeneration: 1,
+      authorizationGeneration: 1,
+      environmentIdentity: measured.environmentIdentity,
+    },
+    source: { type: "materialize-text-set", files: materializeFiles },
+  };
+  const archiveReceipt = await deliver("POST", "/v1/communication", materializeInput);
+  assert.equal(archiveReceipt.outcome?.ok, true);
+  const archive = archiveReceipt.outcome.result.file;
+  assert.equal(archive.fileName, "materialize.tar");
+  assert.equal(archive.mimeType, "application/x-tar");
+  const archiveToken = archive.referenceId.split("/").at(-1);
+  const archiveBytes = await publicationBytes(archiveToken);
+  assert.equal(archiveBytes.length, archive.size);
+  assert.equal(createHash("sha256").update(archiveBytes).digest("hex"), archive.sha256);
+  const extractedFiles = await new Promise((resolve, reject) => {
+    const parser = tar.extract();
+    const files = [];
+    parser.on("entry", (header, stream, next) => {
+      const chunks = [];
+      stream.on("data", (chunk) => chunks.push(chunk));
+      stream.once("error", reject);
+      stream.once("end", () => {
+        files.push({ path: header.name, content: Buffer.concat(chunks).toString("utf8") });
+        next();
+      });
+    });
+    parser.once("error", reject);
+    parser.once("finish", () => resolve(files));
+    parser.end(archiveBytes);
+  });
+  assert.deepEqual(extractedFiles, materializeFiles);
+  assert.deepEqual(await deliver("POST", "/v1/communication", materializeInput), archiveReceipt);
+  assert.deepEqual(
+    await deliver("GET", `/v1/communication/operations/${materializeRequestId}`),
+    archiveReceipt,
+  );
+  assert.deepEqual(await publicationBytes(archiveToken), archiveBytes);
+  await docker(
+    [
+      "exec",
+      "--interactive",
+      container,
+      node,
+      "-e",
+      "require('node:fs').writeFileSync('/workspaces/project/binary.dat',require('node:fs').readFileSync(0))",
+    ],
+    Buffer.from("changed workspace version"),
+  );
+  assert.deepEqual(await publicationBytes(), bytes);
+  await docker(
+    [
+      "exec",
+      "--interactive",
+      container,
+      node,
+      "-e",
+      "require('node:fs').writeFileSync('/workspaces/project/binary.dat',require('node:fs').readFileSync(0))",
+    ],
+    bytes,
+  );
+  // Reuse the real small PNG fixture shape from owner image tests; no source-network claim.
+  const png = await sharp({ create: { width: 3, height: 2, channels: 3, background: "#aabbcc" } })
+    .png()
+    .toBuffer();
+  await docker(
+    [
+      "exec",
+      "--interactive",
+      container,
+      node,
+      "-e",
+      "require('node:fs').writeFileSync('/tmp/preview.png',require('node:fs').readFileSync(0))",
+    ],
+    png,
+  );
+  await cli("write", "preview.png", "/tmp/preview.png");
+  const preview = JSON.parse(await cli("preview", "preview.png"));
+  assert.ok(!preview.isError, "Packaged CLI preview failed");
+  assert.deepEqual(preview.structuredContent, {
+    mime_type: "image/png",
+    width: 3,
+    height: 2,
+    size_bytes: png.length,
+    sha256: createHash("sha256").update(png).digest("hex"),
+  });
+  const image = preview.content?.find((block) => block.type === "image");
+  assert.ok(image && image.mimeType === "image/png", "Packaged CLI omitted the owner image");
+  assert.deepEqual(Buffer.from(image.data, "base64"), png);
   await fixed(WORKSPACE_INSTALL_SCRIPT, workspaceInstallInput(payload));
   await fixed(WORKSPACE_START_SCRIPT);
   assert.equal(JSON.parse(await fixed(WORKSPACE_HEALTH_SCRIPT)).releaseIdentity, payload.release);
   assert.equal((await cli("output", id, "stdout")).toString(), "owned-runtime");
   assert.deepEqual(await cli("read", "binary.dat"), bytes);
   await assert.rejects(cli("read", "../outside"));
+  const previousGhOwner = JSON.parse(await fixed(WORKSPACE_HEALTH_SCRIPT));
+  await docker(["exec", container, node, `${program}/service/daemon.mjs`, "--stop"]);
+  await assert.rejects(fixed(WORKSPACE_HEALTH_SCRIPT));
+  const stoppedOwner = JSON.parse(
+    await docker([
+      "exec",
+      container,
+      node,
+      "-e",
+      `const fs=require('node:fs');const {spawnSync}=require('node:child_process');let actorAbsent=false;try{const record=fs.readFileSync('/proc/${previousGhOwner.processId}/stat','utf8');actorAbsent=['Z','X'].includes(record.slice(record.lastIndexOf(') ')+2).split(' ')[0])}catch(error){if(error.code!=='ENOENT')throw error;actorAbsent=true}const attempt=spawnSync('/usr/bin/flock',['--exclusive','--nonblock','/home/agent/.local/state/moira/workspace-service/daemon.lock','/bin/true']);process.stdout.write(JSON.stringify({actorAbsent,competingStatus:attempt.status}));`,
+    ]),
+  );
+  assert.deepEqual(stoppedOwner, { actorAbsent: true, competingStatus: 0 });
+  // This fixture changes provider mode. Retire only the rewrite its verified GH
+  // configuration installed, retaining the repository's original declaration.
+  await docker([
+    "exec",
+    container,
+    node,
+    "-e",
+    "const fs=require('node:fs');const assert=require('node:assert/strict');const {execFileSync}=require('node:child_process');const c=JSON.parse(fs.readFileSync('/home/agent/.local/share/moira-workspace/config.json'));assert.equal(c.github.canonicalOrigin,'https://github.com/owner/project.git');const git=(...args)=>execFileSync('/usr/bin/git',['-C','/workspaces/project',...args],{encoding:'utf8'}).trim();assert.equal(git('remote','get-url','origin'),c.github.brokerOrigin);assert.equal(git('remote','get-url','--push','origin'),c.github.brokerOrigin);git('config','--local','--unset-all','url.'+c.github.brokerOrigin+'.insteadOf');assert.equal(git('remote','get-url','origin'),c.github.canonicalOrigin);",
+  ]);
+  const localOnly = {
+    version: 1,
+    mode: "local-only",
+    repositoryFullName: "owner/project",
+    root: "/workspaces/project",
+    expectedOrigin: "https://github.com/owner/project.git",
+    environmentIdentity: measured.environmentIdentity,
+  };
+  // Explicit owner-only mode still requires the installed Local proxy and the
+  // measured guest life. Missing binding must fail rather than disabling checks.
+  await assert.rejects(fixed(WORKSPACE_CONFIGURE_SCRIPT, JSON.stringify(localOnly)));
+  await docker([
+    "exec",
+    container,
+    node,
+    "-e",
+    "const fs=require('node:fs');const path='/home/agent/.local/share/moira-local';fs.mkdirSync(path,{recursive:true,mode:448});fs.writeFileSync(path+'/environment.json',JSON.stringify({HTTPS_PROXY:'http://fixture:owner-proxy@127.0.0.1:3437'}),{mode:384})",
+  ]);
+  await assert.rejects(
+    fixed(
+      WORKSPACE_CONFIGURE_SCRIPT,
+      JSON.stringify({ ...localOnly, environmentIdentity: "f".repeat(64) }),
+    ),
+  );
+  await fixed(WORKSPACE_CONFIGURE_SCRIPT, JSON.stringify(localOnly));
+  await docker([
+    "exec",
+    container,
+    node,
+    "-e",
+    "const assert=require('node:assert/strict');const config=JSON.parse(require('node:fs').readFileSync('/home/agent/.local/share/moira-workspace/config.json'));assert.equal(Object.hasOwn(config,'remote'),false);assert.equal(new URL(config.proxy).port,'3437');assert.match(config.environmentIdentity,/^[a-f0-9]{64}$/)",
+  ]);
+  const localReady = JSON.parse(await fixed(WORKSPACE_START_SCRIPT));
+  assert.equal(localReady.environmentIdentity, measured.environmentIdentity);
+  assert.equal(localReady.releaseIdentity, payload.release);
+  assert.equal((await cli("output", id, "stdout")).toString(), "owned-runtime");
+  assert.deepEqual(await cli("read", "binary.dat"), bytes);
+  const localId = createWorkspaceRequestId();
+  assert.equal(
+    (
+      await cli(
+        "exec",
+        "--request-id",
+        localId,
+        "--",
+        node,
+        "-e",
+        "const target=new URL(process.env.HTTPS_PROXY);if(target.hostname!=='127.0.0.1'||target.port!=='3437')process.exit(37);process.stdout.write('local-owner-ready')",
+      )
+    )
+      .toString()
+      .split("\n")[0],
+    localId,
+  );
+  do {
+    status = JSON.parse(await cli("status", localId));
+  } while (["running", "starting"].includes(status.state));
+  assert.equal(status.state, "succeeded");
+  assert.equal((await cli("output", localId, "stdout")).toString(), "local-owner-ready");
   await docker(["exec", container, node, `${program}/service/daemon.mjs`, "--stop"]);
   await assert.rejects(fixed(WORKSPACE_HEALTH_SCRIPT));
   console.log(
-    "Verified pinned Linux runtime installation, actual startup readiness and failure, single-owner locking, offline Unix CLI, exact exit/output, binary files and in-place restart preserving workspace data and receipts.",
+    "Verified pinned Linux runtime installation, authenticated registration with the actual disposable loopback WorkspaceRouter, startup failure, single-owner locking, explicit Local-only configuration with measured guest life and proxy, offline Unix CLI, exact exit/output, binary files, owner publication with repeated immutable reads, packaged UTF-8 materialize tar and original publication replay/collect, packaged custom binary extension delivery with original-receipt replay/collect, exact PNG preview and in-place restart preserving workspace data and receipts. Real GitHub provisioning, vendor delivery and native source networking were not exercised.",
   );
 } finally {
   if (container && /^[a-f0-9]{64}$/.test(container)) await docker(["rm", "--force", container]);
+  if (fixtureDirectory) await rm(fixtureDirectory, { recursive: true, force: true });
 }

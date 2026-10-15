@@ -7,7 +7,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 
 const MIGRATIONS = path.resolve(process.cwd(), "packages/web-backend/drizzle");
-const TABLE = "communication_attachment_grant";
+const TABLE = "archiveCommunicationAttachmentGrant";
 const MIGRATION_TAG = "0023_communication_attachment_grants";
 
 function copyBeforeGrantMigration(directory: string): string {
@@ -25,7 +25,7 @@ function copyBeforeGrantMigration(directory: string): string {
 }
 
 describe("communication attachment grant migration", () => {
-  test("upgrades an existing database with the digest-only grant shape", () => {
+  test("upgrades an existing database with the complete digest-only historical grant shape", () => {
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), "moira-communication-migration-"));
     const sqlite = new Database(path.join(directory, "moira.db"));
     try {
@@ -47,15 +47,11 @@ describe("communication attachment grant migration", () => {
           "expires_at",
         ]),
       );
-      const indexes = (
-        sqlite.prepare(`PRAGMA index_list(${TABLE})`).all() as Array<{ name: string }>
-      ).map((index) => index.name);
-      expect(indexes).toEqual(
-        expect.arrayContaining([
-          "communication_grant_user_state_expiry_idx",
-          "communication_grant_state_expiry_idx",
-        ]),
-      );
+      expect(
+        sqlite
+          .prepare("SELECT name FROM sqlite_master WHERE name='communication_attachment_grant'")
+          .get(),
+      ).toBeUndefined();
     } finally {
       sqlite.close();
       fs.rmSync(directory, { recursive: true, force: true });

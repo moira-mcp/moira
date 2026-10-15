@@ -101,21 +101,15 @@ import {
   createLocalDeviceRoutes,
 } from "./routes/local-devices.js";
 import { createAdminCodespaceRoutes } from "./routes/admin-codespaces.js";
-import { createLocalGitHubDeliveryRoutes } from "./routes/local-github-delivery.js";
-import { getLocalGitHubDeliveryService } from "./services/local-github-delivery-factory.js";
+import { createLocalGitIdentityRoutes } from "./routes/local-git-identity.js";
+import { getLocalGitIdentityService } from "./services/local-git-identity-factory.js";
+import { createScopedCredentialRouter } from "./routes/scoped-credentials.js";
+import { createGitHubControllerRoutes } from "./routes/github-controller.js";
+import { getScopedCredentialService } from "./services/scoped-credential-factory.js";
 import { mcpClientAutoRegister } from "./middleware/mcp-client-auto-register.js";
 import { auth } from "./auth.js";
-import {
-  getLocalDeviceService,
-  getCodespaceProviderBundles,
-  startCodespaceProviderServices,
-  stopCodespaceProviderServices,
-} from "./services/codespace-services.js";
-import {
-  getCodespaceResourcePolicy,
-  ExecutionChangeRepository,
-  getSqliteInstance,
-} from "@mcp-moira/shared";
+import { getLocalDeviceService } from "./services/codespace-services.js";
+import { ExecutionChangeRepository, getSqliteInstance } from "@mcp-moira/shared";
 
 // ES module compatibility
 const __filename = fileURLToPath(import.meta.url);
@@ -137,6 +131,7 @@ class MoiraApiServer {
   private app: express.Application;
   private server: Server | undefined;
   private metricsServer: Server | undefined;
+  private readonly scopedCredentials = getScopedCredentialService();
 
   constructor() {
     try {
@@ -167,6 +162,21 @@ class MoiraApiServer {
   private setupMiddlewareBeforeAuth(): void {
     // Derive req.ip only through the proxies TRUST_PROXY names (the in-container nginx by default)
     applyTrustProxy(this.app);
+
+    // Private broker credentials bypass global request/body logging and error context.
+    this.app.use(
+      "/api/codespaces/github/credentials",
+      createScopedCredentialRouter(this.scopedCredentials),
+      (_req, res) =>
+        res.status(404).json({
+          error: { code: "ENDPOINT_NOT_FOUND", message: "Unknown private credential endpoint" },
+        }),
+    );
+    this.app.use("/api/codespaces/github/resources", createGitHubControllerRoutes(), (_req, res) =>
+      res.status(404).json({
+        error: { code: "ENDPOINT_NOT_FOUND", message: "Unknown private controller endpoint" },
+      }),
+    );
 
     // Prometheus metrics middleware FIRST (before any logging)
     this.app.use(metricsMiddleware());
@@ -219,9 +229,9 @@ class MoiraApiServer {
     this.app.use(
       "/api/local-devices",
       apiLimiter,
-      createLocalGitHubDeliveryRoutes(
+      createLocalGitIdentityRoutes(
         getLocalDeviceService(),
-        getLocalGitHubDeliveryService().delivery,
+        getLocalGitIdentityService(),
         getBaseUrl(),
       ),
       createLocalDeviceRoutes(getLocalDeviceService(), getBaseUrl()),
@@ -534,9 +544,7 @@ class MoiraApiServer {
       getExecutionRetentionService().start();
       // The overview's live updates: this process's watcher of the change feed and its trimming.
       getExecutionChangeHub().start();
-      startCodespaceProviderServices();
-      for (const bundle of getCodespaceProviderBundles())
-        bundle.observability.start(getCodespaceResourcePolicy().reconcileIntervalMs);
+      await this.scopedCredentials.recover();
 
       // Establish this process's extension state. The API server and the MCP server run as
       // separate processes, so each needs its own registry and its own runner client: without them
@@ -613,11 +621,9 @@ class MoiraApiServer {
         uptime: process.uptime(),
       });
 
-      stopCodespaceProviderServices();
       void stopWorkspaceRouter().catch((error) =>
         logger.error("Workspace router shutdown failed", error),
       );
-      for (const bundle of getCodespaceProviderBundles()) bundle.observability.stop();
 
       // Close metrics server
       if (this.metricsServer) {

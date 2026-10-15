@@ -17,8 +17,6 @@ import { LocalManager } from "./manager.js";
 import { localPolicySchema, LocalRefusal, type LocalPolicy } from "./policy.js";
 import { replaceStoppedPolicy } from "./guard.js";
 import { resizeStorage } from "./storage.js";
-import type { LocalRelay } from "./relay.js";
-import { LocalRpc } from "./rpc.js";
 
 const approvalSchema = z
   .object({
@@ -75,54 +73,6 @@ export function controlSettings(
     gitAuthor: policy.gitAuthor ?? null,
     agentRepositoryManagement: delegation,
   });
-}
-/** Keep management alive without an SDK owner while work is disabled or expired. */
-export class LocalCompanion {
-  private opened = false;
-  private readonly rpc: LocalRpc;
-  constructor(
-    readonly manager: LocalManager,
-    readonly relay: LocalRelay,
-    readonly control = new LocalWebControl(manager.records),
-  ) {
-    this.rpc = new LocalRpc(manager);
-  }
-  async pause(): Promise<void> {
-    await this.manager.stopWork();
-    await this.relay.drain();
-    this.opened = false;
-  }
-  async cycle(signal?: AbortSignal): Promise<boolean> {
-    await this.manager.holdRunnerLock();
-    const local = await this.manager.records.policy();
-    if ((!local.enabled || local.leaseUntil <= Date.now()) && this.opened) await this.pause();
-    await this.relay.confirmed(signal);
-    const applied = await this.control.apply(this.relay.control, this.manager);
-    if (applied) {
-      if (applied === true) this.opened = false;
-      await this.relay.confirmed(signal);
-    }
-    const policy = await this.manager.records.policy();
-    if (!policy.enabled || policy.leaseUntil <= Date.now()) {
-      if (this.opened) await this.pause();
-      // The same relay admits only authenticated owner cleanup while ordinary work is closed.
-      // Wait for its addressed management outcome before retiring its cleanup-only native owner.
-      if (this.relay.control?.optedIn) {
-        try {
-          await this.relay.poll(this.rpc, signal);
-        } finally {
-          await this.manager.stopWork();
-        }
-      }
-      return false;
-    }
-    if (!this.opened) {
-      await this.manager.open();
-      this.opened = true;
-    }
-    await this.relay.poll(this.rpc, signal, true);
-    return true;
-  }
 }
 export class LocalWebControl {
   constructor(
@@ -186,9 +136,24 @@ export class LocalWebControl {
         : {}),
     };
   }
+  async hasUnsettledEffect(): Promise<boolean> {
+    const approval = await this.records.state.read("web-control.json", approvalSchema.parse);
+    const intent = await this.records.state.read("control-intent.json", (value) =>
+      z.object({ revision: z.number().int().positive() }).passthrough().parse(value),
+    );
+    if (!intent) return false;
+    // The durable owner receipt proves completion; retiring its final intent
+    // requires no native effect and does not retry an unknown transition.
+    if (approval && intent.revision <= approval.appliedRevision) {
+      await this.records.state.remove("control-intent.json");
+      return false;
+    }
+    return true;
+  }
   async apply(
     view: LocalDeviceControlView | undefined,
     manager: LocalManager,
+    kind: "settings" | "repository" = "settings",
   ): Promise<boolean | "live"> {
     const approval = await this.records.state.read("web-control.json", approvalSchema.parse);
     const intentSchema = z
@@ -199,14 +164,10 @@ export class LocalWebControl {
         previousDelegation: agentRepositoryManagementSchema.nullable().optional(),
       })
       .strict();
-    let intent = approval
+    await this.hasUnsettledEffect();
+    const intent = approval
       ? await this.records.state.read("control-intent.json", intentSchema.parse)
       : null;
-    // A persisted ACK proves completion even if interruption retained its final intent file.
-    if (approval && intent && intent.revision <= approval.appliedRevision) {
-      await this.records.state.remove("control-intent.json");
-      intent = null;
-    }
     if (
       !approval ||
       !view ||
@@ -224,16 +185,18 @@ export class LocalWebControl {
     const previousDelegation = intent?.livePrevious
       ? (intent.previousDelegation ?? null)
       : approval.agentRepositoryManagement;
-    const delegatedRequest =
-      view.repositoryAdmissions?.some((entry) => entry.revision === view.revision) === true;
+    const delegatedRequest = kind === "repository";
+    const repositoriesUnchanged =
+      JSON.stringify(previousPolicy.repositories) === JSON.stringify(view.settings.repositories);
     const live =
       isLiveLocalSettingsChange(
         controlSettings(previousPolicy, previousDelegation),
         view.settings,
       ) &&
       (delegatedRequest ||
-        JSON.stringify(previousDelegation) !==
-          JSON.stringify(view.settings.agentRepositoryManagement) ||
+        (repositoriesUnchanged &&
+          JSON.stringify(previousDelegation) !==
+            JSON.stringify(view.settings.agentRepositoryManagement)) ||
         Boolean(intent?.livePrevious));
     let effectStarted = false;
     try {
@@ -260,6 +223,11 @@ export class LocalWebControl {
         );
       if (live) {
         const additions = view.settings.repositories.slice(previousPolicy.repositories.length);
+        if (delegatedRequest && additions.length !== 1)
+          throw new LocalRefusal(
+            "LOCAL_CONTROL_CONFLICT",
+            "Admit exactly one verified repository request at a time.",
+          );
         if (additions.length) {
           if (
             JSON.stringify(previousDelegation) !==

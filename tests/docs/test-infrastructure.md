@@ -12,10 +12,20 @@ All test suites are managed by **testfold** — a unified test runner configured
 4. The configured `afterSuite` hook verifies apparent framework success before reporting
 5. Built-in reporters generate console output, JSON summary, failure reports, timing stats
 
-The unit suite's `beforeSuite` hook builds the common workspace daemon, CLI, local bootstrap
-and guest proxy through `scripts/build-workspace-service.js`, including filtered runs. Integration global setup runs
-`npm run local:build` for the companion bundles and native helpers before preparing its
-database. A failed build stops preparation before test execution.
+The unit suite's `beforeSuite` hook builds the common workspace programs through
+`scripts/build-workspace-service.js`, including filtered runs. Unit global setup compiles
+the host-native process custody and runtime-control helpers with
+`scripts/build-local-native.js`. Integration global setup builds the host Local programs
+with `scripts/build-local-programs.js`, those native helpers, and its owner programs with
+`scripts/build-workspace-service.js` before preparing its database. Controller rendering
+uses the installed npm dependencies. Neither setup downloads or packages guest archives, GitHub CLI toolchains,
+fonts or renderer dependencies. Full `npm run local:build` release packaging remains
+separate. A failed build stops preparation before test execution.
+
+The hosted integration job runs an exact-byte copy of its Node interpreter in a private
+temporary directory with mode `0700`. Hosted toolcache files are writable by other users;
+the process custody supervisor correctly refuses them. The job does not change the shared
+toolcache permissions or relax the shipped supervisor's executable checks.
 
 The workspace builder compiles each program in memory, writes and syncs an exclusively created
 sibling temporary file, closes it and atomically renames it to the final path. Held file

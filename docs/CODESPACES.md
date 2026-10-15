@@ -15,12 +15,16 @@ receive provider credentials, OAuth operations, SSH configuration or lifecycle
 capabilities. Agents reach codespaces through the authenticated MCP
 `codespace` and `codespace_process` tools and the direct workspace CLI described below; the website owns the GitHub connection and
 offers the same basic codespace management (list, create, start, stop, confirmed
-delete) over the same services. Administrators own the instance-wide kill switches.
+delete and GitHub adoption) over the same services. Cloud checks current account, repository and
+assigned-device authority. Physical lifecycle and its original-operation journal belong to the
+paired controller; existing Local work follows its owner grants and finite lease.
 
 ## Component boundary
 
-Shared connection/resource services own tenant authorization, grants, lifecycle, billing,
-desired/observed state and reconciliation. `packages/workspace-service/` owns commands,
+Shared connection/resource services own tenant authorization, repository grants, billing reads
+and minimal resource routing identity. The paired controller owns GitHub and Local lifecycle,
+original receipts and live observations; Local policy and repository admission also remain there.
+`packages/workspace-service/` owns commands,
 sessions, input, output and guarded files inside each workspace. Its terminal CLI and
 remote clients reach the same private Unix HTTP service and durable local journal.
 
@@ -28,20 +32,22 @@ The backend workspace router authenticates scoped agent credentials and forwards
 HTTP streams over outbound HTTPS Upgrade connections. Its rendezvous state is in memory:
 there is no cloud command queue or result store. `WorkspaceAuthRepository` stores only
 credential digests bound to user, resource, authorization/resource generations and measured
-guest life. Fixed provider bootstrap installs the common payload without giving the guest
-GitHub or device credentials.
+guest life. Fixed provider bootstrap installs the common payload without giving project
+commands the original GitHub OAuth, refresh or device credentials.
 
-GitHub's connector performs fixed bootstrap/readiness and provider lifecycle work.
+The paired controller uses fixed authorized GitHub REST actions and its packaged provisioner
+to install and start the common service. The cloud does not run SSH, bootstrap workers or a
+lifecycle reconciler.
 The Local companion owns exact VM lifecycle, approved policy, storage, SDK credentials
-and inline lifecycle relay; ordinary commands/files bypass that relay.
-`CodespaceTransferService` separately owns private attachment publication and one-use
-download links. It does not own workspace input or file recovery.
+and the private controller journal; ordinary commands/files use the workspace service.
+The workspace or paired controller owns immutable attachment publication and communication receipts. `owner-file://workspace/...` references retain their original guest; `owner-file://controller/...` references retain their original controller. Cloud publication routes authenticate current owner authority and forward the private immutable source. The owner must be reachable; expiry and revocation remain effective. Ordinary owner links are repeatable while authorized, unlike the separately single-use progress-image grant.
 
 Website/MCP adapters share sanitized resource/readiness projections. MCP adapts lifecycle
 services and the workspace client; the typed registry owns its public schema.
 Every cloud lookup supplies the authenticated user and resource identity. An opaque ID
-grants no access. GitHub credentials remain in the vault, enrolled Local private Git uses
-the repository-scoped broker, and SDK credentials remain in the computer's owned store.
+grants no access. Original GitHub OAuth and refresh credentials remain in the vault.
+The trusted Local host or GitHub guest broker receives a derived credential scoped to
+one approved repository and action; SDK credentials remain in the computer's owned store.
 See [System reference](SYSTEM.md#local-codespace-composition-and-ownership) and
 [API](API.md#workspace-streaming-transport).
 
@@ -57,11 +63,11 @@ identity, mounts and network receipt once, then rechecks the current local grant
 after those asynchronous proofs and before dispatch.
 
 Moira Local uses outbound authenticated HTTPS to a locally selected Moira application URL.
-Local work requires enabled instance/provider controls and the computer owner's current grant
-and lease. `CODESPACE_CODESPACES_ENABLED` gates GitHub only; GitHub App credentials and the
-GitHub connector are not required for public read-only Local work.
+Local work requires the computer owner's current grant and lease. Remote work also checks the
+current account, device and resource binding. No cloud control replaces physical owner rights. `CODESPACE_CODESPACES_ENABLED` gates GitHub only; GitHub App credentials and the
+GitHub provisioner are not required for public read-only Local work.
 Private Git, push and pull-request creation use the connected GitHub App user authorization.
-Agent work cannot choose host commands, VM templates, updates or broader local grants.
+Agent work cannot choose arbitrary host execution, VM templates, updates or broader local grants.
 Owner web settings require a separate explicit local approval and remain within its ceilings.
 Each codespace has its own persistent mountless microVM. One repository may have multiple codespaces,
 each with a separate VM and lifecycle. The computer's bounded backing image holds the local SDK
@@ -69,12 +75,15 @@ storage; its configured capacity is shared across these codespaces, not assigned
 Local VMs do not consume GitHub
 Codespaces count slots and are not subject to its machine ceiling or creation throttle.
 CPU, RAM and disk allocations remain owner-controlled. Backend, frontend
-and browser jobs in one codespace share that VM. The companion requires Node.js 24,
-macOS on Apple silicon and Docker Sandboxes `sbx` 0.46.0. Linux execution is refused because
+and browser jobs in one codespace share that VM. The physical Local VM capability requires Node.js 24,
+macOS on Apple silicon and Docker Sandboxes `sbx` 0.46.0. Linux Local VM execution is refused because
 the required runtime ownership contract is not supported there; a container or host-shell fallback
 is not used. Install the pinned SDK from the [official Docker release artifacts](https://github.com/docker/sandboxes/releases/tag/v0.46.0)
 and retain its signed application bundle; see [Docker installation requirements](https://docs.docker.com/ai/sandboxes/install/).
 
+Pairing and running a neutral controller do not require Local SDK initialization or storage.
+It can serve GitHub provisioning and communication without fabricated Local VM grants.
+The following initialization sequence enables the separate physical Local capability.
 Build from the repository root with the macOS command-line C compiler available;
 `@mcp-moira/local` is private, not a published global npm package:
 
@@ -119,46 +128,38 @@ against another process already acting as that same user. Personal Keychain lock
 `approve OWNER/REPO` grants repository read access;
 `--private`, `--push`, `--delete` and `--pull-requests` grant those capabilities explicitly.
 An enrolled private/write repository uses the server's GitHub connection and
-repository grant; the guest receives no OAuth token. Public read-only Git is direct
-and needs no App grant. Relay jobs cannot expand local authority.
+repository grant; the guest receives no original OAuth token. Public read-only Git is direct
+and needs no App grant. Controller operations cannot expand local authority.
 `enable --hours N` grants at most 168 hours (8 by default), not indefinite permission.
 
 Open **Settings → Development → Local computers** (`/settings#integrations-local`, under the app's
-configured prefix), choose **Connect a device**, and copy the enrollment command and token
+configured prefix), choose **Connect a computer**, and copy the enrollment command and token
 separately. From this checkout, use `npm run local -- enroll` with the displayed `--server` and
 `--pairing-id` arguments. Enter the token on stdin and end input; do not append it to the command
 or put it in shell history. The trusted server URL must be HTTPS, without credentials, query or
-fragment. Refresh the browser, review the pending computer's repositories, push/delete
-rights, machine ceilings and lease, then confirm. Only then run:
+fragment. Refresh the browser, verify the pending computer's identity, then confirm. Its
+current rights are read from the reachable owner after connection. Only then run:
 
 ```bash
 npm run local -- run
 ```
 
 Keep that foreground process running to serve the account; Ctrl+C settles owned work. Reconnection
-uses durable request IDs, digests and claims, so a lost response does not authorize redispatch.
+uses the owner's durable original request journal, so a lost response does not authorize redispatch.
 
-New Local lifecycle relay envelopes expire at most 870000 ms after the server's issuance time, leaving
-30 seconds inside the companion's strict 900000 ms future-window ceiling. Shorter requested
-windows, the resource's creation deadline and the ordinary work lease still cap expiry.
-Retained requests keep their original deadline, digest and payload bytes on replay.
-Fresh creation supports a clock difference of up to five seconds in either direction with prompt
-delivery and sufficient unexpired request, delivery-claim and work-lease authority. Delivery claims
-remain limited to 30 seconds and are checked on receipt and renewal; the issuance reserve does not
-grant a 30-second clock tolerance or acceptance after expiry. Malformed, expired and excessive-window
-requests remain refused before durable effects. Keep the server and computer clocks synchronized.
-The issuance rule uses the existing envelope and control schemas: deploying the server issuer
-does not require rebuilding a compatible companion or converting saved state. It applies to new
-requests, without rewriting retained or rejected identities.
+Before Local create/start/stop/delete, the caller chooses a `request_id` in
+`ws1-<lowercase UUID>` form. Start/stop/delete also send the generation observed for that
+resource. This lifecycle generation is distinct from its stable Git routing generation.
+Collect the original receipt through `codespace({ action: "operation", device_id,
+request_id })`, including when create returned no codespace ID. The owner reports `absent`,
+`accepted`, `completed` or `unconfirmed`; collection never repeats the effect. Neither
+`absent` nor a newer resource snapshot authorizes automatic replay. A new explicit action
+uses a new identity after the original outcome and current state have been inspected.
 
-Transient network failures, including failed response reads, and server 5xx responses pause relay
-contact without stopping already admitted work. An addressed resource refusal returns that request's
-bounded error. A refused delivery claim aborts only its request scope; it does not close VM ownership
-or advance its generation. Background delivery confirms the same current device/account/connection
-and generation before continuing independent claims. Successful confirmation does not fault the
-daemon or impose a global retry delay for that refusal. Malformed control-plane protocol sets
-`faulted` and retries confirmation after 30 seconds; transport failures set `offline`. Those
-connection failures suspend new claims until successful confirmation.
+Network failures and server 5xx responses make remote owner state unavailable without
+stopping already admitted work. Offline settings and lifecycle mutations are refused;
+there is no cloud or browser dispatch queue. A failed response to an accepted operation
+requires collection of its original identity after connection returns.
 Only device-endpoint unauthorized responses or confirmed device identity/revocation failures
 invalidate device authority and make the daemon stop work. Local disable, lease expiry and explicit
 shutdown retain their independent stop boundaries. Existing work remains bounded by its current
@@ -166,17 +167,21 @@ local grant and finite lease without extension. Reconnection may return retained
 their effects are not redispatched.
 The browser can revoke a specific device; revocation invalidates its generation and denies new
 work. Local `disable` independently stops owned SDK/VM processes and preserves data, including when
-credentials cannot be read. Neither closing an MCP client nor losing the relay deletes a codespace.
+credentials cannot be read. Neither closing an MCP client nor losing the connection deletes a codespace.
 
 Broker shutdown fences new admission and waits for owned HTTP/CONNECT tasks, accepted socket
 closure and connection-capacity reservation/release. A CONNECT reservation finishing after
 shutdown is released without destination lookup or connection, so closed service ownership does
 not leave an upstream connection running after shutdown.
 
-Local diagnostics use `status`, `stop SPACE_ID`, `remove SPACE_ID --confirm` and
-`recover SPACE_ID --confirm` for owned lifecycle/recovery. Manual host create/start
-and raw execution are refused; use the paired server lifecycle and the guest
-`moira-workspace` CLI for commands/files. Persistent paired `run` owns the VM lifetime.
+The host CLI supports `create OWNER/REPO --ref BRANCH`, `start SPACE_ID`, `stop SPACE_ID`,
+`remove SPACE_ID --confirm` and `collect REQUEST_ID` through the running private controller.
+Choose `--request-id` before mutation; the CLI prints the identity before observing its outcome.
+Fresh create requires live cloud route registration and initial Git authority. Already admitted
+VMs can start, stop or be cleaned up offline under applicable current owner authority.
+Starting requires the finite work lease; owner-confirmed cleanup does not renew it.
+Raw host execution is unsupported; commands/files use the guest `moira-workspace` CLI.
+`status` and `recover SPACE_ID --confirm` retain their custody/recovery roles. Paired `run` owns the VM lifetime.
 Closing it settles owned processes while preserving disks and receipts.
 
 After abrupt termination or reboot, restart `run` with the same state. The runner
@@ -185,17 +190,17 @@ absent. Unverifiable ownership remains refused; do not unlink locks, clear journ
 or adopt a VM by name. Explicit disabled-device recovery proves physical settlement
 without enabling work or replaying unknown commands.
 
-Lifecycle relay carries inline authenticated create/start/stop/delete/snapshot metadata
-and retained replies. It does not carry commands, file bodies or transfer parts.
-Request/claim identity fences lifecycle effects; ordinary and late acknowledgement
-use the active RPC journal's serialization boundary. Archived operation requests and
-receipts remain untouched and non-runnable.
+The cloud routes authenticated controller metadata to the live owner. Lifecycle/settings
+effects and original receipts belong to the controller journal, not a cloud claim/ACK queue.
+Archived operation requests and receipts remain untouched and non-runnable.
 
 ### Owner web control and bundle updates
 
 The server, companion and every running owner guard must use a coordinated control-contract
 edition, including the shared scoped snapshot and typed management-result schemas in
-`packages/shared/src/codespaces/local-protocol.ts`. Strict nested heartbeat fields and the local `web-control.json` schema are not compatible
+`packages/shared/src/codespaces/local-controller-protocol.ts`. Enrollment/heartbeat carry
+registration identity rather than policy; live controller snapshots carry current owner state.
+The controller and local `web-control.json` schemas are not compatible
 with an older reader, even when delegation is disabled. Rebuilding the CLI does not replace an
 already running guard. Mixed-edition rolling upgrades and uninterrupted management during an
 upgrade are not supported.
@@ -215,9 +220,11 @@ companion before the website can apply owner settings.
 
 Persisted policy/control shapes must match their installed reader. An unsupported
 shape is a refusal, not permission to clear journals or adopt replacement state.
-Coordinate a reviewed conversion separately while stopped, preserving grants, credentials,
-VM/profile/disk identity and all unknown receipts. Rollback must retain the matching
-bundle and coherent state rather than resetting the SDK.
+Migration 0061 archives old cloud Local policy/control/relay/grant and operational records;
+the archived rows are not dispatchable authority. The owner imports only verified existing
+native bindings, preserving VM/profile/disk identity and unknown receipts. Do not reconstruct
+cloud policy or clear unknown state to bypass a refusal. Rollback must retain matching bundles
+and coherent state rather than resetting the SDK.
 
 After pairing confirmation, approve web control on the local machine:
 
@@ -258,9 +265,9 @@ The Local computers editor controls enablement, finite lease, defaults, storage,
 repository grants and permissions and optional Git author identity.
 Saving creates a requested revision. Applied means the companion confirmed that
 revision; pending or rejected settings are distinct from the applied device policy.
-Offline contact does not imply application. The companion continues management
-polling while disabled or expired without dispatching work, so web renewal can
-restore work within the approved ceiling. Offline revocation still cannot promise
+Offline contact does not imply application: saving is refused and the editor retains its draft.
+Reconnect and refresh before explicitly saving. The live controller can receive management
+changes while work is disabled or expired, without authorizing guest work. Offline revocation cannot promise
 instant physical shutdown.
 
 An admitted owner can confirm deletion of one owned local codespace in Settings while the
@@ -281,8 +288,8 @@ Docker disk capacity belongs to each admitted VM. The default owned APFS image c
 after native bounds and free-space checks, preserving data. Storage and Docker byte
 values must be positive safe integers, storage must exceed Docker capacity, and native
 sector alignment and usable filesystem capacity remain authoritative. Unknown physical changes retain their journal
-and keep work fenced. Retrying the same settings may renew a finite lease; an
-unrelated request cannot erase an uncertain resize.
+and keep work fenced. Collecting the original settings receipt cannot renew a lease or
+repeat a resize; an unrelated request cannot erase an uncertain resize.
 
 ### Delegated repository additions
 
@@ -290,20 +297,20 @@ After local web-control opt-in, the owner can enable agent repository management
 Local computers editor. It is off by default and binds the connected, verified personal GitHub
 account, separate permissions for existing and new private repositories and optional push.
 There is no repository-count quota or technology-specific network profile.
-Saving requests a revision; only the companion's
-acknowledgement makes its delegation effective. The MCP caller cannot enable that consent, change
+Saving requests a revision; only confirmed owner application makes its delegation effective.
+The MCP caller cannot enable that consent, change
 its account, supply rights, or extend the computer's lease. New-private consent authorizes the
 separate `repository_create` action; it does not authorize adding unrelated existing repositories.
 
 `codespace({ action: "local_devices" })` returns owned device IDs, labels, contact status and
-enablement, plus eligible personal GitHub App installations with `installation_id` and owner.
+`owner_available`, plus eligible personal GitHub App installations with `installation_id` and owner.
 A warning asks for missing GitHub setup while devices remain discoverable. Applied delegation
 and detailed owner permissions are inspected in Settings, not returned in this compact discovery.
 `repository_add` takes that `device_id`, the existing GitHub numeric `repository_id` and a caller-chosen
 UUID `request_id`. It verifies the current GitHub App installation grant, repository ID, owner,
 private visibility and required read/push rights. It adds only a private repository owned by the
 connected personal account. Its receipt is `pending`, `applied` or `rejected`; `local_repository_id`
-is null until the exact grant is acknowledged internally. MCP waits for that acknowledgement and
+is null until the exact grant is confirmed by the owner. MCP calls live owner admission and
 returns the usable ID as `repository_id`. Reuse the same request identity and payload after an
 unconfirmed outcome. An existing local grant is reused through discovery rather than added again. Requests
 racing unapplied owner settings are refused.
@@ -317,7 +324,7 @@ lease are checked before the durable submit fence permits an external create.
 
 Resume using the same complete payload. `pending`, `unknown`, `setup_required` and `rejected` are
 not local authority. A confirmed `github_repository_id` and `full_name` may remain available while
-installation setup is incomplete internally; MCP returns `repository_id` only after applied companion ACK.
+installation setup is incomplete internally; MCP returns `repository_id` only after confirmed owner admission.
 A selected installation receives only that confirmed new repository, then the refreshed actual App
 grant is checked; a successful installation PUT alone does not grant access. Missing permissions
 return Settings/install guidance and preserve the confirmed result for continuation.
@@ -353,6 +360,15 @@ Pull requests write and the repository's `allowPullRequests` grant. Use **Update
 GitHub permissions** when the token needs newly approved permissions; Refresh only
 re-reads grants. Enrolled broker failures never select a host PAT fallback.
 
+Ordinary `git fetch` and `git push` use the installed private broker. The Local host
+and GitHub guest use the same fixed HTTPS Git and pull-request implementation;
+cloud Moira authorizes scoped credential issuance and retains verified author metadata,
+without forwarding Git packfiles or executing pull-request requests. The broker holds
+the child token in memory, checks finite authority and disposes it after the upstream
+transport physically closes. Its same-UID trust boundary is not an OS sandbox against
+authorized project commands. Explicitly approved public read-only Local fetch can use
+anonymous access; failed scoped issuance never enables that branch.
+
 Guest Git identity is repository-local: use owner-configured name/email or the
 verified GitHub login and numeric-account noreply address. Host Git configuration
 and secrets are not forwarded. An existing empty remote can open an unborn
@@ -361,8 +377,26 @@ then pushes a feature branch. A nonempty remote with an absent ref is refused.
 The MCP `pull_request_create`, `pull_request_get` and `pull_request_find` actions
 use the owned codespace and approved repository. Only creation requires the
 pull-request permission; reads and exact head/base lookup use read authority.
-After an uncertain create, find by exact head/base before retrying; there is no
-atomic exactly-once guarantee across Moira and GitHub.
+Choose a fresh `ws1-<lowercase UUID>` `request_id` before PR creation. After an uncertain
+create, call `pull_request_create` with only `codespace_id` and that original
+`request_id` to collect its receipt, then find by exact head/base before considering
+another create. Collection never creates a PR. Unknown creation is an error and retains
+both its original PR identity and any `security_request_id`; the security identity
+addresses credential issuance/disposal, separately from the PR effect. PR reads require
+no mutation identity. There is no atomic exactly-once guarantee across the owner and GitHub.
+
+The installed CLI uses the same owner:
+
+```bash
+moira-workspace pull-request-create --request-id ws1-00000000-0000-4000-8000-000000000001 pr.json
+moira-workspace pull-request-create --request-id ws1-00000000-0000-4000-8000-000000000001
+moira-workspace pull-request-get 7
+moira-workspace pull-request-find feature/change main
+```
+
+`pr.json` supplies `head`, `base`, `title`, and optional `body`/`draft`. The second
+command only collects the first create. CLI errors preserve the owner result;
+credential custody/disposal uncertainty is never reported as confirmed refusal.
 
 ### Local isolation boundary
 
@@ -404,87 +438,84 @@ intentionally visible to Moira. Review returned code before running it on the ho
 
 ## Persistent lifecycle
 
-The GitHub provider manages only personally billed Codespaces created through
-Moira for a repository approved by a GitHub App installation visible to the
-connected user. That repository may belong to the user's account or an
-organization. Importing an existing Codespace and organization billing are
-unsupported. Installing the App on an organization requires that organization's
+The GitHub provider manages personally billed Codespaces for a repository approved by a
+GitHub App installation visible to the connected user. Explicit adoption can prepare an existing
+Codespace without replacing its public identity or disk. That repository may belong to the
+user's account or an organization; organization billing is unsupported. Installing the App on an organization requires that organization's
 approval; the connected user's personal GitHub account remains the payer.
 
-Core exposes provider-neutral create, list, get, start, stop and delete
-operations. A resource records tenant and connection ownership, authorization
-generation, repository, the ref requested at creation, the ref the provider last
-reported checked out, exact provider identity, selected machine, desired and
-observed state, retention policy and lifecycle generation.
+Core exposes provider-neutral create, list, get, start, stop and delete operations.
+Local cloud storage separates immutable `localResourceIdentity` from the approved
+`codespaceLocalResourceBinding`. Together they retain public resource and repository identity,
+the original creation marker/ref, connection and authorization generation, exact device/profile
+binding and revocation. The stable route generation authenticates the guest; it is not the
+controller's current lifecycle comparison generation. Current grants, machine, desired/observed
+state, lifecycle generation and pending request IDs come from the live owner, without writing an
+operational snapshot back to SQL. `current_ref` remains null when the checked-out ref is not observed.
+Registration alone proves neither a machine nor a running or stopped VM.
 
-For GitHub Codespaces, the provider repository ID is the repository identity. Its
-full name is display metadata: lifecycle reconciliation accepts a provider-side
-rename, refreshes the stored name and still refuses a resource whose provider
-repository ID changed. Local VMs retain the admitted repository full name as well
-as its local UUID; editing a grant cannot reassign an existing VM to another repository.
+Local lifecycle/get/list return the common sanitized summary directly. The public `machine` field
+is nullable, including confirmed retirement. If the owner has no resource
+observation or desired state, the call returns `CODESPACE_PROVIDER_UNAVAILABLE`; when its live
+journal retains pending originals instead, it returns `CODESPACE_LOCAL_CREATION_UNKNOWN` with
+the original request, device and resource IDs for collection. Neither case fabricates a lifecycle
+generation from the stable route generation. A completed receipt can still contain a retained
+uncertain error: initial submission and explicit repetition preserve that uncertainty, rather
+than reporting authorization failure or confirmed rejection. Collection does not create another VM.
 
-The checked-out branch is working state, not identity. After creation, an exact
-provider resource belongs to a record when its provider name, Moira marker, owner,
-billable owner and repository ID match; the branch it is on is not compared. An
-agent may therefore switch branches inside a codespace, or leave it on a detached
-HEAD, and start, stop, delete, operations, re-authorization rebind and cleanup keep
-addressing the same codespace. Every observation writes the provider's current ref
-back to the record, or no ref when the provider reports none.
+GitHub route metadata binds the user, current authorization epoch, numeric repository identity,
+exact provider name when known, assigned device/generation/connection and a billable/unknown
+retirement witness. It is not a cloud lifecycle journal or desired-state cache. The controller
+retains the create marker, requested ref, native provisioning custody, measured guest root/life,
+lifecycle generation and pending original request IDs.
 
-- Create reads GitHub's default Codespace attributes for the selected repository
-  and ref before reserving capacity or sending a create request. If GitHub names
-  an organization as `billable_owner`, Moira refuses with
-  `CODESPACE_BILLING_UNSUPPORTED` and creates nothing. An inaccessible repository
-  or a preflight whose payer cannot be verified is also refused before creation.
-  Create then persists intent and a unique marker before provider contact. Moira
-  adopts only the exact returned Codespace after checking account ownership,
-  personal billing, repository, requested ref, machine limits, creation time and
-  connector reachability. Adoption is the only point where the ref is compared: it
-  is compared as a branch name (`refs/heads/x` matches `x`), and a Codespace that
-  does not report a ref yet is adopted on the remaining identity. An ambiguous
-  provider response remains pending for exact reconciliation. The Codespace is
-  created with the owner's selected native idle timeout, or GitHub's maximum of
-  240 minutes when auto-pause is off (see "Idle auto-pause").
-- Start records desired running state before provider contact. While that
-  generation remains current, the official GitHub CLI may restore a Codespace
-  that stopped outside Moira. Starting a codespace whose provider resource Moira
-  has not identified yet returns the retryable `CODESPACE_CREATE_PENDING`; one
-  left ambiguous returns `CODESPACE_NOT_RUNNING`, whose detail says it could not
-  be identified uniquely.
-- An operation addressed to a codespace that is not running starts it and then
-  runs, so work does not fail because the codespace idled out between two calls.
-  The wait for that start is bounded by `CODESPACE_START_WAIT_SECONDS`; exceeding
-  it is `CODESPACE_START_TIMEOUT`, which names the wait and asks the caller to
-  retry once the codespace has finished starting. A codespace that cannot start —
-  deleted, rejected or being deleted — is refused by that condition without the
-  provider being asked to start it. Start never bypasses current resource,
-  account, provider-control or owner-grant authorization. Explicitly starting a codespace remains available and unchanged.
-- Stop records desired stopped state, advances the generation and stops the exact
-  provider environment, preserving repository data. Router authority changes close
-  affected observer streams; they do not fabricate command cancellation or authorize
-  replay. The workspace remains the owner of its retained outcomes.
-- Delete is a separate destructive operation. It requires the caller's current
-  observed generation, checks local deletion permission before recording a new intent, persists
-  delete intent before provider contact and
-  becomes terminal only after the exact Codespace is confirmed absent.
+Create requires a caller-selected ws1 request ID and an explicit live paired controller, or the
+sole eligible one. The controller admits the original operation before invoking fixed provider
+actions. Cloud rechecks account, App grant, numeric repository, personal payer and assignment at
+those boundaries; parent authorization never leaves cloud. The controller receives narrowly scoped
+provisioning authority, installs the packaged service, measures repository/root/release and enrolls
+the outbound guest. Caller commands, SSH configuration or bootstrap URLs cannot select this work.
 
-For local browser deletion, the owner confirmation and its device/resource binding are recorded
-atomically as `owner-delete` in the existing provider mutation journal. Relay derives cleanup
-authority from that intent, not from a caller-supplied flag. MCP deletion retains the agent's
+Start, stop, delete and adopt require the observed owner generation and original ws1 identity.
+The owner journal checks comparison-and-set before admission. Cloud security registration accepts
+monotonic authority only from the same assigned actor and retires old guest/renewal/child authority
+before publication; it has no second operational CAS or replay queue. Stop preserves the disk.
+Delete retires only after exact authenticated absence and physical/credential settlement.
+
+Explicit adopt prepares a known Codespace or registers an exact provider name after current
+owner, billable-owner and numeric-repository proof. After reconnection or repository rename,
+the same controller must drain old provisioning custody before publishing a new authorization
+epoch and reproving the guest. Another device cannot silently replace that custody. Historical
+identities with no assignment stay fenced until earlier custody can actually be proved settled.
+
+A lost create reply retains the original unknown marker and receipt. Pure collection can discover
+that exact Codespace, but never repeats create, start or SSH. A found environment with incomplete
+provisioning requires explicit adopt. No match does not prove create was never dispatched.
+An explicit delete can retire an exact known provider name after a currently authorized GET
+confirms 404; ordinary list/get does not perform retirement.
+
+Command/file calls require the already enrolled live guest. They never implicitly start a stopped
+Codespace or bootstrap from cloud. Owner `running` and provider `available` alone are insufficient:
+the router must have the current resource/authorization/life connection. Explicit registration
+401/403 rejects startup readiness; temporary transport loss reconnects observation without replay.
+
+Disconnect revokes guest/renewal routes, retires known scoped children and parent authorization.
+It neither stops nor deletes a VM or disk. Explicitly stop a running VM to end compute use;
+preserved disks can still incur storage charges until explicitly deleted.
+Minimal owned/billable/unknown identities remain for
+explicit cleanup and block account deletion while unretired. Reconnection does not silently
+restore authority. Public IDs, disks and archived uncertain history remain preserved.
+
+Provider failures retain typed transport, HTTP or invalid-reply evidence with safe status/request
+identity and refusal reason when available. Known create refusals include HTTP 401 and 402;
+timeout, 5xx and accepted responses whose authority publication was lost remain uncertain.
+A reason containing token-, secret-, JWT- or URL-shaped content is dropped whole.
+Collect the original owner/request before deciding on another mutation.
+
+For Local browser deletion, the controller binds explicit owner confirmation to the exact
+device/resource, observed generation and original request identity. Its durable lifecycle journal
+retains that authority; cloud storage does not queue the mutation. MCP deletion retains the agent's
 repository permission and work-lease requirements; a preflight refusal records no new delete intent.
-
-Lifecycle work observes the exact Codespace before it acts. A Codespace already
-in the desired state completes without a provider mutation: a stop of a Codespace
-the provider already shut down makes no stop call, a stop of a Codespace the
-GitHub provider reports as failed completes as stopped with the observed state `failed`,
-and a start of an available one only probes the connector. While the provider
-reports the Codespace as
-provisioning, starting or stopping, GitHub start/stop stays pending and issues
-nothing. Local stop/delete can address the exact owned VM during preparation or an unknown
-guest outcome; they drain accepted creation/work before claiming completion. Delete is issued directly, without a stop first, for persistent delete
-and for legacy cleanup. When the provider refuses a mutation, the Codespace is
-observed again: a record whose goal was reached anyway settles, and one the
-provider is still moving stays pending instead of reporting the refusal.
 
 The local provider reports `created` separately from provisioning. It is an actionable
 observation, so a stop can address the exact existing VM without starting it. It does not
@@ -511,76 +542,16 @@ state without synchronizing lifecycle counters or authorizing guest work. Each f
 while healthy peers refresh and run; the aggregate refresh reports stale data when any observation
 could not be confirmed.
 
-Resource summaries expose nullable `observed_at`, the time of a verified provider observation,
-and nullable `lifecycle_error`, a known `CodespaceResourceErrorCode`. They never expose raw
-provider diagnostics. Claims, retries and a later connector probe do not advance the observation
-time; `updated_at` remains bookkeeping time. A refused observation retains the last verified
-state and observation time until ordinary reconciliation succeeds.
-
-Repeating an active pending lifecycle request does not advance its generation. After a confirmed
-authenticated refusal, an explicit owner action can advance to a fresh guarded attempt after the
-permission/runtime repair. Unknown outcomes continue inspection of the retained intent, not blind
-redispatch. A
-provider response lost during create, start, stop or delete is reconciled from
-the exact stored identity and intent; broad discovery or deletion is not used.
-An owner confirmation can replace an old refused local delete intent, or one with only snapshot
-requests, with a fresh guarded owner intent. A retained destructive delete request with an unknown
-outcome keeps its existing generation and identity; a snapshot receipt alone is not evidence that
-deletion was dispatched.
-The local relay retains authenticated inline create/start/stop/delete requests and replies
-under their lifecycle receipt retention. A retry reads the same mutation receipt even after the
-original delivery deadline, without dispatching the effect again. Snapshot requests retain their lifecycle cleanup behavior.
-Input and new dispatch require current resource authority. Already accepted output/ACK settlement
-can complete an older exact claim after reconciliation advances the resource, without rewriting
-the newer generation. Identical terminal ACK and terminal renewal are read-only receipts: they do
-not extend expiry or revive dispatch. Ordinary work retains current
+Local original receipts live in the controller journal. `pending_request_ids` in owner-backed
+resource summaries identifies accepted/unconfirmed work for collection after a page reload;
+confirmed terminal receipts retire those pointers; retained uncertain errors remain collectable.
+Collection and read-only snapshots do not repeat an
+effect, advance a lifecycle generation or extend a lease. Ordinary work retains current
 account/device/connection/repository/lease checks. Owner cleanup instead requires the current
 admitted account, active device, exact connection/resource binding and web-control approval,
 without extending repository grants or the work lease.
 Finishing a command, disconnecting an MCP client or ending a conversation never
 deletes a persistent codespace.
-
-The background reconciler takes one re-authorization rebind attempt per tick and
-then a bounded batch of due records. A record whose pass does not converge it waits
-before its next attempt: `CODESPACE_RECONCILE_INTERVAL_SECONDS` after the first
-such pass, doubling with each consecutive one and capped at 30 minutes, and never
-later than the create deadline of a codespace still being created or identified, so
-a tick never takes the same record twice. A new user
-request for the codespace and a pass that settles it reset that wait. Records a
-rebind pass could not re-verify move to the back of the rebind order, so one
-codespace that cannot be rebound does not hold back other users' codespaces.
-
-Disconnect fences workspace routing and stops persistent codespaces. It does
-not silently delete their data. A later authorization rebinds a codespace
-automatically when the same GitHub account, approved repository and exact provider
-resource still match, whichever branch the codespace has checked out, or when that
-exact resource is gone, so a later stop or delete settles it as absent; a different
-account or a disconnected connection keeps it fenced. Stored resource rows from the
-disposable contract retain the explicit `legacy_disposable` policy and continue to
-follow exact cleanup.
-
-A provider that refuses a create, start, stop or delete is reported by what it
-refused rather than as an internal failure. A refused stored grant is
-`CODESPACE_AUTHORIZATION_REQUIRED`; a repository the provider no longer exposes,
-or a request it rejects as malformed, conflicting with the current state or
-unprocessable (HTTP 400, 409, 422), is the non-retryable
-`CODESPACE_RESOURCE_INVALID`; any other provider status is the retryable
-`CODESPACE_PROVIDER_UNAVAILABLE`. Each carries the provider's own reason when it
-is safe to repeat: the refused response body is reduced to one line and capped,
-and a message containing anything credential-shaped — a token, a labelled
-secret, a JWT or any URL — is dropped whole, leaving the HTTP status as the only
-detail.
-
-The lifecycle service derives a stable idempotency key from the resource,
-generation, refused action, outcome and bounded provider detail. The audit sink
-inserts that key under a unique database index, so the same refusal produces one
-audit row across restarts and concurrent reconcilers. A changed refusal detail has
-a different key and is recorded separately; an internal failure is not recorded as
-the provider's answer.
-
-Durable global and provider controls act as kill switches. A disabled control
-rejects new creation, start and workspace routing, while required lifecycle stop and
-cleanup remain eligible for reconciliation.
 
 ### Idle auto-pause
 
@@ -605,7 +576,7 @@ collect the original workspace request and retain uncertainty without outcome pr
 One workspace service owns commands, sessions and retained output in both providers.
 The installed `moira-workspace` terminal CLI calls its private Unix HTTP socket.
 MCP reaches the same owner through the cloud router; ordinary work uses neither
-GitHub SSH dispatch nor Local lifecycle relay.
+GitHub SSH dispatch nor the Local controller.
 
 Choose a fresh `request_id` in `ws1-<lowercase UUID>` form before mutation.
 The owner durably binds it to immutable input before effects; changed input is refused.
@@ -661,13 +632,21 @@ resource link. Optional `max_bytes` refuses an oversized complete file before pu
 never publishes a truncated prefix. An agent can create a file with the direct CLI
 and call MCP download without a separate stat.
 
-Published attachments have finite retention and one-use browser download semantics,
-independent of guest target commit/workspace receipts. Explicit
-`communication({ action: "deliver-file", referenceId, message, channelId? })` sends a
-retained owned attachment; download alone sends no notification. Checked sources
-stream to capable adapters; extension adapters refuse streams rather than buffering
-the whole file. Safe UTF-8 basenames including quotes are accepted; controls,
-separators and dot-only names are refused.
+`preview_image` reads a complete owner file and validates PNG/JPEG container framing and
+positive dimensions without decoding pixels. Explicit `max_bytes` is a caller-selected
+whole-file bound; no fixed Moira byte, dimension or pixel-count quota replaces it.
+
+Materialize archive delivery resolves authorized workflow text in the cloud as
+`{path,content:string}`. The selected controller alone encodes UTF-8, constructs
+`materialize.tar`, stages and publishes it. A presentation grant retains the full owner
+scope and original ws1 identity; repeated requests collect that receipt before rerendering
+or resolving Note/Playbook references. Current paused-node/context authority is rechecked
+before streaming. There is no archive file-count or byte quota. The separate owner-free
+in-context fallback retains its 256 KiB UTF-8 budget and refuses instead of truncating.
+
+The workspace or paired controller owns immutable attachment publication and communication receipts. `owner-file://workspace/...` references retain their original guest; `owner-file://controller/...` references retain their original controller. Cloud publication routes authenticate current owner authority and forward the private immutable source. The owner must be reachable; expiry and revocation remain effective. Ordinary owner links are repeatable while authorized, unlike the separately single-use progress-image grant.
+
+The `communication` action `deliver-file` explicitly delivers a publication using `request_id`, `referenceId`, `message`, `kind` and optional `channelId`. It can instead accept a native `file` descriptor with the selected `device_id`, or use the sole eligible live paired controller. Choose and retain the original ws1 ID before submission. Collect with action `operation`, the original `request_id` and its assigned `device_id` or `codespace_id`; collection never downloads again or resends. Missing/ambiguous/offline owner refuses before admission, with no cloud queue or fallback to a different source owner. Text communication remains independent of owner availability.
 
 ## MCP tools
 
@@ -686,201 +665,58 @@ outcomes require collection of the original identity, not a fresh ID to bypass u
 
 ## Website management
 
-The Settings page's **Development** category separates **GitHub Codespaces**, **GitHub**
-and **Local computers**. The `#integrations-github` and `#integrations-local` links
-select their corresponding subsections. GitHub Codespaces holds cloud codespace
-management, Automatic pause and Your limits. Local computers lists each connected computer
-with its own codespaces, creation form and collapsed owner settings. The common management
-component filters local repositories and codespaces by the stable computer UUID, not its label:
-computers with the same name and multiple VMs of one repository remain separate. The shared
-backing disk capacity is shown for the computer; CPU and RAM describe each VM. Local
-provider admission uses the selected device's current grants and lease. Public
-read-only local work needs no GitHub OAuth connection; enrolled private checkout
-and writes additionally require the connected GitHub account's App repository
-grant through the fixed broker described in **Local Git and pull requests**.
-One shared data source loads the connection
-view and the codespace view (with repositories and `limits`) together, and any change
-one card makes reloads what it can affect, so disconnecting never leaves codespaces of
-a connection that no longer exists on screen. The section heading offers a help
-popover and a **Setup guide** tour, and the connection card shows a stepper (connect
-GitHub, install the Moira App, grant repositories) marking each step
-done, current, not started or unavailable on this instance.
+Settings → Development separates environment management, GitHub connection and Local computers.
+The common management card retains provider/resource identity, live owner generation, pending
+original IDs and nullable machine observation. Local cards group by stable computer UUID rather
+than label. A neutral controller can provision GitHub without fabricated Local VM settings.
 
-The GitHub Codespaces card shows the cloud provider's readiness;
-it discloses that an authorized agent has the Codespace user's repository, network and configured-secret
-access, and lets the user create a codespace for an approved personal or organization repository
-and ref when GitHub bills the connected personal account. Each computer's codespace card describes
-the computer-owned VM and approved rights. For GitHub, the create hint
-states how many codespaces the user holds against the per-user ceiling and that
-stopped codespaces count; local creation has no count ceiling. It lists the user's codespaces with repository, current
-branch (the requested ref until a current one is observed), provider and machine
-context and a plain-language state badge; a collapsed **Technical details** block
-carries the requested and current ref, desired/observed state and generation, the
-bookkeeping update and the codespace ID. Local cards separately show verified observation time
-or that no verified observation exists. Safe lifecycle diagnostic codes have localized
-explanations. Start and Stop are available for stopped and
-running codespaces; Delete requires a confirmation that names the repository and
-points to Stop for keeping data. Local Delete remains available with confirmation in
-pending, cleanup, ambiguous and rejected states; an already-confirmed never-created refusal can
-retire its card without a runtime effect. Start is withheld for incomplete guest preparation.
-Local cards offer **Check state again**. For an existing
-start/stop intent with applied access, it retries that exact resource's existing endpoint.
-A local delete intent opens the destructive confirmation again and uses the displayed current
-generation only after the owner confirms. A pending create or unavailable work access instead
-requests read-only refresh and never creates another VM. Action errors and loaders belong to
-the affected codespace. A refused deletion shows its error in the dialog and ends the action's
-spinner immediately; Cancel remains available while a separate read obtains the current generation
-for another confirmation. Domain refusals do not sign out the owner.
-Refreshing a computer section silently updates the shared data source
-without making another computer's card busy. Entering Local computers and acknowledged policy
-changes refresh its management data. The card keeps a saved repository list visible
-with a stale warning when provider enumeration fails. Its Refresh button forces
-grant and managed-resource observation. If GitHub cannot confirm current resource
-state, the card shows a stale warning and retains the saved entries. It never
-mentions chats or sessions.
+GitHub create selects an approved repository/ref and a live controller. Several eligible
+controllers require a choice; without one, creation is unavailable before admission. Explicit
+adopt accepts a provider name or managed resource and preserves its disk. Lifecycle actions use
+an original ws1 identity and observed owner generation. **Check state again** collects retained
+originals or refreshes when none is pending; newer metadata alone cannot settle an uncertain effect.
+Errors remain scoped to their resource. Local browser deletion additionally needs explicit
+confirmation and current web-control approval, without broadening permanent agent permissions.
 
-The Automatic pause card selects GitHub's native timeout for new Codespaces only,
-including its 240-minute maximum when off. It explains editor/browser/terminal activity
-and the risk to silent commands. Existing resources keep their provider parameters;
-Local follows the computer owner's policy.
+Connection, repository, resource and billing reads retain independent error/refresh states.
+Management returns `providers`, minimal live `controllers` and `provider_billing`, with no Moira
+aggregate limit view. `CodespaceBillingPanel` shows personal monthly compute, storage, allowances,
+cost, payer and retrieval time, or unavailable. Missing `Plan: read` does not deny management.
+Automatic pause selects provider timeout for new resources, without a cloud idle timer.
 
-The separate GitHub monthly usage card shows compute/storage use, available plan
-allowances, net billable cost, payer and retrieval time, or unavailable. Your limits
-shows held GitHub resources and applicable owner-selected machine/lifecycle/billing
-controls. It contains no cloud command/output/file-transfer counters. Local resources
-follow their signed computer policy rather than GitHub count or machine budgets.
+The shared `/api/integrations/github/codespaces` routes and MCP tools return
+`CodespaceSummaryView`. Local targets retain discovery's qualified `repository_id`.
+Original collection uses `GET /api/integrations/local/devices/:deviceId/operations/:requestId`
+or MCP `codespace` action `operation` with `device_id` and `request_id`, including create before
+a resource ID returns. See [Codespace Management API](API.md#codespace-management-api) for wire fields.
 
-The routes retain `/api/integrations/github/codespaces` behind
-`requireAuth` and are a second presentation of the same services the MCP tools use,
-with the same tenant and current-authority guards; lifecycle deletion additionally checks its
-current generation. Explicit browser confirmation additionally authorizes
-exact local owner cleanup; MCP confirmation does not grant that authority. The list combines repositories
-and codespaces from both providers and includes `providers` with their separate connection,
-readiness and limits. A local `repository_id` is the qualified target returned by discovery;
-callers do not manufacture it. Creation routes by that target, and later actions route by the
-resource's persisted provider/device identity:
+Offline owners expose no cached policy/grants as current authority; settings drafts stay editable,
+but saves are refused. Existing admitted VM work can continue under its local grants and finite
+lease. Fresh create needs cloud registration and initial Git authority; confirmed authority refusal
+does not allow offline fallback. Local diagnostic recovery is defined by
+`packages/shared/src/codespaces/local-failure-guidance.ts` and the
+[owner recovery guide](../packages/mcp-server/src/help/content/integration/troubleshooting.md#local-codespaces).
 
-| Method   | Path                  | Behavior                                                                                                                                                                                                |
-| -------- | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `GET`    | `/`                   | Refreshes grants behind the TTL, then returns readiness, connection, approved repositories, `repositories_stale`, `resources_stale: false`, summaries still in use and `limits`                         |
-| `POST`   | `/refresh`            | Forces grant refresh, managed-resource observation and billing read; returns the list with separate repository and resource stale flags                                                                 |
-| `POST`   | `/`                   | Selects the provider from `repository_id`, verifies its grants and policy, then creates for `ref`; GitHub also verifies the personal billable owner; returns the sanitized (possibly pending) codespace |
-| `GET`    | `/:codespaceId`       | One owned sanitized codespace                                                                                                                                                                           |
-| `POST`   | `/:codespaceId/start` | Records desired running state; `data_preserved: true`                                                                                                                                                   |
-| `POST`   | `/:codespaceId/stop`  | Records desired stopped state; `data_preserved: true`                                                                                                                                                   |
-| `DELETE` | `/:codespaceId`       | Requires `confirm_delete: true` and the current `expected_generation`; `data_preserved: false`                                                                                                          |
+## Readiness and trust
 
-Domain failures map to bounded codes: not found and malformed IDs return the generic
-404, generation conflicts and not-running states 409, unsupported organization
-billing 422, resource policy refusal 429, provider disabled or unavailable 503, and a
-missing feature configuration 503 with the
-same-origin Settings link. Responses never carry provider resource names, markers,
-claims, capabilities or credentials.
+`CodespaceObservabilityService.readiness()` reports configuration only: `disabled`,
+`misconfigured` or `ready`, with `configuration`, `resources_enabled`, `reason` and `checked_at`.
+It performs no connector probe, SSH check, reconciliation or cached lifecycle observation.
+Ready configuration does not prove a controller/guest online; Local policy/device/grant/lease
+checks remain independent of GitHub configuration.
 
-Local lifecycle errors use bounded diagnostic codes from
-`packages/shared/src/codespaces/local-failure-guidance.ts`: `CODESPACE_LOCAL_CREATION_UNKNOWN`
-(409) asks for exact inspection without replacement; `CODESPACE_LOCAL_SETUP_INCOMPLETE` (409)
-asks for confirmed cleanup before recreation; `CODESPACE_LOCAL_PROTOCOL_ERROR` (409) asks for
-matching bundles and saved-state checks; `CODESPACE_LOCAL_RUNTIME_ERROR` (503) asks for runtime
-repair and exact inspection; `CODESPACE_LOCAL_DELETE_APPROVAL_REQUIRED` (403) means agent deletion
-is not approved. The owner can instead confirm deletion of the same codespace in Settings with
-active local web control, without granting permanent agent deletion permission. Public troubleshooting owns
-the [owner recovery steps](../packages/mcp-server/src/help/content/integration/troubleshooting.md#local-codespaces).
+Authenticated management and `GET /api/admin/codespaces` expose this metadata. Public backend/MCP
+health exposes only `{state,provider,degraded}`; only `misconfigured` degrades that projection.
+No administrator lifecycle kill-switch endpoint or mass-stop operation exists. Metrics retain
+closed-label `moira_codespace_connection_events_total` and `moira_codespace_rejections_total`
+without user/resource/operation labels or cloud lifecycle backlog gauges.
 
-## Readiness, metrics and controls
-
-Each provider's `CodespaceObservabilityService.readiness()` is its instance-level readiness
-decision. Local services have no GitHub configuration requirement; device connection, current
-locally approved repositories, online contact and finite lease are checked independently before work.
-For GitHub, its states are `disabled` (configuration absent or
-`CODESPACE_CODESPACES_ENABLED` false), `misconfigured` (invalid GitHub App or vault
-configuration), `control_disabled` (a kill switch is on), `connector_unavailable`
-(the credential connector does not answer its health probe) and `ready`. The view
-also carries the configuration state, both controls, connector state, the
-resource reconciliation backlog, oldest due age and active resource count against
-its applicable lifecycle limit. It does not infer workspace activity or count command
-queues, retained output or transfer bytes.
-It contains no user, codespace or operation identifier, and the
-connector is never probed while the feature is disabled.
-
-The complete view is served to authenticated website management and
-`GET /api/admin/system-status` (`systemHealth.codespaces`); compact MCP discovery omits it.
-The unauthenticated liveness surfaces
-`GET /api/health` and MCP `GET /health` receive only the public projection
-`{ state, provider, degraded }`, served from `snapshot()`: the last computed decision
-while it is younger than twice `CODESPACE_RECONCILE_INTERVAL_SECONDS`, otherwise one
-recomputation shared by concurrent requests. The connector health probe is bounded to
-two seconds; a slower probe yields `connector_unavailable` with reason
-`health_probe_timeout`, so a stalled connector never holds a health request open.
-`isCodespaceReadinessDegraded` is the single rule:
-`misconfigured` and `connector_unavailable` degrade the instance; `disabled` and
-`control_disabled` are healthy.
-
-Prometheus metrics on the internal metrics port use closed labels only:
-
-| Metric                                                  | Labels                        | Meaning                                                    |
-| ------------------------------------------------------- | ----------------------------- | ---------------------------------------------------------- |
-| `moira_codespace_connection_events_total`               | `provider`, `action`          | Connection start/complete/refresh_failed/disconnect events |
-| `moira_codespace_lifecycle_events_total`                | `provider`, `action`, `state` | Resource create/start/stop/delete/cleanup outcomes         |
-| `moira_codespace_rejections_total`                      | `code`                        | Refusals before provider contact by bounded error code     |
-| `moira_codespace_reconciliation_due`                    | `kind`                        | Records waiting for reconciliation                         |
-| `moira_codespace_reconciliation_oldest_due_age_seconds` | `kind`                        | Age of the oldest waiting record                           |
-| `moira_codespace_active`                                | `kind`                        | Active resources                                           |
-| `moira_codespace_connector_available`                   | `provider`                    | 1 when the connector answers its health probe              |
-| `moira_codespace_ready`                                 | `provider`                    | 1 when the instance accepts new codespace work             |
-
-Both the web backend and the MCP server process refresh their readiness decision and
-gauges on `CODESPACE_RECONCILE_INTERVAL_SECONDS`; every readiness computation also
-refreshes them. Suggested alert conditions: `moira_codespace_ready`
-equal to 0 while `CODESPACE_CODESPACES_ENABLED=true`; `moira_codespace_connector_available`
-equal to 0; `moira_codespace_reconciliation_oldest_due_age_seconds` above several
-reconcile intervals; a rising rate of `moira_codespace_rejections_total` with
-`code="CODESPACE_POLICY_LIMIT"` (resource policy refusal);
-`moira_codespace_lifecycle_events_total{action="create_rejected"}` or
-`moira_codespace_connection_events_total{action="refresh_failed"}` increasing.
-
-Kill switches are the durable `codespaceProviderControl` rows for the `global` scope
-and the `provider:github-codespaces` scope. Administrators read and change them through
-`GET /api/admin/codespaces` and `PUT /api/admin/codespaces/controls/:scope` (body
-`{ "disabled": boolean, "reason"?: string }`) or the Codespaces tab of the admin
-Settings page, which shows the readiness facts and asks for confirmation before
-stopping work. Disabling refuses new create, start and workspace routing,
-rejects unsubmitted creates and requests stop for persistent codespaces through
-ordinary reconciliation; it never deletes data. Re-enabling clears the control. Every
-change is audited as `CODESPACE_CONTROL_UPDATE` with the scope, flag, reason and the
-number of codespaces asked to stop.
-
-## GitHub trust and isolation
-
-Direct execution is not an agent sandbox. An authorized agent has the same
-repository, installed tools, network and configured Codespaces secrets available
-to the Codespace user. Repository content can influence the agent, and commands
-can read or transmit those values. A command may also create a detached daemon
-or modify startup files beyond the foreground process group. Moira therefore does
-not claim to protect codespace data from an agent the user authorized. Restricted
-execution is outside this contract.
-
-The connector boundary protects the multi-tenant Moira server:
-
-- the credential-bearing connector is non-root, read-only, capability-limited
-  runs under an init process that reaps finished gh/ssh helpers, and is bounded to
-  1 CPU, 640 MiB memory and 384 tasks (each lifecycle/bootstrap worker is further limited to 256
-  processes and threads);
-- it mounts only private Unix-socket volumes and a bounded tmpfs, with no Moira
-  database, data directory, vault key, Docker socket or other-tenant volume;
-- `network_mode: none` removes its direct network path;
-- a separate credential-free CONNECT proxy accepts only reviewed
-  GitHub/Codespaces HTTPS hosts, rejects IP-literal and non-public resolution,
-  and verifies the connected peer; the proxy is bounded to 0.25 CPU, 128 MiB
-  memory and 128 tasks.
-
-The optional Compose profile is disabled by default. Start the connector pair
-with the same application image only after configuring the GitHub App, vault and
-codespace policy:
-
-```bash
-docker compose --profile codespaces up -d
-```
+Direct execution is not an agent sandbox. An authorized agent has its repository, installed tools,
+network and configured Codespaces secrets, and can modify startup files. The fixed provisioner
+runs on the assigned controller with narrowly scoped custody, not inside the multi-tenant cloud.
+The guest service/Git broker retain the same-UID trust boundary, not an OS sandbox against
+authorized commands. Original OAuth/refresh and device credentials never enter the project.
+The normal application Compose has no credential-bearing SSH connector pair.
 
 ## GitHub runtime configuration
 
@@ -918,7 +754,7 @@ For local private repository creation, GitHub requires **Repository creation: wr
 and [installation-add](https://docs.github.com/en/rest/apps/installations#add-a-repository-to-an-app-installation)
 permissions. Contents write remains required for approved push. The owner must approve requested
 App permissions and refresh authorization through **Update GitHub permissions**; discovery or a
-source test does not establish that the live App has them. OAuth remains in the server vault.
+source test does not establish that the live App has them. Original OAuth/refresh credentials remain in the server vault.
 
 Enable "Request user authorization (OAuth) during installation" and expiring user
 authorization tokens; the callback URL is the exact same-origin Moira path below.
@@ -942,30 +778,16 @@ origin. Runtime secrets are not baked into the image.
 
 GitHub creation and workspace routing require `CODESPACE_CODESPACES_ENABLED=true`.
 Local availability is independently authorized by its owner policy/device/grants.
-The remaining environment defaults control provider lifecycle, billing and attachment
-retention, not command or file execution:
+The remaining environment defaults control provider lifecycle and billing, not command or file execution:
 
-| Variable                               | Default | Meaning                                           |
-| -------------------------------------- | ------: | ------------------------------------------------- |
-| `CODESPACE_MAX_CPU_CORES`              |       4 | GitHub selected machine CPU budget                |
-| `CODESPACE_MAX_MEMORY_GB`              |       8 | GitHub selected machine memory budget             |
-| `CODESPACE_MAX_STORAGE_GB`             |      32 | GitHub selected machine storage budget            |
-| `CODESPACE_MAX_ACTIVE_PER_USER`        |       4 | Held GitHub resources, including stopped          |
-| `CODESPACE_MAX_ACTIVE_GLOBAL`          |      16 | Held GitHub resources across the instance         |
-| `CODESPACE_CREATE_THROTTLE_SECONDS`    |      60 | GitHub creation reservation interval              |
-| `CODESPACE_PERSISTENT_RETENTION_DAYS`  |      30 | Provider stopped-resource retention, at most 30   |
-| `CODESPACE_CREATE_DEADLINE_MINUTES`    |      15 | Creation reconciliation deadline                  |
-| `CODESPACE_CLEANUP_DEADLINE_MINUTES`   |      15 | Lifecycle cleanup deadline                        |
-| `CODESPACE_CLAIM_LEASE_SECONDS`        |      30 | Resource reconciliation ownership                 |
-| `CODESPACE_RECONCILE_INTERVAL_SECONDS` |      30 | Lifecycle reconciliation cadence                  |
-| `CODESPACE_START_WAIT_SECONDS`         |     180 | Provider start observation window                 |
-| `CODESPACE_TRANSFER_TTL_MINUTES`       |      10 | Separately published private attachment retention |
+| Variable                              | Default | Meaning                                                     |
+| ------------------------------------- | ------: | ----------------------------------------------------------- |
+| `CODESPACE_PERSISTENT_RETENTION_DAYS` |      30 | Provider stopped-resource retention, from 1 through 30 days |
 
-Values must be positive safely representable integers in their units; the global held
-resource budget cannot be below the per-user budget. The provider retention bound
-remains explicit. Removed operation/input/output/binary aggregate settings are not
-workspace execution controls. Actual storage, scoped authority and native provider
-constraints remain applicable.
+`CODESPACE_CODESPACES_ENABLED` defaults false and accepts only `true` or `false`.
+Local availability is independent. There are no cloud machine/count ceilings, create throttles,
+operation deadlines, claim leases, reconciliation intervals or command/file aggregate quotas.
+Provider constraints, actual storage and finite owner authority remain applicable.
 
 ## Website authorization API
 
@@ -978,7 +800,7 @@ All routes are mounted under `/api/integrations` after `requireAuth`.
 | `GET`    | `/github/start`               | Stores one-time browser state and redirects to GitHub; a refused start redirects to Settings with `?github=<outcome>`             |
 | `GET`    | `/github/reauthorize`         | For a connected account, stores one-time browser state and redirects to GitHub for updated permissions without disconnecting      |
 | `GET`    | `/github/callback`            | Consumes state, verifies GitHub identity/grants and redirects; a return from App installation (no state) re-reads grants          |
-| `DELETE` | `/github`                     | Stops managed work, revokes the GitHub grant and disconnects                                                                      |
+| `DELETE` | `/github`                     | Retires guest/renewal and scoped authority, revokes the GitHub grant and disconnects; preserves VM/disks and cleanup witnesses    |
 | `DELETE` | `/github/external-revocation` | Clears an eligible blocked state after external grant revocation                                                                  |
 
 The external-revocation body must be `{ "confirmed": true }`, and the user
@@ -1022,7 +844,9 @@ GitHub returns the same account and the stored connection and credential generat
 still match the state that started the request. The new credential and grants replace
 the old ones atomically; the previous credential is then revoked. A failed or
 abandoned update leaves the working connection in place. This path does not stop
-managed Codespaces. **Disconnect** does stop them before revoking the grant.
+managed Codespaces. **Disconnect** retires access and revokes the grant without stopping
+or deleting those VMs. Explicitly stop running resources to end compute use; disks remain
+until explicitly deleted.
 The **Refresh** button uses the forced endpoint, while ordinary page reads
 honor the ten-minute snapshot TTL, except while the connection is
 `installation_required`: then every read enumerates the grants afresh, so the
@@ -1070,19 +894,57 @@ version makes the credential readable again and restores ordinary reconnect or
 disconnect. Pending revocation remains durable and retryable until GitHub
 accepts it.
 
+Scoped child credentials have separate encrypted custody bound to their original
+security request, resource generation, repository and action. A candidate is retained
+before validation or delivery. Known children are explicitly revoked on completion,
+abort and retirement of parent/grant/device/resource/account authority; parent revocation
+is not assumed to prove child disposal. Unknown issuance remains uncertain.
+`SCOPED_CREDENTIAL_OUTCOME_UNCONFIRMED`, `SCOPED_CREDENTIAL_CUSTODY_UNCONFIRMED` and
+`SCOPED_CREDENTIAL_DISPOSAL_PENDING` retain the original security identity. Pure collection
+does not mint a child or refresh its parent; confirmed absence does not authorize automatic
+reissuance. On the Local host, `moira-local status --json` lists security receipts and
+`moira-local collect ORIGINAL_SECURITY_REQUEST_ID` inspects the exact request. A live
+stream is not cancelled by inspection. Orphan disposal requires proved absence of its
+exclusive owner, rather than a missing listener or lost reply.
+
+Blocking an account fences new work before retiring known children. Account deletion
+returns pending while child/parent custody or nondeleted managed resources remain;
+the account stays blocked and retains the keys and routing required for explicit cleanup.
+Stop does not delete a persistent disk. Delete managed resources through their existing
+confirmed cleanup action before requesting account deletion; the account API does not implicitly
+delete external VM disks. Lifecycle HTTP/MCP callers preserve scoped retirement errors
+without claiming that the provider stop/delete completed.
+
 ## Persistence and audit
 
-SQLite retains connection/resource identity, grants, lifecycle intents, provider controls,
-credential envelopes and attachment metadata. `workspaceAgentCredential` stores scoped
+SQLite retains connection/resource identity, GitHub grants, minimal route identity and retirement witnesses,
+parent and scoped-child credential envelopes. Communication publication metadata and receipts belong to the source owner; complete former transfer/grant rows remain immutable archives. Local policy, control, repository grants,
+observations and mutation receipts belong to the owner. Local cloud storage retains only
+registration/revocation, immutable resource routing and a confirmed retirement witness.
+Owner-confirmed deletion records its generation, original request and retirement time and revokes
+the binding and guest credentials. Device or binding revocation alone does not retire a resource
+or prove that its disk is absent; unretired identities, including unresolved or unbound resources, block account
+deletion. Migration 0064 preserves complete resource and binding rows in the immutable
+`archiveLocalResourceLegacyCurrent` and `archiveLocalResourceBindingLegacyCurrent` tables.
+The active schema contains no Local machine, desired/observed state, preparation deadline or
+operational outcome. Public IDs, native bindings, revocation values and existing guest credential
+tuples survive the migration; it never creates or replaces a VM. Nondeleted historical resources
+remain conservatively unretired. Rollback restores the coherent pre-migration database backup
+with matching owner state and bundles, rather than reconstructing operations from archives.
+Migration 0061 separately preserves old Local device,
+relay/part, repository, provider-mutation, usage and operational rows in immutable archive
+tables; they are not active authority or runnable work. `workspaceAgentCredential` stores scoped
 credential digests and measured-life/generation bindings; clear credentials are delivered
 only by fixed bootstrap. Command/input/output/file journals live in the workspace.
+Token-free security acquisition receipts and PR receipts also belong to the owner;
+they retain original recovery IDs without persisting child tokens in project storage.
 
 Historical SQL operation and transfer rows and companion receipts remain archival.
 They are not attached to execution, counted as active command work, imported into the
 new namespace or replayed. Resource observation timestamps advance only after verified
 provider observation. Credential vault envelopes retain their authenticated ownership.
 
-Cloud audit emits connection, resource lifecycle and administrator-control events.
+Cloud audit records authorization and public tool boundaries.
 MCP call audit records the tool boundary; it is not a cloud execution journal. Metadata
 is sanitized and excludes command/file content, argv, cwd, stdin/stdout/stderr, provider
 credentials, capabilities and SSH material. Provider refusals retain only safe bounded
@@ -1096,21 +958,14 @@ Use the root project commands; do not call Jest directly:
 npm run test:unit
 npm run test:integration
 docker compose config --quiet --no-env-resolution --no-path-resolution --no-interpolate
-npm run test:docker-connector-isolation
 ```
 
-The last command builds the runtime image target on the local Docker daemon and
-proves, from inside a connector container, that another tenant's volume, the Docker
-socket, the Moira application endpoint, the host bridge and cloud metadata are
-unreachable through the actual filesystem and network policy while the reviewed
-GitHub egress path stays usable; it removes its containers, network and volumes on
-exit and ends with `codespace-connector-isolation-ok`.
-
 `tests/COVERAGE-MAP.md` maps the focused connection, resource, workspace-service/router,
-migration, connector, egress, packaged-isolation, MCP tool, website management,
-readiness/metrics and kill-switch suites, including the ChatGPT-compatible client
+migration, provider/controller, packaged-service, MCP tool, website management
+and configuration-readiness suites, including the ChatGPT-compatible client
 scenario over real services, the HTTP contracts against the local container
 (`npm run test:mcp-tools`, `npm run test:api`) and the Settings browser scenarios
-(`npm run test:e2e`). Live GitHub App user
-credentials, an actual personal Codespace and ChatGPT are separate external
-compatibility gates; deterministic tests do not establish them.
+(`npm run test:e2e`). Deterministic tests and container fixtures do not establish live GitHub or ChatGPT
+compatibility, genuine native attachment transfer or physical SDK isolation. Report only
+the external acceptance actually performed; live GitHub validation is excluded from the
+current work.

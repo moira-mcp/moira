@@ -3,3 +3,4 @@ export * from "./protocol.js";
 export * from "./bundle-loader.js";
 export * from "./extension-host.js";
 export * from "./server.js";
+export * from "./binary-artifact.js";

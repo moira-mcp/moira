@@ -49,7 +49,7 @@ import { GitHubCodespaceManagement } from "./settings/GitHubCodespaceManagement"
 import { GitHubCodespacesProvider } from "./settings/GitHubCodespacesData";
 import { LocalDeviceSettings } from "./settings/LocalDeviceSettings";
 import { CodespaceAutoPause } from "./settings/CodespaceAutoPause";
-import { CodespaceLimitsFromData } from "./settings/CodespaceLimitsPanel";
+import { CodespaceBillingFromData } from "./settings/CodespaceBillingPanel";
 import { PreferencesSettings } from "./settings/PreferencesSettings";
 import { useGuidePage, useGuides } from "@/guides/GuideContext";
 import { guideAnchor } from "@/guides/anchors";
@@ -548,7 +548,7 @@ export const Settings: React.FC = () => {
                       className="space-y-4"
                     >
                       <GitHubCodespaceSettings onConsumeOutcome={consumeGitHubOutcome} />
-                      <CodespaceLimitsFromData section="billing" />
+                      <CodespaceBillingFromData />
                     </div>
                   </TabsContent>
                   <TabsContent
@@ -567,7 +567,6 @@ export const Settings: React.FC = () => {
                     >
                       <CodespaceAutoPause values={values} onSave={saveSetting} />
                     </DataRegion>
-                    <CodespaceLimitsFromData section="limits" />
                   </TabsContent>
                 </Tabs>
               </GitHubCodespacesProvider>

@@ -223,6 +223,7 @@ describe("MCP tool definitions", () => {
       "codespace_id",
       "confirm_delete",
       "cwd",
+      "devcontainer_path",
       "device_id",
       "draft",
       "env",
@@ -230,6 +231,7 @@ describe("MCP tool definitions", () => {
       "file",
       "file_name",
       "files",
+      "generation",
       "head",
       "installation_id",
       "length",
@@ -241,6 +243,7 @@ describe("MCP tool definitions", () => {
       "mode",
       "offset",
       "path",
+      "provider_resource_name",
       "pull_request_number",
       "query",
       "ref",
@@ -260,6 +263,7 @@ describe("MCP tool definitions", () => {
       "title",
     ]);
     expect(getToolOperations(definition("codespace")).slice().sort()).toEqual([
+      "adopt",
       "apply_patch",
       "create",
       "delete",
@@ -268,6 +272,7 @@ describe("MCP tool definitions", () => {
       "get",
       "list",
       "local_devices",
+      "operation",
       "preview_image",
       "pull_request_create",
       "pull_request_find",
@@ -297,6 +302,7 @@ describe("MCP tool definitions", () => {
         definition("codespace").schema.safeParse({
           action: "pull_request_create",
           codespace_id: "00000000-0000-4000-8000-000000000000",
+          request_id: "ws1-11111111-1111-4111-8111-111111111111",
           head: "feat/игра",
           base: "main",
           title: "Change",
@@ -348,6 +354,59 @@ describe("MCP tool definitions", () => {
     ).toBe(false);
   });
 
+  it("publishes and enforces original lifecycle identity, observed CAS and closed adoption forms for both providers", () => {
+    const id = "00000000-0000-4000-8000-000000000000",
+      request_id = "ws1-11111111-1111-4111-8111-111111111111";
+    for (const action of ["start", "stop", "delete"] as const) {
+      const schema = CODESPACE_ACTION_REQUEST_SCHEMAS[action];
+      const input = {
+        codespace_id: id,
+        request_id,
+        generation: 3,
+        ...(action === "delete" ? { confirm_delete: true } : {}),
+      };
+      expect(schema.safeParse(input).success).toBe(true);
+      expect(schema.safeParse({ ...input, request_id: undefined }).success).toBe(false);
+      expect(schema.safeParse({ ...input, generation: undefined }).success).toBe(false);
+      expect(schema.safeParse({ ...input, request_id: id }).success).toBe(false);
+    }
+    const create = CODESPACE_ACTION_REQUEST_SCHEMAS.create;
+    expect(
+      create.safeParse({
+        repository_id: "42",
+        ref: "main",
+        request_id,
+        device_id: id,
+        devcontainer_path: ".devcontainer/agent/devcontainer.json",
+      }).success,
+    ).toBe(true);
+    expect(create.safeParse({ repository_id: "42", ref: "main" }).success).toBe(false);
+    const adopt = CODESPACE_ACTION_REQUEST_SCHEMAS.adopt;
+    expect(adopt.safeParse({ codespace_id: id, request_id, generation: 3 }).success).toBe(true);
+    expect(
+      adopt.safeParse({ provider_resource_name: "owned-vm", request_id, device_id: id }).success,
+    ).toBe(true);
+    expect(
+      adopt.safeParse({
+        codespace_id: id,
+        request_id,
+        generation: 3,
+        provider_resource_name: "owned-vm",
+      }).success,
+    ).toBe(false);
+    expect(adopt.safeParse({ codespace_id: id, request_id }).success).toBe(false);
+    expect(
+      CODESPACE_ACTION_REQUEST_SCHEMAS.operation.safeParse({ device_id: id, request_id }).success,
+    ).toBe(true);
+    expect(
+      CODESPACE_ACTION_REQUEST_SCHEMAS.operation.safeParse({
+        device_id: id,
+        request_id,
+        codespace_id: id,
+      }).success,
+    ).toBe(false);
+  });
+
   it("requires attachment metadata for a current file and refuses obsolete download recovery", () => {
     const download = codespaceDownloadRequestSchema;
     const resume = {
@@ -385,6 +444,9 @@ describe("MCP tool definitions", () => {
     const tool = published.tools.find((candidate) => candidate.name === "codespace")!;
     // Both native file parameters belong to the one tool, so both are declared on it.
     expect(tool._meta).toEqual({ "openai/fileParams": ["stdin_file", "file"] });
+    expect(published.tools.find((candidate) => candidate.name === "communication")?._meta).toEqual({
+      "openai/fileParams": ["file"],
+    });
     for (const field of ["stdin_file", "file"]) {
       const schema = dereferenceLocalJsonSchema(tool.inputSchema) as {
         properties: Record<string, { required: string[]; properties: Record<string, unknown> }>;
@@ -441,14 +503,25 @@ describe("MCP tool definitions", () => {
     const communication = TOOL_DEFINITIONS.find(
       (definition) => definition.name === "communication",
     )!;
-    expect(communication.descriptions.default).toContain(
-      "a valid MCP Bearer credential for the same user",
-    );
-    expect(communication.descriptions.default).not.toContain("the same MCP Bearer credential");
+    expect(communication.descriptions.default).toContain("original");
+    expect(communication.descriptions.default).toContain("deliver-file");
     expect(communication.schema.safeParse({ action: "send", message: "ready" }).success).toBe(true);
     expect(
       communication.schema.safeParse({ action: "send", message: "ready", recipient: "123" })
         .success,
+    ).toBe(false);
+    expect(
+      communication.schema.safeParse({
+        action: "deliver-file",
+        request_id: "ws1-11111111-1111-4111-8111-111111111111",
+        file: { file_id: "file_native", download_url: "https://files.oaiusercontent.com/native" },
+      }).success,
+    ).toBe(true);
+    expect(
+      communication.schema.safeParse({
+        action: "deliver-file",
+        referenceId: "https://arbitrary.example/file",
+      }).success,
     ).toBe(false);
     const schema = getToolJsonSchema(communication) as unknown as {
       properties: Record<string, unknown>;

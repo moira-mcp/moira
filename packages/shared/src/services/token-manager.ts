@@ -7,7 +7,36 @@
 import { randomUUID } from "crypto";
 import { getSqliteInstance } from "../database/connection.js";
 import { createLogger } from "../logging/logger.js";
-import { DatabaseError } from "../errors/index.js";
+import { DatabaseError, ValidationError } from "../errors/index.js";
+import { z } from "zod";
+import {
+  communicationOwnerScopeSchema,
+  type CommunicationOwnerScope,
+} from "../communication-owner-protocol.js";
+import { WORKSPACE_REQUEST_ID_PATTERN } from "../codespaces/workspace-request-id.mjs";
+import { metadataRevision } from "../utils/metadata-revision.js";
+
+const materializeArchiveSchema = z
+  .object({
+    owner: communicationOwnerScopeSchema.refine(
+      (scope): scope is Extract<CommunicationOwnerScope, { kind?: "controller" }> =>
+        scope.kind === "controller",
+    ),
+    requestId: z.string().regex(WORKSPACE_REQUEST_ID_PATTERN),
+  })
+  .strict();
+const materializeOptionsSchema = z
+  .object({
+    contextRevision: z.string().min(1).optional(),
+    archive: materializeArchiveSchema.optional(),
+  })
+  .strict();
+
+function materializeOptions(value: string | null) {
+  const parsed = materializeOptionsSchema.safeParse(value === null ? {} : JSON.parse(value));
+  if (!parsed.success) throw new ValidationError("Invalid materialize grant options");
+  return parsed.data;
+}
 
 const logger = createLogger({ component: "TokenManager" });
 
@@ -99,7 +128,7 @@ export class TokenManager {
         this.cleanupExpiredTokens();
       },
       5 * 60 * 1000,
-    );
+    ).unref?.();
   }
 
   /**
@@ -317,25 +346,71 @@ export class TokenManager {
     executionId: string,
     nodeId: string,
     userId: string,
+    expectedContextRevision?: string,
   ): boolean {
     const db = getSqliteInstance();
     const row = db
       .prepare(
-        `SELECT 1 AS authorized
-         FROM workflow_tokens
-         WHERE token = ? AND type = 'materialize' AND execution_id = ? AND node_id = ?
-           AND user_id = ? AND used = 0 AND expires_at > ?
-           AND EXISTS (
-             SELECT 1 FROM workflowExecution AS execution
-             WHERE execution.executionId = workflow_tokens.execution_id
-               AND execution.userId = workflow_tokens.user_id
-               AND execution.state = 'running'
-               AND execution.currentNodeId = workflow_tokens.node_id
-               AND execution.waitingForInputNodeId = workflow_tokens.node_id
-           )`,
+        `SELECT execution.context, workflow_tokens.options_json AS optionsJson
+         FROM workflow_tokens JOIN workflowExecution AS execution
+           ON execution.executionId = workflow_tokens.execution_id
+          AND execution.userId = workflow_tokens.user_id
+         WHERE workflow_tokens.token = ? AND workflow_tokens.type = 'materialize'
+           AND workflow_tokens.execution_id = ? AND workflow_tokens.node_id = ?
+           AND workflow_tokens.user_id = ? AND workflow_tokens.used = 0 AND workflow_tokens.expires_at > ?
+           AND execution.state = 'running'
+           AND execution.currentNodeId = workflow_tokens.node_id
+           AND execution.waitingForInputNodeId = workflow_tokens.node_id`,
       )
-      .get(token, executionId, nodeId, userId, Date.now()) as { authorized: number } | undefined;
-    return row?.authorized === 1;
+      .get(token, executionId, nodeId, userId, Date.now()) as
+      { context: string; optionsJson: string | null } | undefined;
+    if (!row) return false;
+    try {
+      const current = metadataRevision(JSON.parse(row.context));
+      const options = materializeOptions(row.optionsJson);
+      return (
+        (!options.contextRevision || options.contextRevision === current) &&
+        (!expectedContextRevision || expectedContextRevision === current)
+      );
+    } catch {
+      return false;
+    }
+  }
+
+  getMaterializeArchive(token: string) {
+    const grant = this.validateToken(token, "materialize");
+    return grant ? (materializeOptions(grant.optionsJson).archive ?? null) : null;
+  }
+
+  /** Pin only routing authority; the original owner's receipt retains the file outcome. */
+  bindMaterializeArchive(
+    token: string,
+    executionId: string,
+    nodeId: string,
+    userId: string,
+    contextRevision: string,
+    candidate: z.infer<typeof materializeArchiveSchema>,
+  ) {
+    const archive = materializeArchiveSchema.parse(candidate);
+    if (archive.owner.userId !== userId) return null;
+    const db = getSqliteInstance();
+    return db
+      .transaction(() => {
+        if (!this.authorizeMaterializeToken(token, executionId, nodeId, userId, contextRevision))
+          return null;
+        const grant = this.validateToken(token, "materialize");
+        if (!grant) return null;
+        const options = materializeOptions(grant.optionsJson);
+        if (options.archive) return { created: false, archive: options.archive };
+        const result = db
+          .prepare(
+            `UPDATE workflow_tokens SET options_json = ?
+         WHERE token = ? AND type = 'materialize' AND options_json IS ?`,
+          )
+          .run(JSON.stringify({ ...options, contextRevision, archive }), token, grant.optionsJson);
+        return result.changes === 1 ? { created: true, archive } : null;
+      })
+      .immediate();
   }
 
   markTokenAsUsed(token: string): void {

@@ -1,20 +1,22 @@
 import { Router, json, type Request, type Response, type NextFunction } from "express";
-import { setTimeout as delay } from "node:timers/promises";
 import { z } from "zod";
 import {
   LocalDeviceError,
-  localPublicPolicySchema,
-  localAcknowledgementSchema,
-  localControlReportSchema,
   localControlRequestSchema,
   type LocalDeviceService,
   type LocalDeviceAuth,
-  type LocalRelayAcknowledgement,
+  controllerResourceRegistrationSchema,
+  CODESPACE_PROVIDER_LOCAL,
+  type ControllerResourceRegistration,
+  CodespaceResourceError,
+  ScopedCredentialError,
 } from "@mcp-moira/shared";
 import type { AuthenticatedRequest } from "../types/express-types.js";
 import { getLocalRepositoryAdmissionService } from "../services/local-repository-admission-factory.js";
 import { issueWorkspaceAgentCredential } from "../services/workspace-services.js";
 import { getSqliteInstance } from "@mcp-moira/shared";
+import { getCodespaceProviderServices } from "../services/codespace-services.js";
+import { LocalCodespaceResourceService } from "../services/local-codespace-resource-service.js";
 
 type Handler = (req: Request, res: Response, next: NextFunction) => unknown | Promise<unknown>;
 function endpoint(handler: Handler) {
@@ -22,16 +24,51 @@ function endpoint(handler: Handler) {
     Promise.resolve()
       .then(() => handler(req, res, next))
       .catch((error: unknown) => {
+        if (error instanceof ScopedCredentialError) {
+          res.status(error.status).json({
+            success: false,
+            error: {
+              code: error.code,
+              message: "Owner access was retired; scoped credential disposal remains pending.",
+            },
+          });
+          return;
+        }
         if (error instanceof LocalDeviceError) {
           const status = {
             LOCAL_UNAUTHORIZED: 401,
             LOCAL_CONFLICT: 409,
             LOCAL_EXPIRED: 410,
             LOCAL_INVALID: 400,
+            LOCAL_UNAVAILABLE: 503,
+            LOCAL_OUTCOME_UNCONFIRMED: 409,
           }[error.code];
-          res
-            .status(status)
-            .json({ success: false, error: { code: error.code, message: error.message } });
+          res.status(status).json({
+            success: false,
+            error: {
+              code: error.code,
+              message: error.message,
+              ...(error.requestId ? { request_id: error.requestId } : {}),
+            },
+          });
+          return;
+        }
+        if (error instanceof CodespaceResourceError) {
+          const status =
+            error.code === "CODESPACE_GENERATION_CONFLICT"
+              ? 409
+              : error.code === "CODESPACE_RESOURCE_INVALID"
+                ? 400
+                : error.code === "CODESPACE_PROVIDER_UNAVAILABLE"
+                  ? 503
+                  : 403;
+          res.status(status).json({
+            success: false,
+            error: {
+              code: error.code,
+              message: "Resource registration was refused before any native work.",
+            },
+          });
           return;
         }
         if (error instanceof z.ZodError) {
@@ -64,9 +101,6 @@ function deviceAuth(service: LocalDeviceService, req: Request): LocalDeviceAuth 
   const bearer = req.get("Authorization")?.match(/^Bearer ([A-Za-z0-9_-]{43})$/)?.[1];
   if (!bearer) throw new LocalDeviceError("LOCAL_UNAUTHORIZED", "Device access denied.");
   return service.authenticateDevice(bearer);
-}
-function claimHeader(req: Request): string {
-  return z.string().uuid().parse(req.get("X-Moira-Claim-Id"));
 }
 function param(req: Request, key: string): string {
   return z.string().uuid().parse(req.params[key]);
@@ -120,7 +154,9 @@ export function createLocalDeviceManagementRoutes(
   };
   router.get(
     "/devices",
-    endpoint((req, res) => res.json({ success: true, data: service.listOwned(owner(req)) })),
+    endpoint(async (req, res) =>
+      res.json({ success: true, data: await service.listOwned(owner(req)) }),
+    ),
   );
   router.post(
     "/pairings",
@@ -133,27 +169,27 @@ export function createLocalDeviceManagementRoutes(
   );
   router.post(
     "/pairings/:id/confirm",
-    endpoint((req, res) => {
+    endpoint(async (req, res) => {
       const input = z
         .object({ expectedRevision: z.number().int().positive() })
         .strict()
         .parse(req.body);
       res.json({
         success: true,
-        data: service.confirmEnrollment(owner(req), param(req, "id"), input.expectedRevision),
+        data: await service.confirmEnrollment(owner(req), param(req, "id"), input.expectedRevision),
       });
     }),
   );
   router.delete(
     "/devices/:id",
-    endpoint((req, res) => {
+    endpoint(async (req, res) => {
       const input = z
         .object({ expectedGeneration: z.number().int().positive() })
         .strict()
         .parse(req.body);
       res.json({
         success: true,
-        data: service.revokeOwned(owner(req), param(req, "id"), input.expectedGeneration),
+        data: await service.revokeOwned(owner(req), param(req, "id"), input.expectedGeneration),
       });
     }),
   );
@@ -177,18 +213,56 @@ export function createLocalDeviceManagementRoutes(
         );
       res.json({
         success: true,
-        data: service.requestSettings(owner(req), param(req, "id"), input),
+        data: await service.requestSettings(owner(req), param(req, "id"), input),
       });
     }),
   );
+  for (const path of [
+    "/devices/:id/settings/operations/:requestId",
+    "/devices/:id/operations/:requestId",
+  ]) {
+    router.get(
+      path,
+      endpoint(async (req, res) => {
+        const requestId = z
+          .string()
+          .regex(/^ws1-[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/)
+          .parse(req.params.requestId);
+        const data = path.includes("/settings/")
+          ? await service.collectSettings(owner(req), param(req, "id"), requestId)
+          : await service.getOperation(owner(req), param(req, "id"), requestId);
+        res.json({ success: true, data });
+      }),
+    );
+  }
   return finishRouter(router);
 }
 
 /** Native companion initiates outbound requests; these routes use device credentials, not cookies. */
-export function createLocalDeviceRoutes(service: LocalDeviceService, publicOrigin: string): Router {
+export function createLocalDeviceRoutes(
+  service: LocalDeviceService,
+  publicOrigin: string,
+  registerResource: (
+    auth: LocalDeviceAuth,
+    input: ControllerResourceRegistration,
+  ) => Promise<unknown> = async (auth, input) => {
+    const resource = getCodespaceProviderServices(CODESPACE_PROVIDER_LOCAL).resource;
+    if (!(resource instanceof LocalCodespaceResourceService))
+      throw new LocalDeviceError("LOCAL_UNAVAILABLE", "The Local route authority is unavailable.");
+    return resource.registerRoute(auth.userId, auth.deviceId, input);
+  },
+): Router {
   const router = Router();
   protectOrigin(router, publicOrigin);
   router.use(json({ limit: "2mb" }));
+  router.post(
+    "/resources/register",
+    endpoint(async (req, res) => {
+      const auth = deviceAuth(service, req),
+        input = controllerResourceRegistrationSchema.parse(req.body);
+      res.json({ success: true, data: await registerResource(auth, input) });
+    }),
+  );
   router.post(
     "/workspaces/bootstrap",
     endpoint((req, res) => {
@@ -203,7 +277,7 @@ export function createLocalDeviceRoutes(service: LocalDeviceService, publicOrigi
       const binding = getSqliteInstance()
         .prepare(
           `SELECT 1 FROM codespaceLocalResourceBinding
-        WHERE resourceId=? AND userId=? AND deviceId=? AND deviceGeneration=?`,
+        WHERE resourceId=? AND userId=? AND deviceId=? AND deviceGeneration=? AND revokedAt IS NULL`,
         )
         .get(input.resourceId, auth.userId, auth.deviceId, auth.deviceGeneration);
       if (!binding) throw new LocalDeviceError("LOCAL_UNAUTHORIZED", "Workspace binding refused.");
@@ -230,78 +304,12 @@ export function createLocalDeviceRoutes(service: LocalDeviceService, publicOrigi
   router.post(
     "/heartbeat",
     endpoint((req, res) => {
-      const auth = deviceAuth(service, req),
-        input = z
-          .object({ policy: localPublicPolicySchema, control: localControlReportSchema.optional() })
-          .strict()
-          .parse(req.body);
-      res.json({ success: true, data: service.heartbeat(auth, input.policy, input.control) });
-    }),
-  );
-  router.post(
-    "/relay/claim",
-    endpoint(async (req, res) => {
-      const input = z
-        .object({
-          limit: z.number().int().min(1).max(8).default(1),
-          waitMs: z.number().int().min(0).max(25000).default(0),
-        })
-        .strict()
-        .parse(req.body ?? {});
-      const aborted = new AbortController();
-      const close = () => aborted.abort();
-      res.once("close", close);
-      const deadline = Date.now() + input.waitMs;
-      try {
-        while (!aborted.signal.aborted) {
-          const requests = service.claim(deviceAuth(service, req), input.limit);
-          if (requests.length || Date.now() >= deadline) {
-            res.json({
-              success: true,
-              data: { requests },
-            });
-            return;
-          }
-          try {
-            await delay(Math.min(1000, deadline - Date.now()), undefined, {
-              signal: aborted.signal,
-            });
-          } catch (error) {
-            if (!aborted.signal.aborted) throw error;
-          }
-        }
-      } finally {
-        res.off("close", close);
-      }
-    }),
-  );
-  router.post(
-    "/relay/:requestId/renew",
-    endpoint((req, res) => {
       z.object({})
         .strict()
         .parse(req.body ?? {});
-      res.json({
-        success: true,
-        data: service.renewClaim(
-          deviceAuth(service, req),
-          param(req, "requestId"),
-          claimHeader(req),
-        ),
-      });
-    }),
-  );
-  router.post(
-    "/relay/ack",
-    endpoint(async (req, res) => {
       const auth = deviceAuth(service, req),
-        ack = localAcknowledgementSchema.parse(req.body) as LocalRelayAcknowledgement;
-      const existing = service.getResult(auth.userId, ack.requestId);
-      if (existing?.status === "completed" || existing?.status === "refused") {
-        res.json({ success: true, data: service.acknowledge(auth, ack) });
-        return;
-      }
-      res.json({ success: true, data: service.acknowledge(deviceAuth(service, req), ack) });
+        current = service.getDeviceIdentity(auth.userId, auth.deviceId);
+      res.json({ success: true, data: { ...current } });
     }),
   );
   return finishRouter(router);

@@ -4,6 +4,7 @@
  */
 
 import { Router, Request, Response } from "express";
+import { z } from "zod";
 import { asyncHandler, createApiError } from "../middleware/error-middleware.js";
 import {
   DatabaseRepository,
@@ -143,13 +144,20 @@ router.post(
       )
         throw createApiError.validationFailed(`${field} must be an array of block or node ids`);
     }
-    const grant = await progressImages.mint(execution.executionId, execution.userId, {
-      theme: req.body?.theme,
-      viewportWidth: req.body?.viewportWidth,
-      view: req.body?.view,
-      hide: req.body?.hide,
-      collapse: req.body?.collapse,
-    });
+    const deviceId = z.string().uuid().optional().safeParse(req.body?.deviceId);
+    if (!deviceId.success) throw createApiError.validationFailed("deviceId must be a device UUID");
+    const grant = await progressImages.mint(
+      execution.executionId,
+      execution.userId,
+      {
+        theme: req.body?.theme,
+        viewportWidth: req.body?.viewportWidth,
+        view: req.body?.view,
+        hide: req.body?.hide,
+        collapse: req.body?.collapse,
+      },
+      deviceId.data,
+    );
     res.json({ success: true, data: grant, timestamp: new Date().toISOString() });
   }),
 );

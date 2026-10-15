@@ -19,12 +19,16 @@ import {
   TelegramErrorType,
   setTestClientFactory,
   resetClientFactory,
+  notificationLiveRun,
 } from "@mcp-moira/workflow-engine";
 import type {
   TelegramNotificationNode,
   ExecutionContext,
   TelegramError,
+  WorkflowExecution,
+  WorkflowGraph,
 } from "@mcp-moira/workflow-engine";
+import { communicationOwnerFixture } from "../../fixtures/communication-owner.js";
 import type { IDataRepository } from "@mcp-moira/workflow-engine";
 import type { IGraphExecutionEngine } from "@mcp-moira/workflow-engine";
 import { ServiceLogger } from "@mcp-moira/shared/logging/logger";
@@ -127,16 +131,19 @@ describe("TelegramNotificationHandler Error Handling", () => {
     expect(notification.status).toBe(TelegramErrorType.INVALID_CHAT_ID);
   });
 
-  test("renders and sends attached workflow progress through photo transport", async () => {
-    const sent: Array<{ photo: Uint8Array; caption?: string }> = [];
-    const distinctive = Buffer.from("wrapper-image");
+  test("passes current progress and caption to its owner, with independent text error handling when the optional image is unavailable", async () => {
+    const sent: Array<{ caption?: string }> = [];
     const renderedFor: Array<{
       currentNodeId: string | null;
       waitingOn: string | null;
       lastVisitNode?: string;
     }> = [];
     const pictures: string[] = [];
-    handler = new TelegramNotificationHandler(async (workflow, execution) => {
+    const fixture = communicationOwnerFixture(async (input) => {
+      if (input.source.type !== "progress") throw new Error("Expected progress descriptor");
+      const workflow = input.source.descriptor.graph as unknown as WorkflowGraph;
+      const execution = input.source.descriptor.run as unknown as WorkflowExecution;
+      sent.push({ caption: input.action === "deliver" ? input.text : undefined });
       pictures.push(
         renderProgressStepsSvg(buildProgressStepsModel(projectExecutionRun(workflow, execution)!)),
       );
@@ -145,22 +152,14 @@ describe("TelegramNotificationHandler Error Handling", () => {
         waitingOn: execution.waitingForInputNodeId ?? null,
         lastVisitNode: execution.visits?.at(-1)?.nodeId,
       });
-      return {
-        buffer: distinctive,
-        mimeType: "image/png",
-        width: 640,
-        height: 224,
-        workflowVersion: "1.0.0",
-        executionRevision: execution.revision,
-      };
     });
+    handler = new TelegramNotificationHandler(fixture.owner);
     setTestClientFactory(
       () =>
         ({
           getDefaultChatId: () => "12345",
-          sendPhoto: async (params: { photo: Uint8Array; caption?: string }) => {
-            sent.push(params);
-            return { ok: true };
+          sendMessage: async () => {
+            throw new Error("Owner delivery must not use cloud text transport");
           },
         }) as any,
     );
@@ -176,7 +175,7 @@ describe("TelegramNotificationHandler Error Handling", () => {
     const execution = {
       executionId: "test-exec-123",
       workflowId: "test-workflow",
-      userId: "system",
+      userId: "test-user",
       currentNodeId: "test-telegram-node",
       status: "running",
       revision: 1,
@@ -187,6 +186,7 @@ describe("TelegramNotificationHandler Error Handling", () => {
     mockRepository.getWorkflowGraph = jest.fn(async () => graph);
     mockRepository.getExecution = jest.fn(async () => execution);
     mockRepository.getWorkflow = jest.fn(async () => ({ metadata: graph.metadata }) as any);
+    const liveRun = notificationLiveRun({ execution }, [], {}, "test-telegram-node");
 
     const result = await handler.execute(
       createTelegramNode({ progressNodeId: "notify", attachProgressImage: true }),
@@ -194,10 +194,12 @@ describe("TelegramNotificationHandler Error Handling", () => {
       messageQueue,
       mockRepository,
       mockEngine,
+      undefined,
+      undefined,
+      liveRun,
     );
     expect(result.action).toBe("continue");
     expect(sent).toHaveLength(1);
-    expect(Buffer.from(sent[0].photo).equals(distinctive)).toBe(true);
     expect(sent[0].caption).toContain("Test notification: completed");
     // Rendered as of the notification node inside the current cycle, not of the persisted wait;
     // the successor is an end, so nothing is waited on.
@@ -232,9 +234,8 @@ describe("TelegramNotificationHandler Error Handling", () => {
       () =>
         ({
           getDefaultChatId: () => "12345",
-          sendPhoto: async (params: { photo: Uint8Array; caption?: string }) => {
-            sent.push(params);
-            return { ok: true };
+          sendMessage: async () => {
+            throw new Error("Owner delivery must not use cloud text transport");
           },
         }) as any,
     );
@@ -248,6 +249,9 @@ describe("TelegramNotificationHandler Error Handling", () => {
       messageQueue,
       mockRepository,
       mockEngine,
+      undefined,
+      undefined,
+      liveRun,
     );
     expect(renderedFor).toEqual([
       { currentNodeId: "pin-gate", waitingOn: "pin-gate", lastVisitNode: "pin-gate" },
@@ -261,13 +265,19 @@ describe("TelegramNotificationHandler Error Handling", () => {
       () =>
         ({
           getDefaultChatId: () => "12345",
-          sendPhoto: async () => {
+          sendMessage: async () => {
             const error = new Error("chat not found") as TelegramError;
             error.type = TelegramErrorType.INVALID_CHAT_ID;
             throw error;
           },
         }) as any,
     );
+    handler = new TelegramNotificationHandler({
+      ...fixture.owner,
+      async submit() {
+        throw new Error("Controlled owner unavailable before admission");
+      },
+    });
     const failureQueue = new AgentMessageQueue();
     const failure = await handler.execute(
       createTelegramNode({ progressNodeId: "notify", attachProgressImage: true }),
@@ -275,12 +285,19 @@ describe("TelegramNotificationHandler Error Handling", () => {
       failureQueue,
       mockRepository,
       mockEngine,
+      undefined,
+      undefined,
+      liveRun,
     );
     expect(failure.data).toMatchObject({
       telegramNotificationFailed: true,
       errorType: TelegramErrorType.INVALID_CHAT_ID,
     });
-    expect(failureQueue.flush("test-process").messages).toHaveLength(1);
+    expect(
+      failureQueue
+        .flush("test-process")
+        .messages.map((message) => ("status" in message ? message.status : null)),
+    ).toEqual(["attachment_unavailable", TelegramErrorType.INVALID_CHAT_ID]);
   });
 
   /** A checklist block followed by the notification's own block, as the message tests share it. */

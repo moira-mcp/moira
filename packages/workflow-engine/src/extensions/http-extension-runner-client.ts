@@ -106,6 +106,19 @@ export class HttpExtensionRunnerClient implements IExtensionRunnerClient {
     return { ready: response.ok, body };
   }
 
+  async binaryArtifact(channelId: string): Promise<{ digest: string; bytes: Uint8Array }> {
+    const response = await this.requestWithDeadline(
+      `/channels/${encodeURIComponent(channelId)}/binary-artifact`,
+    );
+    const digest = response.headers.get("x-moira-artifact-digest");
+    if (!response.ok || !digest || !/^[a-f0-9]{64}$/.test(digest))
+      throw new ExtensionInvocationError(
+        "invalid-input",
+        "Installed extension has no portable binary artifact",
+      );
+    return { digest, bytes: new Uint8Array(await response.arrayBuffer()) };
+  }
+
   async invoke(request: ExtensionInvocationRequest): Promise<ExtensionInvocationResult> {
     // The transport waits a little longer than the call itself: the service is the one that owns
     // the deadline and kills the handler, and its typed timeout answer is more useful than a
@@ -172,34 +185,13 @@ export class HttpExtensionRunnerClient implements IExtensionRunnerClient {
     request: ExtensionCommunicationChannelRequest,
     signal?: AbortSignal,
   ): Promise<void> {
-    if (request.message.attachment && "source" in request.message.attachment) {
+    if ("attachment" in request.message) {
       throw new ExtensionInvocationError(
         "invalid-input",
-        "streaming attachments are not supported by this runner ABI",
+        "Binary delivery belongs to the original file owner",
       );
     }
-    await this.callCommunicationEndpoint(
-      "/channels/deliver",
-      {
-        ...request,
-        message: {
-          ...request.message,
-          ...(request.message.attachment
-            ? {
-                attachment: {
-                  kind: request.message.attachment.kind,
-                  data: Buffer.from(request.message.attachment.bytes!).toString("base64"),
-                  encoding: "base64",
-                  filename: request.message.attachment.filename,
-                  mimeType: request.message.attachment.mimeType,
-                },
-              }
-            : {}),
-        },
-      },
-      request.timeoutMs,
-      signal,
-    );
+    await this.callCommunicationEndpoint("/channels/deliver", request, request.timeoutMs, signal);
   }
 
   private async callCommunicationEndpoint(

@@ -4,6 +4,7 @@ import {
   TokenManager,
   ValidationError,
   type WorkflowToken,
+  communicationOwnerReceiptSchema,
 } from "@mcp-moira/shared";
 import type { IDataRepository } from "../interfaces/data-repository.js";
 import {
@@ -12,9 +13,13 @@ import {
   type ProgressVisualOptions,
 } from "../utils/execution-progress-visual.js";
 import { deriveProcess } from "../utils/process-derivation.js";
-import { renderExecutionProgressImage } from "../utils/execution-progress-image.js";
+import {
+  getActiveCommunicationFileOwner,
+  type CommunicationFileOwner,
+} from "./user-communication-provider.js";
 import { ProgressStatisticsService, statisticsForRun } from "./progress-statistics-service.js";
 import { randomUUID } from "node:crypto";
+import { runPageUrl } from "../utils/notification-text.js";
 
 export interface ProgressImageGrant {
   downloadUrl: string;
@@ -48,7 +53,7 @@ export class ProgressImageService {
     private readonly repository: IDataRepository,
     private readonly tokens: ProgressImageTokenStore = TokenManager.getInstance(),
     private readonly baseUrl: () => string = getBaseUrl,
-    private readonly renderer: typeof renderExecutionProgressImage = renderExecutionProgressImage,
+    private readonly fileOwner?: CommunicationFileOwner,
     private readonly statistics: Pick<
       ProgressStatisticsService,
       "forVersion"
@@ -59,6 +64,7 @@ export class ProgressImageService {
     executionId: string,
     ownerUserId: string,
     options: ProgressVisualOptions = {},
+    deviceId?: string,
   ): Promise<ProgressImageGrant> {
     // The caller decides whether this user may act on the execution; what this service enforces is
     // the binding the minted token depends on — the execution it names is the one it was minted
@@ -99,6 +105,10 @@ export class ProgressImageService {
     const issuedAt = Date.now();
     const contextRevision = metadataRevision(execution.globalContext);
     const taskIdentityRevision = metadataRevision(execution.taskIdentity ?? null);
+    const selected = await (this.fileOwner ?? getActiveCommunicationFileOwner()).select(
+      ownerUserId,
+      deviceId,
+    );
     const token = this.tokens.createProgressImageToken(
       execution.executionId,
       execution.workflowId,
@@ -110,6 +120,7 @@ export class ProgressImageService {
         contextRevision,
         taskIdentity: execution.taskIdentity ?? null,
         taskIdentityRevision,
+        deviceId: selected.deviceId,
       }),
       ttlMs,
     );
@@ -125,7 +136,9 @@ export class ProgressImageService {
     };
   }
 
-  async redeem(token: string): Promise<{ png: Buffer; claimId: string } | null> {
+  async redeem(
+    token: string,
+  ): Promise<{ referenceId: string; claimId: string; userId: string } | null> {
     const grant = this.tokens.validateToken(token, "progress-image");
     if (
       !grant?.executionId ||
@@ -148,21 +161,25 @@ export class ProgressImageService {
     let options: ProgressVisualOptions;
     let contextRevision: string;
     let taskIdentityRevision: string;
+    let deviceId: string;
     try {
       const stored = JSON.parse(grant.optionsJson) as {
         options: ProgressVisualOptions;
         contextRevision: string;
         taskIdentityRevision: string;
+        deviceId: string;
       };
       if (
         !stored.options ||
         typeof stored.contextRevision !== "string" ||
-        typeof stored.taskIdentityRevision !== "string"
+        typeof stored.taskIdentityRevision !== "string" ||
+        typeof stored.deviceId !== "string"
       )
         return null;
       contextRevision = stored.contextRevision;
       taskIdentityRevision = stored.taskIdentityRevision;
       options = stored.options;
+      deviceId = stored.deviceId;
     } catch {
       return null;
     }
@@ -187,16 +204,53 @@ export class ProgressImageService {
         this.tokens.releaseProgressImageToken(token, claimId);
         return null;
       }
-      const rendered = await this.renderer(graph, execution, options, statistics);
-      if (!rendered || !(await currentBinding())) {
+      const digest = metadataRevision(["progress-image", token]);
+      const requestId = `ws1-${digest.slice(0, 8)}-${digest.slice(8, 12)}-4${digest.slice(13, 16)}-8${digest.slice(17, 20)}-${digest.slice(20, 32)}`;
+      const raw = await (this.fileOwner ?? getActiveCommunicationFileOwner()).submit(
+        grant.userId,
+        {
+          action: "publish",
+          requestId,
+          source: {
+            type: "progress",
+            descriptor: {
+              kind: "map",
+              graph: graph as unknown as Record<string, unknown>,
+              run: execution as unknown as Record<string, unknown>,
+              options: options as Record<string, unknown>,
+              statistics: statistics as unknown as Record<string, unknown> | null,
+              renderContext: { runUrl: runPageUrl(execution.globalContext) },
+            },
+          },
+        },
+        deviceId,
+      );
+      const receipt = communicationOwnerReceiptSchema.passthrough().parse(raw);
+      if (!receipt.outcome?.ok)
+        throw Object.assign(
+          new Error("Collect the original progress publication; its outcome is unconfirmed."),
+          { code: "COMMUNICATION_OUTCOME_UNCONFIRMED", requestId, deviceId },
+        );
+      if (!(await currentBinding())) {
         this.tokens.releaseProgressImageToken(token, claimId);
         return null;
       }
-      return { png: rendered.buffer, claimId };
+      return {
+        referenceId: receipt.outcome.result.file.referenceId,
+        claimId,
+        userId: grant.userId,
+      };
     } catch (error) {
       this.tokens.releaseProgressImageToken(token, claimId);
       throw error;
     }
+  }
+
+  open(redemption: { referenceId: string; userId: string }) {
+    return (this.fileOwner ?? getActiveCommunicationFileOwner()).openPublication(
+      redemption.userId,
+      redemption.referenceId,
+    );
   }
 
   complete(token: string, claimId: string): boolean {

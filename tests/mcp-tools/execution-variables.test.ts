@@ -909,32 +909,20 @@ describe("runtime execution variables", () => {
     };
     expect(noProgressHttpBody.data).toEqual(noProgressMetadata);
 
-    const imageGrant = await callMCPTool<any>(client, "session", {
-      action: "progress-image-token",
-      executionId,
-      theme: "dark",
-      viewportWidth: 720,
+    const imageGrant = await client.callTool({
+      name: "session",
+      arguments: {
+        action: "progress-image-token",
+        executionId,
+        theme: "dark",
+        viewportWidth: 720,
+      },
     });
-    expect(imageGrant).toMatchObject({
-      mimeType: "image/png",
-      workflowVersion: "1.0.0",
-      options: { theme: "dark", viewportWidth: 720 },
+    expect(imageGrant.isError).toBe(true);
+    expect(imageGrant.structuredContent).toMatchObject({
+      success: false,
+      code: "COMMUNICATION_OWNER_UNAVAILABLE",
     });
-    const imagePath = new URL(imageGrant.downloadUrl).pathname;
-    const concurrentImages = await Promise.all([
-      fetch(`${getTestBaseUrl()}${imagePath}`),
-      fetch(`${getTestBaseUrl()}${imagePath}`),
-    ]);
-    expect(concurrentImages.map((response) => response.status).sort()).toEqual([200, 401]);
-    const firstImage = concurrentImages.find((response) => response.status === 200)!;
-    expect(firstImage.status).toBe(200);
-    expect(firstImage.headers.get("content-type")).toContain("image/png");
-    expect(
-      Buffer.from(await firstImage.arrayBuffer())
-        .subarray(0, 8)
-        .toString("hex"),
-    ).toBe("89504e470d0a1a0a");
-    expect((await fetch(`${getTestBaseUrl()}${imagePath}`)).status).toBe(401);
 
     const httpMint = await fetch(
       `${getTestBaseUrl()}/api/executions/${executionId}/progress-image-token`,
@@ -947,10 +935,10 @@ describe("runtime execution variables", () => {
         body: JSON.stringify({ theme: "light", viewportWidth: 600 }),
       },
     );
-    expect(httpMint.status).toBe(200);
-    const httpGrantBody = (await httpMint.json()) as { data: any };
-    expect(httpGrantBody).toMatchObject({
-      data: { mimeType: "image/png", options: { theme: "light", viewportWidth: 600 } },
+    expect(httpMint.status).toBe(503);
+    expect(await httpMint.json()).toMatchObject({
+      success: false,
+      error: { code: "COMMUNICATION_OWNER_UNAVAILABLE" },
     });
     const foreignHttpMint = await fetch(
       `${getTestBaseUrl()}/api/executions/${executionId}/progress-image-token`,
@@ -977,18 +965,28 @@ describe("runtime execution variables", () => {
       executionId,
       names: ["editable_value"],
     });
+    const currentContext = await callMCPTool<any>(client, "session", {
+      action: "execution_context",
+      executionId,
+    });
     await callMCPTool<any>(client, "session", {
       action: "set-variable",
       executionId,
       variableName: "editable_value",
       variableValue: currentEditable.variables[0].value === "old" ? "new" : "old",
-      expectedRevision: httpGrantBody.data.executionRevision,
+      expectedRevision: currentContext.revision,
       expectedContextRevision: currentEditable.contextRevision,
     });
-    expect(
-      (await fetch(`${getTestBaseUrl()}${new URL(httpGrantBody.data.downloadUrl).pathname}`))
-        .status,
-    ).toBe(401);
+    const changedContext = await callMCPTool<any>(client, "session", {
+      action: "execution_context",
+      executionId,
+    });
+    expect(changedContext.context.variables.editable_value).not.toBe(
+      currentContext.context.variables.editable_value,
+    );
+    expect(changedContext.metadataRevisions.context).not.toBe(
+      currentContext.metadataRevisions.context,
+    );
     expect(
       await callMCPToolRaw(foreignClient, "session", {
         action: "progress-image-token",

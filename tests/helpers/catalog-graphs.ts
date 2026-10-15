@@ -7,7 +7,10 @@
  * why it is sound, and fails with the slug that is missing rather than on a null dereference.
  */
 
-import { findCatalogEntryBySlug, findSystemCatalogEntry } from "@mcp-moira/shared";
+import {
+  findCatalogEntryBySlug,
+  findSystemCatalogEntry,
+} from "../../packages/shared/src/services/workflow-catalog.js";
 import type { WorkflowGraph } from "@mcp-moira/workflow-engine";
 import type { WorkflowVisibility } from "@mcp-moira/shared";
 

@@ -1,41 +1,20 @@
 import { createHash, randomUUID } from "node:crypto";
 import type Database from "better-sqlite3";
-import { CodespaceResourceRepository } from "./resource-repository.js";
 import { canonicalJson } from "../utils/canonical-json.js";
 import { getAccountAccessDenial } from "../auth/account-admission.js";
-import { LOCAL_RESULT_SETTLEMENT_RETENTION_MS } from "./local-protocol.js";
-import { localLifecycleEnvelopeSchema, localLifecycleReplySchema } from "./local-protocol.js";
 import {
   CODESPACE_PROVIDER_LOCAL,
   LocalDeviceError,
-  localPublicPolicySchema,
   localRepositoryTargetId,
   type LocalDeviceAuth,
   type LocalDeviceView,
   type LocalPairingView,
-  type LocalPublicPolicy,
   type LocalResourceBinding,
-  type LocalRelayRequest,
-  type LocalRelayClaim,
-  type LocalRelayResult,
-  type LocalRelayAcknowledgement,
 } from "./local-device-types.js";
-import {
-  MAX_LOCAL_WORK_LEASE_MS,
-  assertLocalControlSettings,
-  localDeviceControlViewSchema,
-  assertAgentRepositoryAdmission,
-  localRepositoryAdmissionReceiptSchema,
-  type LocalRepositoryAdmissionReceipt,
-  type LocalControlReport,
-  type LocalDeviceControlView,
-  type LocalDeviceSettingsValue,
-} from "./local-management-types.js";
 
 export function digestLocalSecret(value: string): string {
   return createHash("sha256").update(value).digest("hex");
 }
-const RELAY_REPLAY_RETENTION_MS = LOCAL_RESULT_SETTLEMENT_RETENTION_MS;
 interface DeviceRow {
   id: string;
   userId: string;
@@ -44,9 +23,6 @@ interface DeviceRow {
   generation: number;
   status: LocalDeviceView["status"];
   credentialDigest: string;
-  policy: string;
-  policyDigest: string;
-  control: string | null;
   lastSeenAt: number | null;
   createdAt: number;
 }
@@ -59,19 +35,6 @@ interface PairingRow {
   confirmedAt: number | null;
   expiresAt: number;
 }
-interface RelayRow extends LocalDeviceAuth {
-  requestId: string;
-  resourceId: string;
-  resourceGeneration: number;
-  digest: string;
-  inputReference: string;
-  outputReference: string | null;
-  status: LocalRelayResult["status"];
-  claimId: string | null;
-  settlementClaimId: string | null;
-  claimExpiresAt: number | null;
-  deadlineAt: number;
-}
 function deviceView(row: DeviceRow): LocalDeviceView {
   return {
     userId: row.userId,
@@ -80,12 +43,9 @@ function deviceView(row: DeviceRow): LocalDeviceView {
     deviceGeneration: row.generation,
     label: row.label,
     status: row.status,
-    policy: localPublicPolicySchema.parse(JSON.parse(row.policy)),
+    owner: { state: "unavailable" },
     lastSeenAt: row.lastSeenAt,
     createdAt: row.createdAt,
-    ...(row.control
-      ? { control: localDeviceControlViewSchema.parse(JSON.parse(row.control)) }
-      : {}),
   };
 }
 function pairingView(row: PairingRow, now: number): LocalPairingView {
@@ -104,18 +64,7 @@ function pairingView(row: PairingRow, now: number): LocalPairingView {
             : "waiting_local",
   };
 }
-function result(row: RelayRow): LocalRelayResult {
-  return {
-    requestId: row.requestId,
-    digest: row.digest,
-    status: row.status,
-    outcome: row.outputReference
-      ? localLifecycleReplySchema.parse(JSON.parse(row.outputReference))
-      : null,
-  };
-}
-
-/** Transactions own pairing, device generations, and exact relay authority. */
+/** Registration, revocation and routing identity only; settings and grants belong to the owner. */
 export class LocalDeviceRepository {
   constructor(private readonly sqlite: Database.Database) {}
 
@@ -144,7 +93,6 @@ export class LocalDeviceRepository {
     now: number,
   ): { devices: LocalDeviceView[]; pairings: LocalPairingView[] } {
     this.assertAdmitted(userId);
-    this.sqlite.transaction(() => this.pruneRelayMetadata(userId, now)).immediate();
     const devices = this.sqlite
       .prepare("SELECT * FROM codespaceLocalDevice WHERE userId = ? ORDER BY createdAt,id")
       .all(userId) as DeviceRow[];
@@ -185,7 +133,8 @@ export class LocalDeviceRepository {
       pairingId: string;
       tokenDigest: string;
       credentialDigest: string;
-      policy: LocalPublicPolicy;
+      deviceId: string;
+      label: string;
     },
     now: number,
   ): LocalDeviceView {
@@ -193,21 +142,19 @@ export class LocalDeviceRepository {
       .transaction(() => {
         const pair = this.requirePairing(input.pairingId, input.tokenDigest, now);
         this.assertAdmitted(pair.userId);
-        const policy = canonicalJson(input.policy),
-          policyDigest = digestLocalSecret(policy);
         if (pair.deviceId) {
           const row = this.device(pair.deviceId);
           if (
             !row ||
             row.status === "revoked" ||
-            row.id !== input.policy.deviceId ||
+            row.id !== input.deviceId ||
             row.credentialDigest !== input.credentialDigest ||
-            row.policyDigest !== policyDigest
+            row.label !== input.label
           )
             throw new LocalDeviceError("LOCAL_CONFLICT", "Pairing request changed.");
           return deviceView(row);
         }
-        if (this.device(input.policy.deviceId))
+        if (this.device(input.deviceId))
           throw new LocalDeviceError(
             "LOCAL_CONFLICT",
             "Device already enrolled; revoke and use a new local identity.",
@@ -234,17 +181,15 @@ export class LocalDeviceRepository {
         }
         this.sqlite
           .prepare(
-            `INSERT INTO codespaceLocalDevice(id,userId,connectionId,label,generation,status,credentialDigest,policy,policyDigest,lastSeenAt,createdAt,updatedAt)
-        VALUES(?,?,?,?,1,'pending',?,?,?,?,?,?)`,
+            `INSERT INTO codespaceLocalDevice(id,userId,connectionId,label,generation,status,credentialDigest,lastSeenAt,createdAt,updatedAt)
+        VALUES(?,?,?,?,1,'pending',?,?,?,?)`,
           )
           .run(
-            input.policy.deviceId,
+            input.deviceId,
             pair.userId,
             connection.id,
-            input.policy.label,
+            input.label,
             input.credentialDigest,
-            policy,
-            policyDigest,
             now,
             now,
             now,
@@ -253,8 +198,8 @@ export class LocalDeviceRepository {
           .prepare(
             "UPDATE codespaceLocalPairing SET deviceId = ?, revision = revision + 1 WHERE id = ?",
           )
-          .run(input.policy.deviceId, pair.id);
-        return deviceView(this.device(input.policy.deviceId)!);
+          .run(input.deviceId, pair.id);
+        return deviceView(this.device(input.deviceId)!);
       })
       .immediate();
   }
@@ -323,269 +268,6 @@ export class LocalDeviceRepository {
     };
   }
 
-  heartbeat(
-    auth: LocalDeviceAuth,
-    policy: LocalPublicPolicy,
-    now: number,
-    report?: LocalControlReport,
-  ): LocalDeviceView {
-    return this.sqlite
-      .transaction(() => {
-        const row = this.requireDevice(auth);
-        this.pruneRelayMetadata(row.userId, now);
-        if (policy.deviceId !== row.id)
-          throw new LocalDeviceError("LOCAL_CONFLICT", "Device identity changed.");
-        const encoded = canonicalJson(policy);
-        if (report) {
-          if (
-            report.settings.label !== policy.label ||
-            report.settings.enabled !== policy.enabled ||
-            report.settings.leaseUntil !== policy.leaseUntil ||
-            report.settings.cpuCores !== policy.machine.cpuCores ||
-            report.settings.memoryBytes !== policy.machine.memoryBytes ||
-            report.settings.storageBytes !== policy.machine.storageBytes ||
-            canonicalJson(report.settings.repositories) !== canonicalJson(policy.repositories)
-          )
-            throw new LocalDeviceError(
-              "LOCAL_INVALID",
-              "Applied settings do not match the device policy.",
-            );
-          const previous = row.control
-            ? localDeviceControlViewSchema.parse(JSON.parse(row.control))
-            : null;
-          if (
-            report.appliedRevision > (previous?.revision ?? 0) ||
-            report.appliedRevision < (previous?.appliedRevision ?? 0)
-          )
-            throw new LocalDeviceError(
-              "LOCAL_CONFLICT",
-              "Control acknowledgement changed revision.",
-            );
-          try {
-            // The authenticated device reports its local owner's approved maximum.
-            // Management observations do not renew an expired work lease.
-            assertLocalControlSettings({ ...report.settings, enabled: false }, report.ceiling, now);
-          } catch {
-            throw new LocalDeviceError(
-              "LOCAL_INVALID",
-              "Applied resources exceed the locally approved envelope.",
-            );
-          }
-          const control: LocalDeviceControlView = previous ?? {
-            optedIn: true,
-            revision: 0,
-            appliedRevision: 0,
-            status: "applied",
-            settings: report.settings,
-            ceiling: report.ceiling,
-            error: null,
-          };
-          if (
-            previous &&
-            report.appliedRevision > previous.appliedRevision &&
-            report.appliedRevision === previous.revision &&
-            canonicalJson(report.settings) !== canonicalJson(previous.settings)
-          )
-            throw new LocalDeviceError(
-              "LOCAL_CONFLICT",
-              "Applied revision differs from its requested settings.",
-            );
-          control.optedIn = true;
-          control.ceiling = report.ceiling;
-          control.appliedRevision = report.appliedRevision;
-          control.appliedAgentRepositoryManagement = report.settings.agentRepositoryManagement;
-          if (report.appliedRevision === control.revision) {
-            control.status = "applied";
-            control.settings = report.settings;
-            control.error = null;
-          } else if (report.rejectedRevision === control.revision && report.error) {
-            control.status = "rejected";
-            control.error = report.error;
-          }
-          this.sqlite
-            .prepare("UPDATE codespaceLocalDevice SET control=? WHERE id=?")
-            .run(canonicalJson(control), row.id);
-        }
-        this.sqlite
-          .prepare(
-            "UPDATE codespaceLocalDevice SET label = ?,policy = ?,policyDigest = ?,lastSeenAt = ?,updatedAt = ? WHERE id = ?",
-          )
-          .run(policy.label, encoded, digestLocalSecret(encoded), now, now, row.id);
-        this.syncConnection(row.connectionId, now);
-        return deviceView(this.device(row.id)!);
-      })
-      .immediate();
-  }
-
-  requestSettings(
-    userId: string,
-    deviceId: string,
-    expectedGeneration: number,
-    expectedRevision: number,
-    settings: LocalDeviceSettingsValue,
-    now: number,
-  ): LocalDeviceView {
-    return this.sqlite
-      .transaction(() => {
-        this.assertAdmitted(userId);
-        const row = this.device(deviceId);
-        if (!row || row.userId !== userId || row.status !== "active")
-          throw new LocalDeviceError("LOCAL_UNAUTHORIZED", "Device access denied.");
-        const control = row.control
-          ? localDeviceControlViewSchema.parse(JSON.parse(row.control))
-          : null;
-        if (!control?.optedIn || !control.ceiling)
-          throw new LocalDeviceError(
-            "LOCAL_CONFLICT",
-            "Update this companion and opt in to web control on the computer first.",
-          );
-        if (row.generation !== expectedGeneration || control.revision !== expectedRevision)
-          throw new LocalDeviceError(
-            "LOCAL_CONFLICT",
-            "Device settings changed; reload before saving.",
-          );
-        try {
-          assertLocalControlSettings(settings, control.ceiling, now);
-        } catch {
-          throw new LocalDeviceError(
-            "LOCAL_INVALID",
-            "Settings exceed the locally approved envelope or finite lease.",
-          );
-        }
-        control.revision++;
-        control.settings = settings;
-        control.status = "pending";
-        control.error = null;
-        this.sqlite
-          .prepare("UPDATE codespaceLocalDevice SET control=?,updatedAt=? WHERE id=?")
-          .run(canonicalJson(control), now, row.id);
-        return deviceView(this.device(row.id)!);
-      })
-      .immediate();
-  }
-
-  /** The caller supplies a freshly verified GitHub identity, never arbitrary settings. */
-  requestRepositoryAdmission(
-    userId: string,
-    deviceId: string,
-    input: Omit<
-      LocalRepositoryAdmissionReceipt,
-      "revision" | "connectionId" | "localRepositoryId"
-    > & {
-      expectedRevision: number;
-    },
-    now: number,
-  ): LocalDeviceView {
-    return this.sqlite
-      .transaction(() => {
-        const device = this.getActiveDevice(userId, deviceId);
-        const control = device.control;
-        if (!control?.optedIn || !control.ceiling)
-          throw new LocalDeviceError(
-            "LOCAL_UNAUTHORIZED",
-            "Approve web control on this device first.",
-          );
-        const receipts = control.repositoryAdmissions ?? [];
-        const previous = receipts.find((receipt) => receipt.requestId === input.requestId);
-        if (previous) {
-          if (
-            previous.githubRepositoryId !== input.githubRepositoryId ||
-            previous.creationRequestId !== input.creationRequestId ||
-            previous.deviceGeneration !== input.deviceGeneration ||
-            canonicalJson(previous.repository) !== canonicalJson(input.repository)
-          )
-            throw new LocalDeviceError("LOCAL_CONFLICT", "Repository request identity changed.");
-          return device;
-        }
-        if (
-          device.deviceGeneration !== input.deviceGeneration ||
-          control.revision !== input.expectedRevision ||
-          control.status !== "applied" ||
-          control.appliedRevision !== control.revision
-        )
-          throw new LocalDeviceError(
-            "LOCAL_CONFLICT",
-            "Wait for applied device settings and reload before adding a repository.",
-          );
-        this.requireLease(device.policy, now);
-        if (input.creationRequestId) {
-          const creation = this.sqlite
-            .prepare(
-              `SELECT requestId FROM codespaceRepositoryRequest
-            WHERE requestId=? AND userId=? AND deviceId=? AND deviceGeneration=? AND localConnectionId=?
-              AND admissionRequestId=? AND repositoryId=? AND fullName=? AND state='created' AND installationVerified=1`,
-            )
-            .get(
-              input.creationRequestId,
-              userId,
-              deviceId,
-              device.deviceGeneration,
-              device.connectionId,
-              input.requestId,
-              input.githubRepositoryId,
-              input.repository.fullName,
-            );
-          if (!creation)
-            throw new LocalDeviceError(
-              "LOCAL_UNAUTHORIZED",
-              "New repository admission requires confirmed Moira creation provenance.",
-            );
-        }
-        try {
-          assertAgentRepositoryAdmission(
-            control.settings.agentRepositoryManagement,
-            input.repository,
-            input.creationRequestId ? "created" : "existing",
-          );
-        } catch {
-          throw new LocalDeviceError(
-            "LOCAL_UNAUTHORIZED",
-            "Repository exceeds the applied owner delegation.",
-          );
-        }
-        if (
-          control.settings.repositories.some(
-            (repository) =>
-              repository.id === input.repository.id ||
-              repository.fullName.toLowerCase() === input.repository.fullName.toLowerCase(),
-          )
-        )
-          throw new LocalDeviceError(
-            "LOCAL_CONFLICT",
-            "This repository already has a local grant.",
-          );
-        const receipt = localRepositoryAdmissionReceiptSchema.parse({
-          requestId: input.requestId,
-          githubRepositoryId: input.githubRepositoryId,
-          deviceGeneration: input.deviceGeneration,
-          repository: input.repository,
-          ...(input.creationRequestId ? { creationRequestId: input.creationRequestId } : {}),
-          localRepositoryId: input.repository.id,
-          connectionId: device.connectionId,
-          revision: control.revision + 1,
-        });
-        control.revision = receipt.revision;
-        control.settings = {
-          ...control.settings,
-          repositories: [...control.settings.repositories, receipt.repository],
-        };
-        control.repositoryAdmissions = [...receipts, receipt];
-        control.status = "pending";
-        control.error = null;
-        this.sqlite
-          .prepare("UPDATE codespaceLocalDevice SET control=?,updatedAt=? WHERE id=?")
-          .run(canonicalJson(control), now, deviceId);
-        if (input.creationRequestId)
-          this.sqlite
-            .prepare(
-              "UPDATE codespaceRepositoryRequest SET reservationHeld=0,updatedAt=? WHERE requestId=? AND userId=?",
-            )
-            .run(now, input.creationRequestId, userId);
-        return deviceView(this.device(deviceId)!);
-      })
-      .immediate();
-  }
-
   revokeOwned(
     userId: string,
     deviceId: string,
@@ -605,11 +287,6 @@ export class LocalDeviceRepository {
             "UPDATE codespaceLocalDevice SET status = 'revoked',generation = generation + 1,updatedAt = ? WHERE id = ?",
           )
           .run(now, deviceId);
-        this.sqlite
-          .prepare(
-            "UPDATE codespaceLocalRelay SET status = 'revoked',updatedAt = ? WHERE deviceId = ? AND deviceGeneration = ? AND status IN ('queued','claimed')",
-          )
-          .run(now, deviceId, expectedGeneration);
         this.syncConnection(row.connectionId, now);
         return deviceView(this.device(deviceId)!);
       })
@@ -624,105 +301,45 @@ export class LocalDeviceRepository {
     return deviceView(row);
   }
 
-  authorizeGitHubOperation(
-    auth: LocalDeviceAuth,
-    resourceId: string,
-    resourceGeneration: number,
-    action: "fetch" | "push" | "pull_request",
-    now: number,
-  ): LocalPublicPolicy["repositories"][number] {
-    const policy = localPublicPolicySchema.parse(JSON.parse(this.requireDevice(auth).policy));
-    this.requireDispatch(
-      {
-        ...auth,
-        resourceId,
-        resourceGeneration,
-        deadlineAt: Math.min(now + 120_000, policy.leaseUntil),
-      },
-      now,
-    );
-    const binding = this.getBinding(auth.userId, resourceId)!;
-    const repository = policy.repositories.find((repo) => repo.id === binding.repositoryId)!;
-    const resource = this.sqlite
-      .prepare(
-        "SELECT repositoryId,repositoryFullName FROM codespaceResource WHERE id=? AND userId=?",
-      )
-      .get(resourceId, auth.userId) as
-      { repositoryId: string; repositoryFullName: string } | undefined;
-    if (
-      !resource ||
-      resource.repositoryId !== localRepositoryTargetId(auth.deviceId, repository.id) ||
-      resource.repositoryFullName.toLowerCase() !== repository.fullName.toLowerCase()
-    )
-      throw new LocalDeviceError(
-        "LOCAL_UNAUTHORIZED",
-        "The resource no longer names this approved repository.",
-      );
-    if (
-      (action === "push" && !repository.allowPush) ||
-      (action === "pull_request" && repository.allowPullRequests !== true)
-    )
-      throw new LocalDeviceError(
-        "LOCAL_UNAUTHORIZED",
-        "The local repository operation is not approved.",
-      );
-    return repository;
-  }
-
-  authorizeOwnedGitHubOperation(
+  getDeviceIdentity(
     userId: string,
-    resourceId: string,
-    action: "fetch" | "push" | "pull_request",
-    now: number,
-  ) {
+    deviceId: string,
+  ): LocalDeviceAuth & { status: LocalDeviceView["status"] } {
     this.assertAdmitted(userId);
-    const resource = this.sqlite
-      .prepare("SELECT generation FROM codespaceResource WHERE id=? AND userId=? AND provider=?")
-      .get(resourceId, userId, CODESPACE_PROVIDER_LOCAL) as { generation: number } | undefined;
-    const binding = this.getBinding(userId, resourceId);
-    if (!resource || !binding)
-      throw new LocalDeviceError("LOCAL_UNAUTHORIZED", "Local resource access denied.");
-    const auth: LocalDeviceAuth = {
-      userId,
-      deviceId: binding.deviceId,
-      deviceGeneration: binding.deviceGeneration,
-      connectionId: binding.connectionId,
-    };
+    const row = this.device(deviceId);
+    if (!row || row.userId !== userId)
+      throw new LocalDeviceError("LOCAL_UNAUTHORIZED", "Device access denied.");
     return {
-      auth,
-      resourceGeneration: resource.generation,
-      repository: this.authorizeGitHubOperation(auth, resourceId, resource.generation, action, now),
+      userId: row.userId,
+      deviceId: row.id,
+      deviceGeneration: row.generation,
+      connectionId: row.connectionId,
+      status: row.status,
     };
   }
 
-  bindResource(input: LocalResourceBinding, now: number): LocalResourceBinding {
+  bindResource(input: LocalResourceBinding): LocalResourceBinding {
     return this.sqlite
       .transaction(() => {
-        const device = this.requireDevice(input),
-          policy = localPublicPolicySchema.parse(JSON.parse(device.policy));
-        this.requireLease(policy, now);
+        this.requireDevice(input);
         const resource = this.sqlite
           .prepare(
-            "SELECT userId,connectionId,provider,repositoryId,machineName FROM codespaceResource WHERE id = ?",
+            "SELECT userId,connectionId,repositoryId,retiredAt FROM localResourceIdentity WHERE id = ?",
           )
           .get(input.resourceId) as
           | {
               userId: string;
               connectionId: string;
-              provider: string;
               repositoryId: string;
-              machineName: string;
+              retiredAt: number | null;
             }
           | undefined;
         if (
           !resource ||
           resource.userId !== input.userId ||
           resource.connectionId !== input.connectionId ||
-          resource.provider !== CODESPACE_PROVIDER_LOCAL ||
-          resource.repositoryId !== localRepositoryTargetId(input.deviceId, input.repositoryId) ||
-          resource.machineName !== input.profileId ||
-          !policy.repositories.some((repo) => repo.id === input.repositoryId) ||
-          policy.machine.name !== input.profileId
+          resource.retiredAt !== null ||
+          resource.repositoryId !== localRepositoryTargetId(input.deviceId, input.repositoryId)
         )
           throw new LocalDeviceError(
             "LOCAL_UNAUTHORIZED",
@@ -752,430 +369,57 @@ export class LocalDeviceRepository {
     return (
       (this.sqlite
         .prepare(
-          `SELECT b.*,d.connectionId FROM codespaceLocalResourceBinding b JOIN codespaceLocalDevice d ON d.id=b.deviceId
-      WHERE b.userId=? AND b.resourceId=?`,
+          `SELECT b.resourceId,b.userId,b.deviceId,b.deviceGeneration,b.repositoryId,b.profileId,r.connectionId
+      FROM codespaceLocalResourceBinding b JOIN localResourceIdentity r ON r.id=b.resourceId AND r.userId=b.userId
+      JOIN codespaceLocalDevice d ON d.id=b.deviceId AND d.userId=b.userId AND d.generation=b.deviceGeneration AND d.connectionId=r.connectionId
+      WHERE b.userId=? AND b.resourceId=? AND b.revokedAt IS NULL AND r.retiredAt IS NULL AND d.status='active'`,
         )
         .get(userId, resourceId) as LocalResourceBinding | undefined) ?? null
     );
   }
 
-  isOwnerDeleteIntent(userId: string, resourceId: string, generation: number): boolean {
-    return new CodespaceResourceRepository(this.sqlite).isOwnerDeleteIntent(
-      userId,
-      resourceId,
-      generation,
-    );
-  }
-
-  enqueue(input: LocalRelayRequest, now: number): LocalRelayResult {
-    return this.sqlite
-      .transaction(() => {
-        if ((input.authority === "owner-delete") !== this.ownerDeleteAuthority(input))
-          throw new LocalDeviceError(
-            "LOCAL_UNAUTHORIZED",
-            "Relay authority does not match its mutation.",
-          );
-        this.requireDispatch(input, now);
-        this.pruneRelayMetadata(input.userId, now);
-        const previous = this.relay(input.requestId);
-        if (previous) {
-          if (
-            previous.userId !== input.userId ||
-            previous.deviceId !== input.deviceId ||
-            previous.deviceGeneration !== input.deviceGeneration ||
-            previous.connectionId !== input.connectionId ||
-            previous.resourceId !== input.resourceId ||
-            previous.digest !== input.digest ||
-            previous.deadlineAt !== input.deadlineAt ||
-            previous.inputReference !== canonicalJson(input.payload)
-          )
-            throw new LocalDeviceError("LOCAL_CONFLICT", "Relay request identity changed.");
-          return result(previous);
-        }
-        this.sqlite
-          .prepare(
-            `INSERT INTO codespaceLocalRelay(requestId,userId,deviceId,deviceGeneration,connectionId,resourceId,resourceGeneration,digest,inputReference,status,deadlineAt,createdAt,updatedAt)
-        VALUES(?,?,?,?,?,?,?,?,?,'queued',?,?,?)`,
-          )
-          .run(
-            input.requestId,
-            input.userId,
-            input.deviceId,
-            input.deviceGeneration,
-            input.connectionId,
-            input.resourceId,
-            input.resourceGeneration,
-            input.digest,
-            canonicalJson(input.payload),
-            input.deadlineAt,
-            now,
-            now,
-          );
-        return result(this.relay(input.requestId)!);
-      })
-      .immediate();
-  }
-
-  claim(auth: LocalDeviceAuth, limit: number, now: number): LocalRelayClaim[] {
-    return this.sqlite
-      .transaction(() => {
-        const device = this.requireDevice(auth),
-          policy = localPublicPolicySchema.parse(JSON.parse(device.policy));
-        this.pruneRelayMetadata(auth.userId, now);
-        const rows = this.sqlite
-          .prepare(
-            `SELECT * FROM codespaceLocalRelay WHERE deviceId=? AND deviceGeneration=? AND deadlineAt>?
-        AND json_valid(inputReference) AND json_extract(inputReference,'$.version')=1
-        AND json_extract(inputReference,'$.request.action') IN ('snapshot','create','start','stop','delete')
-        AND (status='queued' OR (status='claimed' AND claimExpiresAt<=?)) ORDER BY createdAt,requestId LIMIT ?`,
-          )
-          .all(auth.deviceId, auth.deviceGeneration, now, now, limit) as RelayRow[];
-        const optedIn =
-          device.control && localDeviceControlViewSchema.parse(JSON.parse(device.control)).optedIn;
-        if (!rows.some((row) => this.ownerDeleteAuthority(row)) && !optedIn)
-          this.requireLease(policy, now);
-        const claims: LocalRelayClaim[] = [];
-        for (const row of rows) {
-          try {
-            this.requireDispatch(row, now);
-          } catch (error) {
-            if (!(error instanceof LocalDeviceError)) throw error;
-            this.sqlite
-              .prepare(
-                "UPDATE codespaceLocalRelay SET status='refused',updatedAt=? WHERE requestId=?",
-              )
-              .run(now, row.requestId);
-            continue;
-          }
-          const claimId = randomUUID(),
-            claimExpiresAt = Math.min(
-              row.deadlineAt,
-              this.ownerDeleteAuthority(row) ? Number.MAX_SAFE_INTEGER : policy.leaseUntil,
-              now + 30_000,
-            );
-          this.sqlite
-            .prepare(
-              "UPDATE codespaceLocalRelay SET status='claimed',claimId=?,settlementClaimId=?,claimExpiresAt=?,updatedAt=? WHERE requestId=?",
-            )
-            .run(claimId, claimId, claimExpiresAt, now, row.requestId);
-          claims.push({
-            ...auth,
-            ...(this.ownerDeleteAuthority(row) ? { authority: "owner-delete" as const } : {}),
-            requestId: row.requestId,
-            resourceId: row.resourceId,
-            resourceGeneration: row.resourceGeneration,
-            digest: row.digest,
-            payload: localLifecycleEnvelopeSchema.parse(JSON.parse(row.inputReference)),
-            deadlineAt: row.deadlineAt,
-            claimId,
-            claimExpiresAt,
-          });
-        }
-        return claims;
-      })
-      .immediate();
-  }
-
-  acknowledge(
-    auth: LocalDeviceAuth,
-    ack: LocalRelayAcknowledgement,
-    now: number,
-  ): LocalRelayResult {
-    return this.sqlite
-      .transaction(() => {
-        this.requireDevice(auth);
-        const row = this.requireRelayOwner(auth, ack.requestId);
-        if (row.digest !== ack.digest || (row.settlementClaimId ?? row.claimId) !== ack.claimId)
-          throw new LocalDeviceError("LOCAL_CONFLICT", "Relay acknowledgement changed.");
-        this.requireResourceAuthority(row, now, true);
-        const encoded = canonicalJson(ack.outcome);
-        if (row.status === "completed" || row.status === "refused") {
-          if (row.status !== ack.status || row.outputReference !== encoded)
-            throw new LocalDeviceError("LOCAL_CONFLICT", "Relay result changed.");
-          return result(row);
-        }
-        this.authorizeOutput(auth, ack, now);
-        this.sqlite
-          .prepare(
-            "UPDATE codespaceLocalRelay SET status=?,outputReference=?,updatedAt=?,claimId=? WHERE requestId=? AND COALESCE(settlementClaimId,claimId)=? AND status IN ('claimed','expired','revoked')",
-          )
-          .run(ack.status, encoded, now, ack.claimId, ack.requestId, ack.claimId);
-        return result(this.relay(ack.requestId)!);
-      })
-      .immediate();
-  }
-
-  getResult(userId: string, requestId: string): LocalRelayResult | null {
-    this.assertAdmitted(userId);
-    const row = this.relay(requestId);
-    return row?.userId === userId && this.isLifecycle(row) ? result(row) : null;
-  }
-  getRequest(userId: string, requestId: string): LocalRelayRequest | null {
-    this.assertAdmitted(userId);
-    const row = this.relay(requestId);
-    if (!row || row.userId !== userId || !this.isLifecycle(row)) return null;
-    return {
-      userId: row.userId,
-      deviceId: row.deviceId,
-      deviceGeneration: row.deviceGeneration,
-      connectionId: row.connectionId,
-      requestId: row.requestId,
-      resourceId: row.resourceId,
-      resourceGeneration: row.resourceGeneration,
-      ...(this.ownerDeleteAuthority(row) ? { authority: "owner-delete" as const } : {}),
-      digest: row.digest,
-      payload: localLifecycleEnvelopeSchema.parse(JSON.parse(row.inputReference)),
-      deadlineAt: row.deadlineAt,
-    };
-  }
-  authorizeOutput(auth: LocalDeviceAuth, ack: LocalRelayAcknowledgement, now: number): void {
-    const claim = this.authorizeResult(auth, ack.requestId, ack.claimId, now);
-    if (claim.digest !== ack.digest)
-      throw new LocalDeviceError("LOCAL_CONFLICT", "Relay acknowledgement changed.");
-  }
-
-  renewClaim(
-    auth: LocalDeviceAuth,
-    requestId: string,
-    claimId: string,
-    now: number,
-  ): LocalRelayClaim {
-    return this.sqlite
-      .transaction(() => {
-        const row = this.requireRelayOwner(auth, requestId);
-        if (row.status === "completed" || row.status === "refused") {
-          // An ACK may already be committed while its response is still in flight.
-          // Replaying that terminal claim observes the receipt; it grants no work lease.
-          this.requireResourceAuthority(row, now, true);
-          return this.retainedClaim(auth, row, claimId);
-        }
-        this.requireDispatch(row, now);
-        this.acceptedClaim(auth, row, claimId, now);
-        const claim = this.authorizeResult(auth, requestId, claimId, now);
-        const policy = localPublicPolicySchema.parse(JSON.parse(this.requireDevice(auth).policy));
-        this.sqlite
-          .prepare(
-            "UPDATE codespaceLocalRelay SET claimExpiresAt=?,updatedAt=? WHERE requestId=? AND claimId=?",
-          )
-          .run(
-            Math.min(
-              claim.deadlineAt,
-              this.ownerDeleteAuthority(row) ? Number.MAX_SAFE_INTEGER : policy.leaseUntil,
-              now + 30_000,
-            ),
-            now,
-            requestId,
-            claimId,
-          );
-        return this.authorizeResult(auth, requestId, claimId, now);
-      })
-      .immediate();
-  }
-
-  /** Input bytes require the currently approved resource, device and repository authority. */
-  authorizePayload(
-    auth: LocalDeviceAuth,
-    requestId: string,
-    claimId: string,
-    now: number,
-  ): LocalRelayClaim {
-    const row = this.requireRelayOwner(auth, requestId);
-    this.requireDispatch(row, now);
-    return this.acceptedClaim(auth, row, claimId, now);
-  }
-
-  /** Settle an already accepted claim; this never authorizes input or dispatches new work. */
-  authorizeResult(
-    auth: LocalDeviceAuth,
-    requestId: string,
-    claimId: string,
-    now: number,
-  ): LocalRelayClaim {
-    const row = this.requireRelayOwner(auth, requestId);
-    this.requireResourceAuthority(row, now, true);
-    if (
-      (row.settlementClaimId ?? row.claimId) !== claimId ||
-      !["claimed", "expired", "revoked", "completed", "refused"].includes(row.status) ||
-      now >= row.deadlineAt + RELAY_REPLAY_RETENTION_MS
-    )
-      throw new LocalDeviceError("LOCAL_EXPIRED", "Accepted result settlement is unavailable.");
-    return this.retainedClaim(
-      auth,
-      { ...row, claimId, claimExpiresAt: row.claimExpiresAt ?? row.deadlineAt },
-      claimId,
-    );
-  }
-
-  private acceptedClaim(
-    auth: LocalDeviceAuth,
-    row: RelayRow,
-    claimId: string,
-    now: number,
-  ): LocalRelayClaim {
-    if (
-      row.status !== "claimed" ||
-      row.claimId !== claimId ||
-      !row.claimExpiresAt ||
-      row.claimExpiresAt <= now
-    )
-      throw new LocalDeviceError("LOCAL_EXPIRED", "Relay claim expired.");
-    return this.retainedClaim(auth, row, claimId);
-  }
-
-  private retainedClaim(auth: LocalDeviceAuth, row: RelayRow, claimId: string): LocalRelayClaim {
-    if (row.claimId !== claimId || row.claimExpiresAt === null)
-      throw new LocalDeviceError("LOCAL_CONFLICT", "Relay acknowledgement changed.");
-    return {
-      ...auth,
-      ...(this.ownerDeleteAuthority(row) ? { authority: "owner-delete" as const } : {}),
-      requestId: row.requestId,
-      resourceId: row.resourceId,
-      resourceGeneration: row.resourceGeneration,
-      digest: row.digest,
-      payload: localLifecycleEnvelopeSchema.parse(JSON.parse(row.inputReference)),
-      deadlineAt: row.deadlineAt,
-      claimId: row.claimId,
-      claimExpiresAt: row.claimExpiresAt,
-    };
-  }
-
-  /** Keep live authority and the full replay horizon; capacity never evicts a fresh receipt. */
-  private pruneRelayMetadata(userId: string, now: number): void {
-    this.sqlite
-      .prepare(
-        "UPDATE codespaceLocalRelay SET status='expired',updatedAt=? WHERE userId=? AND json_valid(inputReference) AND json_extract(inputReference,'$.request.action') IN ('snapshot','create','start','stop','delete') AND status IN ('queued','claimed') AND deadlineAt<=?",
-      )
-      .run(now, userId, now);
-    this.sqlite
-      .prepare(
-        "DELETE FROM codespaceLocalRelay WHERE userId=? AND json_valid(inputReference) AND json_extract(inputReference,'$.request.action') IN ('snapshot','create','start','stop','delete') AND status NOT IN ('queued','claimed') AND deadlineAt<?",
-      )
-      .run(userId, now - RELAY_REPLAY_RETENTION_MS);
-  }
-  private requireRelayOwner(auth: LocalDeviceAuth, requestId: string): RelayRow {
-    this.requireDevice(auth);
-    const row = this.relay(requestId);
-    if (
-      !row ||
-      !this.isLifecycle(row) ||
-      row.userId !== auth.userId ||
-      row.deviceId !== auth.deviceId ||
-      row.deviceGeneration !== auth.deviceGeneration ||
-      row.connectionId !== auth.connectionId
-    )
-      throw new LocalDeviceError("LOCAL_UNAUTHORIZED", "Relay ownership denied.");
-    return row;
-  }
-  private requireDispatch(
-    input: LocalDeviceAuth & { resourceId: string; resourceGeneration: number; deadlineAt: number },
-    now: number,
-  ): void {
-    const policy = this.requireResourceAuthority(input, now, false);
-    this.requireDeliveryDeadline(input, policy, now);
-  }
-  private requireResourceAuthority(
-    input: LocalDeviceAuth & { resourceId: string; resourceGeneration: number; deadlineAt: number },
-    now: number,
-    acceptedResult: boolean,
-  ): LocalPublicPolicy {
-    const row = this.requireDevice(input),
-      policy = localPublicPolicySchema.parse(JSON.parse(row.policy));
-    const ownerDelete = this.ownerDeleteAuthority(input);
-    if (ownerDelete) {
-      const control = row.control
-        ? localDeviceControlViewSchema.parse(JSON.parse(row.control))
-        : null;
-      if (!control?.optedIn)
-        throw new LocalDeviceError(
-          "LOCAL_UNAUTHORIZED",
-          "Owner cleanup consent is no longer active.",
-        );
-    } else if (!acceptedResult) this.requireLease(policy, now);
-    const binding = this.getBinding(input.userId, input.resourceId);
-    const resource = this.sqlite
-      .prepare(
-        `SELECT r.state,r.repositoryId,r.repositoryFullName,r.machineName,r.authorizationGeneration,c.credentialGeneration,c.status FROM codespaceResource r
-      JOIN codespaceConnection c ON c.id=r.connectionId WHERE r.id=? AND r.userId=? AND r.connectionId=? AND r.provider=?`,
-      )
-      .get(input.resourceId, input.userId, input.connectionId, CODESPACE_PROVIDER_LOCAL) as
-      | {
-          state: string;
-          repositoryId: string;
-          repositoryFullName: string;
-          machineName: string;
-          authorizationGeneration: number;
-          credentialGeneration: number;
-          status: string;
-        }
-      | undefined;
-    if (
-      !binding ||
-      binding.deviceId !== input.deviceId ||
-      binding.deviceGeneration !== input.deviceGeneration ||
-      !resource ||
-      resource.repositoryId !== localRepositoryTargetId(input.deviceId, binding.repositoryId) ||
-      resource.machineName !== binding.profileId ||
-      resource.authorizationGeneration !== resource.credentialGeneration ||
-      resource.status !== "connected" ||
-      (!acceptedResult && (resource.state === "deleted" || resource.state === "rejected")) ||
-      (!ownerDelete &&
-        !this.sqlite
-          .prepare(
-            "SELECT 1 FROM codespaceConnectionRepository WHERE connectionId=? AND externalRepositoryId=? AND lower(fullName)=lower(?)",
-          )
-          .get(input.connectionId, resource.repositoryId, resource.repositoryFullName)) ||
-      (!ownerDelete &&
-        !policy.repositories.some(
-          (repo) =>
-            repo.id === binding.repositoryId &&
-            resource.repositoryId === localRepositoryTargetId(input.deviceId, repo.id) &&
-            resource.repositoryFullName.toLowerCase() === repo.fullName.toLowerCase(),
-        )) ||
-      (!ownerDelete && policy.machine.name !== binding.profileId)
-    )
-      throw new LocalDeviceError("LOCAL_UNAUTHORIZED", "Relay resource authority changed.");
-    return policy;
-  }
-  private requireDeliveryDeadline(
+  validateRepositoryCreation(
+    userId: string,
+    device: LocalDeviceAuth,
     input: {
-      deadlineAt: number;
-      userId?: string;
-      resourceId?: string;
-      resourceGeneration?: number;
+      creationRequestId: string;
+      requestId: string;
+      githubRepositoryId: string;
+      fullName: string;
     },
-    policy: LocalPublicPolicy,
-    now: number,
   ): void {
-    if (
-      input.deadlineAt <= now ||
-      (!this.ownerDeleteAuthority(input) && input.deadlineAt > policy.leaseUntil)
-    )
-      throw new LocalDeviceError("LOCAL_EXPIRED", "Relay work lease expired.");
-  }
-  private requireLease(policy: LocalPublicPolicy, now: number): void {
-    if (
-      !policy.enabled ||
-      policy.leaseUntil <= now ||
-      policy.leaseUntil > now + MAX_LOCAL_WORK_LEASE_MS
-    )
-      throw new LocalDeviceError("LOCAL_EXPIRED", "Renew the device work lease locally.");
-  }
-  private ownerDeleteAuthority(input: {
-    userId?: string;
-    resourceId?: string;
-    resourceGeneration?: number;
-  }): boolean {
-    return (
-      !!input.userId &&
-      !!input.resourceId &&
-      input.resourceGeneration !== undefined &&
-      new CodespaceResourceRepository(this.sqlite).isOwnerDeleteIntent(
-        input.userId,
-        input.resourceId,
-        input.resourceGeneration,
+    this.requireDevice(device);
+    const creation = this.sqlite
+      .prepare(
+        `SELECT requestId FROM codespaceRepositoryRequest
+      WHERE requestId=? AND userId=? AND deviceId=? AND deviceGeneration=? AND localConnectionId=?
+        AND admissionRequestId=? AND repositoryId=? AND fullName=? AND state='created' AND installationVerified=1`,
       )
-    );
+      .get(
+        input.creationRequestId,
+        userId,
+        device.deviceId,
+        device.deviceGeneration,
+        device.connectionId,
+        input.requestId,
+        input.githubRepositoryId,
+        input.fullName,
+      );
+    if (!creation)
+      throw new LocalDeviceError(
+        "LOCAL_UNAUTHORIZED",
+        "Repository admission requires confirmed creation provenance.",
+      );
   }
+  releaseRepositoryCreation(userId: string, requestId: string, now: number): void {
+    this.assertAdmitted(userId);
+    this.sqlite
+      .prepare(
+        "UPDATE codespaceRepositoryRequest SET reservationHeld=0,updatedAt=? WHERE requestId=? AND userId=?",
+      )
+      .run(now, requestId, userId);
+  }
+
   private requireDevice(auth: LocalDeviceAuth): DeviceRow {
     this.assertAdmitted(auth.userId);
     const row = this.device(auth.deviceId);
@@ -1201,43 +445,12 @@ export class LocalDeviceRepository {
     return this.sqlite.prepare("SELECT * FROM codespaceLocalDevice WHERE id=?").get(id) as
       DeviceRow | undefined;
   }
-  private relay(id: string): RelayRow | undefined {
-    return this.sqlite.prepare("SELECT * FROM codespaceLocalRelay WHERE requestId=?").get(id) as
-      RelayRow | undefined;
-  }
-  private isLifecycle(row: RelayRow): boolean {
-    try {
-      return localLifecycleEnvelopeSchema.safeParse(JSON.parse(row.inputReference)).success;
-    } catch {
-      return false;
-    }
-  }
   private syncConnection(connectionId: string, now: number): void {
-    const devices = this.sqlite
-      .prepare("SELECT * FROM codespaceLocalDevice WHERE connectionId=? AND status='active'")
-      .all(connectionId) as DeviceRow[];
+    const active = this.sqlite
+      .prepare("SELECT 1 FROM codespaceLocalDevice WHERE connectionId=? AND status='active'")
+      .get(connectionId);
     this.sqlite
-      .prepare("DELETE FROM codespaceConnectionRepository WHERE connectionId=?")
-      .run(connectionId);
-    for (const device of devices)
-      for (const repo of localPublicPolicySchema.parse(JSON.parse(device.policy)).repositories)
-        this.sqlite
-          .prepare(
-            `INSERT OR IGNORE INTO codespaceConnectionRepository(connectionId,externalInstallationId,externalRepositoryId,fullName,private,createdAt)
-        VALUES(?,?,?,?,?,?)`,
-          )
-          .run(
-            connectionId,
-            device.id,
-            localRepositoryTargetId(device.id, repo.id),
-            repo.fullName,
-            repo.private ? 1 : 0,
-            now,
-          );
-    this.sqlite
-      .prepare(
-        "UPDATE codespaceConnection SET status=?,grantsRefreshedAt=?,grantsVersion=grantsVersion+1,updatedAt=? WHERE id=?",
-      )
-      .run(devices.length ? "connected" : "disconnected", now, now, connectionId);
+      .prepare("UPDATE codespaceConnection SET status=?,updatedAt=? WHERE id=?")
+      .run(active ? "connected" : "disconnected", now, connectionId);
   }
 }

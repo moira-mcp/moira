@@ -315,52 +315,10 @@ export const codespaceConnectionEventsTotal = new promClient.Counter({
   registers: [metricsRegistry],
 });
 
-export const codespaceLifecycleEventsTotal = new promClient.Counter({
-  name: "moira_codespace_lifecycle_events_total",
-  help: "Codespace lifecycle audit events by provider, action and resulting state",
-  labelNames: ["provider", "action", "state"],
-  registers: [metricsRegistry],
-});
-
 export const codespaceRejectionsTotal = new promClient.Counter({
   name: "moira_codespace_rejections_total",
   help: "Codespace requests refused before provider contact by bounded error code",
   labelNames: ["code"],
-  registers: [metricsRegistry],
-});
-
-export const codespaceReconciliationDueGauge = new promClient.Gauge({
-  name: "moira_codespace_reconciliation_due",
-  help: "Codespace records currently waiting for reconciliation",
-  labelNames: ["kind"],
-  registers: [metricsRegistry],
-});
-
-export const codespaceReconciliationOldestDueAgeSeconds = new promClient.Gauge({
-  name: "moira_codespace_reconciliation_oldest_due_age_seconds",
-  help: "Age of the oldest codespace record waiting for reconciliation",
-  labelNames: ["kind"],
-  registers: [metricsRegistry],
-});
-
-export const codespaceActiveGauge = new promClient.Gauge({
-  name: "moira_codespace_active",
-  help: "Active codespace resources across the instance",
-  labelNames: ["kind"],
-  registers: [metricsRegistry],
-});
-
-export const codespaceConnectorAvailableGauge = new promClient.Gauge({
-  name: "moira_codespace_connector_available",
-  help: "1 when the credential-bearing codespace connector answers its health probe",
-  labelNames: ["provider"],
-  registers: [metricsRegistry],
-});
-
-export const codespaceReadyGauge = new promClient.Gauge({
-  name: "moira_codespace_ready",
-  help: "1 when the instance can accept new codespace work for the provider",
-  labelNames: ["provider"],
   registers: [metricsRegistry],
 });
 

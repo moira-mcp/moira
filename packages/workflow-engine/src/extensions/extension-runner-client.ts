@@ -73,18 +73,13 @@ export interface ExtensionCommunicationChannelRequest {
     text: string;
     format?: "plain" | "markdown" | "html";
     silent?: boolean;
-    attachment?: {
-      kind: "image" | "document";
-      bytes: Uint8Array;
-      filename: string;
-      mimeType: string;
-    };
   };
   settings?: Record<string, unknown>;
   secrets?: Record<string, string | null>;
 }
 
 export interface IExtensionRunnerClient {
+  binaryArtifact?(channelId: string): Promise<{ digest: string; bytes: Uint8Array }>;
   /**
    * Execute one custom node out-of-process.
    * Implementations reject with ExtensionInvocationError; any other rejection is normalised by

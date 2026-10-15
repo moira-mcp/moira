@@ -478,16 +478,16 @@ choose a provider, recipient, or credential:
 }
 ```
 
-| Property              | Required | Description                                                 |
-| --------------------- | -------- | ----------------------------------------------------------- |
-| `message`             | Yes      | Notification text with template support                     |
-| `format`              | No       | Portable format: `plain`, `markdown`, or `html`             |
-| `silent`              | No       | Request silent delivery where the provider supports it      |
-| `attachProgressImage` | No       | Attach the run's steps as a phone-width PNG                 |
-| `planList`            | No       | Plan lines: `progress` (default), `full`, or `none`         |
-| `attachment`          | No       | One bounded base64 `image` or `document` with name and MIME |
-| `connections.default` | Yes      | Full, partial, or no-eligible-channel continuation          |
-| `connections.error`   | No       | Total attempted failure; otherwise it also uses `default`   |
+| Property              | Required | Description                                                |
+| --------------------- | -------- | ---------------------------------------------------------- |
+| `message`             | Yes      | Notification text with template support                    |
+| `format`              | No       | Portable format: `plain`, `markdown`, or `html`            |
+| `silent`              | No       | Request silent delivery where the provider supports it     |
+| `attachProgressImage` | No       | Attach the run's steps as a phone-width PNG                |
+| `planList`            | No       | Plan lines: `progress` (default), `full`, or `none`        |
+| `attachment`          | No       | One inline base64 `image` or `document` with name and MIME |
+| `connections.default` | Yes      | Full, partial, or no-eligible-channel continuation         |
+| `connections.error`   | No       | Total attempted failure; otherwise it also uses `default`  |
 
 Every delivered message opens with a heading — the workflow's name and the run's canonical task
 name ([execution task identity](/docs/concepts/workflows/#execution-task-name)), linked to the run page — followed by `message`, the run's plan,
@@ -516,19 +516,30 @@ markup shows its escapes, so keep values outside it. The text is fitted to the c
 the plan takes the room left, and an over-long message is cut at a line with `…`. On Telegram,
 link previews are off for every message.
 
-`attachment` and an enabled `attachProgressImage` are mutually exclusive. Attachment filenames
-use the safe portable allowlist and MIME types must have a valid `type/subtype` form. The service
-applies shared per-user/provider rate limits, per-user and provider concurrency, deadlines, text
-and byte limits before provider delivery. A configured Telegram channel supports text, PNG/JPEG
-images, and documents.
+An explicit `attachment` and an enabled `attachProgressImage` are mutually exclusive.
+File handling and progress rendering run at the selected file owner: an enrolled workspace
+service or a paired controller. Filenames must be safe basenames and MIME types must have a
+valid `type/subtype` form. The owner retains an immutable source, the original delivery receipt
+and per-channel stages; Telegram's own image/document limits still apply.
 
-The node result is stored under its node ID. `userNotificationStatus` is `delivered`, `partial`,
-`no_configured_channels`, or `all_failed`; `configuredChannels`, `deliveredChannels`, and
-`channels` contain counts and sanitized per-channel status/reason values. A configured channel that
-cannot carry the requested attachment is reported as `unsupported` and skipped; without another
-eligible channel or availability failure, the aggregate is `no_configured_channels`, not
-`all_failed`. Results and errors do not contain credentials, recipients, message bodies, or
-attachment bytes.
+An explicit attachment that cannot be delivered follows the node's authored error/default
+policy; text delivery cannot silently stand in for its success. For optional
+`attachProgressImage`, unavailable rendering or an unavailable owner omits the picture and
+still attempts the ordinary text notification independently. Text, waiting reminders and
+trusted lock PIN delivery do not require a file owner.
+
+The result exposes `attachmentStatus`, `communicationRequestId` and the observed owner identity
+when available. Preserve them to collect an uncertain delivery through `communication` action
+`operation`; do not rerun a workflow visit to resend it. A new visit is a distinct intent.
+Collection cannot send again, and current execution and task-name bindings are rechecked
+before vendor delivery.
+
+The node result is stored under its node ID. Ordinary text reports `userNotificationStatus` as
+`delivered`, `partial`, `no_configured_channels`, or `all_failed`, with counts and sanitized
+per-channel status/reason values. Successful owner delivery reports `delivered` or
+`no_configured_channels`; `channels` contains the original per-operation delivery stages.
+Only configured channels supporting the requested file kind are selected. Results and errors
+do not contain credentials, recipients, message bodies or attachment bytes.
 
 ### Deprecated Telegram-specific node
 
@@ -643,7 +654,7 @@ and completes the step the same way.
 | Property              | Required | Description                                                         |
 | --------------------- | -------- | ------------------------------------------------------------------- |
 | `basePath`            | Yes      | Rendered destination must be non-empty and contain no NUL character |
-| `files`               | Yes      | 1–100 archive entries                                               |
+| `files`               | Yes      | One or more archive entries                                         |
 | `files[].path`        | Yes      | Templated safe path relative to `basePath`                          |
 | `files[].from`        | One of   | `variableRegistry` string entry whose current default is the source |
 | `files[].content`     | One of   | Must be exactly `""`; creates a skeleton file                       |
@@ -653,11 +664,12 @@ and completes the step the same way.
 `from` and `content` are mutually exclusive. A `from` entry must name a declared string variable
 with a string `default`; arbitrary inline text is rejected. When the step is presented, the server
 renders `basePath` and the file-path summary shown in the directive. The rendered `basePath` is part
-of the issued command. When the HTTP archive is requested, the server reloads the current workflow
-and re-renders each archive entry path and registry-backed content with the bound execution context.
-Changing the workflow after the command was issued can therefore change the downloaded paths or
-contents, but not that command's destination. Re-presenting the paused step uses the current
-definition to issue a new command and grant instead of using a seeded execution snapshot.
+of the issued command. On the first archive request, cloud resolves current paths and text from registry defaults,
+own Notes and Playbooks with the bound context. A paired controller encodes UTF-8, builds the tar
+and retains its immutable publication. The grant pins that controller's full identity and original
+request ID before submission. Repeats collect the same receipt without rendering, selecting another
+owner or submitting again; later definition edits do not alter the published bytes. Re-presenting
+the step issues a new grant for a separate explicit attempt.
 
 The generated POSIX command has this shape, with every argument already shell-quoted:
 
@@ -667,8 +679,7 @@ mkdir -p -- '<basePath>' && curl -sSf -- '<reusable-url>' | tar -x -C '<basePath
 
 Copy the emitted command exactly. Archive entries are relative to `basePath`; the tar never
 contains `basePath` itself. Paths must be normalized, relative, non-empty, unique after template
-rendering, and contain no empty, `.`, `..`, absolute, backslash-rooted, or NUL segments. Limits are
-100 files, 1 MiB UTF-8 content per file, and 10 MiB total uncompressed content.
+rendering, and contain no empty, `.`, `..`, absolute, backslash-rooted, or NUL segments. Archive files have no generic count or byte ceiling; available owner storage and authority apply.
 
 The URL expires after five minutes and is bound to the current user, execution, and node. It can be
 downloaded repeatedly while the execution remains waiting on that node and is invalid immediately

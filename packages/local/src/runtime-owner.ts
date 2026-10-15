@@ -281,12 +281,43 @@ export class RuntimeOwner {
           !gitAuthor &&
           (repository.private || repository.allowPush || repository.allowPullRequests === true) &&
           (await this.records.state.read("connection.json", (value) => value))
-        )
-          gitAuthor = await new LocalRelay(this.records).gitIdentity(
-            space.id,
-            space.repositoryId,
-            this.controller.signal,
-          );
+        ) {
+          try {
+            gitAuthor = await new LocalRelay(this.records).gitIdentity(
+              space.id,
+              space.repositoryId,
+              this.controller.signal,
+            );
+            await this.records.state.write(`controller-git-identity-${space.id}.json`, {
+              repositoryId: space.repositoryId,
+              runtimeId: space.runtimeId,
+              author: gitAuthor,
+            });
+          } catch (error) {
+            if (
+              clone ||
+              !(error instanceof LocalRefusal) ||
+              error.code !== "LOCAL_RELAY_UNAVAILABLE"
+            )
+              throw error;
+            const cached = await this.records.state.read(
+              `controller-git-identity-${space.id}.json`,
+              (value) =>
+                z
+                  .object({
+                    repositoryId: z.literal(space.repositoryId),
+                    runtimeId: z.literal(space.runtimeId),
+                    author: z
+                      .object({ name: z.string().min(1), email: z.string().email() })
+                      .strict(),
+                  })
+                  .strict()
+                  .parse(value),
+            );
+            if (!cached) throw error;
+            gitAuthor = cached.author;
+          }
+        }
         const output = await runtime.runFixedGuest(
           identity,
           "bootstrap",
@@ -327,12 +358,20 @@ export class RuntimeOwner {
               ).toString("utf8"),
             ),
           );
-        const remote = await new LocalRelay(this.records).workspaceCredential(
-          space.id,
-          space.repositoryId,
-          probe.environmentIdentity,
-          this.controller.signal,
-        );
+        let remote;
+        try {
+          remote = await new LocalRelay(this.records).workspaceCredential(
+            space.id,
+            space.repositoryId,
+            probe.environmentIdentity,
+            this.controller.signal,
+          );
+        } catch (error) {
+          if (!(error instanceof LocalRefusal) || error.code !== "LOCAL_RELAY_UNAVAILABLE")
+            throw error;
+          // A confirmed transport outage affects the remote observer, not locally approved work.
+          // Authorization refusal/revocation never enters this explicit local-only mode.
+        }
         await runtime.runFixedGuest(
           identity,
           "configure",
@@ -342,7 +381,8 @@ export class RuntimeOwner {
               repositoryFullName: repository.fullName,
               root: `/workspaces/${repository.fullName.split("/")[1]}`,
               expectedOrigin: `http://${space.id}:${space.brokerToken}@127.0.0.1:3437/git/${repository.fullName}.git`,
-              remote,
+              environmentIdentity: probe.environmentIdentity,
+              ...(remote ? { remote } : { mode: "local-only" }),
             }),
           ),
           30_000,

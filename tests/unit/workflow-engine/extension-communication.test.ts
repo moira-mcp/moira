@@ -232,12 +232,6 @@ describe("extension communication channel integration", () => {
       {
         userId: "user-a",
         text: "portable",
-        attachment: {
-          kind: "document",
-          bytes: Uint8Array.of(1, 2),
-          filename: "report.bin",
-          mimeType: "application/octet-stream",
-        },
       },
       repository,
     );

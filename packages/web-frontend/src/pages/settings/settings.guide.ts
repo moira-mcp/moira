@@ -61,7 +61,7 @@ export const settingsGuide: GuideDefinition = {
       id: "local-devices",
       anchor: "settings.local-devices",
       kind: "look",
-      revision: 8,
+      revision: 9,
       prepare: { section: "integrations-local" },
     },
     {
@@ -114,13 +114,6 @@ export const githubSetupGuide: GuideDefinition = {
       anchor: "settings.codespaces",
       kind: "look",
       revision: 4,
-      prepare: { section: "development-environments" },
-    },
-    {
-      id: "limits",
-      anchor: "settings.codespace-limits",
-      kind: "look",
-      revision: 2,
       prepare: { section: "development-environments" },
     },
     {

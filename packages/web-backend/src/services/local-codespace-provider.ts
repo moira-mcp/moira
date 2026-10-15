@@ -1,21 +1,14 @@
 import { z } from "zod";
 import {
-  CODESPACE_PROVIDER_CONTRACT_VERSION,
   CODESPACE_PROVIDER_LOCAL,
   CodespaceResourceError,
-  LocalDeviceError,
-  canonicalJson,
   localRepositoryTargetId,
   localResourceSnapshotSchema,
-  parseLocalRepositoryTargetId,
-  type CodespaceProviderAdapter,
   type CodespaceProviderResource,
-  type CodespaceResourceRecord,
-  type CodespaceResourceRepository,
-  type CodespaceMachine,
-  type CodespaceRepositoryTarget,
+  type LocalResourceIdentity,
+  type LocalResourceRepository,
 } from "@mcp-moira/shared";
-import { LocalCodespaceRelay } from "./local-codespace-relay.js";
+import { type LocalDeviceService, type LocalControllerSnapshot } from "@mcp-moira/shared";
 
 /** Internal credentials identify the already authenticated caller; they never leave this server. */
 export function localCodespaceCredential(userId: string): string {
@@ -31,19 +24,11 @@ function userFromCredential(credential: string): string {
   return credential.slice(11);
 }
 
-export class LocalCodespaceProvider implements CodespaceProviderAdapter {
+export class LocalCodespaceProvider {
   readonly id = CODESPACE_PROVIDER_LOCAL;
-  readonly contractVersion = CODESPACE_PROVIDER_CONTRACT_VERSION;
-  readonly capabilities = Object.freeze({
-    disposable: false,
-    persistent: true,
-    exactLifecycle: true,
-    personalBillingOnly: true,
-    connector: "local-outbound-relay",
-  });
   constructor(
-    readonly relay: LocalCodespaceRelay,
-    readonly resources: CodespaceResourceRepository,
+    readonly devices: LocalDeviceService,
+    readonly resources: LocalResourceRepository,
     private readonly settingsUrl: string,
     private readonly now: () => number = Date.now,
   ) {}
@@ -53,164 +38,50 @@ export class LocalCodespaceProvider implements CodespaceProviderAdapter {
   }
   async getIdentity(credential: string) {
     const id = userFromCredential(credential);
-    this.relay.devices.listOwned(id);
+    this.devices.listRegistered(id);
     return { id, login: "local" };
-  }
-  private target(credential: string, repository: CodespaceRepositoryTarget) {
-    const userId = userFromCredential(credential);
-    const target = parseLocalRepositoryTargetId(repository.id);
-    const device = this.relay.devices.getActiveDevice(userId, target.deviceId);
-    const grant = device.policy.repositories.find((repo) => repo.id === target.repositoryId);
-    if (!grant || grant.fullName !== repository.fullName || grant.private !== repository.private) {
-      throw new CodespaceResourceError(
-        "CODESPACE_AUTHORIZATION_REQUIRED",
-        "Local repository is not approved on this device",
-      );
-    }
-    if (!device.policy.enabled || device.policy.leaseUntil <= this.now()) {
-      throw new CodespaceResourceError("CODESPACE_POLICY_LIMIT", "Renew the work lease locally");
-    }
-    if (device.lastSeenAt === null || this.now() - device.lastSeenAt > 60_000) {
-      throw new CodespaceResourceError(
-        "CODESPACE_PROVIDER_UNAVAILABLE",
-        "The selected local device is offline",
-      );
-    }
-    return { userId, device, repositoryId: target.repositoryId };
-  }
-  async listMachines(credential: string, repository: CodespaceRepositoryTarget, _ref: string) {
-    return [this.target(credential, repository).device.policy.machine];
-  }
-  async preflightCreate(credential: string, repository: CodespaceRepositoryTarget, _ref: string) {
-    return { billableOwnerId: this.target(credential, repository).userId };
-  }
-  async create(
-    credential: string,
-    input: {
-      repository: CodespaceRepositoryTarget;
-      ref: string;
-      machine: CodespaceMachine;
-      operationMarker: string;
-      idleTimeoutMinutes: number;
-      retentionMinutes: number;
-    },
-  ) {
-    const target = this.target(credential, input.repository);
-    if (canonicalJson(input.machine) !== canonicalJson(target.device.policy.machine)) {
-      throw new CodespaceResourceError(
-        "CODESPACE_RESOURCE_INVALID",
-        "Local machine profile changed",
-      );
-    }
-    const record = this.resources
-      .listOwned(target.userId, this.id)
-      .find((row) => row.operationMarker === input.operationMarker);
-    if (!record || record.repositoryId !== input.repository.id) {
-      throw new CodespaceResourceError(
-        "CODESPACE_NOT_FOUND",
-        "Local creation reservation is missing",
-      );
-    }
-    this.relay.devices.bindResource({
-      userId: target.userId,
-      deviceId: target.device.deviceId,
-      deviceGeneration: target.device.deviceGeneration,
-      connectionId: target.device.connectionId,
-      resourceId: record.id,
-      repositoryId: target.repositoryId,
-      profileId: input.machine.name,
-    });
-    await this.relay.send(
-      record,
-      {
-        action: "create",
-        repositoryId: target.repositoryId,
-        ref: input.ref,
-        operationMarker: input.operationMarker,
-      },
-      { mutation: true },
-    );
-    // A reconciler may have adopted the admitted VM while its original create receipt was in flight.
-    // The receipt settles that old claim; a new snapshot still needs current resource authority.
-    const current = this.resources.getOwned(target.userId, record.id);
-    if (
-      !current ||
-      current.operationMarker !== record.operationMarker ||
-      current.repositoryId !== record.repositoryId ||
-      current.connectionId !== record.connectionId
-    )
-      throw new CodespaceResourceError(
-        "CODESPACE_AUTHORIZATION_REQUIRED",
-        "Local creation authority changed",
-      );
-    const resource = await this.observe(current);
-    return { outcome: "accepted" as const, resource };
-  }
-  async listOwned(credential: string): Promise<CodespaceProviderResource[]> {
-    const userId = userFromCredential(credential);
-    const found: CodespaceProviderResource[] = [];
-    for (const record of this.resources.listOwned(userId, this.id)) {
-      if (
-        record.state === "deleted" ||
-        record.state === "rejected" ||
-        !this.relay.devices.getBinding(userId, record.id)
-      )
-        continue;
-      const resource = await this.observe(record);
-      if (resource) found.push(resource);
-    }
-    return found;
-  }
-  async inspectCreation(
-    credential: string,
-    input: { resourceId: string; operationMarker: string; repositoryId: string },
-  ) {
-    const record = this.resources.getOwned(userFromCredential(credential), input.resourceId);
-    if (
-      !record ||
-      record.provider !== this.id ||
-      record.operationMarker !== input.operationMarker ||
-      record.repositoryId !== input.repositoryId
-    )
-      throw new CodespaceResourceError(
-        "CODESPACE_GENERATION_CONFLICT",
-        "Local creation reservation changed",
-      );
-    const resource = await this.observe(record);
-    return resource ? { outcome: "found" as const, resource } : { outcome: "absent" as const };
   }
   private async exactRecord(credential: string, name: string) {
     const id = z.string().uuid().parse(name);
     const userId = userFromCredential(credential);
     const reserved = this.resources.getOwned(userId, id);
-    if (reserved?.provider === this.id) return reserved;
-    const records = this.resources.listOwned(userId, this.id);
-    const record = records.find((row) => row.providerResourceName === id);
-    if (record) return record;
+    if (reserved) return reserved;
     throw new CodespaceResourceError(
       "CODESPACE_NOT_FOUND",
       "Local codespace is not owned by this account",
     );
   }
-  async getExact(credential: string, name: string) {
-    return this.observe(await this.exactRecord(credential, name));
+  async getExact(credential: string, name: string, snapshot?: LocalControllerSnapshot) {
+    return this.observe(await this.exactRecord(credential, name), snapshot);
   }
   private async observe(
-    record: CodespaceResourceRecord,
+    record: LocalResourceIdentity,
+    observed?: LocalControllerSnapshot,
   ): Promise<CodespaceProviderResource | null> {
-    const binding = this.relay.devices.getBinding(record.userId, record.id);
+    const binding = this.devices.getBinding(record.userId, record.id);
     if (!binding)
       throw new CodespaceResourceError(
         "CODESPACE_AUTHORIZATION_REQUIRED",
         "Local resource binding is missing",
       );
-    const parsed = localResourceSnapshotSchema.safeParse(
-      await this.relay.send(record, { action: "snapshot" }),
-    );
+    const snapshot =
+      observed ?? (await this.devices.localSnapshot(record.userId, binding.deviceId));
+    if (snapshot.resourceObservation.state !== "available")
+      throw new CodespaceResourceError(
+        "CODESPACE_PROVIDER_UNAVAILABLE",
+        "The device cannot observe its native environments.",
+      );
+    const match = snapshot.resources.find((resource) => resource.resourceId === record.id);
+    if (!match?.space) return null;
+    const parsed = localResourceSnapshotSchema.safeParse({
+      deviceId: binding.deviceId,
+      creation: { state: "manifest", spaceId: match.space.id },
+      spaces: [match.space],
+    });
     if (!parsed.success)
       throw new CodespaceResourceError(
         "CODESPACE_LOCAL_PROTOCOL_ERROR",
-        "The local computer returned an incompatible resource snapshot; update the companion and server together",
+        "Invalid owner resource snapshot",
       );
     const result = parsed.data;
     if (result.deviceId !== binding.deviceId)
@@ -240,12 +111,7 @@ export class LocalCodespaceProvider implements CodespaceProviderAdapter {
         "CODESPACE_LOCAL_PROTOCOL_ERROR",
         "The local creation manifest is missing from its scoped snapshot",
       );
-    if (
-      space.repositoryId !== binding.repositoryId ||
-      (record.providerResourceName !== null &&
-        record.providerResourceName !== record.id &&
-        space.id !== record.providerResourceName)
-    ) {
+    if (space.repositoryId !== binding.repositoryId || space.machine.name !== binding.profileId) {
       throw new CodespaceResourceError(
         "CODESPACE_GENERATION_CONFLICT",
         "Local sandbox identity changed",
@@ -262,7 +128,7 @@ export class LocalCodespaceProvider implements CodespaceProviderAdapter {
         space.failure === "LOCAL_GUEST_SETTLEMENT_UNKNOWN" &&
         space.state !== "unknown");
     return {
-      name: record.providerResourceName ?? record.id,
+      name: record.id,
       displayName: record.operationMarker,
       ownerId: record.userId,
       billableOwnerId: record.userId,
@@ -304,99 +170,9 @@ export class LocalCodespaceProvider implements CodespaceProviderAdapter {
                       : "created"
                     : "failed",
       lastUsedAt: space.lastStartedAt,
-      machine: record.machine,
+      machine: space.machine,
       createdAt: space.createdAt,
     };
-  }
-  private async lifecycle(credential: string, name: string, action: "start" | "stop" | "delete") {
-    const record = await this.exactRecord(credential, name);
-    await this.relay.send(
-      record,
-      { action, spaceId: name, ...(action === "delete" ? { generation: record.generation } : {}) },
-      { mutation: true },
-    );
-    return "accepted" as const;
-  }
-  startExact(credential: string, name: string) {
-    return this.lifecycle(credential, name, "start");
-  }
-  async bootstrapWorkspace(
-    credential: string,
-    name: string,
-    workspaceReleases: { x64: string; arm64: string },
-  ): Promise<void> {
-    const record = await this.exactRecord(credential, name);
-    await this.relay.send(
-      record,
-      { action: "start", spaceId: name, workspaceReleases },
-      { mutation: false },
-    );
-  }
-  stopExact(credential: string, name: string) {
-    return this.lifecycle(credential, name, "stop");
-  }
-  deleteExact(credential: string, name: string) {
-    return this.lifecycle(credential, name, "delete");
-  }
-  async preflightDelete(
-    credential: string,
-    input: { resourceId: string; ownerConfirmed: boolean },
-  ) {
-    const record = await this.exactRecord(credential, input.resourceId);
-    const binding = this.relay.devices.getBinding(record.userId, record.id);
-    if (!binding)
-      throw new CodespaceResourceError(
-        "CODESPACE_AUTHORIZATION_REQUIRED",
-        "Local resource is not bound",
-      );
-    let device;
-    try {
-      device = this.relay.devices.getActiveDevice(record.userId, binding.deviceId);
-    } catch (error) {
-      if (error instanceof LocalDeviceError)
-        throw new CodespaceResourceError(
-          "CODESPACE_AUTHORIZATION_REQUIRED",
-          "Local device access is no longer active",
-        );
-      throw error;
-    }
-    if (
-      device.deviceGeneration !== binding.deviceGeneration ||
-      device.connectionId !== record.connectionId
-    )
-      throw new CodespaceResourceError(
-        "CODESPACE_AUTHORIZATION_REQUIRED",
-        "Local device authority changed",
-      );
-    if (input.ownerConfirmed) {
-      if (!device.control?.optedIn)
-        throw new CodespaceResourceError(
-          "CODESPACE_AUTHORIZATION_REQUIRED",
-          "Approve web control on this computer first",
-        );
-    } else if (
-      !device.policy.repositories.find((repo) => repo.id === binding.repositoryId)?.allowDelete
-    ) {
-      throw new CodespaceResourceError(
-        "CODESPACE_LOCAL_DELETE_APPROVAL_REQUIRED",
-        "The owner must confirm deletion in Settings",
-        undefined,
-        true,
-      );
-    }
-    if (!input.ownerConfirmed && (!device.policy.enabled || device.policy.leaseUntil <= this.now()))
-      throw new CodespaceResourceError(
-        "CODESPACE_POLICY_LIMIT",
-        "Renew the device work lease before agent work",
-      );
-  }
-  async probeConnector(credential: string, name: string) {
-    const resource = await this.getExact(credential, name);
-    if (resource?.state !== "available")
-      throw new CodespaceResourceError(
-        resource?.stateError ?? "CODESPACE_NOT_RUNNING",
-        "Local sandbox guest is not ready",
-      );
   }
   guidance() {
     return {

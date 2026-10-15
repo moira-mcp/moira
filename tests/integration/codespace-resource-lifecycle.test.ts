@@ -3,3007 +3,1354 @@ import Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 import path from "node:path";
-import * as fs from "node:fs";
-import * as os from "node:os";
+import { randomUUID, createHash } from "node:crypto";
+import { mkdtemp, realpath, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import express from "express";
+import request from "supertest";
 import {
-  CODESPACE_PROVIDER_CONTRACT_VERSION,
-  CODESPACE_PROVIDER_GITHUB,
-  CODESPACE_PROVIDER_LOCAL,
-  CodespaceObservabilityService,
-  CodespaceProviderRegistry,
-  CodespaceResourceError,
-  CodespaceResourceRepository,
-  CodespaceResourceService,
-  evaluateCodespaceResourcePolicy,
-  projectCodespaceSummary,
-  type CodespaceCreateProviderResult,
-  type CodespaceMachine,
-  type CodespaceProviderAdapter,
-  type CodespaceProviderResource,
-  type CodespaceResourcePolicy,
-  type CodespaceResourceAuditEvent,
+  CodespaceConnectionRepository,
+  GitHubResourceRepository,
+  LocalDeviceRepository,
+  LocalDeviceService,
+  type CodespaceConnectionService,
+  type CodespaceGitHubConfigStatus,
+  type LocalControllerClient,
+  type GitHubControllerResource,
+  WorkspaceAuthRepository,
+  ScopedCredentialError,
+  type ControllerOperation,
 } from "@mcp-moira/shared";
+import { GitHubResourceService } from "../../packages/web-backend/src/services/github-resource-service.js";
+import { HttpGitHubCodespaceClient } from "../../packages/web-backend/src/services/github-codespace-client.js";
+import type { WorkspaceBinding } from "../../packages/web-backend/src/services/workspace-router.js";
+import { createGitHubControllerRoutes } from "../../packages/web-backend/src/routes/github-controller.js";
+import {
+  createLocalDeviceRoutes,
+  createLocalDeviceManagementRoutes,
+} from "../../packages/web-backend/src/routes/local-devices.js";
+import { PrivateState } from "../../packages/local/src/private-state.js";
+import { LocalRecords } from "../../packages/local/src/space-record.js";
+import { LocalManager } from "../../packages/local/src/manager.js";
+import { LocalController } from "../../packages/local/src/controller.js";
+import { LocalRelay } from "../../packages/local/src/relay.js";
 
-const migrations = path.resolve(process.cwd(), "packages/web-backend/drizzle");
-const now = 1_788_750_000_000;
-const machine: CodespaceMachine = {
-  name: "basicLinux32gb",
-  displayName: "Basic Linux",
-  operatingSystem: "linux",
-  cpuCores: 2,
-  memoryBytes: 8 * 1024 ** 3,
-  storageBytes: 32 * 1024 ** 3,
+const config: Extract<CodespaceGitHubConfigStatus, { state: "available" }> = {
+  state: "available",
+  clientId: "Iv23abcdefgh1234",
+  clientSecret: "test-app-secret-1234567890",
+  callbackUrl: "https://moira.example/api/integrations/github/callback",
+  installationUrl: "https://github.com/apps/test/installations/new",
+  vaultKeyHex: "db9cae418f0673b254e0a1c76d9348fb624e37b8a901dc5f02a1e64c739db805",
+  vaultKeyVersion: "v1",
+  settingsUrl: "https://moira.example/settings",
 };
-const policy: CodespaceResourcePolicy = {
-  enabled: true,
-  maxCpuCores: 4,
-  maxMemoryBytes: 8 * 1024 ** 3,
-  maxStorageBytes: 32 * 1024 ** 3,
-  maxActivePerUser: 1,
-  maxActiveGlobal: 2,
-  createThrottleMs: 0,
-  createDeadlineMs: 30_000,
-  cleanupDeadlineMs: 30_000,
-  claimLeaseMs: 5_000,
-  reconcileIntervalMs: 60_000,
-  startWaitMs: 60_000,
-};
-
-class FakeProvider implements CodespaceProviderAdapter {
-  readonly contractVersion = CODESPACE_PROVIDER_CONTRACT_VERSION;
-  readonly capabilities: CodespaceProviderAdapter["capabilities"];
-  resource: CodespaceProviderResource | null = null;
-  loseCreateResponse = false;
-  createObservation: (() => void) | null = null;
-  machineObservation: (() => void) | null = null;
-  createGate: Promise<void> | null = null;
-  startGate: Promise<void> | null = null;
-  startObservation: (() => void) | null = null;
-  returnedMachine: CodespaceMachine = machine;
-  returnedBillableOwnerId = "101";
-  preflightBillableOwnerId = "101";
-  returnedState: CodespaceProviderResource["state"] = "available";
-  ownedResources: CodespaceProviderResource[] | null = null;
-  connectorAvailable = true;
-  healthAvailable = true;
-  createOutcome: "accepted" | "background" | "rejected" = "accepted";
-  /** What the provider said about a refusal, as the real adapter attaches it. */
-  createRejectionDetail: string | null = null;
-  /** A refusal raised the way the real client raises one: an error carrying a status and a reason. */
-  startRefusal: { status: number; providerMessage?: string } | null = null;
-  /** A real provider names each resource uniquely; tests that create twice set this. */
-  resourceName = "silver-space-123";
-  /** Other codespaces the provider holds, so several users' records can coexist in one test. */
-  others: CodespaceProviderResource[] = [];
-  /** The ref the provider reports for a created codespace; `undefined` echoes the request. */
-  returnedRef: string | null | undefined = undefined;
-  /**
-   * A stop refused the way the real client refuses: an error with a status. `carriedOut` models a
-   * provider that answered with an error but shut the codespace down anyway.
-   */
-  stopRefusal: { status: number; carriedOut?: boolean } | null = null;
-  readonly healthCalls = jest.fn();
-  readonly machineCalls = jest.fn();
-  readonly createCalls = jest.fn();
-  readonly preflightCalls = jest.fn();
-  readonly connectorCalls = jest.fn();
-  readonly startCalls = jest.fn();
-  readonly stopCalls = jest.fn();
-  readonly deleteCalls = jest.fn();
-  /** Every provider observation, so a test can bound how often one tick looks at the provider. */
-  readonly identityCalls = jest.fn();
-  readonly listCalls = jest.fn();
-  readonly exactCalls = jest.fn();
-  exactFailure = false;
-  exactObservation: (() => void) | null = null;
-
-  constructor(
-    // A provider id the registry has never seen is a case this suite exercises, so the parameter is
-    // the adapter's id type widened to a string rather than the one built-in constant.
-    readonly id: string = CODESPACE_PROVIDER_GITHUB,
-    personalBillingOnly = true,
-  ) {
-    this.capabilities = {
-      disposable: true,
-      persistent: true,
-      exactLifecycle: true,
-      personalBillingOnly,
-      connector: id === CODESPACE_PROVIDER_GITHUB ? "github-cli-ssh" : "managed-connector",
-    };
-  }
-
-  async health() {
-    this.healthCalls();
-    return this.healthAvailable
-      ? { state: "available" as const, reason: null }
-      : { state: "unavailable" as const, reason: "tooling unavailable" };
-  }
-  async getIdentity() {
-    this.identityCalls();
-    return { id: "101", login: "owner" };
-  }
-  async listMachines(
-    _credential: string,
-    repository: Parameters<CodespaceProviderAdapter["listMachines"]>[1],
-    ref: string,
-  ) {
-    this.machineCalls(repository, ref);
-    this.machineObservation?.();
-    return [machine];
-  }
-  async preflightCreate(
-    _credential: string,
-    repository: Parameters<CodespaceProviderAdapter["preflightCreate"]>[1],
-    ref: string,
-  ) {
-    this.preflightCalls(repository, ref);
-    return { billableOwnerId: this.preflightBillableOwnerId };
-  }
-  guidance() {
-    return {
-      links: [
-        {
-          id: "provider_console" as const,
-          url: `https://${this.id}.example/codespaces`,
-          label: `${this.id} console`,
-        },
-      ],
-      instructions: { ready: `${this.id} is ready` },
-    };
-  }
-  async create(
-    _token: string,
-    input: Parameters<CodespaceProviderAdapter["create"]>[1],
-  ): Promise<CodespaceCreateProviderResult> {
-    this.createCalls(input);
-    this.createObservation?.();
-    this.resource = {
-      name: this.resourceName,
-      displayName: input.operationMarker,
-      ownerId: "101",
-      billableOwnerId: this.returnedBillableOwnerId,
-      repositoryId: input.repository.id,
-      repositoryFullName: input.repository.fullName,
-      ref: this.returnedRef === undefined ? input.ref : this.returnedRef,
-      state: this.returnedState,
-      lastUsedAt: null,
-      machine: this.returnedMachine,
-      createdAt: now,
-    };
-    if (this.createGate) await this.createGate;
-    if (this.loseCreateResponse) throw new Error("connection reset after submit");
-    if (this.createOutcome === "rejected") {
-      this.resource = null;
-      return {
-        outcome: "rejected",
-        reason: "provider_policy",
-        ...(this.createRejectionDetail ? { detail: this.createRejectionDetail } : {}),
-      };
-    }
-    if (this.createOutcome === "background") return { outcome: "accepted", resource: null };
-    return { outcome: "accepted", resource: this.resource };
-  }
-  async listOwned() {
-    this.listCalls();
-    return this.ownedResources ?? [...(this.resource ? [this.resource] : []), ...this.others];
-  }
-  async getExact(_token: string, name: string) {
-    this.exactCalls(name);
-    this.exactObservation?.();
-    if (this.exactFailure) throw new Error("GitHub unavailable");
-    if (this.resource?.name === name) return this.resource;
-    return this.others.find((other) => other.name === name) ?? null;
-  }
-  /** Moves the current codespace aside so the next create gets a fresh one. */
-  park(nextName: string) {
-    if (this.resource) this.others.push(this.resource);
-    this.resource = null;
-    this.resourceName = nextName;
-  }
-  private update(name: string, change: Partial<CodespaceProviderResource> | null) {
-    if (this.resource?.name === name) {
-      this.resource = change ? { ...this.resource, ...change } : null;
-      return;
-    }
-    this.others = this.others.flatMap((other) =>
-      other.name !== name ? [other] : change ? [{ ...other, ...change }] : [],
-    );
-  }
-  /** Like GitHub, a codespace the provider is already moving refuses start and stop. */
-  private refuseWhileTransitional(name: string) {
-    const state = this.others.find((other) => other.name === name)?.state ?? this.resource?.state;
-    if (state === "starting" || state === "stopping" || state === "provisioning") {
-      throw Object.assign(new Error("GitHub API request failed"), { status: 409 });
-    }
-  }
-  /** Like GitHub, a failed codespace cannot be stopped. */
-  private refuseStopWhileFailed(name: string) {
-    const state = this.others.find((other) => other.name === name)?.state ?? this.resource?.state;
-    if (state === "failed") {
-      throw Object.assign(new Error("GitHub API request failed"), { status: 409 });
-    }
-  }
-  async stopExact(_token: string, name: string) {
-    this.stopCalls(name);
-    this.refuseWhileTransitional(name);
-    this.refuseStopWhileFailed(name);
-    if (this.stopRefusal) {
-      if (this.stopRefusal.carriedOut) this.update(name, { state: "shutdown" });
-      throw Object.assign(new Error("GitHub API request failed"), {
-        status: this.stopRefusal.status,
-      });
-    }
-    this.update(name, { state: "shutdown" });
-    return "accepted" as const;
-  }
-  /** A provider that accepts a start without the codespace becoming available yet. */
-  startStaysPending = false;
-  async startExact(_token: string, name: string) {
-    this.startCalls(name);
-    this.refuseWhileTransitional(name);
-    if (this.startRefusal) {
-      throw Object.assign(new Error("GitHub API request failed"), this.startRefusal);
-    }
-    if (!this.startStaysPending) this.update(name, { state: "available" });
-    this.startObservation?.();
-    if (this.startGate) await this.startGate;
-    return "accepted" as const;
-  }
-  async deleteExact(_token: string, name: string) {
-    this.deleteCalls(name);
-    this.update(name, null);
-    return "accepted" as const;
-  }
-  async probeConnector() {
-    this.connectorCalls();
-    if (!this.connectorAvailable) throw new Error("remote ssh unavailable");
-  }
-}
-
-function fixture(
-  policyOverrides: Partial<CodespaceResourcePolicy> = {},
-  refreshAuthorization?: (userId: string) => Promise<boolean>,
-  providerId: string = CODESPACE_PROVIDER_GITHUB,
-) {
+function fixture() {
   const sqlite = new Database(":memory:");
-  sqlite.pragma("foreign_keys = ON");
-  migrate(drizzle(sqlite), { migrationsFolder: migrations });
+  sqlite.pragma("foreign_keys=ON");
+  migrate(drizzle(sqlite), {
+    migrationsFolder: path.resolve(process.cwd(), "packages/web-backend/drizzle"),
+  });
+  const deviceId = randomUUID(),
+    deviceCredential = "b".repeat(43),
+    deviceConnectionId = randomUUID(),
+    githubConnectionId = randomUUID();
   sqlite
     .prepare(
-      `INSERT INTO user (id, email, handle, createdAt, updatedAt)
-     VALUES ('user-1', 'one@example.test', 'user-one', 'now', 'now'),
-            ('user-2', 'two@example.test', 'user-two', 'now', 'now')`,
+      "INSERT INTO user(id,email,handle,approvedAt,emailVerified,createdAt,updatedAt) VALUES('owner','owner@example.test','owner','now',1,'now','now')",
     )
     .run();
+  for (const [id, provider] of [
+    [deviceConnectionId, "local-sandboxes"],
+    [githubConnectionId, "github-codespaces"],
+  ])
+    sqlite
+      .prepare(
+        "INSERT INTO codespaceConnection(id,userId,provider,externalAccountId,externalLogin,status,credentialGeneration,createdAt,updatedAt) VALUES(?,'owner',?,'101','person','connected',1,1,1)",
+      )
+      .run(id, provider);
   sqlite
     .prepare(
-      `INSERT INTO codespaceConnection
-     (id, userId, provider, externalAccountId, externalLogin, status,
-      credentialGeneration, createdAt, updatedAt)
-     VALUES ('connection-1', 'user-1', ?, '101', 'owner', 'connected', 1, ?, ?)`,
+      "INSERT INTO codespaceLocalDevice(id,userId,connectionId,label,generation,status,credentialDigest,createdAt,updatedAt) VALUES(?,'owner',?,'Controller',1,'active',?,1,1)",
     )
-    .run(providerId, now, now);
+    .run(deviceId, deviceConnectionId, createHash("sha256").update(deviceCredential).digest("hex"));
   sqlite
     .prepare(
-      `INSERT INTO codespaceConnectionRepository
-     (connectionId, externalInstallationId, externalRepositoryId, fullName, private, createdAt)
-     VALUES ('connection-1', '201', '301', 'owner/repository', 1, ?)`,
+      "INSERT INTO codespaceConnectionRepository(connectionId,externalInstallationId,externalRepositoryId,fullName,private,createdAt) VALUES(?,'901','201','person/project',1,1)",
     )
-    .run(now);
-  sqlite
-    .prepare(
-      `INSERT INTO codespaceConnection
-       (id, userId, provider, externalAccountId, externalLogin, status,
-        credentialGeneration, createdAt, updatedAt)
-       VALUES ('connection-2', 'user-2', ?, '101', 'owner', 'connected', 1, ?, ?)`,
-    )
-    .run(providerId, now, now);
-  sqlite
-    .prepare(
-      `INSERT INTO codespaceConnectionRepository
-       (connectionId, externalInstallationId, externalRepositoryId, fullName, private, createdAt)
-       VALUES ('connection-2', '202', '302', 'owner/second', 1, ?)`,
-    )
-    .run(now);
-  const repository = new CodespaceResourceRepository(sqlite);
-  const provider = new FakeProvider(providerId);
-  const registry = new CodespaceProviderRegistry();
-  registry.register(provider);
-  const tokenCalls = jest.fn<() => Promise<string>>().mockResolvedValue("ghu_access");
-  const audits: CodespaceResourceAuditEvent[] = [];
-  const auditDedupeKeys = new Set<string>();
-  let currentTime = now;
-  const effectivePolicy = { ...policy, ...policyOverrides };
-  const createService = () =>
-    new CodespaceResourceService({
-      repository,
-      repositories: repository,
-      registry,
-      credentials: { getCredential: tokenCalls },
-      providerId,
-      requiredCapabilities: {
-        exactLifecycle: true,
-        personalBillingOnly: true,
-      },
-      policy: () => effectivePolicy,
-      refreshAuthorization,
-      now: () => currentTime,
-      delay: async (milliseconds) => {
-        currentTime += milliseconds;
-      },
-      audit: (event) => {
-        if (event.dedupeKey !== undefined) {
-          if (auditDedupeKeys.has(event.dedupeKey)) return;
-          auditDedupeKeys.add(event.dedupeKey);
-        }
-        audits.push(event);
-      },
-    });
-  const service = createService();
-  return {
-    sqlite,
-    repository,
-    provider,
-    service,
-    createService,
-    tokenCalls,
-    advance: (milliseconds: number) => {
-      currentTime += milliseconds;
-    },
-    clock: () => currentTime,
-    policy: effectivePolicy,
-    audits,
+    .run(githubConnectionId);
+  const requests: Array<{ method: string; path: string; body: unknown }> = [];
+  let createResponse: () => Promise<Response> = async () => {
+    throw new Error("Provider creation reply lost");
   };
-}
-
-describe("durable persistent codespace lifecycle", () => {
-  test("synchronous local creation preserves confirmed setup failure discovered after acceptance instead of a false generation conflict", async () => {
-    const value = fixture({}, undefined, CODESPACE_PROVIDER_LOCAL);
-    try {
-      value.provider.returnedState = "provisioning";
-      const accepted = await value.service.create("user-1", "301", "refs/heads/main");
-      expect(accepted.resource).toMatchObject({
-        state: "create_submitted",
-        desiredState: "running",
-      });
-      value.provider.resource = {
-        ...value.provider.resource!,
-        state: "failed",
-        stateError: "CODESPACE_LOCAL_SETUP_INCOMPLETE",
-      };
-      await expect(
-        value.service.waitForState("user-1", accepted.resource.id, "usable"),
-      ).rejects.toMatchObject({ code: "CODESPACE_LOCAL_SETUP_INCOMPLETE" });
-      expect(value.repository.getOwned("user-1", accepted.resource.id)).toMatchObject({
-        state: "create_submitted",
-        generation: accepted.resource.generation,
-        desiredState: "running",
-        observedState: "failed",
-        lastOutcome: "CODESPACE_LOCAL_SETUP_INCOMPLETE",
-      });
-      expect(value.provider.createCalls).toHaveBeenCalledTimes(1);
-      expect(value.provider.connectorCalls).not.toHaveBeenCalled();
-      expect(value.provider.startCalls).not.toHaveBeenCalled();
-      expect(value.provider.stopCalls).not.toHaveBeenCalled();
-      expect(value.provider.deleteCalls).not.toHaveBeenCalled();
-    } finally {
-      value.sqlite.close();
-    }
-  });
-  test("synchronous lifecycle waiting reconciles only its accepted create despite an older higher-priority peer", async () => {
-    const value = fixture({ maxActivePerUser: 2, maxActiveGlobal: 3 });
-    try {
-      const peer = await value.service.create("user-1", "301", "refs/heads/peer");
-      value.repository.requestStop("user-1", peer.resource.id, value.clock());
-      const peerBefore = value.repository.getOwned("user-1", peer.resource.id);
-      value.provider.park("target-space");
-      value.provider.returnedState = "provisioning";
-      const accepted = await value.service.create("user-1", "301", "refs/heads/main");
-      expect(accepted.resource.state).toBe("create_submitted");
-      value.provider.resource = { ...value.provider.resource!, state: "available" };
-      const completed = await value.service.waitForState("user-1", accepted.resource.id, "usable");
-      expect(completed).toMatchObject({
-        id: accepted.resource.id,
-        state: "usable",
-        generation: accepted.resource.generation + 1,
-      });
-      expect(value.repository.getOwned("user-1", peer.resource.id)).toEqual(peerBefore);
-      expect(value.provider.createCalls).toHaveBeenCalledTimes(2);
-      expect(value.provider.stopCalls).not.toHaveBeenCalled();
-      expect(value.provider.startCalls).not.toHaveBeenCalled();
-    } finally {
-      value.sqlite.close();
-    }
-  });
-
-  test.each(["stopped", "deleted"] as const)(
-    "synchronous lifecycle waiting confirms %s through exact observation without another mutation",
-    async (target) => {
-      const value = fixture({ reconcileIntervalMs: 1000 });
-      try {
-        const created = await value.service.create("user-1", "301", "refs/heads/main");
-        value.provider.resource = { ...value.provider.resource!, state: "stopping" };
-        if (target === "deleted") {
-          value.provider.deleteExact = async (_token, name) => {
-            value.provider.deleteCalls(name);
-            value.provider.resource = { ...value.provider.resource!, state: "deleting" };
-            return "accepted";
-          };
-        }
-        const accepted =
-          target === "stopped"
-            ? await value.service.stopCodespace("user-1", created.resource.id)
-            : await value.service.deleteCodespace(
-                "user-1",
-                created.resource.id,
-                created.resource.generation,
-              );
-        expect(accepted.state).toBe(target === "stopped" ? "stop_pending" : "delete_pending");
-        value.provider.exactObservation = () => {
-          if (value.clock() >= now + 2000)
-            value.provider.resource =
-              target === "deleted" ? null : { ...value.provider.resource!, state: "shutdown" };
-        };
-        const completed = await value.service.waitForState("user-1", created.resource.id, target);
-        expect(completed).toMatchObject({
-          state: target,
-          generation: accepted.generation,
-          observedState: target === "deleted" ? "absent" : "stopped",
-        });
-        expect(value.provider.stopCalls).not.toHaveBeenCalled();
-        expect(value.provider.deleteCalls).toHaveBeenCalledTimes(target === "deleted" ? 1 : 0);
-        expect(value.provider.createCalls).toHaveBeenCalledTimes(1);
-      } finally {
-        value.sqlite.close();
-      }
-    },
+  let providerResponse: () => Promise<Response> = async () => new Response(null, { status: 404 });
+  let listResponse: () => Promise<Response> = async () => Response.json({ codespaces: [] });
+  let realOwner: LocalController | undefined;
+  let ownerResources: GitHubControllerResource[] = [];
+  let ownerOutcome: ControllerOperation["outcome"];
+  let connectedGuest: WorkspaceBinding | null = null;
+  const guestConnected = jest.fn(
+    (binding: WorkspaceBinding) =>
+      connectedGuest !== null && JSON.stringify(binding) === JSON.stringify(connectedGuest),
   );
-
-  test.each(["revoked", "superseded", "deadline"] as const)(
-    "synchronous lifecycle waiting refuses %s without repeating creation or trusting an obsolete result",
-    async (failure) => {
-      const value = fixture();
-      try {
-        value.provider.returnedState = "provisioning";
-        const accepted = await value.service.create("user-1", "301", "refs/heads/main");
-        if (failure === "revoked") {
-          value.provider.exactObservation = () => {
-            value.sqlite
-              .prepare(
-                "DELETE FROM codespaceConnectionRepository WHERE connectionId = 'connection-1'",
-              )
-              .run();
-          };
-        } else if (failure === "superseded") {
-          value.repository.requestStop("user-1", accepted.resource.id, value.clock());
-        }
-        await expect(
-          value.service.waitForState("user-1", accepted.resource.id, "usable"),
-        ).rejects.toMatchObject({
-          code:
-            failure === "revoked"
-              ? "CODESPACE_AUTHORIZATION_REQUIRED"
-              : failure === "superseded"
-                ? "CODESPACE_GENERATION_CONFLICT"
-                : "CODESPACE_START_TIMEOUT",
-        });
-        expect(value.provider.createCalls).toHaveBeenCalledTimes(1);
-        expect(value.provider.startCalls).not.toHaveBeenCalled();
-        expect(value.provider.stopCalls).not.toHaveBeenCalled();
-      } finally {
-        value.sqlite.close();
-      }
-    },
-  );
-
-  test("forwards the requested ref when selecting a provider machine", async () => {
-    const value = fixture();
-    try {
-      await value.service.create("user-1", "301", "refs/heads/feature/current-machines");
-      expect(value.provider.machineCalls).toHaveBeenCalledWith(
-        expect.objectContaining({ id: "301", fullName: "owner/repository" }),
-        "refs/heads/feature/current-machines",
-      );
-    } finally {
-      value.sqlite.close();
-    }
-  });
-
-  test("keeps start, stop and delete usable after the provider repository is renamed", async () => {
-    const value = fixture();
-    try {
-      const created = await value.service.create("user-1", "301", "refs/heads/main");
-      value.provider.resource = {
-        ...value.provider.resource!,
-        repositoryFullName: "owner/renamed-repository",
-      };
-
-      await expect(
-        value.service.stopCodespace("user-1", created.resource.id),
-      ).resolves.toMatchObject({
-        state: "stopped",
-      });
-      expect(value.repository.getOwned("user-1", created.resource.id)?.repositoryFullName).toBe(
-        "owner/renamed-repository",
-      );
-      await expect(
-        value.service.startCodespace("user-1", created.resource.id),
-      ).resolves.toMatchObject({
-        state: "usable",
-      });
-      const current = value.service.getCodespace("user-1", created.resource.id);
-      await expect(
-        value.service.deleteCodespace("user-1", created.resource.id, current.generation),
-      ).resolves.toMatchObject({ state: "deleted" });
-    } finally {
-      value.sqlite.close();
-    }
-  });
-
-  test("still refuses lifecycle access when the provider repository id changes", async () => {
-    const value = fixture();
-    try {
-      const created = await value.service.create("user-1", "301", "refs/heads/main");
-      value.provider.resource = { ...value.provider.resource!, repositoryId: "different-id" };
-      await expect(
-        value.service.stopCodespace("user-1", created.resource.id),
-      ).rejects.toMatchObject({
-        code: "CODESPACE_RESOURCE_INVALID",
-      });
-    } finally {
-      value.sqlite.close();
-    }
-  });
-
-  test("reports instance-disabled setup before repository and capacity checks", () => {
-    const value = fixture({ enabled: false });
-    try {
-      expect(value.service.setupSituation("user-1", "301")).toBe("instance_disabled");
-    } finally {
-      value.sqlite.close();
-    }
-  });
-
-  test("distinguishes an approved repository from a missing or mismatched one", () => {
-    const value = fixture();
-    try {
-      expect(value.service.setupSituation("user-1", "301")).toBe("ready");
-      expect(value.service.setupSituation("user-1", "different-repository")).toBe(
-        "repository_not_approved",
-      );
-      value.sqlite
-        .prepare("DELETE FROM codespaceConnectionRepository WHERE connectionId = 'connection-1'")
-        .run();
-      expect(value.service.setupSituation("user-1")).toBe("repository_not_approved");
-    } finally {
-      value.sqlite.close();
-    }
-  });
-
-  test("reports the creation ceiling after an approved repository reaches capacity", async () => {
-    const value = fixture();
-    try {
-      await value.service.create("user-1", "301", "refs/heads/main");
-      expect(value.service.setupSituation("user-1", "301")).toBe("ceiling_reached");
-    } finally {
-      value.sqlite.close();
-    }
-  });
-
-  test("binds the same core lifecycle to a non-GitHub provider without installation concepts", async () => {
-    const value = fixture();
-    try {
-      value.sqlite.prepare("UPDATE codespaceConnection SET provider = 'managed-cloud'").run();
-      value.sqlite
-        .prepare("UPDATE codespaceConnectionRepository SET externalRepositoryId = 'project-alpha'")
-        .run();
-      const provider = new FakeProvider("managed-cloud", false);
-      provider.returnedBillableOwnerId = "moira-billing-account";
-      const registry = new CodespaceProviderRegistry();
-      registry.register(provider);
-      const service = new CodespaceResourceService({
-        repository: value.repository,
-        repositories: value.repository,
-        registry,
-        providerId: "managed-cloud",
-        requiredCapabilities: { exactLifecycle: true },
-        credentials: {
-          getCredential: async (userId, providerId) => `${userId}:${providerId}:opaque`,
-        },
-        policy: () => value.policy,
-        now: () => now,
-      });
-      expect(service.setupGuidance("ready")).toEqual({
-        provider: "managed-cloud",
-        situation: "ready",
-        instruction: "managed-cloud is ready",
-        links: [
+  const fetchImpl = jest.fn<typeof fetch>(async (url, init) => {
+    const target = new URL(String(url));
+    requests.push({
+      method: init?.method ?? "GET",
+      path: target.pathname,
+      body: init?.body ? JSON.parse(String(init.body)) : null,
+    });
+    if (target.pathname.endsWith("/new")) return Response.json({ billable_owner: { id: 101 } });
+    if (target.pathname.endsWith("/machines"))
+      return Response.json({
+        machines: [
           {
-            id: "provider_console",
-            url: "https://managed-cloud.example/codespaces",
-            label: "managed-cloud console",
+            name: "standard",
+            display_name: "Standard",
+            operating_system: "linux",
+            cpus: 2,
+            memory_in_bytes: 8 * 1024 ** 3,
+            storage_in_bytes: 32 * 1024 ** 3,
           },
         ],
       });
-
-      expect(service.listRepositories("user-1")).toEqual([
-        { id: "project-alpha", fullName: "owner/repository", private: true },
-      ]);
-      await expect(
-        service.create("user-1", "project-alpha", "refs/heads/main"),
-      ).resolves.toMatchObject({
-        resource: { provider: "managed-cloud", state: "usable" },
-      });
-    } finally {
-      value.sqlite.close();
-    }
+    if (init?.method === "POST" && target.pathname === "/repos/person/project/codespaces")
+      return createResponse();
+    if (target.pathname.startsWith("/user/codespaces/")) return providerResponse();
+    if (target.pathname === "/user/codespaces") return listResponse();
+    throw new Error("Unexpected provider request");
   });
-
-  test("serializes competing reservations from separate services and SQLite connections", async () => {
-    const directory = fs.mkdtempSync(path.join(os.tmpdir(), "moira-resource-concurrency-"));
-    const filename = path.join(directory, "moira.db");
-    const first = new Database(filename);
-    const second = new Database(filename);
-    for (const sqlite of [first, second]) {
-      sqlite.pragma("foreign_keys = ON");
-      sqlite.pragma("busy_timeout = 5000");
-    }
-    try {
-      migrate(drizzle(first), { migrationsFolder: migrations });
-      first
-        .prepare(
-          `INSERT INTO user (id, email, handle, createdAt, updatedAt)
-           VALUES ('user-1', 'one@example.test', 'user-one', 'now', 'now')`,
-        )
-        .run();
-      first
-        .prepare(
-          `INSERT INTO codespaceConnection
-           (id, userId, provider, externalAccountId, externalLogin, status,
-            credentialGeneration, createdAt, updatedAt)
-           VALUES ('connection-1', 'user-1', ?, '101', 'owner', 'connected', 1, ?, ?)`,
-        )
-        .run(CODESPACE_PROVIDER_GITHUB, now, now);
-      first
-        .prepare(
-          `INSERT INTO codespaceConnectionRepository
-           (connectionId, externalInstallationId, externalRepositoryId, fullName, private, createdAt)
-           VALUES ('connection-1', '201', '301', 'owner/repository', 1, ?)`,
-        )
-        .run(now);
-      const concurrentPolicy = {
-        ...policy,
-        createThrottleMs: 0,
-      };
-      const makeService = (sqlite: Database.Database) => {
-        const provider = new FakeProvider();
-        const registry = new CodespaceProviderRegistry();
-        registry.register(provider);
-        return new CodespaceResourceService({
-          repository: new CodespaceResourceRepository(sqlite),
-          repositories: new CodespaceResourceRepository(sqlite),
-          registry,
-          credentials: { getCredential: async () => "ghu_access" },
-          providerId: CODESPACE_PROVIDER_GITHUB,
-          requiredCapabilities: {
-            exactLifecycle: true,
-            personalBillingOnly: true,
-          },
-          policy: () => concurrentPolicy,
-          now: () => now,
-        });
-      };
-      const results = await Promise.allSettled([
-        makeService(first).create("user-1", "301", "refs/heads/main"),
-        makeService(second).create("user-1", "301", "refs/heads/main"),
-      ]);
-      expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
-      expect(results.filter((result) => result.status === "rejected")).toHaveLength(1);
-      expect(
-        first.prepare("SELECT COUNT(*) count FROM codespaceResource WHERE state = 'usable'").get(),
-      ).toEqual({ count: 1 });
-    } finally {
-      second.close();
-      first.close();
-      fs.rmSync(directory, { recursive: true, force: true });
-    }
-  });
-
-  test("rejects a repository grant generation replaced before durable reservation", async () => {
-    const value = fixture();
-    try {
-      value.provider.machineObservation = () => {
-        value.sqlite
-          .prepare(
-            `UPDATE codespaceConnection
-             SET credentialGeneration = credentialGeneration + 1, updatedAt = updatedAt + 1
-             WHERE id = 'connection-1'`,
-          )
-          .run();
-        value.sqlite
-          .prepare("DELETE FROM codespaceConnectionRepository WHERE connectionId = 'connection-1'")
-          .run();
-      };
-
-      await expect(value.service.create("user-1", "301", "refs/heads/main")).rejects.toMatchObject({
-        code: "REPOSITORY_NOT_ALLOWED",
-      });
-      expect(value.provider.createCalls).not.toHaveBeenCalled();
-      expect(value.sqlite.prepare("SELECT COUNT(*) count FROM codespaceResource").get()).toEqual({
-        count: 0,
-      });
-    } finally {
-      value.sqlite.close();
-    }
-  });
-
-  test.each([
-    [403, "CODESPACE_AUTHORIZATION_REQUIRED"],
-    [404, "CODESPACE_RESOURCE_INVALID"],
-    [502, "CODESPACE_PROVIDER_UNAVAILABLE"],
-  ])(
-    "maps a provider HTTP %s before reservation to the typed %s error without an internal failure",
-    async (status, code) => {
-      const value = fixture();
-      try {
-        value.provider.machineObservation = () => {
-          throw Object.assign(new Error(`GitHub API request failed (HTTP ${status})`), { status });
+  const controller: LocalControllerClient = {
+    async json(_userId, _deviceId, input) {
+      if (realOwner) {
+        if (input.path.includes("/operations/"))
+          return realOwner.collectOperation(input.path.split("/").at(-1)!);
+        if (input.method === "POST")
+          return realOwner.githubLifecycle(input.path.split("/").at(-1)!, input.body);
+        return realOwner.snapshot();
+      }
+      if (input.method === "POST")
+        return {
+          requestId: (input.body as { requestId: string }).requestId,
+          state: ownerOutcome ? "completed" : "accepted",
+          ...(ownerOutcome ? { outcome: ownerOutcome } : {}),
         };
-
-        await expect(
-          value.service.create("user-1", "301", "refs/heads/main"),
-        ).rejects.toMatchObject({
-          name: "CodespaceResourceError",
-          code,
-        });
-        expect(value.provider.createCalls).not.toHaveBeenCalled();
-        expect(value.sqlite.prepare("SELECT COUNT(*) count FROM codespaceResource").get()).toEqual({
-          count: 0,
-        });
-      } finally {
-        value.sqlite.close();
-      }
+      return {
+        version: 1,
+        userId: "owner",
+        deviceId,
+        deviceGeneration: 1,
+        ownerConnectionId: deviceConnectionId,
+        connectionId: deviceConnectionId,
+        observedAt: 1,
+        local: { state: "unconfigured" },
+        github: { resources: ownerResources },
+      };
     },
+  };
+  const devices = new LocalDeviceService(new LocalDeviceRepository(sqlite), Date.now, controller),
+    identities = new GitHubResourceRepository(sqlite);
+  const connection: Pick<CodespaceConnectionService, "getAccessToken" | "getStatus"> = {
+    getAccessToken: async () => "ghu_test_parent",
+    getStatus: () => ({
+      state: "connected",
+      reason: null,
+      settingsUrl: config.settingsUrl,
+      installationUrl: config.installationUrl,
+      account: { id: "101", login: "person" },
+      installations: [],
+      repositories: [],
+      canConnect: true,
+      canDisconnect: true,
+    }),
+  };
+  const retire = jest.fn<
+    (userId: string, resourceId: string, throughGeneration: number) => Promise<void>
+  >(async () => {});
+  const service = new GitHubResourceService(
+    identities,
+    connection,
+    new HttpGitHubCodespaceClient(config, fetchImpl),
+    devices,
+    controller,
+    (...args) => retire(...args),
+    () => ({ enabled: true, persistentRetentionMs: 30 * 24 * 60 * 60_000 }),
+    () => config,
+    () => "https://moira.example",
+    guestConnected,
   );
-
-  test("rejects a repository grant removed before durable reservation", async () => {
-    const value = fixture();
-    try {
-      value.provider.machineObservation = () => {
-        value.sqlite
-          .prepare("DELETE FROM codespaceConnectionRepository WHERE connectionId = 'connection-1'")
-          .run();
-      };
-
-      await expect(value.service.create("user-1", "301", "refs/heads/main")).rejects.toMatchObject({
-        code: "REPOSITORY_NOT_ALLOWED",
-      });
-      expect(value.provider.createCalls).not.toHaveBeenCalled();
-      expect(value.sqlite.prepare("SELECT COUNT(*) count FROM codespaceResource").get()).toEqual({
-        count: 0,
-      });
-    } finally {
-      value.sqlite.close();
-    }
-  });
-
-  test("cancels an unsubmitted persistent create before disconnect", async () => {
-    const value = fixture();
-    try {
-      const reserved = value.repository.reserveCreate({
-        userId: "user-1",
-        provider: CODESPACE_PROVIDER_GITHUB,
-        connectionId: "connection-1",
-        authorizationGeneration: 1,
-        repository: { id: "301", fullName: "owner/repository", private: true },
-        requestedRef: "refs/heads/main",
-        machine,
-        externalAccountId: "101",
-        policy: value.policy,
-        now,
-      });
-      expect(reserved.outcome).toBe("reserved");
-
-      await expect(value.service.cleanupBeforeDisconnect("user-1")).resolves.toBeUndefined();
-      // A finished codespace leaves the caller-facing listing but keeps its stored record.
-      expect(value.service.listResources("user-1")).toEqual([]);
-      expect(value.repository.listOwned("user-1", CODESPACE_PROVIDER_GITHUB)[0]).toMatchObject({
-        state: "rejected",
-        desiredState: "deleted",
-        observedState: "absent",
-      });
-      expect(value.provider.stopCalls).not.toHaveBeenCalled();
-    } finally {
-      value.sqlite.close();
-    }
-  });
-
-  test("lets stop win while a submitted create has not returned its provider identity", async () => {
-    const value = fixture();
-    try {
-      let releaseCreate!: () => void;
-      let observeCreate!: () => void;
-      const enteredCreate = new Promise<void>((resolve) => {
-        observeCreate = resolve;
-      });
-      value.provider.createObservation = observeCreate;
-      value.provider.createGate = new Promise<void>((resolve) => {
-        releaseCreate = resolve;
-      });
-
-      const creating = value.service.create("user-1", "301", "refs/heads/main");
-      await enteredCreate;
-      const codespaceId = value.service.listResources("user-1")[0].id;
-      const stopping = value.createService().stopCodespace("user-1", codespaceId);
-      await expect(stopping).resolves.toMatchObject({
-        state: "stopped",
-        desiredState: "stopped",
-        observedState: "stopped",
-      });
-      releaseCreate();
-      await expect(creating).resolves.toMatchObject({
-        resource: { state: "stopped", desiredState: "stopped" },
-      });
-      expect(value.provider.stopCalls).toHaveBeenCalledTimes(1);
-    } finally {
-      value.sqlite.close();
-    }
-  });
-
-  test("records a provider-deleted persistent codespace as absent instead of retrying stop", async () => {
-    const value = fixture();
-    try {
-      const created = await value.service.create("user-1", "301", "refs/heads/main");
-      value.provider.resource = null;
-      await expect(
-        value.service.stopCodespace("user-1", created.resource.id),
-      ).resolves.toMatchObject({
-        state: "deleted",
-        desiredState: "deleted",
-        observedState: "absent",
-        lastOutcome: "verified_externally_absent",
-      });
-    } finally {
-      value.sqlite.close();
-    }
-  });
-
-  test("does not advance lifecycle generation for repeated pending start or delete intent", async () => {
-    const value = fixture();
-    try {
-      const created = await value.service.create("user-1", "301", "refs/heads/main");
-      await value.service.stopCodespace("user-1", created.resource.id);
-
-      const firstStart = value.repository.requestStart("user-1", created.resource.id, now + 1);
-      if (!firstStart || typeof firstStart === "string") throw new Error("start was not reserved");
-      expect(firstStart).toMatchObject({ state: "start_pending" });
-      const repeatedStart = value.repository.requestStart("user-1", created.resource.id, now + 2);
-      if (!repeatedStart || typeof repeatedStart === "string")
-        throw new Error("pending start disappeared");
-      expect(repeatedStart).toMatchObject({ generation: firstStart.generation });
-
-      const firstDelete = value.repository.requestDelete(
-        "user-1",
-        created.resource.id,
-        repeatedStart.generation,
-        now + 3,
-      );
-      if (!firstDelete || typeof firstDelete === "string")
-        throw new Error("delete was not reserved");
-      expect(firstDelete).toMatchObject({ state: "delete_pending" });
-      const repeatedDelete = value.repository.requestDelete(
-        "user-1",
-        created.resource.id,
-        firstDelete.generation,
-        now + 4,
-      );
-      if (!repeatedDelete || typeof repeatedDelete === "string")
-        throw new Error("pending delete disappeared");
-      expect(repeatedDelete).toMatchObject({ generation: firstDelete.generation });
-      expect(
-        value.sqlite
-          .prepare("SELECT kind, COUNT(*) count FROM codespaceProviderMutation GROUP BY kind")
-          .all(),
-      ).toEqual(
-        expect.arrayContaining([
-          { kind: "start", count: 1 },
-          { kind: "delete", count: 1 },
-        ]),
-      );
-    } finally {
-      value.sqlite.close();
-    }
-  });
-
-  test("persists codespace data across stop/start and deletes only on an explicit delete", async () => {
-    const value = fixture();
-    try {
-      value.provider.createObservation = () => {
-        expect(value.sqlite.prepare("SELECT state FROM codespaceResource").get()).toEqual({
-          state: "create_submitted",
-        });
-        expect(value.sqlite.prepare("SELECT * FROM codespacePolicyUsage").all()).toEqual([]);
-        const capability = value.sqlite
-          .prepare("SELECT capabilityHash FROM codespaceLifecycleCapability")
-          .get() as { capabilityHash: string };
-        expect(capability.capabilityHash).toMatch(/^[a-f0-9]{64}$/);
-      };
-      expect(value.service.listRepositories("user-1")).toEqual([
-        {
-          id: "301",
-          fullName: "owner/repository",
-          private: true,
-        },
-      ]);
-      expect(value.service.listRepositories("user-2")).toEqual([
-        {
-          id: "302",
-          fullName: "owner/second",
-          private: true,
-        },
-      ]);
-      const created = await value.service.create("user-1", "301", "refs/heads/main");
-      expect(created.resource.state).toBe("usable");
-      expect(created.lifecycleCapability).not.toMatch(/^[a-f0-9]{64}$/);
-      expect(value.repository.getByCapability("user-2", created.lifecycleCapability)).toBeNull();
-      expect(value.repository.getByCapability("user-1", created.lifecycleCapability)?.id).toBe(
-        created.resource.id,
-      );
-      expect(() => value.sqlite.prepare("DELETE FROM user WHERE id = 'user-1'").run()).toThrow(
-        /FOREIGN KEY/,
-      );
-      expect(value.repository.getOwned("user-1", created.resource.id)?.state).toBe("usable");
-
-      await value.service.release("user-1", created.resource.id, created.lifecycleCapability);
-      expect(value.repository.getOwned("user-1", created.resource.id)).toMatchObject({
-        state: "stopped",
-        retentionPolicy: "persistent",
-        desiredState: "stopped",
-        observedState: "stopped",
-      });
-      expect(value.provider.stopCalls).toHaveBeenCalledTimes(1);
-      expect(value.provider.deleteCalls).not.toHaveBeenCalled();
-
-      await value.service.startCodespace("user-1", created.resource.id);
-      expect(value.repository.getOwned("user-1", created.resource.id)?.state).toBe("usable");
-      expect(value.provider.startCalls).toHaveBeenCalledTimes(1);
-
-      const deletable = value.service.getCodespace("user-1", created.resource.id);
-      await expect(
-        value.service.deleteCodespace("user-1", created.resource.id, deletable.generation - 1),
-      ).rejects.toMatchObject({ code: "CODESPACE_GENERATION_CONFLICT" });
-      expect(value.provider.deleteCalls).not.toHaveBeenCalled();
-      await value.service.deleteCodespace("user-1", created.resource.id, deletable.generation);
-      expect(value.repository.getOwned("user-1", created.resource.id)?.state).toBe("deleted");
-      expect(value.provider.deleteCalls).toHaveBeenCalledTimes(1);
-      expect(
-        value.sqlite.prepare("SELECT requiredCleanupOperations FROM codespacePolicyUsage").get(),
-      ).toEqual({ requiredCleanupOperations: 0 });
-      expect(
-        value.sqlite
-          .prepare("SELECT kind FROM codespaceProviderMutation ORDER BY createdAt, kind")
-          .all(),
-      ).toEqual([{ kind: "create" }, { kind: "delete" }, { kind: "start" }, { kind: "stop" }]);
-      expect(
-        value.audits.map(({ action, state, outcome }) => ({ action, state, outcome })),
-      ).toEqual([
-        { action: "create", state: "usable", outcome: "verified_usable" },
-        { action: "stop", state: "stopped", outcome: "verified_stopped" },
-        { action: "start", state: "usable", outcome: "verified_running" },
-        { action: "delete", state: "deleted", outcome: "verified_absent" },
-      ]);
-      for (const event of value.audits) {
-        expect(Object.keys(event).sort()).toEqual([
-          "action",
-          "machine",
-          "outcome",
-          "provider",
-          "resourceId",
-          "state",
-          "userId",
-        ]);
-        expect(Object.keys(event.machine).sort()).toEqual([
-          "cpuCores",
-          "memoryBytes",
-          "name",
-          "storageBytes",
-        ]);
-      }
-      expect(JSON.stringify(value.audits)).not.toMatch(
-        /ghu_|refresh|operationMarker|repositoryFullName|ProxyCommand|provider echoed/i,
-      );
-    } finally {
-      value.sqlite.close();
-    }
-  });
-
-  test("recovers an accepted create after response loss without creating a duplicate", async () => {
-    const value = fixture();
-    try {
-      value.provider.loseCreateResponse = true;
-      const pending = await value.service.create("user-1", "301", "refs/heads/main");
-      expect(pending.resource.state).toBe("create_submitted");
-      expect(value.audits.at(-1)).toMatchObject({
-        action: "create_pending",
-        state: "create_submitted",
-        outcome: "provider_outcome_unknown",
-      });
-      value.provider.loseCreateResponse = false;
-
-      const restartedService = value.createService();
-      await restartedService.reconcileOnce();
-      expect(value.repository.getOwned("user-1", pending.resource.id)?.state).toBe("usable");
-      expect(value.provider.createCalls).toHaveBeenCalledTimes(1);
-    } finally {
-      value.sqlite.close();
-    }
-  });
-
-  test("keeps accepted-background creation pending and reconciles it after visibility", async () => {
-    const value = fixture();
-    try {
-      value.provider.createOutcome = "background";
-      const pending = await value.service.create("user-1", "301", "refs/heads/main");
-      expect(pending.resource).toMatchObject({ state: "create_submitted", claimId: null });
-      value.provider.createOutcome = "accepted";
-      await value.createService().reconcileOnce("user-1");
-      expect(value.repository.getOwned("user-1", pending.resource.id)?.state).toBe("usable");
-    } finally {
-      value.sqlite.close();
-    }
-  });
-
-  test("makes definitive provider rejection terminal without a cleanup mutation", async () => {
-    const value = fixture();
-    try {
-      value.provider.createOutcome = "rejected";
-      await expect(value.service.create("user-1", "301", "refs/heads/main")).rejects.toMatchObject({
-        code: "CODESPACE_CREATE_REJECTED",
-      });
-      expect(
-        value.sqlite.prepare("SELECT state, lastOutcome FROM codespaceResource").get(),
-      ).toEqual({
-        state: "rejected",
-        lastOutcome: "provider_policy",
-      });
-      expect(value.audits).toEqual([
-        expect.objectContaining({
-          action: "create_rejected",
-          state: "rejected",
-          outcome: "provider_policy",
-        }),
-      ]);
-      expect(value.provider.deleteCalls).not.toHaveBeenCalled();
-    } finally {
-      value.sqlite.close();
-    }
-  });
-
-  test("carries the provider's own reason for a refused creation to the record and the audit", async () => {
-    const value = fixture();
-    try {
-      value.provider.createOutcome = "rejected";
-      value.provider.createRejectionDetail = "retention_period_minutes exceeds the maximum";
-      await expect(value.service.create("user-1", "301", "refs/heads/main")).rejects.toMatchObject({
-        code: "CODESPACE_CREATE_REJECTED",
-        detail: "retention_period_minutes exceeds the maximum",
-      });
-      // The audit entry is the record that survives a container swap; a reason that lives only in a
-      // container log is gone the moment the container is recreated, which is how the production
-      // refusals became undiagnosable.
-      expect(value.audits.at(-1)).toMatchObject({
-        action: "create_rejected",
-        outcome: "provider_policy",
-        reason: "retention_period_minutes exceeds the maximum",
-      });
-    } finally {
-      value.sqlite.close();
-    }
-  });
-
-  test.each([
-    [400, "CODESPACE_RESOURCE_INVALID", "Machine type is unavailable for this repository"],
-    [403, "CODESPACE_AUTHORIZATION_REQUIRED", "Codespaces are disabled for this repository"],
-    [409, "CODESPACE_RESOURCE_INVALID", "The codespace is already starting"],
-    [500, "CODESPACE_PROVIDER_UNAVAILABLE", "We are having trouble"],
-  ])(
-    "a start refused with HTTP %i is classified as %s and keeps the provider's reason",
-    async (status, code, providerMessage) => {
-      // Before this, a refused start left the client as an unclassified error and the caller was
-      // told only that something failed internally — with neither the status nor the reason.
-      const value = fixture();
-      try {
-        const created = await value.service.create("user-1", "301", "refs/heads/main");
-        await value.service.stopCodespace("user-1", created.resource.id);
-        value.provider.startRefusal = { status, providerMessage };
-        await expect(
-          value.service.startCodespace("user-1", created.resource.id),
-        ).rejects.toMatchObject({ code, detail: providerMessage });
-        // The thrown error dies with the request and the connector log dies with the container, so
-        // the audit entry is the only record of a refused start that outlives the next deploy.
-        expect(value.audits.at(-1)).toMatchObject({
-          action: "start",
-          outcome: `provider_refused_${status}`,
-          reason: providerMessage,
-        });
-      } finally {
-        value.sqlite.close();
-      }
+  return {
+    sqlite,
+    service,
+    identities,
+    requests,
+    fetchImpl,
+    deviceId,
+    deviceCredential,
+    deviceConnectionId,
+    githubConnectionId,
+    devices,
+    setOwnerOutcome(value: ControllerOperation["outcome"]) {
+      ownerOutcome = value;
     },
-  );
-
-  test("a refused delete is audited as a delete", async () => {
-    // The third branch of the same mapping: a delete request is the one whose record is already
-    // marked for deletion, so it must not be filed under the stop that a deletion also implies.
-    const value = fixture();
-    try {
-      const created = await value.service.create("user-1", "301", "refs/heads/main");
-      const deletable = value.service.getCodespace("user-1", created.resource.id);
-      value.provider.deleteExact = async () => {
-        throw Object.assign(new Error("GitHub API request failed"), {
-          status: 500,
-          providerMessage: "We are having trouble",
-        });
-      };
-      await expect(
-        value.service.deleteCodespace("user-1", created.resource.id, deletable.generation),
-      ).rejects.toMatchObject({
-        code: "CODESPACE_PROVIDER_UNAVAILABLE",
-        detail: "We are having trouble",
-      });
-      expect(value.audits.at(-1)).toMatchObject({
-        action: "delete",
-        outcome: "provider_refused_500",
-        reason: "We are having trouble",
-      });
-    } finally {
-      value.sqlite.close();
-    }
-  });
-
-  test("a refused stop is audited as a stop, not as the start that preceded it", async () => {
-    // One funnel serves start, stop and delete, so the audited action has to come from what the
-    // record was actually doing; otherwise every refusal would be filed under the same heading.
-    const value = fixture();
-    try {
-      const created = await value.service.create("user-1", "301", "refs/heads/main");
-      value.provider.stopExact = async () => {
-        throw Object.assign(new Error("GitHub API request failed"), {
-          status: 409,
-          providerMessage: "The codespace is being deleted",
-        });
-      };
-      await expect(
-        value.service.stopCodespace("user-1", created.resource.id),
-      ).rejects.toMatchObject({
-        code: "CODESPACE_RESOURCE_INVALID",
-        detail: "The codespace is being deleted",
-      });
-      expect(value.audits.at(-1)).toMatchObject({
-        action: "stop",
-        outcome: "provider_refused_409",
-        reason: "The codespace is being deleted",
-      });
-    } finally {
-      value.sqlite.close();
-    }
-  });
-
-  test("collapses an identical lifecycle refusal across fresh and concurrent reconcilers", async () => {
-    const value = fixture();
-    try {
-      const created = await value.service.create("user-1", "301", "refs/heads/main");
-      await value.service.stopCodespace("user-1", created.resource.id);
-      value.provider.startRefusal = {
-        status: 403,
-        providerMessage: "Codespaces are disabled for this repository",
-      };
-      await expect(
-        value.service.startCodespace("user-1", created.resource.id),
-      ).rejects.toMatchObject({
-        code: "CODESPACE_AUTHORIZATION_REQUIRED",
-      });
-      const refusalCount = () =>
-        value.audits.filter((event) => event.outcome === "provider_refused_403").length;
-      expect(refusalCount()).toBe(1);
-      expect(value.audits.at(-1)?.dedupeKey).toMatch(/^codespace-refusal:[0-9a-f]{64}$/);
-
-      await Promise.allSettled([
-        value.createService().reconcileOnce("user-1"),
-        value.createService().reconcileOnce("user-1"),
-      ]);
-      expect(refusalCount()).toBe(1);
-
-      value.provider.startRefusal = {
-        status: 403,
-        providerMessage: "Repository policy changed",
-      };
-      // The failed pass deferred the record by one reconcile interval before it is due again.
-      value.advance(value.policy.reconcileIntervalMs);
-      await value.createService().reconcileOnce("user-1");
-      expect(refusalCount()).toBe(2);
-      expect(value.audits.at(-1)).toMatchObject({ reason: "Repository policy changed" });
-    } finally {
-      value.sqlite.close();
-    }
-  });
-
-  test("a failure that is not a provider refusal stays an internal failure", async () => {
-    // The classification must be narrow: catching everything would dress a genuine internal fault
-    // as "the provider refused", which is worse than the silence it replaces.
-    const value = fixture();
-    try {
-      const created = await value.service.create("user-1", "301", "refs/heads/main");
-      await value.service.stopCodespace("user-1", created.resource.id);
-      // No status at all: this is what a bug inside Moira looks like, not a provider refusal.
-      value.provider.startRefusal = { status: undefined as unknown as number };
-      const refusal = await value.service
-        .startCodespace("user-1", created.resource.id)
-        .then(() => null)
-        .catch((error: unknown) => error);
-      expect(refusal).toBeInstanceOf(Error);
-      expect((refusal as { code?: string }).code).toBeUndefined();
-      // And it is not filed as the provider's answer either: an audit entry saying the provider
-      // refused would send an operator to GitHub for a fault that lives in Moira.
-      expect(value.audits.map((event) => event.outcome)).not.toContainEqual(
-        expect.stringContaining("provider_refused"),
-      );
-    } finally {
-      value.sqlite.close();
-    }
-  });
-
-  test("does not delete a persistent codespace when the legacy remote TTL expires", async () => {
-    const value = fixture();
-    try {
-      const created = await value.service.create("user-1", "301", "refs/heads/main");
-      // Its stored remote expiry is its creation time, already past: only the persistent retention
-      // keeps it out of expiry.
-      value.advance(60_000);
-      const restartedService = value.createService();
-      await expect(restartedService.reconcileOnce("user-1")).resolves.toBe(false);
-      expect(value.repository.getOwned("user-1", created.resource.id)?.state).toBe("usable");
-      expect(value.provider.stopCalls).not.toHaveBeenCalled();
-      expect(value.provider.deleteCalls).not.toHaveBeenCalled();
-    } finally {
-      value.sqlite.close();
-    }
-  });
-
-  test("a legacy disposable codespace still expires at the time stamped when it was created", async () => {
-    const value = fixture();
-    try {
-      const created = await value.service.create("user-1", "301", "refs/heads/main");
-      value.sqlite
-        .prepare(
-          "UPDATE codespaceResource SET retentionPolicy = 'legacy_disposable', remoteExpiresAt = ? WHERE id = ?",
-        )
-        .run(now + 60_000, created.resource.id);
-
-      await expect(value.createService().reconcileOnce("user-1")).resolves.toBe(false);
-      expect(value.repository.getOwned("user-1", created.resource.id)?.state).toBe("usable");
-
-      value.advance(60_000);
-      await expect(value.createService().reconcileOnce("user-1")).resolves.toBe(true);
-      const expired = value.repository.getOwned("user-1", created.resource.id);
-      expect(expired?.state).toBe("cleanup_pending");
-      expect(expired?.lastOutcome).toBe("remote_ttl_expired");
-    } finally {
-      value.sqlite.close();
-    }
-  });
-
-  test("prevents another tenant from listing, getting, stopping or deleting a codespace", async () => {
-    const value = fixture();
-    try {
-      const created = await value.service.create("user-1", "301", "refs/heads/main");
-      expect(value.service.listResources("user-2")).toEqual([]);
-      expect(() => value.service.getCodespace("user-2", created.resource.id)).toThrow(
-        CodespaceResourceError,
-      );
-      await expect(
-        value.service.stopCodespace("user-2", created.resource.id),
-      ).rejects.toMatchObject({ code: "CODESPACE_NOT_FOUND" });
-      await expect(
-        value.service.deleteCodespace("user-2", created.resource.id, created.resource.generation),
-      ).rejects.toMatchObject({ code: "CODESPACE_NOT_FOUND" });
-      expect(value.provider.stopCalls).not.toHaveBeenCalled();
-      expect(value.provider.deleteCalls).not.toHaveBeenCalled();
-    } finally {
-      value.sqlite.close();
-    }
-  });
-
-  test.each([
-    ["same account and grant", false, false, 1],
-    ["different account", true, false, 0],
-    ["revoked repository grant", false, true, 0],
-  ] as const)(
-    "reauthorization rebinds only after exact verification for %s, whatever branch is checked out",
-    async (_name, changeAccount, removeGrant, expectedRebound) => {
-      const value = fixture();
-      try {
-        const created = await value.service.create("user-1", "301", "refs/heads/main");
-        value.provider.resource = { ...value.provider.resource!, ref: "feature" };
-        value.sqlite
-          .prepare(
-            `UPDATE codespaceConnection SET credentialGeneration = 2,
-             externalAccountId = ?, updatedAt = updatedAt + 1 WHERE id = 'connection-1'`,
-          )
-          .run(changeAccount ? "999" : "101");
-        if (removeGrant) {
-          value.sqlite
-            .prepare(
-              "DELETE FROM codespaceConnectionRepository WHERE connectionId = 'connection-1'",
-            )
-            .run();
-        }
-
-        await expect(value.service.rebindAfterAuthorization("user-1")).resolves.toBe(
-          expectedRebound,
-        );
-        expect(
-          value.repository.getOwned("user-1", created.resource.id)?.authorizationGeneration,
-        ).toBe(expectedRebound === 1 ? 2 : 1);
-      } finally {
-        value.sqlite.close();
-      }
+    retire,
+    guestConnected,
+    setConnectedGuest(binding: WorkspaceBinding | null) {
+      connectedGuest = binding;
     },
-  );
-
-  test("lets a concurrent stop generation win over an in-flight start", async () => {
-    const value = fixture();
-    try {
-      const created = await value.service.create("user-1", "301", "refs/heads/main");
-      await value.service.stopCodespace("user-1", created.resource.id);
-      let releaseStart!: () => void;
-      let observeStart!: () => void;
-      const enteredStart = new Promise<void>((resolve) => {
-        observeStart = resolve;
-      });
-      value.provider.startObservation = observeStart;
-      value.provider.startGate = new Promise<void>((resolve) => {
-        releaseStart = resolve;
-      });
-
-      const starting = value.service.startCodespace("user-1", created.resource.id);
-      await enteredStart;
-      await value.createService().stopCodespace("user-1", created.resource.id);
-      releaseStart();
-      await starting;
-
-      expect(value.repository.getOwned("user-1", created.resource.id)).toMatchObject({
-        state: "stopped",
-        desiredState: "stopped",
-        observedState: "stopped",
-      });
-      expect(value.provider.deleteCalls).not.toHaveBeenCalled();
-    } finally {
-      value.sqlite.close();
-    }
-  });
-
-  test("does not reconcile a create while its provider submission lease is live", async () => {
-    const value = fixture();
-    try {
-      let releaseCreate!: () => void;
-      let observeCreate!: () => void;
-      const enteredCreate = new Promise<void>((resolve) => {
-        observeCreate = resolve;
-      });
-      value.provider.createGate = new Promise<void>((resolve) => {
-        releaseCreate = resolve;
-      });
-      value.provider.createObservation = observeCreate;
-
-      const creating = value.service.create("user-1", "301", "refs/heads/main");
-      await enteredCreate;
-      await expect(value.service.reconcileOnce("user-1")).resolves.toBe(false);
-      releaseCreate();
-      await expect(creating).resolves.toMatchObject({ resource: { state: "usable" } });
-    } finally {
-      value.sqlite.close();
-    }
-  });
-
-  test("reclaims an expired claim once across competing reconcilers", async () => {
-    const value = fixture();
-    try {
-      value.provider.loseCreateResponse = true;
-      const pending = await value.service.create("user-1", "301", "refs/heads/main");
-      value.sqlite
-        .prepare("UPDATE codespaceResource SET claimId = 'stale', claimExpiresAt = ? WHERE id = ?")
-        .run(now - 1, pending.resource.id);
-      value.provider.loseCreateResponse = false;
-      const outcomes = await Promise.all([
-        value.createService().reconcileOnce("user-1"),
-        value.createService().reconcileOnce("user-1"),
-      ]);
-      expect(outcomes.sort()).toEqual([false, true]);
-      expect(value.repository.getOwned("user-1", pending.resource.id)?.state).toBe("usable");
-      expect(value.provider.createCalls).toHaveBeenCalledTimes(1);
-    } finally {
-      value.sqlite.close();
-    }
-  });
-
-  test("enforces durable budgets and a kill switch before credential or provider contact", async () => {
-    const value = fixture();
-    try {
-      await value.service.create("user-1", "301", "refs/heads/main");
-      await expect(value.service.create("user-1", "301", "refs/heads/main")).rejects.toMatchObject({
-        code: "CODESPACE_POLICY_LIMIT",
-      });
-      expect(value.provider.createCalls).toHaveBeenCalledTimes(1);
-      expect(value.tokenCalls).toHaveBeenCalledTimes(1);
-      expect(value.provider.healthCalls).toHaveBeenCalledTimes(1);
-      expect(value.provider.machineCalls).toHaveBeenCalledTimes(1);
-
-      value.repository.setControl({
-        scope: "global",
-        disabled: true,
-        reason: "incident",
-        updatedBy: null,
-        now,
-        cleanupDeadlineAt: now + 30_000,
-      });
-      const tokenCount = value.tokenCalls.mock.calls.length;
-      await expect(value.service.create("user-1", "301", "refs/heads/main")).rejects.toBeInstanceOf(
-        CodespaceResourceError,
-      );
-      expect(value.tokenCalls).toHaveBeenCalledTimes(tokenCount);
-      expect(value.sqlite.prepare("SELECT state FROM codespaceResource").get()).toEqual({
-        state: "stop_pending",
-      });
-      expect(
-        value.sqlite.prepare("SELECT requiredCleanupOperations FROM codespacePolicyUsage").get(),
-      ).toEqual({ requiredCleanupOperations: 1 });
-    } finally {
-      value.sqlite.close();
-    }
-  });
-
-  test("provider-scoped disablement blocks create before health, credential, machine or mutation", async () => {
-    const value = fixture();
-    try {
-      value.repository.setControl({
-        scope: `provider:${CODESPACE_PROVIDER_GITHUB}`,
-        disabled: true,
-        reason: "provider incident",
-        updatedBy: null,
-        now,
-        cleanupDeadlineAt: now + 30_000,
-      });
-
-      await expect(value.service.create("user-1", "301", "refs/heads/main")).rejects.toMatchObject({
-        code: "CODESPACE_PROVIDER_DISABLED",
-      });
-      expect(value.provider.healthCalls).not.toHaveBeenCalled();
-      expect(value.tokenCalls).not.toHaveBeenCalled();
-      expect(value.provider.machineCalls).not.toHaveBeenCalled();
-      expect(value.provider.createCalls).not.toHaveBeenCalled();
-      expect(value.sqlite.prepare("SELECT COUNT(*) count FROM codespaceResource").get()).toEqual({
-        count: 0,
-      });
-    } finally {
-      value.sqlite.close();
-    }
-  });
-
-  test("rejects unavailable connector health before resolving a credential", async () => {
-    const value = fixture();
-    try {
-      value.provider.healthAvailable = false;
-      await expect(value.service.create("user-1", "301", "refs/heads/main")).rejects.toMatchObject({
-        code: "CODESPACE_PROVIDER_UNAVAILABLE",
-      });
-      expect(value.tokenCalls).not.toHaveBeenCalled();
-      expect(value.sqlite.prepare("SELECT COUNT(*) count FROM codespaceResource").get()).toEqual({
-        count: 0,
-      });
-    } finally {
-      value.sqlite.close();
-    }
-  });
-
-  test("lists only codespaces a caller can still act on", async () => {
-    const value = fixture({ createThrottleMs: 0, maxActivePerUser: 4, maxActiveGlobal: 4 });
-    try {
-      const deleted = await value.service.create("user-1", "301", "refs/heads/main");
-      await value.service.deleteCodespace(
-        "user-1",
-        deleted.resource.id,
-        deleted.resource.generation,
-      );
-
-      value.provider.resourceName = "silver-space-456";
-      const stopped = await value.service.create("user-1", "301", "refs/heads/other");
-      await value.service.stopCodespace("user-1", stopped.resource.id);
-
-      value.provider.resourceName = "silver-space-789";
-      value.provider.createOutcome = "rejected";
-      await expect(value.service.create("user-1", "301", "refs/heads/third")).rejects.toMatchObject(
-        {
-          code: "CODESPACE_CREATE_REJECTED",
-        },
-      );
-      value.provider.createOutcome = "accepted";
-
-      value.provider.resourceName = "silver-space-101";
-      value.provider.createOutcome = "background";
-      const pending = await value.service.create("user-1", "301", "refs/heads/fourth");
-      expect(pending.resource.state).toBe("create_submitted");
-
-      const stored = value.repository.listOwned("user-1", CODESPACE_PROVIDER_GITHUB);
-      expect(stored.map((resource) => resource.state).sort()).toEqual([
-        "create_submitted",
-        "deleted",
-        "rejected",
-        "stopped",
-      ]);
-      // Only the codespace that can still be started, used or deleted is offered to a caller.
-      expect(
-        value.service
-          .listResources("user-1")
-          .map((resource) => ({ id: resource.id, state: resource.state }))
-          .sort((left, right) => left.state.localeCompare(right.state)),
-      ).toEqual([
-        { id: pending.resource.id, state: "create_submitted" },
-        { id: stopped.resource.id, state: "stopped" },
-      ]);
-      // A finished codespace stays reachable by its own identifier.
-      expect(value.service.getCodespace("user-1", deleted.resource.id)).toMatchObject({
-        id: deleted.resource.id,
-        state: "deleted",
-      });
-    } finally {
-      value.sqlite.close();
-    }
-  });
-
-  test("admits a later create on the same day as a delete", async () => {
-    const value = fixture({ createThrottleMs: 0 });
-    try {
-      const created = await value.service.create("user-1", "301", "refs/heads/main");
-      await value.service.deleteCodespace(
-        "user-1",
-        created.resource.id,
-        created.resource.generation,
-      );
-      value.provider.resourceName = "silver-space-456";
-      const again = await value.service.create("user-1", "301", "refs/heads/main");
-      expect(again.resource.state).toBe("usable");
-      expect(value.provider.createCalls).toHaveBeenCalledTimes(2);
-      expect(value.repository.getOwned("user-1", created.resource.id)?.state).toBe("deleted");
-      // The day's row survives for cleanup accounting; a confirmed delete requires none.
-      expect(
-        value.sqlite.prepare("SELECT requiredCleanupOperations FROM codespacePolicyUsage").get(),
-      ).toEqual({ requiredCleanupOperations: 0 });
-    } finally {
-      value.sqlite.close();
-    }
-  });
-
-  test("lets one user hold several codespaces under the shipped ceilings", async () => {
-    // The shipped ceilings are the subject: a value that was merely raised but still refuses the
-    // second codespace, or a refusal that repeats the generic quota sentence, fails here.
-    const shipped = evaluateCodespaceResourcePolicy(() => undefined);
-    const value = fixture({
-      maxActivePerUser: shipped.maxActivePerUser,
-      maxActiveGlobal: shipped.maxActiveGlobal,
-      createThrottleMs: 0,
-    });
-    try {
-      expect(shipped.maxActivePerUser).toBeGreaterThan(1);
-      for (let index = 0; index < shipped.maxActivePerUser; index += 1) {
-        value.provider.resourceName = `silver-space-${index}`;
-        const created = await value.service.create("user-1", "301", `refs/heads/task-${index}`);
-        expect(created.resource.state).toBe("usable");
-      }
-      expect(value.service.listResources("user-1")).toHaveLength(shipped.maxActivePerUser);
-
-      value.provider.resourceName = "silver-space-over";
-      await expect(
-        value.service.create("user-1", "301", "refs/heads/one-too-many"),
-      ).rejects.toMatchObject({
-        code: "CODESPACE_POLICY_LIMIT",
-        detail: expect.stringContaining(String(shipped.maxActivePerUser)),
-      });
-      expect(value.provider.createCalls).toHaveBeenCalledTimes(shipped.maxActivePerUser);
-    } finally {
-      value.sqlite.close();
-    }
-  });
-
-  test("distinguishes create throttle, per-user concurrency and global concurrency", async () => {
-    const throttled = fixture({
-      maxActivePerUser: 2,
-      createThrottleMs: 60_000,
-    });
-    try {
-      throttled.provider.createOutcome = "rejected";
-      await expect(
-        throttled.service.create("user-1", "301", "refs/heads/main"),
-      ).rejects.toMatchObject({ code: "CODESPACE_CREATE_REJECTED" });
-      throttled.provider.createOutcome = "accepted";
-      await expect(
-        throttled.service.create("user-1", "301", "refs/heads/main"),
-      ).rejects.toMatchObject({
-        code: "CODESPACE_POLICY_LIMIT",
-        detail: expect.stringContaining("throttled"),
-      });
-    } finally {
-      throttled.sqlite.close();
-    }
-
-    const perUser = fixture();
-    try {
-      await perUser.service.create("user-1", "301", "refs/heads/main");
-      await expect(
-        perUser.service.create("user-1", "301", "refs/heads/other"),
-      ).rejects.toMatchObject({
-        code: "CODESPACE_POLICY_LIMIT",
-        detail: expect.stringContaining("per-user ceiling"),
-      });
-    } finally {
-      perUser.sqlite.close();
-    }
-
-    const global = fixture({
-      maxActivePerUser: 2,
-      maxActiveGlobal: 1,
-    });
-    try {
-      await global.service.create("user-1", "301", "refs/heads/main");
-      const instanceRefusal = await global.service.create("user-2", "302", "refs/heads/main").then(
-        () => null,
-        (error: CodespaceResourceError) => error,
-      );
-      expect(instanceRefusal).toMatchObject({
-        code: "CODESPACE_POLICY_LIMIT",
-        detail: expect.stringContaining("instance"),
-      });
-      // The refused caller learns that the instance is full, never who occupies it.
-      expect(instanceRefusal?.detail).not.toMatch(/user-1|301|owner\/repository/);
-    } finally {
-      global.sqlite.close();
-    }
-  });
-
-  test("a kill switch racing an accepted create retains exact stop authority", async () => {
-    const value = fixture();
-    try {
-      value.provider.createObservation = () => {
-        value.repository.setControl({
-          scope: "global",
-          disabled: true,
-          reason: "incident",
-          updatedBy: null,
-          now,
-          cleanupDeadlineAt: now + 30_000,
-        });
-      };
-      const result = await value.service.create("user-1", "301", "refs/heads/main");
-      expect(result.resource).toMatchObject({
-        state: "stop_pending",
-        providerResourceName: "silver-space-123",
-      });
-
-      await value.service.reconcileOnce("user-1");
-      expect(value.repository.getOwned("user-1", result.resource.id)?.state).toBe("stopped");
-      expect(value.provider.stopCalls).toHaveBeenCalledTimes(1);
-      expect(value.provider.deleteCalls).not.toHaveBeenCalled();
-    } finally {
-      value.sqlite.close();
-    }
-  });
-
-  test("competing cleanup reconcilers submit one exact delete and no stop before it", async () => {
-    const value = fixture();
-    try {
-      const created = await value.service.create("user-1", "301", "refs/heads/main");
-      value.sqlite
-        .prepare("UPDATE codespaceResource SET retentionPolicy = 'legacy_disposable' WHERE id = ?")
-        .run(created.resource.id);
-      expect(
-        value.repository.requestCleanup(
-          "user-1",
-          created.resource.id,
-          created.lifecycleCapability,
-          now + 30_000,
-          now,
-        ),
-      ).toBe(true);
-      const outcomes = await Promise.all([
-        value.createService().reconcileOnce("user-1"),
-        value.createService().reconcileOnce("user-1"),
-      ]);
-      expect(outcomes.sort()).toEqual([false, true]);
-      expect(value.repository.getOwned("user-1", created.resource.id)?.state).toBe("deleted");
-      expect(value.provider.stopCalls).not.toHaveBeenCalled();
-      expect(value.provider.deleteCalls).toHaveBeenCalledTimes(1);
-    } finally {
-      value.sqlite.close();
-    }
-  });
-
-  test("stops every persistent codespace before connection revocation may continue", async () => {
-    const value = fixture();
-    try {
-      const created = await value.service.create("user-1", "301", "refs/heads/main");
-      await value.createService().cleanupBeforeDisconnect("user-1");
-      expect(value.repository.getOwned("user-1", created.resource.id)?.state).toBe("stopped");
-      expect(value.provider.stopCalls).toHaveBeenCalledTimes(1);
-      expect(value.provider.deleteCalls).not.toHaveBeenCalled();
-    } finally {
-      value.sqlite.close();
-    }
-  });
-
-  test("a kill switch recovers and stops an accepted create whose response was lost", async () => {
-    const value = fixture();
-    try {
-      value.provider.loseCreateResponse = true;
-      const result = await value.service.create("user-1", "301", "refs/heads/main");
-      expect(result.resource.providerResourceName).toBeNull();
-      value.repository.setControl({
-        scope: `provider:${CODESPACE_PROVIDER_GITHUB}`,
-        disabled: true,
-        reason: "incident",
-        updatedBy: null,
-        now,
-        cleanupDeadlineAt: now + 30_000,
-      });
-
-      await value.service.reconcileOnce("user-1");
-      expect(value.repository.getOwned("user-1", result.resource.id)).toMatchObject({
-        state: "stopped",
-        providerResourceName: "silver-space-123",
-      });
-      expect(value.provider.createCalls).toHaveBeenCalledTimes(1);
-      expect(value.provider.stopCalls).toHaveBeenCalledTimes(1);
-      expect(value.provider.deleteCalls).not.toHaveBeenCalled();
-    } finally {
-      value.sqlite.close();
-    }
-  });
-
-  test("refuses to stop an exact name whose immutable identity no longer matches", async () => {
-    const value = fixture();
-    try {
-      const created = await value.service.create("user-1", "301", "refs/heads/main");
-      value.provider.resource = { ...value.provider.resource!, ownerId: "999" };
-      await expect(
-        value.service.stopCodespace("user-1", created.resource.id),
-      ).rejects.toMatchObject({ code: "CODESPACE_RESOURCE_INVALID" });
-      expect(value.provider.stopCalls).not.toHaveBeenCalled();
-      expect(value.provider.deleteCalls).not.toHaveBeenCalled();
-      expect(value.repository.getOwned("user-1", created.resource.id)?.state).toBe("stop_pending");
-    } finally {
-      value.sqlite.close();
-    }
-  });
-
-  test("rejects a returned machine that differs from the explicitly selected machine", async () => {
-    const value = fixture();
-    try {
-      value.provider.returnedMachine = { ...machine, memoryBytes: 4 * 1024 ** 3 };
-      await expect(value.service.create("user-1", "301", "refs/heads/main")).rejects.toMatchObject({
-        code: "CODESPACE_RESOURCE_INVALID",
-      });
-      expect(value.sqlite.prepare("SELECT state FROM codespaceResource").get()).toEqual({
-        state: "cleanup_pending",
-      });
-    } finally {
-      value.sqlite.close();
-    }
-  });
-
-  test("makes a verified Codespace unusable when its SSH connector capability is unavailable", async () => {
-    const value = fixture();
-    try {
-      value.provider.connectorAvailable = false;
-      await expect(value.service.create("user-1", "301", "refs/heads/main")).rejects.toMatchObject({
-        code: "CODESPACE_RESOURCE_INVALID",
-      });
-      expect(
-        value.sqlite.prepare("SELECT state, lastOutcome FROM codespaceResource").get(),
-      ).toEqual({
-        state: "cleanup_pending",
-        lastOutcome: "connector_unavailable",
-      });
-      // The rejection audit carries the bounded probe failure so operators can tell a
-      // connector outage from a verification mismatch; usable creations carry no reason.
-      expect(value.audits.find((event) => event.action === "create_rejected")).toMatchObject({
-        outcome: "connector_unavailable",
-        reason: "remote ssh unavailable",
-      });
-    } finally {
-      value.sqlite.close();
-    }
-  });
-
-  test("makes a personal-billing mismatch unusable before connector transport", async () => {
-    const value = fixture();
-    try {
-      value.provider.returnedBillableOwnerId = "organization-202";
-      await expect(value.service.create("user-1", "301", "refs/heads/main")).rejects.toMatchObject({
-        code: "CODESPACE_RESOURCE_INVALID",
-      });
-      expect(value.repository.listOwned("user-1", CODESPACE_PROVIDER_GITHUB)[0]).toMatchObject({
-        state: "cleanup_pending",
-        lastOutcome: "verification_failed",
-      });
-      expect(value.provider.connectorCalls).not.toHaveBeenCalled();
-    } finally {
-      value.sqlite.close();
-    }
-  });
-
-  test("refuses organization billing before any provider create or held reservation", async () => {
-    const value = fixture();
-    try {
-      value.provider.preflightBillableOwnerId = "organization-202";
-      await expect(value.service.create("user-1", "301", "refs/heads/main")).rejects.toMatchObject({
-        code: "CODESPACE_BILLING_UNSUPPORTED",
-      });
-      expect(value.provider.preflightCalls).toHaveBeenCalledWith(
-        expect.objectContaining({ id: "301" }),
-        "refs/heads/main",
-      );
-      expect(value.provider.createCalls).not.toHaveBeenCalled();
-      expect(value.repository.countHeld("user-1", CODESPACE_PROVIDER_GITHUB)).toBe(0);
-    } finally {
-      value.sqlite.close();
-    }
-  });
-
-  test("creates a personally billed Codespace from its approved organization repository", async () => {
-    const value = fixture();
-    try {
-      value.sqlite
-        .prepare(
-          `INSERT INTO codespaceConnectionRepository
-           (connectionId, externalInstallationId, externalRepositoryId, fullName, private, createdAt)
-           VALUES ('connection-1', 'organization-installation', '303', 'moira-mcp/moira', 0, ?)`,
-        )
-        .run(value.clock());
-
-      const created = await value.service.create("user-1", "303", "refs/heads/master");
-      expect(value.provider.preflightCalls).toHaveBeenCalledWith(
-        expect.objectContaining({ id: "303", fullName: "moira-mcp/moira" }),
-        "refs/heads/master",
-      );
-      expect(value.provider.createCalls).toHaveBeenCalledWith(
-        expect.objectContaining({
-          repository: expect.objectContaining({ id: "303", fullName: "moira-mcp/moira" }),
-          ref: "refs/heads/master",
-        }),
-      );
-      expect(created.resource).toMatchObject({
-        state: "usable",
-        repositoryId: "303",
-        repositoryFullName: "moira-mcp/moira",
-        billableOwnerId: "101",
-      });
-    } finally {
-      value.sqlite.close();
-    }
-  });
-
-  test("keeps a transitional returned resource pending without connector transport", async () => {
-    const value = fixture();
-    try {
-      value.provider.returnedState = "provisioning";
-      await expect(value.service.create("user-1", "301", "refs/heads/main")).resolves.toMatchObject(
-        {
-          resource: {
-            state: "create_submitted",
-            providerResourceName: "silver-space-123",
-            lastOutcome: "provisioning",
-          },
-        },
-      );
-      expect(value.provider.connectorCalls).not.toHaveBeenCalled();
-      expect(value.provider.stopCalls).not.toHaveBeenCalled();
-      expect(value.provider.deleteCalls).not.toHaveBeenCalled();
-    } finally {
-      value.sqlite.close();
-    }
-  });
-
-  test("records multiple exact discovery matches as ambiguous without broad cleanup", async () => {
-    const value = fixture();
-    try {
-      value.provider.loseCreateResponse = true;
-      const pending = await value.service.create("user-1", "301", "refs/heads/main");
-      value.provider.loseCreateResponse = false;
-      value.provider.ownedResources = [
-        value.provider.resource!,
-        { ...value.provider.resource!, name: "silver-space-duplicate" },
-      ];
-
-      await value.createService().reconcileOnce("user-1");
-      expect(value.repository.getOwned("user-1", pending.resource.id)).toMatchObject({
-        state: "ambiguous",
-        lastOutcome: "multiple_exact_matches",
-      });
-      expect(value.provider.stopCalls).not.toHaveBeenCalled();
-      expect(value.provider.deleteCalls).not.toHaveBeenCalled();
-    } finally {
-      value.sqlite.close();
-    }
-  });
-
-  test("makes an invisible create terminal only after its durable deadline", async () => {
-    const value = fixture();
-    try {
-      value.provider.loseCreateResponse = true;
-      const pending = await value.service.create("user-1", "301", "refs/heads/main");
-      value.provider.resource = null;
-      await value.createService().reconcileOnce("user-1");
-      expect(value.repository.getOwned("user-1", pending.resource.id)).toMatchObject({
-        state: "create_submitted",
-        lastOutcome: "creation_not_visible",
-      });
-
-      value.advance(policy.createDeadlineMs);
-      await value.createService().reconcileOnce("user-1");
-      expect(value.repository.getOwned("user-1", pending.resource.id)).toMatchObject({
-        state: "rejected",
-        lastOutcome: "verified_no_created_resource",
-      });
-      expect(value.provider.stopCalls).not.toHaveBeenCalled();
-      expect(value.provider.deleteCalls).not.toHaveBeenCalled();
-    } finally {
-      value.sqlite.close();
-    }
-  });
-
-  test("wakes a stopped codespace for the work that needs it and refuses one that cannot wake", async () => {
-    const value = fixture();
-    try {
-      const created = await value.service.create("user-1", "301", "refs/heads/main");
-      await value.service.stopCodespace("user-1", created.resource.id);
-      // The required state is that the command's own call woke the codespace. The wrong state that
-      // looks the same is a codespace that happened to be awake already, so the stopped state is
-      // observed immediately before the call and the provider's start is counted.
-      expect(value.repository.getOwned("user-1", created.resource.id)?.state).toBe("stopped");
-      const startsBefore = value.provider.startCalls.mock.calls.length;
-
-      const running = await value.service.ensureRunning("user-1", created.resource.id);
-
-      expect(running).toMatchObject({ state: "usable", desiredState: "running" });
-      expect(value.provider.startCalls.mock.calls.length).toBe(startsBefore + 1);
-
-      // A codespace that is already usable is not started again.
-      await value.service.ensureRunning("user-1", created.resource.id);
-      expect(value.provider.startCalls.mock.calls.length).toBe(startsBefore + 1);
-
-      await value.service.deleteCodespace(
-        "user-1",
-        created.resource.id,
-        value.repository.getOwned("user-1", created.resource.id)!.generation,
-      );
-      const startsAfterDelete = value.provider.startCalls.mock.calls.length;
-      await expect(
-        value.service.ensureRunning("user-1", created.resource.id),
-      ).rejects.toMatchObject({
-        code: "CODESPACE_NOT_RUNNING",
-        detail: expect.stringContaining("deleted"),
-      });
-      expect(value.provider.startCalls.mock.calls.length).toBe(startsAfterDelete);
-    } finally {
-      value.sqlite.close();
-    }
-  });
-
-  test("refuses by the wait it exhausted when a started codespace never becomes usable", async () => {
-    const value = fixture({ startWaitMs: 120_000, reconcileIntervalMs: 30_000 });
-    try {
-      const created = await value.service.create("user-1", "301", "refs/heads/main");
-      await value.service.stopCodespace("user-1", created.resource.id);
-      value.provider.startStaysPending = true;
-
-      await expect(
-        value.service.ensureRunning("user-1", created.resource.id),
-      ).rejects.toMatchObject({
-        code: "CODESPACE_START_TIMEOUT",
-        detail: expect.stringContaining("120 seconds"),
-      });
-
-      // The wait is bounded by time, and so is what it costs the provider: convergence re-asserts
-      // the start each interval, and four intervals of thirty seconds fit inside two minutes while
-      // the fifth does not, so one caller cannot turn one command into unbounded provider traffic.
-      expect(value.provider.startCalls.mock.calls.length).toBe(5);
-      expect(value.repository.getOwned("user-1", created.resource.id)).toMatchObject({
-        desiredState: "running",
-        state: "start_pending",
-      });
-    } finally {
-      value.sqlite.close();
-    }
-  });
-});
-
-type Fixture = ReturnType<typeof fixture>;
-
-/** A re-authorization as completeConnection records it: a new connection generation, no migration. */
-function reauthorize(value: Fixture, connectionId: string, accountId = "101") {
-  value.sqlite
-    .prepare(
-      `UPDATE codespaceConnection SET credentialGeneration = credentialGeneration + 1,
-       externalAccountId = ?, updatedAt = updatedAt + 1 WHERE id = ?`,
-    )
-    .run(accountId, connectionId);
-}
-
-function resourceRow(value: Fixture, codespaceId: string) {
-  return value.sqlite
-    .prepare(
-      `SELECT state, desiredState, claimExpiresAt, reconcileFailures, authorizationGeneration,
-       lastOutcome FROM codespaceResource WHERE id = ?`,
-    )
-    .get(codespaceId) as {
-    state: string;
-    desiredState: string;
-    claimExpiresAt: number | null;
-    reconcileFailures: number;
-    authorizationGeneration: number;
-    lastOutcome: string | null;
+    setCreateResponse(value: () => Promise<Response>) {
+      createResponse = value;
+    },
+    setProviderResponse(value: () => Promise<Response>) {
+      providerResponse = value;
+    },
+    setListResponse(value: () => Promise<Response>) {
+      listResponse = value;
+    },
+    setRealOwner(value: LocalController) {
+      realOwner = value;
+    },
+    setOwnerResources(value: GitHubControllerResource[]) {
+      ownerResources = value;
+    },
+    auth: { userId: "owner", deviceId, deviceGeneration: 1, connectionId: deviceConnectionId },
   };
 }
-
-describe("codespace identity is not the checked-out branch", () => {
-  test("stop, start, rebind and delete preserve archived uncertain receipts after the agent switches branch", async () => {
-    const value = fixture();
+async function attachOwner(value: ReturnType<typeof fixture>) {
+  const root = await realpath(await mkdtemp(path.join(tmpdir(), "gh-owner-boundary-")));
+  const records = new LocalRecords(await PrivateState.open(root));
+  await records.state.write("connection.json", {
+    ...value.auth,
+    label: "Controller",
+    origin: "https://moira.example",
+    credential: value.deviceCredential,
+    pairingId: randomUUID(),
+  });
+  const app = express();
+  app.use("/api/local-devices", createLocalDeviceRoutes(value.devices, "https://moira.example"));
+  app.use(
+    "/api/codespaces/github/resources",
+    createGitHubControllerRoutes(value.service, value.devices),
+  );
+  app.use(
+    "/api/integrations/local",
+    (req, _res, next) => {
+      Object.assign(req, { userId: "owner" });
+      next();
+    },
+    createLocalDeviceManagementRoutes(value.devices, "https://moira.example"),
+  );
+  const bridge: typeof fetch = async (url, init) => {
+    const target = new URL(String(url));
+    const call =
+      init?.method === "POST"
+        ? request(app).post(target.pathname + target.search)
+        : request(app).get(target.pathname + target.search);
+    for (const [key, header] of new Headers(init?.headers)) call.set(key, header);
+    if (init?.body) call.send(JSON.parse(String(init.body)));
+    const response = await call;
+    return Response.json(response.body, { status: response.status });
+  };
+  const provision = jest.fn(async () => {
+    throw new Error("Controlled explicit adoption provisioning refusal");
+  });
+  const make = () =>
+    new LocalController(new LocalManager(records), value.auth, undefined, undefined, {
+      relay: new LocalRelay(records, bridge),
+      provision,
+      readiness: async () => ({ state: "available" as const }),
+    });
+  const owner = make();
+  value.setRealOwner(owner);
+  return {
+    owner,
+    app,
+    provision,
+    restart() {
+      value.setRealOwner(make());
+    },
+    close: () => rm(root, { recursive: true, force: true }),
+  };
+}
+describe("GitHub cloud identity and fixed provider broker", () => {
+  test("actual HTTP402 payment refusal closes its owner receipt and billable witness without provisioning or retry", async () => {
+    const value = fixture(),
+      requestId = "ws1-" + randomUUID(),
+      id = requestId.slice(4),
+      boundary = await attachOwner(value);
+    const reason = "Codespaces usage not allowed by the configured budget";
     try {
-      const created = await value.service.create("user-1", "301", "refs/heads/main");
-      const id = created.resource.id;
+      value.setCreateResponse(async () =>
+        Response.json(
+          { message: reason },
+          { status: 402, headers: { "x-github-request-id": "AB12:CD34" } },
+        ),
+      );
+      await expect(value.service.create("owner", "201", "main", requestId)).rejects.toMatchObject({
+        code: "CODESPACE_CREATE_REJECTED",
+        requestId,
+        deviceId: value.deviceId,
+        providerFailure: { kind: "http", phase: "request", status: 402, reason },
+      });
+      const response = await request(boundary.app).get(
+        `/api/integrations/local/devices/${value.deviceId}/operations/${requestId}`,
+      );
+      expect(response.status).toBe(200);
+      expect(response.body.data).toMatchObject({
+        requestId,
+        state: "completed",
+        outcome: {
+          ok: false,
+          error: {
+            code: "CODESPACE_CREATE_REJECTED",
+            providerFailure: { kind: "http", status: 402, reason },
+          },
+        },
+      });
+      expect(value.identities.getOwned("owner", id)).toMatchObject({
+        retirement: "retired",
+        providerResourceName: null,
+      });
+      expect((await boundary.owner.snapshot()).github.resources[0].pendingRequestIds).toEqual([]);
+      expect(boundary.provision).not.toHaveBeenCalled();
+      expect(value.requests.filter((entry) => entry.method === "POST")).toHaveLength(1);
+      expect(() =>
+        new CodespaceConnectionRepository(value.sqlite).assertAccountResourcesRetired("owner"),
+      ).not.toThrow();
+    } finally {
+      await boundary.close();
+      value.sqlite.close();
+    }
+  });
+  test("the authenticated fixed broker preserves HTTP evidence without declaring the original provider effect absent", async () => {
+    const value = fixture(),
+      requestId = "ws1-" + randomUUID(),
+      id = requestId.slice(4);
+    try {
+      await expect(value.service.create("owner", "201", "main", requestId)).rejects.toMatchObject({
+        requestId,
+      });
+      await value.service.advanceAuthority(value.auth, id, {
+        requestId,
+        resourceGeneration: 2,
+        authorizationGeneration: 1,
+        providerResourceName: null,
+        retirement: "uncreated",
+      });
+      value.setCreateResponse(async () =>
+        Response.json(
+          { message: "Service unavailable" },
+          { status: 500, headers: { "x-github-request-id": "AB12:CD34" } },
+        ),
+      );
+      const app = express();
+      app.use(
+        "/api/codespaces/github/resources",
+        createGitHubControllerRoutes(value.service, value.devices),
+      );
+      const response = await request(app)
+        .post(`/api/codespaces/github/resources/${id}/provider`)
+        .set("Authorization", `Bearer ${value.deviceCredential}`)
+        .send({ requestId, resourceGeneration: 2, action: "create" });
+      expect(response.status).toBe(503);
+      expect(response.body.error).toMatchObject({
+        code: "WORKSPACE_OUTCOME_UNCONFIRMED",
+        providerFailure: {
+          kind: "http",
+          phase: "request",
+          status: 500,
+          githubRequestId: "AB12:CD34",
+          reason: "Service unavailable",
+        },
+      });
+      expect(response.text).not.toContain("ghu_test_parent");
+      expect(value.identities.getOwned("owner", id)).toMatchObject({
+        retirement: "unknown",
+        providerResourceName: null,
+      });
+      expect(value.requests.filter((entry) => entry.method === "POST")).toHaveLength(1);
+    } finally {
+      value.sqlite.close();
+    }
+  });
+  test("the original owner failure reaches the public resource caller with provider evidence and lifecycle identity", async () => {
+    const value = fixture(),
+      requestId = "ws1-" + randomUUID(),
+      providerFailure = {
+        kind: "http" as const,
+        phase: "request" as const,
+        status: 500,
+        githubRequestId: "AB12:CD34",
+        reason: "Service unavailable",
+      };
+    try {
+      value.setOwnerOutcome({
+        ok: false,
+        error: {
+          code: "WORKSPACE_OUTCOME_UNCONFIRMED",
+          message: "Collect the original request",
+          providerFailure,
+        },
+      });
+      await expect(value.service.create("owner", "201", "main", requestId)).rejects.toMatchObject({
+        code: "WORKSPACE_OUTCOME_UNCONFIRMED",
+        requestId,
+        deviceId: value.deviceId,
+        resourceId: requestId.slice(4),
+        providerFailure,
+      });
+      expect(value.requests).toEqual([]);
+    } finally {
+      value.sqlite.close();
+    }
+  });
+  test.each(["generation", "revocation"] as const)(
+    "a late accepted provider reply cannot restore %s authority and retains its physical identity only as evidence",
+    async (fence) => {
+      const value = fixture(),
+        requestId = "ws1-" + randomUUID(),
+        id = requestId.slice(4);
+      const boundary = await attachOwner(value);
+      try {
+        let release!: (reply: Response) => void, started!: () => void;
+        const reply = new Promise<Response>((resolve) => {
+            release = resolve;
+          }),
+          dispatched = new Promise<void>((resolve) => {
+            started = resolve;
+          });
+        value.setCreateResponse(async () => {
+          started();
+          return reply;
+        });
+        const pending = value.service.create("owner", "201", "main", requestId);
+        await dispatched;
+        const original = value.identities.getOwned("owner", id)!;
+        if (fence === "generation")
+          value.identities.advanceAuthority("owner", id, {
+            resourceGeneration: 3,
+            authorizationGeneration: 1,
+            providerResourceName: null,
+            retirement: "unknown",
+          });
+        else
+          value.sqlite.prepare("UPDATE githubResourceIdentity SET revokedAt=10 WHERE id=?").run(id);
+        const fenced = value.identities.getOwned("owner", id);
+        release(
+          Response.json(
+            {
+              name: "late-created",
+              display_name: original.operationMarker,
+              owner: { id: 101 },
+              billable_owner: { id: 101 },
+              repository: { id: 201, full_name: "person/project" },
+              state: "Provisioning",
+              created_at: "2026-10-14T00:00:00Z",
+            },
+            { status: 201, headers: { "x-github-request-id": "AB12:CD34" } },
+          ),
+        );
+        await expect(pending).rejects.toMatchObject({
+          code: "WORKSPACE_OUTCOME_UNCONFIRMED",
+          requestId,
+          deviceId: value.deviceId,
+          providerFailure: {
+            kind: "authority_changed",
+            phase: "publication",
+            status: 201,
+            githubRequestId: "AB12:CD34",
+            resource: {
+              name: "late-created",
+              repositoryId: "201",
+              repositoryFullName: "person/project",
+              ownerId: "101",
+              billableOwnerId: "101",
+            },
+          },
+        });
+        expect(value.identities.getOwned("owner", id)).toEqual(fenced);
+        const receipt = await request(boundary.app).get(
+          `/api/integrations/local/devices/${value.deviceId}/operations/${requestId}`,
+        );
+        expect(receipt.status).toBe(200);
+        expect(receipt.body.data).toMatchObject({
+          requestId,
+          state: "completed",
+          outcome: {
+            ok: false,
+            error: {
+              code: "WORKSPACE_OUTCOME_UNCONFIRMED",
+              providerFailure: {
+                kind: "authority_changed",
+                status: 201,
+                resource: { name: "late-created" },
+              },
+            },
+          },
+        });
+        expect((await boundary.owner.snapshot()).github.resources[0].pendingRequestIds).toContain(
+          requestId,
+        );
+        boundary.restart();
+        const recovered = await request(boundary.app).get(
+          `/api/integrations/local/devices/${value.deviceId}/operations/${requestId}`,
+        );
+        expect(recovered.body.data).toEqual(receipt.body.data);
+        expect(value.requests.filter((entry) => entry.method === "POST")).toHaveLength(1);
+        expect(() =>
+          new CodespaceConnectionRepository(value.sqlite).assertAccountResourcesRetired("owner"),
+        ).toThrow();
+      } finally {
+        await boundary.close();
+        value.sqlite.close();
+      }
+    },
+  );
+  test("a late confirmed provider refusal cannot retire a newer original ownership witness", async () => {
+    const value = fixture(),
+      requestId = "ws1-" + randomUUID(),
+      id = requestId.slice(4);
+    try {
+      await expect(value.service.create("owner", "201", "main", requestId)).rejects.toMatchObject({
+        requestId,
+      });
+      await value.service.advanceAuthority(value.auth, id, {
+        requestId,
+        resourceGeneration: 2,
+        authorizationGeneration: 1,
+        providerResourceName: null,
+        retirement: "uncreated",
+      });
+      let release!: (reply: Response) => void, started!: () => void;
+      const reply = new Promise<Response>((resolve) => {
+          release = resolve;
+        }),
+        dispatched = new Promise<void>((resolve) => {
+          started = resolve;
+        });
+      value.setCreateResponse(async () => {
+        started();
+        return reply;
+      });
+      const pending = value.service.providerAction(value.auth, id, {
+        requestId,
+        resourceGeneration: 2,
+        action: "create",
+      });
+      await dispatched;
+      value.identities.advanceAuthority("owner", id, {
+        resourceGeneration: 3,
+        authorizationGeneration: 1,
+        providerResourceName: null,
+        retirement: "unknown",
+      });
+      const fenced = value.identities.getOwned("owner", id);
+      release(
+        Response.json(
+          { message: "Forbidden" },
+          { status: 403, headers: { "x-github-request-id": "AB12:CD34" } },
+        ),
+      );
+      await expect(pending).resolves.toMatchObject({
+        outcome: "rejected",
+        providerFailure: { kind: "http", status: 403, githubRequestId: "AB12:CD34" },
+      });
+      expect(value.identities.getOwned("owner", id)).toEqual(fenced);
+    } finally {
+      value.sqlite.close();
+    }
+  });
+  async function ownedFixture() {
+    const value = fixture(),
+      creationId = "ws1-" + randomUUID(),
+      id = creationId.slice(4);
+    await expect(value.service.create("owner", "201", "main", creationId)).rejects.toMatchObject({
+      requestId: creationId,
+    });
+    const resource = value.identities.getOwned("owner", id)!;
+    value.identities.markCreationSubmitted("owner", id, 1);
+    value.identities.observeCreation("owner", id, 1, {
+      name: "owned-space",
+      displayName: resource.operationMarker,
+      ownerId: "101",
+      billableOwnerId: "101",
+      repositoryId: "201",
+      repositoryFullName: "person/project",
+      ref: "main",
+      state: "available",
+      lastUsedAt: null,
+      machine: null,
+      createdAt: 1,
+    });
+    return { ...value, id };
+  }
+  test("explicit adopt previews a renewed grant without changing authority and catches up owner CAS after failed credential retirement", async () => {
+    const value = await ownedFixture(),
+      requestId = "ws1-" + randomUUID();
+    try {
+      let fullName = "person/project";
+      value.setProviderResponse(async () =>
+        Response.json({
+          name: "owned-space",
+          display_name: "A mutable label",
+          owner: { id: 101 },
+          billable_owner: { id: 101 },
+          repository: { id: 201, full_name: fullName },
+          state: "Available",
+          created_at: "2026-10-14T00:00:00Z",
+        }),
+      );
+      const oldRemote = await value.service.enroll(value.auth, value.id, {
+        requestId: "ws1-" + randomUUID(),
+        resourceGeneration: 1,
+        authorizationGeneration: 1,
+        providerResourceName: "owned-space",
+        repositoryId: "201",
+        repositoryFullName: fullName,
+        environmentIdentity: "a".repeat(64),
+        root: "/workspaces/project",
+        rootDevice: "1",
+        rootInode: "2",
+        release: "b".repeat(64),
+      });
       value.sqlite
-        .prepare(
-          `INSERT INTO codespaceOperation
-           (id, userId, resourceId, resourceGeneration, authorizationGeneration, provider,
-            providerResourceName, remoteMarker, kind, state, inputBytes, stdoutLimitBytes,
-            stderrLimitBytes, outputBytes, remoteCleanupPending, deadlineAt, lastOutcome,
-            requestId, requestDigest, inputReference, resultReference, claimId, claimExpiresAt,
-            createdAt, updatedAt)
-           VALUES ('archived-uncertain', 'user-1', ?, ?, 1, 'github-codespaces', ?,
-             'archived-original-marker', 'exec', 'reconcile_pending', 128, 1024, 1024, 17,
-             1, 1000, 'remote_outcome_unknown', 'archived-original-request',
-             'archived-original-digest', 'private-original-input', 'private-original-result',
-             'archived-original-claim', 999, 10, 20)`,
-        )
-        .run(id, created.resource.generation, created.resource.providerResourceName);
-      const archived = value.sqlite
-        .prepare("SELECT * FROM codespaceOperation WHERE id = 'archived-uncertain'")
-        .get();
-      const assertArchiveUnchanged = () =>
+        .prepare("UPDATE codespaceConnection SET authorityGeneration=2 WHERE id=?")
+        .run(value.githubConnectionId);
+      fullName = "person/renamed-project";
+      value.sqlite
+        .prepare("UPDATE codespaceConnectionRepository SET fullName=? WHERE connectionId=?")
+        .run(fullName, value.githubConnectionId);
+      await expect(
+        value.service.adopt("owner", value.id, requestId, 1, { deviceId: value.deviceId }),
+      ).rejects.toMatchObject({ code: "WORKSPACE_OUTCOME_UNCONFIRMED", requestId });
+      expect(value.identities.getOwned("owner", value.id)).toMatchObject({
+        authorizationGeneration: 1,
+        generation: 1,
+        repositoryFullName: "person/project",
+      });
+      expect(
+        new WorkspaceAuthRepository(value.sqlite).authenticate(oldRemote.credential)
+          .authorizationGeneration,
+      ).toBe(1);
+      const preview = await value.service.assignment(value.auth, value.id, "adopt");
+      expect(preview).toMatchObject({
+        resourceGeneration: 1,
+        authorizationGeneration: 2,
+        repositoryId: "201",
+        repositoryFullName: fullName,
+      });
+      let pending = true;
+      value.retire.mockImplementation(async (_user, id, generation) => {
+        expect(id).toBe(value.id);
+        expect(generation).toBe(pending ? 1 : 2);
+        expect(value.identities.getOwned("owner", id)).toMatchObject({
+          authorizationGeneration: 1,
+          generation: 1,
+        });
+        expect(new WorkspaceAuthRepository(value.sqlite).getOwned("owner", id)).toBeNull();
         expect(
           value.sqlite
-            .prepare("SELECT * FROM codespaceOperation WHERE id = 'archived-uncertain'")
-            .get(),
-        ).toEqual(archived);
-      value.provider.resource = { ...value.provider.resource!, ref: "feature" };
-
-      await expect(value.service.stopCodespace("user-1", id)).resolves.toMatchObject({
-        state: "stopped",
+            .prepare("SELECT resourceId FROM githubWorkspaceRenewal WHERE resourceId=?")
+            .get(id),
+        ).toBeUndefined();
+        if (pending) throw new ScopedCredentialError("SCOPED_CREDENTIAL_DISPOSAL_PENDING", 503);
       });
-      await expect(value.service.startCodespace("user-1", id)).resolves.toMatchObject({
-        state: "usable",
-      });
-      assertArchiveUnchanged();
-      expect(value.repository.hasCurrentAuthorization("user-1", id)).toBe(true);
-
-      reauthorize(value, "connection-1");
-      expect(value.repository.hasCurrentAuthorization("user-1", id)).toBe(false);
-      await expect(value.service.rebindAfterAuthorization("user-1")).resolves.toBe(1);
-      expect(value.repository.hasCurrentAuthorization("user-1", id)).toBe(true);
-      assertArchiveUnchanged();
-
-      const current = value.service.getCodespace("user-1", id);
       await expect(
-        value.service.deleteCodespace("user-1", id, current.generation),
-      ).resolves.toMatchObject({ state: "deleted" });
-      expect(value.provider.resource).toBeNull();
-      assertArchiveUnchanged();
-    } finally {
-      value.sqlite.close();
-    }
-  });
-
-  test("reports the branch the provider observed separately from the requested ref", async () => {
-    const value = fixture();
-    try {
-      const created = await value.service.create("user-1", "301", "refs/heads/main");
-      expect(projectCodespaceSummary(created.resource)).toMatchObject({
-        requested_ref: "refs/heads/main",
-        current_ref: "refs/heads/main",
-      });
-
-      value.provider.resource = { ...value.provider.resource!, ref: "feature" };
-      const stopped = await value.service.stopCodespace("user-1", created.resource.id);
-      expect(projectCodespaceSummary(stopped)).toMatchObject({
-        requested_ref: "refs/heads/main",
-        current_ref: "feature",
-      });
-
-      // A detached HEAD reports no ref; it is working state, not a broken codespace.
-      value.provider.resource = { ...value.provider.resource!, ref: null };
-      const started = await value.service.startCodespace("user-1", created.resource.id);
-      expect(started).toMatchObject({ state: "usable", observedRef: null });
-    } finally {
-      value.sqlite.close();
-    }
-  });
-
-  test("lifecycle discovery binds a lost-response codespace whose branch already changed", async () => {
-    const value = fixture();
-    try {
-      value.provider.loseCreateResponse = true;
-      const pending = await value.service.create("user-1", "301", "refs/heads/main");
-      value.provider.resource = { ...value.provider.resource!, ref: "feature" };
-      value.repository.setControl({
-        scope: "global",
-        disabled: true,
-        reason: "incident",
-        updatedBy: null,
-        now,
-        cleanupDeadlineAt: now + 30_000,
-      });
-
-      await value.service.reconcileOnce("user-1");
-      expect(value.repository.getOwned("user-1", pending.resource.id)).toMatchObject({
-        state: "stopped",
-        providerResourceName: "silver-space-123",
-        observedRef: "feature",
-      });
-    } finally {
-      value.sqlite.close();
-    }
-  });
-
-  test("cleanup deletes a disposable codespace whose branch changed", async () => {
-    const value = fixture();
-    try {
-      const created = await value.service.create("user-1", "301", "refs/heads/main");
-      value.sqlite
-        .prepare("UPDATE codespaceResource SET retentionPolicy = 'legacy_disposable' WHERE id = ?")
-        .run(created.resource.id);
-      value.provider.resource = { ...value.provider.resource!, ref: "feature" };
-      value.repository.requestCleanup(
-        "user-1",
-        created.resource.id,
-        created.lifecycleCapability,
-        now + 30_000,
-        now,
-      );
-
-      await value.service.reconcileOnce("user-1");
-      expect(value.repository.getOwned("user-1", created.resource.id)?.state).toBe("deleted");
-      expect(value.provider.deleteCalls).toHaveBeenCalledTimes(1);
-    } finally {
-      value.sqlite.close();
-    }
-  });
-
-  test.each([
-    ["the short name of the requested branch", "usable", "main"],
-    ["no ref yet", "usable", null],
-    ["a different branch", "cleanup_pending", "other"],
-  ] as const)(
-    "adoption compares the requested ref by branch name: a codespace reporting %s becomes %s",
-    async (_name, state, returnedRef) => {
-      const value = fixture();
-      try {
-        value.provider.returnedRef = returnedRef;
-        const result = await value.service
-          .create("user-1", "301", "refs/heads/main")
-          .then((created) => created.resource.state)
-          .catch((error: CodespaceResourceError) => error.code);
-        expect(result).toBe(state === "usable" ? "usable" : "CODESPACE_RESOURCE_INVALID");
-        expect(value.repository.listOwned("user-1", CODESPACE_PROVIDER_GITHUB)[0]?.state).toBe(
-          state,
-        );
-      } finally {
-        value.sqlite.close();
-      }
-    },
-  );
-});
-
-describe("lifecycle looks at the provider before acting", () => {
-  test("a codespace the provider already shut down completes a pending stop without a stop call", async () => {
-    const value = fixture();
-    try {
-      const created = await value.service.create("user-1", "301", "refs/heads/main");
-      value.repository.requestStop("user-1", created.resource.id, now);
-      value.provider.resource = { ...value.provider.resource!, state: "shutdown" };
-
-      await value.service.reconcileOnce("user-1");
-      expect(value.repository.getOwned("user-1", created.resource.id)).toMatchObject({
-        state: "stopped",
-        observedState: "stopped",
-        lastOutcome: "verified_stopped",
-      });
-      expect(value.provider.stopCalls).not.toHaveBeenCalled();
-    } finally {
-      value.sqlite.close();
-    }
-  });
-
-  test("a codespace that is still shutting down waits, then completes once shut down", async () => {
-    const value = fixture();
-    try {
-      const created = await value.service.create("user-1", "301", "refs/heads/main");
-      value.provider.resource = { ...value.provider.resource!, state: "stopping" };
-      await expect(
-        value.service.stopCodespace("user-1", created.resource.id),
-      ).resolves.toMatchObject({ state: "stop_pending", lastOutcome: "provider_stopping" });
-
-      value.provider.resource = { ...value.provider.resource!, state: "shutdown" };
-      await value.service.reconcileOnce("user-1");
-      expect(value.repository.getOwned("user-1", created.resource.id)?.state).toBe("stopped");
-      expect(value.provider.stopCalls).not.toHaveBeenCalled();
-    } finally {
-      value.sqlite.close();
-    }
-  });
-
-  test("a start requested while the codespace is still stopping waits instead of failing", async () => {
-    const value = fixture();
-    try {
-      const created = await value.service.create("user-1", "301", "refs/heads/main");
-      await value.service.stopCodespace("user-1", created.resource.id);
-      value.provider.resource = { ...value.provider.resource!, state: "stopping" };
-
-      await expect(
-        value.service.startCodespace("user-1", created.resource.id),
-      ).resolves.toMatchObject({ state: "start_pending", lastOutcome: "provider_stopping" });
-      expect(value.provider.startCalls).not.toHaveBeenCalled();
-
-      value.provider.resource = { ...value.provider.resource!, state: "shutdown" };
-      await value.service.reconcileOnce("user-1");
-      expect(value.repository.getOwned("user-1", created.resource.id)?.state).toBe("usable");
-      expect(value.provider.startCalls).toHaveBeenCalledTimes(1);
-    } finally {
-      value.sqlite.close();
-    }
-  });
-
-  test("deleting a running codespace deletes it directly without stopping it first", async () => {
-    const value = fixture();
-    try {
-      const created = await value.service.create("user-1", "301", "refs/heads/main");
-      await expect(
-        value.service.deleteCodespace("user-1", created.resource.id, created.resource.generation),
-      ).resolves.toMatchObject({ state: "deleted" });
-      expect(value.provider.stopCalls).not.toHaveBeenCalled();
-      expect(value.provider.deleteCalls).toHaveBeenCalledTimes(1);
-    } finally {
-      value.sqlite.close();
-    }
-  });
-
-  test("a refused stop the provider carried out anyway settles as stopped", async () => {
-    const value = fixture();
-    try {
-      const created = await value.service.create("user-1", "301", "refs/heads/main");
-      value.provider.stopRefusal = { status: 502, carriedOut: true };
-      await expect(
-        value.service.stopCodespace("user-1", created.resource.id),
-      ).resolves.toMatchObject({ state: "stopped" });
-    } finally {
-      value.sqlite.close();
-    }
-  });
-
-  test("a failing stop backs off exponentially up to its cap while another user's record is reconciled", async () => {
-    const value = fixture();
-    try {
-      const first = await value.service.create("user-1", "301", "refs/heads/main");
-      value.provider.park("silver-space-456");
-      const second = await value.service.create("user-2", "302", "refs/heads/main");
-      await value.service.stopCodespace("user-2", second.resource.id);
-      value.repository.requestStart("user-2", second.resource.id, now);
-      // A pending stop outranks a pending start in the claim order, so without a backoff the
-      // failing stop would be claimed on every pass and the start would never be reached.
-      value.repository.requestStop("user-1", first.resource.id, now);
-      value.provider.stopRefusal = { status: 503 };
-
-      await value.service.reconcileOnce();
-      await value.service.reconcileOnce();
-      expect(value.repository.getOwned("user-2", second.resource.id)?.state).toBe("usable");
-      expect(resourceRow(value, first.resource.id)).toMatchObject({
-        state: "stop_pending",
-        reconcileFailures: 1,
-        claimExpiresAt: now + policy.reconcileIntervalMs,
-      });
-
-      // Each retry happens exactly when the previous backoff ends; the next one is measured from it.
-      let clock = now;
-      const delays: number[] = [];
-      for (let attempt = 0; attempt < 8; attempt++) {
-        const due = resourceRow(value, first.resource.id).claimExpiresAt!;
-        await expect(value.service.reconcileOnce("user-1")).resolves.toBe(false);
-        value.advance(due - clock);
-        clock = due;
-        await expect(value.service.reconcileOnce("user-1")).resolves.toBe(true);
-        delays.push(resourceRow(value, first.resource.id).claimExpiresAt! - clock);
-      }
-      expect(resourceRow(value, first.resource.id)).toMatchObject({ state: "stop_pending" });
-      expect(delays.slice(0, 4)).toEqual([2, 4, 8, 16].map((factor) => factor * 60_000));
-      expect(delays.at(-1)).toBe(30 * 60_000);
-    } finally {
-      value.sqlite.close();
-    }
-  });
-});
-
-describe("re-authorization rebinds codespaces and fencing stays fair", () => {
-  test("a same-account re-authorization rebinds a codespace on another branch and lifecycle and reservation work", async () => {
-    const value = fixture();
-    try {
-      const created = await value.service.create("user-1", "301", "refs/heads/main");
-      const id = created.resource.id;
-      value.provider.resource = { ...value.provider.resource!, ref: "feature" };
-      reauthorize(value, "connection-1");
-      // Fenced until the reconciler re-verifies it: the look-alike that stays here is the defect.
-      await expect(value.service.stopCodespace("user-1", id)).rejects.toMatchObject({
-        code: "CODESPACE_AUTHORIZATION_REQUIRED",
-        message: expect.stringContaining("Reconnect"),
-      });
-
-      await expect(value.service.reconcileOnce("user-1")).resolves.toBe(true);
-      expect(resourceRow(value, id).authorizationGeneration).toBe(2);
-      expect(value.repository.hasCurrentAuthorization("user-1", id)).toBe(true);
-      await expect(value.service.stopCodespace("user-1", id)).resolves.toMatchObject({
-        state: "stopped",
-      });
-      await expect(value.service.ensureRunning("user-1", id)).resolves.toMatchObject({
-        state: "usable",
-      });
-    } finally {
-      value.sqlite.close();
-    }
-  });
-
-  test.each([
-    ["a different provider account", (value: Fixture) => reauthorize(value, "connection-1", "999")],
-    [
-      "a disconnect",
-      (value: Fixture) =>
-        value.sqlite
-          .prepare(
-            "UPDATE codespaceConnection SET status = 'disconnected' WHERE id = 'connection-1'",
-          )
-          .run(),
-    ],
-  ])("%s keeps the codespace fenced", async (_name, change) => {
-    const value = fixture();
-    try {
-      const created = await value.service.create("user-1", "301", "refs/heads/main");
-      change(value);
-      await value.service.reconcileOnce("user-1");
-      expect(value.repository.hasCurrentAuthorization("user-1", created.resource.id)).toBe(false);
-      await expect(
-        value.service.startCodespace("user-1", created.resource.id),
-      ).rejects.toMatchObject({ code: "CODESPACE_AUTHORIZATION_REQUIRED" });
-    } finally {
-      value.sqlite.close();
-    }
-  });
-
-  test("one record that can never be rebound does not hold another user's rebind back", async () => {
-    const value = fixture();
-    try {
-      const unrebindable = await value.service.create("user-1", "301", "refs/heads/main");
-      // Same name, another owner: the provider resource is no longer this record's.
-      value.provider.resource = { ...value.provider.resource!, ownerId: "999" };
-      value.provider.park("silver-space-456");
-      value.advance(1);
-      const rebindable = await value.service.create("user-2", "302", "refs/heads/main");
-      reauthorize(value, "connection-1");
-      reauthorize(value, "connection-2");
-
-      // Two scheduled ticks, one reconcile interval apart, the first after the re-authorizations.
-      value.advance(value.policy.reconcileIntervalMs);
-      await value.service.reconcileOnce();
-      value.advance(value.policy.reconcileIntervalMs);
-      await value.service.reconcileOnce();
-      expect(resourceRow(value, rebindable.resource.id).authorizationGeneration).toBe(2);
-      expect(resourceRow(value, unrebindable.resource.id).authorizationGeneration).toBe(1);
-    } finally {
-      value.sqlite.close();
-    }
-  });
-});
-
-describe("a stuck production-shaped codespace converges by ordinary reconciliation", () => {
-  test.each([
-    ["shut down", "stop_pending", "shutdown", "stopped"],
-    ["running", "stop_pending", "available", "stopped"],
-    ["shut down", "start_pending", "shutdown", "usable"],
-    ["running", "start_pending", "available", "usable"],
-  ] as const)(
-    "a codespace the provider reports %s, recorded %s on a switched branch with a stale authorization",
-    async (_name, recordState, providerState, settled) => {
-      const value = fixture();
-      try {
-        const created = await value.service.create("user-1", "301", "refs/heads/main");
-        const id = created.resource.id;
-        value.provider.resource = {
-          ...value.provider.resource!,
-          ref: "fix/production-branch",
-          state: providerState,
-        };
-        // The record as production held it: pending after repeated refusals, still bound to the
-        // authorization generation that was current before the user re-authorized.
-        value.sqlite
-          .prepare(
-            `UPDATE codespaceResource SET state = ?, desiredState = ?, generation = generation + 5,
-             lastOutcome = 'lifecycle_reconcile_required', reconcileFailures = 3
-             WHERE id = ?`,
-          )
-          .run(recordState, recordState === "stop_pending" ? "stopped" : "running", id);
-        reauthorize(value, "connection-1");
-
-        for (let tick = 0; tick < 3; tick++) {
-          await value.service.reconcileOnce();
-          value.advance(value.policy.reconcileIntervalMs);
-        }
-        expect(resourceRow(value, id)).toMatchObject({
-          state: settled,
+        value.service.advanceAuthority(value.auth, value.id, {
+          requestId,
+          resourceGeneration: 2,
           authorizationGeneration: 2,
-          reconcileFailures: 0,
-        });
-        expect(value.provider.stopCalls.mock.calls.length).toBe(
-          recordState === "stop_pending" && providerState === "available" ? 1 : 0,
-        );
-
-        await expect(value.service.ensureRunning("user-1", id)).resolves.toMatchObject({
-          state: "usable",
-        });
-        expect(value.repository.hasCurrentAuthorization("user-1", id)).toBe(true);
-        expect(value.service.getCodespace("user-1", id).observedRef).toBe("fix/production-branch");
-      } finally {
-        value.sqlite.close();
-      }
-    },
-  );
-});
-
-describe("starting a codespace Moira has not bound to a provider resource", () => {
-  test("an ambiguous codespace refuses start as not startable rather than not found", async () => {
-    const value = fixture();
-    try {
-      value.provider.loseCreateResponse = true;
-      const pending = await value.service.create("user-1", "301", "refs/heads/main");
-      value.provider.loseCreateResponse = false;
-      value.provider.ownedResources = [
-        value.provider.resource!,
-        { ...value.provider.resource!, name: "silver-space-duplicate" },
-      ];
-      await value.service.reconcileOnce("user-1");
-      expect(value.service.getCodespace("user-1", pending.resource.id).state).toBe("ambiguous");
-
-      await expect(
-        value.service.startCodespace("user-1", pending.resource.id),
-      ).rejects.toMatchObject({
-        code: "CODESPACE_NOT_RUNNING",
-        detail: expect.stringContaining("ambiguous"),
+          providerResourceName: "owned-space",
+          retirement: "owned",
+          rebindPurpose: "adopt",
+        }),
+      ).rejects.toMatchObject({ code: "SCOPED_CREDENTIAL_DISPOSAL_PENDING" });
+      expect(value.identities.getOwned("owner", value.id)).toMatchObject({
+        authorizationGeneration: 1,
+        generation: 1,
       });
-      expect(value.provider.startCalls).not.toHaveBeenCalled();
+      const laterRequest = "ws1-" + randomUUID();
+      await expect(
+        value.service.adopt("owner", value.id, laterRequest, 2, { deviceId: value.deviceId }),
+      ).rejects.toMatchObject({ code: "WORKSPACE_OUTCOME_UNCONFIRMED", requestId: laterRequest });
+      pending = false;
+      await value.service.advanceAuthority(value.auth, value.id, {
+        requestId: laterRequest,
+        resourceGeneration: 3,
+        authorizationGeneration: 2,
+        providerResourceName: "owned-space",
+        retirement: "owned",
+        rebindPurpose: "adopt",
+      });
+      expect(value.identities.getOwned("owner", value.id)).toMatchObject({
+        id: value.id,
+        authorizationGeneration: 2,
+        generation: 3,
+        repositoryId: "201",
+        repositoryFullName: fullName,
+        providerResourceName: "owned-space",
+      });
+      expect(value.identities.hasCurrentAuthorization("owner", value.id)).toBe(true);
+      expect(new WorkspaceAuthRepository(value.sqlite).getOwned("owner", value.id)).toBeNull();
+      expect(value.requests.every((request) => request.method === "GET")).toBe(true);
     } finally {
       value.sqlite.close();
     }
   });
-
-  test("a codespace still being identified refuses start as pending rather than not found", async () => {
-    const value = fixture();
+  test("explicit public adoption closes the original lost-create receipt before advancing restored owner authority", async () => {
+    const value = fixture(),
+      creationId = "ws1-" + randomUUID(),
+      id = creationId.slice(4),
+      adoptId = "ws1-" + randomUUID(),
+      boundary = await attachOwner(value);
+    const collect = () =>
+      request(boundary.app).get(
+        `/api/integrations/local/devices/${value.deviceId}/operations/${creationId}`,
+      );
     try {
-      value.provider.loseCreateResponse = true;
-      const pending = await value.service.create("user-1", "301", "refs/heads/main");
-      value.provider.resource = null;
-      await expect(
-        value.service.stopCodespace("user-1", pending.resource.id),
-      ).resolves.toMatchObject({ state: "stop_pending", providerResourceName: null });
-
-      await expect(
-        value.service.startCodespace("user-1", pending.resource.id),
-      ).rejects.toMatchObject({
-        code: "CODESPACE_CREATE_PENDING",
-        detail: expect.stringContaining("stop_pending"),
+      await expect(value.service.create("owner", "201", "main", creationId)).rejects.toMatchObject({
+        code: "WORKSPACE_OUTCOME_UNCONFIRMED",
+        requestId: creationId,
       });
-    } finally {
-      value.sqlite.close();
-    }
-  });
-});
-
-describe("one scheduled tick looks at each codespace at most once", () => {
-  const observations = (value: Fixture) =>
-    value.provider.identityCalls.mock.calls.length +
-    value.provider.listCalls.mock.calls.length +
-    value.provider.exactCalls.mock.calls.length;
-
-  test.each([
-    [
-      "a create the provider is still provisioning",
-      (value: Fixture) => {
-        value.provider.returnedState = "provisioning";
-      },
-      (_value: Fixture) => {},
-    ],
-    [
-      "a background-accepted create the provider does not list yet",
-      (value: Fixture) => {
-        value.provider.createOutcome = "background";
-      },
-      (value: Fixture) => {
-        value.provider.resource = null;
-      },
-    ],
-  ])(
-    "%s is reconciled once per tick and still meets its create deadline",
-    async (_name, arrange, afterCreate) => {
-      const value = fixture();
-      try {
-        arrange(value);
-        const pending = await value.service.create("user-1", "301", "refs/heads/main");
-        afterCreate(value);
-        expect(pending.resource.state).toBe("create_submitted");
-        value.provider.identityCalls.mockClear();
-        value.provider.listCalls.mockClear();
-        value.provider.exactCalls.mockClear();
-        const auditsBefore = value.audits.length;
-
-        await value.service.reconcileTick();
-        // One pass: the identity plus one exact read or one listing, never a pass per batch slot.
-        expect(observations(value)).toBeLessThanOrEqual(2);
-        expect(value.audits.length - auditsBefore).toBeLessThanOrEqual(1);
-
-        // A second tick in the same instant finds nothing due: the record waits for the next one.
-        await value.service.reconcileTick();
-        expect(observations(value)).toBeLessThanOrEqual(2);
-
-        // The deferral never outlives the create deadline, so an unfinished create still ends there.
-        value.provider.resource = null;
-        value.advance(value.policy.createDeadlineMs);
-        await value.service.reconcileTick();
-        expect(value.repository.getOwned("user-1", pending.resource.id)?.state).toBe("rejected");
-      } finally {
-        value.sqlite.close();
-      }
-    },
-  );
-
-  test("a disposable cleanup whose resource is not visible yet is reconciled once per tick", async () => {
-    const value = fixture();
-    try {
-      value.provider.loseCreateResponse = true;
-      const pending = await value.service.create("user-1", "301", "refs/heads/main");
-      value.provider.resource = null;
+      expect(boundary.provision).not.toHaveBeenCalled();
+      expect(value.retire.mock.calls).toEqual([
+        ["owner", id, 1],
+        ["owner", id, 1],
+      ]);
+      value.retire.mockClear();
+      expect((await boundary.owner.snapshot()).github.resources[0]).toMatchObject({
+        resourceGeneration: 2,
+        pendingRequestIds: [creationId],
+        retirement: "unknown",
+      });
+      const original = value.identities.getOwned("owner", id)!;
       value.sqlite
-        .prepare(
-          `UPDATE codespaceResource SET retentionPolicy = 'legacy_disposable',
-           state = 'cleanup_pending', desiredState = 'deleted', claimId = NULL,
-           claimExpiresAt = NULL WHERE id = ?`,
-        )
-        .run(pending.resource.id);
-      value.provider.identityCalls.mockClear();
-      value.provider.listCalls.mockClear();
-
-      await value.service.reconcileTick();
-      expect(observations(value)).toBeLessThanOrEqual(2);
-      expect(value.repository.getOwned("user-1", pending.resource.id)?.state).toBe(
-        "cleanup_pending",
-      );
-
-      value.advance(value.policy.createDeadlineMs);
-      await value.service.reconcileTick();
-      expect(value.repository.getOwned("user-1", pending.resource.id)?.state).toBe("deleted");
-    } finally {
-      value.sqlite.close();
-    }
-  });
-});
-
-describe("codespaces that are gone or failed at the provider still converge", () => {
-  test("a codespace deleted on the provider before a re-authorization is rebound, then deletes and frees its slot", async () => {
-    const value = fixture();
-    try {
-      const created = await value.service.create("user-1", "301", "refs/heads/main");
-      value.provider.resource = null;
-      reauthorize(value, "connection-1");
-
-      await value.service.reconcileOnce("user-1");
-      expect(resourceRow(value, created.resource.id).authorizationGeneration).toBe(2);
-      const current = value.service.getCodespace("user-1", created.resource.id);
-      await expect(
-        value.service.deleteCodespace("user-1", created.resource.id, current.generation),
-      ).resolves.toMatchObject({ state: "deleted", observedState: "absent" });
-
-      value.provider.resourceName = "silver-space-456";
-      await expect(value.service.create("user-1", "301", "refs/heads/main")).resolves.toMatchObject(
-        { resource: { state: "usable" } },
-      );
-    } finally {
-      value.sqlite.close();
-    }
-  });
-
-  test("a stop of a codespace the provider reports failed completes without a refused stop call", async () => {
-    const value = fixture();
-    try {
-      const created = await value.service.create("user-1", "301", "refs/heads/main");
-      value.provider.resource = { ...value.provider.resource!, state: "failed" };
-      await expect(
-        value.service.stopCodespace("user-1", created.resource.id),
-      ).resolves.toMatchObject({ state: "stopped", observedState: "failed" });
-      expect(value.provider.stopCalls).not.toHaveBeenCalled();
-    } finally {
-      value.sqlite.close();
-    }
-  });
-});
-
-/** Stores a user's value for one of the codespace idle settings, as the settings screen would. */
-function setPreference(value: Fixture, userId: string, key: string, stored: string) {
-  value.sqlite
-    .prepare(
-      `INSERT OR IGNORE INTO settingDefinition
-       (key, type, category, label, createdAt, updatedAt) VALUES (?, 'string', 'codespaces', ?, 0, 0)`,
-    )
-    .run(key, key);
-  value.sqlite
-    .prepare(
-      `INSERT INTO userSettingValue (userId, settingKey, value, encrypted, updatedAt)
-       VALUES (?, ?, ?, 0, 0)
-       ON CONFLICT DO UPDATE SET value = excluded.value`,
-    )
-    .run(userId, key, stored);
-}
-
-const MINUTE = 60_000;
-
-describe("provider owns its idle lifecycle", () => {
-  test.each([
-    ["the default settings", null, null, 30],
-    ["a chosen 45-minute timeout", "true", "45", 45],
-    ["auto-pause turned off", "false", "45", 240],
-  ] as const)(
-    "creation configures the provider idle timeout from %s",
-    async (_name, autoStop, timeout, expected) => {
-      const value = fixture();
-      try {
-        if (autoStop !== null)
-          setPreference(value, "user-1", "codespaces.auto_stop_enabled", autoStop);
-        if (timeout !== null)
-          setPreference(value, "user-1", "codespaces.idle_timeout_minutes", timeout);
-        await value.service.create("user-1", "301", "refs/heads/main");
-        expect(value.provider.createCalls).toHaveBeenCalledWith(
-          expect.objectContaining({ idleTimeoutMinutes: expected }),
-        );
-      } finally {
-        value.sqlite.close();
-      }
-    },
-  );
-});
-
-describe("the provider's own view of running codespaces is observed periodically", () => {
-  test("an exact owned refresh observes only that codespace without listing its peers", async () => {
-    const value = fixture({ maxActivePerUser: 2 });
-    try {
-      const first = await value.service.create("user-1", "301", "main");
-      value.provider.park("second-space");
-      const second = await value.service.create("user-1", "301", "main");
-      value.provider.others[0] = { ...value.provider.others[0], state: "shutdown" };
-      value.advance(1000);
-      value.provider.listCalls.mockClear();
-      value.provider.exactCalls.mockClear();
-
-      expect(
-        await value.service.refreshProviderState("user-1", { codespaceId: first.resource.id }),
-      ).toEqual({ stale: false });
-      expect(value.provider.listCalls).not.toHaveBeenCalled();
-      expect(value.provider.exactCalls.mock.calls).toEqual([[first.resource.providerResourceName]]);
-      expect(value.service.getCodespace("user-1", first.resource.id).state).toBe("stopped");
-      expect(value.service.getCodespace("user-1", second.resource.id)).toEqual(second.resource);
-
-      value.provider.identityCalls.mockClear();
-      value.provider.exactCalls.mockClear();
-      expect(
-        await value.service.refreshProviderState("user-2", { codespaceId: second.resource.id }),
-      ).toEqual({ stale: false });
-      expect(value.provider.identityCalls).not.toHaveBeenCalled();
-      expect(value.provider.exactCalls).not.toHaveBeenCalled();
-      expect(value.service.getCodespace("user-1", second.resource.id)).toEqual(second.resource);
-    } finally {
-      value.sqlite.close();
-    }
-  });
-
-  test("a codespace the provider stopped on its own is recorded stopped with its last start time, listing once per interval", async () => {
-    const value = fixture();
-    try {
-      const created = await value.service.create("user-1", "301", "refs/heads/main");
-      const interval = value.policy.reconcileIntervalMs * 10;
-      value.provider.listCalls.mockClear();
-
-      await value.service.reconcileTick();
-      expect(value.provider.listCalls).toHaveBeenCalledTimes(1);
-
-      const lastUsedAt = value.clock() + 2 * MINUTE;
-      value.provider.resource = { ...value.provider.resource!, state: "shutdown", lastUsedAt };
-      value.advance(interval - 1);
-      await value.service.reconcileTick();
-      expect(value.provider.listCalls).toHaveBeenCalledTimes(1);
-      expect(value.repository.getOwned("user-1", created.resource.id)?.state).toBe("usable");
-
-      value.advance(1);
-      await value.service.reconcileTick();
-      expect(value.provider.listCalls).toHaveBeenCalledTimes(2);
-      expect(value.repository.getOwned("user-1", created.resource.id)).toMatchObject({
-        state: "stopped",
-        desiredState: "stopped",
-        observedState: "stopped",
-        providerLastUsedAt: lastUsedAt,
-        lastOutcome: "provider_observed_stopped",
-      });
-      expect(value.provider.stopCalls).not.toHaveBeenCalled();
-    } finally {
-      value.sqlite.close();
-    }
-  });
-
-  test.each(["usable", "stopped"] as const)(
-    "an externally deleted %s Codespace disappears and releases its held slot after exact 404",
-    async (state) => {
-      const value = fixture();
-      try {
-        const created = await value.service.create("user-1", "301", "refs/heads/main");
-        if (state === "stopped") await value.service.stopCodespace("user-1", created.resource.id);
-        value.provider.resource = null;
-        const refreshed = await value.service.refreshProviderState("user-1");
-        expect(refreshed).toEqual({ stale: false });
-        expect(value.provider.exactCalls).toHaveBeenCalledWith("silver-space-123");
-        expect(value.service.listResources("user-1")).toEqual([]);
-        expect(value.repository.countHeld("user-1", CODESPACE_PROVIDER_GITHUB)).toBe(0);
-        expect(value.repository.getOwned("user-1", created.resource.id)).toMatchObject({
-          state: "deleted",
-          observedState: "absent",
-        });
-      } finally {
-        value.sqlite.close();
-      }
-    },
-  );
-
-  test("a missing list entry with a successful exact read keeps the resource and capacity", async () => {
-    const value = fixture();
-    try {
-      const created = await value.service.create("user-1", "301", "refs/heads/main");
-      value.provider.ownedResources = [];
-      expect(await value.service.refreshProviderState("user-1")).toEqual({ stale: false });
-      expect(value.provider.exactCalls).toHaveBeenCalledWith("silver-space-123");
-      expect(value.service.getCodespace("user-1", created.resource.id).state).toBe("usable");
-      expect(value.repository.countHeld("user-1", CODESPACE_PROVIDER_GITHUB)).toBe(1);
-    } finally {
-      value.sqlite.close();
-    }
-  });
-
-  test("an exact provider error preserves a missing listed resource and reports stale state", async () => {
-    const value = fixture();
-    try {
-      const created = await value.service.create("user-1", "301", "refs/heads/main");
-      value.provider.ownedResources = [];
-      value.provider.exactFailure = true;
-      expect(await value.service.refreshProviderState("user-1")).toEqual({ stale: true });
-      expect(value.service.getCodespace("user-1", created.resource.id).state).toBe("usable");
-      expect(value.repository.countHeld("user-1", CODESPACE_PROVIDER_GITHUB)).toBe(1);
-    } finally {
-      value.sqlite.close();
-    }
-  });
-
-  test("failed grant refresh prevents treating provider absence as deletion", async () => {
-    const value = fixture({}, async () => false);
-    try {
-      const created = await value.service.create("user-1", "301", "refs/heads/main");
-      value.provider.resource = null;
-      expect(await value.service.refreshProviderState("user-1")).toEqual({ stale: true });
-      expect(value.provider.exactCalls).not.toHaveBeenCalled();
-      expect(value.service.getCodespace("user-1", created.resource.id).state).toBe("usable");
-      expect(value.repository.countHeld("user-1", CODESPACE_PROVIDER_GITHUB)).toBe(1);
-    } finally {
-      value.sqlite.close();
-    }
-  });
-
-  test("authorization changed during exact 404 prevents retiring a resource", async () => {
-    const value = fixture();
-    try {
-      const created = await value.service.create("user-1", "301", "refs/heads/main");
-      value.provider.resource = null;
-      value.provider.exactObservation = () => reauthorize(value, "connection-1");
-      expect(await value.service.refreshProviderState("user-1")).toEqual({ stale: true });
-      expect(value.service.getCodespace("user-1", created.resource.id).state).toBe("usable");
-      expect(value.repository.countHeld("user-1", CODESPACE_PROVIDER_GITHUB)).toBe(1);
-    } finally {
-      value.sqlite.close();
-    }
-  });
-
-  test("a new local generation superseding exact 404 keeps the current resource", async () => {
-    const value = fixture();
-    try {
-      const created = await value.service.create("user-1", "301", "refs/heads/main");
-      value.provider.resource = null;
-      value.provider.exactObservation = () => {
-        value.sqlite
-          .prepare("UPDATE codespaceResource SET generation = generation + 1 WHERE id = ?")
-          .run(created.resource.id);
+        .prepare("UPDATE codespaceConnection SET authorityGeneration=2 WHERE id=?")
+        .run(value.githubConnectionId);
+      const found = {
+        name: "found-original",
+        display_name: original.operationMarker,
+        owner: { id: 101 },
+        billable_owner: { id: 101 },
+        repository: { id: 201, full_name: "person/project" },
+        state: "Available",
+        created_at: "2026-10-14T00:00:00Z",
       };
-      expect(await value.service.refreshProviderState("user-1")).toEqual({ stale: true });
-      expect(value.service.getCodespace("user-1", created.resource.id)).toMatchObject({
-        state: "usable",
-        generation: created.resource.generation + 1,
+      value.setListResponse(async () => Response.json({ codespaces: [found] }));
+      value.setProviderResponse(async () => Response.json(found));
+      const unresolved = await collect();
+      expect(unresolved.body.data).toMatchObject({
+        requestId: creationId,
+        outcome: { ok: false, error: { code: "WORKSPACE_OUTCOME_UNCONFIRMED" } },
       });
-      expect(value.repository.countHeld("user-1", CODESPACE_PROVIDER_GITHUB)).toBe(1);
+      expect(value.identities.getOwned("owner", id)).toEqual(original);
+      const retirementPhases: Array<{ generation: number; authorizationGeneration: number }> = [];
+      value.retire.mockImplementation(async (userId, resourceId, throughGeneration) => {
+        expect([userId, resourceId, throughGeneration]).toEqual(["owner", id, 2]);
+        const closed = await collect();
+        expect(closed.status).toBe(200);
+        expect(closed.body.data).toMatchObject({
+          requestId: creationId,
+          state: "completed",
+          outcome: { ok: false, error: { code: "GITHUB_PROVISIONING_INCOMPLETE" } },
+        });
+        expect(
+          (await boundary.owner.snapshot()).github.resources[0].pendingRequestIds,
+        ).not.toContain(creationId);
+        const authority = value.identities.getOwned("owner", id)!;
+        retirementPhases.push({
+          generation: authority.generation,
+          authorizationGeneration: authority.authorizationGeneration,
+        });
+        if (retirementPhases.length === 1) expect(authority).toEqual(original);
+        else
+          expect(authority).toMatchObject({
+            generation: 3,
+            authorizationGeneration: 2,
+            providerResourceName: found.name,
+          });
+        expect(boundary.provision).not.toHaveBeenCalled();
+      });
+      await expect(
+        value.service.adopt("owner", id, adoptId, 2, { deviceId: value.deviceId }),
+      ).rejects.toMatchObject({ code: "WORKSPACE_OUTCOME_UNCONFIRMED", requestId: adoptId });
+      expect(retirementPhases).toEqual([
+        { generation: 2, authorizationGeneration: 1 },
+        { generation: 3, authorizationGeneration: 2 },
+      ]);
+      expect(boundary.provision).toHaveBeenCalledTimes(1);
+      expect((await collect()).body.data).toMatchObject({
+        requestId: creationId,
+        state: "completed",
+        outcome: { ok: false, error: { code: "GITHUB_PROVISIONING_INCOMPLETE" } },
+      });
+      expect((await boundary.owner.snapshot()).github.resources[0]).toMatchObject({
+        resourceGeneration: 3,
+        authorizationGeneration: 2,
+        providerResourceName: found.name,
+      });
+      expect((await boundary.owner.snapshot()).github.resources[0].pendingRequestIds).not.toContain(
+        creationId,
+      );
+      expect(value.identities.getOwned("owner", id)).toMatchObject({
+        generation: 3,
+        authorizationGeneration: 2,
+        providerResourceName: found.name,
+      });
+      expect(value.requests.filter((entry) => entry.method === "POST")).toHaveLength(1);
+    } finally {
+      await boundary.close();
+      value.sqlite.close();
+    }
+  });
+  test.each(["found", "absent", "foreign-repository"] as const)(
+    "restored same-controller UNKNOWN adoption discovers %s without rebinding on read",
+    async (result) => {
+      const value = fixture(),
+        requestId = "ws1-" + randomUUID(),
+        id = requestId.slice(4);
+      try {
+        await expect(value.service.create("owner", "201", "main", requestId)).rejects.toMatchObject(
+          { requestId },
+        );
+        await value.service.advanceAuthority(value.auth, id, {
+          requestId,
+          resourceGeneration: 2,
+          authorizationGeneration: 1,
+          providerResourceName: null,
+          retirement: "uncreated",
+        });
+        value.identities.markCreationSubmitted("owner", id, 2);
+        value.sqlite
+          .prepare("UPDATE codespaceConnection SET authorityGeneration=2 WHERE id=?")
+          .run(value.githubConnectionId);
+        const original = value.identities.getOwned("owner", id)!;
+        value.setListResponse(async () =>
+          Response.json({
+            codespaces:
+              result === "absent"
+                ? []
+                : [
+                    {
+                      name: "found-original",
+                      display_name: original.operationMarker,
+                      owner: { id: 101 },
+                      billable_owner: { id: 101 },
+                      repository: {
+                        id: result === "foreign-repository" ? 999 : 201,
+                        full_name: "person/project",
+                      },
+                      state: "Available",
+                      created_at: "2026-10-14T00:00:00Z",
+                    },
+                  ],
+          }),
+        );
+        if (result !== "found") {
+          await expect(value.service.assignment(value.auth, id, "adopt")).rejects.toMatchObject({
+            code:
+              result === "absent" ? "CODESPACE_RESOURCE_INVALID" : "CODESPACE_GENERATION_CONFLICT",
+          });
+        } else {
+          const retirementBeforeRead = value.retire.mock.calls.slice();
+          const preview = await value.service.assignment(value.auth, id, "adopt");
+          expect(preview).toMatchObject({
+            providerResourceName: "found-original",
+            authorizationGeneration: 2,
+            providerResource: { name: "found-original", repositoryId: "201" },
+          });
+          expect(value.identities.getOwned("owner", id)).toEqual(original);
+          expect(value.retire.mock.calls).toEqual(retirementBeforeRead);
+          await value.service.advanceAuthority(value.auth, id, {
+            requestId: "ws1-" + randomUUID(),
+            resourceGeneration: 3,
+            authorizationGeneration: 2,
+            providerResourceName: "found-original",
+            retirement: "owned",
+            rebindPurpose: "adopt",
+          });
+          expect(value.identities.getOwned("owner", id)).toMatchObject({
+            id,
+            generation: 3,
+            authorizationGeneration: 2,
+            providerResourceName: "found-original",
+            retirement: "owned",
+          });
+        }
+        if (result !== "found") expect(value.identities.getOwned("owner", id)).toEqual(original);
+        expect(value.requests.every((entry) => entry.method === "GET")).toBe(true);
+      } finally {
+        value.sqlite.close();
+      }
+    },
+  );
+  test.each([
+    "foreign-account",
+    "ungranted-numeric-repository",
+    "foreign-provider-repository",
+    "other-controller",
+  ] as const)("explicit adopt refuses %s before changing old authority", async (failure) => {
+    const value = await ownedFixture();
+    try {
+      value.sqlite
+        .prepare("UPDATE codespaceConnection SET authorityGeneration=2 WHERE id=?")
+        .run(value.githubConnectionId);
+      if (failure === "foreign-account")
+        value.sqlite
+          .prepare("UPDATE codespaceConnection SET externalAccountId='999' WHERE id=?")
+          .run(value.githubConnectionId);
+      if (failure === "ungranted-numeric-repository")
+        value.sqlite
+          .prepare(
+            "UPDATE codespaceConnectionRepository SET externalRepositoryId='999' WHERE connectionId=?",
+          )
+          .run(value.githubConnectionId);
+      value.setProviderResponse(async () =>
+        Response.json({
+          name: "owned-space",
+          display_name: "Any label",
+          owner: { id: 101 },
+          billable_owner: { id: 101 },
+          repository: {
+            id: failure === "foreign-provider-repository" ? 999 : 201,
+            full_name: "person/project",
+          },
+          state: "Available",
+          created_at: "2026-10-14T00:00:00Z",
+        }),
+      );
+      await expect(
+        value.service.assignment(
+          failure === "other-controller" ? { ...value.auth, deviceId: randomUUID() } : value.auth,
+          value.id,
+          "adopt",
+        ),
+      ).rejects.toMatchObject({
+        code:
+          failure === "foreign-provider-repository"
+            ? "CODESPACE_GENERATION_CONFLICT"
+            : "CODESPACE_AUTHORIZATION_REQUIRED",
+      });
+      expect(value.identities.getOwned("owner", value.id)).toMatchObject({
+        authorizationGeneration: 1,
+        generation: 1,
+      });
+      expect(value.retire).not.toHaveBeenCalled();
     } finally {
       value.sqlite.close();
     }
   });
-
-  test("provider resources without a Moira record are not adopted by refresh", async () => {
-    const value = fixture();
+  test("reconnect cleanup reauthorizes only known-name absence after owner registration, with no guest issuance or delete replay", async () => {
+    const value = await ownedFixture(),
+      requestId = "ws1-" + randomUUID();
     try {
-      value.provider.resource = {
-        name: "external-space",
-        displayName: "external-marker",
+      value.sqlite
+        .prepare("UPDATE codespaceConnection SET authorityGeneration=2 WHERE id=?")
+        .run(value.githubConnectionId);
+      await expect(
+        value.service.deleteCodespace("owner", value.id, 1, { requestId }),
+      ).rejects.toMatchObject({ code: "WORKSPACE_OUTCOME_UNCONFIRMED", requestId });
+      expect(value.identities.getOwned("owner", value.id)).toMatchObject({
+        authorizationGeneration: 1,
+        generation: 1,
+        retirement: "owned",
+      });
+      const preview = await value.service.assignment(value.auth, value.id, "retire");
+      expect(preview.authorizationGeneration).toBe(2);
+      const registration = {
+        requestId,
+        resourceGeneration: 2,
+        authorizationGeneration: 2,
+        providerResourceName: "owned-space",
+        retirement: "owned",
+        rebindPurpose: "retire",
+      };
+      await value.service.advanceAuthority(value.auth, value.id, registration);
+      await expect(
+        value.service.providerAction(value.auth, value.id, {
+          requestId,
+          resourceGeneration: 2,
+          action: "delete",
+        }),
+      ).resolves.toBe("absent");
+      await value.service.advanceAuthority(value.auth, value.id, {
+        ...registration,
+        retirement: "retired",
+      });
+      await value.service.advanceAuthority(value.auth, value.id, {
+        ...registration,
+        retirement: "retired",
+      });
+      expect(value.identities.getOwned("owner", value.id)).toMatchObject({
+        id: value.id,
+        authorizationGeneration: 2,
+        generation: 2,
+        retirement: "retired",
+      });
+      expect(new WorkspaceAuthRepository(value.sqlite).getOwned("owner", value.id)).toBeNull();
+      expect(
+        value.requests.every(
+          (request) => request.method === "GET" && request.path === "/user/codespaces/owned-space",
+        ),
+      ).toBe(true);
+    } finally {
+      value.sqlite.close();
+    }
+  });
+  test("owner running metadata cannot present an externally stopped provider workspace as usable", async () => {
+    const value = fixture(),
+      requestId = "ws1-" + randomUUID(),
+      id = requestId.slice(4);
+    try {
+      await expect(value.service.create("owner", "201", "main", requestId)).rejects.toMatchObject({
+        requestId,
+      });
+      const resource = value.identities.getOwned("owner", id)!;
+      value.identities.markCreationSubmitted("owner", id, 1);
+      value.identities.observeCreation("owner", id, 1, {
+        name: "owned-space",
+        displayName: resource.operationMarker,
         ownerId: "101",
         billableOwnerId: "101",
-        repositoryId: "301",
-        repositoryFullName: "owner/repository",
+        repositoryId: "201",
+        repositoryFullName: "person/project",
         ref: "main",
         state: "available",
         lastUsedAt: null,
-        machine,
-        createdAt: value.clock(),
+        machine: null,
+        createdAt: 1,
+      });
+      value.setOwnerResources([
+        {
+          ...(await value.service.assignment(value.auth, id)),
+          state: "running",
+          desiredState: "running",
+          environmentIdentity: "a".repeat(64),
+          observedAt: 1,
+        },
+      ]);
+      let state = "Shutdown";
+      value.setProviderResponse(async () =>
+        Response.json({
+          name: "owned-space",
+          display_name: resource.operationMarker,
+          owner: { id: 101 },
+          billable_owner: { id: 101 },
+          repository: { id: 201, full_name: "person/project" },
+          state,
+          created_at: "2026-10-14T00:00:00Z",
+        }),
+      );
+      await expect(value.service.getCodespace("owner", id)).resolves.toMatchObject({
+        state: "ambiguous",
+        observed_state: "stopped",
+        machine: null,
+      });
+      state = "Available";
+      const credentials = new WorkspaceAuthRepository(value.sqlite);
+      credentials.issue(
+        {
+          userId: "owner",
+          resourceId: id,
+          resourceGeneration: 1,
+          authorizationGeneration: 1,
+          environmentIdentity: "a".repeat(64),
+        },
+        null,
+      );
+      const binding: WorkspaceBinding = {
+        kind: "workspace",
+        userId: "owner",
+        resourceId: id,
+        resourceGeneration: 1,
+        authorizationGeneration: 1,
+        environmentIdentity: "a".repeat(64),
+        expiresAt: null,
       };
-      expect(await value.service.refreshProviderState("user-1")).toEqual({ stale: false });
-      expect(value.service.listResources("user-1")).toEqual([]);
-      expect(value.repository.countHeld("user-1", CODESPACE_PROVIDER_GITHUB)).toBe(0);
-    } finally {
-      value.sqlite.close();
-    }
-  });
-
-  test("an externally restarted stopped Codespace is recorded running without provider mutation", async () => {
-    const value = fixture();
-    try {
-      const created = await value.service.create("user-1", "301", "refs/heads/main");
-      await value.service.stopCodespace("user-1", created.resource.id);
-      value.provider.resource = { ...value.provider.resource!, state: "available" };
-      value.provider.startCalls.mockClear();
-      expect(await value.service.refreshProviderState("user-1")).toEqual({ stale: false });
-      expect(value.service.getCodespace("user-1", created.resource.id)).toMatchObject({
+      await expect(value.service.getCodespace("owner", id)).resolves.toMatchObject({
+        state: "start_pending",
+        lifecycle_error: "CODESPACE_PROVIDER_UNAVAILABLE",
+      });
+      value.setConnectedGuest({ ...binding, environmentIdentity: "c".repeat(64) });
+      await expect(value.service.getCodespace("owner", id)).resolves.toMatchObject({
+        state: "start_pending",
+      });
+      value.setConnectedGuest(binding);
+      await expect(value.service.getCodespace("owner", id)).resolves.toMatchObject({
         state: "usable",
-        desiredState: "running",
-        observedState: "running",
+        observed_state: "running",
       });
-      expect(value.provider.startCalls).not.toHaveBeenCalled();
+      value.setConnectedGuest(null);
+      await expect(value.service.getCodespace("owner", id)).resolves.toMatchObject({
+        state: "start_pending",
+      });
+      value.setConnectedGuest(binding);
+      await expect(value.service.getCodespace("owner", id)).resolves.toMatchObject({
+        state: "usable",
+      });
+      value.sqlite
+        .prepare("UPDATE workspaceAgentCredential SET resourceGeneration=2 WHERE resourceId=?")
+        .run(id);
+      await expect(value.service.getCodespace("owner", id)).resolves.toMatchObject({
+        state: "start_pending",
+      });
+      expect(value.requests.every((request) => request.method === "GET")).toBe(true);
     } finally {
       value.sqlite.close();
     }
   });
-});
-
-describe("each user sees their own codespace limits beside their use", () => {
-  function limitsOf(value: Fixture, userId: string) {
-    return new CodespaceObservabilityService({
-      providerId: CODESPACE_PROVIDER_GITHUB,
-      config: () => ({ state: "absent" }) as never,
-      policy: () => value.policy,
-      resources: value.repository,
-      transport: null,
-      now: value.clock,
-    }).limits(userId);
-  }
-
-  test("a user holding a running and a stopped codespace sees both held against the configured ceiling", async () => {
-    // Values that are nobody's default, so a number that comes from anywhere but the policy fails.
-    const value = fixture({
-      maxActivePerUser: 7,
-      maxActiveGlobal: 9,
-      createThrottleMs: 0,
-      persistentRetentionMs: 12 * 24 * 60 * 60_000,
-    });
+  test("accepted owner create retains original identity without a cloud provider effect or operational journal", async () => {
+    const value = fixture(),
+      requestId = "ws1-" + randomUUID();
     try {
-      await value.service.create("user-1", "301", "refs/heads/main");
-      value.provider.park("silver-space-456");
-      const stopped = await value.service.create("user-1", "301", "refs/heads/other");
-      await value.service.stopCodespace("user-1", stopped.resource.id);
-      value.provider.park("silver-space-789");
-      await value.service.create("user-2", "302", "refs/heads/main");
-      const limits = limitsOf(value, "user-1");
-      expect(limits.codespaces).toEqual({
-        held: 2,
-        max_per_user: 7,
-        instance_held: 3,
-        max_instance: 9,
-        create_throttle_seconds: 0,
+      await expect(value.service.create("owner", "201", "main", requestId)).rejects.toMatchObject({
+        code: "WORKSPACE_OUTCOME_UNCONFIRMED",
+        requestId,
+        deviceId: value.deviceId,
+        resourceId: requestId.slice(4),
       });
-      expect(limits.lifecycle).toMatchObject({ retention_days: 12, start_wait_seconds: 60 });
-      expect(limits.machine_ceiling).toEqual({
-        cpu_cores: value.policy.maxCpuCores,
-        memory_bytes: value.policy.maxMemoryBytes,
-        storage_bytes: value.policy.maxStorageBytes,
+      expect(value.requests).toEqual([]);
+      expect(value.identities.getOwned("owner", requestId.slice(4))).toMatchObject({
+        repositoryId: "201",
+        requestedRef: "main",
+        retirement: "uncreated",
+        generation: 1,
       });
-      // Nothing the provider did not say is presented as a number.
-      expect(limits.provider).toEqual({ billing: "unavailable" });
-      // Another user's view counts only their own codespace.
-      expect(limitsOf(value, "user-2").codespaces).toMatchObject({ held: 1, instance_held: 3 });
+      expect(
+        value.sqlite.prepare("SELECT COUNT(*) count FROM localResourceIdentity").get(),
+      ).toEqual({
+        count: 0,
+      });
+      expect(
+        value.sqlite
+          .prepare(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='codespaceProviderMutation'",
+          )
+          .get(),
+      ).toBeUndefined();
+      const columns = value.sqlite
+        .prepare("PRAGMA table_info(githubResourceIdentity)")
+        .all()
+        .map((row) => (row as { name: string }).name);
+      for (const retired of ["desiredState", "claimId", "createDeadlineAt", "lastOutcome"])
+        expect(columns).not.toContain(retired);
     } finally {
       value.sqlite.close();
     }
   });
-
-  test.each([
-    ["never changed", null, null, { auto_stop_enabled: true, timeout_minutes: 30 }],
-    ["turned off", "false", null, { auto_stop_enabled: false, timeout_minutes: 30 }],
-    ["set to 45 minutes", "true", "45", { auto_stop_enabled: true, timeout_minutes: 45 }],
-  ] as const)(
-    "the idle block reports auto-pause %s, with GitHub's own 240-minute maximum",
-    (_name, autoStop, timeout, expected) => {
-      const value = fixture();
-      try {
-        if (autoStop !== null)
-          setPreference(value, "user-1", "codespaces.auto_stop_enabled", autoStop);
-        if (timeout !== null)
-          setPreference(value, "user-1", "codespaces.idle_timeout_minutes", timeout);
-        expect(limitsOf(value, "user-1").lifecycle.idle).toEqual({
-          ...expected,
-          provider_max_minutes: 240,
-        });
-      } finally {
-        value.sqlite.close();
-      }
-    },
-  );
-
-  test("the per-user refusal says stopped codespaces are held and deleting one frees a slot", async () => {
-    const value = fixture();
+  test("explicit delete proves known provider absence without a DELETE and retires ownership only through owner registration", async () => {
+    const value = fixture(),
+      creationId = "ws1-" + randomUUID(),
+      id = creationId.slice(4),
+      requestId = "ws1-" + randomUUID();
     try {
-      const created = await value.service.create("user-1", "301", "refs/heads/main");
-      await value.service.stopCodespace("user-1", created.resource.id);
-      value.provider.park("silver-space-456");
-      await expect(value.service.create("user-1", "301", "refs/heads/main")).rejects.toMatchObject({
-        code: "CODESPACE_POLICY_LIMIT",
-        message: "Codespace per-user held limit reached",
-        detail: expect.stringMatching(
-          /hold 1 codespaces.*Stopped codespaces count too.*delete one/,
+      await expect(value.service.create("owner", "201", "main", creationId)).rejects.toMatchObject({
+        requestId: creationId,
+      });
+      const resource = value.identities.getOwned("owner", id)!;
+      value.identities.markCreationSubmitted("owner", id, 1);
+      value.identities.observeCreation("owner", id, 1, {
+        name: "owned-space",
+        displayName: resource.operationMarker,
+        ownerId: "101",
+        billableOwnerId: "101",
+        repositoryId: "201",
+        repositoryFullName: "person/project",
+        ref: "main",
+        state: "available",
+        lastUsedAt: null,
+        machine: null,
+        createdAt: 1,
+      });
+      await value.service.getCodespace("owner", id);
+      expect(value.identities.getOwned("owner", id)?.retirement).toBe("owned");
+      const registration = {
+        requestId,
+        resourceGeneration: 2,
+        authorizationGeneration: 1,
+        providerResourceName: "owned-space",
+        retirement: "owned",
+      };
+      await value.service.advanceAuthority(value.auth, id, registration);
+      await expect(
+        value.service.providerAction(value.auth, id, {
+          requestId,
+          resourceGeneration: 2,
+          action: "delete",
+        }),
+      ).resolves.toBe("absent");
+      expect(value.identities.getOwned("owner", id)?.retirement).toBe("owned");
+      expect(() =>
+        new CodespaceConnectionRepository(value.sqlite).assertAccountResourcesRetired("owner"),
+      ).toThrow();
+      await value.service.advanceAuthority(value.auth, id, {
+        ...registration,
+        retirement: "retired",
+      });
+      expect(value.identities.getOwned("owner", id)?.retirement).toBe("retired");
+      expect(() =>
+        new CodespaceConnectionRepository(value.sqlite).assertAccountResourcesRetired("owner"),
+      ).not.toThrow();
+      expect(
+        value.requests.every(
+          (request) => request.method === "GET" && request.path === "/user/codespaces/owned-space",
         ),
-      });
+      ).toBe(true);
     } finally {
       value.sqlite.close();
     }
   });
-
-  test("the instance refusal says stopped codespaces are held too", async () => {
-    const value = fixture({ maxActivePerUser: 2, maxActiveGlobal: 1 });
+  test("lost provider creation reply leaves a billable unknown witness and cannot repeat the POST", async () => {
+    const value = fixture(),
+      requestId = "ws1-" + randomUUID(),
+      id = requestId.slice(4);
     try {
-      const created = await value.service.create("user-1", "301", "refs/heads/main");
-      await value.service.stopCodespace("user-1", created.resource.id);
-      value.provider.park("silver-space-456");
-      await expect(value.service.create("user-2", "302", "refs/heads/main")).rejects.toMatchObject({
-        code: "CODESPACE_POLICY_LIMIT",
-        message: "Codespace instance held limit reached",
-        detail: expect.stringMatching(/ceiling of 1 held codespaces.*stopped ones count/),
+      await expect(value.service.create("owner", "201", "main", requestId)).rejects.toMatchObject({
+        requestId,
       });
+      await value.service.advanceAuthority(value.auth, id, {
+        requestId,
+        resourceGeneration: 2,
+        authorizationGeneration: 1,
+        providerResourceName: null,
+        retirement: "uncreated",
+      });
+      await expect(
+        value.service.providerAction(value.auth, id, {
+          requestId,
+          resourceGeneration: 2,
+          action: "create",
+        }),
+      ).rejects.toThrow();
+      expect(value.identities.getOwned("owner", id)?.retirement).toBe("unknown");
+      await expect(
+        value.service.providerAction(value.auth, id, {
+          requestId,
+          resourceGeneration: 2,
+          action: "create",
+        }),
+      ).rejects.toMatchObject({ code: "WORKSPACE_OUTCOME_UNCONFIRMED" });
+      await expect(
+        value.service.advanceAuthority(value.auth, id, {
+          requestId,
+          resourceGeneration: 2,
+          authorizationGeneration: 1,
+          providerResourceName: null,
+          retirement: "uncreated",
+        }),
+      ).rejects.toMatchObject({ code: "CODESPACE_GENERATION_CONFLICT" });
+      expect(value.requests.filter((request) => request.method === "POST")).toHaveLength(1);
+      expect(() =>
+        new CodespaceConnectionRepository(value.sqlite).assertAccountResourcesRetired("owner"),
+      ).toThrow();
+    } finally {
+      value.sqlite.close();
+    }
+  });
+  test("documented provider refusal retires the witness while unsubmitted identity has no billable ownership", async () => {
+    const value = fixture(),
+      requestId = "ws1-" + randomUUID(),
+      id = requestId.slice(4);
+    try {
+      value.setCreateResponse(async () =>
+        Response.json({ message: "Ref is invalid" }, { status: 422 }),
+      );
+      await expect(value.service.create("owner", "201", "main", requestId)).rejects.toMatchObject({
+        requestId,
+      });
+      const connections = new CodespaceConnectionRepository(value.sqlite);
+      expect(() => connections.assertAccountResourcesRetired("owner")).not.toThrow();
+      await value.service.advanceAuthority(value.auth, id, {
+        requestId,
+        resourceGeneration: 2,
+        authorizationGeneration: 1,
+        providerResourceName: null,
+        retirement: "uncreated",
+      });
+      await expect(
+        value.service.providerAction(value.auth, id, {
+          requestId,
+          resourceGeneration: 2,
+          action: "create",
+        }),
+      ).resolves.toMatchObject({ outcome: "rejected" });
+      expect(value.identities.getOwned("owner", id)?.retirement).toBe("retired");
+      expect(() => connections.assertAccountResourcesRetired("owner")).not.toThrow();
+    } finally {
+      value.sqlite.close();
+    }
+  });
+  test("ordinary OAuth refresh preserves workspace authorization epoch, explicit grant replacement fences it", async () => {
+    const value = fixture(),
+      requestId = "ws1-" + randomUUID(),
+      id = requestId.slice(4);
+    try {
+      await expect(value.service.create("owner", "201", "main", requestId)).rejects.toMatchObject({
+        requestId,
+      });
+      const connections = new CodespaceConnectionRepository(value.sqlite),
+        envelope = {
+          envelopeVersion: 2 as const,
+          keyVersion: "v1",
+          iv: "iv",
+          authTag: "tag",
+          ciphertext: "encrypted",
+          generation: 1,
+        };
+      value.sqlite
+        .prepare(
+          "INSERT INTO codespaceCredentialVault(connectionId,envelopeVersion,keyVersion,iv,authTag,ciphertext,generation,updatedAt) VALUES(?,2,'v1','iv','tag','encrypted',1,1)",
+        )
+        .run(value.githubConnectionId);
+      const leaseId = randomUUID();
+      expect(
+        connections.claimRefresh({
+          userId: "owner",
+          connectionId: value.githubConnectionId,
+          expectedGeneration: 1,
+          leaseId,
+          leaseExpiresAt: 100,
+          now: 2,
+        }),
+      ).toBe(true);
+      expect(
+        connections.completeRefresh({
+          userId: "owner",
+          connectionId: value.githubConnectionId,
+          expectedGeneration: 1,
+          leaseId,
+          envelope: { ...envelope, generation: 2 },
+          now: 3,
+        }),
+      ).toBe(true);
+      expect(value.identities.hasCurrentAuthorization("owner", id)).toBe(true);
+      expect(connections.getAuthorityGeneration("owner", value.githubConnectionId)).toBe(1);
+      expect(
+        connections.replaceConnectedAuthorization({
+          connectionId: value.githubConnectionId,
+          userId: "owner",
+          provider: "github-codespaces",
+          externalAccountId: "101",
+          externalLogin: "person",
+          status: "connected",
+          envelope: { ...envelope, generation: 3 },
+          installations: [],
+          repositories: [
+            {
+              externalInstallationId: "901",
+              externalRepositoryId: "201",
+              fullName: "person/project",
+              private: true,
+            },
+          ],
+          supersededRevocation: { id: randomUUID(), envelope: { ...envelope, generation: 2 } },
+          now: 4,
+          expectedGeneration: 2,
+          expectedExternalAccountId: "101",
+        }),
+      ).toBe(true);
+      expect(connections.getAuthorityGeneration("owner", value.githubConnectionId)).toBe(2);
+      expect(value.identities.hasCurrentAuthorization("owner", id)).toBe(false);
     } finally {
       value.sqlite.close();
     }

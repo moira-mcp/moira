@@ -20,13 +20,13 @@ function services(): CodespaceToolServices {
   };
   return {
     connection: { getStatus: unexpected, refreshGrants: unexpected },
-    observability: { readiness: unexpected, limitsWithBilling: unexpected },
+    observability: { readiness: unexpected },
     guidance: unexpected,
     select: jest.fn(unexpected),
     resource: null,
     workspace: { json: async () => unexpected(), request: async () => unexpected() },
     localRepositories: {
-      listDevices: jest.fn(() => ({ devices: [{ device_id: DEVICE_ID, delegation: null }] })),
+      listDevices: jest.fn(() => ({ devices: [{ device_id: DEVICE_ID, owner_available: true }] })),
       addExistingRepository: jest.fn(async () => ({
         status: "applied",
         device_id: DEVICE_ID,
@@ -131,16 +131,11 @@ describe("local repository MCP admission", () => {
     }
   });
 
-  it("waits for private repository acknowledgement while preserving the original creation identity", async () => {
+  it("returns the owner's private repository receipt with the original creation identity", async () => {
     const dependencies = services();
     jest.useFakeTimers();
     const create = jest
       .fn<NonNullable<CodespaceToolServices["localRepositoryCreation"]>["createRepository"]>()
-      .mockResolvedValueOnce({
-        status: "pending",
-        request_id: REQUEST_ID,
-        local_repository_id: null,
-      })
       .mockResolvedValue({
         status: "applied",
         request_id: REQUEST_ID,
@@ -166,7 +161,7 @@ describe("local repository MCP admission", () => {
       repository_id: "approved-private-repository",
       name: "owner/private-app",
     });
-    expect(create).toHaveBeenCalledTimes(2);
+    expect(create).toHaveBeenCalledTimes(1);
     expect(create.mock.calls[0]).toEqual([
       "owner",
       {
@@ -176,7 +171,6 @@ describe("local repository MCP admission", () => {
         installationId: "41",
       },
     ]);
-    expect(create.mock.calls[1]).toEqual(create.mock.calls[0]);
     expect(dependencies.select).not.toHaveBeenCalled();
   });
 
@@ -189,6 +183,7 @@ describe("local repository MCP admission", () => {
           delegation: null,
           label: "My computer",
           status: "active",
+          owner_available: true,
           enabled: true,
           lease_until: 123,
           revision: 4,
@@ -204,22 +199,25 @@ describe("local repository MCP admission", () => {
       dependencies,
     );
     expect(result.structuredContent).toEqual({
-      devices: [{ device_id: DEVICE_ID, label: "My computer", status: "active", enabled: true }],
+      devices: [
+        {
+          device_id: DEVICE_ID,
+          label: "My computer",
+          status: "active",
+          owner_available: true,
+          enabled: true,
+        },
+      ],
       installations: [{ installation_id: "41", owner: "personal" }],
     });
     expect(dependencies.select).not.toHaveBeenCalled();
   });
 
-  it("waits for pending admission using the same request and returns only the approved repository", async () => {
+  it("returns the owner-approved repository without repeating admission", async () => {
     const dependencies = services();
     jest.useFakeTimers();
     const add = jest
       .fn<NonNullable<CodespaceToolServices["localRepositories"]>["addExistingRepository"]>()
-      .mockResolvedValueOnce({
-        status: "pending",
-        request_id: REQUEST_ID,
-        local_repository_id: null,
-      })
       .mockResolvedValue({
         status: "applied",
         request_id: REQUEST_ID,
@@ -241,10 +239,35 @@ describe("local repository MCP admission", () => {
       repositoryId: "42",
       requestId: REQUEST_ID,
     });
-    expect(add).toHaveBeenCalledTimes(2);
-    expect(add.mock.calls[1]).toEqual(add.mock.calls[0]);
+    expect(add).toHaveBeenCalledTimes(1);
     expect(result.structuredContent).toEqual({ repository_id: "approved-local-repository" });
     expect(dependencies.select).not.toHaveBeenCalled();
+  });
+
+  it("an incomplete owner admission returns its original identity without polling or duplicating the effect", async () => {
+    const dependencies = services();
+    const add = jest.fn(async () => ({
+      status: "pending",
+      request_id: REQUEST_ID,
+      local_repository_id: null,
+    }));
+    dependencies.localRepositories!.addExistingRepository = add;
+    const result = await executeCodespaceTool(
+      parseCodespaceToolParams({
+        action: "repository_add",
+        device_id: DEVICE_ID,
+        repository_id: "42",
+        request_id: REQUEST_ID,
+      }),
+      "owner",
+      dependencies,
+    );
+    expect(result.isError).toBe(true);
+    expect(result.structuredContent).toMatchObject({
+      request_id: REQUEST_ID,
+      error: { code: "LOCAL_ADMISSION_UNCONFIRMED" },
+    });
+    expect(add).toHaveBeenCalledTimes(1);
   });
 
   it("returns an actionable denial without bypassing applied owner consent", async () => {
@@ -331,5 +354,24 @@ describe("local repository MCP admission", () => {
         operation_id: REQUEST_ID,
       }),
     ).toThrow();
+  });
+
+  it("collects either provider's original controller receipt before a codespace ID exists without replaying a mutation", async () => {
+    const dependencies = services();
+    const requestId = `ws1-${REQUEST_ID}`;
+    dependencies.localController = {
+      getOperation: async () => ({ requestId, state: "unconfirmed" }),
+    };
+    const result = await executeCodespaceTool(
+      parseCodespaceToolParams({
+        action: "operation",
+        device_id: DEVICE_ID,
+        request_id: requestId,
+      }),
+      "owner",
+      dependencies,
+    );
+    expect(result.structuredContent).toEqual({ requestId, state: "unconfirmed" });
+    expect(dependencies.select).not.toHaveBeenCalled();
   });
 });

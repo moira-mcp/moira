@@ -12,6 +12,7 @@ describe("nginx configuration", () => {
     expect(source).toContain("~^/api/public/executions/materialize/ 0;");
     expect(source).toContain("/api/integrations/github/callback 0;");
     expect(source).toContain("~^/api/codespaces/transfers/ 0;");
+    expect(source).toContain("~^/api/codespaces/files/ 0;");
     expect(source).toContain(
       "access_log /var/log/nginx/access.log combined if=$moira_access_loggable;",
     );
@@ -22,9 +23,7 @@ describe("nginx configuration", () => {
     "%s streams private codespace downloads from MCP without path logging",
     (config) => {
       const source = readFileSync(resolve(process.cwd(), "config", config), "utf8");
-      const location = source.match(
-        /location \^~ \/api\/codespaces\/transfers\/\s*\{([^}]+)\}/,
-      )?.[1];
+      const location = source.match(/location \^~ \/api\/codespaces\/files\/\s*\{([^}]+)\}/)?.[1];
       expect(location).toBeDefined();
       expect(location).toContain("proxy_pass http://localhost:3000;");
       expect(location).toContain("proxy_buffering off;");
@@ -35,18 +34,56 @@ describe("nginx configuration", () => {
   );
 
   test.each(configs)(
-    "%s routes bounded communication uploads to MCP without rewriting MIME",
+    "%s streams public progress PNGs without disk buffering or capability-path logging",
+    (config) => {
+      const source = readFileSync(resolve(process.cwd(), "config", config), "utf8");
+      const location = source.match(
+        /location \^~ \/api\/public\/execution-progress-image\/\s*\{([^}]+)\}/,
+      )?.[1];
+      expect(location).toBeDefined();
+      expect(location).toContain("proxy_pass http://localhost:3001;");
+      expect(location).toContain("proxy_buffering off;");
+      expect(location).toContain("proxy_max_temp_file_size 0;");
+      expect(location).toContain("proxy_cache off;");
+      expect(location).toContain("access_log off;");
+      expect(location).toContain("error_log /dev/null;");
+    },
+  );
+
+  test.each(configs)(
+    "%s streams owner communication through MCP without buffering or a cloud file quota",
     (config) => {
       const source = readFileSync(resolve(process.cwd(), "config", config), "utf8");
 
-      expect(source).toContain("client_max_body_size 20m;");
-      const location = source.slice(source.indexOf("location = /api/communication/attachments"));
-      expect(location).toContain("proxy_pass http://localhost:3000/api/communication/attachments;");
+      const location = source.match(/location \^~ \/api\/communication\/\s*\{([^}]+)\}/)?.[1];
+      expect(location).toBeDefined();
+      expect(location).toContain("proxy_pass http://localhost:3000;");
       expect(location).toContain("proxy_set_header Authorization $http_authorization;");
-      expect(location).toContain(
-        "proxy_set_header X-Moira-Communication-Grant $http_x_moira_communication_grant;",
-      );
-      expect(location.split("}", 1)[0]).not.toContain('Content-Type "application/json"');
+      expect(location).toContain("client_max_body_size 0;");
+      expect(location).toContain("proxy_request_buffering off;");
+      expect(location).toContain("proxy_buffering off;");
+      expect(location).toContain("proxy_max_temp_file_size 0;");
+      expect(location).toContain("access_log off;");
+      expect(location).toContain("error_log /dev/null;");
+      expect(location).not.toContain('Content-Type "application/json"');
+    },
+  );
+
+  test.each(configs)(
+    "%s streams materialize owner archives without disk buffering or capability-path logging",
+    (config) => {
+      const source = readFileSync(resolve(process.cwd(), "config", config), "utf8");
+      const location = source.match(
+        /location \^~ \/api\/public\/executions\/materialize\/\s*\{([^}]+)\}/,
+      )?.[1];
+      expect(location).toBeDefined();
+      expect(location).toContain("proxy_pass http://localhost:3001;");
+      expect(location).toContain("proxy_http_version 1.1;");
+      expect(location).toContain("proxy_buffering off;");
+      expect(location).toContain("proxy_max_temp_file_size 0;");
+      expect(location).toContain("proxy_cache off;");
+      expect(location).toContain("access_log off;");
+      expect(location).toContain("error_log /dev/null;");
     },
   );
 

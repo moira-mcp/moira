@@ -13,8 +13,6 @@ export interface BrokerGrant {
   generation?: number;
   repository: LocalRepository;
   policy: LocalPolicy;
-  /** Read only by the Git request broker; never used for CONNECT. */
-  gitCredential: string | null;
   /** Socket lifetime and fresh bound authority govern waiting, never the VM lifetime. */
   admission?: NetworkAdmission;
 }
@@ -25,6 +23,11 @@ export interface BrokerOptions {
   resolve?: ResolveHost;
   dial?: (target: ResolvedTarget, port: number) => Socket;
   git: (request: IncomingMessage, response: ServerResponse, grant: BrokerGrant) => Promise<void>;
+  pullRequest?: (
+    request: IncomingMessage,
+    response: ServerResponse,
+    grant: BrokerGrant,
+  ) => Promise<void>;
   onFault: (error: unknown) => void;
 }
 
@@ -37,7 +40,7 @@ function deny(socket: Duplex, status = "403 Forbidden"): void {
 export async function startBroker(options: BrokerOptions, port = 0) {
   const sockets = new Set<Socket>();
   const active = new Map<Duplex, string>();
-  const responses = new Map<ServerResponse, string>();
+  const responses = new Map<ServerResponse, { credential: string; grant: BrokerGrant }>();
   const requests = new Set<Promise<unknown>>();
   let shuttingDown = false;
   const track = (work: Promise<unknown>): void => {
@@ -64,6 +67,7 @@ export async function startBroker(options: BrokerOptions, port = 0) {
       if (
         !fresh ||
         fresh.spaceId !== grant.spaceId ||
+        fresh.generation !== grant.generation ||
         fresh.repository.id !== grant.repository.id ||
         fresh.repository.fullName !== grant.repository.fullName
       )
@@ -114,7 +118,10 @@ export async function startBroker(options: BrokerOptions, port = 0) {
           };
           response.once("close", close);
           request.once("aborted", close);
-          responses.set(response, credential);
+          responses.set(response, {
+            credential,
+            grant: { ...grant, repository: { ...grant.repository } },
+          });
           grant.admission = admission(credential, grant, controller.signal);
           // Fixed Git operations and approved public HTTP downloads have separate handlers.
           if (proxy)
@@ -123,6 +130,8 @@ export async function startBroker(options: BrokerOptions, port = 0) {
               response,
               grant,
             );
+          else if (request.url?.startsWith("/github/") && options.pullRequest)
+            await options.pullRequest(request, response, grant);
           else await options.git(request, response, grant);
         })().catch((error) => {
           if (!response.headersSent)
@@ -251,10 +260,16 @@ export async function startBroker(options: BrokerOptions, port = 0) {
         () => socket.destroy(),
       );
     }
-    for (const [response, credential] of responses) {
+    for (const [response, { credential, grant }] of responses) {
       void options.authorize(credential).then(
-        (grant) => {
-          if (!grant) response.destroy();
+        (fresh) => {
+          if (
+            !fresh ||
+            fresh.spaceId !== grant.spaceId ||
+            fresh.generation !== grant.generation ||
+            JSON.stringify(fresh.repository) !== JSON.stringify(grant.repository)
+          )
+            response.destroy();
         },
         () => response.destroy(),
       );

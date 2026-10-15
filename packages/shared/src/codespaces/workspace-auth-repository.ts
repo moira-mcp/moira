@@ -19,7 +19,11 @@ export interface WorkspaceAgentCredentialRecord extends WorkspaceAgentBinding {
 export class WorkspaceAuthRepository {
   constructor(private readonly db: Database.Database) {}
 
-  issue(binding: WorkspaceAgentBinding, expiresAt: number | null): string {
+  issue(
+    binding: WorkspaceAgentBinding,
+    expiresAt: number | null,
+    trustedCredential?: string,
+  ): string {
     if (
       !binding.environmentIdentity ||
       binding.environmentIdentity.length > 256 ||
@@ -30,7 +34,9 @@ export class WorkspaceAuthRepository {
       (expiresAt !== null && (!Number.isSafeInteger(expiresAt) || expiresAt <= Date.now()))
     )
       throw new Error("Invalid workspace credential binding");
-    const credential = randomBytes(32).toString("base64url");
+    const credential = trustedCredential ?? randomBytes(32).toString("base64url");
+    if (!/^[A-Za-z0-9_-]{43}$/.test(credential))
+      throw new Error("Invalid trusted workspace credential");
     this.db
       .prepare(
         `INSERT INTO workspaceAgentCredential

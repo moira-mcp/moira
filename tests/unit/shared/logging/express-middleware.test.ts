@@ -26,6 +26,12 @@ describe("sanitizeRequestUrl", () => {
     ).toBe("/api/public/execution-progress-image/[REDACTED]?download=true");
   });
 
+  test("redacts owner publication capability while retaining resource routing identity", () => {
+    expect(sanitizeRequestUrl("/api/codespaces/files/resource-id/private-capability")).toBe(
+      "/api/codespaces/files/resource-id/[REDACTED]",
+    );
+  });
+
   test("redacts GitHub callback code and state as one sensitive query", () => {
     const safe = sanitizeRequestUrl(
       "/api/integrations/github/callback?code=github-secret-code&state=browser-secret-state",

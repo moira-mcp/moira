@@ -1,5 +1,11 @@
 import { spawn } from "node:child_process";
 import { LocalRefusal } from "./policy.js";
+import {
+  prepareProcessCustody,
+  processGroupHelperAsset,
+  type ProcessCustody,
+} from "./process-custody.js";
+export { processGroupHelperAsset } from "./process-custody.js";
 
 export interface ProcessRequest {
   binary: string;
@@ -16,6 +22,11 @@ export interface ProcessRequest {
   /** null is reserved for complete fixed SDK inventory metadata, never command execution. */
   maxBytes: number | null;
   signal?: AbortSignal;
+  /** Fixed provisioning retains custody until every process in its private POSIX group exits. */
+  settleGroup?: boolean;
+  /** Trusted in-process factory override for the supplied native supervisor. */
+  groupHelper?: string;
+  custody?: ProcessCustody;
 }
 export interface ProcessResult {
   stdout: Buffer;
@@ -25,111 +36,168 @@ export interface ProcessResult {
 export type RunProcess = (request: ProcessRequest) => Promise<ProcessResult>;
 
 /** The caller chooses a fixed local executable; guest argv is always behind sbx exec. */
-export const runProcess: RunProcess = (request) =>
-  new Promise((resolve, reject) => {
-    if (request.signal?.aborted) {
-      reject(new LocalRefusal("LOCAL_CANCELLED", "Local operation was cancelled."));
-      return;
-    }
-    const child = spawn(request.binary, [...request.argv], {
-      cwd: request.cwd,
-      env: { ...request.env },
-      shell: false,
-      detached: process.platform !== "win32",
-      stdio: ["pipe", "pipe", "pipe"],
-      windowsHide: true,
-    });
-    const stdout: Buffer[] = [];
-    const stderr: Buffer[] = [];
-    let bytes = 0;
-    let refusal: LocalRefusal | null = null;
-    const stop = (code: string, message: string) => {
-      refusal ??= new LocalRefusal(code, message);
-      if (!child.pid) return;
-      try {
-        if (process.platform !== "win32") process.kill(-child.pid, "SIGKILL");
-        else child.kill("SIGKILL");
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== "ESRCH") child.kill("SIGKILL");
+export const runProcess: RunProcess = async (request) => {
+  const custody =
+    request.settleGroup && request.custody
+      ? await prepareProcessCustody(request.custody)
+      : undefined;
+  try {
+    return await new Promise((resolve, reject) => {
+      if (request.signal?.aborted) {
+        reject(new LocalRefusal("LOCAL_CANCELLED", "Local operation was cancelled."));
+        return;
       }
-    };
-    const timer =
-      request.timeoutMs === null
-        ? undefined
-        : setTimeout(
-            () => stop("LOCAL_COMMAND_TIMEOUT", "Local runtime did not answer in time."),
-            request.timeoutMs,
-          );
-    const cancel = () => stop("LOCAL_CANCELLED", "Local operation was cancelled.");
-    request.signal?.addEventListener("abort", cancel, { once: true });
-    const collect = (chunks: Buffer[]) => (chunk: Buffer) => {
-      bytes += chunk.length;
-      if (!request.retainOutput && request.maxBytes !== null && bytes > request.maxBytes) {
-        stop("LOCAL_OUTPUT_LIMIT", "Local runtime output exceeded its bound.");
-      } else {
-        chunks.push(Buffer.from(chunk));
-        if (request.retainOutput && request.maxBytes !== null) {
-          let retained = chunks.reduce((total, bytes) => total + bytes.length, 0);
-          while (retained > request.maxBytes) {
-            const first = chunks[0];
-            const drop = Math.min(first.length, retained - request.maxBytes);
-            if (drop === first.length) chunks.shift();
-            else chunks[0] = first.subarray(drop);
-            retained -= drop;
-          }
-        }
-        if (chunks === stdout && request.onStdout) {
-          try {
-            request.onStdout(Buffer.from(chunk));
-          } catch {
-            stop("LOCAL_OUTPUT_INVALID", "The local companion returned invalid output.");
-          }
-        }
-      }
-    };
-    child.stdout.on("data", collect(stdout));
-    child.stderr.on("data", collect(stderr));
-    child.stdin.on("error", (error: NodeJS.ErrnoException) => {
-      if (error.code !== "EPIPE") stop("LOCAL_INPUT_FAILED", "Could not deliver runtime input.");
-    });
-    child.once("error", () => {
-      clearTimeout(timer);
-      request.signal?.removeEventListener("abort", cancel);
-      reject(
-        new LocalRefusal(
-          "LOCAL_RUNTIME_UNAVAILABLE",
-          "The configured local executable could not start.",
-        ),
+      const helper = processGroupHelperAsset();
+      const child = spawn(
+        request.settleGroup ? (request.groupHelper ?? helper) : request.binary,
+        request.settleGroup
+          ? [
+              ...(custody ? ["--custody", custody.witness.nonce] : []),
+              request.binary,
+              ...request.argv,
+            ]
+          : [...request.argv],
+        {
+          cwd: request.cwd,
+          env: { ...request.env },
+          shell: false,
+          detached: process.platform !== "win32",
+          stdio: request.settleGroup
+            ? [
+                "pipe",
+                "pipe",
+                "pipe",
+                "pipe",
+                ...(custody ? [custody.handle.fd, custody.parent.fd] : []),
+              ]
+            : ["pipe", "pipe", "pipe"],
+          windowsHide: true,
+        },
       );
-    });
-    child.once("close", (code) => {
-      clearTimeout(timer);
-      request.signal?.removeEventListener("abort", cancel);
-      if (refusal) reject(refusal);
-      else
-        resolve({
-          stdout: Buffer.concat(stdout),
-          stderr: Buffer.concat(stderr),
-          exitCode: code ?? 1,
-        });
-    });
-    if (request.input) {
-      const input = request.input;
-      void (async () => {
+      const inputPipe = child.stdin;
+      const outputPipe = child.stdout;
+      const errorPipe = child.stderr;
+      if (!inputPipe || !outputPipe || !errorPipe) {
+        reject(
+          new LocalRefusal(
+            "LOCAL_CUSTODY_UNCONFIRMED",
+            "Provisioning process settlement is unconfirmed.",
+          ),
+        );
+        return;
+      }
+      const stdout: Buffer[] = [];
+      const stderr: Buffer[] = [];
+      let bytes = 0;
+      let refusal: LocalRefusal | null = null;
+      const stop = (code: string, message: string) => {
+        refusal ??= new LocalRefusal(code, message);
+        if (!child.pid) return;
         try {
-          if (request.stdin) throw new Error("Conflicting input modes");
-          for await (const chunk of input) {
-            if (child.stdin.destroyed) break;
-            if (!child.stdin.write(chunk))
-              await new Promise<void>((done) => {
-                child.stdin.once("drain", done);
-                child.stdin.once("close", done);
-              });
-          }
-          child.stdin.end();
-        } catch {
-          stop("LOCAL_INPUT_FAILED", "Could not deliver companion input.");
+          if (request.settleGroup) child.kill("SIGTERM");
+          else if (process.platform !== "win32") process.kill(-child.pid, "SIGKILL");
+          else child.kill("SIGKILL");
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== "ESRCH") child.kill("SIGKILL");
         }
-      })();
-    } else child.stdin.end(request.stdin);
-  });
+      };
+      const timer =
+        request.timeoutMs === null
+          ? undefined
+          : setTimeout(
+              () => stop("LOCAL_COMMAND_TIMEOUT", "Local runtime did not answer in time."),
+              request.timeoutMs,
+            );
+      const cancel = () => stop("LOCAL_CANCELLED", "Local operation was cancelled.");
+      request.signal?.addEventListener("abort", cancel, { once: true });
+      const collect = (chunks: Buffer[]) => (chunk: Buffer) => {
+        bytes += chunk.length;
+        if (!request.retainOutput && request.maxBytes !== null && bytes > request.maxBytes) {
+          stop("LOCAL_OUTPUT_LIMIT", "Local runtime output exceeded its bound.");
+        } else {
+          chunks.push(Buffer.from(chunk));
+          if (request.retainOutput && request.maxBytes !== null) {
+            let retained = chunks.reduce((total, bytes) => total + bytes.length, 0);
+            while (retained > request.maxBytes) {
+              const first = chunks[0];
+              const drop = Math.min(first.length, retained - request.maxBytes);
+              if (drop === first.length) chunks.shift();
+              else chunks[0] = first.subarray(drop);
+              retained -= drop;
+            }
+          }
+          if (chunks === stdout && request.onStdout) {
+            try {
+              request.onStdout(Buffer.from(chunk));
+            } catch {
+              stop("LOCAL_OUTPUT_INVALID", "The local companion returned invalid output.");
+            }
+          }
+        }
+      };
+      outputPipe.on("data", collect(stdout));
+      errorPipe.on("data", collect(stderr));
+      inputPipe.on("error", (error: NodeJS.ErrnoException) => {
+        if (error.code !== "EPIPE") stop("LOCAL_INPUT_FAILED", "Could not deliver runtime input.");
+      });
+      child.once("error", () => {
+        clearTimeout(timer);
+        request.signal?.removeEventListener("abort", cancel);
+        reject(
+          new LocalRefusal(
+            "LOCAL_RUNTIME_UNAVAILABLE",
+            "The configured local executable could not start.",
+          ),
+        );
+      });
+      child.once("close", (code, signal) => {
+        clearTimeout(timer);
+        request.signal?.removeEventListener("abort", cancel);
+        void (async () => {
+          if (request.settleGroup && (signal !== null || code === 254))
+            throw new LocalRefusal(
+              "LOCAL_CUSTODY_UNCONFIRMED",
+              "Provisioning process settlement is unconfirmed.",
+            );
+          if (refusal) throw refusal;
+          return {
+            stdout: Buffer.concat(stdout),
+            stderr: Buffer.concat(stderr),
+            exitCode: code ?? 1,
+          };
+        })().then(resolve, (error) =>
+          reject(
+            error instanceof LocalRefusal
+              ? error
+              : new LocalRefusal(
+                  "LOCAL_CUSTODY_UNCONFIRMED",
+                  "Provisioning process settlement is unconfirmed.",
+                ),
+          ),
+        );
+      });
+      if (request.input) {
+        const input = request.input;
+        void (async () => {
+          try {
+            if (request.stdin) throw new Error("Conflicting input modes");
+            for await (const chunk of input) {
+              if (inputPipe.destroyed) break;
+              if (!inputPipe.write(chunk))
+                await new Promise<void>((done) => {
+                  inputPipe.once("drain", done);
+                  inputPipe.once("close", done);
+                });
+            }
+            inputPipe.end();
+          } catch {
+            stop("LOCAL_INPUT_FAILED", "Could not deliver companion input.");
+          }
+        })();
+      } else inputPipe.end(request.stdin);
+    });
+  } finally {
+    await custody?.handle.close();
+    await custody?.parent.close();
+  }
+};

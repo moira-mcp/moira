@@ -4,11 +4,19 @@ import { join } from "node:path";
 import { parseArgs } from "node:util";
 import { pathToFileURL } from "node:url";
 import { spawn } from "node:child_process";
+import { randomBytes, randomUUID } from "node:crypto";
 import { z } from "zod";
 import { openLocalState, initializeLocal, approveRepository, setEnabled } from "./config.js";
 import { LocalRecords } from "./space-record.js";
 import { LocalManager } from "./manager.js";
 import { LocalRelay } from "./relay.js";
+import { controllerRequest } from "./controller.js";
+import { ControllerState } from "./controller-state.js";
+import {
+  controllerIdentitySchema,
+  controllerRequestIdSchema,
+} from "../../shared/src/codespaces/local-controller-protocol.js";
+import { createWorkspaceRequestId } from "../../shared/src/codespaces/workspace-request-id.js";
 import { LocalWebControl } from "./web-control.js";
 import { LocalDaemon } from "./daemon.js";
 import {
@@ -25,7 +33,7 @@ import {
   withLocalRuntimeOwner,
 } from "./guard.js";
 
-const HELP = `Moira Local — user-owned, mountless Docker Sandboxes codespaces
+const HELP = `Moira Local — paired controller and optional user-owned Local sandboxes
 
 Usage: moira-local <command> [options]
 
@@ -35,19 +43,27 @@ Usage: moira-local <command> [options]
   setup        Initialize an empty dedicated runtime with host integrations disabled
   approve OWNER/REPO [--private] [--push] [--delete]
                Grant repository and optional destructive rights locally
-  git-token OWNER/REPO
-               Read this repository's GitHub token from stdin; never from arguments
   enable [--hours 8] | disable
                Grant a finite local work lease, or stop all owned sandboxes
   status | doctor
-               Inspect local grants, health and isolation prerequisites
+               Inspect controller/capability state; doctor checks the configured Local SDK
   stop SPACE_ID | remove SPACE_ID --confirm
+  create OWNER/REPO --ref BRANCH | start SPACE_ID
+               Call the running owner controller using the currently observed generation
+               Create requires cloud route registration and initial Git credential authority
+  collect REQUEST_ID
+               Inspect the original ws1 request ID without repeating the operation
+  github-start RESOURCE_ID | github-stop RESOURCE_ID
+  github-adopt RESOURCE_ID | github-remove RESOURCE_ID --confirm
+               Use the paired controller assigned to the GitHub resource; no Local SDK is needed
+               Adopt prepares the existing VM without creating a replacement
   recover SPACE_ID --confirm
                Acknowledge a verified stopped VM for recovery; prior jobs are never retried
   recover --confirm
                Acknowledge orphan device shutdown while work is disabled; preserve jobs and data
   enroll --server HTTPS_URL --pairing-id UUID
-               Read the browser's pairing token from stdin; confirm the local grants in Moira
+               Read the browser's pairing token from stdin; confirm device identity in Moira
+               Enrollment and run do not require Local SDK initialization or storage
   run          Serve the paired Moira account through outbound HTTPS until stopped
   web-control --confirm [--max-lease-hours 168]
                Approve or revise owner web settings within locally confirmed resource limits
@@ -55,11 +71,18 @@ Usage: moira-local <command> [options]
 
 Options: --state PATH --sbx PATH --template IMAGE@sha256:DIGEST
          --storage-root PATH --storage-gib 32 --cpus 2 --memory-gib 4
+         --request-id ws1-<lowercase UUID> for lifecycle commands
          --label NAME --json --help
 
-The verified runtime supports macOS; init creates a private bounded disk image.
-Linux execution is refused until its kernel ownership contract is supported.
-Docker Sandboxes sign-in is required.
+Lifecycle commands print their requestId before waiting for the result.
+After a lost reply, run collect with that original ID; do not submit a replacement mutation.
+An unconfirmed outcome does not prove that the effect did not happen.
+With cloud transport unavailable, existing owner-admitted VMs and their guest CLI remain
+subject to current local grants and leases. A confirmed authority refusal is not offline access.
+
+The physical Local VM runtime supports macOS; init creates a private bounded disk image.
+Linux Local VM execution is refused until its kernel ownership contract is supported.
+Docker Sandboxes sign-in is required only for the physical Local capability.
 No host folders, host secrets or production credentials are supplied to a sandbox.
 Codespace content is visible to Moira. Review returned code before running it locally.
 `;
@@ -105,6 +128,8 @@ export async function main(args: string[], environment: NodeJS.ProcessEnv): Prom
       "pairing-id": { type: "string" },
       "max-lease-hours": { type: "string" },
       "docker-gib": { type: "string" },
+      ref: { type: "string" },
+      "request-id": { type: "string" },
     },
   });
   const [command, target] = parsed.positionals;
@@ -119,10 +144,15 @@ export async function main(args: string[], environment: NodeJS.ProcessEnv): Prom
     process.stdout.write(HELP);
     return;
   }
-  if (["create", "start", "request"].includes(command))
+  if (command === "request")
     throw new LocalRefusal(
       "LOCAL_COMMAND_UNSUPPORTED",
-      "Create and start environments through your paired Moira account; raw host requests are not supported.",
+      "Use the running owner controller; raw host request envelopes are not supported.",
+    );
+  if (command === "git-token")
+    throw new LocalRefusal(
+      "LOCAL_COMMAND_UNSUPPORTED",
+      "Git credentials are issued to the paired private broker; manual tokens are not accepted.",
     );
   const state = await openLocalState(options.state);
   const records = new LocalRecords(state);
@@ -160,26 +190,101 @@ export async function main(args: string[], environment: NodeJS.ProcessEnv): Prom
     output(await setEnabled(records, true, number(options.hours) ?? 8));
     return;
   }
-  if (command === "git-token") {
-    const repository = (await records.policy()).repositories.find(
-      (item) => item.fullName === target,
-    );
-    if (!repository)
+  if (["github-start", "github-stop", "github-adopt", "github-remove"].includes(command)) {
+    const resourceId = z.string().uuid().parse(target);
+    if (command === "github-remove" && !options.confirm)
       throw new LocalRefusal(
-        "LOCAL_REPOSITORY_DENIED",
-        "Approve the repository before supplying its token.",
+        "LOCAL_DELETE_CONFIRM",
+        "Pass --confirm to permanently delete this GitHub workspace.",
       );
-    const token = z
-      .string()
-      .min(1)
-      .max(4096)
-      .regex(/^[A-Za-z0-9_]+$/)
-      .parse((await input(4096)).toString("utf8").trim());
-    await state.write(`git-${repository.id}.json`, { token });
-    output({ stored: true, repository: repository.fullName });
+    const relay = new LocalRelay(records),
+      connection = await relay.confirmed();
+    const binding = await new ControllerState(records).githubBinding(resourceId, connection);
+    const assignment = binding ?? (await relay.githubAssignment(resourceId));
+    const requestId = controllerRequestIdSchema.parse(
+      options["request-id"] ?? createWorkspaceRequestId(),
+    );
+    output({ requestId, resourceId });
+    output(
+      await controllerRequest(
+        join((await state.ipcDirectory()).root, "controller.sock"),
+        "POST",
+        `/v1/controller/github/resources/${resourceId}`,
+        {
+          requestId,
+          expectedGeneration: assignment.resourceGeneration,
+          action: command === "github-remove" ? "delete" : command.slice("github-".length),
+        },
+      ),
+    );
     return;
   }
-  const policy = await records.policy();
+  if (["create", "start", "stop", "remove", "collect"].includes(command)) {
+    const socketPath = join((await state.ipcDirectory()).root, "controller.sock");
+    if (command === "collect") {
+      const credential = await new LocalRelay(records).collectGitCredentialRequest(target);
+      if (credential) {
+        output(credential);
+        return;
+      }
+      output(await controllerRequest(socketPath, "GET", `/v1/controller/operations/${target}`));
+      return;
+    }
+    const connection = await state.read("connection.json", (value) =>
+      controllerIdentitySchema.parse(value),
+    );
+    if (!connection)
+      throw new LocalRefusal("LOCAL_NOT_ENROLLED", "Pair the running controller first.");
+    let resourceId: string;
+    let input: Record<string, unknown>;
+    const requestId = options["request-id"] ?? createWorkspaceRequestId();
+    if (command === "create") {
+      const policy = await records.policy();
+      const repository = policy.repositories.find(
+        (repository) => repository.fullName === target || repository.id === target,
+      );
+      if (!repository || !options.ref)
+        throw new LocalRefusal(
+          "LOCAL_REQUEST_INVALID",
+          "Create requires an approved repository and explicit --ref.",
+        );
+      resourceId = randomUUID();
+      input = {
+        requestId,
+        expectedGeneration: 1,
+        action: "create",
+        repositoryId: repository.id,
+        ref: options.ref,
+        operationMarker: `moira-${randomBytes(12).toString("hex")}`,
+      };
+    } else {
+      const space = await records.get(z.string().uuid().parse(target));
+      if (!space)
+        throw new LocalRefusal(
+          "LOCAL_SANDBOX_ABSENT",
+          "This device does not own that native space.",
+        );
+      const binding = await new ControllerState(records).forSpace(space, connection);
+      resourceId = binding.resourceId;
+      if (command === "remove" && !options.confirm)
+        throw new LocalRefusal(
+          "LOCAL_DELETE_CONFIRM",
+          "Pass --confirm to permanently remove this sandbox.",
+        );
+      input = {
+        requestId,
+        expectedGeneration: binding.resourceGeneration,
+        action: command === "remove" ? "delete" : command,
+        ...(command === "remove" ? { ownerConfirmed: true } : {}),
+      };
+    }
+    // Print recovery identity before observation; transport loss never invites a fresh mutation.
+    process.stderr.write(`${JSON.stringify({ requestId, resourceId })}\n`);
+    output(
+      await controllerRequest(socketPath, "POST", `/v1/resources/${resourceId}/lifecycle`, input),
+    );
+    return;
+  }
   if (command === "recover" && target === undefined) {
     await recoverLocalDevice(records, options.confirm === true);
     output({ recovered: true, enabled: false, priorJobsRetained: true, dataPreserved: true });
@@ -196,6 +301,7 @@ export async function main(args: string[], environment: NodeJS.ProcessEnv): Prom
         options.server,
         options["pairing-id"],
         (await input(4096)).toString("utf8").trim(),
+        options.label,
       ),
     );
     return;
@@ -216,6 +322,7 @@ export async function main(args: string[], environment: NodeJS.ProcessEnv): Prom
     return;
   }
   if (command === "web-control") {
+    const policy = await records.policy();
     if (!options.confirm)
       throw new LocalRefusal(
         "LOCAL_CONTROL_CONFIRM",
@@ -251,8 +358,11 @@ export async function main(args: string[], environment: NodeJS.ProcessEnv): Prom
     return;
   }
   if (command === "status") {
+    const policy = await records.policyOrNull();
     output({
-      ...publicPolicy(policy),
+      ...(policy ? publicPolicy(policy) : {}),
+      device: await records.deviceIdentity(),
+      localCapability: policy ? "configured" : "unconfigured",
       spaces: (await records.list()).map(({ id, phase, repositoryId, generation, failure }) => ({
         id,
         phase,
@@ -260,16 +370,19 @@ export async function main(args: string[], environment: NodeJS.ProcessEnv): Prom
         generation,
         failure,
       })),
+      credentialRequests: await new LocalRelay(records).pendingGitCredentialRequests(),
     });
     return;
   }
   if (command === "setup") {
+    const policy = await records.policy();
     await admitStorage(policy);
     await withLocalRuntimeOwner(records, "setup");
     output({ configured: true });
     return;
   }
   if (command === "doctor") {
+    const policy = await records.policy();
     await admitStorage(policy);
     await withLocalRuntimeOwner(records, "doctor");
     output({ ready: true, liveVmIsolationVerified: false });
@@ -333,21 +446,6 @@ async function runManagerCommand(
         generation: recovered.generation,
         priorJobsRetained: true,
       });
-      return;
-    }
-    if (command === "stop") {
-      await manager.stop(target);
-      output({ stopped: true, dataPreserved: true });
-      return;
-    }
-    if (command === "remove") {
-      if (!options.confirm)
-        throw new LocalRefusal(
-          "LOCAL_DELETE_CONFIRM",
-          "Pass --confirm to permanently remove this sandbox.",
-        );
-      await manager.remove(target, (await manager.require(target)).generation, true);
-      output({ deleted: true });
       return;
     }
     throw new LocalRefusal("LOCAL_COMMAND_UNKNOWN", "Unknown command; run moira-local --help.");

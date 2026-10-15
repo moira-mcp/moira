@@ -42,6 +42,11 @@ const SENSITIVE_PATTERNS = [
   "grant",
   "referenceid",
   "reference_id",
+  "downloadurl",
+  "download_url",
+  "fileid",
+  "file_id",
+  "file_name",
 ];
 
 /**

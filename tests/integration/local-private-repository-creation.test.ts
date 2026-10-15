@@ -3,16 +3,16 @@ import Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 import { randomBytes, randomUUID } from "node:crypto";
-import { resolve } from "node:path";
+import { join, resolve } from "node:path";
+import { mkdtemp, realpath, rm } from "node:fs/promises";
+import { controllerFixture } from "../fixtures/local-controller.js";
+import { createWorkspaceRequestId } from "@mcp-moira/shared";
 import {
   LocalDeviceRepository,
   LocalDeviceService,
   RepositoryCreationRepository,
   LocalDeviceError,
-  MAX_LOCAL_WORK_LEASE_MS,
   type LocalDeviceSettingsValue,
-  type LocalPublicPolicy,
-  type LocalControlCeiling,
   type RepositoryCreationAuthority,
   type CodespaceGitHubConfigStatus,
 } from "@mcp-moira/shared";
@@ -22,9 +22,13 @@ import { HttpGitHubCodespaceClient } from "../../packages/web-backend/src/servic
 import { personalGitHubInstallations } from "../../packages/web-backend/src/services/local-github-repository-authority.js";
 
 let sqlite: Database.Database;
-const now = 1791320400000,
+let owners: Array<Awaited<ReturnType<typeof controllerFixture>>> = [],
+  directory: string;
+const now = Date.now(),
   GiB = 1024 ** 3;
-beforeEach(() => {
+beforeEach(async () => {
+  owners = [];
+  directory = await realpath(await mkdtemp("/tmp/moira-private-owner-"));
   sqlite = new Database(":memory:");
   sqlite.pragma("foreign_keys=ON");
   migrate(drizzle(sqlite), { migrationsFolder: resolve("packages/web-backend/drizzle") });
@@ -35,12 +39,21 @@ beforeEach(() => {
       )
       .run(id, `${id}@example.test`, id);
 });
-afterEach(() => {
+afterEach(async () => {
+  for (const owner of owners) await owner.close();
   sqlite.close();
+  await rm(directory, { recursive: true, force: true });
 });
 
-function fixture() {
-  const devices = new LocalDeviceService(new LocalDeviceRepository(sqlite), () => now);
+async function fixture() {
+  const owner: { current?: Awaited<ReturnType<typeof controllerFixture>> } = {};
+  const devices = new LocalDeviceService(new LocalDeviceRepository(sqlite), () => now, {
+    async json(user, id, input) {
+      if (!owner.current)
+        throw Object.assign(new Error("Owner unavailable"), { code: "ECONNREFUSED" });
+      return owner.current.client.json(user, id, input);
+    },
+  });
   const settings: LocalDeviceSettingsValue = {
     label: "Owned",
     enabled: true,
@@ -59,48 +72,26 @@ function fixture() {
       allowPush: true,
     },
   };
-  const ceiling: LocalControlCeiling = {
-    cpuCores: 2,
-    memoryBytes: 4 * GiB,
-    storageBytes: 32 * GiB,
-    dockerBytes: 4 * GiB,
-    maxLeaseMs: 3600000,
-  };
   const pair = devices.beginEnrollment("owner"),
     deviceId = randomUUID(),
     credential = randomBytes(32).toString("base64url");
-  const policy = (value = settings): LocalPublicPolicy => ({
-    version: 1,
-    deviceId,
-    label: value.label,
-    enabled: value.enabled,
-    leaseUntil: value.leaseUntil,
-    repositories: value.repositories,
-    machine: {
-      name: "local-approved",
-      displayName: value.label,
-      operatingSystem: "linux",
-      cpuCores: value.cpuCores,
-      memoryBytes: value.memoryBytes,
-      storageBytes: value.storageBytes,
-    },
-  });
   devices.approveLocalEnrollment({
     pairingId: pair.pairingId,
     pairingToken: pair.pairingToken,
     credential,
-    policy: policy(),
+    deviceId,
+    label: settings.label,
   });
-  devices.confirmEnrollment("owner", pair.pairingId, 2);
+  await devices.confirmEnrollment("owner", pair.pairingId, 2);
   const auth = devices.authenticateDevice(credential);
-  const opted = { ...settings, agentRepositoryManagement: null };
-  devices.heartbeat(auth, policy(), { ceiling, settings: opted, appliedRevision: 0 });
-  devices.requestSettings("owner", deviceId, {
-    expectedRevision: 0,
+  owner.current = await controllerFixture(join(directory, deviceId), auth);
+  owners.push(owner.current);
+  await devices.requestSettings("owner", deviceId, {
+    requestId: createWorkspaceRequestId(),
     expectedGeneration: 1,
+    expectedRevision: 0,
     settings,
   });
-  devices.heartbeat(auth, policy(), { ceiling, settings, appliedRevision: 1 });
   const authority: RepositoryCreationAuthority = {
     githubConnectionId: randomUUID(),
     githubUserId: "42",
@@ -175,7 +166,9 @@ function fixture() {
     throw new Error(`Unexpected fixture endpoint ${path}`);
   };
   const client = new HttpGitHubCodespaceClient(config, fetchImpl);
-  const repository = new RepositoryCreationRepository(sqlite);
+  const repository = new RepositoryCreationRepository(sqlite, (user, id) =>
+    devices.getActiveDevice(user, id),
+  );
   const admission = new LocalRepositoryAdmissionService({
     devices,
     verifyAccount: async () => ({ githubUserId: "42", owner: "owner" }),
@@ -220,20 +213,10 @@ function fixture() {
     repositoryName: "new-project",
     installationId: "8",
   };
-  const acknowledge = () => {
-    const current = devices.getActiveDevice("owner", deviceId).control!;
-    devices.heartbeat(auth, policy(current.settings), {
-      ceiling,
-      settings: current.settings,
-      appliedRevision: current.revision,
-    });
-  };
   return {
     devices,
     auth,
     settings,
-    ceiling,
-    policy,
     authority,
     remote,
     state,
@@ -241,24 +224,23 @@ function fixture() {
     admission,
     makeService,
     input,
-    acknowledge,
     deviceId,
+    local: owner.current,
   };
 }
 
 describe("Private repository creation precedes local admission without repeating unknown effects", () => {
   test("rejected local admission names retained-repository recovery without repeating GitHub creation", async () => {
-    const f = fixture();
+    const f = await fixture();
     await f.makeService().createRepository("owner", f.input);
-    f.acknowledge();
-    const admitted = f.devices.getActiveDevice("owner", f.deviceId).control!;
+    const admitted = (await f.devices.getActiveDevice("owner", f.deviceId)).owner.local.control;
     const receipt = admitted.repositoryAdmissions![0];
-    f.devices.requestSettings("owner", f.deviceId, {
+    await f.devices.requestSettings("owner", f.deviceId, {
+      requestId: createWorkspaceRequestId(),
       expectedRevision: admitted.revision,
       expectedGeneration: 1,
       settings: f.settings,
     });
-    f.acknowledge();
     const rejected = await f.makeService().createRepository("owner", f.input);
     expect(rejected).toMatchObject({
       status: "rejected",
@@ -273,13 +255,13 @@ describe("Private repository creation precedes local admission without repeating
     expect(rejected.instruction).toContain("Moira Settings");
     expect(rejected.instruction).toContain("Do not create another repository");
     expect(f.repository.getOwned("owner", f.input.requestId)?.state).toBe("created");
-    const current = f.devices.getActiveDevice("owner", f.deviceId).control!;
-    f.devices.requestSettings("owner", f.deviceId, {
+    const current = (await f.devices.getActiveDevice("owner", f.deviceId)).owner.local.control;
+    await f.devices.requestSettings("owner", f.deviceId, {
+      requestId: createWorkspaceRequestId(),
       expectedRevision: current.revision,
       expectedGeneration: 1,
       settings: { ...f.settings, repositories: [receipt.repository] },
     });
-    f.acknowledge();
     expect(await f.makeService().createRepository("owner", f.input)).toMatchObject({
       status: "applied",
       request_id: f.input.requestId,
@@ -291,8 +273,9 @@ describe("Private repository creation precedes local admission without repeating
   });
 
   test("missing applied computer delegation names the owner action before any GitHub mutation", async () => {
-    const f = fixture();
-    f.devices.requestSettings("owner", f.deviceId, {
+    const f = await fixture();
+    await f.devices.requestSettings("owner", f.deviceId, {
+      requestId: createWorkspaceRequestId(),
       expectedRevision: 1,
       expectedGeneration: 1,
       settings: { ...f.settings, agentRepositoryManagement: null },
@@ -308,7 +291,7 @@ describe("Private repository creation precedes local admission without repeating
   });
 
   test("GitHub creation refusal identifies its exact stage and preserves retry identity", async () => {
-    const f = fixture();
+    const f = await fixture();
     f.state.rejectStatus = 403;
     const refused = await f.makeService().createRepository("owner", f.input);
     expect(refused).toMatchObject({
@@ -321,17 +304,17 @@ describe("Private repository creation precedes local admission without repeating
     expect(JSON.stringify(refused)).not.toContain("fixture refusal");
     expect(f.repository.getOwned("owner", f.input.requestId)?.state).toBe("prepared");
     f.state.rejectStatus = 0;
-    expect((await f.makeService().createRepository("owner", f.input)).status).toBe("pending");
+    expect((await f.makeService().createRepository("owner", f.input)).status).toBe("applied");
     expect(f.state.posts).toBe(2);
     expect(f.remote.size).toBe(1);
   });
   test.each(["tenant", "device", "revoked", "account"])(
     "%s authority denial cannot reach repository POST",
     async (failure) => {
-      const f = fixture();
+      const f = await fixture();
       const userId = failure === "tenant" ? "other" : "owner";
       const input = failure === "device" ? { ...f.input, deviceId: randomUUID() } : f.input;
-      if (failure === "revoked") f.devices.revokeOwned("owner", f.deviceId, 1);
+      if (failure === "revoked") await f.devices.revokeOwned("owner", f.deviceId, 1);
       if (failure === "account") f.authority.githubUserId = "43";
       expect((await f.makeService().createRepository(userId, input)).status).toBe("setup_required");
       expect(f.state.posts).toBe(0);
@@ -341,7 +324,7 @@ describe("Private repository creation precedes local admission without repeating
   test.each(["public", "malformed"] as const)(
     "%s provider success cannot confirm private identity or add a grant",
     async (mode) => {
-      const f = fixture();
+      const f = await fixture();
       f.state.successMode = mode;
       expect(await f.makeService().createRepository("owner", f.input)).toMatchObject({
         status: "unknown",
@@ -352,13 +335,16 @@ describe("Private repository creation precedes local admission without repeating
       expect(f.state.posts).toBe(1);
       expect(f.state.puts).toBe(0);
       expect(
-        f.devices.getActiveDevice("owner", f.deviceId).control!.repositoryAdmissions,
-      ).toBeUndefined();
-      expect(f.devices.getActiveDevice("owner", f.deviceId).policy.repositories).toEqual([]);
+        (await f.devices.getActiveDevice("owner", f.deviceId)).owner.local.control
+          .repositoryAdmissions,
+      ).toEqual([]);
+      expect(
+        (await f.devices.getActiveDevice("owner", f.deviceId)).owner.local.policy.repositories,
+      ).toEqual([]);
     },
   );
   test("two concurrent same-payload requests share one durable submitted claim and one POST", async () => {
-    const f = fixture();
+    const f = await fixture();
     let entered!: () => void, finish!: () => void;
     const reachedPost = new Promise<void>((resolve) => {
       entered = resolve;
@@ -380,17 +366,17 @@ describe("Private repository creation precedes local admission without repeating
     } finally {
       finish();
     }
-    expect((await first).status).toBe("pending");
+    expect((await first).status).toBe("applied");
     expect(f.state.posts).toBe(1);
   });
-  test("private create and selected installation remain pending until companion ACK, then replay the same identity", async () => {
-    const f = fixture();
+  test("private create and selected installation apply on the owner and replay the same identity", async () => {
+    const f = await fixture();
     const pending = await f.makeService().createRepository("owner", f.input);
     expect(pending).toMatchObject({
-      status: "pending",
+      status: "applied",
       github_repository_id: "77",
       full_name: "owner/new-project",
-      local_repository_id: null,
+      local_repository_id: expect.stringMatching(/^local:/),
     });
     expect(f.state.postBodies).toEqual([
       {
@@ -403,30 +389,31 @@ describe("Private repository creation precedes local admission without repeating
     const retained = f.repository.getOwned("owner", f.input.requestId)!;
     expect(JSON.stringify(pending)).not.toContain(retained.marker);
     expect(retained.reservationHeld).toBe(0);
-    expect(f.devices.getActiveDevice("owner", f.deviceId).policy.repositories).toEqual([]);
-    expect((await f.makeService().createRepository("owner", f.input)).status).toBe("pending");
-    f.acknowledge();
+    expect(
+      (await f.devices.getActiveDevice("owner", f.deviceId)).owner.local.policy.repositories,
+    ).toHaveLength(1);
+    expect((await f.makeService().createRepository("owner", f.input)).status).toBe("applied");
     const applied = await f.makeService().createRepository("owner", f.input);
     expect(applied.status).toBe("applied");
     expect(applied.local_repository_id).toMatch(/^local:/);
     expect(f.state.posts).toBe(1);
     expect(f.state.puts).toBe(1);
-    expect(f.devices.getActiveDevice("owner", f.deviceId).deviceGeneration).toBe(1);
+    expect((await f.devices.getActiveDevice("owner", f.deviceId)).deviceGeneration).toBe(1);
   });
   test("lost create response recovers only its exact marker after process reconstruction", async () => {
-    const f = fixture();
+    const f = await fixture();
     f.state.loseResponse = true;
     expect((await f.makeService().createRepository("owner", f.input)).status).toBe("unknown");
     expect(f.repository.getOwned("owner", f.input.requestId)!.reservationHeld).toBe(1);
     f.state.loseResponse = false;
-    expect((await f.makeService().createRepository("owner", f.input)).status).toBe("pending");
+    expect((await f.makeService().createRepository("owner", f.input)).status).toBe("applied");
     expect(f.state.posts).toBe(1);
     expect(f.state.puts).toBe(1);
   });
   test.each([401, 403, 429])(
     "unknown creation retains the lookup refusal HTTP%s without another create",
     async (status) => {
-      const f = fixture();
+      const f = await fixture();
       f.state.loseResponse = true;
       await f.makeService().createRepository("owner", f.input);
       f.state.loseResponse = false;
@@ -448,12 +435,12 @@ describe("Private repository creation precedes local admission without repeating
       expect(f.repository.getOwned("owner", f.input.requestId)?.state).toBe("unknown");
       expect(f.state.posts).toBe(1);
       f.state.lookupRejectStatus = 0;
-      expect((await f.makeService().createRepository("owner", f.input)).status).toBe("pending");
+      expect((await f.makeService().createRepository("owner", f.input)).status).toBe("applied");
       expect(f.state.posts).toBe(1);
     },
   );
   test("same-name object without the persisted marker cannot resolve unknown or release its reservation", async () => {
-    const f = fixture();
+    const f = await fixture();
     f.state.loseResponse = true;
     await f.makeService().createRepository("owner", f.input);
     f.remote.get("new-project")!.description = "Unrelated repository";
@@ -468,7 +455,7 @@ describe("Private repository creation precedes local admission without repeating
     expect(f.repository.getOwned("owner", f.input.requestId)!.reservationHeld).toBe(1);
   });
   test("changed immutable payload is rejected before another provider call", async () => {
-    const f = fixture();
+    const f = await fixture();
     await f.makeService().createRepository("owner", f.input);
     await expect(
       f.makeService().createRepository("owner", { ...f.input, repositoryName: "changed" }),
@@ -476,7 +463,7 @@ describe("Private repository creation precedes local admission without repeating
     expect(f.state.posts).toBe(1);
   });
   test("installation setup preserves confirmed ID and continues without repeating create", async () => {
-    const f = fixture();
+    const f = await fixture();
     f.state.installationDenied = true;
     expect(await f.makeService().createRepository("owner", f.input)).toMatchObject({
       status: "setup_required",
@@ -485,62 +472,114 @@ describe("Private repository creation precedes local admission without repeating
       error: { stage: "installation_access", provider_status: 403 },
     });
     f.state.installationDenied = false;
-    expect((await f.makeService().createRepository("owner", f.input)).status).toBe("pending");
+    expect((await f.makeService().createRepository("owner", f.input)).status).toBe("applied");
     expect(f.state.posts).toBe(1);
   });
   test("successful installation PUT alone never supplies local authority", async () => {
-    const f = fixture();
+    const f = await fixture();
     f.state.grantVisible = false;
     expect((await f.makeService().createRepository("owner", f.input)).status).toBe(
       "setup_required",
     );
     expect(
-      f.devices.getActiveDevice("owner", f.deviceId).control!.repositoryAdmissions,
-    ).toBeUndefined();
+      (await f.devices.getActiveDevice("owner", f.deviceId)).owner.local.control
+        .repositoryAdmissions,
+    ).toEqual([]);
     f.state.grantVisible = true;
-    expect((await f.makeService().createRepository("owner", f.input)).status).toBe("pending");
+    expect((await f.makeService().createRepository("owner", f.input)).status).toBe("applied");
     expect(f.state.posts).toBe(1);
   });
-  test("requested new-private consent cannot reach POST", async () => {
-    const f = fixture();
-    f.devices.requestSettings("owner", f.deviceId, {
+  test("requested new-private consent cannot reach POST before the owner applies it", async () => {
+    const f = await fixture();
+    await f.devices.requestSettings("owner", f.deviceId, {
+      requestId: createWorkspaceRequestId(),
       expectedRevision: 1,
       expectedGeneration: 1,
       settings: {
         ...f.settings,
-        agentRepositoryManagement: { ...f.settings.agentRepositoryManagement!, allowPush: false },
+        agentRepositoryManagement: {
+          ...f.settings.agentRepositoryManagement!,
+          allowNewPrivate: false,
+        },
       },
     });
-    expect((await f.makeService().createRepository("owner", f.input)).status).toBe(
-      "setup_required",
-    );
-    expect(f.state.posts).toBe(0);
-    expect(f.repository.getOwned("owner", f.input.requestId)).toBeNull();
+    const write = f.local.state.write.bind(f.local.state);
+    let enter!: () => void, release!: () => void;
+    const entered = new Promise<void>((resolve) => {
+        enter = resolve;
+      }),
+      continueApply = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+    f.local.state.write = async (key, value) => {
+      if (key === "control-intent.json") {
+        enter();
+        await continueApply;
+      }
+      return write(key, value);
+    };
+    const applying = f.devices.requestSettings("owner", f.deviceId, {
+      requestId: createWorkspaceRequestId(),
+      expectedRevision: 2,
+      expectedGeneration: 1,
+      settings: f.settings,
+    });
+    try {
+      await entered;
+      expect((await f.makeService().createRepository("owner", f.input)).status).toBe(
+        "setup_required",
+      );
+      expect(f.state.posts).toBe(0);
+      expect(f.repository.getOwned("owner", f.input.requestId)).toBeNull();
+    } finally {
+      release();
+      await applying;
+    }
+  });
+  test("persisted admission metadata cannot confirm a failed owner policy write or release creation provenance", async () => {
+    const f = await fixture(),
+      write = f.local.state.write.bind(f.local.state);
+    f.local.state.write = async (key, value) => {
+      if (key === "policy.json") throw new Error("Controlled owner policy fsync failure");
+      return write(key, value);
+    };
+    const failed = await f.makeService().createRepository("owner", f.input);
+    expect(failed.status).not.toBe("applied");
+    const device = await f.devices.getActiveDevice("owner", f.deviceId),
+      receipt = device.owner.local.control.repositoryAdmissions![0];
+    expect(receipt).toBeDefined();
+    expect(device.owner.local.policy.repositories).toEqual([]);
+    await expect(
+      f.devices.requestRepositoryAdmission("owner", f.deviceId, {
+        ...receipt,
+        expectedRevision: device.owner.local.control.revision,
+      }),
+    ).rejects.toThrow();
+    expect(f.repository.getOwned("owner", f.input.requestId)?.reservationHeld).toBe(1);
+    expect(f.state.posts).toBe(1);
   });
   test("changed credentials during preflight cannot reach POST", async () => {
-    const f = fixture();
+    const f = await fixture();
     f.state.changedDuringInspection = true;
     expect((await f.makeService().createRepository("owner", f.input)).status).toBe(
       "setup_required",
     );
     expect(f.state.posts).toBe(0);
   });
-  test("a reported work lease beyond the finite local contract cannot reach repository POST", async () => {
-    const f = fixture();
-    const unbounded = { ...f.settings, leaseUntil: now + MAX_LOCAL_WORK_LEASE_MS + 1 };
-    f.devices.heartbeat(f.auth, f.policy(unbounded), {
-      ceiling: f.ceiling,
-      settings: unbounded,
-      appliedRevision: 1,
-    });
-    expect((await f.makeService().createRepository("owner", f.input)).status).toBe(
-      "setup_required",
-    );
+  test("a settings lease outside the physical ceiling is refused before GitHub POST", async () => {
+    const f = await fixture();
+    await expect(
+      f.devices.requestSettings("owner", f.deviceId, {
+        requestId: createWorkspaceRequestId(),
+        expectedGeneration: 1,
+        expectedRevision: 1,
+        settings: { ...f.settings, leaseUntil: now + 7200000 },
+      }),
+    ).rejects.toThrow();
     expect(f.state.posts).toBe(0);
-    expect(f.repository.getOwned("owner", f.input.requestId)).toBeNull();
   });
   test("multiple unknown private creations retain independent identities without a repository quota", async () => {
-    const f = fixture();
+    const f = await fixture();
     f.state.loseResponse = true;
     await f.makeService().createRepository("owner", f.input);
     await f
@@ -553,7 +592,7 @@ describe("Private repository creation precedes local admission without repeating
     expect(f.state.posts).toBe(3);
   });
   test("existing admissions remain available beside multiple unknown creation requests", async () => {
-    const f = fixture();
+    const f = await fixture();
     const both = {
       ...f.settings,
       agentRepositoryManagement: {
@@ -561,15 +600,11 @@ describe("Private repository creation precedes local admission without repeating
         allowExistingPrivate: true,
       },
     };
-    f.devices.requestSettings("owner", f.deviceId, {
+    await f.devices.requestSettings("owner", f.deviceId, {
+      requestId: createWorkspaceRequestId(),
       expectedRevision: 1,
       expectedGeneration: 1,
       settings: both,
-    });
-    f.devices.heartbeat(f.auth, f.policy(both), {
-      ceiling: f.ceiling,
-      settings: both,
-      appliedRevision: 2,
     });
     f.state.loseResponse = true;
     expect((await f.makeService().createRepository("owner", f.input)).status).toBe("unknown");
@@ -582,8 +617,7 @@ describe("Private repository creation precedes local admission without repeating
           requestId: randomUUID(),
         })
       ).status,
-    ).toBe("pending");
-    f.acknowledge();
+    ).toBe("applied");
     const third = await f
       .makeService()
       .createRepository("owner", { ...f.input, requestId: randomUUID(), repositoryName: "third" });
@@ -596,10 +630,10 @@ describe("Private repository creation precedes local admission without repeating
         repositoryId: "91",
         requestId: randomUUID(),
       }),
-    ).resolves.toMatchObject({ status: "pending" });
+    ).resolves.toMatchObject({ status: "applied" });
   });
   test("more than 64 confirmed refusals do not consume future admission capacity", async () => {
-    const f = fixture();
+    const f = await fixture();
     f.state.rejectStatus = 422;
     for (let index = 0; index < 65; index++) {
       const result = await f.makeService().createRepository("owner", {
@@ -610,10 +644,10 @@ describe("Private repository creation precedes local admission without repeating
       expect(result.status).toBe("rejected");
     }
     f.state.rejectStatus = 0;
-    expect((await f.makeService().createRepository("owner", f.input)).status).toBe("pending");
+    expect((await f.makeService().createRepository("owner", f.input)).status).toBe("applied");
   });
   test("more than 64 existing grants admit another repository and preserve unknown creation provenance", async () => {
-    const f = fixture();
+    const f = await fixture();
     const oldGrants = Array.from({ length: 65 }, (_, index) => ({
       id: randomUUID(),
       fullName: `owner/old-${index}`,
@@ -629,17 +663,13 @@ describe("Private repository creation precedes local admission without repeating
         allowExistingPrivate: true,
       },
     };
-    f.devices.requestSettings("owner", f.deviceId, {
+    await f.devices.requestSettings("owner", f.deviceId, {
+      requestId: createWorkspaceRequestId(),
       expectedRevision: 1,
       expectedGeneration: 1,
       settings: fullSettings,
     });
-    f.devices.heartbeat(f.auth, f.policy(fullSettings), {
-      ceiling: f.ceiling,
-      settings: fullSettings,
-      appliedRevision: 2,
-    });
-    const original = f.devices.getActiveDevice("owner", f.deviceId).policy;
+    const original = (await f.devices.getActiveDevice("owner", f.deviceId)).owner.local.policy;
     f.state.loseResponse = true;
     expect((await f.makeService().createRepository("owner", f.input)).status).toBe("unknown");
     f.remote.set("unrelated", { id: 90, full_name: "owner/unrelated", private: true });
@@ -649,16 +679,16 @@ describe("Private repository creation precedes local admission without repeating
         repositoryId: "90",
         requestId: randomUUID(),
       }),
-    ).resolves.toMatchObject({ status: "pending" });
-    expect(f.devices.getActiveDevice("owner", f.deviceId).policy).toEqual(original);
+    ).resolves.toMatchObject({ status: "applied" });
+    expect(
+      (await f.devices.getActiveDevice("owner", f.deviceId)).owner.local.policy.repositories,
+    ).toHaveLength(66);
     expect(f.repository.getOwned("owner", f.input.requestId)!.reservationHeld).toBe(1);
-    f.acknowledge();
     f.state.loseResponse = false;
-    expect((await f.makeService().createRepository("owner", f.input)).status).toBe("pending");
-    expect(f.repository.getOwned("owner", f.input.requestId)!.reservationHeld).toBe(0);
-    f.acknowledge();
     expect((await f.makeService().createRepository("owner", f.input)).status).toBe("applied");
-    const completed = f.devices.getActiveDevice("owner", f.deviceId).policy;
+    expect(f.repository.getOwned("owner", f.input.requestId)!.reservationHeld).toBe(0);
+    expect((await f.makeService().createRepository("owner", f.input)).status).toBe("applied");
+    const completed = (await f.devices.getActiveDevice("owner", f.deviceId)).owner.local.policy;
     expect(completed.repositories).toHaveLength(67);
     expect(completed.repositories.slice(0, 65)).toEqual(original.repositories);
     expect(completed.repositories[66].fullName).toBe("owner/new-project");
@@ -667,7 +697,7 @@ describe("Private repository creation precedes local admission without repeating
     expect(f.state.posts).toBe(1);
   });
   test("personal installation projection excludes organizations and stale connected accounts", async () => {
-    const f = fixture();
+    const f = await fixture();
     const installations = personalGitHubInstallations(
       [
         {

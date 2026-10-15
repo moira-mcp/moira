@@ -8,6 +8,11 @@ import { promisify } from "node:util";
 import { resolve, join } from "node:path";
 import { parseArgs } from "node:util";
 import { buildWorkspaceService } from "./build-workspace-service.js";
+import {
+  packageOwnerDependencies,
+  packageOwnerSupervisor,
+  ownerAssetDigests,
+} from "./package-owner-dependencies.js";
 import { WORKSPACE_INSTALL_SCRIPT } from "../packages/workspace-service/src/bootstrap.mjs";
 
 const execute = promisify(execFile);
@@ -87,7 +92,8 @@ export async function packageWorkspaceService({
     throw new Error("Workspace payload supports Linux glibc x64 and arm64");
   output = resolve(output);
   await buildWorkspaceService(output);
-  const cache = join(output, "node-archives");
+  // Download caches are build inputs, not part of the shipped owner release.
+  const cache = resolve("node_modules/.cache/moira-workspace");
   await mkdir(cache, { recursive: true });
   const nodeArchive = await acquireNode(cache, architecture);
   const rgTarget = WORKSPACE_RG_ARCHIVES[architecture];
@@ -130,11 +136,23 @@ export async function packageWorkspaceService({
       `${rgName}/UNLICENSE`,
       `${rgName}/COPYING`,
     ]);
-    const assets = {};
-    for (const name of ["daemon.mjs", "cli.mjs", "local-bootstrap.mjs", "guest-proxy.mjs"]) {
+    for (const name of [
+      "daemon.mjs",
+      "cli.mjs",
+      "local-bootstrap.mjs",
+      "guest-proxy.mjs",
+      "owner-renderer.mjs",
+      "extension-handler-host.mjs",
+    ]) {
       await copyFile(join(output, name), join(staging, "service", name));
-      assets[`service/${name}`] = await sha256(join(staging, "service", name));
     }
+    await packageOwnerDependencies({
+      directory: join(staging, "service"),
+      platform: "linux",
+      architecture,
+    });
+    await packageOwnerSupervisor(join(staging, "service"), architecture);
+    const assets = await ownerAssetDigests(join(staging, "service"), "service");
     await chmod(join(staging, "runtime/bin/node"), 0o755);
     assets["runtime/bin/node"] = await sha256(join(staging, "runtime/bin/node"));
     assets["runtime/LICENSE"] = await sha256(join(staging, "runtime/LICENSE"));
@@ -205,6 +223,7 @@ export async function packageWorkspaceService({
         join(output, `header-${architecture}.txt`),
         `${release} ${archiveSha256} ${architecture} ${receipt.size}\n`,
       );
+      await rm(join(output, "node-archives"), { recursive: true, force: true });
       return receipt;
     } finally {
       await rm(temporary, { force: true });

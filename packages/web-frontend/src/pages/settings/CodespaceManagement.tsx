@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   AlertCircle,
@@ -76,6 +76,10 @@ export type CodespaceManagementScope =
   { provider: "github-codespaces" } | { provider: "local-sandboxes"; computer: LocalDeviceView };
 
 type ResourceRequestError = { message: string; origin: CodespaceSummaryView };
+type RetainedOperation = {
+  requestId: string;
+  action: "create" | "start" | "stop" | "delete" | "adopt";
+};
 
 function errorStillCurrent(error: ResourceRequestError | undefined, current: CodespaceSummaryView) {
   if (!error) return false;
@@ -105,6 +109,11 @@ export function CodespaceManagement({ scope }: { scope: CodespaceManagementScope
   const provider = scope.provider;
   const computer = scope.provider === "local-sandboxes" ? scope.computer : null;
   const computerId = computer?.deviceId;
+  const localCapability =
+    computer?.owner.state === "available" && computer.owner.local.state === "configured"
+      ? computer.owner.local
+      : null;
+  const ownerUnavailable = computer?.owner.state === "unavailable";
   const regionId = computer
     ? `local-codespaces-${computer.deviceId}`
     : "github-codespace-management";
@@ -115,10 +124,14 @@ export function CodespaceManagement({ scope }: { scope: CodespaceManagementScope
   const accessEnabled =
     !computer ||
     (computer.status === "active" &&
-      computer.policy.enabled &&
-      computer.policy.leaseUntil > Date.now());
+      computer.owner.state === "available" &&
+      localCapability?.policy.enabled === true &&
+      localCapability.policy.leaseUntil > Date.now());
   const ownerDeleteEnabled =
-    !computer || (computer.status === "active" && computer.control?.optedIn === true);
+    !computer ||
+    (computer.status === "active" &&
+      computer.owner.state === "available" &&
+      localCapability?.control?.optedIn === true);
   const {
     management: view,
     managementLoading: loading,
@@ -129,18 +142,110 @@ export function CodespaceManagement({ scope }: { scope: CodespaceManagementScope
   const [repositoryId, setRepositoryId] = useState("");
   // Repository metadata has no default branch; require a ref instead of guessing one.
   const [ref, setRef] = useState("");
+  const [controllerId, setControllerId] = useState("");
+  const [devcontainerPath, setDevcontainerPath] = useState("");
+  const [providerName, setProviderName] = useState("");
+  const availableControllers = useMemo(
+    () => view?.controllers?.filter((entry) => entry.available) ?? [],
+    [view?.controllers],
+  );
+  useEffect(() => {
+    setControllerId((current) =>
+      view?.controllers?.some((entry) => entry.device_id === current && entry.available)
+        ? current
+        : availableControllers.length === 1
+          ? availableControllers[0].device_id
+          : "",
+    );
+  }, [view?.controllers, availableControllers]);
   const [creating, setCreating] = useState(false);
   const [busyCodespaces, setBusyCodespaces] = useState<Set<string>>(new Set());
   const [actionErrors, setActionErrors] = useState<
     Record<string, ResourceRequestError & { action: "start" | "stop" }>
   >({});
   const [createError, setCreateError] = useState<string | null>(null);
+  const [adopting, setAdopting] = useState(false);
+  const [adoptError, setAdoptError] = useState<{ message: string; target: string } | null>(null);
+  const [unconfirmedOperations, setUnconfirmedOperations] = useState<
+    Record<string, RetainedOperation>
+  >({});
+  const [operationOwners, setOperationOwners] = useState<Record<string, string>>({});
+  const pendingOperationIds = (target: string): string[] => {
+    const resource = view?.codespaces.find((entry) => entry.codespace_id === target);
+    return [
+      ...new Set([
+        ...(unconfirmedOperations[target] ? [unconfirmedOperations[target].requestId] : []),
+        ...(resource?.pending_request_ids ?? []),
+      ]),
+    ];
+  };
+  const hasUnconfirmedOperation = (target: string) => pendingOperationIds(target).length > 0;
+  const retainOperation = (
+    target: string,
+    requestId: string | undefined,
+    deviceId: string | undefined,
+    action: RetainedOperation["action"],
+  ) => {
+    if (requestId)
+      setUnconfirmedOperations((previous) => ({ ...previous, [target]: { requestId, action } }));
+    if (deviceId) setOperationOwners((previous) => ({ ...previous, [target]: deviceId }));
+  };
+  const unconfirmedFailure = (error: unknown) => {
+    const code = error && typeof error === "object" && "code" in error ? String(error.code) : "";
+    return ![
+      "CODESPACE_LOCAL_DELETE_APPROVAL_REQUIRED",
+      "CODESPACE_GENERATION_CONFLICT",
+      "CODESPACE_AUTHORIZATION_REQUIRED",
+      "CODESPACE_REQUEST_INVALID",
+      "CODESPACE_RESOURCE_INVALID",
+      "CODESPACE_PROVIDER_DISABLED",
+      "CODESPACE_PROVIDER_UNAVAILABLE",
+      "CODESPACE_LOCAL_SETUP_INCOMPLETE",
+      "LOCAL_UNAVAILABLE",
+    ].includes(code);
+  };
+  const collectOperation = async (target: string) => {
+    const requestIds = pendingOperationIds(target);
+    const deviceId =
+      computer?.deviceId ??
+      operationOwners[target] ??
+      view?.codespaces.find((entry) => entry.codespace_id === target)?.device_id;
+    if (!requestIds.length) return;
+    if (!deviceId || ownerUnavailable) throw new Error(t("localDevices.ownerUnavailable"));
+    const owned = guard(false);
+    let refused = false;
+    for (const requestId of requestIds) {
+      const receipt = await apiClient.getLocalControllerOperation(deviceId, requestId);
+      if (!owned()) return;
+      if (receipt.state !== "absent" && receipt.state !== "completed")
+        throw new Error(t("localDevices.editor.unconfirmed"));
+      if (receipt.outcome?.ok === false) refused = true;
+    }
+    setUnconfirmedOperations((previous) => {
+      const next = { ...previous };
+      delete next[target];
+      return next;
+    });
+    setActionErrors((previous) => {
+      const next = { ...previous };
+      delete next[target];
+      return next;
+    });
+    if (target === "create") setCreateError(null);
+    if (target === "adopt") setAdoptError(null);
+    if (!(await reloadManagement({ sync: true, silent: true }))) throw new Error(loadFailed);
+    if (refused) toast.error(t("localDevices.provisioning.failed"));
+  };
   const [checkingCodespaces, setCheckingCodespaces] = useState<Set<string>>(new Set());
   const [checkErrors, setCheckErrors] = useState<Record<string, ResourceRequestError>>({});
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [deleteNeedsRefresh, setDeleteNeedsRefresh] = useState(false);
   const checkState = async (codespace: CodespaceSummaryView, trigger?: HTMLButtonElement) => {
-    if (computer && codespace.desired_state === "deleted") {
+    if (
+      computer &&
+      codespace.desired_state === "deleted" &&
+      !hasUnconfirmedOperation(codespace.codespace_id)
+    ) {
       if (ownerDeleteEnabled) openDeleteDialog(codespace, trigger);
       return;
     }
@@ -153,30 +258,16 @@ export function CodespaceManagement({ scope }: { scope: CodespaceManagementScope
       return next;
     });
     try {
-      // A previously requested lifecycle intent must be retried through its existing endpoint;
-      // provider refresh only observes and cannot complete a pending stop/start/delete effect.
-      if (
-        accessEnabled &&
-        codespace.lifecycle_error !== "CODESPACE_LOCAL_SETUP_INCOMPLETE" &&
-        codespace.state !== "create_pending" &&
-        codespace.state !== "create_submitted"
-      ) {
-        const next =
-          codespace.desired_state === "deleted"
-            ? await apiClient.deleteGitHubCodespace(id, codespace.generation)
-            : codespace.desired_state === "stopped"
-              ? await apiClient.stopGitHubCodespace(id)
-              : await apiClient.startGitHubCodespace(id);
-        if (!owned()) return;
-        replaceCodespace(next);
-      } else {
-        const refreshed = await reloadManagement({ sync: true, silent: true });
-        if (owned() && !refreshed)
-          setCheckErrors((previous) => ({
-            ...previous,
-            [id]: { message: loadFailed, origin: codespace },
-          }));
+      if (hasUnconfirmedOperation(id)) {
+        await collectOperation(id);
+        return;
       }
+      const refreshed = await reloadManagement({ sync: true, silent: true, throwOnError: true });
+      if (owned() && !refreshed)
+        setCheckErrors((previous) => ({
+          ...previous,
+          [id]: { message: loadFailed, origin: codespace },
+        }));
     } catch (error) {
       if (owned())
         setCheckErrors((previous) => ({
@@ -200,6 +291,13 @@ export function CodespaceManagement({ scope }: { scope: CodespaceManagementScope
       return next;
     });
   const [pendingDelete, setPendingDelete] = useState<CodespaceSummaryView | null>(null);
+  const pendingDeleteCollectOnly = Boolean(
+    pendingDelete &&
+    hasUnconfirmedOperation(pendingDelete.codespace_id) &&
+    (computer ||
+      pendingDelete.desired_state === "deleted" ||
+      unconfirmedOperations[pendingDelete.codespace_id]?.action === "delete"),
+  );
   const deleteDecision = useRef(0);
   // The element that opened the destructive dialog; focus returns to it after closing.
   const deleteTriggerRef = useRef<HTMLButtonElement | null>(null);
@@ -300,24 +398,39 @@ export function CodespaceManagement({ scope }: { scope: CodespaceManagementScope
   const create = async () => {
     if (
       !repositoryId ||
+      hasUnconfirmedOperation("create") ||
       !accessEnabled ||
       !ref.trim() ||
       !availableRepositories?.some((repository) => repository.repository_id === repositoryId)
     )
       return;
     const owned = guard(false);
+    const requestId = `ws1-${crypto.randomUUID()}`;
+    const deviceId = computer?.deviceId ?? controllerId;
+    if (!deviceId) return;
     try {
       setCreating(true);
       setCreateError(null);
       const codespace = await apiClient.createGitHubCodespace({
         repository_id: repositoryId,
         ref: ref.trim(),
+        request_id: requestId,
+        ...(!computer
+          ? {
+              device_id: deviceId,
+              ...(devcontainerPath.trim() ? { devcontainer_path: devcontainerPath.trim() } : {}),
+            }
+          : {}),
       });
       if (!owned()) return;
       replaceCodespace(codespace);
+      if (codespace.state !== "usable")
+        retainOperation(codespace.codespace_id, requestId, deviceId, "create");
       if (codespace.state === "usable") toast.success(t("pages.settings.codespaces.created"));
       else toast(t("localDevices.codespaces.requestAccepted"));
     } catch (error) {
+      if (owned() && unconfirmedFailure(error))
+        retainOperation("create", requestId, deviceId, "create");
       if (owned()) setCreateError(failureMessage(error));
     } finally {
       if (owned()) setCreating(false);
@@ -331,6 +444,15 @@ export function CodespaceManagement({ scope }: { scope: CodespaceManagementScope
     )
       return;
     const owned = guard(false);
+    const retainedAction = unconfirmedOperations[codespace.codespace_id]?.action;
+    const explicitGitHubStop =
+      !computer &&
+      action === "stop" &&
+      ["usable", "create_pending", "create_submitted", "start_pending"].includes(codespace.state) &&
+      retainedAction !== "stop" &&
+      retainedAction !== "delete";
+    if (hasUnconfirmedOperation(codespace.codespace_id) && !explicitGitHubStop) return;
+    const requestId = `ws1-${crypto.randomUUID()}`;
     try {
       markBusy(codespace.codespace_id, true);
       setActionErrors((previous) => {
@@ -340,11 +462,26 @@ export function CodespaceManagement({ scope }: { scope: CodespaceManagementScope
       });
       const next =
         action === "start"
-          ? await apiClient.startGitHubCodespace(codespace.codespace_id)
-          : await apiClient.stopGitHubCodespace(codespace.codespace_id);
+          ? await apiClient.startGitHubCodespace(
+              codespace.codespace_id,
+              requestId,
+              codespace.generation,
+            )
+          : await apiClient.stopGitHubCodespace(
+              codespace.codespace_id,
+              requestId,
+              codespace.generation,
+            );
       if (!owned()) return;
       replaceCodespace(next);
       const completed = action === "start" ? next.state === "usable" : next.state === "stopped";
+      if (!completed)
+        retainOperation(
+          codespace.codespace_id,
+          requestId,
+          computer?.deviceId ?? codespace.device_id,
+          action,
+        );
       if (completed)
         toast.success(
           t(
@@ -355,6 +492,13 @@ export function CodespaceManagement({ scope }: { scope: CodespaceManagementScope
         );
       else toast(t("localDevices.codespaces.requestAccepted"));
     } catch (error) {
+      if (owned() && unconfirmedFailure(error))
+        retainOperation(
+          codespace.codespace_id,
+          requestId,
+          computer?.deviceId ?? codespace.device_id,
+          action,
+        );
       if (owned())
         setActionErrors((previous) => ({
           ...previous,
@@ -362,6 +506,47 @@ export function CodespaceManagement({ scope }: { scope: CodespaceManagementScope
         }));
     } finally {
       if (owned()) markBusy(codespace.codespace_id, false);
+    }
+  };
+
+  const adopt = async (codespace?: CodespaceSummaryView) => {
+    const target = codespace?.codespace_id ?? "adopt";
+    if (
+      !controllerId ||
+      adopting ||
+      hasUnconfirmedOperation(target) ||
+      (!codespace && !providerName.trim())
+    )
+      return;
+    const owned = guard(false);
+    const requestId = `ws1-${crypto.randomUUID()}`;
+    try {
+      setAdopting(true);
+      setAdoptError(null);
+      const next = await apiClient.adoptGitHubCodespace(
+        codespace
+          ? {
+              codespace_id: codespace.codespace_id,
+              expected_generation: codespace.generation,
+              request_id: requestId,
+              device_id: controllerId,
+            }
+          : {
+              provider_resource_name: providerName.trim(),
+              request_id: requestId,
+              device_id: controllerId,
+            },
+      );
+      if (!owned()) return;
+      replaceCodespace(next);
+      if (next.state !== "usable")
+        retainOperation(next.codespace_id, requestId, controllerId, "adopt");
+    } catch (error) {
+      if (!owned()) return;
+      if (unconfirmedFailure(error)) retainOperation(target, requestId, controllerId, "adopt");
+      setAdoptError({ message: failureMessage(error), target });
+    } finally {
+      if (owned()) setAdopting(false);
     }
   };
 
@@ -395,19 +580,39 @@ export function CodespaceManagement({ scope }: { scope: CodespaceManagementScope
 
   const remove = async () => {
     if (!pendingDelete || deleteNeedsRefresh || !ownerDeleteEnabled) return;
+    if (pendingDeleteCollectOnly) {
+      await collectOperation(pendingDelete.codespace_id);
+      return;
+    }
     const owned = guard(false);
+    const requestId = `ws1-${crypto.randomUUID()}`;
     try {
       markBusy(pendingDelete.codespace_id, true);
       setDeleteError(null);
       const next = await apiClient.deleteGitHubCodespace(
         pendingDelete.codespace_id,
         pendingDelete.generation,
+        requestId,
       );
       if (!owned()) return;
       replaceCodespace(next);
+      if (next.state !== "deleted")
+        retainOperation(
+          next.codespace_id,
+          requestId,
+          computer?.deviceId ?? next.device_id,
+          "delete",
+        );
       if (next.state === "deleted") toast.success(t("pages.settings.codespaces.deleted"));
       else toast(t("localDevices.codespaces.requestAccepted"));
     } catch (error) {
+      if (owned() && unconfirmedFailure(error))
+        retainOperation(
+          pendingDelete.codespace_id,
+          requestId,
+          computer?.deviceId ?? pendingDelete.device_id,
+          "delete",
+        );
       if (owned()) {
         setDeleteError(failureMessage(error));
         // The refusal settles confirmation immediately; a read for a safe retry is independent.
@@ -449,7 +654,7 @@ export function CodespaceManagement({ scope }: { scope: CodespaceManagementScope
   }
 
   const selectedProvider = view.providers?.find((entry) => entry.provider === provider);
-  const { readiness, connection, limits } = selectedProvider ?? view;
+  const { readiness, connection } = selectedProvider ?? view;
   const repositoriesStale = selectedProvider?.repositories_stale ?? view.repositories_stale;
   const resourcesStale = selectedProvider?.resources_stale ?? view.resources_stale;
   const codespaces = view.codespaces.filter(
@@ -459,7 +664,12 @@ export function CodespaceManagement({ scope }: { scope: CodespaceManagementScope
   );
   const ready = readiness.state === "ready";
   const connected = connection.state === "connected";
-  const canCreate = ready && connected && accessEnabled && (availableRepositories?.length ?? 0) > 0;
+  const canCreate =
+    ready &&
+    connected &&
+    accessEnabled &&
+    (availableRepositories?.length ?? 0) > 0 &&
+    (computer !== null || controllerId !== "");
   const formatDate = (value: number) => new Date(value).toLocaleString(i18n.language);
 
   return (
@@ -497,7 +707,11 @@ export function CodespaceManagement({ scope }: { scope: CodespaceManagementScope
         <DataRegion
           hasResult
           pending={loading || refreshing}
-          error={refreshError ?? (loadError ? loadFailed : null)}
+          error={
+            ownerUnavailable
+              ? t("localDevices.ownerUnavailable")
+              : (refreshError ?? (loadError ? loadFailed : null))
+          }
           onRetry={computer ? refreshList : () => load()}
           testId={computer ? `${regionId}-region` : "github-management-region"}
         >
@@ -577,6 +791,38 @@ export function CodespaceManagement({ scope }: { scope: CodespaceManagementScope
             </Alert>
           )}
 
+          {!computer && connected && (
+            <div className="space-y-2">
+              <Label htmlFor={`${formId}-controller`}>
+                {t("localDevices.provisioning.controller")}
+              </Label>
+              <Select
+                value={controllerId}
+                onValueChange={setControllerId}
+                disabled={
+                  creating ||
+                  adopting ||
+                  hasUnconfirmedOperation("create") ||
+                  hasUnconfirmedOperation("adopt")
+                }
+              >
+                <SelectTrigger id={`${formId}-controller`}>
+                  <SelectValue placeholder={t("localDevices.provisioning.select")} />
+                </SelectTrigger>
+                <SelectContent>
+                  {availableControllers.map((entry) => (
+                    <SelectItem key={entry.device_id} value={entry.device_id}>
+                      {entry.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {availableControllers.length === 0 && (
+                <p role="status">{t("localDevices.provisioning.unavailable")}</p>
+              )}
+            </div>
+          )}
+
           {canCreate && (
             <form
               className="grid gap-3 rounded-md border p-3 sm:grid-cols-[1fr_minmax(0,12rem)_auto]"
@@ -618,32 +864,90 @@ export function CodespaceManagement({ scope }: { scope: CodespaceManagementScope
               <div className="flex items-end">
                 <Button
                   type="submit"
-                  disabled={creating || !repositoryId || !ref.trim()}
+                  disabled={
+                    creating || !repositoryId || !ref.trim() || hasUnconfirmedOperation("create")
+                  }
                   data-testid={`${formId}-create-submit`}
                 >
                   {creating && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                   {t("pages.settings.codespaces.create")}
                 </Button>
               </div>
+              {!computer && (
+                <div className="space-y-1 sm:col-span-3">
+                  <Label htmlFor={`${formId}-configuration`}>
+                    {t("localDevices.provisioning.configuration")}
+                  </Label>
+                  <Input
+                    id={`${formId}-configuration`}
+                    value={devcontainerPath}
+                    onChange={(event) => setDevcontainerPath(event.target.value)}
+                  />
+                </div>
+              )}
               <p className="text-xs text-muted-foreground sm:col-span-3">
                 {t(
                   provider === "local-sandboxes"
                     ? "localDevices.createHint"
-                    : "pages.settings.codespaces.createHint",
-                  {
-                    held: limits.codespaces.held,
-                    max: limits.codespaces.max_per_user,
-                  },
+                    : "localDevices.provisioning.hint",
                 )}
               </p>
             </form>
+          )}
+
+          {!computer && connected && controllerId && (
+            <form
+              className="space-y-2 rounded-md border p-3"
+              onSubmit={(event) => {
+                event.preventDefault();
+                void adopt();
+              }}
+            >
+              <Label htmlFor={`${formId}-existing`}>
+                {t("localDevices.provisioning.existingName")}
+              </Label>
+              <Input
+                id={`${formId}-existing`}
+                value={providerName}
+                onChange={(event) => setProviderName(event.target.value)}
+                required
+              />
+              <Button
+                type="submit"
+                disabled={adopting || !providerName.trim() || hasUnconfirmedOperation("adopt")}
+              >
+                {t("localDevices.provisioning.adopt")}
+              </Button>
+            </form>
+          )}
+          {adoptError && (
+            <InlineError
+              title={t("pages.settings.codespaces.requestFailed")}
+              message={adoptError.message}
+              onRetry={() =>
+                hasUnconfirmedOperation(adoptError.target)
+                  ? void collectOperation(adoptError.target).catch(() =>
+                      setAdoptError({
+                        ...adoptError,
+                        message: t("localDevices.provisioning.unconfirmed"),
+                      }),
+                    )
+                  : void refreshList()
+              }
+            />
           )}
 
           {createError && (
             <InlineError
               title={t("pages.settings.codespaces.requestFailed")}
               message={createError}
-              onRetry={() => void create()}
+              onRetry={() =>
+                hasUnconfirmedOperation("create")
+                  ? void collectOperation("create")
+                      .then(() => setCreateError(null))
+                      .catch(() => setCreateError(t("localDevices.editor.unconfirmed")))
+                  : void create()
+              }
             />
           )}
           {!accessEnabled && (
@@ -677,6 +981,7 @@ export function CodespaceManagement({ scope }: { scope: CodespaceManagementScope
                   busyCodespaces.has(codespace.codespace_id) ||
                   checkingCodespaces.has(codespace.codespace_id) ||
                   !accessEnabled;
+                const outcomeUnconfirmed = hasUnconfirmedOperation(codespace.codespace_id);
                 const requestBusy =
                   busyCodespaces.has(codespace.codespace_id) ||
                   checkingCodespaces.has(codespace.codespace_id);
@@ -724,7 +1029,9 @@ export function CodespaceManagement({ scope }: { scope: CodespaceManagementScope
                                 ? "localDevices.localProviderLine"
                                 : "pages.settings.codespaces.providerLine",
                               {
-                                machine: codespace.machine.display_name,
+                                machine:
+                                  codespace.machine?.display_name ??
+                                  t("pages.settings.codespaces.details.unknown"),
                               },
                             )}
                           </p>
@@ -744,13 +1051,15 @@ export function CodespaceManagement({ scope }: { scope: CodespaceManagementScope
                           : t(`pages.settings.codespaces.states.${codespace.state}`)}
                       </Badge>
                     </div>
-                    <p className="mt-2 text-xs text-muted-foreground">
-                      {t("localDevices.codespaces.resources", {
-                        cpu: codespace.machine.cpu_cores,
-                        memory: codespace.machine.memory_bytes / 1024 ** 3,
-                      })}
-                    </p>
-                    {!computer && (
+                    {codespace.machine && (
+                      <p className="mt-2 text-xs text-muted-foreground">
+                        {t("localDevices.codespaces.resources", {
+                          cpu: codespace.machine.cpu_cores,
+                          memory: codespace.machine.memory_bytes / 1024 ** 3,
+                        })}
+                      </p>
+                    )}
+                    {!computer && codespace.machine && (
                       <p className="text-xs text-muted-foreground">
                         {t("localDevices.codespaces.disk", {
                           storage: codespace.machine.storage_bytes / 1024 ** 3,
@@ -777,16 +1086,24 @@ export function CodespaceManagement({ scope }: { scope: CodespaceManagementScope
                       />
                     )}
                     <div className="mt-3 flex flex-wrap items-center gap-2">
-                      {(errorMessage || (computer && BUSY_STATES.has(codespace.state))) && (
+                      {!computer && codespace.state !== "usable" && !outcomeUnconfirmed && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={requestBusy || adopting || !controllerId}
+                          onClick={() => void adopt(codespace)}
+                        >
+                          {t("localDevices.provisioning.adopt")}
+                        </Button>
+                      )}
+                      {(errorMessage ||
+                        outcomeUnconfirmed ||
+                        (computer && BUSY_STATES.has(codespace.state))) && (
                         <Button
                           size="sm"
                           variant="outline"
                           disabled={requestBusy}
-                          onClick={(event) =>
-                            actionError && !setupIncomplete
-                              ? void lifecycle(codespace, actionError.action)
-                              : void checkState(codespace, event.currentTarget)
-                          }
+                          onClick={(event) => void checkState(codespace, event.currentTarget)}
                           data-testid={`codespace-reconcile-${codespace.codespace_id}`}
                         >
                           {checkingCodespaces.has(codespace.codespace_id) && (
@@ -799,7 +1116,7 @@ export function CodespaceManagement({ scope }: { scope: CodespaceManagementScope
                         <Button
                           size="sm"
                           variant="outline"
-                          disabled={busy || setupIncomplete}
+                          disabled={busy || setupIncomplete || outcomeUnconfirmed}
                           onClick={() => void lifecycle(codespace, "start")}
                           data-testid={`github-codespace-start-${codespace.codespace_id}`}
                         >
@@ -807,11 +1124,23 @@ export function CodespaceManagement({ scope }: { scope: CodespaceManagementScope
                           {t("pages.settings.codespaces.start")}
                         </Button>
                       )}
-                      {codespace.state === "usable" && (
+                      {(codespace.state === "usable" ||
+                        (!computer &&
+                          ["create_pending", "create_submitted", "start_pending"].includes(
+                            codespace.state,
+                          ))) && (
                         <Button
                           size="sm"
                           variant="outline"
-                          disabled={busy}
+                          disabled={
+                            computer
+                              ? busy || outcomeUnconfirmed
+                              : requestBusy ||
+                                !accessEnabled ||
+                                ["stop", "delete"].includes(
+                                  unconfirmedOperations[codespace.codespace_id]?.action ?? "",
+                                )
+                          }
                           onClick={() => void lifecycle(codespace, "stop")}
                           data-testid={`github-codespace-stop-${codespace.codespace_id}`}
                         >
@@ -822,7 +1151,11 @@ export function CodespaceManagement({ scope }: { scope: CodespaceManagementScope
                       <Button
                         size="sm"
                         variant="destructive"
-                        disabled={requestBusy || !ownerDeleteEnabled}
+                        disabled={
+                          requestBusy ||
+                          !ownerDeleteEnabled ||
+                          (computer !== null && outcomeUnconfirmed)
+                        }
                         onClick={(event) => {
                           openDeleteDialog(codespace, event.currentTarget);
                         }}
@@ -904,7 +1237,11 @@ export function CodespaceManagement({ scope }: { scope: CodespaceManagementScope
         description={t("pages.settings.codespaces.confirmDeleteDescription", {
           repository: pendingDelete?.repository ?? "",
         })}
-        confirmLabel={t("pages.settings.codespaces.delete")}
+        confirmLabel={t(
+          pendingDeleteCollectOnly
+            ? "localDevices.codespaces.reconcile"
+            : "pages.settings.codespaces.delete",
+        )}
         cancelLabel={t("common.cancel")}
         variant="destructive"
         onConfirm={remove}

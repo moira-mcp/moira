@@ -14,7 +14,6 @@ import { McpPromptsEditor } from "../../../packages/web-frontend/src/components/
 import { AdminSettingsUnified } from "../../../packages/web-frontend/src/pages/AdminSettingsUnified";
 import { AdminCodespaceControls } from "../../../packages/web-frontend/src/pages/AdminCodespaceControls";
 import { MemoryRouter, useLocation } from "react-router-dom";
-import { toast } from "sonner";
 import {
   observeReadSession,
   suspendReadSession,
@@ -516,115 +515,63 @@ test("the global-settings alias still opens values without an explicit tab", asy
   );
 });
 
-const controls: Awaited<ReturnType<typeof apiClient.getAdminCodespaces>> = {
-  controls: [{ scope: "global", disabled: false, reason: null, updated_at: null }],
+const codespaceStatus: Awaited<ReturnType<typeof apiClient.getAdminCodespaces>> = {
   readiness: {
     state: "ready",
     reason: null,
     provider: "github-codespaces",
     configuration: "available",
     resources_enabled: true,
-    controls: [{ scope: "global", disabled: false, reason: null, updated_at: null }],
-    connector: { state: "available", reason: null },
-    reconciliation: { due_resources: 0, oldest_due_age_ms: null },
-    usage: {
-      active_resources: 0,
-      max_active_resources: 4,
-    },
     checked_at: 1,
   },
 };
 
-function twoControls(disabled: boolean): typeof controls {
-  const rows = (["global", "provider:github-codespaces"] as const).map((scope) => ({
-    scope,
-    disabled,
-    reason: null,
-    updated_at: null,
-  }));
-  return { controls: rows, readiness: { ...controls.readiness, controls: rows } };
-}
-
-test("reversed independent codespace mutation responses reread authority without reverting a neighbour or its new draft", async () => {
-  const first = deferred<typeof controls>();
-  const second = deferred<typeof controls>();
-  const accepted = twoControls(false);
-  const staleFirst = twoControls(true);
-  staleFirst.controls[0]!.disabled = false;
+test("codespace configuration refresh retains the last confirmed observation through failure and retry", async () => {
+  const next = deferred<typeof codespaceStatus>();
   const get = jest
     .spyOn(apiClient, "getAdminCodespaces")
-    .mockResolvedValueOnce(twoControls(true))
-    .mockResolvedValue(accepted);
-  jest
-    .spyOn(apiClient, "setAdminCodespaceControl")
-    .mockImplementation((scope) => (scope === "global" ? first.promise : second.promise));
+    .mockResolvedValueOnce(codespaceStatus)
+    .mockImplementationOnce(() => next.promise)
+    .mockResolvedValue({
+      readiness: { ...codespaceStatus.readiness, state: "disabled", resources_enabled: false },
+    });
   show(<AdminCodespaceControls />);
-  await screen.findByTestId("admin-codespace-enable-global");
-  const neighbour = screen.getByTestId("admin-codespace-control-provider-github-codespaces");
-  const input = within(neighbour).getByRole("textbox");
-  fireEvent.click(screen.getByTestId("admin-codespace-enable-global"));
-  expect(screen.getByTestId("admin-codespace-enable-provider-github-codespaces")).toBeEnabled();
-  fireEvent.click(screen.getByTestId("admin-codespace-enable-provider-github-codespaces"));
-  fireEvent.change(input, { target: { value: "new neighbour draft" } });
-  input.focus();
-  await act(async () => second.resolve(accepted));
-  await waitFor(() => expect(get).toHaveBeenCalledTimes(2));
-  expect(screen.getByTestId("admin-codespace-disable-global")).toBeDisabled();
-  expect(screen.getByTestId("admin-codespace-disable-provider-github-codespaces")).toBeEnabled();
-  await act(async () => first.resolve(staleFirst));
+  expect(await screen.findByTestId("admin-codespace-readiness-state")).toHaveTextContent("Ready");
+  expect(screen.queryByRole("textbox")).toBeNull();
+  expect(screen.queryByTestId("admin-codespace-disable-global")).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: i18n.t("admin.codespaces.refresh") }));
+  expect(screen.getByTestId("admin-codespace-readiness-state")).toHaveTextContent("Ready");
+  await act(async () => next.reject(new Error("unavailable")));
+  expect(await screen.findByText(i18n.t("admin.codespaces.loadFailed"))).toBeInTheDocument();
+  expect(screen.getByTestId("admin-codespace-readiness-state")).toHaveTextContent("Ready");
+  fireEvent.click(screen.getByRole("button", { name: i18n.t("common.dataRegion.retry") }));
   await waitFor(() => expect(get).toHaveBeenCalledTimes(3));
-  expect(
-    screen.getByTestId("admin-codespace-control-state-provider-github-codespaces"),
-  ).toHaveTextContent(i18n.t("admin.codespaces.accepting"));
-  expect(screen.getByTestId("admin-codespace-disable-global")).toBeEnabled();
-  expect(within(neighbour).getByRole("textbox")).toBe(input);
-  expect(input).toHaveValue("new neighbour draft");
-  expect(input).toHaveFocus();
+  await waitFor(() =>
+    expect(screen.getByTestId("admin-codespace-readiness-state")).toHaveTextContent(
+      i18n.t("admin.codespaces.states.disabled"),
+    ),
+  );
 });
 
 test.each(["owner", "unmount", "suspend"] as const)(
-  "late codespace mutation after %s produces no global toast",
+  "late codespace configuration observation after %s cannot publish retired authority",
   async (retirement) => {
     observeReadSession("settings-admin", "settings-session");
-    const next = deferred<typeof controls>();
-    const get = jest.spyOn(apiClient, "getAdminCodespaces").mockResolvedValue(twoControls(true));
-    jest.spyOn(apiClient, "setAdminCodespaceControl").mockImplementation(() => next.promise);
-    const success = jest.spyOn(toast, "success");
-    const error = jest.spyOn(toast, "error");
+    const next = deferred<typeof codespaceStatus>();
+    const get = jest.spyOn(apiClient, "getAdminCodespaces").mockImplementation(() => next.promise);
     const view = show(<AdminCodespaceControls />);
-    fireEvent.click(await screen.findByTestId("admin-codespace-enable-global"));
-    if (retirement === "owner") observeReadSession("replacement-admin", "replacement-session");
-    else if (retirement === "unmount") view.unmount();
-    else suspendReadSession();
-    await act(async () => next.resolve(twoControls(false)));
-    expect(success).not.toHaveBeenCalled();
-    expect(error).not.toHaveBeenCalled();
-    if (retirement !== "suspend") expect(get).toHaveBeenCalledTimes(1);
-    observeReadSession(null, null);
+    try {
+      await waitFor(() => expect(get).toHaveBeenCalledTimes(1));
+      if (retirement === "owner") observeReadSession("replacement-admin", "replacement-session");
+      else if (retirement === "unmount") view.unmount();
+      else suspendReadSession();
+      await act(async () => next.resolve(codespaceStatus));
+      expect(screen.queryByTestId("admin-codespace-readiness-state")).toBeNull();
+    } finally {
+      observeReadSession(null, null);
+    }
   },
 );
-
-test("codespace refresh retains the reason field and its draft through failure and retry", async () => {
-  const next = deferred<typeof controls>();
-  jest
-    .spyOn(apiClient, "getAdminCodespaces")
-    .mockResolvedValueOnce(controls)
-    .mockImplementationOnce(() => next.promise)
-    .mockResolvedValue(controls);
-  show(<AdminCodespaceControls />);
-  await screen.findByTestId("admin-codespace-control-global");
-  const input = screen.getByLabelText(i18n.t("admin.codespaces.reasonLabel"));
-  fireEvent.change(input, { target: { value: "planned maintenance" } });
-  input.focus();
-  fireEvent.click(screen.getByRole("button", { name: i18n.t("admin.codespaces.refresh") }));
-  expect(screen.getByLabelText(i18n.t("admin.codespaces.reasonLabel"))).toBe(input);
-  expect(input).toHaveFocus();
-  await act(async () => next.reject(new Error("unavailable")));
-  expect(input).toHaveValue("planned maintenance");
-  fireEvent.click(screen.getByRole("button", { name: i18n.t("common.dataRegion.retry") }));
-  await waitFor(() => expect(apiClient.getAdminCodespaces).toHaveBeenCalledTimes(3));
-  expect(input).toHaveValue("planned maintenance");
-});
 
 test("a refused prompt read is an error with retry rather than an empty editable value", async () => {
   jest

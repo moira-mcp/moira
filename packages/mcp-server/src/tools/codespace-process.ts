@@ -5,17 +5,9 @@ import {
   codespaceToolLogContext,
   errorResult,
   getCodespaceToolServices,
-  type CodespaceCall,
   type CodespaceToolServices,
 } from "./manage-codespaces.js";
-import {
-  executeWorkspaceAction,
-  readWorkspaceBytes,
-  workspaceQuery,
-  workspaceResult,
-  workspaceFailure,
-  workspaceCommandStatus,
-} from "./codespace-workspace.js";
+import { executeWorkspaceAction } from "./codespace-workspace.js";
 import {
   CODESPACE_PROCESS_ACTION_REQUEST_SCHEMAS,
   type CodespaceProcessAction,
@@ -50,57 +42,11 @@ export async function executeCodespaceProcess(
   userId: string,
   initial: CodespaceToolServices,
 ): Promise<CallToolResult> {
-  const id = call.request.codespace_id;
-  const client = initial.workspace;
-  try {
-    if (call.action === "start") {
-      const result = await executeWorkspaceAction(
-        { action: "exec", request: call.request } as CodespaceCall,
-        userId,
-        client,
-        { background: true, attachments: initial.attachments },
-      );
-      return workspaceResult({ ...result.structuredContent, process_id: call.request.request_id });
-    }
-    const requestId =
-      "request_id" in call.request ? call.request.request_id : call.request.process_id;
-    if (call.action === "read") {
-      const request = call.request;
-      const response = await client.request(userId, id, {
-        method: "GET",
-        path: `/v1/operations/${requestId}/output?${workspaceQuery({ stream: request.stream, offset: request.offset, length: request.length })}`,
-      });
-      const bytes = await readWorkspaceBytes(response, request.length);
-      return workspaceResult({
-        process_id: requestId,
-        stream: request.stream,
-        offset: request.offset,
-        total_bytes: Number(response.headers["x-moira-total-size"] ?? bytes.length),
-        text: bytes.toString("utf8"),
-      });
-    }
-    const data = await client.json(userId, id, {
-      method: call.action === "stop" ? "POST" : "GET",
-      path: `/v1/operations/${requestId}${call.action === "stop" ? "/cancel" : ""}`,
-    });
-    return workspaceResult({
-      ...workspaceCommandStatus(data),
-      process_id: requestId,
-      request_id: requestId,
-    });
-  } catch (error) {
-    const requestId =
-      "request_id" in call.request
-        ? call.request.request_id
-        : "process_id" in call.request
-          ? call.request.process_id
-          : undefined;
-    const failure = workspaceFailure(error, requestId);
-    return workspaceResult({
-      ...failure.structuredContent,
-      ...(requestId ? { process_id: requestId } : {}),
-    });
-  }
+  return executeWorkspaceAction(
+    { action: `process_${call.action}`, request: call.request },
+    userId,
+    initial.workspace,
+  );
 }
 
 export async function manageCodespaceProcess(params: unknown): Promise<CallToolResult> {

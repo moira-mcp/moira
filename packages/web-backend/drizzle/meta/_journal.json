@@ -435,6 +435,41 @@
       "when": 1791918000000,
       "tag": "0060_workspace_agent_auth",
       "breakpoints": true
+    },
+    {
+      "idx": 62,
+      "version": "7",
+      "when": 1792004400000,
+      "tag": "0061_local_controller_authority",
+      "breakpoints": true
+    },
+    {
+      "idx": 63,
+      "version": "7",
+      "when": 1792011600000,
+      "tag": "0062_scoped_credential_custody",
+      "breakpoints": true
+    },
+    {
+      "idx": 64,
+      "version": "7",
+      "when": 1792018800000,
+      "tag": "0063_github_controller_authority",
+      "breakpoints": true
+    },
+    {
+      "idx": 65,
+      "version": "7",
+      "when": 1792026000000,
+      "tag": "0064_local_resource_identity",
+      "breakpoints": true
+    },
+    {
+      "idx": 66,
+      "version": "7",
+      "when": 1792112400000,
+      "tag": "0065_owner_communication",
+      "breakpoints": true
     }
   ]
 }

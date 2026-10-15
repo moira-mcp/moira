@@ -283,7 +283,6 @@ async function main(): Promise<void> {
 
       const controller = new AbortController();
       inFlight.set(id, controller);
-      const attachment = request.communication.message.attachment;
       const channelServices = createServices(
         manifest,
         request,
@@ -303,16 +302,6 @@ async function main(): Promise<void> {
             text: request.communication.message.text,
             format: request.communication.message.format,
             silent: request.communication.message.silent,
-            ...(attachment
-              ? {
-                  attachment: {
-                    kind: attachment.kind,
-                    bytes: Uint8Array.from(Buffer.from(attachment.data, "base64")),
-                    filename: attachment.filename,
-                    mimeType: attachment.mimeType,
-                  },
-                }
-              : {}),
           },
           settings: (request.communication.settings ?? {}) as JsonObject,
           signal: controller.signal,

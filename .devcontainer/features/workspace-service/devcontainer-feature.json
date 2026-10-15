@@ -4,5 +4,6 @@
   "name": "Moira workspace service",
   "description": "Installs the workspace service and CLI with their own verified Node.js and ripgrep runtime.",
   "options": {},
+  "postStartCommand": "$HOME/.local/bin/moira-workspace-service",
   "installsAfter": ["ghcr.io/devcontainers/features/common-utils"]
 }

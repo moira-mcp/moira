@@ -4,6 +4,8 @@ import { zodToJsonSchema } from "zod-to-json-schema";
 import { AWAITING_USER_LIMITS } from "@mcp-moira/workflow-engine/awaiting-user";
 import { EXECUTION_TASK_TITLE_LIMIT } from "@mcp-moira/shared/execution-task-identity";
 import { WORKSPACE_REQUEST_ID_PATTERN } from "@mcp-moira/shared/workspace-request-id";
+import { controllerRequestIdSchema } from "@mcp-moira/shared/local-controller-protocol";
+import { communicationOwnerReferenceSchema } from "@mcp-moira/shared/communication-owner-protocol";
 import { progressAuthoringSchema } from "../schemas/progress-authoring.js";
 
 export const listWorkflowsSchema = z.object({
@@ -223,6 +225,13 @@ export const manageWorkflowHandlerSchema = manageWorkflowSchema.extend({
 });
 
 export const getSessionInfoHandlerSchema = z.object({
+  device_id: z
+    .string()
+    .uuid()
+    .optional()
+    .describe(
+      "Selected paired controller for progress-image-token; omit only when exactly one live controller is eligible",
+    ),
   action: z
     .enum([
       "user",
@@ -602,56 +611,6 @@ export const tokenSchema = z.object({
     .describe("Token expiration time in minutes (default: 60)"),
 });
 
-const communicationFilename = z
-  .string()
-  .min(1)
-  .max(255)
-  .refine(
-    (value) =>
-      !value.includes("/") &&
-      !value.includes("\\") &&
-      [...value].every((character) => {
-        const code = character.charCodeAt(0);
-        return code >= 32 && code !== 127;
-      }),
-    "Filename must not contain paths or control characters",
-  );
-const communicationMimeType = z
-  .string()
-  .max(127)
-  .regex(/^[a-z0-9][a-z0-9!#$&^_.+-]*\/[a-z0-9][a-z0-9!#$&^_.+-]*$/i);
-
-export const communicationSchema = z
-  .object({
-    action: z.enum(["send", "attachment-token", "deliver-file"]),
-    message: z.string().min(1).max(4096),
-    format: z.enum(["plain", "markdown", "html"]).optional(),
-    silent: z.boolean().optional(),
-    kind: z.enum(["image", "document"]).optional(),
-    filename: communicationFilename.optional(),
-    mimeType: communicationMimeType.optional(),
-    sizeBytes: z
-      .number()
-      .int()
-      .min(1)
-      .max(20 * 1024 * 1024)
-      .optional(),
-    referenceId: z
-      .string()
-      .regex(/^codespace-file:\/\/[A-Za-z0-9_-]{43}$/)
-      .optional()
-      .describe("Owned ready private file reference for explicit deliver-file"),
-    channelId: z
-      .string()
-      .max(128)
-      .regex(/^[a-z0-9][a-z0-9._-]*$/)
-      .optional()
-      .describe(
-        "Deliver-file only: one configured channel, or omit for ordinary configured-channel delivery",
-      ),
-  })
-  .strict();
-
 const codespaceIdSchema = z.string().uuid().describe("Persistent codespace ID");
 const codespacePathSchema = z.string().min(1).max(4096).describe("Repository-relative path");
 const codespaceSha256Schema = z.string().regex(/^[a-f0-9]{64}$/);
@@ -694,7 +653,51 @@ export const codespaceNativeFileSchema = z
     size_bytes: z.number().int().min(0).optional(),
   })
   .strict()
-  .describe("Native ChatGPT file reference; pass the attachment reference without base64");
+  .describe(
+    "Native ChatGPT reference acquired by the workspace owner; pass it without base64. Source refusal before admission is confirmed, not a lost accepted mutation",
+  );
+
+export const communicationSchema = z
+  .object({
+    action: z.enum(["send", "deliver-file", "operation"]),
+    message: z.string().max(4096).optional(),
+    format: z.enum(["plain", "markdown", "html"]).optional(),
+    silent: z.boolean().optional(),
+    kind: z.enum(["image", "document"]).optional(),
+    request_id: controllerRequestIdSchema
+      .optional()
+      .describe(
+        "Choose the original ws1 delivery identity before submission; collect it with operation after uncertainty, without resending",
+      ),
+    device_id: z
+      .string()
+      .uuid()
+      .optional()
+      .describe(
+        "Paired source controller; required when more than one live controller is eligible, and for its original operation collection",
+      ),
+    codespace_id: z
+      .string()
+      .uuid()
+      .optional()
+      .describe("Original workspace owner for operation collection"),
+    referenceId: communicationOwnerReferenceSchema
+      .optional()
+      .describe(
+        "Immutable owner-file:// workspace/controller reference from publication; bytes stay with that owner",
+      ),
+    file: codespaceNativeFileSchema
+      .optional()
+      .describe(
+        "Native ChatGPT file acquired directly by the selected paired owner, without cloud download",
+      ),
+    channelId: z
+      .string()
+      .regex(/^[a-z0-9][a-z0-9._-]*$/)
+      .optional()
+      .describe("One configured channel; omit to use configured eligible channels"),
+  })
+  .strict();
 
 const codespaceBinaryNativeFileSchema = codespaceNativeFileSchema.extend({
   size_bytes: z
@@ -729,6 +732,17 @@ export const codespaceSetupHelpSchema = z
   .strict();
 
 export const codespaceLocalDevicesSchema = z.object({}).strict();
+export const codespaceOperationSchema = z
+  .object({
+    device_id: z
+      .string()
+      .uuid()
+      .describe("Paired controller device ID from local_devices or resource discovery"),
+    request_id: controllerRequestIdSchema.describe(
+      "Original ws1 controller lifecycle/provisioning/settings request ID for either provider. Inspect even when create returned no codespace ID; collection never resubmits the effect",
+    ),
+  })
+  .strict();
 export const codespaceRepositoryAddSchema = z
   .object({
     device_id: z.string().uuid().describe("Owner-approved local device"),
@@ -769,19 +783,78 @@ export const codespaceCreateSchema = z
   .object({
     repository_id: z.string().min(1).max(255),
     ref: z.string().min(1).max(255),
+    request_id: controllerRequestIdSchema.describe(
+      "Choose a fresh ws1-<lowercase UUID> before creating either provider. After a lost reply use operation with the assigned device_id and this original ID",
+    ),
+    device_id: z
+      .string()
+      .uuid()
+      .optional()
+      .describe(
+        "GitHub provisioning controller; omit only when one live paired controller is eligible",
+      ),
+    devcontainer_path: z
+      .string()
+      .min(1)
+      .optional()
+      .describe("GitHub-only path to an existing repository devcontainer configuration"),
   })
   .strict();
 
 export const codespaceGetSchema = z.object({ codespace_id: codespaceIdSchema }).strict();
-export const codespaceStartSchema = codespaceGetSchema;
-export const codespaceStopSchema = codespaceGetSchema;
+export const codespaceStartSchema = codespaceGetSchema.extend({
+  generation: z
+    .number()
+    .int()
+    .positive()
+    .describe(
+      "Generation from the current get/list observation for either provider. Stale values are refused",
+    ),
+  request_id: controllerRequestIdSchema.describe(
+    "Fresh ws1-<lowercase UUID> chosen before start/stop. Recover with operation and the same ID instead of repeating the mutation",
+  ),
+});
+export const codespaceStopSchema = codespaceStartSchema;
 
 export const codespaceDeleteSchema = z
   .object({
     codespace_id: codespaceIdSchema,
     confirm_delete: z.literal(true).describe("Required explicit destructive confirmation"),
+    generation: z
+      .number()
+      .int()
+      .positive()
+      .describe("Observed generation from the current get/list for either provider"),
+    request_id: controllerRequestIdSchema.describe(
+      "Fresh ws1-<lowercase UUID> chosen before deletion; collect the original ID with operation after a lost reply",
+    ),
   })
   .strict();
+
+const codespaceAdoptionIdentity = {
+  request_id: controllerRequestIdSchema,
+  device_id: z.string().uuid().optional(),
+};
+export const codespaceAdoptSchema = z.union([
+  z
+    .object({
+      ...codespaceAdoptionIdentity,
+      codespace_id: codespaceIdSchema,
+      generation: z.number().int().positive(),
+    })
+    .strict(),
+  z
+    .object({
+      ...codespaceAdoptionIdentity,
+      provider_resource_name: z
+        .string()
+        .regex(/^[A-Za-z0-9][A-Za-z0-9-]*$/)
+        .describe(
+          "Exact owned GitHub Codespace name; provider identity is verified before registration",
+        ),
+    })
+    .strict(),
+]);
 
 const workspaceRequestIdSchema = z
   .string()
@@ -943,7 +1016,7 @@ export const codespaceUploadRequestSchema = z
   .object({
     codespace_id: codespaceIdSchema,
     request_id: workspaceRequestIdSchema.describe(
-      "Choose before upload; reuse with unchanged input to resume",
+      "Choose before upload; inspect this original identity after an uncertain reply. Accepted effects are not repeated and a rotating download URL does not change source identity",
     ),
     path: codespacePathSchema,
     file: codespaceBinaryNativeFileSchema,
@@ -955,7 +1028,14 @@ const codespaceDownloadStartSchema = z
   .object({
     codespace_id: codespaceIdSchema,
     path: codespacePathSchema,
-    max_bytes: z.number().int().min(1).optional(),
+    max_bytes: z
+      .number()
+      .int()
+      .min(1)
+      .optional()
+      .describe(
+        "Optional whole-file observation bound for download or image preview; no fixed owner preview quota",
+      ),
     file_name: codespaceFileNameSchema,
     mime_type: codespaceMimeTypeSchema,
   })
@@ -976,16 +1056,23 @@ export const codespacePreviewImageRequestSchema = codespaceDownloadStartSchema.o
   mime_type: true,
 });
 
-export const codespacePullRequestCreateSchema = z
+const codespacePullRequestSubmitSchema = z
   .object({
     codespace_id: codespaceIdSchema,
+    request_id: workspaceRequestIdSchema.describe(
+      "Choose before creating the PR; collect this original identity after an unconfirmed outcome",
+    ),
     head: gitBranchSchema.describe("Pushed branch in this codespace's approved repository"),
     base: gitBranchSchema.describe("Existing target branch in the same approved repository"),
-    title: z.string().trim().min(1).max(256),
-    body: z.string().max(65536).default(""),
+    title: z.string().trim().min(1),
+    body: z.string().default(""),
     draft: z.boolean().default(false),
   })
   .strict();
+export const codespacePullRequestCreateSchema = z.union([
+  codespacePullRequestSubmitSchema,
+  z.object({ codespace_id: codespaceIdSchema, request_id: workspaceRequestIdSchema }).strict(),
+]);
 export const codespacePullRequestGetSchema = z
   .object({
     codespace_id: codespaceIdSchema,
@@ -1002,6 +1089,7 @@ export const codespacePullRequestFindSchema = z
 
 export const CODESPACE_ACTION_REQUEST_SCHEMAS = {
   local_devices: codespaceLocalDevicesSchema,
+  operation: codespaceOperationSchema,
   repository_add: codespaceRepositoryAddSchema,
   repository_create: codespaceRepositoryCreateSchema,
   preview_image: codespacePreviewImageRequestSchema,
@@ -1012,6 +1100,7 @@ export const CODESPACE_ACTION_REQUEST_SCHEMAS = {
   repositories: codespaceRepositoriesSchema,
   setup_help: codespaceSetupHelpSchema,
   create: codespaceCreateSchema,
+  adopt: codespaceAdoptSchema,
   get: codespaceGetSchema,
   start: codespaceStartSchema,
   stop: codespaceStopSchema,

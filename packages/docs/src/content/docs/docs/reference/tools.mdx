@@ -24,48 +24,53 @@ providers and recipients; callers cannot supply a user, provider, destination, c
 path, remote URL, or arbitrary request header. `send` accepts a non-empty message of at most 4096
 characters and returns a sanitized aggregate status for all configured channels.
 
-For an image or document, call `attachment-token` with the message, attachment kind, filename, MIME
-type, and exact byte size. The returned grant expires after five minutes and can authorize at most
-one provider attempt. Keep the grant out of the URL and send the bytes with an OAuth or persistent
-MCP Bearer credential belonging to the user who minted it:
+A file owner is an enrolled workspace service or a paired controller on the user's computer.
+It retains the immutable source and original delivery receipt. Cloud Moira authorizes the channel
+and streams its source to a fixed vendor transport without downloading native attachments or
+keeping a temporary file copy. Ordinary text through `send` needs no file owner.
 
-```bash
-curl --request POST "$uploadUrl" \
-  --header "Authorization: Bearer $MOIRA_MCP_TOKEN" \
-  --header "X-Moira-Communication-Grant: $grant" \
-  --header "Content-Type: application/pdf" \
-  --header "Content-Length: $(wc -c < report.pdf)" \
-  --data-binary @report.pdf
-```
-
-The declared size must equal both `Content-Length` and the received byte count. Each attachment-token upload is
-limited to 20 MiB; images accept PNG or JPEG and documents reject image MIME types. Before provider
-delivery begins, a failed MIME, size, image-signature, or in-flight admission check releases the
-grant for another corrected request until expiry. After any provider attempt, success or failure is
-terminal and replay returns the same non-specific invalid-grant response. Each user may have ten
-live grants and two simultaneous upload streams totalling at most 40 MiB; the installation accepts
-one thousand live grants. Expired and completed grants do not consume issuance capacity.
-
-To deliver a ready private file, use its returned `file.reference_id` rather than uploading its bytes
-again:
+Before `deliver-file`, choose a fresh `request_id` in `ws1-<lowercase UUID>` form. Supply exactly
+one source: a returned `file.reference_id` in `referenceId`, or the host's native descriptor in
+`file`. A native source needs a live paired controller; select `device_id` if several are eligible.
+Omit it only when exactly one is available. A publication reference identifies its owner:
 
 ```javascript
 communication({
   action: "deliver-file",
+  request_id: "ws1-11111111-1111-4111-8111-111111111111",
   referenceId: "<file.reference_id>",
   message: "The requested recording",
   kind: "document",
 });
 ```
 
-An optional `channelId` selects one of the user's configured channels; omission uses ordinary
-configured-channel delivery. Filename, MIME and size come from the owned object, so do not provide
-`filename`, `mimeType` or `sizeBytes` with this action. Delivery does not consume its native download
-reference or extend retention. Safe private basenames retain Unicode and quotes within 255 UTF-8
-bytes; paths, control characters and the names `.` and `..` are refused. Telegram streams checked bytes;
-extension channels whose attachment contract supports only buffered bytes are explicitly unsupported
-for this source. Raw authenticated uploads stream through private storage as temporary objects and
-release those objects only after readers settle. Publishing a private file never sends a message.
+For a native attachment, replace `referenceId` with `file: nativeFile`, using the exact descriptor
+supplied by the host: `file_id`, `download_url` and any available `file_name`, `mime_type`,
+`size_bytes`. Do not invent an ID or substitute an arbitrary URL. An optional `channelId` selects
+one configured channel. Filename, MIME and size come from the source.
+
+Retain the original ID and returned `device_id` or `codespace_id`. The owner receipt names the ID
+`requestId`; tool input uses `request_id`. After an uncertain reply, collect without resending:
+
+```javascript
+communication({
+  action: "operation",
+  request_id: "ws1-11111111-1111-4111-8111-111111111111",
+  device_id: "<device_id returned for this delivery>",
+});
+```
+
+For a workspace source, use its `codespace_id` instead of `device_id`; never provide both.
+Collection does not upload, render or send again. `absent`, `accepted`, `completed` and
+`unconfirmed` describe the original receipt; a completed receipt can contain an uncertain error.
+Absence or uncertainty does not authorize an automatic new delivery. For
+`COMMUNICATION_OWNER_UNAVAILABLE`, connect the original owner and inspect the same request if
+an earlier submission may have been admitted.
+
+Publications contain complete immutable bytes and support repeated reads until expiry under
+current authority; later source edits do not change them. Publishing does not send a message,
+and delivery neither consumes the publication nor renews it. Telegram's own image/document bounds
+and installed extensions' declared binary transports apply without a generic cloud attachment quota.
 
 ### Workflow discovery and execution
 
@@ -81,7 +86,7 @@ action and applies its defaults. Collect an admitted command with `codespace_id`
 `request_id`, without submitting command fields again. An execution accepts at most one of
 `stdin_text` and `stdin_file`. Unknown fields are MCP errors; fields belonging only to another action
 return `CODESPACE_REQUEST_INVALID`. Caller-selected search/output windows bound observations;
-image preview has its own decoder budget, and native download streams a complete file by path.
+image preview validates the complete container within optional max_bytes, and native download streams a complete file by path.
 
 `start({ action: "prepare" })` resolves and validates an authorized workflow, binds the workflow version and request options, and returns a Start attempt ID that expires after 15 minutes without creating an execution. `parentExecutionId` links a child to an existing parent; use `"none"` for a standalone execution. `skipNotificationCheck` records a policy to bypass only optional ordinary-notification preflight during execute. `skipTelegramCheck` remains a deprecated alias with the same behavior, and conflicting values are rejected.
 
@@ -97,7 +102,17 @@ For an agent-directive step whose expression reads a saved top-level variable ab
 
 During ordinary progression, an original `step` advances the execution revision when it persists workflow state; `stop-execution` also advances it once when ending the run. Parent, reminder, note, and runtime-variable mutations do not advance it or invalidate the current Step attempt. Parent, reminder, and runtime-variable writes require both `expectedRevision` and the corresponding opaque revision returned by `execution_context`, `reminders`, `variables`, or the previous mutation (`expectedParentRevision`, `expectedRemindersRevision`, or `expectedContextRevision`). These target revisions prevent an older metadata snapshot from overwriting a newer one within the same step generation. Parent changes accept `"none"` to detach, require same-owner running executions, and reject ancestry cycles. Reminders do not change the workflow plan or grant authority; active reminders are returned when an execution completes. Runtime variable writes are default-deny, must satisfy the variable schema, and never advance the graph. A write whose revision is no longer current is rejected before anything is written; its `AGENT INSTRUCTIONS` tell the caller to re-read that state and retry with the current revisions, without involving the user.
 
-When `current_step` presents a paused materialization node, it returns a fresh five-minute archive command rather than file contents. The grant is bound to the current user, execution, node, and context snapshot and can be downloaded repeatedly only while that execution remains waiting on the node with the same context. Run or retry the returned command exactly, then complete the node with `null` or `{}`; advancing the execution or changing its context invalidates the URL. A host that cannot run the command or reach the network uses `materialize` instead, which returns the same file bodies in the response under the same bindings and window, subject to a smaller total-size ceiling, and completes the node the same way.
+For a paused materialize node, `current_step` returns a five-minute archive command rather than
+file bodies. Run it as issued, then complete the step with `null` or `{}` after extraction succeeds.
+The first materialize archive request resolves authorized text and pins the selected paired
+controller's complete identity plus an original publication request ID. Repeating the same
+five-minute grant collects that publication without resolving sources, rendering or submitting again.
+Its bytes remain immutable if the workflow definition changes. An absent or unconfirmed original
+returns HTTP 409 with `COMMUNICATION_OUTCOME_UNCONFIRMED` and `request_id`; collection never replays.
+A completed owner error returns HTTP 422, and an unavailable controller returns HTTP 503 with
+`COMMUNICATION_OWNER_UNAVAILABLE`. Obtain a fresh current-step presentation only for a separate
+explicit retry. Current user/node/context checks remain required. The `materialize` text fallback
+requires no file owner and keeps its separate 256 KiB observation budget.
 
 `update-task-title` establishes or renames the owner's active task independently of arbitrary notes.
 Read `execution_context` and pass its `revision` and `metadataRevisions.taskIdentity` as
@@ -119,6 +134,12 @@ A rename, including a same-clock change back to the original text, invalidates a
 Stale redemption does not successfully consume it; obtain a fresh grant, also when its identity
 binding is absent. Failed rendering or HTTP delivery releases reservation; successful response
 completion consumes the grant once.
+Rendering requires a live paired controller. Supply `device_id` to select it when several are
+eligible; omission requires exactly one live owner. `COMMUNICATION_OWNER_UNAVAILABLE` is an
+operational HTTP 503 from mint/public read and a coded MCP failure. Connect that controller rather
+than recreating a VM. The one-use progress URL is distinct from the repeatable owner publication;
+an error response finishing does not consume the progress grant. Ordinary progress reads and text
+notifications need no file owner.
 
 ### Stopping a run
 
@@ -204,6 +225,25 @@ The direct `moira-workspace` CLI uses its private Unix socket. Remote MCP calls 
 owner through authenticated streaming routing; cloud Moira stores neither command queues nor
 command/file results. Provider bootstrap establishes the service before ordinary work is admitted.
 
+#### Git and pull requests
+
+Use ordinary `git fetch`/`git push` in the workspace. A trusted owner broker executes fixed
+HTTPS Git and typed PR requests directly; cloud Moira issues a child credential limited to
+the approved repository/action. Original OAuth/refresh credentials stay in its vault, and
+tools receive no GitHub token. The broker's same-UID trust boundary is not an OS sandbox.
+
+For `pull_request_create`, choose a fresh `ws1-<lowercase UUID>` `request_id` before
+submission. After an unconfirmed result, collect with only `codespace_id` and that original
+`request_id`, then use `pull_request_find` for the pushed head/base before considering another
+create. Collection never creates a PR; get/find are reads. An unknown create is an error
+carrying the original PR ID and any `security_request_id`. The latter identifies credential
+issuance/disposal separately from the PR effect. Custody or disposal pending remains
+uncertain; collecting that security identity cannot mint another token or replay Git.
+
+The direct CLI supports `pull-request-create --request-id ID pr.json`, collect-only
+`pull-request-create --request-id ID`, `pull-request-get NUMBER` and
+`pull-request-find HEAD BASE` on the same owner.
+
 #### Access and lifecycle
 
 GitHub authorization happens on the Moira website. Install the Moira GitHub App and grant the
@@ -213,8 +253,39 @@ anything. `repositories` discovers approved targets and `local_devices` discover
 Local pairing, repository admission and finite work permission remain owner-controlled and do not
 require the GitHub Codespaces provider to be enabled.
 
-`create`, `get`, `start`, `stop` and `delete` address the selected provider. Create/start wait for
-readiness within their observation window and may return a pending resource. Ordinary workspace
+For both providers, `create`, `start`, `stop`, `delete` and GitHub `adopt` require a caller-chosen `request_id` in
+`ws1-<lowercase UUID>` form. Start/stop/delete also require the resource's observed `generation`;
+the owner refuses a stale generation with `CODESPACE_GENERATION_CONFLICT`, rather than repairing
+authorization or using a newer value on the caller's behalf. Get/list expose that generation and
+`pending_request_ids` from the live owner. Collect the original receipt with
+`codespace({ action: "operation", device_id, request_id })`, even if create returned no ID.
+`absent`, `accepted`, `completed` and `unconfirmed` distinguish original outcomes; collection
+never repeats the mutation. Neither absence nor a newer snapshot permits automatic replay.
+An unavailable owner supplies no current policy or grants and accepts no queued offline mutations.
+
+Local resource summaries use the live owner's machine, current lifecycle generation and state;
+route registration alone cannot supply them. The public `machine` field is nullable, including
+after confirmed deletion. Without an owner resource observation, get/list refuse as
+`CODESPACE_PROVIDER_UNAVAILABLE` instead of inventing a profile or generation. If the owner journal
+retains pending creation work, `CODESPACE_LOCAL_CREATION_UNKNOWN` carries the original `request_id`,
+`device_id` and `codespace_id` for collection even before a summary is available. A completed receipt
+with an uncertain error remains uncertain on explicit repetition; collection never creates another VM.
+
+On the computer, the host CLI uses the running private controller for `create`, `start`, `stop`,
+`remove --confirm` and `collect`. Fresh creation needs live cloud route registration and initial
+Git authority; admitted VMs can be managed offline under applicable current owner rights.
+Starting requires the finite work lease; owner-confirmed cleanup does not renew it. Ordinary
+commands/files use the guest `moira-workspace` CLI.
+
+GitHub create/adopt runs at an available paired controller; choose `device_id` when several
+are live. `adopt` accepts a registered `codespace_id` with its observed `generation`, or an owned
+`provider_resource_name` for initial admission. The controller uses trusted gh/SSH and the shipped
+payload in place, preserving the disk and original operation journal. Ordinary file calls cannot
+start or SSH into the environment. Local has no cloud aggregate quota; its current rights and
+physical limits belong to the owner.
+
+`create`, `get`, `start`, `stop` and `delete` address the selected provider. GitHub create/start may
+return a pending resource; inspect its original receipt and current guest connection without replay. Ordinary workspace
 dispatch requires a usable guest. Stop preserves repository data, and delete requires `confirm_delete: true` and
 confirmed absence. Local agent deletion also requires its repository permission and current work
 authority. The owner can instead confirm cleanup of that exact environment in **Settings →
@@ -223,14 +294,14 @@ or renewing an expired work lease.
 
 Unknown or foreign resources disclose no other owner's data. Ordinary resource calls return
 `CODESPACE_NOT_FOUND`; process authority refusal uses `CODESPACE_AUTHORIZATION_REQUIRED`.
-An incomplete provider refresh reports a warning rather than erasing saved entries.
+An incomplete GitHub provider refresh reports a warning rather than erasing saved entries.
 `codespace({ action: "list", refresh: true })` requests a fresh approved repository/resource observation. Repository
 identity follows the provider ID, so a rename or checked-out branch change does not replace the
 environment. Creation still requires a valid branch or commit reference.
 
 GitHub creation supports personal-account billing. Organization-billed creation is refused with
-`CODESPACE_BILLING_UNSUPPORTED`. Settings shows resource count, creation, machine, retention and
-startup policies, plus available current-month GitHub billing separately from Local owner budgets.
+`CODESPACE_BILLING_UNSUPPORTED`. Settings shows current resources and separately available current-month GitHub billing. Local has no cloud billing limits;
+its resource and policy observations come from the owner.
 Billing may be unavailable without `Plan: read` or while its API is unavailable; that does not grant
 or revoke resource access. Physical Local storage, CPU/RAM admission and finite work leases remain
 effective.
@@ -240,8 +311,7 @@ GitHub idle preferences apply when Moira creates a new Codespace:
 30 within GitHub's 5–240-minute range. Disabling the preference requests 240 minutes, not unlimited
 running. Existing environments retain their provider parameters. GitHub detects editor, browser and
 terminal activity; a silent background command can be stopped by its native idle policy or lifetime
-limit. Local environments follow their computer owner's policy. A later call can start a stopped
-environment, but stopping does not preserve a live process.
+limit. Local environments follow their computer owner's policy. Starting a stopped environment requires explicit start; stopping does not preserve a live process.
 
 #### Commands, collection and sessions
 
@@ -299,10 +369,11 @@ file by `path` and requires `file_name` and `mime_type`. It publishes an MCP `re
 `file.reference_id`, size, digest and expiry. Optional `max_bytes` refuses an oversized complete
 file with `CODESPACE_DOWNLOAD_BOUND_EXCEEDED`; it never publishes a prefix as the file.
 A complete empty file is valid. Publication does not send a message: explicitly use
-`communication({ action: "deliver-file", referenceId, message, kind })` for an owned ready file.
-Its native download link is single-use, and delivery does not renew its retention.
+`communication({ action: "deliver-file", request_id, referenceId, message, kind })` for an owned ready file.
+Its immutable owner publication supports repeated reads until expiry; delivery does not renew it.
 
-`preview_image` returns PNG/JPEG image content under its separate preview byte/dimension budget.
+`preview_image` returns complete structurally checked PNG/JPEG content; optional `max_bytes`
+sets the caller's whole-image bound without generic byte or dimension ceilings.
 Use complete download for the original binary. Workspace command/file streams have no inherited
 aggregate transfer, output, session or implicit execution-duration quota. Physical storage,
 filesystem confinement, scoped authority, provider policies and caller-selected observation bounds

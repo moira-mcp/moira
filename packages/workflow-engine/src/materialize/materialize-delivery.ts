@@ -1,5 +1,10 @@
 import { metadataRevision, type ExecutionError, type WorkflowToken } from "@mcp-moira/shared";
-import { isMaterializeNode, type WorkflowExecution, type WorkflowGraph } from "../types/index.js";
+import {
+  isMaterializeNode,
+  type MaterializeNode,
+  type WorkflowExecution,
+  type WorkflowGraph,
+} from "../types/index.js";
 import {
   renderMaterializeFilesWithReport,
   type RenderedMaterializeFile,
@@ -23,6 +28,7 @@ export interface MaterializeGrantStore {
     executionId: string,
     nodeId: string,
     userId: string,
+    expectedContextRevision?: string,
   ): boolean;
 }
 
@@ -41,22 +47,25 @@ export type MaterializeDelivery =
   | { authorized: true; files: RenderedMaterializeFile[]; executionId: string; nodeId: string }
   | { authorized: false; reason: MaterializeDenialReason };
 
-/**
- * Decide whether a materialize grant may be served right now, and render its files if so.
- *
- * This is the single place that owns the authorization decision. Both the archive endpoint and the
- * in-context fallback resolve through it, so the two channels cannot drift into disagreeing about
- * who may read what. Rendering happens before the final authorization re-check for the same reason
- * the archive endpoint has always done it: a render failure must not consume the decision.
- *
- * Throws whatever {@link renderMaterializeFilesWithReport} throws — a rendering or size violation is a
- * different outcome from a refusal and each caller maps it to its own transport.
- */
-export async function resolveMaterializeDelivery(
+export type MaterializeAuthorization =
+  | {
+      authorized: true;
+      executionId: string;
+      nodeId: string;
+      userId: string;
+      contextRevision: string;
+      execution: WorkflowExecution;
+      graph: WorkflowGraph;
+      node: MaterializeNode;
+    }
+  | { authorized: false; reason: MaterializeDenialReason };
+
+/** Check current grant authority without rendering text or resolving Note/Playbook references. */
+export async function authorizeMaterializeDelivery(
   token: string,
   tokens: MaterializeGrantStore,
   source: MaterializeExecutionSource,
-): Promise<MaterializeDelivery> {
+): Promise<MaterializeAuthorization> {
   const grant = tokens.validateToken(token, "materialize");
   if (!grant?.executionId || !grant.nodeId) {
     return { authorized: false, reason: "grant_invalid_or_expired" };
@@ -66,21 +75,26 @@ export async function resolveMaterializeDelivery(
   if (
     !execution ||
     execution.userId !== grant.userId ||
+    execution.status !== "running" ||
     execution.currentNodeId !== grant.nodeId ||
     execution.waitingForInputNodeId !== grant.nodeId
   ) {
     return { authorized: false, reason: "execution_binding_mismatch" };
   }
 
+  const contextRevision = metadataRevision(execution.globalContext);
   if (grant.optionsJson) {
-    let contextRevision: string | undefined;
+    let grantedRevision: unknown;
     try {
-      contextRevision = (JSON.parse(grant.optionsJson) as { contextRevision?: string })
+      grantedRevision = (JSON.parse(grant.optionsJson) as { contextRevision?: unknown })
         .contextRevision;
     } catch {
       return { authorized: false, reason: "grant_invalid_or_expired" };
     }
-    if (contextRevision && metadataRevision(execution.globalContext) !== contextRevision) {
+    if (grantedRevision !== undefined && typeof grantedRevision !== "string") {
+      return { authorized: false, reason: "grant_invalid_or_expired" };
+    }
+    if (grantedRevision !== undefined && contextRevision !== grantedRevision) {
       return { authorized: false, reason: "execution_binding_mismatch" };
     }
   }
@@ -91,28 +105,75 @@ export async function resolveMaterializeDelivery(
     return { authorized: false, reason: "workflow_node_unavailable" };
   }
 
+  if (
+    !tokens.authorizeMaterializeToken(
+      token,
+      execution.executionId,
+      node.id,
+      execution.userId,
+      contextRevision,
+    )
+  ) {
+    return { authorized: false, reason: "authorization_lost" };
+  }
+  return {
+    authorized: true,
+    executionId: execution.executionId,
+    nodeId: node.id,
+    userId: execution.userId,
+    contextRevision,
+    execution,
+    graph,
+    node,
+  };
+}
+
+/** Render authorized workflow text, then reread the complete current grant/node/context authority. */
+export async function resolveMaterializeDelivery(
+  token: string,
+  tokens: MaterializeGrantStore,
+  source: MaterializeExecutionSource,
+): Promise<MaterializeDelivery> {
+  const initial = await authorizeMaterializeDelivery(token, tokens, source);
+  if (initial.authorized === false) return initial;
+  const { execution, graph, node } = initial;
   const { files, unresolvedPlaybooks } = await renderMaterializeFilesWithReport(
     node,
     graph.variableRegistry,
     execution.globalContext,
   );
 
-  if (!tokens.authorizeMaterializeToken(token, execution.executionId, node.id, execution.userId)) {
-    return { authorized: false, reason: "authorization_lost" };
+  const current = await authorizeMaterializeDelivery(token, tokens, source);
+  if (current.authorized === false) return current;
+  if (
+    current.executionId !== initial.executionId ||
+    current.nodeId !== initial.nodeId ||
+    current.userId !== initial.userId ||
+    current.contextRevision !== initial.contextRevision
+  ) {
+    return { authorized: false, reason: "execution_binding_mismatch" };
   }
 
   if (unresolvedPlaybooks.length > 0) {
-    // Recorded only once the delivery is authorized: a refused download delivers nothing, and the
-    // run must not carry a note about files it never received. The placeholder lands inside a
-    // delivered file, where nobody reading the run would see it.
+    // This records authorized text preparation, not successful archive or context delivery.
     await source.appendError?.(execution.executionId, {
       timestamp: Date.now(),
       nodeId: node.id,
       errorType: "degradation",
       message:
-        `Materialized files were delivered without ${unresolvedPlaybooks.length === 1 ? "a playbook" : "playbooks"} they reference: ` +
+        `Prepared materialize text contains unresolved ${unresolvedPlaybooks.length === 1 ? "playbook reference" : "playbook references"}: ` +
         unresolvedPlaybooks.map((entry) => entry.reference).join(", "),
     });
+    const afterRecording = await authorizeMaterializeDelivery(token, tokens, source);
+    if (afterRecording.authorized === false) return afterRecording;
+    if (
+      afterRecording.executionId !== initial.executionId ||
+      afterRecording.nodeId !== initial.nodeId ||
+      afterRecording.userId !== initial.userId ||
+      afterRecording.contextRevision !== initial.contextRevision
+    ) {
+      return { authorized: false, reason: "execution_binding_mismatch" };
+    }
   }
 
   return { authorized: true, files, executionId: execution.executionId, nodeId: node.id };

@@ -1,294 +1,56 @@
-import {
-  codespaceActiveGauge,
-  codespaceConnectionEventsTotal,
-  codespaceConnectorAvailableGauge,
-  codespaceLifecycleEventsTotal,
-  codespaceReadyGauge,
-  codespaceReconciliationDueGauge,
-  codespaceReconciliationOldestDueAgeSeconds,
-  codespaceRejectionsTotal,
-} from "../metrics/index.js";
+import { codespaceConnectionEventsTotal, codespaceRejectionsTotal } from "../metrics/index.js";
 import type { CodespaceConnectionAuditEvent } from "./connection-service.js";
-import type { CodespaceResourceRepository } from "./resource-repository.js";
-import type { CodespaceResourceAuditEvent } from "./resource-service.js";
-import type {
-  CodespaceResourceErrorCode,
-  CodespaceResourcePolicy,
-  CodespaceTransportAvailability,
-} from "./resource-types.js";
-import { CODESPACE_IDLE_TIMEOUT_MINUTES } from "./resource-repository.js";
-import { CODESPACE_PROVIDER_LOCAL } from "./local-device-types.js";
+import type { CodespaceReadinessView } from "./views.js";
 import { LOCAL_CODESPACE_FAILURE_GUIDANCE } from "./local-failure-guidance.js";
-import {
-  projectCodespaceLimits,
-  type CodespaceLimitsView,
-  type CodespaceProviderBillingView,
-  type CodespaceReadinessView,
-} from "./views.js";
 
-/** Count a provider connection audit event (start/complete/refresh_failed/disconnect). */
 export function recordCodespaceConnectionEvent(event: CodespaceConnectionAuditEvent): void {
   codespaceConnectionEventsTotal.inc({ provider: event.provider, action: event.action });
 }
-
-/** Count a codespace lifecycle audit event with closed labels only. */
-export function recordCodespaceResourceEvent(event: CodespaceResourceAuditEvent): void {
-  codespaceLifecycleEventsTotal.inc({
-    provider: event.provider,
-    action: event.action,
-    state: event.state,
-  });
-}
-
-/** Resource error codes plus the MCP-layer schema refusal, all bounded pre-provider labels. */
-const REJECTION_CODES: ReadonlySet<string> = new Set<
-  CodespaceResourceErrorCode | "CODESPACE_REQUEST_INVALID"
->([
+const refusalCodes = new Set([
   "CODESPACE_PROVIDER_DISABLED",
   "CODESPACE_PROVIDER_UNAVAILABLE",
-  "CODESPACE_POLICY_LIMIT",
   "CODESPACE_AUTHORIZATION_REQUIRED",
   "CODESPACE_NOT_RUNNING",
-  "CODESPACE_START_TIMEOUT",
   "CODESPACE_GENERATION_CONFLICT",
   "CODESPACE_REQUEST_INVALID",
 ]);
-
-/** Count a bounded pre-provider refusal. Unknown codes are ignored to keep labels closed. */
 export function recordCodespaceRejection(code: string): void {
-  if (REJECTION_CODES.has(code) || Object.hasOwn(LOCAL_CODESPACE_FAILURE_GUIDANCE, code))
+  if (refusalCodes.has(code) || Object.hasOwn(LOCAL_CODESPACE_FAILURE_GUIDANCE, code))
     codespaceRejectionsTotal.inc({ code });
 }
-
 export interface CodespaceObservabilityDependencies {
   providerId: string;
   config: () =>
     { state: "available" } | { state: "disabled" } | { state: "invalid"; reason: string };
-  policy: () => CodespaceResourcePolicy;
-  resources: Pick<
-    CodespaceResourceRepository,
-    "listControls" | "countActive" | "dueSummary" | "countHeld" | "idlePolicy"
-  >;
-  /** Present only when the provider composition exists; absent while configuration is missing. */
-  transport: CodespaceTransportAvailability | null;
-  /** Optional provider usage reader; local limits remain available when it fails. */
-  providerBilling?: (
-    userId: string,
-    options?: { force?: boolean },
-  ) => Promise<CodespaceProviderBillingView>;
+  policy: () => { enabled: boolean };
   now?: () => number;
-  /** Upper bound for one connector health probe; a slower probe counts as unavailable. */
-  probeTimeoutMs?: number;
-  /** How old a cached decision may be before `snapshot()` recomputes it. */
-  snapshotMaxAgeMs?: number;
 }
-
-const DEFAULT_PROBE_TIMEOUT_MS = 2_000;
-const DEFAULT_SNAPSHOT_MAX_AGE_MS = 60_000;
-
-/**
- * Computes the single instance-level readiness decision and projects it into the
- * Prometheus gauges. Every surface (website, administration, backend health, MCP)
- * consumes this object rather than re-deriving readiness.
- */
+/** Configuration metadata only; live resource observations belong to the provider and owner. */
 export class CodespaceObservabilityService {
-  private timer: NodeJS.Timeout | null = null;
-  private refreshing = false;
-  private last: CodespaceReadinessView | null = null;
-  private inFlight: Promise<CodespaceReadinessView> | null = null;
-
   constructor(private readonly dependencies: CodespaceObservabilityDependencies) {}
-
-  private now(): number {
-    return (this.dependencies.now ?? Date.now)();
-  }
-
-  /**
-   * The decision for liveness surfaces: the last computed view while it is younger
-   * than `snapshotMaxAgeMs`, otherwise one shared recomputation. A public health
-   * request therefore never waits on a stalled connector beyond the bounded probe,
-   * and concurrent requests share one computation.
-   */
-  async snapshot(): Promise<CodespaceReadinessView> {
-    const maxAge = this.dependencies.snapshotMaxAgeMs ?? DEFAULT_SNAPSHOT_MAX_AGE_MS;
-    if (this.last && this.now() - this.last.checked_at <= maxAge) return this.last;
-    if (!this.inFlight) {
-      this.inFlight = this.readiness().finally(() => {
-        this.inFlight = null;
-      });
-    }
-    return this.inFlight;
-  }
-
-  private async probeConnector(
-    transport: CodespaceTransportAvailability,
-  ): Promise<CodespaceReadinessView["connector"]> {
-    const timeoutMs = this.dependencies.probeTimeoutMs ?? DEFAULT_PROBE_TIMEOUT_MS;
-    let timer: NodeJS.Timeout | null = null;
-    const timeout = new Promise<CodespaceReadinessView["connector"]>((resolve) => {
-      timer = setTimeout(
-        () => resolve({ state: "unavailable", reason: "health_probe_timeout" }),
-        timeoutMs,
-      );
-    });
-    try {
-      return await Promise.race([
-        transport.health().then(
-          (health): CodespaceReadinessView["connector"] =>
-            health.ok
-              ? { state: "available", reason: null }
-              : { state: "unavailable", reason: health.reason },
-          (): CodespaceReadinessView["connector"] => ({
-            state: "unavailable",
-            reason: "health_probe_failed",
-          }),
-        ),
-        timeout,
-      ]);
-    } finally {
-      if (timer) clearTimeout(timer);
-    }
-  }
-
-  /**
-   * One user's limits beside their use, read from policy and the database only: no provider call is
-   * made, so listing codespaces costs the provider nothing more than it did.
-   */
-  limits(userId: string): CodespaceLimitsView {
-    const provider = this.dependencies.providerId;
-    return projectCodespaceLimits({
-      provider,
-      policy: this.dependencies.policy(),
-      held: this.dependencies.resources.countHeld(userId, provider),
-      instanceHeld: this.dependencies.resources.countActive(provider),
-      idle: this.dependencies.resources.idlePolicy(userId),
-      providerIdleMaxMinutes: CODESPACE_IDLE_TIMEOUT_MINUTES.maximum,
-    });
-  }
-
-  /** Add the provider's monthly usage without coupling local capacity to billing availability. */
-  async limitsWithBilling(
-    userId: string,
-    options: { force?: boolean } = {},
-  ): Promise<CodespaceLimitsView> {
-    const local = this.limits(userId);
-    if (!this.dependencies.providerBilling) return local;
-    try {
-      const billing = await this.dependencies.providerBilling(userId, options);
-      return { ...local, provider: { billing } };
-    } catch {
-      return local;
-    }
-  }
-
   async readiness(): Promise<CodespaceReadinessView> {
-    const now = this.now();
-    const provider = this.dependencies.providerId;
-    const config = this.dependencies.config();
-    const policy = this.dependencies.policy();
-    const controls = this.dependencies.resources.listControls(provider).map((control) => ({
-      scope: control.scope,
-      disabled: control.disabled,
-      reason: control.reason,
-      updated_at: control.updatedAt,
-    }));
-    const resourceDue = this.dependencies.resources.dueSummary(now);
-    let connector: CodespaceReadinessView["connector"] = {
-      state: "not_applicable",
-      reason: null,
-    };
-    if (config.state === "available" && policy.enabled && this.dependencies.transport) {
-      connector = await this.probeConnector(this.dependencies.transport);
-    }
-
-    const disabledControl = controls.find((control) => control.disabled);
-    let state: CodespaceReadinessView["state"];
-    let reason: string | null;
-    if (config.state === "invalid") {
-      state = "misconfigured";
-      reason = config.reason;
-    } else if (config.state === "disabled" || !policy.enabled) {
-      state = "disabled";
-      reason = config.state === "disabled" ? "NOT_CONFIGURED" : "RESOURCES_DISABLED";
-    } else if (disabledControl) {
-      state = "control_disabled";
-      reason = disabledControl.scope;
-    } else if (connector.state === "unavailable") {
-      state = "connector_unavailable";
-      reason = connector.reason;
-    } else {
-      state = "ready";
-      reason = null;
-    }
-
-    const view: CodespaceReadinessView = {
-      state,
-      reason,
-      provider,
+    const config = this.dependencies.config(),
+      enabled = this.dependencies.policy().enabled;
+    return {
+      state:
+        config.state === "invalid"
+          ? "misconfigured"
+          : !enabled || config.state === "disabled"
+            ? "disabled"
+            : "ready",
+      reason: config.state === "invalid" ? config.reason : null,
+      provider: this.dependencies.providerId,
       configuration:
         config.state === "available"
           ? "available"
           : config.state === "invalid"
             ? "invalid"
             : "absent",
-      resources_enabled: policy.enabled,
-      controls,
-      connector,
-      reconciliation: {
-        due_resources: resourceDue.count,
-        oldest_due_age_ms:
-          resourceDue.oldestUpdatedAt === null
-            ? null
-            : Math.max(0, now - resourceDue.oldestUpdatedAt),
-      },
-      usage: {
-        active_resources: this.dependencies.resources.countActive(provider),
-        max_active_resources: provider === CODESPACE_PROVIDER_LOCAL ? null : policy.maxActiveGlobal,
-      },
-      checked_at: now,
+      resources_enabled: enabled,
+      checked_at: (this.dependencies.now ?? Date.now)(),
     };
-    this.project(view, resourceDue.oldestUpdatedAt);
-    this.last = view;
-    return view;
   }
-
-  private project(view: CodespaceReadinessView, oldestResource: number | null): void {
-    const now = view.checked_at;
-    codespaceReadyGauge.set({ provider: view.provider }, view.state === "ready" ? 1 : 0);
-    codespaceConnectorAvailableGauge.set(
-      { provider: view.provider },
-      view.connector.state === "available" ? 1 : 0,
-    );
-    codespaceReconciliationDueGauge.set({ kind: "resource" }, view.reconciliation.due_resources);
-    codespaceReconciliationOldestDueAgeSeconds.set(
-      { kind: "resource" },
-      oldestResource === null ? 0 : Math.max(0, now - oldestResource) / 1000,
-    );
-    codespaceActiveGauge.set({ kind: "resource" }, view.usage.active_resources);
-  }
-
-  /** Refresh the gauges periodically so `/metrics` stays current without a request. */
-  start(intervalMs: number): void {
-    if (this.timer) return;
-    void this.refresh();
-    this.timer = setInterval(() => void this.refresh(), intervalMs);
-    this.timer.unref();
-  }
-
-  stop(): void {
-    if (this.timer) clearInterval(this.timer);
-    this.timer = null;
-  }
-
-  private async refresh(): Promise<void> {
-    if (this.refreshing) return;
-    this.refreshing = true;
-    try {
-      await this.readiness();
-    } catch {
-      // A failed refresh leaves the previous gauge values; the next request recomputes.
-    } finally {
-      this.refreshing = false;
-    }
+  async snapshot() {
+    return this.readiness();
   }
 }

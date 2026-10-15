@@ -1,94 +1,185 @@
 import { describe, expect, jest, test } from "@jest/globals";
+import { randomUUID } from "node:crypto";
 import { LocalDaemon } from "../../../packages/local/src/daemon.js";
 import { LocalManager } from "../../../packages/local/src/manager.js";
 import { LocalRelay, LocalDeviceAuthorityFailure } from "../../../packages/local/src/relay.js";
-import { LocalCompanion } from "../../../packages/local/src/web-control.js";
 import { LocalRefusal } from "../../../packages/local/src/policy.js";
 
 function fixture() {
+  const connection = {
+    origin: "https://moira.example",
+    credential: "a".repeat(43),
+    userId: "owner",
+    deviceId: randomUUID(),
+    deviceGeneration: 1,
+    connectionId: randomUUID(),
+    pairingId: randomUUID(),
+  };
   const manager = {
     close: jest.fn<() => Promise<void>>().mockResolvedValue(undefined),
+    stopWork: jest.fn<() => Promise<void>>().mockResolvedValue(undefined),
+    records: {
+      state: {
+        read: async () => connection,
+        write: async (_key: string, value: unknown) => Object.assign(connection, value),
+      },
+      policy: async () => ({
+        deviceId: connection.deviceId,
+        enabled: true,
+        leaseUntil: Date.now() + 60_000,
+      }),
+      policyOrNull: async () => ({ enabled: true, leaseUntil: Date.now() + 60_000 }),
+      deviceIdentity: async () => ({ deviceId: connection.deviceId, label: "controller" }),
+    },
   } as unknown as LocalManager;
+  const confirmed = jest.fn<(signal?: AbortSignal) => ReturnType<LocalRelay["confirmed"]>>();
   const relay = {
-    drain: jest.fn<() => Promise<void>>().mockResolvedValue(undefined),
+    confirmed,
     isUnavailable: (error: unknown) =>
       error instanceof LocalRefusal && error.code === "LOCAL_RELAY_UNAVAILABLE",
   } as unknown as LocalRelay;
-  const cycle = jest.fn<(signal?: AbortSignal) => Promise<boolean>>();
-  const pause = jest.fn<() => Promise<void>>().mockResolvedValue(undefined);
-  const companion = { cycle, pause } as unknown as LocalCompanion;
-  const report = jest.fn();
-  const daemon = new LocalDaemon(manager, relay, { companion, report });
-  return { manager, relay, cycle, pause, daemon, companion, report };
+  const controllerClose = jest.fn<() => Promise<void>>().mockResolvedValue(undefined);
+  const controllerRetire = jest.fn<() => Promise<void>>().mockImplementation(async () => {
+    await manager.stopWork();
+  });
+  const remoteClose = jest.fn<() => Promise<void>>().mockResolvedValue(undefined);
+  const options = {
+    report: jest.fn(),
+    startController: async () => ({
+      socketPath: "/private/controller.sock",
+      connectionId: connection.connectionId,
+      incarnation: "b".repeat(64),
+      close: controllerClose,
+      retire: controllerRetire,
+    }),
+    startRemote: () => ({ close: remoteClose, whenConnected: async () => undefined }),
+  };
+  return {
+    manager,
+    relay,
+    confirmed,
+    connection,
+    controllerClose,
+    controllerRetire,
+    remoteClose,
+    options,
+  };
 }
 
-describe("Local daemon owns connection policy independently of VM admission", () => {
-  test.each(["LOCAL_UNAUTHORIZED", "LOCAL_RELAY_REFUSED", "LOCAL_GENERATION_CONFLICT"])(
-    "scoped refusal %s suspends claims without pausing hardware",
-    async (code) => {
-      const f = fixture();
-      f.cycle.mockRejectedValueOnce(new LocalRefusal(code, "private ignored message"));
-      expect(await f.daemon.cycle()).toBe(false);
-      expect(f.daemon.status).toEqual({ controlPlane: "faulted", code });
-      expect(f.pause).not.toHaveBeenCalled();
-      expect(f.manager.close).not.toHaveBeenCalled();
-      expect(JSON.stringify(f.report.mock.calls)).not.toContain("private ignored message");
-    },
-  );
-  test("validated device revocation stops work but leaves management available", async () => {
+describe("Local controller survives observation loss without native replay", () => {
+  test("a paired controller without Local capability remains connected without opening or stopping an SDK", async () => {
     const f = fixture();
-    f.cycle.mockRejectedValueOnce(new LocalDeviceAuthorityFailure("LOCAL_UNAUTHORIZED"));
-    expect(await f.daemon.cycle()).toBe(false);
-    expect(f.pause).toHaveBeenCalledTimes(1);
-    expect(f.manager.close).not.toHaveBeenCalled();
-    expect(f.daemon.status).toEqual({ controlPlane: "disabled", code: "LOCAL_UNAUTHORIZED" });
+    f.manager.records.policyOrNull = async () => null;
+    f.manager.records.policy = async () => {
+      throw new Error("Local SDK policy must not be required");
+    };
+    f.confirmed.mockResolvedValue(f.connection);
+    const daemon = new LocalDaemon(f.manager, f.relay, f.options);
+    expect(await daemon.cycle()).toBe(true);
+    expect(daemon.status).toEqual({ controlPlane: "connected", code: null });
+    expect(f.manager.stopWork).not.toHaveBeenCalled();
+    expect(f.controllerClose).not.toHaveBeenCalled();
   });
-  test("offline transport reconnects without shutdown; only explicit abort closes manager", async () => {
+  test("saved paired owner exposes IPC while cloud is offline and does not stop existing hardware", async () => {
     const f = fixture();
-    const controller = new AbortController();
-    f.cycle.mockRejectedValueOnce(new LocalRefusal("LOCAL_RELAY_UNAVAILABLE", "private"));
-    f.cycle.mockResolvedValueOnce(true).mockImplementationOnce(async () => {
-      controller.abort();
-      return true;
+    f.confirmed.mockRejectedValueOnce(new LocalRefusal("LOCAL_RELAY_UNAVAILABLE", "private"));
+    const daemon = new LocalDaemon(f.manager, f.relay, f.options);
+    expect(await daemon.cycle()).toBe(false);
+    expect(daemon.status).toEqual({ controlPlane: "offline", code: "LOCAL_RELAY_UNAVAILABLE" });
+    expect(f.manager.stopWork).not.toHaveBeenCalled();
+    expect(f.controllerClose).not.toHaveBeenCalled();
+    expect(f.remoteClose).not.toHaveBeenCalled();
+  });
+  test("confirmed revocation fences owned work and retires the authenticated controller", async () => {
+    const f = fixture();
+    f.confirmed.mockRejectedValueOnce(new LocalDeviceAuthorityFailure("LOCAL_UNAUTHORIZED"));
+    const daemon = new LocalDaemon(f.manager, f.relay, f.options);
+    expect(await daemon.cycle()).toBe(false);
+    expect(daemon.status).toEqual({ controlPlane: "disabled", code: "LOCAL_UNAUTHORIZED" });
+    expect(f.manager.stopWork).toHaveBeenCalledTimes(1);
+    expect(f.controllerClose).toHaveBeenCalledTimes(1);
+    expect(f.controllerRetire).toHaveBeenCalledTimes(1);
+    expect(f.remoteClose).toHaveBeenCalledTimes(1);
+    f.confirmed.mockRejectedValueOnce(
+      new LocalRefusal("LOCAL_RELAY_UNAVAILABLE", "offline after revocation"),
+    );
+    expect(await daemon.cycle()).toBe(false);
+    expect(f.controllerClose).toHaveBeenCalledTimes(1);
+    expect(f.remoteClose).toHaveBeenCalledTimes(1);
+  });
+  test("malformed observation is a fault, and explicit shutdown closes independent owner", async () => {
+    const f = fixture(),
+      abort = new AbortController();
+    f.confirmed.mockRejectedValueOnce(new SyntaxError("private response"));
+    f.confirmed.mockImplementationOnce(async () => {
+      abort.abort();
+      return f.connection;
     });
     const wait = jest
-      .fn<(ms: number, signal: AbortSignal) => Promise<void>>()
+      .fn<(_ms: number, _signal: AbortSignal) => Promise<void>>()
       .mockResolvedValue(undefined);
-    const daemon = new LocalDaemon(f.manager, f.relay, {
-      companion: f.companion,
-      wait,
-      report: f.report,
-    });
-    await daemon.run(controller.signal);
-    expect(wait).toHaveBeenCalledWith(1000, controller.signal);
-    expect(f.pause).not.toHaveBeenCalled();
-    expect(f.manager.close).toHaveBeenCalledTimes(1);
-    expect(f.report.mock.calls).toEqual([
-      [{ controlPlane: "offline", code: "LOCAL_RELAY_UNAVAILABLE" }],
-      [{ controlPlane: "connected", code: null }],
-    ]);
-  });
-  test("malformed authority response retries with bounded backoff and never becomes transport revocation", async () => {
-    const f = fixture();
-    const controller = new AbortController();
-    f.cycle.mockRejectedValueOnce(new SyntaxError("private response contents"));
-    f.cycle.mockImplementationOnce(async () => {
-      controller.abort();
-      return true;
-    });
-    const wait = jest
-      .fn<(ms: number, signal: AbortSignal) => Promise<void>>()
-      .mockResolvedValue(undefined);
-    const daemon = new LocalDaemon(f.manager, f.relay, {
-      companion: f.companion,
-      wait,
-      report: f.report,
-    });
-    await daemon.run(controller.signal);
-    expect(wait).toHaveBeenCalledWith(30_000, controller.signal);
-    expect(f.pause).not.toHaveBeenCalled();
-    expect(f.report.mock.calls[0]).toEqual([
+    await new LocalDaemon(f.manager, f.relay, { ...f.options, wait }).run(abort.signal);
+    expect(f.options.report.mock.calls[0]).toEqual([
       { controlPlane: "faulted", code: "LOCAL_PROTOCOL_INVALID" },
     ]);
+    expect(JSON.stringify(f.options.report.mock.calls)).not.toContain("private response");
+    expect(f.manager.close).toHaveBeenCalledTimes(1);
+    expect(f.controllerClose).toHaveBeenCalledTimes(1);
+    expect(f.controllerRetire.mock.invocationCallOrder[0]).toBeLessThan(
+      (f.manager.close as ReturnType<typeof jest.fn>).mock.invocationCallOrder[0],
+    );
+  });
+  test("shutdown retains the runner gate until endpoint namespace cleanup completes", async () => {
+    const f = fixture(),
+      abort = new AbortController();
+    f.confirmed.mockResolvedValue(f.connection);
+    let release!: () => void, arrived!: () => void;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const cleaning = new Promise<void>((resolve) => {
+      arrived = resolve;
+    });
+    f.controllerClose.mockImplementation(async () => {
+      arrived();
+      await held;
+    });
+    const running = new LocalDaemon(f.manager, f.relay, {
+      ...f.options,
+      wait: async () => {
+        abort.abort();
+      },
+    }).run(abort.signal);
+    await cleaning;
+    expect(f.manager.close).not.toHaveBeenCalled();
+    release();
+    await running;
+    expect(f.manager.close).toHaveBeenCalledTimes(1);
+    expect(f.controllerClose.mock.invocationCallOrder[0]).toBeLessThan(
+      (f.manager.close as ReturnType<typeof jest.fn>).mock.invocationCallOrder[0],
+    );
+  });
+  test("remote shutdown failure still cleans the endpoint; unknown custody keeps the runner gate", async () => {
+    const f = fixture(),
+      abort = new AbortController();
+    f.confirmed.mockResolvedValue(f.connection);
+    f.remoteClose.mockRejectedValue(new Error("Controlled transport closure failure"));
+    f.controllerRetire.mockRejectedValue(
+      new LocalRefusal("LOCAL_CUSTODY_UNCONFIRMED", "Native custody remains pending."),
+    );
+    f.controllerClose.mockRejectedValue(
+      new LocalRefusal("LOCAL_CUSTODY_UNCONFIRMED", "Native custody remains pending."),
+    );
+    await expect(
+      new LocalDaemon(f.manager, f.relay, {
+        ...f.options,
+        wait: async () => {
+          abort.abort();
+        },
+      }).run(abort.signal),
+    ).rejects.toBeInstanceOf(AggregateError);
+    expect(f.controllerRetire).toHaveBeenCalledTimes(1);
+    expect(f.controllerClose).toHaveBeenCalledTimes(1);
+    expect(f.manager.close).not.toHaveBeenCalled();
   });
 });

@@ -1,99 +1,103 @@
 import {
   CODESPACE_PROVIDER_LOCAL,
   CodespaceConnectionRepository,
-  CodespaceResourceRepository,
-  CodespaceResourceService,
-  CodespaceObservabilityService,
-  CodespaceProviderRegistry,
+  LocalResourceRepository,
   LocalDeviceRepository,
   LocalDeviceService,
-  localRepositoryTargetId,
   getBaseUrl,
   codespaceGitHubSettingsPath,
   getSqliteInstance,
   getCodespaceResourcePolicy,
-  recordCodespaceResourceEvent,
   type CodespaceConnectionView,
   type CodespaceConnectionService,
-  type CodespaceTransferService,
   type CodespaceResourcePolicy,
-  type CodespaceResourceAuditEvent,
+  type CodespaceReadinessView,
+  LocalDeviceError,
+  CODESPACE_PROVIDER_GITHUB,
 } from "@mcp-moira/shared";
-import { LocalCodespaceRelay } from "./local-codespace-relay.js";
-import { LocalCodespaceProvider, localCodespaceCredential } from "./local-codespace-provider.js";
-import { getWorkspaceClient } from "./workspace-client.js";
+import { LocalCodespaceProvider } from "./local-codespace-provider.js";
+import { LocalCodespaceResourceService } from "./local-codespace-resource-service.js";
+import { getWorkspaceClient, getControllerClient } from "./workspace-client.js";
 
 export function localCodespaceSettingsUrl(baseUrl = getBaseUrl(), appPrefix?: string): string {
   const url = new URL(codespaceGitHubSettingsPath(appPrefix), baseUrl);
   url.hash = "integrations-local";
   return url.toString();
 }
-
 export function localCodespacePolicy() {
   return { ...getCodespaceResourcePolicy(), enabled: true };
 }
-
 export function createLocalCodespaceServices(
-  transfer: CodespaceTransferService,
   context: {
     sqlite?: ReturnType<typeof getSqliteInstance>;
     now?: () => number;
     policy?: () => CodespaceResourcePolicy;
     settingsUrl?: string;
-    resourceAudit?: (event: CodespaceResourceAuditEvent) => Promise<void> | void;
+    controller?: ConstructorParameters<typeof LocalDeviceService>[2];
+    github?: Pick<CodespaceConnectionService, "refreshGrants">;
+    retireDeviceCredentials?: ConstructorParameters<typeof LocalDeviceService>[3];
   } = {},
 ) {
-  const sqlite = context.sqlite ?? getSqliteInstance();
-  const now = context.now ?? Date.now;
-  const policy = context.policy ?? localCodespacePolicy;
-  const devices = new LocalDeviceService(new LocalDeviceRepository(sqlite), now);
-  const resources = new CodespaceResourceRepository(sqlite);
-  const connections = new CodespaceConnectionRepository(sqlite);
+  const sqlite = context.sqlite ?? getSqliteInstance(),
+    now = context.now ?? Date.now;
+  const devices = new LocalDeviceService(
+    new LocalDeviceRepository(sqlite),
+    now,
+    context.controller ?? getControllerClient(),
+    context.retireDeviceCredentials,
+  );
+  const resources = new LocalResourceRepository(sqlite),
+    connections = new CodespaceConnectionRepository(sqlite);
   const settingsUrl = context.settingsUrl ?? localCodespaceSettingsUrl();
-  const relay = new LocalCodespaceRelay(devices, now);
-  const provider = new LocalCodespaceProvider(relay, resources, settingsUrl, now);
-  const registry = new CodespaceProviderRegistry();
-  registry.register(provider);
-  const credentials = {
-    getCredential: async (userId: string, providerId: string) => {
-      if (providerId !== CODESPACE_PROVIDER_LOCAL)
-        throw new Error("Local credential provider does not match");
-      devices.listOwned(userId);
-      return localCodespaceCredential(userId);
+  const provider = new LocalCodespaceProvider(devices, resources, settingsUrl, now);
+  const resource = new LocalCodespaceResourceService(
+    resources,
+    devices,
+    provider,
+    sqlite,
+    now,
+    async (userId, repository) => {
+      if (!context.github || (await context.github.refreshGrants(userId, { force: true })).stale)
+        throw new LocalDeviceError(
+          "LOCAL_UNAUTHORIZED",
+          "Refresh GitHub repository authority before registering this resource.",
+        );
+      const account = connections.getConnection(userId, CODESPACE_PROVIDER_GITHUB);
+      const grant = account?.repositories.find(
+        (entry) =>
+          entry.fullName.toLowerCase() === repository.fullName.toLowerCase() &&
+          entry.private === repository.private,
+      );
+      if (
+        account?.status !== "connected" ||
+        !grant ||
+        !account.installations.some(
+          (entry) => entry.externalInstallationId === grant.externalInstallationId,
+        )
+      )
+        throw new LocalDeviceError(
+          "LOCAL_UNAUTHORIZED",
+          "The selected GitHub App does not admit this repository.",
+        );
+    },
+  );
+  const observability = {
+    async readiness(): Promise<CodespaceReadinessView> {
+      return {
+        provider: CODESPACE_PROVIDER_LOCAL,
+        state: "ready",
+        reason: null,
+        configuration: "available",
+        resources_enabled: true,
+        checked_at: now(),
+      };
     },
   };
-  const resource = new CodespaceResourceService({
-    repository: resources,
-    repositories: resources,
-    registry,
-    credentials,
-    providerId: CODESPACE_PROVIDER_LOCAL,
-    requiredCapabilities: { persistent: true, exactLifecycle: true, personalBillingOnly: true },
-    policy,
-    now,
-    refreshAuthorization: async (userId) => {
-      devices.listOwned(userId);
-      return true;
-    },
-    audit: context.resourceAudit ?? recordCodespaceResourceEvent,
-  });
-  const observability = new CodespaceObservabilityService({
-    providerId: CODESPACE_PROVIDER_LOCAL,
-    config: () => ({ state: "available" }),
-    policy,
-    now,
-    resources,
-    transport: {
-      async health() {
-        const current = await provider.health();
-        return { ok: current.state === "available", reason: current.reason };
-      },
-    },
-  });
   const connection: Pick<CodespaceConnectionService, "getStatus" | "refreshGrants"> = {
     getStatus(userId): CodespaceConnectionView {
-      const owned = devices.listOwned(userId);
-      const active = owned.devices.filter((device) => device.status === "active");
+      const active = devices
+        .listRegistered(userId)
+        .devices.filter((device) => device.status === "active");
       const stored = connections.getConnection(userId, CODESPACE_PROVIDER_LOCAL);
       return {
         state:
@@ -106,20 +110,19 @@ export function createLocalCodespaceServices(
           externalInstallationId: device.deviceId,
           repositorySelection: "selected",
         })),
-        repositories: active.flatMap((device) =>
-          device.policy.repositories.map((repo) => ({
-            externalRepositoryId: localRepositoryTargetId(device.deviceId, repo.id),
-            fullName: repo.fullName,
-            private: repo.private,
-          })),
-        ),
+        repositories: [],
         canConnect: true,
         canDisconnect: false,
       };
     },
     async refreshGrants(userId) {
-      devices.listOwned(userId);
-      return { refreshed: false, stale: false };
+      const owned = await devices.listOwned(userId);
+      return {
+        refreshed: true,
+        stale: owned.devices.some(
+          (device) => device.status === "active" && device.owner.state !== "available",
+        ),
+      };
     },
   };
   return {
@@ -128,8 +131,6 @@ export function createLocalCodespaceServices(
     workspace: getWorkspaceClient(),
     observability,
     devices,
-    relay,
     provider,
-    transfer,
   };
 }

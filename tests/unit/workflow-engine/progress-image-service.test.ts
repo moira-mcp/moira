@@ -1,7 +1,12 @@
-import { describe, expect, jest, test } from "@jest/globals";
+import { beforeEach, describe, expect, jest, test } from "@jest/globals";
+import {
+  communicationOwnerFixture,
+  communicationDeviceId,
+} from "../../fixtures/communication-owner.js";
 import {
   ProgressImageService,
   statisticsForRun,
+  setActiveCommunicationFileOwner,
   type ProgressImageTokenStore,
   type WorkflowExecution,
   type WorkflowGraph,
@@ -9,6 +14,8 @@ import {
   type WorkflowVersionStatistics,
 } from "@mcp-moira/workflow-engine";
 import type { WorkflowToken } from "@mcp-moira/shared";
+
+beforeEach(() => setActiveCommunicationFileOwner(communicationOwnerFixture().owner));
 
 function fixture() {
   const graph: WorkflowGraph = {
@@ -125,7 +132,7 @@ describe("progress image grants", () => {
       mimeType: "image/png",
     });
     const redemption = await service.redeem("opaque");
-    expect(redemption?.png.subarray(0, 8).toString("hex")).toBe("89504e470d0a1a0a");
+    expect(redemption?.referenceId).toContain(`owner-file://controller/${communicationDeviceId}/`);
     expect(await service.redeem("opaque")).toBeNull();
     expect(service.complete("opaque", redemption!.claimId)).toBe(true);
     expect(await service.redeem("opaque")).toBeNull();
@@ -167,9 +174,9 @@ describe("progress image grants", () => {
       f.repository,
       f.tokens,
       () => "https://moira.test",
-      async () => {
+      communicationOwnerFixture(async () => {
         throw new Error("render failed");
-      },
+      }).owner,
     );
     await failing.mint("execution", "owner");
     await expect(failing.redeem("opaque")).rejects.toThrow("render failed");
@@ -214,17 +221,12 @@ describe("progress image grants", () => {
       f.repository,
       f.tokens,
       undefined,
-      async (_graph, execution) => {
-        titles.push(execution.taskIdentity!.title);
-        return {
-          buffer: Buffer.from("png"),
-          mimeType: "image/png",
-          width: 1,
-          height: 1,
-          workflowVersion: "2.0.0",
-          executionRevision: 4,
-        };
-      },
+      communicationOwnerFixture(async (input) => {
+        if (input.source.type === "progress")
+          titles.push(
+            (input.source.descriptor.run as unknown as WorkflowExecution).taskIdentity!.title,
+          );
+      }).owner,
     );
     await service.mint("execution", "owner");
     f.execution.taskIdentity = { title: "B", changedAt: 1, changeId: "b1" };
@@ -255,18 +257,15 @@ describe("progress image grants", () => {
           return f.graph;
         },
       } as IDataRepository;
-      const service = new ProgressImageService(repository, f.tokens, undefined, async () => {
-        if (phase === "render")
-          f.execution.taskIdentity = { title: "After", changedAt: 1, changeId: "after" };
-        return {
-          buffer: Buffer.from("png"),
-          mimeType: "image/png",
-          width: 1,
-          height: 1,
-          workflowVersion: "2.0.0",
-          executionRevision: 4,
-        };
-      });
+      const service = new ProgressImageService(
+        repository,
+        f.tokens,
+        undefined,
+        communicationOwnerFixture(async () => {
+          if (phase === "render")
+            f.execution.taskIdentity = { title: "After", changedAt: 1, changeId: "after" };
+        }).owner,
+      );
       await service.mint("execution", "owner");
       rename = true;
       expect(await service.redeem("opaque")).toBeNull();
@@ -340,27 +339,14 @@ describe("the statistics a picture is drawn with", () => {
       getWorkflowGraph: async () => f.graph,
     } as unknown as IDataRepository;
     const received: unknown[] = [];
-    const renderer = async (
-      _graph: WorkflowGraph,
-      _execution: WorkflowExecution,
-      _options: unknown,
-      statistics?: WorkflowVersionStatistics | null,
-    ) => {
-      received.push(statistics);
-      return {
-        buffer: Buffer.from("png"),
-        mimeType: "image/png" as const,
-        width: 1,
-        height: 1,
-        workflowVersion: "2.0.0",
-        executionRevision: 4,
-      };
-    };
+    const owner = communicationOwnerFixture((input) => {
+      if (input.source.type === "progress") received.push(input.source.descriptor.statistics);
+    }).owner;
     const service = new ProgressImageService(
       repository,
       f.tokens,
       () => "https://moira.test/",
-      renderer as unknown as ConstructorParameters<typeof ProgressImageService>[3],
+      owner,
       { forVersion: async () => versionStatistics("2.0.0") },
     );
     await service.mint("execution", "owner");

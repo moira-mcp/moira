@@ -23,6 +23,8 @@ import {
 } from "../utils/execution-run-projection.js";
 import { metadataRevision, ConflictError } from "@mcp-moira/shared";
 import { withInFlightPause } from "../utils/execution-visits.js";
+import { liveExecution, type CycleOrigin, type EngineVisit } from "../utils/execution-visits.js";
+import { createHash } from "node:crypto";
 import {
   composeNotification,
   notificationHeading,
@@ -45,6 +47,56 @@ export interface NotificationFrame {
    * is still in progress — unfinished items read as open.
    */
   closing: boolean;
+}
+
+interface NotificationInvocation {
+  executionId: string;
+  workflowId: string;
+  userId: string;
+  revision: number;
+  nodeId: string;
+  ordinal: number;
+}
+const invocations = new WeakMap<() => WorkflowExecution, NotificationInvocation>();
+/** Captures the executor's real origin and ordered visits before the current handler runs. */
+export function notificationLiveRun(
+  origin: CycleOrigin,
+  visits: readonly EngineVisit[],
+  variables: Record<string, unknown>,
+  nodeId: string,
+): () => WorkflowExecution {
+  const run = () => liveExecution(origin, visits, variables);
+  invocations.set(run, {
+    executionId: origin.execution.executionId,
+    workflowId: origin.execution.workflowId,
+    userId: origin.execution.userId,
+    revision: origin.execution.revision,
+    nodeId,
+    ordinal: run().visits?.length ?? 0,
+  });
+  return run;
+}
+/** Unsaved/inline callers cannot manufacture restart-safe binary invocation authority. */
+export async function notificationDeliveryRequestId(
+  repository: IDataRepository,
+  nodeId: string,
+  liveRun?: () => WorkflowExecution,
+): Promise<string> {
+  const invocation = liveRun ? invocations.get(liveRun) : undefined;
+  if (!invocation || invocation.nodeId !== nodeId || !Number.isSafeInteger(invocation.revision))
+    throw new Error("binary_invocation_unavailable");
+  const stored = await repository.getExecution(invocation.executionId);
+  if (
+    !stored ||
+    stored.userId !== invocation.userId ||
+    stored.workflowId !== invocation.workflowId ||
+    stored.revision !== invocation.revision
+  )
+    throw new Error("binary_invocation_unavailable");
+  const digest = createHash("sha256")
+    .update(JSON.stringify(["workflow-communication", invocation]))
+    .digest("hex");
+  return `ws1-${digest.slice(0, 8)}-${digest.slice(8, 12)}-4${digest.slice(13, 16)}-8${digest.slice(17, 20)}-${digest.slice(20, 32)}`;
 }
 
 /**

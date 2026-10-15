@@ -43,14 +43,19 @@ import {
   getSqliteInstance,
   getWorkflowReconciliationStatusSummary,
   formatWorkflowReconciliationNotice,
-  CommunicationAttachmentGrantService,
-  getCodespaceResourcePolicy,
   projectPublicCodespaceReadiness,
-  logAuditEvent,
 } from "@mcp-moira/shared";
 import {
   getCodespaceObservabilityService,
-  getCodespaceTransferService,
+  initializeCommunicationFileOwner,
+  CommunicationOwnerTransport,
+  authenticateCommunicationOwner,
+  authorizeCommunicationOwner,
+  authorizeControllerPublication,
+  createCommunicationOwnerRoutes,
+  getControllerClient,
+  getWorkspaceClient,
+  authorizeWorkspacePublication,
 } from "@mcp-moira/web-backend/services";
 
 // Get monorepo version from root package.json (#196)
@@ -65,7 +70,6 @@ import {
   HttpExtensionRunnerClient,
   DatabaseRepository,
   ExecutionAttemptMaintenance,
-  getActiveUserCommunicationService,
   WaitingNotificationSender,
 } from "@mcp-moira/workflow-engine";
 import { runWithMCPContext } from "./core/request-context.js";
@@ -88,9 +92,7 @@ import {
   CODESPACE_TOOL_NAME,
   CODESPACE_PROCESS_TOOL_NAME,
 } from "./tools/tool-definitions.js";
-import { CommunicationAttachmentInflightLimiter } from "./communication-attachment-inflight.js";
-import { createCommunicationAttachmentHandler } from "./communication-attachment-route.js";
-import { createCodespaceTransferDownloadHandler } from "./codespace-transfer-route.js";
+import { createWorkspacePublicationHandler } from "./workspace-publication-route.js";
 
 // Initialize logger
 const logger = createLogger({ component: "MCPServer" });
@@ -465,9 +467,18 @@ const app = express();
 // Derive req.ip only through the proxies TRUST_PROXY names (the in-container nginx by default)
 applyTrustProxy(app);
 
-const attachmentGrantService = new CommunicationAttachmentGrantService();
-const attachmentInflight = new CommunicationAttachmentInflightLimiter();
-const codespaceTransferService = getCodespaceTransferService();
+initializeCommunicationFileOwner();
+
+// Owner credentials and fixed provider secrets are handled before general request logging/parsing.
+app.use(
+  "/api/communication/owner",
+  createCommunicationOwnerRoutes(
+    new CommunicationOwnerTransport({
+      authenticate: authenticateCommunicationOwner,
+      authorize: authorizeCommunicationOwner,
+    }),
+  ),
+);
 
 // Prometheus metrics middleware FIRST
 app.use(metricsMiddleware());
@@ -483,25 +494,21 @@ app.use(requestLogger({ logger: httpLogger }));
 // GeoIP logging for request origins
 app.use(geoipLogger({ logger: httpLogger }));
 
-// This endpoint must precede JSON parsing because a declared document may itself use application/json.
-app.post(
-  "/api/communication/attachments",
+app.get(
+  "/api/communication/files/:resourceId/:token",
   mcpLimiter,
-  createCommunicationAttachmentHandler({
-    authenticate: authenticatePrincipal,
-    grantService: attachmentGrantService,
-    inflight: attachmentInflight,
-    communicationService: getActiveUserCommunicationService(),
-    transfers: codespaceTransferService,
-    createRepository: () => new DatabaseRepository(),
-    audit: logAuditEvent,
-    logger,
+  createWorkspacePublicationHandler({
+    authorize: authorizeControllerPublication,
+    workspace: getControllerClient(),
   }),
 );
 app.get(
-  "/api/codespaces/transfers/:token",
+  "/api/codespaces/files/:resourceId/:token",
   mcpLimiter,
-  createCodespaceTransferDownloadHandler(codespaceTransferService),
+  createWorkspacePublicationHandler({
+    authorize: authorizeWorkspacePublication,
+    workspace: getWorkspaceClient(),
+  }),
 );
 
 app.use(express.json({ limit: "10mb" }));
@@ -560,8 +567,7 @@ app.post("/mcp", mcpLimiter, async (req: Request, res: Response) => {
 // Health check endpoint
 app.get("/health", async (req: Request, res: Response) => {
   const reconciliation = getWorkflowReconciliationStatusSummary(getSqliteInstance());
-  // Public liveness surface: the cached decision with only the readiness state,
-  // never operator detail; a stalled connector cannot hang this endpoint.
+  // Read current configuration without contacting an environment or its controller.
   const codespaces = projectPublicCodespaceReadiness(
     await getCodespaceObservabilityService().snapshot(),
   );
@@ -583,9 +589,6 @@ async function main() {
     const stopAttemptMaintenance = await new ExecutionAttemptMaintenance(
       new DatabaseRepository(),
     ).start();
-    // Keep this process's readiness decision and gauges current between requests.
-    getCodespaceObservabilityService().start(getCodespaceResourcePolicy().reconcileIntervalMs);
-
     // The MCP and API servers are separate processes, so each owns a registry and runner client.
     // This process is the single writer of the snapshot consumed by tools outside the container.
     const runnerUrl = getExtensionRunnerUrl();
@@ -644,7 +647,6 @@ async function main() {
       logger.info("Received SIGINT, shutting down HTTP server");
       stopAttemptMaintenance();
       stopWaitingNotifications();
-      getCodespaceObservabilityService().stop();
       httpServer.close(() => {
         try {
           closeDatabase();
@@ -662,7 +664,6 @@ async function main() {
       logger.info("Received SIGTERM, shutting down HTTP server");
       stopAttemptMaintenance();
       stopWaitingNotifications();
-      getCodespaceObservabilityService().stop();
       httpServer.close(() => {
         try {
           closeDatabase();

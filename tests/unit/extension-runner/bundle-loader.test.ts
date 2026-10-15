@@ -74,6 +74,86 @@ describe("Bundle discovery", () => {
     expect(result.rejected.length).toBeGreaterThan(0);
   });
 
+  test.each([
+    [
+      "secret permissions",
+      { permissions: { secrets: {}, network: ["api.example.com"] } },
+      "permissions.secrets",
+    ],
+    [
+      "network permissions",
+      { permissions: { secrets: ["broken.token"], network: {} } },
+      "permissions.network",
+    ],
+    ["nonsecret settings", { settings: {} }, "settings"],
+    ["null transport", { binaryTransport: null }, "binaryTransport"],
+    ["false transport", { binaryTransport: false }, "binaryTransport"],
+  ])(
+    "a malformed binary channel's %s rejects only its bundle",
+    (_label, channelOverride, reason) => {
+      const directory = fs.mkdtempSync(path.join(os.tmpdir(), "moira-binary-manifest-"));
+      const channel = {
+        id: "broken.files",
+        title: "Files",
+        capabilities: { text: true, image: false, document: true },
+        configurationSchema: { type: "object" },
+        enabledSetting: "broken.enabled",
+        settings: ["broken.enabled", "broken.recipient"],
+        permissions: { secrets: ["broken.token"], network: ["api.example.com"] },
+        binaryTransport: {
+          operations: [
+            {
+              id: "upload",
+              endpoint: { url: "https://api.example.com/files" },
+              method: "POST",
+              credential: { header: "authorization", secret: "broken.token" },
+              recipient: { field: "chat", setting: "broken.recipient" },
+              body: { mode: "multipart", fileField: "file" },
+            },
+          ],
+        },
+        ...channelOverride,
+      };
+      const healthy = {
+        apiVersion: "moira.extensions/v1",
+        name: "healthy",
+        version: "1.0.0",
+        entrypoint: "index.ts",
+        nodes: [{ type: "healthy.go", title: "Go", configSchema: {}, outputSchema: {} }],
+      };
+      const broken = {
+        ...healthy,
+        name: "broken",
+        nodes: [{ type: "broken.go", title: "Go", configSchema: {}, outputSchema: {} }],
+        settings: [
+          { key: "broken.enabled", type: "boolean", label: "Enabled" },
+          { key: "broken.recipient", type: "string", label: "Recipient" },
+          { key: "broken.token", type: "encrypted", label: "Token" },
+        ],
+        communicationChannels: [channel],
+      };
+      try {
+        for (const manifest of [broken, healthy]) {
+          const bundle = path.join(directory, manifest.name);
+          fs.mkdirSync(bundle);
+          fs.writeFileSync(path.join(bundle, "index.ts"), "export default { nodes: [] };", "utf-8");
+          fs.writeFileSync(
+            path.join(bundle, "moira-extension.json"),
+            JSON.stringify(manifest),
+            "utf-8",
+          );
+        }
+        const result = scanExtensionBundles(directory);
+        expect(result.bundles.map((bundle) => bundle.manifest.name)).toEqual(["healthy"]);
+        expect(result.rejected).toHaveLength(1);
+        expect(path.basename(result.rejected[0].directory)).toBe("broken");
+        expect(result.rejected[0].reasons.join(" ")).toContain(reason);
+      } finally {
+        fs.rmSync(directory, { recursive: true, force: true });
+      }
+    },
+  );
+
   test("two bundles claiming one settings key: exactly one loads and both names appear", () => {
     // Two copies of one extension name can carry different node types while still claiming one
     // setting. The bundle is refused as a whole, and the key-specific reason remains useful to an

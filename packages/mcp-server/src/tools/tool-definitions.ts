@@ -261,29 +261,37 @@ export const TOOL_DEFINITIONS = [
   }),
   defineTool({
     name: "communication",
+    _meta: { "openai/fileParams": ["file"] },
     schema: communicationSchema,
     responsePolicy: "json",
     examples: [
       { action: "send", message: "The report is ready." },
       {
-        action: "attachment-token",
+        action: "deliver-file",
+        request_id: "ws1-11111111-1111-4111-8111-111111111111",
         message: "Report",
         kind: "document",
-        filename: "report.pdf",
-        mimeType: "application/pdf",
-        sizeBytes: 12000,
+        referenceId:
+          "owner-file://workspace/00000000-0000-4000-8000-000000000000/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      },
+      {
+        action: "operation",
+        request_id: "ws1-11111111-1111-4111-8111-111111111111",
+        device_id: "00000000-0000-4000-8000-000000000000",
       },
     ],
     documentation: {
       en: {
         summary:
-          "Send a message to the current user or mint a one-time authenticated attachment upload grant.",
-        result: "A channel-safe delivery summary or a short-lived upload grant and endpoint.",
+          "Send ordinary text or deliver a native/owner-held file through configured channels. Binary delivery requires an original ws1 request_id and an available source owner; operation collects its receipt without resending.",
+        result:
+          "A text delivery summary or an owner receipt with its original request and assigned device/workspace identity. Uncertainty preserves that identity; no cloud file grant is issued.",
       },
       ru: {
         summary:
-          "Отправляет сообщение текущему пользователю или создаёт одноразовый grant для авторизованной загрузки вложения.",
-        result: "Безопасная сводка доставки либо временный grant и адрес загрузки.",
+          "Отправляет обычный текст либо native-файл/файл владельца через настроенные каналы. Для файла нужны исходный request_id вида ws1 и доступный владелец источника; operation читает результат без повторной отправки.",
+        result:
+          "Сводка текстовой доставки либо квитанция владельца с исходным запросом и устройством/средой. Неопределённость сохраняет эту идентичность; облачный grant файла не создаётся.",
       },
     },
   }),
@@ -376,6 +384,11 @@ export const TOOL_DEFINITIONS = [
       { action: "setup_help" },
       { action: "local_devices" },
       {
+        action: "operation",
+        device_id: "00000000-0000-4000-8000-000000000000",
+        request_id: "ws1-11111111-1111-4111-8111-111111111111",
+      },
+      {
         action: "repository_add",
         device_id: "00000000-0000-4000-8000-000000000000",
         repository_id: "123456",
@@ -393,8 +406,57 @@ export const TOOL_DEFINITIONS = [
         codespace_id: "00000000-0000-4000-8000-000000000000",
         path: "screenshots/app.png",
       },
-      { action: "create", repository_id: "123456", ref: "main" },
+      {
+        action: "create",
+        repository_id: "123456",
+        ref: "main",
+        request_id: "ws1-11111111-1111-4111-8111-111111111111",
+      },
+      {
+        action: "adopt",
+        provider_resource_name: "owned-space-123",
+        request_id: "ws1-11111111-1111-4111-8111-111111111111",
+      },
+      {
+        action: "adopt",
+        codespace_id: "00000000-0000-4000-8000-000000000000",
+        generation: 2,
+        device_id: "22222222-2222-4222-8222-222222222222",
+        request_id: "ws1-11111111-1111-4111-8111-111111111111",
+      },
+      {
+        action: "create",
+        repository_id:
+          "local:00000000-0000-4000-8000-000000000000:22222222-2222-4222-8222-222222222222",
+        ref: "main",
+        request_id: "ws1-11111111-1111-4111-8111-111111111111",
+      },
       { action: "get", codespace_id: "00000000-0000-4000-8000-000000000000" },
+      {
+        action: "pull_request_create",
+        codespace_id: "00000000-0000-4000-8000-000000000000",
+        request_id: "ws1-11111111-1111-4111-8111-111111111111",
+        head: "feature/change",
+        base: "main",
+        title: "Change",
+      },
+      {
+        action: "pull_request_create",
+        codespace_id: "00000000-0000-4000-8000-000000000000",
+        request_id: "ws1-11111111-1111-4111-8111-111111111111",
+      },
+      {
+        action: "start",
+        codespace_id: "00000000-0000-4000-8000-000000000000",
+        generation: 3,
+        request_id: "ws1-22222222-2222-4222-8222-222222222222",
+      },
+      {
+        action: "stop",
+        codespace_id: "00000000-0000-4000-8000-000000000000",
+        generation: 4,
+        request_id: "ws1-33333333-3333-4333-8333-333333333333",
+      },
       {
         action: "exec",
         codespace_id: "00000000-0000-4000-8000-000000000000",
@@ -418,6 +480,8 @@ export const TOOL_DEFINITIONS = [
       {
         action: "delete",
         codespace_id: "00000000-0000-4000-8000-000000000000",
+        generation: 5,
+        request_id: "ws1-44444444-4444-4444-8444-444444444444",
         confirm_delete: true,
       },
       {
@@ -446,15 +510,15 @@ export const TOOL_DEFINITIONS = [
     documentation: {
       en: {
         summary:
-          "Work in a persistent GitHub or local Docker Sandboxes codespace: lifecycle, commands and files, by action.",
+          "Work in a persistent GitHub or local Docker Sandboxes codespace: lifecycle, commands and files, by action. Both providers' lifecycle mutations require a caller-selected ws1 request_id; start/stop/delete and adoption by codespace_id require the observed generation from get/list. GitHub create/adopt runs through the selected available paired controller. Recover through operation with device_id and the original request_id, including a lost create reply before a codespace_id is known.",
         result:
-          "Discovery, lifecycle state, workspace-owned command state and output, guarded file results, a private download link or PNG/JPEG preview. Choose a fresh ws1-<lowercase UUID> request_id for commands and file mutations; legacy UUIDs cannot execute. Collect the original request_id without command fields; collection never repeats the command. Background commands use codespace_process.",
+          "Discovery, lifecycle state, owner operation receipts, workspace-owned command state and output, guarded file results, a private download link or PNG/JPEG preview. Lifecycle collection never resubmits or provisions an effect; accepted/unconfirmed receipts retain the original identity. An offline Local owner returns unavailable to MCP, without queuing; direct owner/guest CLI access to existing VMs remains subject to local grants and leases. New creation requires cloud route registration and initial Git authority. Choose a fresh ws1-<lowercase UUID> request_id for commands and file mutations; legacy UUIDs cannot execute. Collect a command through exec with the original request_id and no command fields. Background commands use codespace_process.",
       },
       ru: {
         summary:
-          "Работа в постоянном codespace GitHub или локальной Docker Sandboxes VM: жизненный цикл, команды и файлы, по action.",
+          "Работа в постоянном codespace GitHub или локальной Docker Sandboxes VM: жизненный цикл, команды и файлы, по action. Для обоих провайдеров выберите request_id вида ws1 до изменения; start/stop/delete и adopt по codespace_id требуют наблюдаемое generation из get/list. GitHub create/adopt выполняет выбранный доступный сопряжённый контроллер. После потери ответа используйте operation с device_id и исходным request_id, в том числе если create ещё не вернул codespace_id.",
         result:
-          "Обнаружение сред, состояние жизненного цикла, состояние команды и вывод, защищённые изменения файлов, приватная ссылка или PNG/JPEG preview. Для команды или изменения файла выберите новый request_id вида ws1-<UUID в нижнем регистре>; старые UUID не выполняются. Получайте результат по исходному request_id без полей команды; чтение не повторяет запуск. Для фоновых команд используйте codespace_process.",
+          "Обнаружение сред, состояние жизненного цикла, квитанции операций владельца, состояние команды и вывод, защищённые изменения файлов, приватная ссылка или PNG/JPEG preview. Чтение квитанции не повторяет действие и подготовку среды; accepted/unconfirmed сохраняют исходную идентичность. Недоступный Local owner возвращает MCP unavailable без постановки в очередь; прямой CLI владельца или среды работает с существующими VM в рамках локальных прав и lease. Новое создание требует облачной регистрации маршрута и начальных Git-полномочий. Для команды или изменения файла выберите новый request_id вида ws1-<UUID в нижнем регистре>; старые UUID не выполняются. Получайте результат команды через exec с исходным request_id без полей команды. Для фоновых команд используйте codespace_process.",
       },
     },
   }),

@@ -1,17 +1,18 @@
 import { Router } from "express";
+import { z } from "zod";
 import {
   CodespaceConnectionError,
+  ScopedCredentialError,
   CodespaceResourceError,
-  projectCodespaceSummary,
   recordCodespaceRejection,
   localCodespaceFailureGuidance,
   parseLocalRepositoryTargetId,
+  providerFailureSchema,
   type CodespaceConnectionService,
-  type CodespaceObservabilityService,
-  type CodespaceResourceService,
 } from "@mcp-moira/shared";
 import type { AuthenticatedRequest } from "../types/express-types.js";
 import { asyncHandler } from "../middleware/error-middleware.js";
+import { GitHubResourceService } from "../services/github-resource-service.js";
 import {
   getCodespaceConnectionService,
   getCodespaceObservabilityService,
@@ -19,6 +20,7 @@ import {
   getCodespaceProviderBundles,
   selectCodespaceProviderServices,
   getLocalDeviceService,
+  getCodespaceProviderBilling,
 } from "../services/codespace-services.js";
 
 export interface CodespaceManagementServices {
@@ -32,10 +34,14 @@ export interface CodespaceManagementServices {
     userId: string,
     repositoryId: string,
   ) => { device_id: string; device_label: string };
+  billing?: typeof getCodespaceProviderBilling;
+  controllers?: (
+    userId: string,
+  ) => Promise<Array<{ device_id: string; label: string; available: boolean }>>;
   connection: Pick<CodespaceConnectionService, "getStatus" | "refreshGrants">;
-  observability: Pick<CodespaceObservabilityService, "readiness" | "limitsWithBilling">;
+  observability: ReturnType<typeof selectCodespaceProviderServices>["observability"];
   resource: Pick<
-    CodespaceResourceService,
+    NonNullable<ReturnType<typeof selectCodespaceProviderServices>["resource"]>,
     | "listRepositories"
     | "listResources"
     | "refreshProviderState"
@@ -60,6 +66,7 @@ const RESOURCE_ERROR_STATUS: Record<string, number> = {
   CODESPACE_PROVIDER_DISABLED: 503,
   CODESPACE_PROVIDER_UNAVAILABLE: 503,
   CODESPACE_AUTHORIZATION_REQUIRED: 409,
+  WORKSPACE_OUTCOME_UNCONFIRMED: 503,
 };
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -69,13 +76,23 @@ function defaultServices(): CodespaceManagementServices {
     connection: getCodespaceConnectionService(),
     observability: getCodespaceObservabilityService(),
     resource: getCodespaceResourceService(),
+    billing: getCodespaceProviderBilling,
+    controllers: async (userId) =>
+      (await getLocalDeviceService().listOwned(userId)).devices.map((device) => ({
+        device_id: device.deviceId,
+        label: device.label,
+        available: device.status === "active" && device.owner.state === "available",
+      })),
     providers: getCodespaceProviderBundles(),
     select: selectCodespaceProviderServices,
     repositoryMetadata: (userId, repositoryId) => {
       const target = parseLocalRepositoryTargetId(repositoryId);
       return {
         device_id: target.deviceId,
-        device_label: getLocalDeviceService().getActiveDevice(userId, target.deviceId).label,
+        device_label:
+          getLocalDeviceService()
+            .listRegistered(userId)
+            .devices.find((device) => device.deviceId === target.deviceId)?.label ?? "Local device",
       };
     },
   };
@@ -114,7 +131,32 @@ export function createCodespaceManagementRoutes(
   });
 
   const handleError = (userId: string, error: unknown, res: import("express").Response) => {
+    if (error instanceof z.ZodError) {
+      res.status(400).json({
+        success: false,
+        error: {
+          code: "CODESPACE_RESOURCE_INVALID",
+          message: "The lifecycle request is invalid",
+        },
+      });
+      return true;
+    }
+    if (error instanceof ScopedCredentialError) {
+      res.status(error.status).json({
+        success: false,
+        error: {
+          code: error.code,
+          message: error.message,
+          ...(error.requestId ? { request_id: error.requestId } : {}),
+          ...(error.deviceId ? { device_id: error.deviceId } : {}),
+          ...(error.resourceId ? { codespace_id: error.resourceId } : {}),
+          ...(error.securityRequestId ? { security_request_id: error.securityRequestId } : {}),
+        },
+      });
+      return true;
+    }
     if (error instanceof CodespaceResourceError) {
+      const providerFailure = providerFailureSchema.safeParse(error.providerFailure);
       recordCodespaceRejection(error.code);
       res
         .status(
@@ -129,6 +171,10 @@ export function createCodespaceManagementRoutes(
             message: error.detail
               ? `${publicMessage(error.code).replace(/\.$/, "")}. ${error.detail}`
               : publicMessage(error.code),
+            ...(error.requestId ? { request_id: error.requestId } : {}),
+            ...(error.deviceId ? { device_id: error.deviceId } : {}),
+            ...(error.resourceId ? { codespace_id: error.resourceId } : {}),
+            ...(providerFailure.success ? { provider_failure: providerFailure.data } : {}),
           },
         });
       return true;
@@ -166,6 +212,7 @@ export function createCodespaceManagementRoutes(
         ) ?? providers[0];
       return {
         ...preferred,
+        controllers: (await selected.controllers?.(userId)) ?? [],
         providers,
         repositories: providers.flatMap((bundle) =>
           ((bundle.repositories ?? []) as Record<string, unknown>[]).map((repository) => {
@@ -187,22 +234,26 @@ export function createCodespaceManagementRoutes(
       ? await selected.connection.refreshGrants(userId, { force: true })
       : await selected.connection.refreshGrants(userId);
     const resources =
-      refresh && !grants.stale && selected.resource
+      refresh &&
+      !grants.stale &&
+      selected.resource &&
+      !(selected.resource instanceof GitHubResourceService)
         ? await selected.resource.refreshProviderState(userId, { authorizationFresh: true })
         : { stale: refresh && grants.stale };
     return {
       readiness: await selected.observability.readiness(),
       connection: selected.connection.getStatus(userId),
       repositories:
-        selected.resource?.listRepositories(userId).map((repository) => ({
+        (await selected.resource?.listRepositories(userId))?.map((repository) => ({
           repository_id: repository.id,
           name: repository.fullName,
           private: repository.private,
         })) ?? [],
       repositories_stale: grants.stale,
       resources_stale: resources.stale,
-      codespaces: selected.resource?.listResources(userId).map(projectCodespaceSummary) ?? [],
-      limits: await selected.observability.limitsWithBilling(userId, { force: refresh }),
+      codespaces: (await selected.resource?.listResources(userId)) ?? [],
+      ...(selected.billing ? { provider_billing: await selected.billing(userId) } : {}),
+      controllers: (await selected.controllers?.(userId)) ?? [],
     };
   };
 
@@ -258,10 +309,18 @@ export function createCodespaceManagementRoutes(
           return;
         }
         await selected.connection.refreshGrants(userId);
-        const created = await selected.resource.create(userId, repositoryId, ref);
+        const created =
+          selected.resource instanceof GitHubResourceService
+            ? await selected.resource.create(userId, repositoryId, ref, req.body?.request_id, {
+                deviceId: req.body?.device_id,
+                devcontainerPath: req.body?.devcontainer_path,
+              })
+            : await selected.resource.create(userId, repositoryId, ref, req.body?.request_id);
         res.status(201).json({
           success: true,
-          data: { codespace: projectCodespaceSummary(created.resource) },
+          data: {
+            codespace: created,
+          },
         });
       } catch (error) {
         if (!handleError(userId, error, res)) throw error;
@@ -269,6 +328,82 @@ export function createCodespaceManagementRoutes(
     }),
   );
 
+  router.post(
+    "/adopt",
+    asyncHandler(async (req, res) => {
+      const userId = (req as AuthenticatedRequest).userId;
+      try {
+        const selected = services.select?.(userId, {}) ?? services;
+        if (!(selected.resource instanceof GitHubResourceService))
+          throw new CodespaceResourceError(
+            "CODESPACE_PROVIDER_UNAVAILABLE",
+            "GitHub provisioning is unavailable",
+          );
+        const input = z
+          .object({
+            provider_resource_name: z.string().min(1),
+            request_id: z.string(),
+            device_id: z.string().uuid().optional(),
+          })
+          .strict()
+          .parse(req.body);
+        const identity = await selected.resource.registerExisting(
+          userId,
+          input.provider_resource_name,
+          { deviceId: input.device_id, requestId: input.request_id },
+        );
+        const codespace = await selected.resource.adopt(
+          userId,
+          identity.codespace_id,
+          input.request_id,
+          identity.generation,
+          { deviceId: input.device_id },
+        );
+        res.json({
+          success: true,
+          data: { codespace, data_preserved: true },
+        });
+      } catch (error) {
+        if (!handleError(userId, error, res)) throw error;
+      }
+    }),
+  );
+  router.post(
+    "/:codespaceId/adopt",
+    asyncHandler(async (req, res) => {
+      const userId = (req as AuthenticatedRequest).userId;
+      try {
+        const id = z.string().uuid().parse(req.params.codespaceId),
+          selected = services.select?.(userId, { codespaceId: id }) ?? services;
+        if (!(selected.resource instanceof GitHubResourceService))
+          throw new CodespaceResourceError(
+            "CODESPACE_RESOURCE_INVALID",
+            "Only a GitHub resource can be adopted",
+          );
+        const input = z
+          .object({
+            request_id: z.string(),
+            expected_generation: z.number().int().positive(),
+            device_id: z.string().uuid().optional(),
+          })
+          .strict()
+          .parse(req.body);
+        const codespace = await selected.resource.adopt(
+          userId,
+          id,
+          input.request_id,
+          input.expected_generation,
+          { deviceId: input.device_id },
+        );
+        res.json({
+          success: true,
+          data: { codespace, data_preserved: true },
+        });
+      } catch (error) {
+        if (!handleError(userId, error, res)) throw error;
+      }
+    }),
+  );
   router.get(
     "/:codespaceId",
     asyncHandler(async (req, res) => {
@@ -288,10 +423,10 @@ export function createCodespaceManagementRoutes(
             "CODESPACE_NOT_FOUND",
             "Codespace provider is unavailable",
           );
-        const codespace = selected.resource.getCodespace(userId, id);
+        const codespace = await selected.resource.getCodespace(userId, id);
         res.json({
           success: true,
-          data: { codespace: projectCodespaceSummary(codespace) },
+          data: { codespace },
         });
       } catch (error) {
         if (!handleError(userId, error, res)) throw error;
@@ -326,12 +461,22 @@ export function createCodespaceManagementRoutes(
           }
           const codespace =
             action === "start"
-              ? await selected.resource.startCodespace(userId, id)
-              : await selected.resource.stopCodespace(userId, id);
+              ? await selected.resource.startCodespace(
+                  userId,
+                  id,
+                  req.body?.request_id,
+                  req.body?.expected_generation,
+                )
+              : await selected.resource.stopCodespace(
+                  userId,
+                  id,
+                  req.body?.request_id,
+                  req.body?.expected_generation,
+                );
           res.json({
             success: true,
             data: {
-              codespace: projectCodespaceSummary(codespace),
+              codespace,
               data_preserved: true,
             },
           });
@@ -383,10 +528,11 @@ export function createCodespaceManagementRoutes(
         }
         const codespace = await selected.resource.deleteCodespace(userId, id, expectedGeneration, {
           ownerConfirmed: true,
+          requestId: req.body?.request_id,
         });
         res.json({
           success: true,
-          data: { codespace: projectCodespaceSummary(codespace), data_preserved: false },
+          data: { codespace, data_preserved: false },
         });
       } catch (error) {
         if (!handleError(userId, error, res)) throw error;
@@ -401,6 +547,8 @@ function publicMessage(code: string): string {
   const local = localCodespaceFailureGuidance(code);
   if (local) return local.message;
   switch (code) {
+    case "WORKSPACE_OUTCOME_UNCONFIRMED":
+      return "The owner outcome is unconfirmed; collect the original request before submitting another lifecycle action";
     case "CODESPACE_NOT_FOUND":
       return "Codespace was not found";
     case "CODESPACE_GENERATION_CONFLICT":

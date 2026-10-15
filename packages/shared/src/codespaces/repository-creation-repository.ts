@@ -2,7 +2,7 @@ import { randomBytes, randomUUID } from "node:crypto";
 import type Database from "better-sqlite3";
 import { canonicalJson } from "../utils/canonical-json.js";
 import { LocalDeviceRepository, digestLocalSecret } from "./local-device-repository.js";
-import { LocalDeviceError } from "./local-device-types.js";
+import { LocalDeviceError, type LocalDeviceView } from "./local-device-types.js";
 import { MAX_LOCAL_WORK_LEASE_MS } from "./local-management-types.js";
 
 export interface RepositoryCreationInput {
@@ -41,7 +41,10 @@ export interface RepositoryCreationRecord
 /** Durable private-repository requests exist independently of a VM or workflow. */
 export class RepositoryCreationRepository {
   private readonly devices: LocalDeviceRepository;
-  constructor(private readonly sqlite: Database.Database) {
+  constructor(
+    private readonly sqlite: Database.Database,
+    private readonly readDevice: (userId: string, deviceId: string) => Promise<LocalDeviceView>,
+  ) {
     this.devices = new LocalDeviceRepository(sqlite);
   }
   getOwned(userId: string, requestId: string): RepositoryCreationRecord | null {
@@ -57,10 +60,19 @@ export class RepositoryCreationRepository {
     input: RepositoryCreationInput,
     authority: RepositoryCreationAuthority,
     now: number,
+    device: LocalDeviceView,
     admissionPending = false,
   ) {
-    const device = this.devices.getActiveDevice(userId, input.deviceId);
-    const control = device.control;
+    const identity = this.devices.getDeviceIdentity(userId, input.deviceId);
+    if (
+      device.owner.state !== "available" ||
+      device.owner.local.state !== "configured" ||
+      identity.status !== "active" ||
+      identity.deviceGeneration !== device.deviceGeneration ||
+      identity.connectionId !== device.connectionId
+    )
+      throw new LocalDeviceError("LOCAL_UNAVAILABLE", "The original device owner is unavailable.");
+    const control = device.owner.local.control;
     const delegation = control?.appliedAgentRepositoryManagement;
     if (
       !control ||
@@ -69,9 +81,9 @@ export class RepositoryCreationRepository {
       !delegation?.allowNewPrivate ||
       delegation.githubUserId !== authority.githubUserId ||
       delegation.owner.toLowerCase() !== authority.owner.toLowerCase() ||
-      !device.policy.enabled ||
-      device.policy.leaseUntil <= now ||
-      device.policy.leaseUntil > now + MAX_LOCAL_WORK_LEASE_MS
+      !device.owner.local.policy.enabled ||
+      device.owner.local.policy.leaseUntil <= now ||
+      device.owner.local.policy.leaseUntil > now + MAX_LOCAL_WORK_LEASE_MS
     )
       throw new LocalDeviceError(
         "LOCAL_UNAUTHORIZED",
@@ -79,12 +91,13 @@ export class RepositoryCreationRepository {
       );
     return { device, delegation };
   }
-  reserve(
+  async reserve(
     userId: string,
     input: RepositoryCreationInput,
     authority: RepositoryCreationAuthority,
     now: number,
-  ): RepositoryCreationRecord {
+  ): Promise<RepositoryCreationRecord> {
+    const observed = await this.readDevice(userId, input.deviceId);
     return this.sqlite
       .transaction(() => {
         const fingerprint = digestLocalSecret(canonicalJson(input));
@@ -97,7 +110,13 @@ export class RepositoryCreationRepository {
             );
           return old;
         }
-        const { device, delegation } = this.deviceAuthority(userId, input, authority, now);
+        const { device, delegation } = this.deviceAuthority(
+          userId,
+          input,
+          authority,
+          now,
+          observed,
+        );
         if (
           this.sqlite
             .prepare(
@@ -139,26 +158,29 @@ export class RepositoryCreationRepository {
       })
       .immediate();
   }
-  assertCurrent(
+  async assertCurrent(
     record: RepositoryCreationRecord,
     authority: RepositoryCreationAuthority,
     now: number,
-  ): void {
-    const observed = this.devices.getActiveDevice(record.userId, record.deviceId);
+  ): Promise<void> {
+    const observed = await this.readDevice(record.userId, record.deviceId);
+    if (observed.owner.state !== "available" || observed.owner.local.state !== "configured")
+      throw new LocalDeviceError("LOCAL_UNAVAILABLE", "The original device owner is unavailable.");
+    const control = observed.owner.local.control;
     const admissionPending =
       record.reservationHeld === 0 &&
-      observed.control?.status === "pending" &&
-      observed.control.repositoryAdmissions?.some(
+      control.status === "pending" &&
+      control.repositoryAdmissions?.some(
         (receipt) =>
-          receipt.requestId === record.admissionRequestId &&
-          receipt.revision === observed.control!.revision,
+          receipt.requestId === record.admissionRequestId && receipt.revision === control.revision,
       ) === true &&
-      canonicalJson(observed.control.settings.agentRepositoryManagement) === record.delegation;
+      canonicalJson(control.settings.agentRepositoryManagement) === record.delegation;
     const { device, delegation } = this.deviceAuthority(
       record.userId,
       record,
       authority,
       now,
+      observed,
       admissionPending,
     );
     if (
@@ -194,14 +216,24 @@ export class RepositoryCreationRepository {
       })
       .immediate();
   }
-  submit(
+  async submit(
     record: RepositoryCreationRecord,
     authority: RepositoryCreationAuthority,
     now: number,
-  ): void {
+  ): Promise<void> {
+    await this.assertCurrent(record, authority, now);
     this.sqlite
       .transaction(() => {
-        this.assertCurrent(record, authority, now);
+        const device = this.devices.getDeviceIdentity(record.userId, record.deviceId);
+        if (
+          device.status !== "active" ||
+          device.deviceGeneration !== record.deviceGeneration ||
+          device.connectionId !== record.localConnectionId
+        )
+          throw new LocalDeviceError(
+            "LOCAL_UNAUTHORIZED",
+            "Repository creation authority changed.",
+          );
         const changed = this.sqlite
           .prepare(
             "UPDATE codespaceRepositoryRequest SET state='submitted',errorCode=NULL,updatedAt=? WHERE requestId=? AND userId=? AND state='prepared' AND claimId=? AND claimExpiresAt>?",

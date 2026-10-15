@@ -160,14 +160,14 @@ function foreignKeyProjection(
     );
 }
 
-function copyBeforeRename(directory: string): string {
-  const target = path.join(directory, "before-codespace-rename");
+function copyBeforeMigration(directory: string, tag: string): string {
+  const target = path.join(directory, `before-${tag}`);
   fs.cpSync(migrations, target, { recursive: true });
   const journalPath = path.join(target, "meta/_journal.json");
   const journal = JSON.parse(fs.readFileSync(journalPath, "utf8")) as {
     entries: Array<{ tag: string }>;
   };
-  const index = journal.entries.findIndex((entry) => entry.tag === "0037_codespace_rename");
+  const index = journal.entries.findIndex((entry) => entry.tag === tag);
   expect(index).toBeGreaterThan(0);
   journal.entries = journal.entries.slice(0, index);
   fs.writeFileSync(journalPath, `${JSON.stringify(journal, null, 2)}\n`);
@@ -245,7 +245,9 @@ describe("codespace rename migration", () => {
     const sqlite = new Database(path.join(directory, "moira.db"));
     sqlite.pragma("foreign_keys = ON");
     try {
-      migrate(drizzle(sqlite), { migrationsFolder: copyBeforeRename(directory) });
+      migrate(drizzle(sqlite), {
+        migrationsFolder: copyBeforeMigration(directory, "0037_codespace_rename"),
+      });
       populateEveryOldTable(sqlite);
 
       const storedRows = new Map(oldTables.map((table) => [table, rows(sqlite, table)]));
@@ -253,7 +255,10 @@ describe("codespace rename migration", () => {
       const storedForeignKeys = foreignKeyProjection(sqlite, oldTables, true);
       const storedAudit = rows(sqlite, "auditLog");
 
-      migrate(drizzle(sqlite), { migrationsFolder: migrations });
+      // Inspect the renamed operational schema before later owner migrations archive it.
+      migrate(drizzle(sqlite), {
+        migrationsFolder: copyBeforeMigration(directory, "0061_local_controller_authority"),
+      });
 
       for (const oldTable of oldTables) {
         const newTable = renamedTable.get(oldTable)!;
@@ -319,6 +324,28 @@ describe("codespace rename migration", () => {
             .replace('"workspace_id"', '"codespace_id"'),
         })),
       );
+      expect(sqlite.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
+
+      const archivedTables = new Map([
+        ["codespaceResource", "archiveGithubResourceOperational"],
+        ["codespaceLifecycleCapability", "archiveCodespaceLifecycleCapability"],
+        ["codespacePolicyUsage", "archiveCodespacePolicyUsage"],
+        ["codespaceProviderMutation", "archiveCodespaceProviderMutation"],
+        ["codespaceProviderControl", "archiveCodespaceProviderControl"],
+        ["codespaceOperation", "archiveCodespaceOperation"],
+        ["codespaceTransfer", "archiveCommunicationTransfer"],
+      ]);
+      const beforeArchival = new Map(
+        [...archivedTables.keys()].map((table) => [table, rows(sqlite, table)]),
+      );
+      migrate(drizzle(sqlite), { migrationsFolder: migrations });
+      for (const [table, archive] of archivedTables) {
+        // Full-row equality also retains the original running operation and cleanup uncertainty.
+        expect(rows(sqlite, archive)).toEqual(beforeArchival.get(table));
+        expect(
+          sqlite.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name=?").get(table),
+        ).toBeUndefined();
+      }
       expect(sqlite.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
     } finally {
       sqlite.close();

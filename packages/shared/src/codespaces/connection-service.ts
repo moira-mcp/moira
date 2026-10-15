@@ -98,6 +98,8 @@ export interface CodespaceConnectionServiceDependencies {
   sleep?: (ms: number) => Promise<void>;
   audit?: (event: CodespaceConnectionAuditEvent) => Promise<void> | void;
   beforeDisconnect?: (userId: string) => Promise<void>;
+  /** Dispose known scoped children before retiring their parent or admitted grants. */
+  beforeCredentialRetirement?: (userId: string) => Promise<void>;
   afterConnect?: (userId: string) => Promise<void>;
 }
 
@@ -768,6 +770,7 @@ export class CodespaceConnectionService {
         now,
       };
       if (consumed.intent.kind === "reauthorize") {
+        await this.dependencies.beforeCredentialRetirement?.(input.userId);
         const replaced = this.dependencies.repository.replaceConnectedAuthorization({
           ...connectedInput,
           expectedGeneration: consumed.intent.generation,
@@ -1034,6 +1037,11 @@ export class CodespaceConnectionService {
       return { refreshed: false, stale: true };
     }
 
+    const grantIdentity = (value: unknown[]) =>
+      JSON.stringify(value.map((item) => JSON.stringify(item)).sort());
+    const grantsChanged =
+      grantIdentity(current.installations) !== grantIdentity(installationGrants) ||
+      grantIdentity(current.repositories) !== grantIdentity(repositoryGrants);
     const replaced = this.dependencies.repository.replaceGrants({
       connectionId: snapshot.id,
       userId,
@@ -1063,6 +1071,7 @@ export class CodespaceConnectionService {
       };
     }
     this.failedGrantRefreshes.delete(snapshot.id);
+    if (grantsChanged) await this.dependencies.beforeCredentialRetirement?.(userId);
     // A superseded credential whose revocation GitHub refused earlier is retried here, while the
     // provider is evidently reachable. A refusal again leaves it queued; it never fails the read.
     try {
@@ -1166,6 +1175,7 @@ export class CodespaceConnectionService {
     if (credential.accessTokenExpiresAt > this.now() + REFRESH_EARLY_MS) {
       return credential.accessToken;
     }
+    await this.dependencies.beforeCredentialRetirement?.(userId);
     const existing = this.refreshes.get(stored.connection.id);
     if (existing) return existing;
     const refresh = this.refreshCredential(
@@ -1178,6 +1188,46 @@ export class CodespaceConnectionService {
     });
     this.refreshes.set(stored.connection.id, refresh);
     return refresh;
+  }
+
+  /** A parent capability and its witness are read after any refresh has committed. */
+  async getScopedCredentialParent(userId: string, options: { refresh?: boolean } = {}) {
+    const token = options.refresh === false ? null : await this.getAccessToken(userId);
+    const config = requireAvailableConfig(this.dependencies.config());
+    const { stored, connection, grants } = this.dependencies.repository.readCredentialAuthority(
+      userId,
+      CODESPACE_PROVIDER_GITHUB,
+    );
+    if (
+      !stored ||
+      !connection ||
+      connection.status !== "connected" ||
+      connection.lastErrorCode ||
+      stored.connection.id !== connection.id ||
+      stored.connection.credentialGeneration !== connection.credentialGeneration
+    )
+      throw new CodespaceConnectionError(
+        "AUTHORIZATION_FAILED",
+        "GitHub credential authority changed",
+      );
+    const payload = new CodespaceCredentialVault(
+      config.vaultKeyHex,
+      config.vaultKeyVersion,
+    ).decrypt(userId, CODESPACE_PROVIDER_GITHUB, connection.id, stored.envelope);
+    if (
+      (token !== null && payload.accessToken !== token) ||
+      payload.accessTokenExpiresAt <= this.now()
+    )
+      throw new CodespaceConnectionError(
+        "AUTHORIZATION_FAILED",
+        "GitHub credential authority changed",
+      );
+    return {
+      token: payload.accessToken,
+      expiresAt: payload.accessTokenExpiresAt,
+      connection,
+      grantsVersion: grants?.version,
+    };
   }
 
   private async refreshCredential(
@@ -1337,9 +1387,15 @@ export class CodespaceConnectionService {
     }
   }
 
-  async disconnect(userId: string): Promise<CodespaceConnectionView> {
+  async disconnect(
+    userId: string,
+    options: { securityOnly?: boolean } = {},
+  ): Promise<CodespaceConnectionView> {
+    if (options.securityOnly) this.dependencies.repository.assertAccountResourcesRetired(userId);
     const config = requireAvailableConfig(this.dependencies.config());
     const current = this.dependencies.repository.getConnection(userId, CODESPACE_PROVIDER_GITHUB);
+    if (options.securityOnly && current?.lastErrorCode === "AUTH_GRANT_REVOCATION_REQUIRED")
+      return this.getStatus(userId);
     if (
       current?.lastErrorCode === "AUTH_GRANT_REVOCATION_REQUIRED" &&
       !this.dependencies.repository.isRefreshSubmissionInFlight(
@@ -1350,7 +1406,8 @@ export class CodespaceConnectionService {
     ) {
       return this.getStatus(userId);
     }
-    await this.dependencies.beforeDisconnect?.(userId);
+    if (!options.securityOnly) await this.dependencies.beforeDisconnect?.(userId);
+    await this.dependencies.beforeCredentialRetirement?.(userId);
     const stored = this.dependencies.repository.beginDisconnect(
       userId,
       CODESPACE_PROVIDER_GITHUB,
