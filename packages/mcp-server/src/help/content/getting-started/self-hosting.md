@@ -585,10 +585,17 @@ reclaims a stale runner marker only under the system lock and after proving both
 owners absent. Saved policy, VM records and unknown operations are retained without replay.
 Live, unknown or malformed ownership stays refused; do not delete its marker manually.
 On macOS, startup also remounts the existing default disk image from that same state directory
-when needed. It verifies the native image/mount binding and the volume's ownership, capacity and
-free space before work; a lost attach reply is checked against the observed binding. Custom
+when needed. It verifies the native image/mount binding and the volume's ownership and approved
+capacity before work, without a fixed free-space reserve; a lost attach reply is checked against the observed binding. Custom
 storage mounts must be mounted manually. Missing images or conflicting bindings remain refused;
 startup does not create a replacement disk or reset its data.
+Sparse image growth does not require full logical preallocation or an extra host reserve.
+Shrinking still requires the native APFS minimum and enough capacity for existing data;
+uncertain physical changes retain their original resize journal.
+Work and `doctor` enforce current authority from SDK startup onward. Installation, bootstrap and
+guest registration wait for actual completion; disable, lease expiry, cancellation and parent loss
+still stop owned work. Fixed metadata checks and the bounded `doctor` diagnostic are observations,
+not proof that a pending operation has settled.
 The local daemon separates server contact from VM lifetime. Network/5xx failures reconnect;
 remote owner state is unavailable until connection succeeds, without stopping already-admitted
 work. Remote mutations are refused rather than queued. An addressed resource refusal stays with

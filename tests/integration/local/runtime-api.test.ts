@@ -1,5 +1,6 @@
-import { afterEach, beforeEach, expect, test } from "@jest/globals";
+import { afterEach, beforeEach, expect, jest, test } from "@jest/globals";
 import { createServer, type Server } from "node:http";
+import * as http from "node:http";
 import { mkdir, mkdtemp, realpath, rm, symlink } from "node:fs/promises";
 import { join } from "node:path";
 import { Readable, Writable, type Duplex } from "node:stream";
@@ -75,7 +76,13 @@ function output() {
   return { stream, bytes: () => Buffer.concat(chunks) };
 }
 async function execServer(
-  options: { truncated?: boolean; inspect?: object; badHeader?: boolean; held?: boolean } = {},
+  options: {
+    truncated?: boolean;
+    inspect?: object;
+    badHeader?: boolean;
+    held?: boolean;
+    stdout?: Buffer;
+  } = {},
 ) {
   let input = Buffer.alloc(0);
   let running = true;
@@ -115,7 +122,10 @@ async function execServer(
     peer.on("end", () => {
       if (options.held) return;
       running = false;
-      const bytes = Buffer.concat([frame(1, input), frame(2, Buffer.from("diagnostic"))]);
+      const bytes = Buffer.concat([
+        frame(1, options.stdout ?? input),
+        frame(2, Buffer.from("diagnostic")),
+      ]);
       peer.write(bytes.subarray(0, 3));
       peer.write(bytes.subarray(3, 11));
       peer.end(options.truncated ? bytes.subarray(11, bytes.length - 1) : bytes.subarray(11));
@@ -144,6 +154,50 @@ test("fixed attach preserves binary stdin and split stdout/stderr frames until v
   ).resolves.toBe(7);
   expect(stdout.bytes()).toEqual(bytes);
   expect(stderr.bytes().toString()).toBe("diagnostic");
+});
+
+test("fixed attach streams one frame beyond eight MiB with output backpressure", async () => {
+  const bytes = Buffer.alloc(8 * 1024 * 1024 + 37, 0xa7);
+  await execServer({ stdout: bytes });
+  let release!: () => void;
+  let entered!: () => void;
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const writing = new Promise<void>((resolve) => {
+    entered = resolve;
+  });
+  const chunks: Buffer[] = [];
+  const stdout = new Writable({
+    highWaterMark: 1,
+    write(chunk: Buffer, _encoding, done) {
+      chunks.push(Buffer.from(chunk));
+      entered();
+      void held.then(() => done());
+    },
+  });
+  let settled = false;
+  const result = attachFixedGuest(
+    home,
+    namespace,
+    name,
+    "install",
+    Readable.from([]),
+    stdout,
+    output().stream,
+  );
+  // Observe either actual output admission or a refusal, so the old frame ceiling fails promptly.
+  await Promise.race([writing, result]);
+  const completion = result.finally(() => {
+    settled = true;
+  });
+  expect(settled).toBe(false);
+  expect(Buffer.concat(chunks).length).toBeLessThan(bytes.length);
+  release();
+  await expect(completion).resolves.toBe(7);
+  const actual = Buffer.concat(chunks);
+  expect(actual.length).toBe(bytes.length);
+  expect(actual.equals(bytes)).toBe(true);
 });
 
 test.each([
@@ -401,6 +455,52 @@ test("held raw creation is canceled without returning an invented identity", asy
   controller.abort();
   await refusal;
 });
+
+test.each(["create", "start", "remove gateway"] as const)(
+  "held SDK %s has no work clock and remains caller-cancellable",
+  async (mode) => {
+    let entered!: () => void;
+    const held = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    server = createServer(() => entered());
+    await listen();
+    let client: http.ClientRequest | undefined;
+    jest.resetModules();
+    jest.unstable_mockModule("node:http", () => ({
+      ...http,
+      request: (...args: Parameters<typeof http.request>) => {
+        client = http.request(...args);
+        return client;
+      },
+    }));
+    const controller = new AbortController();
+    let completion: Promise<unknown> | undefined;
+    try {
+      const api = await import("../../../packages/local/src/runtime-api.js");
+      completion =
+        mode === "create"
+          ? api.createWithoutGateway(home, namespace, profile, controller.signal)
+          : api.startWithoutGateway(
+              home,
+              namespace,
+              name,
+              mode === "remove gateway",
+              controller.signal,
+            );
+      await held;
+      // Read the actual connected Node socket, rather than mirroring request options.
+      expect(client?.socket).toBeDefined();
+      // Node leaves timeout undefined when no socket timer was ever installed.
+      expect(client?.socket?.timeout ?? 0).toBe(0);
+    } finally {
+      controller.abort();
+      if (completion) await expect(completion).rejects.toMatchObject({ name: "AbortError" });
+      jest.unstable_unmockModule("node:http");
+      jest.resetModules();
+    }
+  },
+);
 
 test("an owned stopped sandbox boots only after its gateway is removed with an empty startup body", async () => {
   let gateway = true;

@@ -117,7 +117,8 @@ set local resource defaults at initialization. `--storage-root` accepts an exist
 private, separately mounted bounded filesystem, not an ordinary directory. Preserve the image and
 ownership records. On macOS, manager startup restores an unmounted default image from the same
 state directory under the runner gate. It verifies the native image/mount binding, then repeats
-the volume's device ownership, capacity and free-space checks before work. A lost attach reply
+the volume's device ownership and approved capacity checks before work. Admission does not require
+a fixed free-space reserve. A lost attach reply
 is resolved from the observed binding rather than another attach. Custom storage mounts require
 manual mounting; a missing image or unsafe binding remains a refusal. Startup never creates a
 replacement image, resets storage or substitutes an unbounded directory.
@@ -125,6 +126,10 @@ replacement image, resets storage or substitutes an unbounded directory.
 `setup` initializes only an empty dedicated SDK profile. `doctor` checks storage, supported SDK,
 settings, global network policy and owned inventory under an enabled, unexpired lease. Its
 `liveVmIsolationVerified: false` result is explicit: it does not execute a microVM isolation test.
+Work and `doctor` check current authority from the start of SDK startup. Disable, lease expiry,
+caller cancellation and parent loss remain effective while startup or guest registration is pending.
+Installation, bootstrap and registration wait for actual completion rather than a general work
+deadline; fixed metadata observations and the bounded `doctor` diagnostic remain distinct.
 The SDK profile has its own HOME, namespace and encrypted credential store; it does not select
 the user's personal Docker profile or change personal Keychain default/search metadata.
 The bundled native helper prepares and unlocks only the owned store without interactive password
@@ -302,7 +307,9 @@ CPU, RAM and Docker disk
 defaults apply to new VMs; existing VMs restart with their admitted machine and
 repository identity. The storage setting bounds the computer's SDK backing filesystem, while
 Docker disk capacity belongs to each admitted VM. The default owned APFS image can grow or shrink while stopped
-after native bounds and free-space checks, preserving data. Storage and Docker byte
+after checking the native APFS minimum and whether existing data fits, preserving data. Sparse
+image creation and growth do not require the entire logical capacity plus a fixed host reserve
+to be free in advance; actual filesystem failures still refuse the operation. Storage and Docker byte
 values must be positive safe integers, storage must exceed Docker capacity, and native
 sector alignment and usable filesystem capacity remain authoritative. Unknown physical changes retain their journal
 and keep work fenced. Collecting the original settings receipt cannot renew a lease or

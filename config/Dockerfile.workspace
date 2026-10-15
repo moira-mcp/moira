@@ -5,7 +5,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends gcc libc6-dev b
     rm -rf /var/lib/apt/lists/*
 COPY package*.json ./
 COPY packages ./packages
-COPY scripts/build-workspace-service.js scripts/package-workspace-service.js scripts/package-owner-dependencies.js ./scripts/
+COPY scripts/build-workspace-service.js scripts/package-workspace-service.js scripts/package-owner-dependencies.js scripts/acquire-pinned-archive.js ./scripts/
 RUN npm ci --ignore-scripts
 COPY tsconfig.base.json ./
 ARG TARGETARCH

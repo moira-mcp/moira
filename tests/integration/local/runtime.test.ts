@@ -6,7 +6,8 @@ import { PrivateState } from "../../../packages/local/src/private-state.js";
 import { SbxRuntime } from "../../../packages/local/src/sbx-runtime.js";
 import { runProcess } from "../../../packages/local/src/process.js";
 import { LocalManager } from "../../../packages/local/src/manager.js";
-import { GUEST_COMMANDS, VERIFIED_GUEST_FAILURE_EXIT } from "../../../packages/local/src/assets.js";
+import { VERIFIED_GUEST_FAILURE_EXIT } from "../../../packages/local/src/assets.js";
+import type { FixedGuestEntrypoint } from "../../../packages/local/src/local-vm-runtime.js";
 import { localFixture } from "./fixtures.js";
 
 let root: string;
@@ -84,6 +85,29 @@ test("complete fixed SDK inventory exceeds former count and byte ceilings while 
   expect(inventory).toHaveLength(130);
   expect(inventory[129]).toMatchObject({ id: "runtime-129", metadata: "x".repeat(80 * 1024) });
   await expect(runtime.call(["version"])).rejects.toMatchObject({ code: "LOCAL_OUTPUT_LIMIT" });
+});
+
+test("complete policy inventory preserves the final global denial and refuses a conflicting tail", async () => {
+  const fixture = await localFixture(state);
+  let decision = "deny";
+  const runtime = simulatedRuntime(fixture.policy, (request) =>
+    runProcess({
+      ...request,
+      binary: process.execPath,
+      cwd: root,
+      env: {},
+      argv: [
+        "-e",
+        `const rules=Array.from({length:50000},(_,i)=>({resource_type:'network',scope:'sandbox',applies_to:'moira-'+i.toString(16).padStart(32,'0'),decision:'allow',status:'active',resources:['localhost:42500'],actions:['net:connect:tcp']}));rules.push({...${JSON.stringify(baseline)},decision:${JSON.stringify(decision)}});process.stdout.write(JSON.stringify({rules}));`,
+      ],
+    }),
+  );
+  runtime.verifyDaemonOwnership = async () => {};
+  await expect(runtime.verifyGlobalNetworkPolicy()).resolves.toBeUndefined();
+  decision = "allow";
+  await expect(runtime.verifyGlobalNetworkPolicy()).rejects.toMatchObject({
+    code: "LOCAL_NETWORK_UNSAFE",
+  });
 });
 
 async function ownedSocket(runtime: SbxRuntime): Promise<string> {
@@ -505,7 +529,10 @@ describe("Docker Sandboxes lifecycle boundary", () => {
       throw new Error("Unsafe dispatch");
     });
     await expect(
-      runtime.guest({ name, runtimeId: "runtime-1" }, ["sh", "-c", "anything"]),
+      runtime.runFixedGuest(
+        { name, runtimeId: "runtime-1" },
+        "host-command" as FixedGuestEntrypoint,
+      ),
     ).rejects.toMatchObject({ code: "LOCAL_GUEST_COMMAND_INVALID" });
   });
   test.each([
@@ -521,13 +548,26 @@ describe("Docker Sandboxes lifecycle boundary", () => {
         exitCode: helperExit,
       }));
       runtime.exact = async () => ({ name, id: "runtime-1", agent: "shell", status: "running" });
-      runtime.verifyBoundary = async () => undefined;
-      const outcome = await runtime
-        .guest({ name, runtimeId: "runtime-1" }, GUEST_COMMANDS.health)
-        .then(
-          (bytes) => bytes.toString(),
-          (error: { code: string }) => error.code,
-        );
+      runtime.verifySettings = async () => undefined;
+      runtime.call = async () =>
+        result({
+          name,
+          agent: "shell",
+          image: fixture.policy.runtime.template,
+          image_digest: fixture.policy.runtime.template.split("@")[1],
+          cpus: fixture.policy.runtime.cpuCores,
+          memory: `${fixture.policy.runtime.memoryBytes / 1024 ** 2}m`,
+          network: name,
+          runtime_mounts: [],
+          kits: [],
+          daemon_version: "v0.46.0",
+          mcp_gateway: false,
+          network_policy: {},
+        }).stdout;
+      const outcome = await runtime.runFixedGuest({ name, runtimeId: "runtime-1" }, "health").then(
+        (bytes) => bytes.toString(),
+        (error: { code: string }) => error.code,
+      );
       expect(outcome).toBe(expected);
     },
   );

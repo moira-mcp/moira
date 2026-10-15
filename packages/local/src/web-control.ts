@@ -347,9 +347,7 @@ export class LocalWebControl {
     } catch (error) {
       if (
         error instanceof LocalRefusal &&
-        ["LOCAL_STORAGE_SIZE", "LOCAL_STORAGE_FULL", "LOCAL_HOST_STORAGE_LOW"].includes(
-          error.code,
-        ) &&
+        ["LOCAL_STORAGE_SIZE", "LOCAL_STORAGE_FULL"].includes(error.code) &&
         !(await this.records.state.read("storage-resize.json", (value) => value))
       )
         await this.records.state.remove("control-intent.json");

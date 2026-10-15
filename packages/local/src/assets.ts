@@ -63,6 +63,13 @@ export async function installGuest(
   runtime: LocalVmRuntime,
   identity: LocalVmIdentity,
   assets: GuestAssets,
+  signal?: AbortSignal,
 ): Promise<void> {
-  await runtime.runFixedGuest(identity, "install", workspaceInstallInput(assets.payload));
+  await runtime.runFixedGuest(
+    identity,
+    "install",
+    workspaceInstallInput(assets.payload),
+    null,
+    signal,
+  );
 }

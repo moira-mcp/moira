@@ -10,7 +10,6 @@ import {
 export const LOCAL_PROTOCOL_VERSION = 1 as const;
 export const LOCAL_PROVIDER = "local-sandboxes" as const;
 export const SUPPORTED_SBX_VERSION = "0.46.0";
-export const MAX_MESSAGE_BYTES = 8 * 1024 * 1024;
 export const MAX_LEASE_MS = MAX_LOCAL_WORK_LEASE_MS;
 export const GiB = 1024 ** 3;
 

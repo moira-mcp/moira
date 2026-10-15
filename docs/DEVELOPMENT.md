@@ -61,9 +61,12 @@ Neither is a command transport. Changes to lifecycle or guest behavior must pres
 durable replay receipts, independent kernel ownership and unknown-outcome fences;
 an injected test runtime does not establish physical SDK isolation. Use root
 Testfold scripts for focused tests in `tests/integration/local/` and device/provider
-integration tests. Integration global setup runs `local:build` before database
-migration, so source consumers use current packaged native and guest assets on a
-clean checkout. This build prerequisite does not run the SDK or validate a microVM.
+integration tests. Before database migration, integration global setup builds current
+host programs with `build-local-programs.js`, native helpers with `build-local-native.js`
+and controller owner programs with `build-workspace-service.js`. It does not download
+guest archives or GitHub toolchains or package renderer dependencies. Complete payload
+packaging and the packaged guest verifier remain separate checks; this prerequisite
+does not run the SDK or validate a microVM.
 Host `create OWNER/REPO --ref BRANCH`, `start SPACE_ID`, `stop SPACE_ID` and
 `remove SPACE_ID --confirm` use the running owner controller. Raw `request` envelopes are
 unsupported. Supply `--request-id ws1-<lowercase UUID>` to choose a lifecycle identity;
@@ -125,6 +128,12 @@ publish the source-only Feature directory. A project can retain its own image/ru
 the Feature. Provider bootstrap also installs/upgrades an existing environment in place without
 container recreation or VM-disk replacement. Root and nonroot guests require repository ownership
 to equal the service UID. Confirmed startup checks the selected release and Unix service health.
+
+Pinned build inputs use `scripts/acquire-pinned-archive.js`: native HTTPS streaming with verified
+TLS and HTTPS-only redirects, an exclusive candidate and integrity verification before atomic cache
+publication. Matching cached archives are verified before reuse; failed candidates are removed
+without replacing an existing corrupt cache. Node/ripgrep SHA-256 pins and private owner dependency
+integrity values remain authoritative.
 
 The same package contains the GitHub trusted broker and typed PR client. Ordinary
 workspace `git fetch`/`git push` use its managed fixed origin; the broker verifies both

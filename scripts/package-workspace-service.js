@@ -1,13 +1,12 @@
 import { createHash, randomUUID } from "node:crypto";
-import { createReadStream, createWriteStream } from "node:fs";
+import { createReadStream } from "node:fs";
 import { chmod, copyFile, mkdir, rename, rm, stat, writeFile } from "node:fs/promises";
-import { pipeline } from "node:stream/promises";
-import { Readable } from "node:stream";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { resolve, join } from "node:path";
 import { parseArgs } from "node:util";
 import { buildWorkspaceService } from "./build-workspace-service.js";
+import { acquirePinnedArchive } from "./acquire-pinned-archive.js";
 import {
   packageOwnerDependencies,
   packageOwnerSupervisor,
@@ -60,28 +59,13 @@ async function acquireNode(directory, architecture) {
 }
 
 async function acquireArchive(directory, fileName, expected, url) {
-  const target = join(directory, fileName);
-  try {
-    if ((await sha256(target)) === expected) return target;
-    throw new Error("Cached official Node archive failed its pinned digest");
-  } catch (error) {
-    if (error.code !== "ENOENT") throw error;
-  }
-  const temporary = `${target}.next-${randomUUID()}`;
-  try {
-    const response = await fetch(url);
-    if (!response.ok || !response.body) throw new Error("Official Node download failed");
-    await pipeline(
-      Readable.fromWeb(response.body),
-      createWriteStream(temporary, { flags: "wx", mode: 0o600 }),
-    );
-    if ((await sha256(temporary)) !== expected)
-      throw new Error("Official Node archive digest mismatch");
-    await rename(temporary, target);
-    return target;
-  } finally {
-    await rm(temporary, { force: true });
-  }
+  return acquirePinnedArchive({
+    url,
+    target: join(directory, fileName),
+    algorithm: "sha256",
+    expected,
+    encoding: "hex",
+  });
 }
 
 export async function packageWorkspaceService({

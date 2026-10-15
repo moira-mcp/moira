@@ -485,7 +485,7 @@ describe("Locally pinned owner web control", () => {
     const control = new LocalWebControl(f.records, {
       resize: async () => {
         attempts++;
-        throw new LocalRefusal("LOCAL_HOST_STORAGE_LOW", "Not enough host storage.");
+        throw new LocalRefusal("LOCAL_STORAGE_FULL", "Requested size is below the APFS minimum.");
       },
       replacePolicy: async (records, next) => {
         await records.state.write("policy.json", next);
@@ -497,7 +497,7 @@ describe("Locally pinned owner web control", () => {
       revision: 1,
       appliedRevision: 0,
       status: "pending",
-      settings: { ...controlSettings(f.policy), storageBytes: 64 * GiB },
+      settings: { ...controlSettings(f.policy), storageBytes: 16 * GiB },
       ceiling: f.ceiling,
       error: null,
     };

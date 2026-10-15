@@ -1,7 +1,7 @@
 import { chmod, lstat, mkdir, readdir, realpath, stat, statfs } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { z } from "zod";
-import { GiB, LocalRefusal, type LocalPolicy } from "./policy.js";
+import { LocalRefusal, type LocalPolicy } from "./policy.js";
 import { PrivateState } from "./private-state.js";
 import { runProcess, type RunProcess } from "./process.js";
 
@@ -78,12 +78,6 @@ export async function admitStorage(policy: LocalPolicy): Promise<void> {
       "This storage volume does not belong to this local device.",
     );
   }
-  if (filesystem.bavail * filesystem.bsize < BigInt(GiB)) {
-    throw new LocalRefusal(
-      "LOCAL_STORAGE_FULL",
-      "Local storage needs at least one GiB of free space before new work.",
-    );
-  }
 }
 
 /** Restore only this device's existing image; the caller holds the private runner gate. */
@@ -133,14 +127,19 @@ export async function ensureStorageMounted(
   )
     throw new LocalRefusal("LOCAL_STORAGE_OWNER", "The saved disk image identity is invalid.");
   const run = dependencies.run ?? runProcess;
-  const command = (binary: string, argv: string[], stdin?: Uint8Array) =>
+  const command = (
+    binary: string,
+    argv: string[],
+    stdin?: Uint8Array,
+    timeoutMs: number | null = 120_000,
+  ) =>
     run({
       binary,
       argv,
       stdin,
       cwd: state.root,
       env: { PATH: "/usr/bin:/bin:/usr/sbin:/sbin" },
-      timeoutMs: 120_000,
+      timeoutMs,
       maxBytes: 1024 * 1024,
     });
   const binding = async (): Promise<boolean> => {
@@ -222,9 +221,12 @@ export async function ensureStorageMounted(
     );
   // A lost attach response is resolved from fresh native binding and ordinary admission.
   // Never detach, recreate the image or replay guest operations to recover that response.
-  await command("/usr/bin/hdiutil", ["attach", "-nobrowse", "-mountpoint", root, image]).catch(
-    () => undefined,
-  );
+  await command(
+    "/usr/bin/hdiutil",
+    ["attach", "-nobrowse", "-mountpoint", root, image],
+    undefined,
+    null,
+  ).catch(() => undefined);
   if (!(await binding()))
     throw new LocalRefusal(
       "LOCAL_STORAGE_NOT_MOUNTED",
@@ -266,13 +268,6 @@ export async function initializeStorage(
         "LOCAL_STORAGE_EXISTS",
         "An image already exists; remount it instead of overwriting it.",
       );
-    const filesystem = await statfs(state.root, { bigint: true });
-    if (filesystem.bavail * filesystem.bsize < BigInt(capacityBytes + 4 * GiB)) {
-      throw new LocalRefusal(
-        "LOCAL_HOST_STORAGE_LOW",
-        "Choose a smaller volume and leave four GiB of host storage free.",
-      );
-    }
     await mkdir(root, { mode: 0o700 });
     for (const argv of [
       [
@@ -294,7 +289,7 @@ export async function initializeStorage(
         argv,
         cwd: state.root,
         env: { PATH: "/usr/bin:/bin:/usr/sbin:/sbin" },
-        timeoutMs: 120_000,
+        timeoutMs: null,
         maxBytes: 64 * 1024,
       });
       if (result.exitCode !== 0)
@@ -388,14 +383,19 @@ export async function resizeStorage(
   ) {
     throw new LocalRefusal("LOCAL_STORAGE_OWNER", "The private disk image identity is invalid.");
   }
-  const command = async (binary: string, argv: string[], stdin?: Uint8Array) => {
+  const command = async (
+    binary: string,
+    argv: string[],
+    stdin?: Uint8Array,
+    timeoutMs: number | null = 120_000,
+  ) => {
     const result = await run({
       binary,
       argv,
       stdin,
       cwd: state.root,
       env: { PATH: "/usr/bin:/bin:/usr/sbin:/sbin" },
-      timeoutMs: 120_000,
+      timeoutMs,
       maxBytes: 1024 * 1024,
     });
     if (result.exitCode !== 0)
@@ -479,8 +479,13 @@ export async function resizeStorage(
       })
         .passthrough()
         .parse(info);
-      await command("/usr/bin/hdiutil", ["detach", whole[0]["dev-entry"]]);
-      await command("/usr/bin/hdiutil", ["attach", "-nobrowse", "-mountpoint", root, image]);
+      await command("/usr/bin/hdiutil", ["detach", whole[0]["dev-entry"]], undefined, null);
+      await command(
+        "/usr/bin/hdiutil",
+        ["attach", "-nobrowse", "-mountpoint", root, image],
+        undefined,
+        null,
+      );
       await chmod(root, 0o700);
       return binding();
     }
@@ -535,7 +540,12 @@ export async function resizeStorage(
         "LOCAL_STORAGE_NOT_MOUNTED",
         "Mount the owned volume before requesting a resize.",
       );
-    await command("/usr/bin/hdiutil", ["attach", "-nobrowse", "-mountpoint", root, image]);
+    await command(
+      "/usr/bin/hdiutil",
+      ["attach", "-nobrowse", "-mountpoint", root, image],
+      undefined,
+      null,
+    );
     await chmod(root, 0o700);
     current = await binding();
   }
@@ -584,44 +594,45 @@ export async function resizeStorage(
       "limits",
       "-plist",
     ]);
-    // Native data/snapshot/reserve minimum plus our explicit free-space requirement.
+    // Preserve the native data/snapshot minimum and the filesystem's actual used bytes.
     // The preferred recommendation can equal the current container even when shrink is valid.
     const minimum = z.number().int().positive().parse(limits.MinimumSizeNoGuard);
     const filesystem = await statfs(root, { bigint: true });
     const used = (filesystem.blocks - filesystem.bfree) * filesystem.bsize;
-    if (targetContainer < minimum || BigInt(targetContainer) < used + BigInt(GiB)) {
+    if (targetContainer < minimum || BigInt(targetContainer) < used) {
       throw new LocalRefusal(
         "LOCAL_STORAGE_FULL",
-        "The smaller volume cannot preserve its data and required free space.",
-      );
-    }
-  }
-  if (requestedBytes > current.imageBytes) {
-    const host = await statfs(state.root, { bigint: true });
-    if (host.bavail * host.bsize < BigInt(requestedBytes - current.imageBytes + 4 * GiB)) {
-      throw new LocalRefusal(
-        "LOCAL_HOST_STORAGE_LOW",
-        "Leave four GiB of host storage free after growing the image.",
+        "The smaller volume cannot preserve its data and native APFS minimum.",
       );
     }
   }
   // An infeasible request has not changed the filesystem and must remain correctable.
   if (freshResize) await state.write("storage-resize.json", journal);
   if (current.volume.APFSContainerSize > targetContainer) {
-    await command("/usr/sbin/diskutil", [
-      "apfs",
-      "resizeContainer",
-      current.volume.APFSContainerReference,
-      `${targetContainer}b`,
-    ]);
+    await command(
+      "/usr/sbin/diskutil",
+      ["apfs", "resizeContainer", current.volume.APFSContainerReference, `${targetContainer}b`],
+      undefined,
+      null,
+    );
     current = await binding(journal.volumeUUID);
     if (!current)
       throw new LocalRefusal("LOCAL_STORAGE_NOT_MOUNTED", "The resized container did not remount.");
   }
   if (current.imageBytes !== requestedBytes) {
-    await command("/usr/bin/hdiutil", ["detach", root]);
-    await command("/usr/bin/hdiutil", ["resize", "-imageonly", "-sectors", sectors, image]);
-    await command("/usr/bin/hdiutil", ["attach", "-nobrowse", "-mountpoint", root, image]);
+    await command("/usr/bin/hdiutil", ["detach", root], undefined, null);
+    await command(
+      "/usr/bin/hdiutil",
+      ["resize", "-imageonly", "-sectors", sectors, image],
+      undefined,
+      null,
+    );
+    await command(
+      "/usr/bin/hdiutil",
+      ["attach", "-nobrowse", "-mountpoint", root, image],
+      undefined,
+      null,
+    );
     await chmod(root, 0o700);
     current = await binding(journal.volumeUUID);
   }
@@ -632,12 +643,12 @@ export async function resizeStorage(
     );
   }
   if (current.volume.APFSContainerSize < targetContainer - 4 * 1024 * 1024) {
-    await command("/usr/sbin/diskutil", [
-      "apfs",
-      "resizeContainer",
-      current.volume.APFSContainerReference,
-      "0",
-    ]);
+    await command(
+      "/usr/sbin/diskutil",
+      ["apfs", "resizeContainer", current.volume.APFSContainerReference, "0"],
+      undefined,
+      null,
+    );
     current = await binding(journal.volumeUUID);
   }
   const filesystem = await statfs(root, { bigint: true });

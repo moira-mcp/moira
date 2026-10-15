@@ -120,6 +120,9 @@ else if(args[0]==='api-guest'){
         f.writeFileSync(pending+'.'+name,JSON.stringify({pid:process.pid}));
         const timer=setInterval(()=>{if(f.existsSync(release)){clearInterval(timer);if(name===${JSON.stringify(local.space.name)})f.writeFileSync(path,JSON.stringify({status:'running'}));finish({});}},10);
       }else finish({});
+  }else if(args[2]==='start-service'&&f.existsSync(path+'.service-wait')){
+    f.writeFileSync(pending,JSON.stringify({pid:process.pid}));
+    const timer=setInterval(()=>{if(f.existsSync(release)){clearInterval(timer);f.writeFileSync(sentinel,'service ready');finish();}},10);
   }else if(args[2]==='probe')process.stdout.write(JSON.stringify({environmentIdentity:'e'.repeat(64),architecture:'aarch64'})),finish();
   else if(args[2]==='health')process.stdout.write(JSON.stringify({environmentIdentity:'e'.repeat(64),releaseIdentity:'f'.repeat(64)})),finish();
   else finish();
@@ -135,7 +138,15 @@ else if(args[0]==='api-create'){
 }
 else if(args[0]==='stop'){const lag=f.existsSync(path+'.stop-sdk-lag');if(args[1]===${JSON.stringify(local.space.name)})f.writeFileSync(path,JSON.stringify(lag?{status:'running',engineState:'exited'}:{status:current().stopKeepsCreated?'created':'stopped'}));f.writeFileSync(peersPath,JSON.stringify(peers().map(peer=>peer.name===args[1]?{...peer,status:lag?'running':'stopped',engineState:'exited'}:peer)));}
 else if(args[0]==='rm'){const name=args.at(-1);if(name===${JSON.stringify(local.space.name)})f.writeFileSync(path,JSON.stringify({status:'absent'}));f.writeFileSync(peersPath,JSON.stringify(peers().filter(peer=>peer.name!==name)));}
-else if(args[0]==='daemon'&&args[1]==='status')process.stdout.write(JSON.stringify({status:f.existsSync(path+'.daemon-stopped')?'stopped':'running',socket:process.env.HOME+'/.sbx/run_'+process.env.DOCKER_SANDBOXES_APP_NAME+'/d/sandboxd.sock'}));
+else if(args[0]==='daemon'&&args[1]==='status'){
+  const held=f.existsSync(path+'.daemon-ready-wait');
+  if(held)f.writeFileSync(path+'.daemon-observed','waiting');
+  const emit=()=>process.stdout.write(JSON.stringify({status:held||f.existsSync(path+'.daemon-stopped')?'stopped':'running',socket:process.env.HOME+'/.sbx/run_'+process.env.DOCKER_SANDBOXES_APP_NAME+'/d/sandboxd.sock'}));
+  if(f.existsSync(path+'.daemon-status-wait')&&f.existsSync(path+'.launches')){
+    f.writeFileSync(path+'.daemon-status-entered',JSON.stringify({pid:process.pid}));
+    const timer=setInterval(()=>{if(f.existsSync(release)){clearInterval(timer);f.writeFileSync(sentinel,'late status');emit();}},10);
+  }else emit();
+}
 else if(args[0]==='daemon'&&args[1]==='stop'){if(current().status!=='absent')f.writeFileSync(path,JSON.stringify({status:'stopped'}));f.writeFileSync(path+'.daemon-stopped','stopped');f.writeFileSync(peersPath,JSON.stringify(peers().map(peer=>({...peer,status:'stopped'}))));}
 else if(args[0]==='exec'||args[0]==='create'){
   if(args[0]==='exec'){
@@ -1474,6 +1485,137 @@ supportedGuard("independent guard with a real subprocess SDK substitute", () => 
     },
   );
 
+  test.each(["lease", "disabled"] as const)(
+    "%s revocation settles a held foreground startup metadata child",
+    async (reason) => {
+      const local = await fixture();
+      const daemon = daemons[0];
+      const closed = once(daemon, "close");
+      daemon.kill("SIGTERM");
+      await closed;
+      await writeFile(local.observation + ".daemon-status-wait", "wait");
+      const marker = local.observation + ".daemon-status-entered";
+      const readiness = observeInventoryRead(marker);
+      const caller = spawn(
+        process.execPath,
+        [
+          "--input-type=module",
+          "-e",
+          `
+      import {startGuard} from ${JSON.stringify(`file://${join(root, "guard.js")}`)};
+      await startGuard(${JSON.stringify(local.state.root)});
+    `,
+        ],
+        { env: {}, stdio: ["ignore", "pipe", "pipe"] },
+      );
+      daemons.push(caller);
+      let stderr = "";
+      caller.stderr!.on("data", (chunk) => {
+        stderr += chunk.toString();
+      });
+      const exited = once(caller, "close");
+      try {
+        await readiness.wait(caller, () => stderr);
+        if (reason === "lease") local.policy.leaseUntil = Date.now();
+        else local.policy.enabled = false;
+        await local.state.write("policy.json", local.policy);
+        await waitFor(
+          async () =>
+            (await local.state.read("runtime-owner.json", (value) => value as { settled: boolean }))
+              ?.settled === true,
+        );
+        expect((await exited)[0]).not.toBe(0);
+        const { pid } = JSON.parse(await readFile(marker, "utf8"));
+        expect(() => process.kill(pid, 0)).toThrow();
+        await writeFile(local.release, "resume");
+        await expect(readFile(local.sentinel)).rejects.toMatchObject({ code: "ENOENT" });
+        expect(await local.records.get(local.space.id)).toEqual(local.space);
+      } finally {
+        if (caller.exitCode === null && caller.signalCode === null) caller.kill("SIGKILL");
+        await exited;
+      }
+    },
+  );
+
+  test("parent death during foreground SDK startup settles the native launch without guest work", async () => {
+    const local = await fixture();
+    const daemon = daemons[0];
+    const closed = once(daemon, "close");
+    daemon.kill("SIGTERM");
+    await closed;
+    await writeFile(local.observation + ".daemon-ready-wait", "wait");
+    const readiness = observeInventoryRead(local.observation + ".launches");
+    const caller = spawn(
+      process.execPath,
+      [
+        "--input-type=module",
+        "-e",
+        `
+      import {startGuard} from ${JSON.stringify(`file://${join(root, "guard.js")}`)};
+      await startGuard(${JSON.stringify(local.state.root)});
+    `,
+      ],
+      { env: {}, stdio: ["ignore", "pipe", "pipe"] },
+    );
+    daemons.push(caller);
+    let stderr = "";
+    caller.stderr!.on("data", (chunk) => {
+      stderr += chunk.toString();
+    });
+    await readiness.wait(caller, () => stderr);
+    const exited = once(caller, "close");
+    caller.kill("SIGKILL");
+    await exited;
+    await waitFor(
+      async () =>
+        (await local.state.read("runtime-owner.json", (value) => value as { settled: boolean }))
+          ?.settled === true,
+    );
+    expect(await readFile(local.observation + ".daemon-stopped", "utf8")).toBe("stopped");
+    await expect(readFile(local.pending)).rejects.toMatchObject({ code: "ENOENT" });
+    expect(await local.records.get(local.space.id)).toEqual(local.space);
+  });
+
+  test("foreground SDK startup remains admitted beyond former work clocks and settles its actual owner", async () => {
+    const local = await fixture();
+    const daemon = daemons[0];
+    const closed = once(daemon, "close");
+    daemon.kill("SIGTERM");
+    await closed;
+    local.policy.leaseUntil = Date.now() + 120_000;
+    await local.state.write("policy.json", local.policy);
+    const barrier = local.observation + ".daemon-ready-wait";
+    const observed = local.observation + ".daemon-observed";
+    await writeFile(barrier, "wait");
+    await execute(process.execPath, [
+      "--input-type=module",
+      "-e",
+      `
+      import {startGuard} from ${JSON.stringify(`file://${join(root, "guard.js")}`)};
+      import f from 'node:fs/promises';
+      import {watch} from 'node:fs';
+      const opening=startGuard(${JSON.stringify(local.state.root)});
+      const observed=new Promise((resolve,reject)=>{
+        const changed=()=>{void f.readFile(${JSON.stringify(observed)}).then(()=>{observer.close();resolve();},error=>{if(error.code!=='ENOENT'){observer.close();reject(error);}});};
+        const observer=watch(${JSON.stringify(root)},changed);observer.unref();observer.on('error',reject);changed();
+      });
+      try {
+        await Promise.race([observed,opening.then(()=>{throw new Error('SDK startup completed before readiness');})]);
+        await Promise.race([new Promise(resolve=>setTimeout(resolve,46_000)),opening.then(()=>{throw new Error('SDK startup completed before readiness');})]);
+        await f.rm(${JSON.stringify(barrier)});
+        const device=await opening;
+        const rows=await device.observe();
+        if(rows.length!==1||rows[0].status!=='stopped')throw new Error('Startup changed the guest lifecycle');
+      } finally { const device=await opening.catch(()=>undefined);await device?.stop(); }
+    `,
+    ]);
+    expect((await readFile(local.observation + ".launches", "utf8")).trim()).toBe("launched");
+    expect(await local.state.read("runtime-owner.json", (value) => value)).toMatchObject({
+      settled: true,
+    });
+    expect(await readFile(local.observation + ".daemon-stopped", "utf8")).toBe("stopped");
+  });
+
   test("an enabled owner reopens a stopped SDK through fixed foreground ownership and settles it", async () => {
     const local = await fixture();
     const daemon = daemons[0];
@@ -1711,6 +1853,55 @@ supportedGuard("independent guard with a real subprocess SDK substitute", () => 
     });
     expect(JSON.parse(await readFile(local.observation, "utf8"))).toEqual({ status: "stopped" });
     await expect(readFile(local.pending)).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  test("remote registration remains pending beyond the former work clock and completes on actual readiness", async () => {
+    const local = await fixture();
+    await execute(process.execPath, [
+      "--input-type=module",
+      "-e",
+      driver(local) +
+        `
+      await f.writeFile(${JSON.stringify(local.observation + ".service-wait")},'wait');
+      const work=guard.prepare();
+      try {
+        await Promise.race([wait(),work.then(()=>{throw new Error('Registration completed before readiness');})]);
+        await Promise.race([
+          new Promise(resolve=>setTimeout(resolve,31_000)),
+          work.then(()=>{throw new Error('Registration completed before readiness');})
+        ]);
+        await f.writeFile(${JSON.stringify(local.release)},'ready');
+        await work;
+        const current=await driverRecords.get(${JSON.stringify(local.space.id)});
+        if(current.phase!=='usable')throw new Error('Actual readiness did not become usable');
+      } finally { await guard.stop(); await device.stop(); }
+    `,
+    ]);
+    expect(await readFile(local.sentinel, "utf8")).toBe("service ready");
+  });
+
+  test("addressed stop physically settles pending remote registration before any late readiness", async () => {
+    const local = await fixture();
+    await execute(process.execPath, [
+      "--input-type=module",
+      "-e",
+      driver(local) +
+        `
+      await f.writeFile(${JSON.stringify(local.observation + ".service-wait")},'wait');
+      const work=guard.prepare();
+      const settled=work.then(()=>false,()=>true);
+      try {
+        await Promise.race([wait(),work.then(()=>{throw new Error('Registration completed before readiness');})]);
+        await guard.stop();
+        if(!await settled)throw new Error('Interrupted registration incorrectly succeeded');
+      } finally { await device.stop(); }
+    `,
+    ]);
+    const { pid } = JSON.parse(await readFile(local.pending, "utf8"));
+    expect(() => process.kill(pid, 0)).toThrow();
+    await writeFile(local.release, "ready");
+    await expect(readFile(local.sentinel)).rejects.toMatchObject({ code: "ENOENT" });
+    expect(JSON.parse(await readFile(local.observation, "utf8"))).toEqual({ status: "stopped" });
   });
 
   test("IPC shutdown settles an outstanding guest bootstrap before stopping the sandbox", async () => {

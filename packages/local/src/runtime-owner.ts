@@ -274,8 +274,8 @@ export class RuntimeOwner {
           await this.persist(space);
         }
         const assets = await this.loadAssets();
-        await installGuest(runtime, identity, assets);
-        const latest = await this.current();
+        await installGuest(runtime, identity, assets, this.controller.signal);
+        await this.current();
         let gitAuthor = policy.gitAuthor ?? null;
         if (
           !gitAuthor &&
@@ -333,7 +333,7 @@ export class RuntimeOwner {
               gitAuthor,
             }),
           ),
-          Math.min(300_000, latest.policy.leaseUntil - Date.now()),
+          null,
           this.controller.signal,
         );
         z.object({ ok: z.literal(true), result: z.unknown() })
@@ -392,7 +392,7 @@ export class RuntimeOwner {
           identity,
           "start-service",
           undefined,
-          30_000,
+          null,
           this.controller.signal,
         );
         await this.waitWorkspaceHealth(

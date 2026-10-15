@@ -27,6 +27,52 @@ afterEach(async () => {
   await rm(root, { recursive: true, force: true });
 });
 describe("Guest initialization of a proven empty repository", () => {
+  test("a complete large ref advertisement still checks out the requested branch", async () => {
+    await run(
+      "git",
+      [
+        "-C",
+        clone,
+        "-c",
+        "user.name=fixture",
+        "-c",
+        "user.email=fixture@example.test",
+        "commit",
+        "--allow-empty",
+        "-m",
+        "Existing",
+      ],
+      { env: environment },
+    );
+    await run("git", ["-C", clone, "push", "origin", "HEAD:main"], { env: environment });
+    const commit = (
+      await run("git", ["-C", clone, "rev-parse", "HEAD"], { env: environment })
+    ).stdout.trim();
+    const refs = Array.from(
+      { length: 18_000 },
+      (_, index) => `${commit} refs/tags/${String(index).padStart(90, "r")}\n`,
+    )
+      .sort()
+      .join("");
+    expect(Buffer.byteLength(refs)).toBeGreaterThan(1024 * 1024);
+    await writeFile(join(remote, "packed-refs"), "# pack-refs with: sorted\n" + refs);
+    await checkoutGuestRepository(clone, "main", environment);
+    expect(
+      (await run("git", ["-C", clone, "symbolic-ref", "HEAD"], { env: environment })).stdout.trim(),
+    ).toBe("refs/heads/main");
+    expect(
+      (await run("git", ["-C", clone, "rev-parse", "HEAD"], { env: environment })).stdout.trim(),
+    ).toBe(commit);
+  });
+  test("a failed advertisement is not interpreted as an empty repository", async () => {
+    await run("git", ["-C", clone, "remote", "set-url", "origin", join(root, "absent.git")], {
+      env: environment,
+    });
+    await expect(checkoutGuestRepository(clone, "main", environment)).rejects.toThrow();
+    await expect(
+      run("git", ["-C", clone, "show-ref", "--verify", "refs/heads/main"], { env: environment }),
+    ).rejects.toThrow();
+  });
   test("sets an unborn main branch and supports first commit, push, feature commit without host Git identity", async () => {
     await checkoutGuestRepository(clone, "main", environment);
     expect(

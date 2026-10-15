@@ -1,4 +1,5 @@
-import { afterEach, beforeEach, describe, expect, test } from "@jest/globals";
+import { afterEach, beforeEach, describe, expect, jest, test } from "@jest/globals";
+import * as filesystem from "node:fs/promises";
 import {
   mkdtemp,
   rm,
@@ -30,14 +31,147 @@ import { localPolicy } from "./fixtures.js";
 let root: string;
 let deviceId: string;
 let preserveNativeImage: boolean;
+let fixtureMount: string | undefined;
 beforeEach(async () => {
   preserveNativeImage = false;
   root = await realpath(await mkdtemp(join(tmpdir(), "moira-local-storage-")));
   deviceId = randomUUID();
 });
 afterEach(async () => {
+  if (fixtureMount) await rm(fixtureMount, { recursive: true, force: true });
+  fixtureMount = undefined;
   if (!preserveNativeImage) await rm(root, { recursive: true, force: true });
 });
+
+// Only native filesystem observations are substituted. Private owner files and journals stay real.
+async function observeStorage<T>(
+  mount: string,
+  capacity: () => number,
+  used: () => number,
+  action: (storage: typeof import("../../../packages/local/src/storage.js")) => Promise<T>,
+) {
+  jest.resetModules();
+  jest.unstable_mockModule("node:fs/promises", () => ({
+    ...filesystem,
+    lstat: async (...args: Parameters<typeof lstat>) => {
+      const metadata = await filesystem.lstat(...args);
+      if (String(args[0]) === mount)
+        Object.defineProperty(metadata, "dev", { value: Number(metadata.dev) + 1 });
+      return metadata;
+    },
+    statfs: async (path: unknown) => {
+      const size = String(path) === mount ? capacity() : 1024 * 1024;
+      const occupied = String(path) === mount ? used() : 0;
+      return {
+        bsize: 512n,
+        blocks: BigInt(size / 512),
+        bfree: BigInt((size - occupied) / 512),
+        bavail: BigInt((size - occupied) / 512),
+      };
+    },
+  }));
+  try {
+    return await action(await import("../../../packages/local/src/storage.js"));
+  } finally {
+    jest.unstable_unmockModule("node:fs/promises");
+    jest.resetModules();
+  }
+}
+
+async function resizeFixture() {
+  const state = await PrivateState.open(root);
+  const policy = localPolicy(root);
+  policy.deviceId = deviceId;
+  const mount = defaultStorageMount(root, deviceId, "darwin");
+  fixtureMount = mount;
+  policy.runtime.storageRoot = mount;
+  await mkdir(mount, { mode: 0o700 });
+  await mkdir(join(root, "storage.sparsebundle"), { mode: 0o700 });
+  await writeFile(join(mount, "original-bytes"), "preserved", { mode: 0o600 });
+  const volume = await PrivateState.open(mount);
+  policy.runtime.maxStorageBytes = 16 * GiB;
+  await volume.write("storage-owner.json", { deviceId, capacityBytes: 16 * GiB });
+  const volumeUUID = randomUUID();
+  const overhead = 1024 * 1024;
+  let imageBytes = 16 * GiB,
+    containerBytes = imageBytes - overhead,
+    attached = true;
+  let minimum = 11 * GiB,
+    failResize = false;
+  const run: RunProcess = async ({ binary, argv, stdin, timeoutMs }) => {
+    const observation =
+      binary === "/usr/bin/plutil" || argv[0] === "info" || argv.includes("limits");
+    expect(timeoutMs).toBe(observation ? 120_000 : null);
+    let value: unknown;
+    if (binary === "/usr/bin/plutil")
+      return { stdout: Buffer.from(stdin!), stderr: Buffer.alloc(0), exitCode: 0 };
+    if (binary === "/usr/bin/hdiutil") {
+      if (argv[0] === "info")
+        value = {
+          images: attached
+            ? [
+                {
+                  "image-path": join(root, "storage.sparsebundle"),
+                  blockcount: imageBytes / 512,
+                  blocksize: 512,
+                  "system-entities": [{ "dev-entry": "/dev/disk9s1", "mount-point": mount }],
+                },
+              ]
+            : [],
+        };
+      else if (argv[0] === "detach") attached = false;
+      else if (argv[0] === "attach") attached = true;
+      else if (argv[0] === "resize") {
+        imageBytes = Number(argv[argv.indexOf("-sectors") + 1]) * 512;
+        if (failResize) {
+          failResize = false;
+          return {
+            stdout: Buffer.alloc(0),
+            stderr: Buffer.from("native resize interrupted"),
+            exitCode: 1,
+          };
+        }
+      } else throw new Error("Unexpected image command");
+    } else if (binary === "/usr/sbin/diskutil") {
+      if (argv[0] === "info")
+        value = {
+          MountPoint: mount,
+          VolumeUUID: volumeUUID,
+          FilesystemType: "apfs",
+          BusProtocol: "Disk Image",
+          APFSContainerReference: "disk9",
+          APFSContainerSize: containerBytes,
+          DeviceNode: "/dev/disk9s1",
+          WritableVolume: true,
+          Locked: false,
+        };
+      else if (argv.includes("limits")) value = { MinimumSizeNoGuard: minimum };
+      else if (argv[0] === "apfs" && argv[1] === "resizeContainer")
+        containerBytes = argv[3] === "0" ? imageBytes - overhead : Number(argv[3].slice(0, -1));
+      else throw new Error("Unexpected volume command");
+    } else throw new Error("Unexpected native executable");
+    return {
+      stdout: Buffer.from(JSON.stringify(value ?? {})),
+      stderr: Buffer.alloc(0),
+      exitCode: 0,
+    };
+  };
+  return {
+    state,
+    policy,
+    mount,
+    volume,
+    run,
+    capacity: () => containerBytes,
+    setMinimum(value: number) {
+      minimum = value;
+    },
+    interrupt() {
+      failResize = true;
+    },
+    identity: () => ({ imageBytes, containerBytes, volumeUUID }),
+  };
+}
 
 async function remountFixture() {
   const state = await PrivateState.open(root);
@@ -113,6 +247,118 @@ async function remountFixture() {
 
 describe("bounded runtime storage mount", () => {
   const darwinTest = process.platform === "darwin" ? test : test.skip;
+  test("remount preserves fixed observations without a native attach work deadline", async () => {
+    const f = await remountFixture();
+    const native = f.dependencies.run;
+    f.dependencies.run = async (request) => {
+      expect(request.timeoutMs).toBe(request.argv[0] === "attach" ? null : 120_000);
+      return native(request);
+    };
+    f.loseResponse();
+    await expect(ensureStorageMounted(f.state, f.policy, f.dependencies)).resolves.toBeUndefined();
+    expect(await readFile(join(f.image, "retained-data"), "utf8")).toBe("saved image bytes");
+  });
+  test("owned storage remains readable below one GiB free", async () => {
+    const mount = join(root, "bounded-volume");
+    await mkdir(mount, { mode: 0o700 });
+    const policy = localPolicy(root);
+    policy.runtime.storageRoot = mount;
+    await (
+      await PrivateState.open(mount)
+    ).write("storage-owner.json", {
+      deviceId: policy.deviceId,
+      capacityBytes: policy.runtime.maxStorageBytes,
+    });
+    await observeStorage(
+      mount,
+      () => 2 * GiB,
+      () => 2 * GiB - 512,
+      async (storage) => {
+        await expect(storage.admitStorage(policy)).resolves.toBeUndefined();
+      },
+    );
+  });
+  darwinTest(
+    "sparse creation is decided by native allocation rather than logical host reserve",
+    async () => {
+      const state = await PrivateState.open(root);
+      const mount = defaultStorageMount(root, deviceId, "darwin");
+      fixtureMount = mount;
+      const run: RunProcess = async (request) => {
+        expect(request.timeoutMs).toBeNull();
+        return { stdout: Buffer.alloc(0), stderr: Buffer.alloc(0), exitCode: 0 };
+      };
+      await observeStorage(
+        mount,
+        () => 8 * GiB,
+        () => 0,
+        async (storage) => {
+          await expect(
+            storage.initializeStorage(state, deviceId, 8 * GiB, undefined, run),
+          ).resolves.toBe(mount);
+        },
+      );
+      expect(
+        await (await PrivateState.open(mount)).read("storage-owner.json", (value) => value),
+      ).toEqual({ deviceId, capacityBytes: 8 * GiB });
+    },
+  );
+  darwinTest(
+    "sparse growth survives native interruption and resumes the original resize journal",
+    async () => {
+      const f = await resizeFixture();
+      f.interrupt();
+      await observeStorage(
+        f.mount,
+        f.capacity,
+        () => GiB,
+        async (storage) => {
+          await expect(
+            storage.resizeStorage(f.state, f.policy, 20 * GiB, f.run),
+          ).rejects.toMatchObject({ code: "LOCAL_STORAGE_RESIZE_FAILED" });
+          const journal = await readFile(join(root, "storage-resize.json"));
+          await expect(
+            storage.resizeStorage(f.state, f.policy, 20 * GiB, f.run),
+          ).resolves.toBeUndefined();
+          expect((await readFile(join(root, "storage-resize.json"))).equals(journal)).toBe(true);
+        },
+      );
+      expect(f.identity().imageBytes).toBe(20 * GiB);
+      expect(await readFile(join(f.mount, "original-bytes"), "utf8")).toBe("preserved");
+      expect(await f.volume.read("storage-owner.json", (value) => value)).toEqual({
+        deviceId,
+        capacityBytes: 20 * GiB,
+      });
+    },
+  );
+  darwinTest(
+    "APFS shrink accepts actual data fit without spare GiB but refuses its native minimum",
+    async () => {
+      const f = await resizeFixture();
+      const before = f.identity();
+      await observeStorage(
+        f.mount,
+        f.capacity,
+        () => 11.5 * GiB,
+        async (storage) => {
+          f.setMinimum(13 * GiB);
+          await expect(
+            storage.resizeStorage(f.state, f.policy, 12 * GiB, f.run),
+          ).rejects.toMatchObject({ code: "LOCAL_STORAGE_FULL" });
+          expect(f.identity()).toEqual(before);
+          await expect(lstat(join(root, "storage-resize.json"))).rejects.toMatchObject({
+            code: "ENOENT",
+          });
+          f.setMinimum(11 * GiB);
+          await expect(
+            storage.resizeStorage(f.state, f.policy, 12 * GiB, f.run),
+          ).resolves.toBeUndefined();
+        },
+      );
+      expect(f.identity().imageBytes).toBe(12 * GiB);
+      expect(await readFile(join(f.mount, "original-bytes"), "utf8")).toBe("preserved");
+    },
+  );
   test("an absent approved volume reports LOCAL_STORAGE_NOT_MOUNTED", async () => {
     const policy = localPolicy(root);
     policy.runtime.storageRoot = join(root, "missing-volume");

@@ -256,7 +256,7 @@ describe("GET /api/public/executions/materialize/:token", () => {
       const owner = new LiveCommunicationFileOwner({
         devices: () =>
           ({
-            listOwned: async () => ({ devices: [observed] }),
+            listRegistered: () => ({ devices: [observed] }),
             getDeviceIdentity: () => observed,
           }) as never,
         controller: () => client,

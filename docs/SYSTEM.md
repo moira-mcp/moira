@@ -730,13 +730,16 @@ and stopped-policy intents fence interrupted changes; a persisted applied revisi
 permits cleanup of its completed intent, not a newer uncertain intent. CPU, RAM and
 Docker disk changes are defaults for new VMs. Existing VMs retain their admitted
 machine and repository identity. Storage resizing uses only the exact owned disk
-image and APFS container, checks native bounds and capacity, and preserves data;
+image and APFS container, checks native bounds, actual used-data fit and capacity, and preserves data;
 uncertain native settlement retains its journal and disables work.
+Sparse image creation and growth require no synthetic host reserve or full logical preallocation.
+Shrink retains the native APFS minimum and actual used-data bound; native filesystem failures
+remain refusals.
 
 Manager startup holds the runner gate while `ensureStorageMounted` checks storage.
 On macOS it may attach only the existing `storage.sparsebundle` in the same private
 state to that device's default mount. Fresh native image/mount binding and ordinary
-volume ownership, finite capacity and free-space admission are required, including
+volume ownership and approved finite capacity are required, including
 after a lost attach reply. Custom mounts remain manually managed. Missing images,
 unsafe mount points and conflicting bindings refuse startup without creating or
 resetting storage.
@@ -797,6 +800,12 @@ leaves the account blocked. Pending retirement preserves encrypted custody and
 ownership rather than cascading them away or implicitly deleting external VMs.
 
 An independent device guard owns SDK launch and calls before VM creation. It
+checks current work or `doctor` authority before opening the SDK and throughout startup;
+setup and cleanup retain their separate local authority. SDK startup, installation,
+bootstrap and authenticated guest registration have no aggregate work clock. Fixed
+identity/health observations and the bounded `doctor` diagnostic retain their own bounds;
+an expired observation never proves physical settlement. Disable, lease expiry,
+caller cancellation and parent death remain effective during pending startup. The guard
 cancels and reaps tracked calls, holds exact kernel identities for the SDK daemon
 and VM workers, and maps SDK UUIDs to private container identities before admitting
 work. Shutdown does not depend on a readable SDK credential store. It signals only
