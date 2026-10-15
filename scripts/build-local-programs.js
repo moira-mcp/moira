@@ -20,7 +20,13 @@ export async function buildLocalPrograms(directory = defaultOutput) {
       legalComments: "none",
       entryPoints: [join(source, `${entry}.ts`)],
       outfile: join(output, `${entry}.js`),
-      banner: entry === "cli" ? { js: "#!/usr/bin/env node" } : undefined,
+      banner: {
+        js: [
+          ...(entry === "cli" ? ["#!/usr/bin/env node"] : []),
+          'import { createRequire as moiraCreateRequire } from "node:module";',
+          "const require = moiraCreateRequire(import.meta.url);",
+        ].join("\n"),
+      },
     });
   }
   await chmod(join(output, "cli.js"), 0o755);

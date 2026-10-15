@@ -19,7 +19,7 @@ export interface RegistrationNotificationDependencies {
   getEnabled(): Promise<boolean | null>;
   getRecipients(): ReturnType<UserRepository["getAdminNotificationRecipients"]>;
   createRepository(): IDataRepository;
-  communication: Pick<UserCommunicationService, "deliverChannel" | "maxTextLength">;
+  communication: Pick<UserCommunicationService, "deliverChannel">;
   getBaseUrl(): string;
   getAppPrefix(): string;
   logger: Pick<ReturnType<typeof createLogger>, "info" | "warn">;
@@ -54,11 +54,19 @@ export async function notifyAdminsOfRegistration(
     const clean = (text: string) => text.replace(/[\r\n\t]/g, " ");
     const details = `\nEmail: ${clean(registration.email)}\nRegistered: ${new Date(registration.createdAt).toISOString()}\nAccount: ${url}`;
     const heading = "New account registered\nName: ";
-    const nameBudget = Math.max(
-      0,
-      dependencies.communication.maxTextLength - heading.length - details.length,
-    );
-    const text = heading + clean(registration.name ?? "—").slice(0, nameBudget) + details;
+    const message = (textLimit?: number) => ({
+      text:
+        heading +
+        (textLimit === undefined
+          ? clean(registration.name ?? "—")
+          : clean(registration.name ?? "—").slice(
+              0,
+              Math.max(0, textLimit - heading.length - details.length),
+            )) +
+        details,
+      format: "plain" as const,
+      purpose: "notification" as const,
+    });
     for (const recipient of recipients) {
       if (
         !recipient.isAdmin ||
@@ -71,8 +79,9 @@ export async function notifyAdminsOfRegistration(
       try {
         const result = await dependencies.communication.deliverChannel(
           "telegram",
-          { userId: recipient.id, text, format: "plain", purpose: "notification" },
+          { userId: recipient.id, ...message() },
           repository,
+          async (textLimit) => message(textLimit),
         );
         logger.info("Registration notification completed", {
           recipientId: recipient.id,

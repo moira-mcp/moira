@@ -1,6 +1,6 @@
 /**
  * Telegram Bot API HTTP Client
- * Production-ready client with comprehensive error handling and rate limiting
+ * Provider payload validation and explicit caller cancellation.
  */
 
 import {
@@ -11,21 +11,19 @@ import {
   TelegramErrorType,
   TELEGRAM_TEXT_MAX_LENGTH,
 } from "../types/telegram-types.js";
-import { RateLimiter, createTelegramRateLimiter } from "./rate-limiter.js";
 import { createLogger, WorkflowLogger } from "@mcp-moira/shared";
+import { fetchWork } from "@mcp-moira/shared/http/work-fetch";
 
 /**
- * HTTP client for Telegram Bot API with rate limiting and error handling
+ * HTTP client for Telegram Bot API with error handling
  * Implements graceful degradation strategy for production use
  */
 export class TelegramClient {
   private config: TelegramConfig;
-  private rateLimiter: RateLimiter;
   private logger: WorkflowLogger;
 
-  constructor(config: TelegramConfig, rateLimiter?: RateLimiter) {
+  constructor(config: TelegramConfig) {
     this.config = this.validateAndNormalizeConfig(config);
-    this.rateLimiter = rateLimiter ?? createTelegramRateLimiter();
     this.logger = createLogger({ component: "TelegramClient" });
 
     this.logger.info("Telegram client initialized", {
@@ -36,14 +34,11 @@ export class TelegramClient {
 
   /**
    * Send message to Telegram chat
-   * Handles rate limiting, HTTP errors, and API errors gracefully
+   * Preserves HTTP and vendor errors without retrying the message.
    */
-  async sendMessage(params: SendMessageParams): Promise<TelegramResponse> {
+  async sendMessage(params: SendMessageParams, signal?: AbortSignal): Promise<TelegramResponse> {
     try {
-      // Apply rate limiting
-      await this.rateLimiter.waitForAvailability();
-
-      const response = await this.makeHttpRequest(params);
+      const response = await this.makeHttpRequest(params, signal);
 
       this.logger.info("Message sent successfully", {
         messageLength: params.text.length,
@@ -83,8 +78,6 @@ export class TelegramClient {
    */
   async answerCallbackQuery(callbackQueryId: string, text?: string): Promise<TelegramResponse> {
     try {
-      await this.rateLimiter.waitForAvailability();
-
       const url = this.buildApiUrl("answerCallbackQuery");
       const body: Record<string, unknown> = {
         callback_query_id: callbackQueryId,
@@ -94,10 +87,13 @@ export class TelegramClient {
       }
 
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), this.config.timeout || 5000);
+      const timeoutId =
+        this.config.timeout === undefined
+          ? undefined
+          : setTimeout(() => controller.abort(), this.config.timeout);
 
       try {
-        const response = await fetch(url, {
+        const response = await fetchWork(url, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(body),
@@ -141,8 +137,6 @@ export class TelegramClient {
     allowedUpdates?: string[],
     secretToken?: string,
   ): Promise<TelegramResponse> {
-    await this.rateLimiter.waitForAvailability();
-
     const apiUrl = this.buildApiUrl("setWebhook");
     const body: Record<string, unknown> = { url };
     if (allowedUpdates) {
@@ -153,10 +147,13 @@ export class TelegramClient {
     }
 
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), this.config.timeout || 5000);
+    const timeoutId =
+      this.config.timeout === undefined
+        ? undefined
+        : setTimeout(() => controller.abort(), this.config.timeout);
 
     try {
-      const response = await fetch(apiUrl, {
+      const response = await fetchWork(apiUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
@@ -203,13 +200,6 @@ export class TelegramClient {
   }
 
   /**
-   * Get rate limiter status for monitoring
-   */
-  getRateLimitStatus() {
-    return this.rateLimiter.getStatus();
-  }
-
-  /**
    * Get default chat ID if configured
    * Used by handlers to determine target chat
    */
@@ -221,15 +211,24 @@ export class TelegramClient {
    * Make HTTP request to Telegram Bot API
    * Central point for all HTTP communication
    */
-  private async makeHttpRequest(params: SendMessageParams): Promise<TelegramResponse> {
+  private async makeHttpRequest(
+    params: SendMessageParams,
+    signal?: AbortSignal,
+  ): Promise<TelegramResponse> {
     const url = this.buildApiUrl("sendMessage");
     const body = this.buildRequestBody(params);
 
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), this.config.timeout || 5000);
+    const abort = () => controller.abort();
+    signal?.addEventListener("abort", abort, { once: true });
+    if (signal?.aborted) abort();
+    const timeoutId =
+      this.config.timeout === undefined
+        ? undefined
+        : setTimeout(() => controller.abort(), this.config.timeout);
 
     try {
-      const response = await fetch(url, {
+      const response = await fetchWork(url, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -237,8 +236,6 @@ export class TelegramClient {
         body: JSON.stringify(body),
         signal: controller.signal,
       });
-
-      clearTimeout(timeoutId);
 
       const responseData = (await response.json()) as TelegramResponse;
 
@@ -259,6 +256,9 @@ export class TelegramClient {
       }
 
       throw error;
+    } finally {
+      clearTimeout(timeoutId);
+      signal?.removeEventListener("abort", abort);
     }
   }
 
@@ -414,7 +414,6 @@ export class TelegramClient {
     return {
       ...config,
       apiUrl: config.apiUrl || "https://api.telegram.org/bot",
-      timeout: config.timeout || 5000,
     };
   }
 }

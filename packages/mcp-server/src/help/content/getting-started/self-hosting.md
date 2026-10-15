@@ -671,7 +671,9 @@ tool or agent. When setup is
 missing or a credential must be renewed, the user returns to this website.
 
 GitHub Codespaces requires `CODESPACE_CODESPACES_ENABLED=true`, current App grants and an
-available paired controller. Choose `device_id` if more than one controller is available.
+active registered paired controller. Choose `device_id` if more than one controller is registered,
+even when only one is reachable. Selection does not probe each controller; the normal route
+reports whether the chosen owner can receive the request and never switches to another owner.
 The controller owns original-operation journals and fixed provisioning through its packaged gh,
 trusted SSH and verified Linux payload; cloud Moira retains minimal resource/account authority
 and fixed provider API calls. No cloud connector Compose service is required.
@@ -838,7 +840,9 @@ you want to rejoin the normal release channel.
 
 Run a paired controller for native attachment capture and workflow progress rendering.
 Owning these communication files requires neither a Local VM nor an enabled Local SDK work
-lease. Select `device_id` when several controllers are live. Preserve the owner's private
+lease. Select `device_id` when several active controllers are registered, even if only one is
+reachable. The selected identity stays fixed; an unavailable route does not authorize another
+owner or prove that a previous submission never ran. Preserve the owner's private
 immutable files and delivery journal when updating its matched executable release.
 Workspace publications remain with their workspace owner.
 Materialize archives use the paired controller's immutable publication and original receipt;

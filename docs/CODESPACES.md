@@ -37,12 +37,13 @@ credential digests bound to user, resource, authorization/resource generations a
 guest life. Fixed provider bootstrap installs the common payload without giving project
 commands the original GitHub OAuth, refresh or device credentials.
 
-The backend is the sole live connection registry. MCP and other server processes observe
-workspace/controller presence asynchronously through its protected Unix socket. The backend
-rechecks current authority and the exact endpoint identity and both generations without
-dispatching an owner call. Publication, communication, scoped credentials and GitHub readiness
-use this observation; an unreachable backend or mismatched binding is unavailable. Owner
-dispatch independently rechecks current authority.
+The backend workspace router owns the live CONTROL/DATA connections and dispatch decision.
+MCP and other server processes forward requests through its protected Unix socket. Actor and
+publication authorization checks current account, credential, registration, resource generations
+and enrolled guest life independently of connection availability. The router selects the current
+connection and rechecks authority after asynchronous DATA rendezvous before dispatch. Explicit
+GitHub status reads observe guest health through that same route; they do not establish a separate
+presence gate for subsequent operations.
 
 The paired controller uses fixed authorized GitHub REST actions and its packaged provisioner
 to install and start the common service. The cloud does not run SSH, bootstrap workers or a
@@ -274,6 +275,13 @@ The Local computers editor controls enablement, finite lease, defaults, storage,
 repository grants and permissions and optional Git author identity.
 Saving creates a requested revision. Applied means the companion confirmed that
 revision; pending or rejected settings are distinct from the applied device policy.
+Browser settings admission checks the session and matching Origin before incremental JSON
+parsing, then revalidates the session and unchanged account before owner submission. Variable
+repository policy does not pass through the ordinary web API body ceiling. Native enrollment
+and bootstrap use a separate bounded parser for their closed identity metadata.
+Successful settings responses and original-request collection project the checked snapshot
+stored in that owner operation, with current cloud device registration revalidated. They do not
+perform another discovery or report a newer policy as the original operation's result.
 Offline contact does not imply application: saving is refused and the editor retains its draft.
 Reconnect and refresh before explicitly saving. The live controller can receive management
 changes while work is disabled or expired, without authorizing guest work. Offline revocation cannot promise
@@ -323,6 +331,9 @@ is null until the exact grant is confirmed by the owner. MCP calls live owner ad
 returns the usable ID as `repository_id`. Reuse the same request identity and payload after an
 unconfirmed outcome. An existing local grant is reused through discovery rather than added again. Requests
 racing unapplied owner settings are refused.
+Admission reuses its post-GitHub owner observation for the current decision and checks cloud
+registration again. Completion requires the original owner result and its actually applied grant;
+admission metadata alone cannot release a repository-creation reservation.
 
 `repository_create` takes `device_id`, a stable UUID `request_id`, `repository_name` and the personal
 `installation_id` from discovery. The name is 1–100 ASCII letters, digits, underscores, dots or
@@ -377,6 +388,12 @@ the child token in memory, checks finite authority and disposes it after the ups
 transport physically closes. Its same-UID trust boundary is not an OS sandbox against
 authorized project commands. Explicitly approved public read-only Local fetch can use
 anonymous access; failed scoped issuance never enables that branch.
+
+Each Local Git authorization phase returns one coherent owner observation: repository rights,
+stable route generation, owner lifecycle generation, applied settings revision and finite lease.
+The issuer and author-identity resolver reuse that observation within the phase. They reauthorize
+after asynchronous GitHub grant refresh and credential issuance; an earlier observation cannot
+authorize use after those rights change.
 
 Guest Git identity is repository-local: use owner-configured name/email or the
 verified GitHub login and numeric-account noreply address. Host Git configuration
@@ -478,8 +495,11 @@ retirement witness. It is not a cloud lifecycle journal or desired-state cache. 
 retains the create marker, requested ref, native provisioning custody, measured guest root/life,
 lifecycle generation and pending original request IDs.
 
-Create requires a caller-selected ws1 request ID and an explicit live paired controller, or the
-sole eligible one. The controller admits the original operation before invoking fixed provider
+Create requires a caller-selected ws1 request ID and an explicit active registered controller, or the
+sole active registered one. Selection does not probe controller snapshots. If several controllers
+are registered, choose one even when only one is reachable; the gateway never substitutes another
+owner. The actual route reports whether the selected controller can receive the request.
+The controller admits the original operation before invoking fixed provider
 actions. Cloud rechecks account, App grant, numeric repository, personal payer and assignment at
 those boundaries; parent authorization never leaves cloud. The controller receives narrowly scoped
 provisioning authority, installs the packaged service, measures repository/root/release and enrolls
@@ -665,7 +685,7 @@ in-context fallback retains its 256 KiB UTF-8 budget and refuses instead of trun
 
 The workspace or paired controller owns immutable attachment publication and communication receipts. `owner-file://workspace/...` references retain their original guest; `owner-file://controller/...` references retain their original controller. Cloud publication routes authenticate current owner authority and forward the private immutable source. The owner must be reachable; expiry and revocation remain effective. Ordinary owner links are repeatable while authorized, unlike the separately single-use progress-image grant.
 
-The `communication` action `deliver-file` explicitly delivers a publication using `request_id`, `referenceId`, `message`, `kind` and optional `channelId`. It can instead accept a native `file` descriptor with the selected `device_id`, or use the sole eligible live paired controller. Choose and retain the original ws1 ID before submission. Collect with action `operation`, the original `request_id` and its assigned `device_id` or `codespace_id`; collection never downloads again or resends. Missing/ambiguous/offline owner refuses before admission, with no cloud queue or fallback to a different source owner. Text communication remains independent of owner availability.
+The `communication` action `deliver-file` explicitly delivers a publication using `request_id`, `referenceId`, `message`, `kind` and optional `channelId`. It can instead accept a native `file` descriptor with the selected `device_id`, or use the sole active registered paired controller. Selection pins that identity without a health/snapshot probe; multiple registered controllers require an explicit choice. Choose and retain the original ws1 ID before submission. Collect with action `operation`, the original `request_id` and its assigned `device_id` or `codespace_id`; collection never downloads again or resends. An unavailable route refuses the current dispatch, with no cloud queue or fallback to a different source owner. It does not prove that a previous submission under the original ID never ran. Text communication remains independent of owner availability.
 
 ## MCP tools
 
@@ -697,8 +717,9 @@ The common management card retains provider/resource identity, live owner genera
 original IDs and nullable machine observation. Local cards group by stable computer UUID rather
 than label. A neutral controller can provision GitHub without fabricated Local VM settings.
 
-GitHub create selects an approved repository/ref and a live controller. Several eligible
-controllers require a choice; without one, creation is unavailable before admission. Explicit
+GitHub create selects an approved repository/ref and an active registered controller. Several
+registered controllers require a choice, irrespective of their observed availability; without one,
+creation is unavailable before admission. Explicit
 adopt accepts a provider name or managed resource and preserves its disk. Lifecycle actions use
 an original ws1 identity and observed owner generation. **Check state again** collects retained
 originals or refreshes when none is pending; newer metadata alone cannot settle an uncertain effect.

@@ -154,7 +154,7 @@ export async function resolveNotificationFrame(
 export function frameNotification(
   frame: NotificationFrame,
   body: string,
-  options: { format?: NotificationFormat; planList?: PlanListMode; limit: number },
+  options: { format?: NotificationFormat; planList?: PlanListMode; limit?: number },
 ): string {
   const escape = textEscaper(options.format);
   const mode = options.planList ?? "progress";
@@ -166,7 +166,7 @@ export function frameNotification(
       if (mode === "full") return planListLines(frame.progress, budget, escape, { ended });
       if (mode === "none") return [];
       const line = boundListLine(frame.progress, escape, { ended });
-      return line && line.length <= budget ? [line] : [];
+      return line && (budget === undefined || line.length <= budget) ? [line] : [];
     },
     waitingLine: waitingActorLine(frame.progress, escape),
     limit: options.limit,

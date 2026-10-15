@@ -68,7 +68,6 @@ export interface ExtensionInvocationResult {
 
 export interface ExtensionCommunicationChannelRequest {
   channelId: string;
-  timeoutMs: number;
   message: {
     text: string;
     format?: "plain" | "markdown" | "html";

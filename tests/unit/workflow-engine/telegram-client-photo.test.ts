@@ -5,6 +5,40 @@ import { ServiceLogger } from "@mcp-moira/shared/logging/logger";
 describe("TelegramClient text metadata privacy", () => {
   afterEach(() => {
     jest.restoreAllMocks();
+    jest.useRealTimers();
+  });
+
+  test("default text delivery waits for the provider and does not impose a local per-minute budget", async () => {
+    jest.useFakeTimers();
+    let release!: (value: Response) => void;
+    const fetch = jest
+      .spyOn(globalThis, "fetch")
+      .mockImplementationOnce(
+        (_input, init) =>
+          new Promise<Response>((resolve, reject) => {
+            release = resolve;
+            init?.signal?.addEventListener("abort", () =>
+              reject(Object.assign(new Error("aborted"), { name: "AbortError" })),
+            );
+          }),
+      )
+      .mockImplementation(async () => Response.json({ ok: true }));
+    const client = new TelegramClient({ botToken: "123:private-token" });
+    let settled = false;
+    const held = client
+      .sendMessage({ chatId: "private-chat", text: "original text" })
+      .finally(() => {
+        settled = true;
+      });
+    held.catch(() => undefined);
+    await jest.advanceTimersByTimeAsync(60_001);
+    expect(settled).toBe(false);
+    release(Response.json({ ok: true }));
+    await expect(held).resolves.toMatchObject({ ok: true });
+    for (let index = 0; index < 40; index++)
+      await client.sendMessage({ chatId: "private-chat", text: `message ${index}` });
+    expect(fetch).toHaveBeenCalledTimes(41);
+    expect(JSON.parse(String(fetch.mock.calls[0][1]?.body)).text).toBe("original text");
   });
 
   test("logs delivery metadata without token, destination, or message content", async () => {

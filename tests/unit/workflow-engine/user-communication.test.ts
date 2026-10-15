@@ -61,40 +61,85 @@ function adapter(
 }
 
 describe("UserCommunicationService", () => {
+  test("delivers arbitrary text and repeated requests without a cross-provider workload budget", async () => {
+    const texts: string[] = [];
+    const service = new UserCommunicationService([
+      adapter("owner", async (message) => void texts.push(message.text)),
+    ]);
+    const text = "complete message ".repeat(1000);
+    for (let index = 0; index < 40; index++) {
+      await expect(
+        service.deliver({ userId: "same-user", text }, repository),
+      ).resolves.toMatchObject({
+        status: "delivered",
+      });
+    }
+    expect(texts).toEqual(Array(40).fill(text));
+  });
+
+  test("held real adapter work remains pending across the former deadline while independent callers deliver", async () => {
+    jest.useFakeTimers();
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const texts: string[] = [];
+    const service = new UserCommunicationService([
+      adapter("held", async (message) => {
+        if (message.text === "held") await gate;
+        texts.push(message.text);
+      }),
+    ]);
+    let settled = false;
+    const held = service
+      .deliver({ userId: "same-user", text: "held" }, repository)
+      .then((value) => {
+        settled = true;
+        return value;
+      });
+    await jest.advanceTimersByTimeAsync(10_001);
+    expect(settled).toBe(false);
+    const results = await Promise.all(
+      Array.from({ length: 40 }, (_, index) =>
+        service.deliver({ userId: "same-user", text: `independent-${index}` }, repository),
+      ),
+    );
+    expect(results.every((result) => result.status === "delivered")).toBe(true);
+    release();
+    await expect(held).resolves.toMatchObject({ status: "delivered" });
+    expect(texts).toHaveLength(41);
+    expect(texts.at(-1)).toBe("held");
+  });
+
   test("prepares mutable content after channel configuration and validates it before handoff", async () => {
     let title = "Old";
     const texts: string[] = [];
-    const service = new UserCommunicationService(
-      [
-        {
-          ...adapter("late", async (message) => {
-            texts.push(message.text);
-          }),
-          isConfigured: async () => {
-            title = "Current";
-            return true;
-          },
+    const service = new UserCommunicationService([
+      {
+        ...adapter("late", async (message) => {
+          texts.push(message.text);
+        }),
+        isConfigured: async () => {
+          title = "Current";
+          return true;
         },
-      ],
-      { maxTextLength: 10 },
-    );
+      },
+    ]);
     await service.deliver({ userId: "u", text: "Old" }, repository, async () => ({ text: title }));
     expect(texts).toEqual(["Current"]);
-    await expect(
-      service.deliver({ userId: "u", text: "Old" }, repository, async () => ({
-        text: "x".repeat(11),
-      })),
-    ).rejects.toThrow("text exceeds");
+    await service.deliver({ userId: "u", text: "Old" }, repository, async () => ({
+      text: "x".repeat(11),
+    }));
     await service.deliver({ userId: "u", text: "Old" }, repository, async () => null);
-    expect(texts).toEqual(["Current"]);
+    expect(texts).toEqual(["Current", "x".repeat(11)]);
   });
-  test("tests one registered channel through the common limits without fanning out", async () => {
+  test("tests one registered channel through its configured adapter without fanning out", async () => {
     const calls: string[] = [];
     const registry = new CommunicationChannelRegistry([
       adapter("selected", async (message) => void calls.push(`selected:${message.text}`)),
       adapter("other", async () => void calls.push("other")),
     ]);
-    const service = new UserCommunicationService(registry, { maxRequestsPerWindow: 1 });
+    const service = new UserCommunicationService(registry);
 
     await expect(service.testChannel("selected", "user-1", repository)).resolves.toMatchObject({
       status: "delivered",
@@ -102,8 +147,8 @@ describe("UserCommunicationService", () => {
     });
     expect(calls).toEqual(["selected:Test notification from MCP Moira."]);
     await expect(service.testChannel("selected", "user-1", repository)).resolves.toMatchObject({
-      status: "all_failed",
-      channels: [{ channelId: "selected", status: "rate_limited" }],
+      status: "delivered",
+      channels: [{ channelId: "selected", status: "delivered" }],
     });
     await expect(service.testChannel("missing", "user-1", repository)).resolves.toBeNull();
   });
@@ -168,77 +213,8 @@ describe("UserCommunicationService", () => {
       status: "all_failed",
       configuredChannels: 0,
       deliveredChannels: 0,
-      channels: [{ channelId: "broken-settings", status: "failed", reason: "availability_error" }],
+      channels: [{ channelId: "broken-settings", status: "failed", reason: "configuration_error" }],
     });
-  });
-
-  test("shares per-user rate budget across sequential callers", async () => {
-    const availability = jest.fn(async () => true);
-    const service = new UserCommunicationService(
-      [{ ...adapter("one", async () => undefined), isConfigured: availability }],
-      {
-        maxRequestsPerWindow: 1,
-      },
-    );
-    await expect(
-      service.deliver({ userId: "same-user", text: "one" }, repository),
-    ).resolves.toMatchObject({
-      status: "delivered",
-    });
-    await expect(
-      service.deliver({ userId: "same-user", text: "two" }, repository),
-    ).resolves.toEqual({
-      status: "all_failed",
-      configuredChannels: 0,
-      deliveredChannels: 0,
-      channels: [{ channelId: "one", status: "rate_limited", reason: "rate_limit" }],
-    });
-    expect(availability).toHaveBeenCalledTimes(1);
-    await expect(
-      service.deliver({ userId: "other-user", text: "three" }, repository),
-    ).resolves.toMatchObject({
-      status: "delivered",
-      channels: [{ status: "delivered" }],
-    });
-    expect(availability).toHaveBeenCalledTimes(2);
-  });
-
-  test("bounds a stuck text adapter with a deadline and retains its concurrency fence", async () => {
-    const service = new UserCommunicationService(
-      [
-        adapter("text-only", async () => new Promise<void>(() => undefined), true, {
-          image: false,
-        }),
-      ],
-      { deadlineMs: 5, maxConcurrentPerUser: 1, maxConcurrentPerProvider: 1 },
-    );
-    await expect(service.deliver({ userId: "u", text: "x" }, repository)).resolves.toMatchObject({
-      status: "all_failed",
-      channels: [{ status: "timed_out" }],
-    });
-    await expect(
-      service.deliver({ userId: "u", text: "again" }, repository),
-    ).resolves.toMatchObject({
-      status: "all_failed",
-      channels: [{ status: "rate_limited" }],
-    });
-    await expect(
-      service.deliver({ userId: "another-user", text: "provider busy" }, repository),
-    ).resolves.toMatchObject({
-      status: "all_failed",
-      channels: [{ status: "rate_limited" }],
-    });
-  });
-
-  test("rejects text beyond its configured limit before delivery", async () => {
-    const deliver = jest.fn(async () => undefined);
-    const service = new UserCommunicationService([adapter("bounded", deliver)], {
-      maxTextLength: 3,
-    });
-    await expect(service.deliver({ userId: "u", text: "four" }, repository)).rejects.toThrow(
-      "text exceeds",
-    );
-    expect(deliver).not.toHaveBeenCalled();
   });
 
   test("refuses adapter-supplied failure text as a public reason", async () => {
@@ -307,77 +283,51 @@ describe("UserCommunicationService", () => {
       registry.unregister(channelId);
     }
   });
-
-  test("checks channel availability concurrently and bounds a stuck resolver", async () => {
-    jest.useFakeTimers();
-    const fastAvailability = jest.fn(async () => true);
-    const registry = new CommunicationChannelRegistry([
-      {
-        ...adapter("stuck", async () => undefined),
-        isConfigured: async () => new Promise<boolean>(() => undefined),
-      },
-      { ...adapter("fast", async () => undefined), isConfigured: fastAvailability },
-    ]);
-    const service = new UserCommunicationService(registry, {
-      deadlineMs: 5,
-      maxConcurrentPerProvider: 1,
-    });
-    const delivery = service.deliver({ userId: "u", text: "x" }, repository);
-    await Promise.resolve();
-    await Promise.resolve();
-    expect(fastAvailability).toHaveBeenCalledTimes(1);
-    await jest.advanceTimersByTimeAsync(5);
-    await expect(delivery).resolves.toMatchObject({
-      status: "partial",
-      configuredChannels: 1,
-      deliveredChannels: 1,
-      channels: expect.arrayContaining([
-        { channelId: "stuck", status: "timed_out", reason: "deadline_exceeded" },
-        { channelId: "fast", status: "delivered" },
-      ]),
-    });
-    const next = await service.deliver({ userId: "another-user", text: "x" }, repository);
-    expect(next).toMatchObject({
-      status: "partial",
-      configuredChannels: 1,
-      deliveredChannels: 1,
-      channels: expect.arrayContaining([
-        {
-          channelId: "stuck",
-          status: "rate_limited",
-          reason: "availability_concurrency_limit",
-        },
-        { channelId: "fast", status: "delivered" },
-      ]),
-    });
-  });
-
-  test("refuses new limiter identities at its bound and reclaims expired idle state", async () => {
-    let now = 0;
-    const deliver = jest.fn(async () => undefined);
-    const service = new UserCommunicationService(
-      [adapter("provider", deliver)],
-      { maxLimiterKeys: 5, windowMs: 10 },
-      () => now,
-    );
-    for (const userId of ["u1", "u2", "u3"])
-      await expect(service.deliver({ userId, text: "x" }, repository)).resolves.toMatchObject({
-        status: "delivered",
-      });
-    await expect(service.deliver({ userId: "u4", text: "x" }, repository)).resolves.toMatchObject({
-      status: "all_failed",
-      channels: [{ status: "rate_limited" }],
-    });
-    expect(deliver).toHaveBeenCalledTimes(3);
-    now = 11;
-    await expect(service.deliver({ userId: "u5", text: "x" }, repository)).resolves.toMatchObject({
-      status: "delivered",
-    });
-    expect(deliver).toHaveBeenCalledTimes(4);
-  });
 });
 
 describe("TelegramCommunicationAdapter", () => {
+  test("fits workflow text only for the selected provider and preserves the full extension message", async () => {
+    const telegramTexts: string[] = [],
+      extensionTexts: string[] = [];
+    setTestClientFactory(
+      () =>
+        ({
+          sendMessage: async ({ text }: { text: string }) => {
+            telegramTexts.push(text);
+            return { ok: true };
+          },
+        }) as never,
+    );
+    const repo = {
+      getSetting: async (_u: string, key: string) =>
+        key === "telegram.bot_token" ? "123:token" : key === "telegram.chat_id" ? "chat" : null,
+      getWorkflow: async () => null,
+    } as unknown as IDataRepository;
+    const service = new UserCommunicationService([
+      new TelegramCommunicationAdapter(),
+      adapter("extension", async (message) => {
+        extensionTexts.push(message.text);
+      }),
+    ]);
+    const body = "complete authored content ".repeat(1000);
+    const result = await new UserNotificationHandler(service).execute(
+      { type: "user-notification", id: "notify", message: body, connections: { default: "end" } },
+      {
+        variables: {},
+        nodeStates: {},
+        executionId: "execution",
+        workflowId: "workflow",
+        userId: "user",
+      },
+      new AgentMessageQueue(),
+      repo,
+      {} as IGraphExecutionEngine,
+    );
+    expect(result.data?.userNotificationStatus).toBe("delivered");
+    expect(extensionTexts[0]).toContain(body.trim());
+    expect(telegramTexts[0].length).toBeLessThanOrEqual(4096);
+    expect(telegramTexts[0]).toContain("…");
+  });
   test("fans out one aggregate through configured Telegram and a second channel", async () => {
     const telegramCalls: string[] = [];
     const secondCalls: PortableCommunicationMessage[] = [];
@@ -586,11 +536,11 @@ describe("user-notification graph contract", () => {
 });
 
 describe("UserNotificationHandler", () => {
-  test("shares one provider budget with direct callers while another provider remains independent", async () => {
+  test("workflow and direct callers deliver through the same configured providers", async () => {
     const sharedDeliver = jest.fn(async () => undefined);
     const independentDeliver = jest.fn(async () => undefined);
     const registry = new CommunicationChannelRegistry([adapter("shared", sharedDeliver)]);
-    const service = new UserCommunicationService(registry, { maxRequestsPerWindow: 1 });
+    const service = new UserCommunicationService(registry);
     const handler = new UserNotificationHandler(service);
     const repo = { getWorkflow: async () => null } as unknown as IDataRepository;
 
@@ -618,14 +568,14 @@ describe("UserNotificationHandler", () => {
 
     expect(workflowResult.data?.userNotificationStatus).toBe("delivered");
     expect(directResult).toMatchObject({
-      status: "partial",
-      deliveredChannels: 1,
+      status: "delivered",
+      deliveredChannels: 2,
       channels: [
-        { channelId: "shared", status: "rate_limited", reason: "rate_limit" },
+        { channelId: "shared", status: "delivered" },
         { channelId: "independent", status: "delivered" },
       ],
     });
-    expect(sharedDeliver).toHaveBeenCalledTimes(1);
+    expect(sharedDeliver).toHaveBeenCalledTimes(2);
     expect(independentDeliver).toHaveBeenCalledTimes(1);
   });
 
@@ -744,7 +694,7 @@ describe("UserNotificationHandler", () => {
     }> = [];
     const pictures: string[] = [];
     const handler = new UserNotificationHandler(
-      { deliver, maxTextLength: 4096 } as unknown as UserCommunicationService,
+      { deliver } as unknown as UserCommunicationService,
       {
         select: async () => {
           throw new Error("unused selection");
@@ -905,7 +855,6 @@ describe("UserNotificationHandler", () => {
     }));
     const handler = new UserNotificationHandler({
       deliver,
-      maxTextLength: 4096,
     } as unknown as UserCommunicationService);
     const node: UserNotificationNode = {
       type: "user-notification",
@@ -1010,7 +959,6 @@ describe("UserNotificationHandler", () => {
     }));
     const handler = new UserNotificationHandler({
       deliver,
-      maxTextLength: 4096,
     } as unknown as UserCommunicationService);
     const node: UserNotificationNode = {
       type: "user-notification",
@@ -1122,7 +1070,6 @@ describe("UserNotificationHandler", () => {
     }));
     const handler = new UserNotificationHandler({
       deliver,
-      maxTextLength: 4096,
     } as unknown as UserCommunicationService);
     const node: UserNotificationNode = {
       type: "user-notification",
@@ -1209,7 +1156,6 @@ describe("UserNotificationHandler", () => {
     }));
     const handler = new UserNotificationHandler({
       deliver,
-      maxTextLength: 4096,
     } as unknown as UserCommunicationService);
     const graph = {
       metadata: { name: "Example", version: "1.0.0", description: "x" },
@@ -1263,7 +1209,6 @@ describe("UserNotificationHandler", () => {
     const deliver = jest.fn<UserCommunicationService["deliver"]>();
     const handler = new UserNotificationHandler({
       deliver,
-      maxTextLength: 4096,
     } as unknown as UserCommunicationService);
     const queue = new AgentMessageQueue();
     const result = await handler.execute(

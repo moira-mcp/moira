@@ -77,12 +77,16 @@ async function start(value) {
   });
   child.stdin.end(`import {startWorkspaceService} from ${JSON.stringify(serviceUrl)};
     const options=${JSON.stringify({ socketPath: value.socketPath, stateRoot: value.stateRoot, binding: value.binding, searchExecutable: value.searchExecutable, publicationScope: value.publicationScope })};
+    const remoteOptions=${JSON.stringify(value.remote ?? null)};
+    if(remoteOptions){const {createOwnerCommunicationTransport}=await import(${JSON.stringify(pathToFileURL(resolve("packages/workspace-service/src/communication-transport.mjs")).href)});options.communicationTransport=createOwnerCommunicationTransport(remoteOptions);}
     const sourceFixture=${JSON.stringify(value.sourceFixture ?? null)};
     if(sourceFixture){const {createSourceOpener}=await import(sourceFixture.moduleUrl);options.sourceOpener=createSourceOpener({socketPath:sourceFixture.socketPath});}
     const pullRequestFixture=${JSON.stringify(value.pullRequestFixture ?? null)};
     if(pullRequestFixture)options.pullRequest=(await import(pullRequestFixture)).pullRequest;
     const service=await startWorkspaceService(options);
-    process.on('SIGTERM',async()=>{await service.close();process.exit(0)});process.stdout.write('ready\\n');`);
+    let remote;
+    if(remoteOptions){const {startWorkspaceRemote}=await import(${JSON.stringify(pathToFileURL(resolve("packages/workspace-service/src/remote.ts")).href)});remote=startWorkspaceRemote({socketPath:options.socketPath,...remoteOptions});await remote.whenConnected();}
+    process.on('SIGTERM',async()=>{await remote?.close();await service.close();process.exit(0)});process.stdout.write('ready\\n');`);
   await ready;
 }
 

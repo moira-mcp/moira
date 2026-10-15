@@ -18,6 +18,7 @@ import {
 } from "./extension-runner-client.js";
 import type { ExtensionManifest } from "./extension-contract.js";
 import { EXTENSION_API_VERSION, EXTENSION_RUNNER_API_VERSION } from "./extension-contract.js";
+import { fetchWork } from "@mcp-moira/shared/http/work-fetch";
 
 export interface HttpExtensionRunnerClientOptions {
   /** Base URL of the runner service, for example `http://moira-extension-runner:9110`. */
@@ -191,13 +192,13 @@ export class HttpExtensionRunnerClient implements IExtensionRunnerClient {
         "Binary delivery belongs to the original file owner",
       );
     }
-    await this.callCommunicationEndpoint("/channels/deliver", request, request.timeoutMs, signal);
+    await this.callCommunicationEndpoint("/channels/deliver", request, undefined, signal);
   }
 
   private async callCommunicationEndpoint(
     pathname: string,
     body: unknown,
-    timeoutMs: number,
+    timeoutMs: number | undefined,
     signal?: AbortSignal,
   ): Promise<void> {
     if (signal?.aborted) {
@@ -207,16 +208,27 @@ export class HttpExtensionRunnerClient implements IExtensionRunnerClient {
     const onAbort = () => controller.abort();
     signal?.addEventListener("abort", onAbort, { once: true });
     const grace = this.options.transportGraceMs ?? 5_000;
-    const timer = setTimeout(() => controller.abort(), timeoutMs + grace);
-    let response: Response;
+    const timer =
+      timeoutMs === undefined ? undefined : setTimeout(() => controller.abort(), timeoutMs + grace);
     try {
-      response = await this.request(pathname, {
+      const response = await this.request(pathname, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(body),
         signal: controller.signal,
       });
+      if (!response.ok) {
+        throw new ExtensionInvocationError(
+          "runner-unavailable",
+          `the extension runner answered with HTTP ${response.status}`,
+        );
+      }
+      const result = (await response.json()) as RunnerSuccessBody | RunnerFailureBody;
+      if (result.ok) return;
+      const failure = result as RunnerFailureBody;
+      throw new ExtensionInvocationError(failure.kind, failure.message);
     } catch (error) {
+      if (error instanceof ExtensionInvocationError) throw error;
       throw new ExtensionInvocationError(
         signal?.aborted
           ? "runner-unavailable"
@@ -226,24 +238,13 @@ export class HttpExtensionRunnerClient implements IExtensionRunnerClient {
         signal?.aborted
           ? "communication call was cancelled"
           : controller.signal.aborted
-            ? `the runner did not answer within ${timeoutMs + grace} ms`
+            ? `the runner did not answer within the selected deadline`
             : `the extension runner could not be reached: ${error instanceof Error ? error.message : String(error)}`,
       );
     } finally {
       clearTimeout(timer);
       signal?.removeEventListener("abort", onAbort);
     }
-
-    if (!response.ok) {
-      throw new ExtensionInvocationError(
-        "runner-unavailable",
-        `the extension runner answered with HTTP ${response.status}`,
-      );
-    }
-    const result = (await response.json()) as RunnerSuccessBody | RunnerFailureBody;
-    if (result.ok) return;
-    const failure = result as RunnerFailureBody;
-    throw new ExtensionInvocationError(failure.kind, failure.message);
   }
 
   /** A GET with its own deadline, so a silent runner fails instead of waiting indefinitely. */
@@ -267,6 +268,7 @@ export class HttpExtensionRunnerClient implements IExtensionRunnerClient {
 
   private async request(pathname: string, init: RequestInit): Promise<Response> {
     const url = new URL(pathname, this.options.baseUrl).toString();
+    if (pathname === "/channels/deliver") return fetchWork(url, init, this.fetchImpl);
     return this.fetchImpl(url, init);
   }
 }

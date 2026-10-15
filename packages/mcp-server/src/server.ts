@@ -93,6 +93,7 @@ import {
   CODESPACE_PROCESS_TOOL_NAME,
 } from "./tools/tool-definitions.js";
 import { createWorkspacePublicationHandler } from "./workspace-publication-route.js";
+import { readAuthenticatedMcpRequest } from "./authenticated-request.js";
 
 // Initialize logger
 const logger = createLogger({ component: "MCPServer" });
@@ -511,7 +512,6 @@ app.get(
   }),
 );
 
-app.use(express.json({ limit: "10mb" }));
 const mcpOriginAllowlist = getBrowserOriginAllowlist();
 app.use(
   cors({
@@ -532,6 +532,8 @@ app.get("/mcp", (_req: Request, res: Response) => {
 // MCP HTTP endpoints - Authenticated mode with rate limiting
 app.post("/mcp", mcpLimiter, async (req: Request, res: Response) => {
   try {
+    const principal = await readAuthenticatedMcpRequest(req, res, authenticatePrincipal);
+    if (!principal) return;
     // Log MCP request with tool context (for debugging)
     const mcpMethod = req.body?.method;
     const mcpParams = req.body?.params;
@@ -545,8 +547,6 @@ app.post("/mcp", mcpLimiter, async (req: Request, res: Response) => {
       hasAuthHeader: !!req.headers.authorization,
     });
 
-    const principal = await authenticatePrincipal(req, res, mcpMethod);
-    if (!principal) return;
     await handleAuthenticatedMcpRequest(req, res, principal.identity, principal.credential);
     return;
   } catch (error) {
@@ -641,6 +641,10 @@ async function main() {
         endpoint: `http://localhost:${port}/mcp`,
       });
     });
+    // Owner callbacks and authenticated controls retain caller/authority cancellation,
+    // without Node's whole-request body clock interrupting a live payload stream.
+    // Header admission remains bounded by the HTTP server's separate header timeout.
+    httpServer.requestTimeout = 0;
 
     // Graceful shutdown of HTTP server (stateless mode)
     process.on("SIGINT", () => {

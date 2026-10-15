@@ -352,6 +352,7 @@ describe("composition", () => {
       heading,
       body: Array.from({ length: 400 }, (_, index) => `line ${index}`).join("\n"),
       planList: (budget) => {
+        if (budget === undefined) throw new Error("This provider selected a text bound");
         budgets.push(budget);
         return budget >= "📝 1/3".length ? ["📝 1/3"] : [];
       },
@@ -427,7 +428,6 @@ describe("planList", () => {
         texts.push(request.text);
         return { status: "delivered", configuredChannels: 1, deliveredChannels: 1, channels: [] };
       },
-      maxTextLength: 4096,
     } as unknown as UserCommunicationService);
     const repository = {
       getWorkflow: async () => ({ metadata: graph.metadata }),
@@ -467,7 +467,6 @@ describe("planList", () => {
           texts.push(request.text);
           return { status: "delivered", configuredChannels: 1, deliveredChannels: 1, channels: [] };
         },
-        maxTextLength: 4096,
       } as unknown as UserCommunicationService);
       const repository = {
         getWorkflow: async () => ({ metadata: closing.metadata }),

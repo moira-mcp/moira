@@ -6,7 +6,6 @@ import {
 } from "@mcp-moira/shared";
 import { getLocalDeviceService } from "./codespace-services.js";
 import { authorizeWorkspaceAgentCredential } from "./workspace-services.js";
-import { isWorkspaceOwnerConnected } from "./workspace-client.js";
 
 /** Resolve an existing private actor before accepting an unbounded framed metadata stream. */
 export async function authenticateCommunicationOwner(bearer: string): Promise<void> {
@@ -24,14 +23,7 @@ export async function authenticateCommunicationOwner(bearer: string): Promise<vo
     );
     return;
   }
-  const device = getLocalDeviceService().authenticateDevice(bearer);
-  await authorizeCommunicationOwner(bearer, {
-    kind: "controller",
-    userId: device.userId,
-    deviceId: device.deviceId,
-    deviceGeneration: device.deviceGeneration,
-    connectionId: device.connectionId,
-  });
+  getLocalDeviceService().authenticateDevice(bearer);
 }
 
 /** Authenticates the actual source actor; a valid user MCP credential is not an owner credential. */
@@ -63,18 +55,6 @@ export async function authorizeCommunicationOwner(
     device.connectionId !== scope.connectionId
   )
     throw new Error("owner_scope_refused");
-  if (
-    !(await isWorkspaceOwnerConnected({
-      kind: "controller",
-      userId: device.userId,
-      resourceId: device.deviceId,
-      resourceGeneration: device.deviceGeneration,
-      authorizationGeneration: device.deviceGeneration,
-      connectionId: device.connectionId,
-      expiresAt: null,
-    }))
-  )
-    throw new Error("owner_unavailable");
   return device.userId;
 }
 
@@ -84,18 +64,6 @@ export async function authorizeControllerPublication(deviceId: string): Promise<
     .get(deviceId) as { userId: string } | undefined;
   if (!row) throw new Error("owner_unavailable");
   const device = getLocalDeviceService().getDeviceIdentity(row.userId, deviceId);
-  if (
-    device.status !== "active" ||
-    !(await isWorkspaceOwnerConnected({
-      kind: "controller",
-      userId: device.userId,
-      resourceId: device.deviceId,
-      resourceGeneration: device.deviceGeneration,
-      authorizationGeneration: device.deviceGeneration,
-      connectionId: device.connectionId,
-      expiresAt: null,
-    }))
-  )
-    throw new Error("owner_unavailable");
+  if (device.status !== "active") throw new Error("owner_unavailable");
   return row.userId;
 }

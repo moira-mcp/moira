@@ -24,6 +24,7 @@ import {
   TELEGRAM_TEXT_MAX_LENGTH,
 } from "@mcp-moira/workflow-engine";
 import { binaryControlsSchema } from "@mcp-moira/workflow-engine/extensions/contract";
+import { fetchWork } from "@mcp-moira/shared/http/work-fetch";
 
 type ExtensionConfiguration = Awaited<
   ReturnType<ExtensionCommunicationChannelAdapter["resolveBinaryConfiguration"]>
@@ -205,14 +206,18 @@ export class CommunicationOwnerTransport {
         if (plan.suffix) yield plan.suffix;
       })();
       dispatched = true;
-      const response = await (this.dependencies.fetch ?? fetch)(plan.url, {
-        method: plan.method,
-        headers: plan.headers,
-        body: body as unknown as BodyInit,
-        duplex: "half",
-        redirect: "error",
-        signal: outbound.signal,
-      } as RequestInit & { duplex: "half" });
+      const response = await fetchWork(
+        plan.url,
+        {
+          method: plan.method,
+          headers: plan.headers,
+          body: body as unknown as BodyInit,
+          duplex: "half",
+          redirect: "error",
+          signal: outbound.signal,
+        } as RequestInit & { duplex: "half" },
+        this.dependencies.fetch,
+      );
       if (channel.kind === "telegram") {
         const result = (await response.json()) as { ok?: unknown };
         if (!response.ok || result.ok !== true)

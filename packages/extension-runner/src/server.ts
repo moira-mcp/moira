@@ -141,6 +141,8 @@ export class ExtensionRunnerService {
   }
 
   async invoke(request: RunnerInvokeRequest, signal?: AbortSignal): Promise<RunnerInvokeResponse> {
+    if (!Number.isFinite(request.timeoutMs) || (request.timeoutMs ?? 0) <= 0)
+      return { ok: false, kind: "handler-error", message: "a positive node timeoutMs is required" };
     const host = this.hostByNodeType.get(request.nodeType);
     if (!host) {
       return {
@@ -254,7 +256,6 @@ export class ExtensionRunnerService {
         executionId: "",
         workflowId: "",
         config: {},
-        timeoutMs: request.timeoutMs,
         secrets,
         communication: {
           kind: "deliver",
@@ -274,14 +275,14 @@ export class ExtensionRunnerService {
 
 function readBody(
   request: http.IncomingMessage,
-  maxBytes: number = MAX_BODY_BYTES,
+  maxBytes: number | null = MAX_BODY_BYTES,
 ): Promise<string> {
   return new Promise((resolve, reject) => {
     let size = 0;
     const chunks: Buffer[] = [];
     request.on("data", (chunk: Buffer) => {
       size += chunk.length;
-      if (size > maxBytes) {
+      if (maxBytes !== null && size > maxBytes) {
         reject(new Error("request body is too large"));
         request.destroy();
         return;
@@ -380,7 +381,7 @@ export async function startExtensionRunner(options: RunnerOptions): Promise<Runn
       response.once("close", () => {
         if (!response.writableEnded) controller.abort();
       });
-      void readBody(request)
+      void readBody(request, url.pathname === "/channels/deliver" ? null : MAX_BODY_BYTES)
         .then(async (raw) => {
           let parsed: RunnerChannelCheckRequest | RunnerChannelDeliverRequest;
           try {
@@ -392,8 +393,9 @@ export async function startExtensionRunner(options: RunnerOptions): Promise<Runn
           if (
             !parsed ||
             typeof parsed.channelId !== "string" ||
-            !Number.isFinite(parsed.timeoutMs) ||
-            parsed.timeoutMs <= 0
+            (url.pathname === "/channels/check" &&
+              (!Number.isFinite((parsed as RunnerChannelCheckRequest).timeoutMs) ||
+                (parsed as RunnerChannelCheckRequest).timeoutMs <= 0))
           ) {
             send(400, {
               ok: false,
@@ -415,7 +417,10 @@ export async function startExtensionRunner(options: RunnerOptions): Promise<Runn
           }
           const result =
             url.pathname === "/channels/check"
-              ? await service.checkCommunicationChannel(parsed, controller.signal)
+              ? await service.checkCommunicationChannel(
+                  parsed as RunnerChannelCheckRequest,
+                  controller.signal,
+                )
               : await service.deliverCommunicationChannel(
                   parsed as RunnerChannelDeliverRequest,
                   controller.signal,
@@ -435,6 +440,7 @@ export async function startExtensionRunner(options: RunnerOptions): Promise<Runn
     send(404, { ok: false, kind: "handler-error", message: "unknown endpoint" });
   });
 
+  server.requestTimeout = 0;
   await new Promise<void>((resolve) => {
     server.listen(options.port ?? 0, options.host ?? "0.0.0.0", () => resolve());
   });

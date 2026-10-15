@@ -39,8 +39,6 @@ export interface WaitingNotificationSenderOptions {
 }
 
 const BATCH_SIZE = 50;
-/** The communication service's rate window: a rate-limited row is retried after it. */
-const RATE_LIMIT_RETRY_MS = 60_000;
 /** A row whose handling failed is set aside this long before the next try. */
 const FAILED_ROW_RETRY_MS = 5 * 60_000;
 const MAX_BATCHES_PER_TICK = 20;
@@ -163,15 +161,6 @@ export class WaitingNotificationSender {
       channels = result.channels
         .filter((channel) => channel.status === "delivered")
         .map((channel) => channel.channelId);
-      // A person's channel budget is per minute: a notification refused only for the rate is tried
-      // again after the window instead of being recorded as lost.
-      if (
-        result.deliveredChannels === 0 &&
-        result.channels.some((channel) => channel.status === "rate_limited")
-      ) {
-        this.queue.hold(row.id, this.now() + RATE_LIMIT_RETRY_MS);
-        return;
-      }
     } catch (error) {
       this.logger.warn("Waiting notification could not be delivered", {
         executionId: row.executionId,

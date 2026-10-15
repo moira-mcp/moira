@@ -486,21 +486,6 @@ export class WorkspaceRouter extends EventEmitter {
           );
         delete headers["x-moira-user-id"];
         delete headers["x-moira-resource-id"];
-        if (request.method === "GET" && request.url === "/v1/router/presence") {
-          const binding = await this.requestAuthority(userId, resourceId, controller.signal, kind);
-          response.writeHead(200, { "content-type": "application/json" });
-          response.end(
-            JSON.stringify({
-              connected:
-                this.isConnected(binding) &&
-                headers["x-moira-resource-generation"] === String(binding.resourceGeneration) &&
-                headers["x-moira-authorization-generation"] ===
-                  String(binding.authorizationGeneration) &&
-                headers["x-moira-endpoint-identity"] === endpointIdentity(binding),
-            }),
-          );
-          return;
-        }
         const result = await this.request(
           userId,
           resourceId,

@@ -100,7 +100,6 @@ describe("TelegramNotificationHandler Error Handling", () => {
             error.type = TelegramErrorType.INVALID_CHAT_ID;
             throw error;
           },
-          getRateLimitStatus: () => ({ allowed: true, currentCount: 0 }),
           sendMessageToDefault: async () => {
             throw new Error("not implemented");
           },
@@ -552,7 +551,6 @@ describe("TelegramNotificationHandler Error Handling", () => {
             error.type = TelegramErrorType.INVALID_TOKEN;
             throw error;
           },
-          getRateLimitStatus: () => ({ allowed: true, currentCount: 0 }),
           sendMessageToDefault: async () => {
             throw new Error("not implemented");
           },
@@ -588,7 +586,6 @@ describe("TelegramNotificationHandler Error Handling", () => {
             error.type = TelegramErrorType.NETWORK_ERROR;
             throw error;
           },
-          getRateLimitStatus: () => ({ allowed: true, currentCount: 0 }),
           sendMessageToDefault: async () => {
             throw new Error("not implemented");
           },
@@ -657,7 +654,6 @@ describe("TelegramNotificationHandler Error Handling", () => {
             error.type = TelegramErrorType.API_ERROR;
             throw error;
           },
-          getRateLimitStatus: () => ({ allowed: true, currentCount: 0 }),
           sendMessageToDefault: async () => {
             throw new Error("not implemented");
           },
@@ -687,7 +683,6 @@ describe("TelegramNotificationHandler Error Handling", () => {
             error.type = TelegramErrorType.API_ERROR;
             throw error;
           },
-          getRateLimitStatus: () => ({ allowed: true, currentCount: 0 }),
           sendMessageToDefault: async () => {
             throw new Error("not implemented");
           },

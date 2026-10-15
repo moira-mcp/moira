@@ -24,11 +24,7 @@ import {
 import { createLocalCodespaceServices } from "./local-codespace-services.js";
 import { getScopedCredentialService } from "./scoped-credential-factory.js";
 import type { LocalCodespaceResourceService } from "./local-codespace-resource-service.js";
-import {
-  getWorkspaceClient,
-  getControllerClient,
-  isWorkspaceOwnerConnected,
-} from "./workspace-client.js";
+import { getWorkspaceClient, getControllerClient } from "./workspace-client.js";
 import type { WorkspaceClient } from "./workspace-router.js";
 import {
   GitHubCodespaceClientError,
@@ -165,7 +161,16 @@ function initializeCodespaceServices(): CodespaceServices {
         getCodespaceResourcePolicy,
         getCodespaceGitHubConfig,
         getBaseUrl,
-        isWorkspaceOwnerConnected,
+        async (binding) => {
+          if (binding.kind !== "workspace") return false;
+          // An explicit status read observes the owner through the normal route;
+          // admission never consults a second availability registry.
+          const observed = await getWorkspaceClient().json(binding.userId, binding.resourceId, {
+            method: "GET",
+            path: "/v1/health",
+          });
+          return observed.environmentIdentity === binding.environmentIdentity;
+        },
       )
     : null;
   const billing = createCodespaceBillingReader({

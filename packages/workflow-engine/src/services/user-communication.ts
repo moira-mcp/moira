@@ -41,6 +41,8 @@ export interface CommunicationChannelAdapter {
   readonly provider: string;
   readonly capabilities: CommunicationChannelCapabilities;
   readonly metadata: CommunicationChannelMetadata;
+  /** A provider payload requirement, used only by a sender that explicitly fits its notification. */
+  readonly textLimit?: number;
   isConfigured(
     configuration: CommunicationConfigurationResolver,
     signal: AbortSignal,
@@ -141,8 +143,7 @@ export class CommunicationChannelRegistry {
   }
 }
 
-export type CommunicationChannelStatus =
-  "delivered" | "not_configured" | "unsupported" | "rate_limited" | "timed_out" | "failed";
+export type CommunicationChannelStatus = "delivered" | "not_configured" | "unsupported" | "failed";
 
 export interface CommunicationChannelResult {
   channelId: string;
@@ -160,100 +161,43 @@ export interface UserCommunicationResult {
   channels: CommunicationChannelResult[];
 }
 
-export interface UserCommunicationLimits {
-  maxRequestsPerWindow: number;
-  windowMs: number;
-  maxConcurrentPerUser: number;
-  maxConcurrentPerProvider: number;
-  deadlineMs: number;
-  maxTextLength: number;
-  maxLimiterKeys: number;
-}
-
-const DEFAULT_LIMITS: UserCommunicationLimits = {
-  maxRequestsPerWindow: 30,
-  windowMs: 60_000,
-  maxConcurrentPerUser: 4,
-  maxConcurrentPerProvider: 8,
-  deadlineMs: 10_000,
-  maxTextLength: 4096,
-  maxLimiterKeys: 10_000,
-};
-
-interface LimitState {
-  timestamps: number[];
-  active: number;
-}
-
-type Availability =
-  | { adapter: CommunicationChannelAdapter; configured: boolean }
-  | { adapter: CommunicationChannelAdapter; result: CommunicationChannelResult };
+type PrepareMessage = (textLimit?: number) => Promise<PortableCommunicationMessage | null>;
 
 export class UserCommunicationService {
-  private readonly limits: UserCommunicationLimits;
-  private readonly states = new Map<string, LimitState>();
   private readonly registry: CommunicationChannelRegistry;
 
-  constructor(
-    registry: CommunicationChannelRegistry | readonly CommunicationChannelAdapter[],
-    limits: Partial<UserCommunicationLimits> = {},
-    private readonly now: () => number = Date.now,
-  ) {
+  constructor(registry: CommunicationChannelRegistry | readonly CommunicationChannelAdapter[]) {
     this.registry =
       registry instanceof CommunicationChannelRegistry
         ? registry
         : new CommunicationChannelRegistry(registry);
-    this.limits = { ...DEFAULT_LIMITS, ...limits };
-    if (this.limits.maxLimiterKeys < 1) throw new Error("maxLimiterKeys must be positive");
   }
 
   async deliver(
     request: UserCommunicationRequest,
     repository: IDataRepository,
-    prepare?: () => Promise<PortableCommunicationMessage | null>,
+    prepare?: PrepareMessage,
   ): Promise<UserCommunicationResult> {
     this.validateRequest(request);
     const configuration: CommunicationConfigurationResolver = {
       get: <T>(key: string) => repository.getSetting<T>(request.userId, key),
     };
-    let message: PortableCommunicationMessage = {
+    const message: PortableCommunicationMessage = {
       text: request.text,
       format: request.format,
       silent: request.silent,
       purpose: request.purpose,
     };
-    const availability = await Promise.all(
+    const attempts = await Promise.all(
       this.registry
         .list()
-        .map((adapter) => this.resolveAvailability(adapter, configuration, request.userId)),
+        .map((adapter) => this.deliverToAdapter(adapter, message, configuration, prepare)),
     );
-    const channels: CommunicationChannelResult[] = [];
-    const configured: CommunicationChannelAdapter[] = [];
-    for (const entry of availability) {
-      if ("result" in entry) channels.push(entry.result);
-      else if (entry.configured) configured.push(entry.adapter);
-      else channels.push({ channelId: entry.adapter.id, status: "not_configured" });
-    }
-
-    // Availability can await settings or a provider. Resolve mutable content at adapter handoff.
-    if (prepare && configured.length) {
-      const prepared = await prepare();
-      if (!prepared) return this.aggregate(channels, configured.length, 0);
-      this.validateRequest({ ...prepared, userId: request.userId });
-      message = { ...prepared };
-    }
-
-    channels.push(
-      ...(await Promise.all(
-        configured.map((adapter) =>
-          this.deliverToAdapter(adapter, message, configuration, request.userId),
-        ),
-      )),
+    return this.aggregate(
+      attempts.flatMap((attempt) => (attempt.result ? [attempt.result] : [])),
+      attempts.filter((attempt) => attempt.configured).length,
+      attempts.filter((attempt) => attempt.eligible).length,
     );
-    const eligibleConfiguredChannels = configured.filter((adapter) =>
-      this.supports(adapter, message),
-    ).length;
-    return this.aggregate(channels, configured.length, eligibleConfiguredChannels);
   }
 
   /** Deliver a provider-neutral test message through one registered user channel. */
@@ -274,11 +218,12 @@ export class UserCommunicationService {
     );
   }
 
-  /** Deliver through one registered channel with the same admission as ordinary notifications. */
+  /** Deliver through one registered channel with the same configuration authority as fan-out. */
   async deliverChannel(
     channelId: string,
     request: UserCommunicationRequest,
     repository: IDataRepository,
+    prepare?: PrepareMessage,
   ): Promise<UserCommunicationResult | null> {
     const adapter = this.registry.get(channelId);
     if (!adapter) return null;
@@ -286,12 +231,7 @@ export class UserCommunicationService {
     const configuration: CommunicationConfigurationResolver = {
       get: <T>(key: string) => repository.getSetting<T>(request.userId, key),
     };
-    const availability = await this.resolveAvailability(adapter, configuration, request.userId);
-    if ("result" in availability) return this.aggregate([availability.result], 0, 0);
-    if (!availability.configured) {
-      return this.aggregate([{ channelId, status: "not_configured" }], 0, 0);
-    }
-    const result = await this.deliverToAdapter(
+    const attempt = await this.deliverToAdapter(
       adapter,
       {
         text: request.text,
@@ -300,9 +240,13 @@ export class UserCommunicationService {
         purpose: request.purpose,
       },
       configuration,
-      request.userId,
+      prepare,
     );
-    return this.aggregate([result], 1, this.supports(adapter, request) ? 1 : 0);
+    return this.aggregate(
+      attempt.result ? [attempt.result] : [],
+      Number(attempt.configured),
+      Number(attempt.eligible),
+    );
   }
 
   private aggregate(
@@ -311,12 +255,7 @@ export class UserCommunicationService {
     eligibleConfiguredChannels: number,
   ): UserCommunicationResult {
     const deliveredChannels = channels.filter((channel) => channel.status === "delivered").length;
-    const availabilityFailed = channels.some(
-      (channel) =>
-        channel.status === "failed" ||
-        channel.status === "timed_out" ||
-        channel.status === "rate_limited",
-    );
+    const availabilityFailed = channels.some((channel) => channel.status === "failed");
     return {
       status:
         eligibleConfiguredChannels === 0 && !availabilityFailed
@@ -332,94 +271,9 @@ export class UserCommunicationService {
     };
   }
 
-  private async resolveAvailability(
-    adapter: CommunicationChannelAdapter,
-    configuration: CommunicationConfigurationResolver,
-    userId: string,
-  ): Promise<Availability> {
-    const rateKey = `rate:${userId}:${adapter.provider}`;
-    const userKey = `availability:concurrency:user:${userId}`;
-    const providerKey = `availability:concurrency:provider:${adapter.provider}`;
-    if (!this.consumeRate(rateKey))
-      return {
-        adapter,
-        result: {
-          channelId: adapter.id,
-          status: "rate_limited",
-          reason: "rate_limit",
-        },
-      };
-    if (!this.acquireConcurrency(userKey, this.limits.maxConcurrentPerUser))
-      return {
-        adapter,
-        result: {
-          channelId: adapter.id,
-          status: "rate_limited",
-          reason: "availability_concurrency_limit",
-        },
-      };
-    if (!this.acquireConcurrency(providerKey, this.limits.maxConcurrentPerProvider)) {
-      this.release(userKey);
-      return {
-        adapter,
-        result: {
-          channelId: adapter.id,
-          status: "rate_limited",
-          reason: "availability_concurrency_limit",
-        },
-      };
-    }
-    const controller = new AbortController();
-    let timeout: ReturnType<typeof setTimeout> | undefined;
-    const availability = Promise.resolve()
-      .then(() => adapter.isConfigured(configuration, controller.signal))
-      .finally(() => {
-        this.release(providerKey);
-        this.release(userKey);
-      });
-    try {
-      const configured = await Promise.race([
-        availability,
-        new Promise<never>((_, reject) => {
-          timeout = setTimeout(() => {
-            controller.abort();
-            reject(new Error("communication_deadline"));
-          }, this.limits.deadlineMs);
-        }),
-      ]);
-      return { adapter, configured };
-    } catch (error) {
-      return {
-        adapter,
-        result: {
-          channelId: adapter.id,
-          status:
-            error instanceof Error && error.message === "communication_deadline"
-              ? "timed_out"
-              : "failed",
-          reason:
-            error instanceof Error && error.message === "communication_deadline"
-              ? "deadline_exceeded"
-              : error instanceof CommunicationChannelError
-                ? error.reason
-                : "availability_error",
-        },
-      };
-    } finally {
-      if (timeout) clearTimeout(timeout);
-    }
-  }
-
-  /** The longest text a request may carry; senders fit their text to it. */
-  get maxTextLength(): number {
-    return this.limits.maxTextLength;
-  }
-
   private validateRequest(request: UserCommunicationRequest): void {
     if (!request.userId) throw new Error("User communication requires an authenticated user");
     if (!request.text) throw new Error("User communication requires text");
-    if (request.text.length > this.limits.maxTextLength)
-      throw new Error("User communication text exceeds the configured limit");
   }
 
   private supports(
@@ -432,101 +286,49 @@ export class UserCommunicationService {
 
   private async deliverToAdapter(
     adapter: CommunicationChannelAdapter,
-    message: PortableCommunicationMessage,
+    initial: PortableCommunicationMessage,
     configuration: CommunicationConfigurationResolver,
-    userId: string,
-  ): Promise<CommunicationChannelResult> {
-    if (!this.supports(adapter, message)) return { channelId: adapter.id, status: "unsupported" };
-    const userKey = `concurrency:user:${userId}`;
-    const providerKey = `concurrency:provider:${adapter.provider}`;
-    if (!this.acquireConcurrency(userKey, this.limits.maxConcurrentPerUser))
-      return { channelId: adapter.id, status: "rate_limited" };
-    if (!this.acquireConcurrency(providerKey, this.limits.maxConcurrentPerProvider)) {
-      this.release(userKey);
-      return { channelId: adapter.id, status: "rate_limited" };
-    }
-
+    prepare?: PrepareMessage,
+  ): Promise<{ configured: boolean; eligible: boolean; result?: CommunicationChannelResult }> {
     const controller = new AbortController();
-    let timeout: ReturnType<typeof setTimeout> | undefined;
-    const delivery = Promise.resolve()
-      .then(() => adapter.deliver(message, configuration, controller.signal))
-      .finally(() => {
-        this.release(providerKey);
-        this.release(userKey);
-      });
+    let configured = false;
+    let eligible = false;
+    let preparingConfiguration = true;
     try {
-      await Promise.race([
-        delivery,
-        new Promise<never>((_, reject) => {
-          timeout = setTimeout(() => {
-            controller.abort();
-            reject(new Error("communication_deadline"));
-          }, this.limits.deadlineMs);
-        }),
-      ]);
-      return { channelId: adapter.id, status: "delivered" };
+      configured = await adapter.isConfigured(configuration, controller.signal);
+      if (!configured)
+        return {
+          configured,
+          eligible,
+          result: { channelId: adapter.id, status: "not_configured" },
+        };
+      preparingConfiguration = false;
+      if (!this.supports(adapter, initial))
+        return { configured, eligible, result: { channelId: adapter.id, status: "unsupported" } };
+      // Settings resolution yields. Refresh mutable content independently at each provider handoff.
+      const message = prepare ? await prepare(adapter.textLimit) : initial;
+      if (!message) return { configured, eligible };
+      if (!message.text) throw new Error("User communication requires text");
+      eligible = this.supports(adapter, message);
+      if (!eligible)
+        return { configured, eligible, result: { channelId: adapter.id, status: "unsupported" } };
+      await adapter.deliver(message, configuration, controller.signal);
+      return { configured, eligible, result: { channelId: adapter.id, status: "delivered" } };
     } catch (error) {
       return {
-        channelId: adapter.id,
-        status:
-          error instanceof Error && error.message === "communication_deadline"
-            ? "timed_out"
-            : "failed",
-        reason:
-          error instanceof Error && error.message === "communication_deadline"
-            ? "deadline_exceeded"
-            : error instanceof CommunicationChannelError
+        configured,
+        eligible,
+        result: {
+          channelId: adapter.id,
+          status: "failed",
+          reason:
+            error instanceof CommunicationChannelError
               ? error.reason
-              : "channel_error",
+              : preparingConfiguration
+                ? "configuration_error"
+                : "channel_error",
+        },
       };
-    } finally {
-      if (timeout) clearTimeout(timeout);
     }
-  }
-
-  private consumeRate(key: string): boolean {
-    const now = this.now();
-    const state = this.stateFor(key, now);
-    if (!state) return false;
-    state.timestamps = state.timestamps.filter(
-      (timestamp) => timestamp > now - this.limits.windowMs,
-    );
-    if (state.timestamps.length >= this.limits.maxRequestsPerWindow) return false;
-    state.timestamps.push(now);
-    return true;
-  }
-
-  private acquireConcurrency(key: string, concurrencyLimit: number): boolean {
-    const now = this.now();
-    const state = this.stateFor(key, now);
-    if (!state || state.active >= concurrencyLimit) return false;
-    state.active += 1;
-    return true;
-  }
-
-  private stateFor(key: string, now: number): LimitState | null {
-    const existing = this.states.get(key);
-    if (existing) return existing;
-    this.pruneExpiredStates(now);
-    if (this.states.size >= this.limits.maxLimiterKeys) return null;
-    const created = { timestamps: [], active: 0 };
-    this.states.set(key, created);
-    return created;
-  }
-
-  private pruneExpiredStates(now: number): void {
-    for (const [key, state] of this.states) {
-      state.timestamps = state.timestamps.filter(
-        (timestamp) => timestamp > now - this.limits.windowMs,
-      );
-      if (state.active === 0 && state.timestamps.length === 0) this.states.delete(key);
-    }
-  }
-
-  private release(key: string): void {
-    const state = this.states.get(key);
-    if (!state) return;
-    state.active = Math.max(0, state.active - 1);
-    if (state.active === 0 && state.timestamps.length === 0) this.states.delete(key);
   }
 }

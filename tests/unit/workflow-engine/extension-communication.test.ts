@@ -10,6 +10,7 @@ import {
   TrustedExtensionChannelApprovalService,
   TrustedExtensionChannelEligibilityService,
   UserCommunicationService,
+  probeCommunicationChannelConfiguration,
 } from "@mcp-moira/workflow-engine";
 import type {
   CommunicationConfigurationResolver,
@@ -340,6 +341,44 @@ describe("extension communication channel integration", () => {
     });
     expect(JSON.stringify(result)).not.toContain("destination");
     expect(JSON.stringify(result)).not.toContain("private message");
+  });
+
+  test("ordinary configured delivery reaches the runner without a separate health gate", async () => {
+    const extensionRegistry = new ExtensionRegistry();
+    extensionRegistry.register(manifest());
+    const communicationRegistry = new CommunicationChannelRegistry();
+    const delivered: ExtensionCommunicationChannelRequest[] = [];
+    const reconciler = new ExtensionCommunicationChannelReconciler(communicationRegistry);
+    reconciler.reconcile(
+      extensionRegistry,
+      runner({
+        checkCommunicationChannel: async () => {
+          throw new ExtensionInvocationError("runner-unavailable", "health unavailable");
+        },
+        deliverCommunicationChannel: async (input) => {
+          delivered.push(input);
+        },
+      }),
+    );
+    const values = { "probe.enabled": true, "probe.destination": "team", "probe.token": "secret" };
+    const repository = {
+      getSetting: async (_user: string, key: string) => values[key as keyof typeof values] ?? null,
+    } as unknown as IDataRepository;
+    const text = "untruncated extension text ".repeat(1000);
+    const result = await new UserCommunicationService(communicationRegistry).deliver(
+      { userId: "user", text },
+      repository,
+    );
+    expect(result).toMatchObject({ status: "delivered", deliveredChannels: 1 });
+    expect(delivered[0].message.text).toBe(text);
+    expect(delivered[0]).not.toHaveProperty("timeoutMs");
+    const configured = reconciler.get("probe.notifications")!;
+    await expect(
+      probeCommunicationChannelConfiguration(configured, configuration(values)),
+    ).resolves.toBe("configured");
+    await expect(configured.checkRunner(new AbortController().signal)).rejects.toMatchObject({
+      reason: "runner_unavailable",
+    });
   });
 
   test("trusted eligibility requires declaration, persisted approval, health and configuration", async () => {

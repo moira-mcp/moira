@@ -12,8 +12,7 @@ import {
   getCodespaceGitHubConfig,
   type ScopedCredentialAcquire,
   type LocalDeviceAuth,
-  type LocalPublicPolicy,
-  canonicalJson,
+  type LocalGitAuthorization,
 } from "@mcp-moira/shared";
 import {
   getCodespaceConnectionService,
@@ -82,38 +81,22 @@ export function createScopedCredentialService(): ScopedCredentialService {
       }),
     };
   }
-  async function localAuthority(
-    auth: LocalDeviceAuth,
-    input: ScopedCredentialAcquire,
-    grant: LocalPublicPolicy["repositories"][number],
-  ): Promise<ScopedCredentialAuthority> {
-    const snapshot = await getLocalDeviceService().localSnapshot(auth.userId, auth.deviceId),
-      resource = snapshot.resources.find((entry) => entry.resourceId === input.resourceId),
-      liveGrant =
-        resource && snapshot.policy.repositories.find((repo) => repo.id === resource.repositoryId);
-    if (
-      !resource ||
-      resource.routeGeneration !== input.resourceGeneration ||
-      !liveGrant ||
-      canonicalJson(liveGrant) !== canonicalJson(grant) ||
-      !snapshot.policy.enabled ||
-      snapshot.policy.leaseUntil <= Date.now()
-    )
-      throw new ScopedCredentialError("SCOPED_CREDENTIAL_AUTHORITY_REFUSED", 403);
+  function localAuthority(witness: LocalGitAuthorization): ScopedCredentialAuthority {
+    const { auth, repository } = witness;
     return {
       userId: auth.userId,
-      repositoryFullName: liveGrant.fullName,
-      private: liveGrant.private,
-      useUntil: snapshot.policy.leaseUntil,
+      repositoryFullName: repository.fullName,
+      private: repository.private,
+      useUntil: witness.useUntil,
       identity: JSON.stringify({
         deviceId: auth.deviceId,
         deviceGeneration: auth.deviceGeneration,
         connectionId: auth.connectionId,
-        resourceId: input.resourceId,
-        routeGeneration: input.resourceGeneration,
-        ownerResourceGeneration: resource.resourceGeneration,
-        ownerAppliedRevision: snapshot.control.appliedRevision,
-        grant: liveGrant,
+        resourceId: witness.resourceId,
+        routeGeneration: witness.resourceGeneration,
+        ownerResourceGeneration: witness.ownerResourceGeneration,
+        ownerAppliedRevision: witness.appliedRevision,
+        grant: repository,
       }),
     };
   }
@@ -154,7 +137,7 @@ export function createScopedCredentialService(): ScopedCredentialService {
                   ? "push"
                   : "fetch",
             );
-          const live = await localAuthority(current.auth, input, current.repository);
+          const live = localAuthority(current);
           return (
             current.resourceGeneration === input.resourceGeneration &&
             live.identity === authority.identity &&
@@ -209,7 +192,7 @@ export function createScopedCredentialService(): ScopedCredentialService {
         if (resource.provider === CODESPACE_PROVIDER_LOCAL) {
           const devices = getLocalDeviceService(),
             auth = devices.authenticateDevice(bearer);
-          const grant = await devices.authorizeGitHubOperation(
+          const witness = await devices.authorizeGitHubOperation(
             auth,
             input.resourceId,
             input.resourceGeneration,
@@ -219,7 +202,7 @@ export function createScopedCredentialService(): ScopedCredentialService {
                 ? "push"
                 : "fetch",
           );
-          return await localAuthority(auth, input, grant);
+          return localAuthority(witness);
         }
         if (resource.provider !== CODESPACE_PROVIDER_GITHUB)
           throw new ScopedCredentialError("SCOPED_CREDENTIAL_AUTHORITY_REFUSED", 403);

@@ -47,11 +47,24 @@ afterEach(async () => {
 
 async function fixture() {
   const owner: { current?: Awaited<ReturnType<typeof controllerFixture>> } = {};
+  const observation = {
+    verified: false,
+    disconnectAfterVerified: false,
+    unavailable: false,
+    afterVerify: undefined as undefined | (() => Promise<void>),
+  };
   const devices = new LocalDeviceService(new LocalDeviceRepository(sqlite), () => now, {
     async json(user, id, input) {
-      if (!owner.current)
+      if (!owner.current || (observation.unavailable && input.path === "/v1/controller"))
         throw Object.assign(new Error("Owner unavailable"), { code: "ECONNREFUSED" });
-      return owner.current.client.json(user, id, input);
+      const result = await owner.current.client.json(user, id, input);
+      if (
+        input.path === "/v1/controller" &&
+        observation.verified &&
+        observation.disconnectAfterVerified
+      )
+        observation.unavailable = true;
+      return result;
     },
   });
   const settings: LocalDeviceSettingsValue = {
@@ -174,6 +187,8 @@ async function fixture() {
     verifyAccount: async () => ({ githubUserId: "42", owner: "owner" }),
     verifyRepository: async (_user, repositoryId) => {
       const value = [...remote.values()].find((entry) => String(entry.id) === repositoryId)!;
+      observation.verified = true;
+      await observation.afterVerify?.();
       return {
         githubUserId: "42",
         owner: "owner",
@@ -214,6 +229,7 @@ async function fixture() {
     installationId: "8",
   };
   return {
+    observation,
     devices,
     auth,
     settings,
@@ -230,6 +246,51 @@ async function fixture() {
 }
 
 describe("Private repository creation precedes local admission without repeating unknown effects", () => {
+  test("admission completes from the post-verification witness and physical owner receipt when discovery disconnects", async () => {
+    const f = await fixture();
+    f.observation.disconnectAfterVerified = true;
+    const result = await f.makeService().createRepository("owner", f.input);
+    expect(result).toMatchObject({ status: "applied", github_repository_id: "77" });
+    expect((await f.local.records.policy()).repositories).toEqual([
+      expect.objectContaining({ fullName: "owner/new-project", private: true }),
+    ]);
+    expect(f.repository.getOwned("owner", f.input.requestId)!.reservationHeld).toBe(0);
+    expect(f.state.posts).toBe(1);
+    expect((await f.devices.listOwned("owner")).devices[0].owner.state).toBe("unavailable");
+  });
+  test("consent revoked during GitHub verification refuses admission before any owner grant", async () => {
+    const f = await fixture();
+    f.remote.set("existing", { id: 90, full_name: "owner/existing", private: true });
+    await f.devices.requestSettings("owner", f.deviceId, {
+      requestId: createWorkspaceRequestId(),
+      expectedGeneration: 1,
+      expectedRevision: 1,
+      settings: {
+        ...f.settings,
+        agentRepositoryManagement: {
+          ...f.settings.agentRepositoryManagement!,
+          allowExistingPrivate: true,
+        },
+      },
+    });
+    f.observation.afterVerify = async () => {
+      await f.devices.requestSettings("owner", f.deviceId, {
+        requestId: createWorkspaceRequestId(),
+        expectedGeneration: 1,
+        expectedRevision: 2,
+        settings: { ...f.settings, agentRepositoryManagement: null },
+      });
+    };
+    await expect(
+      f.admission.addExistingRepository("owner", {
+        deviceId: f.deviceId,
+        requestId: randomUUID(),
+        repositoryId: "90",
+      }),
+    ).rejects.toMatchObject({ code: "LOCAL_UNAUTHORIZED" });
+    expect((await f.local.records.policy()).repositories).toEqual([]);
+    expect(f.state.posts).toBe(0);
+  });
   test("rejected local admission names retained-repository recovery without repeating GitHub creation", async () => {
     const f = await fixture();
     await f.makeService().createRepository("owner", f.input);

@@ -110,8 +110,9 @@ test.each([
   "owner disconnect after publication authorization",
   "publication from another process",
   "controller authorization from another process",
+  "offline actor from another process",
 ] as const)(
-  "production router requires current live enrollment (%s) without lifecycle or bootstrap effects",
+  "production routing requires current enrollment while actor authentication survives disconnection (%s)",
   async (change) => {
     providerEnabled = true;
     const directory = await mkdtemp(join(tmpdir(), "workspace-authority-"));
@@ -270,26 +271,6 @@ test.each([
         const authorityModule = pathToFileURL(
           resolve("packages/web-backend/src/services/communication-owner-authority.ts"),
         ).href;
-        const clientModule = pathToFileURL(
-          resolve("packages/web-backend/src/services/workspace-client.ts"),
-        ).href;
-        const binding = controller
-          ? {
-              kind: "controller",
-              userId,
-              resourceId: deviceId,
-              resourceGeneration: 1,
-              authorizationGeneration: 1,
-              connectionId: deviceConnectionId,
-            }
-          : {
-              kind: "workspace",
-              userId,
-              resourceId,
-              resourceGeneration: 1,
-              authorizationGeneration: 1,
-              environmentIdentity: original.environmentIdentity,
-            };
         const scope = controller
           ? {
               kind: "controller",
@@ -305,20 +286,30 @@ test.each([
               authorizationGeneration: 1,
               environmentIdentity: original.environmentIdentity,
             };
+        if (change === "offline actor from another process") {
+          if (!ownerSocket) throw new Error("Missing actual owner control");
+          const closed = once(ownerSocket, "close");
+          ownerSocket.destroy();
+          await closed;
+          expect(router.isConnected({ kind: "workspace", ...original, userId })).toBe(false);
+        }
         const program = `
           const {authorizeWorkspacePublication}=await import(${JSON.stringify(module)});
           const {authorizeControllerPublication,authorizeCommunicationOwner,authenticateCommunicationOwner}=await import(${JSON.stringify(authorityModule)});
-          const {isWorkspaceOwnerConnected}=await import(${JSON.stringify(clientModule)});
-          const binding=${JSON.stringify(binding)},scope=${JSON.stringify(scope)},credential=${JSON.stringify(controller ? "c".repeat(43) : original.credential)};
+          const scope=${JSON.stringify(scope)},credential=${JSON.stringify(controller ? "c".repeat(43) : original.credential)};
+          const refused=async(candidate,token=credential)=>{
+            try{await authorizeCommunicationOwner(token,candidate);return false;}
+            catch{return true;}
+          };
           try{
             const userId=await ${controller ? `authorizeControllerPublication(${JSON.stringify(deviceId)})` : `authorizeWorkspacePublication(${JSON.stringify(resourceId)})`};
             const actor=await authorizeCommunicationOwner(credential,scope);
             await authenticateCommunicationOwner(credential);
-            const exact=await isWorkspaceOwnerConnected(binding);
-            const changedIdentity=await isWorkspaceOwnerConnected({...binding,...(binding.kind==='workspace'?{environmentIdentity:'b'.repeat(64)}:{connectionId:${JSON.stringify(randomUUID())}})});
-            const changedGeneration=await isWorkspaceOwnerConnected({...binding,resourceGeneration:2});
-            const changedAuthorization=await isWorkspaceOwnerConnected({...binding,authorizationGeneration:2});
-            process.send({userId,actor,exact,changedIdentity,changedGeneration,changedAuthorization});
+            const changedIdentityRefused=await refused({...scope,...(scope.kind==='workspace'?{environmentIdentity:'b'.repeat(64)}:{connectionId:${JSON.stringify(randomUUID())}})});
+            const changedGenerationRefused=await refused({...scope,...(scope.kind==='workspace'?{resourceGeneration:2}:{deviceGeneration:2})});
+            const changedAuthorizationRefused=await refused({...scope,...(scope.kind==='workspace'?{authorizationGeneration:2}:{userId:${JSON.stringify(randomUUID())}})});
+            const foreignCredentialRefused=await refused(scope,'z'.repeat(43));
+            process.send({userId,actor,changedIdentityRefused,changedGenerationRefused,changedAuthorizationRefused,foreignCredentialRefused});
           }catch(error){process.send({error:error.code??error.message});}
         `;
         const child = spawn(
@@ -349,10 +340,10 @@ test.each([
           expect(await outcome).toEqual({
             userId,
             actor: userId,
-            exact: true,
-            changedIdentity: false,
-            changedGeneration: false,
-            changedAuthorization: false,
+            changedIdentityRefused: true,
+            changedGenerationRefused: true,
+            changedAuthorizationRefused: true,
+            foreignCredentialRefused: true,
           });
         } finally {
           if (child.exitCode === null) {
@@ -384,7 +375,10 @@ test.each([
           .prepare("UPDATE githubResourceIdentity SET revokedAt=1 WHERE id=?")
           .run(resourceId);
       else if (change === "disabled provider") providerEnabled = false;
-      if (change === "current enrollment" || change.endsWith("from another process")) {
+      if (
+        change === "current enrollment" ||
+        (change.endsWith("from another process") && change !== "offline actor from another process")
+      ) {
         const abort = new AbortController();
         const outcome = router
           .request(userId, resourceId, { method: "GET", path: "/v1/health" }, abort.signal)
@@ -438,7 +432,11 @@ test.each([
         });
       }
       expect(dispatched).toHaveBeenCalledTimes(
-        change === "current enrollment" || change.endsWith("from another process") ? 1 : 0,
+        change === "current enrollment" ||
+          (change.endsWith("from another process") &&
+            change !== "offline actor from another process")
+          ? 1
+          : 0,
       );
       const current = new WorkspaceAuthRepository(authorityDb).getOwned(userId, resourceId);
       if (change === "missing enrollment") expect(current).toBeNull();
