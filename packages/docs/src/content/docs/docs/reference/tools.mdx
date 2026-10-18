@@ -269,11 +269,18 @@ An unavailable owner supplies no current policy or grants and accepts no queued 
 
 Local resource summaries use the live owner's machine, current lifecycle generation and state;
 route registration alone cannot supply them. The public `machine` field is nullable, including
-after confirmed deletion. Without an owner resource observation, get/list refuse as
+after confirmed deletion. Without an owner resource observation, `get` refuses as
 `CODESPACE_PROVIDER_UNAVAILABLE` instead of inventing a profile or generation. If the owner journal
 retains pending creation work, `CODESPACE_LOCAL_CREATION_UNKNOWN` carries the original `request_id`,
 `device_id` and `codespace_id` for collection even before a summary is available. A completed receipt
 with an uncertain error remains uncertain on explicit repetition; collection never creates another VM.
+
+`list` returns observed summaries in `codespaces` and separately retains owned identities whose
+observation failed in `unavailable`. Each unavailable entry carries its identity and safe `error.code`,
+without an invented state or generation. Known owner request IDs may appear in `pending_request_ids`;
+their absence does not certify that no request was admitted. `provider_errors` identifies providers
+that failed to produce a view, including when all providers failed; successful peers remain visible.
+Settings shows unavailable identities read-only until a current observation supplies lifecycle authority.
 
 On the computer, the host CLI uses the running private controller for `create`, `start`, `stop`,
 `remove --confirm` and `collect`. Fresh creation needs live cloud route registration and initial

@@ -11,6 +11,7 @@ import i18n from "../../../packages/web-frontend/src/i18n";
 import { GitHubCodespacesProvider } from "../../../packages/web-frontend/src/pages/settings/GitHubCodespacesData";
 import { GitHubCodespaceManagement } from "../../../packages/web-frontend/src/pages/settings/GitHubCodespaceManagement";
 import { CodespaceManagement } from "../../../packages/web-frontend/src/pages/settings/CodespaceManagement";
+import { CodespaceBillingFromData } from "../../../packages/web-frontend/src/pages/settings/CodespaceBillingPanel";
 import { GitHubCodespaceSettings } from "../../../packages/web-frontend/src/pages/settings/GitHubCodespaceSettings";
 import { apiClient, MoiraApiClient } from "../../../packages/web-frontend/src/services/api-client";
 import type { CodespaceManagementView } from "../../../packages/web-frontend/src/types/api-types";
@@ -27,7 +28,7 @@ const connection: CodespaceConnectionView = {
   canConnect: false,
   canDisconnect: true,
 };
-const management: CodespaceManagementView = {
+const management = {
   readiness: {
     state: "ready",
     reason: null,
@@ -71,7 +72,7 @@ const management: CodespaceManagementView = {
   controllers: [
     { device_id: "11111111-1111-4111-8111-111111111111", label: "Controller", available: true },
   ],
-};
+} satisfies CodespaceManagementView;
 
 const originalReact = (globalThis as typeof globalThis & { React?: typeof React }).React;
 
@@ -103,6 +104,154 @@ function renderSettings(content: React.ReactNode) {
 }
 
 describe("GitHub Codespaces Settings", () => {
+  test.each([true, false])(
+    "keeps unavailable Local identities read-only with healthy peers=%s and replaces them only after an observation",
+    async (healthyPeer) => {
+      const computerId = "11111111-1111-4111-8111-111111111111";
+      const unavailableId = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
+      const local = {
+        ...management.codespaces[0],
+        provider: "local-sandboxes",
+        repository_id: `local:${computerId}:44444444-4444-4444-8444-444444444444`,
+      };
+      const next: CodespaceManagementView = {
+        ...management,
+        readiness: { ...management.readiness, provider: "local-sandboxes" },
+        repositories: [],
+        codespaces: healthyPeer ? [local] : [],
+        unavailable: [
+          {
+            codespace_id: unavailableId,
+            provider: "local-sandboxes",
+            repository_id: local.repository_id,
+            repository: "owner/unobserved",
+            requested_ref: "feature/original",
+            device_id: computerId,
+            created_at: 1,
+            error: { code: "CODESPACE_PROVIDER_UNAVAILABLE" },
+          },
+        ],
+      };
+      jest.mocked(apiClient.getGitHubCodespaces).mockResolvedValue(next);
+      jest.mocked(apiClient.refreshGitHubCodespaces).mockResolvedValue({
+        ...next,
+        unavailable: [],
+        codespaces: [
+          ...(healthyPeer ? [local] : []),
+          { ...local, codespace_id: unavailableId, repository: "owner/unobserved", generation: 9 },
+        ],
+      });
+      renderSettings(
+        <CodespaceManagement
+          scope={{
+            provider: "local-sandboxes",
+            computer: {
+              deviceId: computerId,
+              status: "active",
+              owner: {
+                state: "available",
+                local: {
+                  state: "configured",
+                  policy: { enabled: true, leaseUntil: Date.now() + 600_000 },
+                },
+                github: { resources: [] },
+              },
+            } as LocalDeviceView,
+          }}
+        />,
+      );
+      const row = await screen.findByTestId(`codespace-unavailable-${unavailableId}`);
+      expect(row).toHaveTextContent("owner/unobserved");
+      expect(row).toHaveTextContent("feature/original");
+      expect(row).toHaveTextContent("State could not be confirmed");
+      expect(within(row).queryByRole("button")).toBeNull();
+      expect(screen.queryByTestId("github-codespace-empty")).toBeNull();
+      expect(screen.queryByTestId(`github-codespace-${CODESPACE_ID}`) !== null).toBe(healthyPeer);
+      fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+      expect(await screen.findByTestId(`github-codespace-${unavailableId}`)).toBeInTheDocument();
+      expect(screen.queryByTestId(`codespace-unavailable-${unavailableId}`)).toBeNull();
+      expect(screen.getByTestId(`github-codespace-stop-${unavailableId}`)).toBeEnabled();
+    },
+  );
+  test("shows provider failures without borrowing healthy peer metadata or claiming an empty list", async () => {
+    jest.mocked(apiClient.getGitHubCodespaces).mockResolvedValue({
+      ...management,
+      readiness: undefined,
+      connection: undefined,
+      codespaces: [],
+      repositories: [],
+      provider_errors: [
+        { provider: "github-codespaces", error: { code: "CODESPACE_PROVIDER_UNAVAILABLE" } },
+      ],
+      providers: [
+        {
+          provider: "github-codespaces",
+          error: { code: "CODESPACE_PROVIDER_UNAVAILABLE" },
+        },
+        {
+          provider: "local-sandboxes",
+          readiness: { ...management.readiness, provider: "local-sandboxes" },
+          connection,
+          repositories: [],
+          repositories_stale: false,
+          resources_stale: false,
+        },
+      ],
+    });
+    renderSettings(
+      <>
+        <GitHubCodespaceManagement />
+        <CodespaceBillingFromData />
+      </>,
+    );
+    expect(await screen.findByText("Provider data could not be loaded")).toBeInTheDocument();
+    expect(screen.getByTestId("github-codespace-billing-unavailable")).toBeInTheDocument();
+    expect(screen.queryByTestId("github-codespace-instance-state")).toBeNull();
+    expect(screen.queryByTestId("github-codespace-empty")).toBeNull();
+    expect(screen.queryByTestId("github-codespace-create")).toBeNull();
+    expect(
+      screen.getByText(i18n.t("common.codespaceErrors.CODESPACE_PROVIDER_UNAVAILABLE")),
+    ).toBeInTheDocument();
+  });
+  test("an in-flight refresh that loses an observation disables an already opened delete confirmation", async () => {
+    let complete!: (next: CodespaceManagementView) => void;
+    jest.mocked(apiClient.refreshGitHubCodespaces).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          complete = resolve;
+        }),
+    );
+    const remove = jest.spyOn(apiClient, "deleteGitHubCodespace");
+    renderSettings(<GitHubCodespaceManagement />);
+    await screen.findByTestId(`github-codespace-${CODESPACE_ID}`);
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+    fireEvent.click(screen.getByTestId(`github-codespace-delete-${CODESPACE_ID}`));
+    const dialog = await screen.findByRole("alertdialog");
+    const confirm = within(dialog).getByRole("button", {
+      name: i18n.t("pages.settings.codespaces.delete"),
+    });
+    expect(confirm).toBeEnabled();
+    await act(async () =>
+      complete({
+        ...management,
+        codespaces: [],
+        unavailable: [
+          {
+            codespace_id: CODESPACE_ID,
+            provider: "github-codespaces",
+            repository_id: "301",
+            repository: "owner/repository",
+            requested_ref: "main",
+            created_at: 1,
+            error: { code: "CODESPACE_PROVIDER_UNAVAILABLE" },
+          },
+        ],
+      }),
+    );
+    expect(confirm).toBeDisabled();
+    fireEvent.click(confirm);
+    expect(remove).not.toHaveBeenCalled();
+  });
   test("the GitHub list excludes local codespaces even when the management response contains both providers", async () => {
     const localId = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
     jest.mocked(apiClient.getGitHubCodespaces).mockResolvedValue({

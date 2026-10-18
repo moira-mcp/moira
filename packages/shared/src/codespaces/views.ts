@@ -1,9 +1,10 @@
-import type {
-  CodespaceResourceErrorCode,
-  CodespaceResourceState,
-  CodespaceDesiredState,
-  CodespaceObservedState,
-  CodespaceRetentionPolicy,
+import {
+  codespaceLifecycleErrorCode,
+  type CodespaceResourceErrorCode,
+  type CodespaceResourceState,
+  type CodespaceDesiredState,
+  type CodespaceObservedState,
+  type CodespaceRetentionPolicy,
 } from "./resource-types.js";
 
 /**
@@ -44,6 +45,58 @@ export interface CodespaceSummaryView {
   pending_request_ids?: string[];
   device_id?: string;
   provider_url?: string;
+}
+
+/** Owned identity whose current observation cannot supply a strict lifecycle summary. */
+export interface CodespaceUnavailableResourceView {
+  codespace_id: string;
+  provider: string;
+  repository_id: string;
+  repository: string;
+  requested_ref: string;
+  created_at: number;
+  device_id?: string;
+  /** Present only when obtained from an authoritative owner receipt observation. */
+  pending_request_ids?: string[];
+  error: { code: CodespaceResourceErrorCode };
+}
+
+export interface CodespaceResourceListView {
+  codespaces: CodespaceSummaryView[];
+  unavailable: CodespaceUnavailableResourceView[];
+}
+
+export interface CodespaceProviderErrorView {
+  provider: string;
+  error: { code: CodespaceResourceErrorCode };
+}
+
+/** Discovery diagnostics only: never classify a mutation's admission or completion. */
+export function codespaceObservationErrorCode(error: unknown): CodespaceResourceErrorCode {
+  const code =
+    typeof error === "string"
+      ? error
+      : error && typeof error === "object" && "code" in error
+        ? error.code
+        : null;
+  const known = typeof code === "string" ? codespaceLifecycleErrorCode(code) : null;
+  if (known) return known;
+  switch (code) {
+    case "LOCAL_OUTCOME_UNCONFIRMED":
+      return "CODESPACE_LOCAL_CREATION_UNKNOWN";
+    case "LOCAL_UNAUTHORIZED":
+    case "LOCAL_EXPIRED":
+    case "CONNECTION_REQUIRED":
+    case "INSTALLATION_REQUIRED":
+    case "REPOSITORY_NOT_ALLOWED":
+    case "AUTH_REFRESH_FAILED":
+    case "AUTH_GRANT_REVOCATION_REQUIRED":
+    case "CREDENTIAL_UNREADABLE":
+    case "AUTHORIZATION_FAILED":
+      return "CODESPACE_AUTHORIZATION_REQUIRED";
+    default:
+      return "CODESPACE_PROVIDER_UNAVAILABLE";
+  }
 }
 
 /** GitHub's monthly bill for the connected personal account, separate from Moira's own limits. */

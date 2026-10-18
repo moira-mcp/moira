@@ -8,6 +8,8 @@ import {
   localCodespaceFailureGuidance,
   parseLocalRepositoryTargetId,
   providerFailureSchema,
+  codespaceObservationErrorCode,
+  type CodespaceProviderErrorView,
   type CodespaceConnectionService,
 } from "@mcp-moira/shared";
 import type { AuthenticatedRequest } from "../types/express-types.js";
@@ -201,20 +203,48 @@ export function createCodespaceManagementRoutes(
     if (selected.providers) {
       const providers: Array<Record<string, unknown> & { provider: string | undefined }> =
         await Promise.all(
-          selected.providers.map(async (bundle) => ({
-            ...(await managementData(userId, refresh, bundle)),
-            provider: bundle.provider,
-          })),
+          selected.providers.map(async (bundle) => {
+            try {
+              return {
+                ...(await managementData(userId, refresh, bundle)),
+                provider: bundle.provider,
+              };
+            } catch (error) {
+              return {
+                provider: bundle.provider,
+                error: { code: codespaceObservationErrorCode(error) },
+              };
+            }
+          }),
         );
+      const successful = providers.filter((bundle) => !bundle.error);
+      const providerErrors: CodespaceProviderErrorView[] = providers
+        .filter((bundle) => bundle.error)
+        .map((bundle) => ({
+          provider: bundle.provider ?? "unknown",
+          error: { code: codespaceObservationErrorCode(bundle.error) },
+        }));
       const preferred =
-        providers.find(
+        successful.find(
           (bundle) => (bundle.connection as { state?: string } | undefined)?.state === "connected",
-        ) ?? providers[0];
+        ) ?? successful[0];
+      let controllers: Awaited<
+        ReturnType<NonNullable<CodespaceManagementServices["controllers"]>>
+      > = [];
+      try {
+        controllers = (await selected.controllers?.(userId)) ?? [];
+      } catch (error) {
+        providerErrors.push({
+          provider: "local-sandboxes",
+          error: { code: codespaceObservationErrorCode(error) },
+        });
+      }
       return {
         ...preferred,
-        controllers: (await selected.controllers?.(userId)) ?? [],
+        controllers,
         providers,
-        repositories: providers.flatMap((bundle) =>
+        provider_errors: providerErrors,
+        repositories: successful.flatMap((bundle) =>
           ((bundle.repositories ?? []) as Record<string, unknown>[]).map((repository) => {
             if (bundle.provider !== "local-sandboxes")
               return { ...repository, provider: bundle.provider };
@@ -225,9 +255,18 @@ export function createCodespaceManagementRoutes(
             };
           }),
         ),
-        codespaces: providers.flatMap((bundle) => (bundle.codespaces ?? []) as unknown[]),
-        repositories_stale: providers.some((bundle) => bundle.repositories_stale === true),
-        resources_stale: providers.some((bundle) => bundle.resources_stale === true),
+        codespaces: successful.flatMap((bundle) => (bundle.codespaces ?? []) as unknown[]),
+        unavailable: successful.flatMap((bundle) => (bundle.unavailable ?? []) as unknown[]),
+        repositories_stale:
+          providerErrors.length > 0 ||
+          successful.some((bundle) => bundle.repositories_stale === true),
+        resources_stale:
+          providerErrors.length > 0 ||
+          successful.some(
+            (bundle) =>
+              bundle.resources_stale === true ||
+              (bundle.unavailable as unknown[] | undefined)?.length,
+          ),
       };
     }
     const grants = refresh
@@ -240,6 +279,10 @@ export function createCodespaceManagementRoutes(
       !(selected.resource instanceof GitHubResourceService)
         ? await selected.resource.refreshProviderState(userId, { authorizationFresh: true })
         : { stale: refresh && grants.stale };
+    const listed = (await selected.resource?.listResources(userId)) ?? {
+      codespaces: [],
+      unavailable: [],
+    };
     return {
       readiness: await selected.observability.readiness(),
       connection: selected.connection.getStatus(userId),
@@ -250,8 +293,9 @@ export function createCodespaceManagementRoutes(
           private: repository.private,
         })) ?? [],
       repositories_stale: grants.stale,
-      resources_stale: resources.stale,
-      codespaces: (await selected.resource?.listResources(userId)) ?? [],
+      resources_stale: resources.stale || listed.unavailable.length > 0,
+      codespaces: listed.codespaces,
+      unavailable: listed.unavailable,
       ...(selected.billing ? { provider_billing: await selected.billing(userId) } : {}),
       controllers: (await selected.controllers?.(userId)) ?? [],
     };

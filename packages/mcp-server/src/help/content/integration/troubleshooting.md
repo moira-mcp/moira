@@ -447,8 +447,9 @@ Open that computer's codespace card and use **Check state again** for a pending 
 delete. It collects the original lifecycle receipt when its identity is known, otherwise it
 performs a read-only refresh. It never resubmits start/stop/delete or creates a replacement VM.
 Errors and loaders stay on the affected card.
-**Delete** is available with confirmation even during pending creation, cleanup or uncertain
-local state. It addresses only the same owned codespace and finishes after confirmed absence.
+**Delete** is available with confirmation during pending creation, cleanup or uncertain
+local state when a current summary supplies the owner generation. An unavailable identity has
+no lifecycle controls. Deletion addresses only the same owned codespace and finishes after confirmed absence.
 
 Owner cleanup requires the active paired computer, current local web-control approval and a
 running, reachable companion. It does not require agent deletion permission, enabled work or
@@ -475,9 +476,13 @@ Neither `absent` nor newer metadata permits automatic replay. Owner-backed `pend
 restore collection after a reload without a cloud/browser dispatch queue.
 
 Local cloud registration stores routing identity, not a current machine, state or lifecycle
-generation. If the owner has no resource observation, get/list return
+generation. If the owner has no resource observation, `get` returns
 `CODESPACE_PROVIDER_UNAVAILABLE`; reconnect and inspect the same owner rather than treating the
-registration as a ready VM. Pending originals without a resource observation return
+registration as a ready VM. `list` keeps observed summaries in `codespaces` and failed owned
+identities in `unavailable`, each with its safe `error.code` and no fabricated state or generation.
+One unavailable resource does not hide healthy peers. Provider-wide failures appear separately
+in `provider_errors`, including when every provider fails; they do not prove an empty inventory.
+Settings retains unavailable identities read-only. Pending originals without a resource observation return
 `CODESPACE_LOCAL_CREATION_UNKNOWN` with `request_id`, `device_id` and `codespace_id`. Use those
 identities to collect the owner receipt. A receipt can be completed while its contained error
 still reports an uncertain native outcome; explicit repetition preserves that uncertainty and
