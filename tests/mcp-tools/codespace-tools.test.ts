@@ -159,6 +159,8 @@ describe("Codespace MCP HTTP contract without configured GitHub or paired Local"
     expect(result.isError).not.toBe(true);
     expect(result.structuredContent).toEqual({
       codespaces: [],
+      unavailable: [],
+      provider_errors: [],
       provider_billing: "unavailable",
     });
     expect(JSON.stringify(result)).not.toMatch(
@@ -189,7 +191,7 @@ describe("Codespace MCP HTTP contract without configured GitHub or paired Local"
       await client.callTool({ name: "codespace", arguments: { action: "repositories" } }),
     );
     expect(result.isError).not.toBe(true);
-    expect(result.structuredContent).toEqual({ repositories: [] });
+    expect(result.structuredContent).toEqual({ repositories: [], provider_errors: [] });
   });
 
   test.each([
