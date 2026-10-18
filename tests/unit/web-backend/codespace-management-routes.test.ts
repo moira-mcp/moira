@@ -70,7 +70,7 @@ function services(
     },
     resource: {
       listRepositories: () => [{ id: "42", fullName: "owner/repository", private: true }],
-      listResources: async () => [codespace()],
+      listResources: async () => ({ codespaces: [codespace()], unavailable: [] }),
       refreshProviderState: jest.fn(async () => ({ stale: false })),
       getCodespace: jest.fn(async () => codespace()),
       create: jest.fn(async () => codespace({ state: "create_submitted" })),
@@ -99,6 +99,105 @@ function appWith(dependencies: CodespaceManagementServices, userId = "user-a") {
 }
 
 describe("website codespace management routes", () => {
+  test("keeps observed peers and unavailable identities without fabricating resource state", async () => {
+    const base = services();
+    const unavailable = {
+      codespace_id: "00000000-0000-4000-8000-000000000002",
+      provider: "local-sandboxes",
+      repository_id: "local-target",
+      repository: "owner/unobserved",
+      requested_ref: "main",
+      created_at: 10,
+      error: { code: "CODESPACE_PROVIDER_UNAVAILABLE" as const },
+    };
+    const local = services({
+      provider: "local-sandboxes",
+      resource: {
+        ...base.resource!,
+        listResources: async () => ({
+          codespaces: [codespace({ provider: "local-sandboxes" })],
+          unavailable: [unavailable],
+        }),
+      },
+    });
+    const response = await request(appWith(services({ providers: [local] }))).get(
+      "/api/integrations/github/codespaces",
+    );
+    expect(response.status).toBe(200);
+    expect(response.body.data).toMatchObject({
+      codespaces: [{ codespace_id: CODESPACE_ID, generation: 3 }],
+      unavailable: [unavailable],
+      provider_errors: [],
+      resources_stale: true,
+    });
+    expect(response.body.data.unavailable[0]).not.toHaveProperty("generation");
+    expect(response.body.data.unavailable[0]).not.toHaveProperty("state");
+  });
+
+  test.each([false, true])(
+    "reports all provider failures while retaining successful peers (all failed: %s)",
+    async (allFailed) => {
+      const failed = (provider: string) =>
+        services({
+          provider,
+          observability: {
+            readiness: async () => {
+              throw new CodespaceResourceError(
+                "CODESPACE_AUTHORIZATION_REQUIRED",
+                "private credential diagnostic",
+              );
+            },
+          },
+        });
+      const response = await request(
+        appWith(
+          services({
+            providers: [
+              allFailed ? failed("github-codespaces") : services({ provider: "github-codespaces" }),
+              failed("local-sandboxes"),
+            ],
+          }),
+        ),
+      ).get("/api/integrations/github/codespaces");
+      expect(response.status).toBe(200);
+      expect(response.body.data.codespaces).toHaveLength(allFailed ? 0 : 1);
+      expect(response.body.data.provider_errors).toEqual(
+        (allFailed ? ["github-codespaces", "local-sandboxes"] : ["local-sandboxes"]).map(
+          (provider) => ({ provider, error: { code: "CODESPACE_AUTHORIZATION_REQUIRED" } }),
+        ),
+      );
+      expect(response.body.data.providers.at(-1)).toEqual({
+        provider: "local-sandboxes",
+        error: { code: "CODESPACE_AUTHORIZATION_REQUIRED" },
+      });
+      if (allFailed) {
+        expect(response.body.data).not.toHaveProperty("readiness");
+        expect(response.body.data).not.toHaveProperty("connection");
+        expect(response.body.data.repositories).toEqual([]);
+      }
+      expect(JSON.stringify(response.body)).not.toContain("private credential diagnostic");
+    },
+  );
+
+  test("a failed controller observation does not discard healthy provider resources", async () => {
+    const response = await request(
+      appWith(
+        services({
+          providers: [services({ provider: "github-codespaces" })],
+          controllers: async () => {
+            throw new Error("private controller diagnostic");
+          },
+        }),
+      ),
+    ).get("/api/integrations/github/codespaces");
+    expect(response.status).toBe(200);
+    expect(response.body.data.codespaces).toHaveLength(1);
+    expect(response.body.data.provider_errors).toEqual([
+      { provider: "local-sandboxes", error: { code: "CODESPACE_PROVIDER_UNAVAILABLE" } },
+    ]);
+    expect(JSON.stringify(response.body)).not.toContain("private controller diagnostic");
+  });
+
   test("a confirmed payment refusal retains safe provider evidence and its original request instead of unknown creation", async () => {
     const base = services(),
       requestId = "ws1-00000000-0000-4000-8000-000000000002",
@@ -348,12 +447,15 @@ describe("website codespace management routes", () => {
       resource: {
         ...base.resource!,
         listRepositories: () => [{ id: "local-target", fullName: "owner/local", private: false }],
-        listResources: async () => [
-          codespace({
-            provider: "local-sandboxes",
-            codespace_id: "00000000-0000-4000-8000-000000000002",
-          }),
-        ],
+        listResources: async () => ({
+          codespaces: [
+            codespace({
+              provider: "local-sandboxes",
+              codespace_id: "00000000-0000-4000-8000-000000000002",
+            }),
+          ],
+          unavailable: [],
+        }),
       },
       observability: {
         ...base.observability,
@@ -421,15 +523,18 @@ describe("website codespace management routes", () => {
       const dependencies = services({
         resource: {
           ...base.resource!,
-          listResources: async () => [
-            codespace({
-              state: "stop_pending",
-              desired_state: "stopped",
-              observed_at: 15,
-              updated_at: 500,
-              lifecycle_error: outcome,
-            }),
-          ],
+          listResources: async () => ({
+            codespaces: [
+              codespace({
+                state: "stop_pending",
+                desired_state: "stopped",
+                observed_at: 15,
+                updated_at: 500,
+                lifecycle_error: outcome,
+              }),
+            ],
+            unavailable: [],
+          }),
         },
       });
       const response = await request(appWith(dependencies)).get(
@@ -513,7 +618,7 @@ describe("website codespace management routes", () => {
           present = false;
           return { stale: false };
         }),
-        listResources: async () => (present ? [codespace()] : []),
+        listResources: async () => ({ codespaces: present ? [codespace()] : [], unavailable: [] }),
       },
     });
 

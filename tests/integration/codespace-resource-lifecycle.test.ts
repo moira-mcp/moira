@@ -276,6 +276,72 @@ async function attachOwner(value: ReturnType<typeof fixture>) {
   };
 }
 describe("GitHub cloud identity and fixed provider broker", () => {
+  test("one unavailable provider observation retains its owned identity beside an independent summary without leaking diagnostics or replaying work", async () => {
+    const value = fixture(),
+      requestId = "ws1-" + randomUUID(),
+      peerRequest = "ws1-" + randomUUID();
+    try {
+      value.setProviderResponse(async () =>
+        Response.json({
+          name: "unavailable-space",
+          display_name: "Owned fixture",
+          owner: { id: 101 },
+          billable_owner: { id: 101 },
+          repository: { id: 201, full_name: "person/project" },
+          state: "Available",
+          created_at: "2026-10-14T00:00:00Z",
+        }),
+      );
+      const original = await value.service.registerExisting("owner", "unavailable-space", {
+        requestId,
+        deviceId: value.deviceId,
+      });
+      await expect(value.service.create("owner", "201", "main", peerRequest)).rejects.toMatchObject(
+        {
+          code: "WORKSPACE_OUTCOME_UNCONFIRMED",
+        },
+      );
+      const identities = value.identities.listOwned("owner");
+      value.setProviderResponse(async () => {
+        throw new Error("private-provider-token-and-URL");
+      });
+      const view = await value.service.listResources("owner");
+      expect(view.codespaces).toEqual([
+        expect.objectContaining({
+          codespace_id: peerRequest.slice(4),
+          generation: 1,
+        }),
+      ]);
+      expect(view.unavailable).toEqual([
+        {
+          codespace_id: original.codespace_id,
+          provider: "github-codespaces",
+          repository_id: "201",
+          repository: "person/project",
+          requested_ref: "HEAD",
+          created_at: original.created_at,
+          device_id: value.deviceId,
+          error: { code: "CODESPACE_PROVIDER_UNAVAILABLE" },
+        },
+      ]);
+      expect(JSON.stringify(view)).not.toContain("private-provider-token-and-URL");
+      expect(await value.service.refreshProviderState("owner")).toEqual({ stale: true });
+      await expect(value.service.getCodespace("owner", original.codespace_id)).rejects.toThrow();
+      expect(value.identities.listOwned("owner")).toEqual(identities);
+      expect(value.requests.every((entry) => entry.method === "GET")).toBe(true);
+      value.sqlite
+        .prepare(
+          "INSERT INTO user(id,email,handle,approvedAt,emailVerified,createdAt,updatedAt) VALUES('other','other@example.test','other','now',1,'now','now')",
+        )
+        .run();
+      expect(await value.service.listResources("other")).toEqual({
+        codespaces: [],
+        unavailable: [],
+      });
+    } finally {
+      value.sqlite.close();
+    }
+  });
   test.each(["explicit", "single-registered"] as const)(
     "%s controller admission survives a failed snapshot observer and retains its original owner receipt",
     async (selection) => {
@@ -673,6 +739,64 @@ describe("GitHub cloud identity and fixed provider broker", () => {
     });
     return { ...value, id };
   }
+  test("lost account authority retains only owned unavailable identities while exact get remains refused", async () => {
+    const value = await ownedFixture();
+    try {
+      const original = value.identities.getOwned("owner", value.id)!,
+        foreignConnection = randomUUID(),
+        foreignId = randomUUID();
+      value.sqlite
+        .prepare(
+          "INSERT INTO user(id,email,handle,approvedAt,emailVerified,createdAt,updatedAt) VALUES('other','other@example.test','other','now',1,'now','now')",
+        )
+        .run();
+      value.sqlite
+        .prepare(
+          "INSERT INTO codespaceConnection(id,userId,provider,externalAccountId,externalLogin,status,credentialGeneration,createdAt,updatedAt) VALUES(?,'other','github-codespaces','999','other','connected',1,1,1)",
+        )
+        .run(foreignConnection);
+      value.identities.reserve({
+        ...original,
+        id: foreignId,
+        userId: "other",
+        connectionId: foreignConnection,
+        externalOwnerId: "999",
+        billableOwnerId: "999",
+        deviceId: null,
+        deviceGeneration: null,
+        deviceConnectionId: null,
+        providerResourceName: null,
+        operationMarker: "moira-" + "e".repeat(24),
+      });
+      value.sqlite.prepare("UPDATE user SET blocked=1 WHERE id='owner'").run();
+      const requests = value.requests.slice();
+      const view = await value.service.listResources("owner");
+      expect(view).toEqual({
+        codespaces: [],
+        unavailable: [
+          {
+            codespace_id: value.id,
+            provider: "github-codespaces",
+            repository_id: original.repositoryId,
+            repository: original.repositoryFullName,
+            requested_ref: original.requestedRef,
+            created_at: original.createdAt,
+            device_id: value.deviceId,
+            error: { code: "CODESPACE_AUTHORIZATION_REQUIRED" },
+          },
+        ],
+      });
+      await expect(value.service.getCodespace("owner", value.id)).rejects.toMatchObject({
+        code: "CODESPACE_AUTHORIZATION_REQUIRED",
+      });
+      expect(await value.service.refreshProviderState("owner")).toEqual({ stale: true });
+      expect(value.identities.getOwned("owner", value.id)).toEqual(original);
+      expect(value.identities.getOwned("other", foreignId)).not.toBeNull();
+      expect(value.requests).toEqual(requests);
+    } finally {
+      value.sqlite.close();
+    }
+  });
   test("explicit adopt previews a renewed grant without changing authority and catches up owner CAS after failed credential retirement", async () => {
     const value = await ownedFixture(),
       requestId = "ws1-" + randomUUID();

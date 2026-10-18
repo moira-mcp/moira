@@ -376,6 +376,9 @@ export function CodespaceManagement({ scope }: { scope: CodespaceManagementScope
       );
       return {
         ...current,
+        unavailable: current.unavailable?.filter(
+          (entry) => entry.codespace_id !== codespace.codespace_id,
+        ),
         codespaces: exists
           ? current.codespaces.map((item) =>
               item.codespace_id === codespace.codespace_id ? codespace : item,
@@ -579,7 +582,13 @@ export function CodespaceManagement({ scope }: { scope: CodespaceManagementScope
   };
 
   const remove = async () => {
-    if (!pendingDelete || deleteNeedsRefresh || !ownerDeleteEnabled) return;
+    if (
+      !pendingDelete ||
+      deleteNeedsRefresh ||
+      !ownerDeleteEnabled ||
+      !view?.codespaces.some((entry) => entry.codespace_id === pendingDelete.codespace_id)
+    )
+      return;
     if (pendingDeleteCollectOnly) {
       await collectOperation(pendingDelete.codespace_id);
       return;
@@ -654,16 +663,29 @@ export function CodespaceManagement({ scope }: { scope: CodespaceManagementScope
   }
 
   const selectedProvider = view.providers?.find((entry) => entry.provider === provider);
-  const { readiness, connection } = selectedProvider ?? view;
-  const repositoriesStale = selectedProvider?.repositories_stale ?? view.repositories_stale;
-  const resourcesStale = selectedProvider?.resources_stale ?? view.resources_stale;
+  const metadata =
+    selectedProvider && !("error" in selectedProvider)
+      ? selectedProvider
+      : view.providers
+        ? undefined
+        : view;
+  const readiness = metadata?.readiness;
+  const connection = metadata?.connection;
+  const providerError = view.provider_errors?.find((entry) => entry.provider === provider)?.error;
+  const repositoriesStale = metadata?.repositories_stale ?? view.repositories_stale;
+  const resourcesStale = metadata?.resources_stale ?? view.resources_stale;
   const codespaces = view.codespaces.filter(
     (codespace) =>
       codespace.provider === provider &&
       (!computer || localComputerId(codespace.repository_id) === computer.deviceId),
   );
-  const ready = readiness.state === "ready";
-  const connected = connection.state === "connected";
+  const unavailable = (view.unavailable ?? []).filter(
+    (entry) =>
+      entry.provider === provider &&
+      (!computer || localComputerId(entry.repository_id) === computer.deviceId),
+  );
+  const ready = readiness?.state === "ready";
+  const connected = connection?.state === "connected";
   const canCreate =
     ready &&
     connected &&
@@ -695,12 +717,14 @@ export function CodespaceManagement({ scope }: { scope: CodespaceManagementScope
               </CardDescription>
             </div>
           </div>
-          <Badge
-            variant={ready ? "default" : "secondary"}
-            data-testid="github-codespace-instance-state"
-          >
-            {t(`pages.settings.codespaces.instanceStates.${readiness.state}`)}
-          </Badge>
+          {readiness && (
+            <Badge
+              variant={ready ? "default" : "secondary"}
+              data-testid="github-codespace-instance-state"
+            >
+              {t(`pages.settings.codespaces.instanceStates.${readiness.state}`)}
+            </Badge>
+          )}
         </div>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -733,7 +757,16 @@ export function CodespaceManagement({ scope }: { scope: CodespaceManagementScope
             </AlertDescription>
           </Alert>
 
-          {!ready && (
+          {providerError && (
+            <InlineError
+              title={t("localDevices.codespaces.providerUnavailable")}
+              message={failureMessage(providerError)}
+              onRetry={() => void refreshList()}
+              retryLabel={t("localDevices.codespaces.reconcile")}
+            />
+          )}
+
+          {readiness && !ready && (
             <Alert variant={readiness.state === "disabled" ? "default" : "destructive"}>
               <AlertCircle aria-hidden="true" />
               <AlertTitle>
@@ -967,7 +1000,7 @@ export function CodespaceManagement({ scope }: { scope: CodespaceManagementScope
             </Button>
           </div>
 
-          {codespaces.length === 0 ? (
+          {codespaces.length === 0 && unavailable.length === 0 && !providerError ? (
             <p className="text-sm text-muted-foreground" data-testid="github-codespace-empty">
               {t("pages.settings.codespaces.empty")}
             </p>
@@ -1220,6 +1253,27 @@ export function CodespaceManagement({ scope }: { scope: CodespaceManagementScope
                   </li>
                 );
               })}
+              {unavailable.map((entry) => (
+                <li
+                  key={entry.codespace_id}
+                  className="rounded-md border p-3"
+                  data-testid={`codespace-unavailable-${entry.codespace_id}`}
+                >
+                  <p className="truncate font-medium">{entry.repository}</p>
+                  <p className="flex items-center gap-1 text-sm text-muted-foreground">
+                    <GitBranch className="size-3.5 shrink-0" aria-hidden="true" />
+                    <span className="truncate font-mono text-xs">{entry.requested_ref}</span>
+                  </p>
+                  <InlineError
+                    title={t("localDevices.codespaces.observationFailed")}
+                    message={failureMessage(entry.error)}
+                  />
+                  <p className="mt-2 text-xs text-muted-foreground">
+                    {t("localDevices.codespaces.unavailableIdentity")}
+                  </p>
+                  <p className="mt-1 break-all font-mono text-xs">{entry.codespace_id}</p>
+                </li>
+              ))}
             </ul>
           )}
         </DataRegion>
@@ -1245,7 +1299,11 @@ export function CodespaceManagement({ scope }: { scope: CodespaceManagementScope
         cancelLabel={t("common.cancel")}
         variant="destructive"
         onConfirm={remove}
-        confirmDisabled={deleteNeedsRefresh || !ownerDeleteEnabled}
+        confirmDisabled={
+          deleteNeedsRefresh ||
+          !ownerDeleteEnabled ||
+          !view.codespaces.some((entry) => entry.codespace_id === pendingDelete?.codespace_id)
+        }
         content={
           deleteError ? (
             <>

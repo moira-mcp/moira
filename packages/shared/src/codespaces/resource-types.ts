@@ -196,6 +196,8 @@ export interface CodespaceTransportAvailability {
 
 export class CodespaceResourceError extends Error {
   requestId?: string;
+  /** Authoritative owner observation, when available; never inferred from cloud identity. */
+  pendingRequestIds?: string[];
   deviceId?: string;
   resourceId?: string;
   providerFailure?: GitHubProviderFailure;

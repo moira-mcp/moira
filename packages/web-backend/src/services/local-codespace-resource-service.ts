@@ -9,8 +9,10 @@ import {
   controllerRequestIdSchema,
   localRepositoryTargetId,
   parseLocalRepositoryTargetId,
+  codespaceObservationErrorCode,
   type LocalDeviceService,
   type CodespaceSummaryView,
+  type CodespaceResourceListView,
   type LocalResourceIdentity,
   type CodespaceRepositoryTarget,
   type CodespaceGuidanceSituation,
@@ -49,10 +51,37 @@ export class LocalCodespaceResourceService {
         : [],
     );
   }
-  async listResources(userId: string): Promise<CodespaceSummaryView[]> {
-    return Promise.all(
-      this.repository.listOwned(userId).map((resource) => this.getCodespace(userId, resource.id)),
+  async listResources(userId: string): Promise<CodespaceResourceListView> {
+    const identities = this.repository.listOwned(userId);
+    const observations = await Promise.allSettled(
+      identities.map((resource) => this.getCodespace(userId, resource.id)),
     );
+    const result: CodespaceResourceListView = { codespaces: [], unavailable: [] };
+    observations.forEach((observation, index) => {
+      if (observation.status === "fulfilled") {
+        result.codespaces.push(observation.value);
+        return;
+      }
+      const identity = identities[index]!,
+        error: unknown = observation.reason,
+        deviceId =
+          (error instanceof CodespaceResourceError ? error.deviceId : undefined) ??
+          this.devices.getBinding(userId, identity.id)?.deviceId;
+      result.unavailable.push({
+        codespace_id: identity.id,
+        provider: CODESPACE_PROVIDER_LOCAL,
+        repository_id: identity.repositoryId,
+        repository: identity.repositoryFullName,
+        requested_ref: identity.requestedRef,
+        created_at: identity.createdAt,
+        ...(deviceId ? { device_id: deviceId } : {}),
+        ...(error instanceof CodespaceResourceError && error.pendingRequestIds !== undefined
+          ? { pending_request_ids: error.pendingRequestIds }
+          : {}),
+        error: { code: codespaceObservationErrorCode(error) },
+      });
+    });
+    return result;
   }
   private summary(
     resource: LocalResourceIdentity,
@@ -115,6 +144,7 @@ export class LocalCodespaceResourceService {
             : undefined,
         );
         error.requestId = pendingRequestIds[0];
+        error.pendingRequestIds = pendingRequestIds;
         error.deviceId = binding.deviceId;
         error.resourceId = resourceId;
         return error;
@@ -179,8 +209,8 @@ export class LocalCodespaceResourceService {
     }
   }
   async refreshProviderState(userId: string, _options: { authorizationFresh?: boolean } = {}) {
-    await this.listResources(userId);
-    return { stale: false };
+    const resources = await this.listResources(userId);
+    return { stale: resources.unavailable.length > 0 };
   }
   async create(userId: string, repositoryId: string, requestedRef: string, requestId?: string) {
     const operationId = this.requestIdentity(requestId);

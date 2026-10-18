@@ -80,6 +80,55 @@ async function create(requestId = createWorkspaceRequestId()) {
 }
 
 describe("Local cloud facade routes to the authoritative owner", () => {
+  test("a closed create without a native space remains discoverable without hiding usable peers or inventing lifecycle authority", async () => {
+    const healthy = await create(),
+      failedRequest = createWorkspaceRequestId(),
+      originalCreate = owner!.manager.create;
+    let attempts = 0;
+    owner!.manager.create = async () => {
+      attempts++;
+      throw new LocalRefusal("LOCAL_RUNTIME_UNAVAILABLE", "private-create-diagnostic");
+    };
+    await expect(create(failedRequest)).rejects.toBeDefined();
+    owner!.manager.create = originalCreate;
+    const failedId = failedRequest.slice(4),
+      identities = resource.repository.listOwned("owner"),
+      journals = await owner!.state.keys("controller-operation-");
+    expect(await owner!.controller.state.binding(failedId, owner!.identity)).toMatchObject({
+      localSpaceId: null,
+      creationClosed: true,
+    });
+    const view = await resource.listResources("owner");
+    expect(view.codespaces).toEqual([
+      expect.objectContaining({
+        codespace_id: healthy.codespace_id,
+        state: "usable",
+        generation: healthy.generation,
+      }),
+    ]);
+    expect(view.unavailable).toEqual([
+      {
+        codespace_id: failedId,
+        provider: "local-sandboxes",
+        repository_id: target,
+        repository: owner!.policy.repositories[0].fullName,
+        requested_ref: "main",
+        created_at: identities.find((entry) => entry.id === failedId)!.createdAt,
+        device_id: deviceId,
+        pending_request_ids: [],
+        error: { code: "CODESPACE_PROVIDER_UNAVAILABLE" },
+      },
+    ]);
+    expect(JSON.stringify(view)).not.toContain("private-create-diagnostic");
+    expect(await resource.refreshProviderState("owner")).toEqual({ stale: true });
+    expect(await resource.listResources("other")).toEqual({ codespaces: [], unavailable: [] });
+    expect(resource.repository.listOwned("owner")).toEqual(identities);
+    expect(await owner!.state.keys("controller-operation-")).toEqual(journals);
+    expect(attempts).toBe(1);
+    await expect(resource.getCodespace("owner", failedId)).rejects.toMatchObject({
+      code: "CODESPACE_PROVIDER_UNAVAILABLE",
+    });
+  });
   test("paired-device registration API reserves only a checked route, idempotently, before native work", async () => {
     const app = express();
     app.use(
@@ -341,6 +390,21 @@ describe("Local cloud facade routes to the authoritative owner", () => {
     await expect(resource.getCodespace("owner", created.codespace_id)).rejects.toMatchObject({
       code: "CODESPACE_PROVIDER_UNAVAILABLE",
     });
+    expect(await resource.listResources("owner")).toEqual({
+      codespaces: [],
+      unavailable: [
+        {
+          codespace_id: created.codespace_id,
+          provider: "local-sandboxes",
+          repository_id: target,
+          repository: created.repository,
+          requested_ref: "main",
+          created_at: created.created_at,
+          device_id: deviceId,
+          error: { code: "CODESPACE_PROVIDER_UNAVAILABLE" },
+        },
+      ],
+    });
     await expect(
       resource.stopCodespace("owner", created.codespace_id, createWorkspaceRequestId(), 1),
     ).rejects.toMatchObject({ code: "CODESPACE_PROVIDER_UNAVAILABLE" });
@@ -409,6 +473,44 @@ describe("Local cloud facade routes to the authoritative owner", () => {
     });
     expect((await devices.localSnapshot("owner", deviceId)).pendingResourceOperations).toEqual([
       { resourceId, requestIds: [requestId] },
+    ]);
+    expect((await resource.listResources("owner")).unavailable).toEqual([
+      expect.objectContaining({
+        codespace_id: resourceId,
+        device_id: deviceId,
+        pending_request_ids: [requestId],
+        error: { code: "CODESPACE_LOCAL_CREATION_UNKNOWN" },
+      }),
+    ]);
+    const nextDevice = randomUUID(),
+      pairing = devices.beginEnrollment("owner");
+    devices.approveLocalEnrollment({
+      pairingId: pairing.pairingId,
+      pairingToken: pairing.pairingToken,
+      credential: randomBytes(32).toString("base64url"),
+      deviceId: nextDevice,
+      label: "Changed binding",
+    });
+    await devices.confirmEnrollment("owner", pairing.pairingId, 2);
+    const observe = resource.getCodespace.bind(resource);
+    resource.getCodespace = async (...args) => {
+      try {
+        return await observe(...args);
+      } catch (error) {
+        db.prepare(
+          "UPDATE codespaceLocalResourceBinding SET deviceId=? WHERE resourceId=? AND userId='owner'",
+        ).run(nextDevice, resourceId);
+        throw error;
+      }
+    };
+    const raced = await resource.listResources("owner");
+    expect(devices.getBinding("owner", resourceId)?.deviceId).toBe(nextDevice);
+    expect(raced.unavailable).toEqual([
+      expect.objectContaining({
+        codespace_id: resourceId,
+        device_id: deviceId,
+        pending_request_ids: [requestId],
+      }),
     ]);
   });
 });

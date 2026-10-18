@@ -8,12 +8,14 @@ import type {
   CodespaceReadinessView,
   CodespaceSummaryView,
   CodespaceProviderBillingView,
+  CodespaceUnavailableResourceView,
+  CodespaceProviderErrorView,
 } from "@mcp-moira/shared";
 
 /** Website codespace management view returned by GET /api/integrations/github/codespaces. */
 export interface CodespaceManagementView {
-  readiness: CodespaceReadinessView;
-  connection: CodespaceConnectionView;
+  readiness?: CodespaceReadinessView;
+  connection?: CodespaceConnectionView;
   repositories: Array<{
     repository_id: string;
     name: string;
@@ -22,18 +24,23 @@ export interface CodespaceManagementView {
     device_id?: string;
     device_label?: string;
   }>;
-  providers?: Array<{
-    provider: string;
-    readiness: CodespaceReadinessView;
-    connection: CodespaceConnectionView;
-    repositories: CodespaceManagementView["repositories"];
-    provider_billing?: CodespaceProviderBillingView;
-    repositories_stale: boolean;
-    resources_stale: boolean;
-  }>;
+  providers?: Array<
+    | CodespaceProviderErrorView
+    | {
+        provider: string;
+        readiness: CodespaceReadinessView;
+        connection: CodespaceConnectionView;
+        repositories: CodespaceManagementView["repositories"];
+        provider_billing?: CodespaceProviderBillingView;
+        repositories_stale: boolean;
+        resources_stale: boolean;
+      }
+  >;
   repositories_stale: boolean;
   resources_stale: boolean;
   codespaces: CodespaceSummaryView[];
+  unavailable?: CodespaceUnavailableResourceView[];
+  provider_errors?: CodespaceProviderErrorView[];
   provider_billing?: CodespaceProviderBillingView;
   controllers?: Array<{ device_id: string; label: string; available: boolean }>;
 }

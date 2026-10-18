@@ -88,7 +88,7 @@ function services(overrides: Partial<CodespaceToolServices> = {}): CodespaceTool
     resource: {
       listRepositories: jest.fn(() => [{ id: "42", fullName: "owner/repository", private: true }]),
       setupSituation: jest.fn(async (_userId: string, _repositoryId?: string) => "ready" as const),
-      listResources: jest.fn(async () => [codespace()]),
+      listResources: jest.fn(async () => ({ codespaces: [codespace()], unavailable: [] })),
       refreshProviderState: jest.fn(async () => ({ stale: false })),
       getCodespace: jest.fn(async () => current),
       create: jest.fn(async () => codespace()),
@@ -129,6 +129,98 @@ function data(result: Awaited<ReturnType<typeof executeCodespaceTool>>) {
 }
 
 describe("codespace lifecycle and discovery adapter", () => {
+  it("keeps observed peers and safe unavailable identities in one discovery result", async () => {
+    const local = services({ provider: "local-sandboxes" });
+    const repositoryId =
+      "local:00000000-0000-4000-8000-000000000011:00000000-0000-4000-8000-000000000012";
+    const unavailable = {
+      codespace_id: OTHER_CODESPACE_ID,
+      provider: "local-sandboxes",
+      repository_id: repositoryId,
+      repository: "owner/unobserved",
+      requested_ref: "main",
+      created_at: 10,
+      pending_request_ids: [REQUEST_ID],
+      error: { code: "CODESPACE_PROVIDER_UNAVAILABLE" as const },
+    };
+    local.resource!.listResources = jest.fn(async () => ({
+      codespaces: [codespace({ provider: "local-sandboxes", repository_id: repositoryId })],
+      unavailable: [unavailable],
+    }));
+    const result = await executeCodespaceTool(
+      parseCodespaceToolParams({ action: "list" }),
+      USER_ID,
+      services({ providers: [local] }),
+    );
+    expect(data(result)).toMatchObject({
+      codespaces: [{ codespace_id: CODESPACE_ID, generation: 3 }],
+      unavailable: [unavailable],
+      provider_errors: [],
+    });
+    expect((data(result).unavailable as object[])[0]).not.toHaveProperty("generation");
+    expect((data(result).unavailable as object[])[0]).not.toHaveProperty("state");
+  });
+
+  it.each(["list", "repositories"] as const)(
+    "retains healthy provider %s data and reports a failed peer safely",
+    async (action) => {
+      const failed = services({
+        provider: "local-sandboxes",
+        connection: {
+          ...services().connection,
+          refreshGrants: async () => {
+            throw new CodespaceResourceError(
+              "CODESPACE_AUTHORIZATION_REQUIRED",
+              "private credential diagnostic",
+            );
+          },
+        },
+      });
+      const result = await executeCodespaceTool(
+        parseCodespaceToolParams({ action }),
+        USER_ID,
+        services({ providers: [services({ provider: "github-codespaces" }), failed] }),
+      );
+      expect(data(result)[action === "list" ? "codespaces" : "repositories"]).toHaveLength(1);
+      expect(data(result).provider_errors).toEqual([
+        { provider: "local-sandboxes", error: { code: "CODESPACE_AUTHORIZATION_REQUIRED" } },
+      ]);
+      expect(result.isError).not.toBe(true);
+      expect(JSON.stringify(result)).not.toContain("private credential diagnostic");
+    },
+  );
+
+  it.each(["list", "repositories"] as const)(
+    "marks %s as an error and reports every failure when no provider can be observed",
+    async (action) => {
+      const failed = (provider: string) =>
+        services({
+          provider,
+          connection: {
+            ...services().connection,
+            refreshGrants: async () => {
+              throw new Error("private transport diagnostic");
+            },
+          },
+        });
+      const result = await executeCodespaceTool(
+        parseCodespaceToolParams({ action }),
+        USER_ID,
+        services({ providers: [failed("github-codespaces"), failed("local-sandboxes")] }),
+      );
+      expect(data(result)).toMatchObject({
+        [action === "list" ? "codespaces" : "repositories"]: [],
+        ...(action === "list" ? { unavailable: [] } : {}),
+        provider_errors: [
+          { provider: "github-codespaces", error: { code: "CODESPACE_PROVIDER_UNAVAILABLE" } },
+          { provider: "local-sandboxes", error: { code: "CODESPACE_PROVIDER_UNAVAILABLE" } },
+        ],
+      });
+      expect(result.isError).toBe(true);
+      expect(JSON.stringify(result)).not.toContain("private transport diagnostic");
+    },
+  );
+
   it("registers a verified existing GitHub VM and adopts the same ID and owner CAS without creating a replacement", async () => {
     const dependencies = services({ provider: "github-codespaces" });
     const existing = {
@@ -296,7 +388,10 @@ describe("codespace lifecycle and discovery adapter", () => {
     });
     const dependencies = services({ provider: "local-sandboxes" });
     dependencies.resource!.getCodespace = jest.fn(async () => local);
-    dependencies.resource!.listResources = jest.fn(async () => [local]);
+    dependencies.resource!.listResources = jest.fn(async () => ({
+      codespaces: [local],
+      unavailable: [],
+    }));
     dependencies.resource!.create = jest.fn(async () => local);
     const expected = {
       codespace_id: CODESPACE_ID,
@@ -329,7 +424,7 @@ describe("codespace lifecycle and discovery adapter", () => {
       dependencies,
     );
     expect(data(fetched)).toEqual(expected);
-    expect(data(listed)).toEqual({ codespaces: [expected] });
+    expect(data(listed)).toEqual({ codespaces: [expected], unavailable: [] });
     expect(data(created)).toEqual({ ...expected, request_id: OPERATION_ID });
     expect(JSON.stringify([fetched, listed, created])).not.toMatch(
       /secret-(connection|capability|marker|claim)|authorizationGeneration/,
@@ -586,7 +681,10 @@ describe("codespace lifecycle and discovery adapter", () => {
       lastOutcome: "provider-private-diagnostic",
     });
     dependencies.resource!.getCodespace = jest.fn(async () => ownerView);
-    dependencies.resource!.listResources = jest.fn(async () => [ownerView]);
+    dependencies.resource!.listResources = jest.fn(async () => ({
+      codespaces: [ownerView],
+      unavailable: [],
+    }));
     const listed = await executeCodespaceTool(
       parseCodespaceToolParams({ action: "list" }),
       USER_ID,
@@ -607,7 +705,7 @@ describe("codespace lifecycle and discovery adapter", () => {
       generation: 3,
       pending_request_ids: [],
     };
-    expect(data(listed)).toEqual({ codespaces: [brief] });
+    expect(data(listed)).toEqual({ codespaces: [brief], unavailable: [] });
     expect(data(fetched)).toEqual(brief);
     const repositories = await executeCodespaceTool(
       parseCodespaceToolParams({ action: "repositories" }),

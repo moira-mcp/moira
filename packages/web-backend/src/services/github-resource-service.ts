@@ -14,6 +14,8 @@ import {
   CodespaceRepositorySettings,
   type CodespaceConnectionService,
   type CodespaceSummaryView,
+  type CodespaceResourceListView,
+  codespaceObservationErrorCode,
   type CodespaceProviderResource,
   type GitHubResourceIdentity,
   type LocalDeviceService,
@@ -286,17 +288,36 @@ export class GitHubResourceService {
         : {}),
     };
   }
-  async listResources(userId: string) {
-    return Promise.all(
-      this.identities
-        .listOwned(userId)
-        .filter((resource) => resource.retirement !== "retired")
-        .map((resource) => this.getCodespace(userId, resource.id)),
+  async listResources(userId: string): Promise<CodespaceResourceListView> {
+    const identities = this.identities
+      .listOwned(userId)
+      .filter((resource) => resource.retirement !== "retired");
+    const observations = await Promise.allSettled(
+      identities.map((resource) => this.getCodespace(userId, resource.id)),
     );
+    const result: CodespaceResourceListView = { codespaces: [], unavailable: [] };
+    observations.forEach((observation, index) => {
+      if (observation.status === "fulfilled") {
+        result.codespaces.push(observation.value);
+        return;
+      }
+      const identity = identities[index]!;
+      result.unavailable.push({
+        codespace_id: identity.id,
+        provider: "github-codespaces",
+        repository_id: identity.repositoryId,
+        repository: identity.repositoryFullName,
+        requested_ref: identity.requestedRef,
+        created_at: identity.createdAt,
+        ...(identity.deviceId ? { device_id: identity.deviceId } : {}),
+        error: { code: codespaceObservationErrorCode(observation.reason) },
+      });
+    });
+    return result;
   }
   async refreshProviderState(userId: string) {
-    await this.listResources(userId);
-    return { stale: false };
+    const resources = await this.listResources(userId);
+    return { stale: resources.unavailable.length > 0 };
   }
   private uncertainty(
     resource: GitHubResourceIdentity,

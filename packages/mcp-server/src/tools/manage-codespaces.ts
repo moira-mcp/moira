@@ -9,6 +9,8 @@ import {
   localCodespaceFailureGuidance,
   parseLocalRepositoryTargetId,
   providerFailureSchema,
+  codespaceObservationErrorCode,
+  type CodespaceProviderErrorView,
   type GitHubProviderFailure,
   type CodespaceConnectionService,
   type CodespaceGuidanceSituation,
@@ -594,29 +596,42 @@ export async function executeCodespaceTool(
     const successful = results.filter(
       (entry) => !entry.result.isError && entry.result.structuredContent,
     );
-    if (successful.length === 0) return results[0].result;
+    const providerErrors: CodespaceProviderErrorView[] = results
+      .filter((entry) => entry.result.isError || !entry.result.structuredContent)
+      .map((entry) => ({
+        provider: entry.provider ?? "unknown",
+        error: {
+          code: codespaceObservationErrorCode(
+            (entry.result.structuredContent as { error?: { code?: unknown } } | undefined)?.error
+              ?.code,
+          ),
+        },
+      }));
     const projections: Array<Record<string, unknown> & { provider: string | undefined }> =
       successful.map((entry) => ({
         ...(entry.result.structuredContent as Record<string, unknown>),
         provider: entry.provider,
       }));
     const key = action === "list" ? "codespaces" : "repositories";
-    return jsonResult({
+    const result = jsonResult({
       [key]: projections.flatMap((entry) => (entry[key] ?? []) as unknown[]),
+      provider_errors: providerErrors,
       ...(action === "list"
         ? {
+            unavailable: projections.flatMap((entry) => (entry.unavailable ?? []) as unknown[]),
             provider_billing:
               projections.find((entry) => entry.provider === "github-codespaces")
                 ?.provider_billing ?? "unavailable",
           }
         : {}),
-      ...(projections.some((entry) => entry.warning)
+      ...(providerErrors.length || projections.some((entry) => entry.warning)
         ? {
             warning:
-              "Some provider data could not be refreshed; the last confirmed entries are shown.",
+              "Some provider data could not be observed; inspect provider_errors and unavailable entries.",
           }
         : {}),
     });
+    return successful.length === 0 ? { ...result, isError: true } : result;
   }
   if (services.select && ("repository_id" in params || "codespace_id" in params)) {
     try {
@@ -684,6 +699,13 @@ export async function executeCodespaceTool(
         action === "list" && listInput.refresh === true && !grants.stale && services.resource
           ? await services.resource.refreshProviderState(userId, { authorizationFresh: true })
           : { stale: listInput.refresh === true && grants.stale };
+      const listed =
+        action === "list"
+          ? ((await services.resource?.listResources(userId)) ?? {
+              codespaces: [],
+              unavailable: [],
+            })
+          : undefined;
       status = services.connection.getStatus(userId);
       return jsonResult({
         ...(action === "list" && services.billing
@@ -699,13 +721,14 @@ export async function executeCodespaceTool(
                 })) ?? [],
             }
           : {
-              codespaces:
-                (await services.resource?.listResources(userId))?.map(projectCodespace) ?? [],
+              codespaces: listed!.codespaces.map(projectCodespace),
+              unavailable: listed!.unavailable,
             }),
-        ...(grants.stale || resources.stale
+        ...(grants.stale || resources.stale || listed?.unavailable.length
           ? {
-              warning:
-                "The provider could not refresh this view; the last confirmed entries are shown.",
+              warning: listed?.unavailable.length
+                ? "Some resources could not be observed; inspect unavailable entries."
+                : "The provider could not refresh this view; the last confirmed entries are shown.",
             }
           : {}),
       });

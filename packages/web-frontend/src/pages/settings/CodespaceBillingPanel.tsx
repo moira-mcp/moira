@@ -113,9 +113,10 @@ export function CodespaceBillingFromData(): React.JSX.Element | null {
   const { management } = useGitHubCodespaces();
   if (!management) return null;
   const selected = management.providers?.find((entry) => entry.provider === "github-codespaces");
-  return (
-    <CodespaceBillingPanel
-      billing={selected?.provider_billing ?? management.provider_billing ?? "unavailable"}
-    />
-  );
+  const billing = selected
+    ? "provider_billing" in selected
+      ? selected.provider_billing
+      : "unavailable"
+    : management.provider_billing;
+  return <CodespaceBillingPanel billing={billing ?? "unavailable"} />;
 }

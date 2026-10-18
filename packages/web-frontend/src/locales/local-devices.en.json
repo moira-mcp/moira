@@ -70,6 +70,8 @@
     "resourcesStale": "The computer could not confirm every codespace. The last confirmed states are kept; check again.",
     "reconcile": "Check state again",
     "observationFailed": "State could not be confirmed",
+    "providerUnavailable": "Provider data could not be loaded",
+    "unavailableIdentity": "This environment is registered, but its current state cannot be confirmed. Refresh its state before managing it.",
     "needsAttention": "{{state}} · Needs attention",
     "requestAccepted": "Request accepted. Completion has not been confirmed yet.",
     "refPlaceholder": "Enter an existing branch, tag or commit",
