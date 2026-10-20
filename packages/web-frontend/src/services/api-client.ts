@@ -1103,6 +1103,18 @@ export class MoiraApiClient {
     return response.data.data!.codespace;
   }
 
+  async resumeLocalCodespaceSetup(
+    codespaceId: string,
+    requestId: string,
+    generation: number,
+  ): Promise<CodespaceSummaryView> {
+    const response = await this.client.post<ApiResponse<{ codespace: CodespaceSummaryView }>>(
+      `/integrations/github/codespaces/${encodeURIComponent(codespaceId)}/resume_setup`,
+      { request_id: requestId, expected_generation: generation },
+    );
+    return response.data.data!.codespace;
+  }
+
   async deleteGitHubCodespace(
     codespaceId: string,
     expectedGeneration: number,

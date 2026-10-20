@@ -105,6 +105,12 @@ export function sameDirectoryIdentity(
   left: DirectoryIdentity | null | undefined,
   right: DirectoryIdentity | null | undefined,
 ): boolean;
+export function publishDirectoryNoReplace(
+  parent: FileHandle,
+  stageName: string,
+  targetName: string,
+  stage: FileHandle,
+): Promise<DirectoryIdentity>;
 export function verifyParentIdentity(
   root: FileRoot,
   relative: string,

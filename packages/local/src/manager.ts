@@ -1,6 +1,11 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import { z } from "zod";
-import { LocalRecords, policyForSpace, type LocalSpace } from "./space-record.js";
+import {
+  LocalRecords,
+  policyForSpace,
+  requireSetupRecovery,
+  type LocalSpace,
+} from "./space-record.js";
 import {
   LocalRefusal,
   requireLocalGrant,
@@ -169,7 +174,11 @@ export class LocalManager {
       });
       this.broker = await startBroker(
         {
-          authorize: (credential) => this.records.authorize(credential),
+          authorize: (credential) =>
+            this.records.authorize(
+              credential,
+              (space) => this.guards.get(space.id)?.setupGeneration === space.generation,
+            ),
           budget,
           ...github,
           onFault,
@@ -282,6 +291,48 @@ export class LocalManager {
         await this.records.state.write("policy.json", next);
       }
     });
+  }
+  /** The daemon's existing observation cycle retries only ready, known local owners. */
+  async refreshWorkspaceEnrollments(): Promise<{ spaceId: string; code: string }[]> {
+    const policy = await this.records.policyOrNull();
+    if (!policy?.enabled || !this.broker || !this.tunnel) return [];
+    const unavailable: { spaceId: string; code: string }[] = [];
+    for (const saved of await this.records.list()) {
+      if (
+        saved.desiredState !== "running" ||
+        saved.phase !== "usable" ||
+        saved.failure !== null ||
+        !saved.runtimeId
+      )
+        continue;
+      const guard = await this.serial(`space:${saved.id}`, async () => {
+        try {
+          const current = await this.require(saved.id);
+          if (current.generation !== saved.generation || current.desiredState !== "running") return;
+          let guard = this.guards.get(saved.id);
+          if (!guard?.active) {
+            guard = await (await this.owner()).space(saved.id);
+            this.guards.set(saved.id, guard);
+          }
+          return guard;
+        } catch (error) {
+          unavailable.push({
+            spaceId: saved.id,
+            code: error instanceof LocalRefusal ? error.code : "LOCAL_OBSERVATION_UNKNOWN",
+          });
+        }
+      });
+      // Optional cloud acquisition must not retain local lifecycle admission.
+      try {
+        await guard?.refreshRemote?.();
+      } catch (error) {
+        unavailable.push({
+          spaceId: saved.id,
+          code: error instanceof LocalRefusal ? error.code : "LOCAL_OBSERVATION_UNKNOWN",
+        });
+      }
+    }
+    return unavailable;
   }
   async close(keepLock = false): Promise<void> {
     await this.closeResources(keepLock);
@@ -485,12 +536,12 @@ export class LocalManager {
       if (space.failure === "LOCAL_SETUP_INCOMPLETE" || space.lastStartedAt === null)
         throw new LocalRefusal(
           "LOCAL_SETUP_INCOMPLETE",
-          "Guest preparation did not finish. Delete this codespace after confirmed cleanup, then create a new one.",
+          "Guest preparation did not finish. Resume setup explicitly on this same known codespace.",
         );
       if (space.phase !== "usable" && space.phase !== "stopped") {
         throw new LocalRefusal(
           "LOCAL_SETUP_INCOMPLETE",
-          "Guest preparation did not finish. Delete this codespace after confirmed cleanup, then create a new one.",
+          "Guest preparation did not finish. Resume setup explicitly on this same known codespace.",
         );
       }
       await (this.dependencies.storage ?? admitStorage)(policy);
@@ -514,6 +565,30 @@ export class LocalManager {
       }
       this.guards.delete(id);
       return this.prepare(space, false, true, onAdmitted);
+    });
+  }
+
+  /** A new explicit setup operation; it never retries the original create receipt. */
+  async resumeSetup(id: string, onAdmitted?: () => void | Promise<void>): Promise<LocalSpace> {
+    return this.serial(`space:${id}`, async () => {
+      const space = await this.require(id);
+      const policy = await this.records.policy();
+      requireLocalGrant(policy, space.repositoryId);
+      requireSetupRecovery(space);
+      if (this.guards.get(id)?.setupGeneration !== undefined)
+        throw new LocalRefusal(
+          "LOCAL_STOP_PENDING",
+          "The original setup is still pending; collect its original operation before recovery.",
+        );
+      if (!this.tunnel)
+        throw new LocalRefusal("LOCAL_NOT_RUNNING", "Start the local companion first.");
+      await (this.dependencies.storage ?? admitStorage)(policy);
+      const guard = await (await this.owner()).space(id, "resume-setup");
+      this.guards.set(id, guard);
+      await onAdmitted?.();
+      // No cleanup stop: this operation owns preparation of an existing bound VM.
+      await guard.prepare();
+      return this.require(id);
     });
   }
 
@@ -730,6 +805,8 @@ export class LocalManager {
               : "unknown"),
         phase: space.phase,
         failure: observationFailure ?? actual?.failure ?? space.failure,
+        ...(space.remote ? { remote: space.remote } : {}),
+        ...(space.setupFailure ? { setupFailure: space.setupFailure } : {}),
         // Only the independent native owner can attest physical settlement. The persisted
         // phase alone is historical; an injected runtime or unavailable observation cannot.
         nativeStopConfirmed:

@@ -257,8 +257,8 @@ anything. `repositories` discovers approved targets and `local_devices` discover
 Local pairing, repository admission and work permission until explicit disable remain owner-controlled and do not
 require the GitHub Codespaces provider to be enabled.
 
-For both providers, `create`, `start`, `stop`, `delete` and GitHub `adopt` require a caller-chosen `request_id` in
-`ws1-<lowercase UUID>` form. Start/stop/delete also require the resource's observed `generation`;
+For both providers, `create`, `start`, `stop`, `delete`, Local `resume_setup` and GitHub `adopt` require a caller-chosen `request_id` in
+`ws1-<lowercase UUID>` form. Start/resume_setup/stop/delete also require the resource's observed `generation`;
 the owner refuses a stale generation with `CODESPACE_GENERATION_CONFLICT`, rather than repairing
 authorization or using a newer value on the caller's behalf. Get/list expose that generation and
 `pending_request_ids` from the live owner. Collect the original receipt with
@@ -282,7 +282,20 @@ their absence does not certify that no request was admitted. `provider_errors` i
 that failed to produce a view, including when all providers failed; successful peers remain visible.
 Settings shows unavailable identities read-only until a current observation supplies lifecycle authority.
 
-On the computer, the host CLI uses the running private controller for `create`, `start`, `stop`,
+Local `resume_setup` continues incomplete preparation on the same proved VM/disk after its
+reported prerequisite is repaired. It preserves repository/user files and the original create
+result; ordinary start and custody `recover` remain separate. Unknown creation is collected,
+not adopted or replaced. An initial unknown guest outcome must first receive exact stopped-custody
+acknowledgement; setup remains incomplete until explicit same-VM resume succeeds.
+Optional `setup_failure` reports `repository_unproven` (inspect the
+preserved root), `prerequisite_unavailable` (Python3/libc/filesystem exclusive publication),
+`repository_checkout_failed` (repair access/ref) or `configuration_failed` (inspect fixed setup diagnostics).
+Optional observed `remote.state` is `unconfigured`, `enrollment_unavailable`, `connecting`,
+`connected`, `unavailable` or `refused`. A usable Unix service need not be remotely reachable;
+missing health is unknown. Temporary enrollment/store/transport failure does not revoke authority;
+confirmed refusal closes that remote authority. Remote calls still need a live authorized route.
+
+On the computer, the host CLI uses the running private controller for `create`, `start`, `resume-setup`, `stop`,
 `remove --confirm` and `collect`. Fresh creation needs live cloud route registration and initial
 Git authority; admitted VMs can be managed offline under applicable current owner rights.
 Starting requires enabled work permission; owner-confirmed cleanup does not enable it. Ordinary

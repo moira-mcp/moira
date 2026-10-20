@@ -104,6 +104,13 @@ export const controllerLifecycleSchema = z.discriminatedUnion("action", [
     .object({
       requestId: controllerRequestIdSchema,
       expectedGeneration: generation,
+      action: z.literal("resume_setup"),
+    })
+    .strict(),
+  z
+    .object({
+      requestId: controllerRequestIdSchema,
+      expectedGeneration: generation,
       action: z.literal("stop"),
     })
     .strict(),

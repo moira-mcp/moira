@@ -55,6 +55,9 @@ type Consume<T> = (range: {
   size: number;
 }) => Promise<T>;
 export interface WorkspaceOwner {
+  configureRemote(
+    configuration?: Pick<WorkspaceOwnerOptions, "publicationScope" | "communicationTransport">,
+  ): Promise<void>;
   execute(body: Value): Promise<Value>;
   nativeUpload(body: Value): Promise<Value>;
   write(input: {

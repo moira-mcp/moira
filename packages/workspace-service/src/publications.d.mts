@@ -40,6 +40,11 @@ export type PublicationSource = PublicationMetadata &
     close(): Promise<void>;
   };
 
+export type PublicationCaptureInput = Omit<PublicationInput, "path"> & {
+  stream: AsyncIterable<Uint8Array>;
+  sourceIdentity: object;
+};
+
 export function serveOwnerPublication(
   openSource: (token: string, signal?: AbortSignal) => Promise<PublicationSource>,
   token: string,
@@ -64,13 +69,13 @@ export function createOwnerPublications(options: {
   withCommitLock?<T>(work: () => Promise<T>): Promise<T>;
   now?: () => number;
 }): Promise<{
+  configureScope(scope?: PublicationScope): void;
+  snapshot(): {
+    capture(input: PublicationCaptureInput): Promise<PublicationMetadata>;
+    openSource(token: string, signal?: AbortSignal): Promise<PublicationSource>;
+  };
   publish(input: PublicationInput): Promise<PublicationMetadata>;
-  capture(
-    input: Omit<PublicationInput, "path"> & {
-      stream: AsyncIterable<Uint8Array>;
-      sourceIdentity: object;
-    },
-  ): Promise<PublicationMetadata>;
+  capture(input: PublicationCaptureInput): Promise<PublicationMetadata>;
   openSource(token: string, signal?: AbortSignal): Promise<PublicationSource>;
   serve(token: string, response: ServerResponse): Promise<void>;
   close(): Promise<void>;

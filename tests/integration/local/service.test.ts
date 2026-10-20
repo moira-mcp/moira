@@ -40,6 +40,7 @@ async function fixture(
     pause?: true;
   },
   failOpen = false,
+  restoreNeedsController = false,
 ) {
   const root = await realpath(await mkdtemp(join(tmpdir(), "moira-service-")));
   const state = await PrivateState.open(root);
@@ -72,6 +73,10 @@ async function fixture(
   let unlock: (() => Promise<void>) | undefined;
   let active = retained?.phase === "selected" ? staged : release;
   let closed = false;
+  let controllerOnline!: () => void;
+  const controllerReady = new Promise<void>((resolve) => {
+    controllerOnline = resolve;
+  });
   const manager = {
     records: local.records,
     holdRunnerLock: async () => {
@@ -84,7 +89,10 @@ async function fixture(
       if (retained && retained.phase !== "selected")
         throw new Error("Pending maintenance admitted physical work");
     },
-    restoreIntendedWork: async () => ({ restored: [local.space.id], unavailable: [] }),
+    restoreIntendedWork: async () => {
+      if (restoreNeedsController) await controllerReady;
+      return { restored: [local.space.id], unavailable: [] };
+    },
     release: async () => {
       await unlock?.();
       unlock = undefined;
@@ -100,6 +108,7 @@ async function fixture(
     status: { controlPlane: "offline", code: null },
     prepareMaintenance: async () => undefined,
     run: async (signal: AbortSignal, physicalStop: () => boolean, keepLock = false) => {
+      controllerOnline();
       await new Promise<void>((done) => {
         signal.addEventListener("abort", () => done(), { once: true });
         if (signal.aborted) done();
@@ -187,6 +196,27 @@ async function fixture(
     },
   };
 }
+
+test("a selected host owner establishes its controller while same-VM restoration needs enrollment", async () => {
+  // Guest restoration's credential callback needs the controller; starting it
+  // only after restoration would leave both sides waiting indefinitely.
+  const id = requestId(),
+    f = await fixture(false, { requestId: id, phase: "selected" }, false, true);
+  try {
+    expect(await f.observe()).toMatchObject({ ready: true, release: staged });
+    expect(await collectServiceMaintenance(f.state, id)).toMatchObject({
+      phase: "completed",
+      recovery: { restored: [f.space.id] },
+    });
+    expect(await f.records.get(f.space.id)).toMatchObject({
+      runtimeId: f.space.runtimeId,
+      desiredState: "running",
+      generation: 3,
+    });
+  } finally {
+    await f.close();
+  }
+});
 
 test("a real CLI observer exits while the original owner endpoint and running intent remain", async () => {
   const f = await fixture();
@@ -385,7 +415,17 @@ test("same-VM recovery reports one guest refusal, restores a healthy peer and pr
   const root = await realpath(await mkdtemp(join(tmpdir(), "moira-recovery-")));
   const state = await PrivateState.open(root),
     f = await localFixture(state);
-  const bad = { ...f.space, runtimeId: "refused-runtime", phase: "stopped" as const },
+  const bad = {
+      ...f.space,
+      runtimeId: "refused-runtime",
+      phase: "stopped" as const,
+      admittedMachine: {
+        cpuCores: f.policy.runtime.cpuCores,
+        memoryBytes: f.policy.runtime.memoryBytes,
+        dockerBytes: f.policy.runtime.dockerBytes,
+      },
+      admittedRepositoryFullName: f.policy.repositories[0].fullName,
+    },
     id = randomUUID();
   const peer = {
     ...bad,
@@ -459,6 +499,15 @@ test("authority refusal detaches a real route while original work remains owned 
     credential: "a".repeat(43),
     pairingId: randomUUID(),
   };
+  Object.assign(f.space, {
+    admittedMachine: {
+      cpuCores: f.policy.runtime.cpuCores,
+      memoryBytes: f.policy.runtime.memoryBytes,
+      dockerBytes: f.policy.runtime.dockerBytes,
+    },
+    admittedRepositoryFullName: f.policy.repositories[0].fullName,
+  });
+  await f.records.put(f.space);
   await state.write("connection.json", connection);
   let refused = false,
     owner: LocalController | undefined,

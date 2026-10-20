@@ -371,6 +371,8 @@ export class LocalDeviceService {
           "WORKSPACE_OUTCOME_UNCONFIRMED",
           "WORKSPACE_OUTCOME_UNKNOWN",
           "LOCAL_CUSTODY_UNCONFIRMED",
+          "LOCAL_CREATE_UNKNOWN",
+          "LOCAL_GUEST_SETTLEMENT_UNKNOWN",
         ].includes(code) ||
           scopedCredentialFailureOutcome(code) === "unconfirmed")
       )
@@ -383,6 +385,11 @@ export class LocalDeviceService {
         throw new CodespaceResourceError(
           "CODESPACE_GENERATION_CONFLICT",
           operation.outcome.error.message,
+        );
+      if (lifecycle && code === "LOCAL_SETUP_INCOMPLETE")
+        throw new CodespaceResourceError(
+          "CODESPACE_LOCAL_SETUP_INCOMPLETE",
+          "The known environment's preparation is incomplete; repair its prerequisite and resume setup.",
         );
       throw new LocalDeviceError(
         code === "LOCAL_UNAUTHORIZED" ||

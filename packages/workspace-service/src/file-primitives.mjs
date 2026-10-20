@@ -4,6 +4,7 @@ import { constants } from "node:fs";
 import { lstat, open, readFile, rename, rm } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import process from "node:process";
+import { spawn } from "node:child_process";
 
 const MAX_FILE_PATH_BYTES = 4096;
 const DESCRIPTOR_ROOT = process.platform === "linux" ? "/proc/self/fd" : "/dev/fd";
@@ -296,6 +297,86 @@ export async function directoryIdentity(handle) {
 
 export function sameDirectoryIdentity(left, right) {
   return Boolean(left && right && left.dev === right.dev && left.ino === right.ino);
+}
+
+// Linux has no Node directory-rename no-replace API. Pass held descriptors to
+// libc rather than resolving caller paths again or falling back to replacement.
+const EXCLUSIVE_DIRECTORY_RENAME = String.raw`
+import errno, os, stat, sys
+source, target = sys.argv[1:]
+try:
+    import ctypes
+    library = ctypes.CDLL(None, use_errno=True)
+    rename = library.renameat2
+except (ImportError, OSError, AttributeError):
+    sys.exit(3)
+rename.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_char_p, ctypes.c_uint]
+rename.restype = ctypes.c_int
+held = os.fstat(4)
+named = os.stat(source, dir_fd=3, follow_symlinks=False)
+if not stat.S_ISDIR(held.st_mode) or not stat.S_ISDIR(named.st_mode) or (held.st_dev, held.st_ino) != (named.st_dev, named.st_ino):
+    sys.exit(4)
+if rename(3, os.fsencode(source), 3, os.fsencode(target), 1) != 0:
+    error = ctypes.get_errno()
+    sys.exit(2 if error in (errno.EEXIST, errno.ENOTEMPTY) else 3 if error in (errno.ENOSYS, errno.EINVAL, errno.EOPNOTSUPP, errno.EPERM) else 4)
+published = os.stat(target, dir_fd=3, follow_symlinks=False)
+if not stat.S_ISDIR(published.st_mode) or (held.st_dev, held.st_ino) != (published.st_dev, published.st_ino):
+    sys.exit(4)
+os.fsync(3)
+`;
+
+/** Atomically publish an owned directory, preserving every occupied destination. */
+export async function publishDirectoryNoReplace(parent, stageName, targetName, stage) {
+  for (const name of [stageName, targetName]) {
+    if (safeRelativePath(name) !== name || name.includes("/"))
+      failFile("unsafe_access", "directory publication requires basenames");
+  }
+  if (stageName === targetName)
+    failFile("unsafe_access", "directory publication requires distinct entries");
+  if (process.platform !== "linux")
+    failFile("unsupported", "Local setup requires Linux exclusive directory publication");
+  const expected = await directoryIdentity(stage);
+  await directoryIdentity(parent);
+  let outcome;
+  try {
+    outcome = await new Promise((done, reject) => {
+      const child = spawn(
+        "/usr/bin/python3",
+        ["-I", "-c", EXCLUSIVE_DIRECTORY_RENAME, stageName, targetName],
+        {
+          stdio: ["ignore", "ignore", "ignore", parent.fd, stage.fd],
+          env: { PATH: "/usr/bin:/bin", LANG: "C.UTF-8" },
+        },
+      );
+      child.once("error", reject);
+      child.once("close", (code) => done(code));
+    });
+  } catch (error) {
+    if (error.code === "ENOENT")
+      failFile("unsupported", "Local setup requires Python3 and libc renameat2 support");
+    throw error;
+  }
+  if (outcome === 2)
+    failFile("concurrent_change", "repository destination is occupied and was preserved");
+  if (outcome === 3)
+    failFile(
+      "unsupported",
+      "Local setup requires Python3/libc/filesystem exclusive rename support",
+    );
+  if (outcome !== 0)
+    failFile("concurrent_change", "directory publication outcome requires identity inspection");
+  const published = await open(
+    descriptorPath(parent, targetName),
+    constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW,
+  );
+  try {
+    if (!sameDirectoryIdentity(expected, await directoryIdentity(published)))
+      failFile("concurrent_change", "published repository directory changed");
+    await syncDirectory(parent);
+    return expected;
+  } finally {
+    await published.close();
+  }
 }
 
 export async function verifyParentIdentity(root, relative, expected) {

@@ -749,43 +749,54 @@ export async function createWorkspaceOwner({
     environmentIdentity: life,
     engine,
   });
-  if (publicationScope)
-    communication = await createOwnerCommunication({
-      stateRoot,
-      publications,
-      scope: {
-        kind: "workspace",
-        resourceId: publicationScope.resourceId,
-        resourceGeneration: publicationScope.resourceGeneration,
-        authorizationGeneration: publicationScope.authorizationGeneration,
-        environmentIdentity: life,
-      },
-      transport: communicationTransport,
-      sourceProxy,
-      sourceOpener,
-      renderProgress,
-      renderMaterialize,
-      deliverExtension,
-      extensionArtifact: communicationTransport?.artifact,
-      handlerHost: join(ownerRuntimeDirectory, "extension-handler-host.mjs"),
-      admit: (requestId, inputDigest, work) =>
-        inLane(requestId, async () => {
-          const directory = await requestDirectory(requestId),
-            accepted = await optionalJson(join(directory, "accepted.json"));
-          if (accepted) {
-            if (accepted.kind !== "communication" || accepted.digest !== inputDigest)
-              refuse("REQUEST_ID_CONFLICT", 409);
-            const receipt = await communication.inspect(requestId);
-            return receipt.state === "absent" ? { requestId, state: "unconfirmed" } : receipt;
-          }
-          await engine.writeDurableJson(directory, "accepted.json", {
-            kind: "communication",
-            digest: inputDigest,
-            environmentIdentity: life,
-          });
-          return journalOutcome(directory, work);
-        }),
+  const communicationScope = (scope) =>
+    scope
+      ? {
+          kind: "workspace",
+          resourceId: scope.resourceId,
+          resourceGeneration: scope.resourceGeneration,
+          authorizationGeneration: scope.authorizationGeneration,
+          environmentIdentity: life,
+        }
+      : undefined;
+  communication = await createOwnerCommunication({
+    stateRoot,
+    publications,
+    scope: communicationScope(publicationScope),
+    transport: communicationTransport,
+    sourceProxy,
+    sourceOpener,
+    renderProgress,
+    renderMaterialize,
+    deliverExtension,
+    extensionArtifact: communicationTransport?.artifact,
+    handlerHost: join(ownerRuntimeDirectory, "extension-handler-host.mjs"),
+    admit: (requestId, inputDigest, work) =>
+      inLane(requestId, async () => {
+        const directory = await requestDirectory(requestId),
+          accepted = await optionalJson(join(directory, "accepted.json"));
+        if (accepted) {
+          if (accepted.kind !== "communication" || accepted.digest !== inputDigest)
+            refuse("REQUEST_ID_CONFLICT", 409);
+          const receipt = await communication.inspect(requestId);
+          return receipt.state === "absent" ? { requestId, state: "unconfirmed" } : receipt;
+        }
+        await engine.writeDurableJson(directory, "accepted.json", {
+          kind: "communication",
+          digest: inputDigest,
+          environmentIdentity: life,
+        });
+        return journalOutcome(directory, work);
+      }),
+  });
+  owner.configureRemote = (configuration = {}) => {
+    publications.configureScope(configuration.publicationScope);
+    communication.configure({
+      scope: communicationScope(configuration.publicationScope),
+      transport: configuration.communicationTransport,
+      extensionArtifact: configuration.communicationTransport?.artifact,
     });
+  };
   // Only the new service's private namespace owns these transactions. An interrupted
   // commit is rolled back from retained inode proof; it is never replayed as a request.
   for (const entry of await readdir(requestsRoot)) {

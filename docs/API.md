@@ -1832,6 +1832,13 @@ time, lifecycle error, owner generation and timestamps. Assigned resources expos
 `device_id` and unfinished original `pending_request_ids`. Missing live observation
 does not manufacture a machine, current ref or lifecycle generation.
 
+Local summaries can include `remote: {state}` independently of local Unix readiness.
+Its states are `unconfigured`, `enrollment_unavailable`, `connecting`, `connected`,
+`unavailable` and `refused`; an omitted field means no observation is available.
+Optional `setup_failure` reports `repository_unproven`, `prerequisite_unavailable`,
+`repository_checkout_failed` or `configuration_failed`. These bounded reasons explain
+incomplete preparation without returning Git output, host paths or credentials.
+
 ### GET /api/integrations/github/codespaces
 
 Returns `{success:true,data:{readiness,connection,repositories,repositories_stale,
@@ -1887,6 +1894,22 @@ stale admission returns `409 CODESPACE_GENERATION_CONFLICT`. Successful start/st
 returns `{codespace,data_preserved:true}`; deletion returns
 `{codespace,data_preserved:false}` only after exact physical absence is established.
 
+`POST /:codespaceId/resume_setup` accepts `{request_id,expected_generation}` for an
+existing owned Local codespace whose known VM and admitted machine have incomplete
+preparation. MCP exposes `codespace({action:"resume_setup",…})`; the host CLI uses
+`moira-local resume-setup SPACE_ID`. Repair the reported prerequisite, then submit
+this explicit intent with a fresh request identity and the observed generation.
+It continues on the same VM/disk and preserves the original creation receipt.
+GitHub resources do not support this action. An unknown creation must be collected
+under its original request; unknown guest settlement requires separate local custody
+recovery. Neither authorizes guessing a VM identity or creating a replacement.
+
+For a known incomplete VM with retained guest-settlement uncertainty, local custody
+recovery first verifies that exact VM is physically stopped. Acknowledgement retains
+the failed phase and `LOCAL_SETUP_INCOMPLETE`; it does not make ordinary Start valid.
+Then use explicit setup resume on the same VM. The original creation outcome remains
+preserved; recovery does not repeat the original creation.
+
 Local browser deletion uses owner-approved web control for that exact generation,
 independently of agent delete permission or enabled agent work. MCP retains agent
 permissions. Current account/device and binding authority remain mandatory.
@@ -1939,16 +1962,25 @@ versions of `x-moira-user-id`, `x-moira-device-id`, `x-moira-device-generation` 
 server-owned revalidation and exact expiry fence CONTROL and DATA independently of
 peer heartbeats. Observer loss does not cancel accepted work or replay an effect.
 
+The guest Unix API becomes ready after its repository binding, measured life and
+packaged release are verified; it does not wait for CONTROL registration. Remote
+enrollment and reachability are reported separately. A temporary authority-store or
+internal Upgrade failure returns an empty-body 503; explicit typed authority,
+identity and protocol refusals return 403. The remote adapter reconnects temporary
+failures without retaining or resubmitting operation payloads. A CONTROL handshake
+401/403 retires that remote authority. DATA rendezvous failure closes its transport
+epoch without replay. These outcomes do not change Local VM desired state.
+
 The Local controller's private API provides:
 
-| Method and path                            | Contract                                                                                   |
-| ------------------------------------------ | ------------------------------------------------------------------------------------------ |
-| `GET /v1/controller/health`                | Pairing `connectionId` and live `incarnation`                                              |
-| `GET /v1/controller`                       | Current policy, control, resource observations and unfinished original IDs                 |
-| `PUT /v1/controller/settings`              | `{requestId,expectedGeneration,expectedRevision,settings}`                                 |
-| `POST /v1/controller/repositories`         | Exact delegated repository admission with identity/revision guards                         |
-| `POST /v1/resources/:resourceId/lifecycle` | Create/start/stop/delete/snapshot with original `requestId` and exact `expectedGeneration` |
-| `GET /v1/controller/operations/:requestId` | Inspect the original receipt; no effect dispatch                                           |
+| Method and path                            | Contract                                                                                                |
+| ------------------------------------------ | ------------------------------------------------------------------------------------------------------- |
+| `GET /v1/controller/health`                | Pairing `connectionId` and live `incarnation`                                                           |
+| `GET /v1/controller`                       | Current policy, control, resource observations and unfinished original IDs                              |
+| `PUT /v1/controller/settings`              | `{requestId,expectedGeneration,expectedRevision,settings}`                                              |
+| `POST /v1/controller/repositories`         | Exact delegated repository admission with identity/revision guards                                      |
+| `POST /v1/resources/:resourceId/lifecycle` | Create/start/resume_setup/stop/delete/snapshot with original `requestId` and exact `expectedGeneration` |
+| `GET /v1/controller/operations/:requestId` | Inspect the original receipt; no effect dispatch                                                        |
 
 The device controller owns physical VM lifecycle, settings and their durable journals.
 Resource admission serializes validation, generation change and durable binding before

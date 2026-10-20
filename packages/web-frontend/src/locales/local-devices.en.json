@@ -69,6 +69,21 @@
     "notObserved": "State has not been confirmed yet",
     "resourcesStale": "The computer could not confirm every codespace. The last confirmed states are kept; check again.",
     "reconcile": "Check state again",
+    "resumeSetup": "Resume setup",
+    "setupFailure": {
+      "repository_unproven": "The existing workspace root could not be verified as this repository. Its files were preserved. Inspect and repair the repository binding before resuming setup; do not overwrite the checkout.",
+      "prerequisite_unavailable": "A required Python or libc prerequisite is unavailable in the guest. Repair the guest prerequisite, then resume setup of this same environment.",
+      "repository_checkout_failed": "The approved repository checkout could not be prepared. Check repository access and the requested Git ref, then resume setup without replacing the environment.",
+      "configuration_failed": "Workspace configuration did not complete. Check this environment's local setup diagnostics, repair the reported prerequisite, then resume setup."
+    },
+    "remote": {
+      "unconfigured": "Remote access is not configured; local readiness is independent.",
+      "enrollment_unavailable": "Cloud registration is temporarily unavailable; local readiness is independent.",
+      "connecting": "Remote access is connecting; local readiness is independent.",
+      "connected": "Remote access is connected.",
+      "unavailable": "The remote connection is unavailable; local readiness is independent.",
+      "refused": "Remote access was refused. Check the current authorization."
+    },
     "observationFailed": "State could not be confirmed",
     "providerUnavailable": "Provider data could not be loaded",
     "unavailableIdentity": "This environment is registered, but its current state cannot be confirmed. Refresh its state before managing it.",

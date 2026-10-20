@@ -4,7 +4,7 @@ import { z } from "zod";
 import { createHash, randomUUID } from "node:crypto";
 import { setTimeout as pause } from "node:timers/promises";
 import { PrivateState, hostBootIdentity } from "./private-state.js";
-import { LocalRecords } from "./space-record.js";
+import { LocalRecords, requireSetupRecovery } from "./space-record.js";
 import { RuntimeOwner } from "./runtime-owner.js";
 import { DeviceRuntimeControl } from "./runtime-control.js";
 import { RuntimeDeviceOwner } from "./runtime-device-owner.js";
@@ -486,14 +486,17 @@ export async function prepareLocalCredentialRecovery(records: LocalRecords): Pro
 
 export interface SpaceGuard {
   readonly active: boolean;
+  /** Exact admitted generation only while the fixed setup operation is pending. */
+  readonly setupGeneration?: number;
   prepare(): Promise<void>;
+  refreshRemote?(): Promise<void>;
   validate(): Promise<void>;
   stop(): Promise<void>;
 }
 export interface DeviceGuard {
   readonly active: boolean;
   release?(): Promise<void>;
-  space(id: string, activate?: boolean): Promise<SpaceGuard>;
+  space(id: string, activate?: boolean | "resume-setup"): Promise<SpaceGuard>;
   observe(spaceId?: string): Promise<LocalVmObservation[]>;
   retire(id: string, generation: number): Promise<void>;
   remove(id: string, generation: number, localApproval: boolean): Promise<void>;
@@ -517,7 +520,9 @@ const callSchema = z.discriminatedUnion("action", [
     .strict(),
   z.object({ ...scope, action: z.literal("admit") }).strict(),
   z.object({ ...scope, action: z.literal("start-space") }).strict(),
+  z.object({ ...scope, action: z.literal("resume-setup") }).strict(),
   z.object({ ...admittedScope, action: z.literal("prepare") }).strict(),
+  z.object({ ...admittedScope, action: z.literal("refresh-remote") }).strict(),
   z.object({ ...admittedScope, action: z.literal("validate") }).strict(),
   z.object({ ...admittedScope, action: z.literal("stop-space") }).strict(),
   z.object({ ...admittedScope, action: z.literal("retire-space") }).strict(),
@@ -583,7 +588,9 @@ export const startGuard: StartGuard = (root, mode = "work", signal) =>
       action:
         | "admit"
         | "start-space"
+        | "resume-setup"
         | "prepare"
+        | "refresh-remote"
         | "validate"
         | "stop-space"
         | "observe"
@@ -605,7 +612,7 @@ export const startGuard: StartGuard = (root, mode = "work", signal) =>
             ? { id, action, ...(spaceId ? { spaceId } : {}) }
             : action === "remove-space"
               ? { id, action, spaceId, generation, localApproval: value }
-              : action === "admit" || action === "start-space"
+              : action === "admit" || action === "start-space" || action === "resume-setup"
                 ? { id, action, spaceId }
                 : { id, action, spaceId, generation };
         child.send(message, (error) => {
@@ -716,22 +723,46 @@ export const startGuard: StartGuard = (root, mode = "work", signal) =>
               .number()
               .int()
               .positive()
-              .parse(await request(spaceId, activate ? "start-space" : "admit"));
+              .parse(
+                await request(
+                  spaceId,
+                  activate === "resume-setup" ? "resume-setup" : activate ? "start-space" : "admit",
+                ),
+              );
             const scope = { active: true };
             const existing = scopes.get(spaceId) ?? new Set();
             existing.add(scope);
             scopes.set(spaceId, existing);
             let stopped = false;
+            let preparing = 0;
             return {
               get active() {
                 return scope.active && !stopped && !closed && !shutdown && child.connected;
               },
+              get setupGeneration() {
+                return preparing > 0 &&
+                  scope.active &&
+                  !stopped &&
+                  !closed &&
+                  !shutdown &&
+                  child.connected
+                  ? generation
+                  : undefined;
+              },
               prepare: async () => {
                 if (stopped) throw unavailable();
-                await request(spaceId, "prepare", undefined, generation);
+                preparing++;
+                try {
+                  await request(spaceId, "prepare", undefined, generation);
+                } finally {
+                  preparing--;
+                }
               },
               validate: async () => {
                 await request(spaceId, "validate", undefined, generation);
+              },
+              refreshRemote: async () => {
+                await request(spaceId, "refresh-remote", undefined, generation);
               },
               stop: async () => {
                 if (stopped) return;
@@ -1039,13 +1070,33 @@ async function runGuard(
         sendGuardMessage({ retired: call.spaceId });
         return;
       }
-      if (call.action === "admit" || call.action === "start-space") {
+      if (
+        call.action === "admit" ||
+        call.action === "start-space" ||
+        call.action === "resume-setup"
+      ) {
         const admitted = (admissionTails.get(call.spaceId) ?? Promise.resolve())
           .catch(() => undefined)
           .then(async () => {
             if (stopping)
               throw new LocalRefusal("LOCAL_NOT_RUNNING", "The device owner is stopping.");
             let owner = owners.get(call.spaceId);
+            if (call.action === "resume-setup") {
+              const space = await records.get(call.spaceId);
+              if (!space)
+                throw new LocalRefusal("LOCAL_SANDBOX_ABSENT", "The setup target is absent.");
+              requireSetupRecovery(space);
+              if (owner?.preparing)
+                throw new LocalRefusal(
+                  "LOCAL_STOP_PENDING",
+                  "Collect the original pending setup before recovery.",
+                );
+              if (owner?.active) {
+                await owner.release();
+                owners.delete(call.spaceId);
+                owner = undefined;
+              }
+            }
             if (!owner?.active) {
               await owner?.stop();
               if (stopping)
@@ -1060,7 +1111,9 @@ async function runGuard(
               );
               owners.set(call.spaceId, owner);
               try {
-                await owner.admit(call.action === "start-space");
+                await owner.admit(
+                  call.action === "resume-setup" ? "resume-setup" : call.action === "start-space",
+                );
               } catch (error) {
                 // Failed initialization has no guest work to retire. Do not cache its rejected
                 // admission forever, nor mutate its generation just to discard that promise.
@@ -1109,6 +1162,7 @@ async function runGuard(
         }
       }
       if (call.action === "validate") return owner.validate();
+      if (call.action === "refresh-remote") return owner.refreshRemote();
       try {
         await owner.stop();
       } catch (error) {

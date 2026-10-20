@@ -4,14 +4,20 @@ import {
   spaceSchema,
   policyForSpace,
   requireSpaceGrant,
+  workspaceRemoteObservationSchema,
+  requireSetupRecovery,
   type LocalSpace,
 } from "./space-record.js";
-import { LocalRelay } from "./relay.js";
-import { localManagementOutcomeSchema } from "../../shared/src/codespaces/local-protocol.js";
+import { LocalRelay, LocalDeviceAuthorityFailure, localConnectionSchema } from "./relay.js";
+import { controllerIdentitySchema } from "../../shared/src/codespaces/local-controller-protocol.js";
+import {
+  localManagementOutcomeSchema,
+  workspaceSetupFailureSchema,
+} from "../../shared/src/codespaces/local-protocol.js";
 import type { LocalVmRuntime } from "./local-vm-runtime.js";
 import { createLocalVmRuntime } from "./local-vm-runtime-factory.js";
 import { runProcess, type RunProcess, type ProcessRequest, type ProcessResult } from "./process.js";
-import { guestAssets, installGuest, runtimeApiAsset } from "./assets.js";
+import { guestAssets, installGuest, runtimeApiAsset, type GuestAssets } from "./assets.js";
 import { LocalRefusal, type LocalPolicy } from "./policy.js";
 
 /** The independent guard owns every native call that can start this space. */
@@ -38,6 +44,16 @@ export class RuntimeOwner {
   private admittedGenerationValue = 0;
   private createdRuntimeId?: string;
   private managementTail: Promise<unknown> = Promise.resolve();
+  private assets?: Promise<GuestAssets>;
+  private enrollment?: Promise<void>;
+
+  private ownerAssets(): Promise<GuestAssets> {
+    this.assets ??= this.loadAssets().catch((error) => {
+      this.assets = undefined;
+      throw error;
+    });
+    return this.assets;
+  }
 
   constructor(
     readonly records: LocalRecords,
@@ -65,6 +81,9 @@ export class RuntimeOwner {
   }
   get admitted(): boolean {
     return this.admissionComplete;
+  }
+  get preparing(): boolean {
+    return this.preparations.size > 0;
   }
 
   private readonly run: RunProcess = (request) => {
@@ -109,12 +128,12 @@ export class RuntimeOwner {
     return child;
   };
 
-  admit(activate = false): Promise<void> {
+  admit(activate: boolean | "resume-setup" = false): Promise<void> {
     this.admission ??= this.initialize(activate);
     return this.admission;
   }
 
-  private async initialize(activate: boolean): Promise<void> {
+  private async initialize(activate: boolean | "resume-setup"): Promise<void> {
     this.space = (await this.records.get(this.id)) ?? undefined;
     this.policy = await this.records.policy();
     if (!this.space)
@@ -125,17 +144,27 @@ export class RuntimeOwner {
         "LOCAL_GUEST_SETTLEMENT_UNKNOWN",
         "Acknowledge the retained unknown outcome locally before admitting new work.",
       );
+    const resume = activate === "resume-setup";
+    if (resume) requireSetupRecovery(this.space);
     if (
-      this.space.failure === "LOCAL_SETUP_INCOMPLETE" ||
-      ((this.space.phase === "usable" || this.space.phase === "stopped") &&
-        this.space.lastStartedAt === null)
+      !resume &&
+      (this.space.failure === "LOCAL_SETUP_INCOMPLETE" ||
+        ((this.space.phase === "usable" || this.space.phase === "stopped") &&
+          this.space.lastStartedAt === null))
     )
       throw new LocalRefusal(
         "LOCAL_SETUP_INCOMPLETE",
-        "Guest preparation did not finish. Delete this codespace after confirmed cleanup, then create a new one.",
+        "Guest preparation did not finish. Resume setup on this same codespace explicitly.",
       );
     requireSpaceGrant(this.policy, this.space);
-    if (activate) {
+    if (resume) {
+      this.space = {
+        ...this.space,
+        desiredState: "running",
+        generation: this.space.generation + 1,
+      };
+      await this.records.put(this.space);
+    } else if (activate) {
       if (this.space.phase !== "usable" && this.space.phase !== "stopped")
         throw new LocalRefusal(
           "LOCAL_SETUP_INCOMPLETE",
@@ -261,7 +290,7 @@ export class RuntimeOwner {
       this.serial(async () => {
         const { space, policy, runtime } = await this.current();
         const repository = requireSpaceGrant(policy, space);
-        const clone = space.phase === "creating";
+        const clone = space.lastStartedAt === null;
         await this.protectRuntime();
         if (!space.runtimeId) {
           if (!clone)
@@ -291,50 +320,41 @@ export class RuntimeOwner {
           space.networkPolicy = await runtime.boundary.configureNetwork(identity, saved.port);
           await this.persist(space);
         }
-        const assets = await this.loadAssets();
+        const assets = await this.ownerAssets();
         await installGuest(runtime, identity, assets, this.controller.signal);
         await this.current();
         let gitAuthor = policy.gitAuthor ?? null;
+        if (!gitAuthor) {
+          const cached = await this.records.state.read(
+            `controller-git-identity-${space.id}.json`,
+            (value) =>
+              z
+                .object({
+                  repositoryId: z.literal(space.repositoryId),
+                  runtimeId: z.literal(space.runtimeId),
+                  author: z.object({ name: z.string().min(1), email: z.string().email() }).strict(),
+                })
+                .strict()
+                .parse(value),
+          );
+          gitAuthor = cached?.author ?? null;
+        }
         if (
+          clone &&
           !gitAuthor &&
-          (repository.private || repository.allowPush || repository.allowPullRequests === true) &&
+          repository.private &&
           (await this.records.state.read("connection.json", (value) => value))
         ) {
-          try {
-            gitAuthor = await new LocalRelay(this.records).gitIdentity(
-              space.id,
-              space.repositoryId,
-              this.controller.signal,
-            );
-            await this.records.state.write(`controller-git-identity-${space.id}.json`, {
-              repositoryId: space.repositoryId,
-              runtimeId: space.runtimeId,
-              author: gitAuthor,
-            });
-          } catch (error) {
-            if (
-              clone ||
-              !(error instanceof LocalRefusal) ||
-              error.code !== "LOCAL_RELAY_UNAVAILABLE"
-            )
-              throw error;
-            const cached = await this.records.state.read(
-              `controller-git-identity-${space.id}.json`,
-              (value) =>
-                z
-                  .object({
-                    repositoryId: z.literal(space.repositoryId),
-                    runtimeId: z.literal(space.runtimeId),
-                    author: z
-                      .object({ name: z.string().min(1), email: z.string().email() })
-                      .strict(),
-                  })
-                  .strict()
-                  .parse(value),
-            );
-            if (!cached) throw error;
-            gitAuthor = cached.author;
-          }
+          gitAuthor = await new LocalRelay(this.records).gitIdentity(
+            space.id,
+            space.repositoryId,
+            this.controller.signal,
+          );
+          await this.records.state.write(`controller-git-identity-${space.id}.json`, {
+            repositoryId: space.repositoryId,
+            runtimeId: space.runtimeId,
+            author: gitAuthor,
+          });
         }
         const output = await runtime.runFixedGuest(
           identity,
@@ -344,6 +364,7 @@ export class RuntimeOwner {
               proxySource: assets.proxy,
               hostPort: saved.port,
               spaceId: space.id,
+              operationMarker: space.operationMarker,
               brokerToken: space.brokerToken,
               repository: repository.fullName,
               ref: space.ref,
@@ -354,9 +375,27 @@ export class RuntimeOwner {
           null,
           this.controller.signal,
         );
-        z.object({ ok: z.literal(true), result: z.unknown() })
-          .strict()
+        const setup = z
+          .discriminatedUnion("ok", [
+            z.object({ ok: z.literal(true), result: z.unknown() }).strict(),
+            z.object({ ok: z.literal(false), reason: workspaceSetupFailureSchema }).strict(),
+          ])
           .parse(JSON.parse(output.toString("utf8")));
+        if (!setup.ok) {
+          await this.current();
+          await this.persist({ ...space, setupFailure: setup.reason });
+          const remedies = {
+            repository_unproven:
+              "The existing repository was preserved because its setup ownership is not proved. Inspect it locally before recovery.",
+            prerequisite_unavailable:
+              "Safe repository publication requires Linux Python3, libc renameat2 and filesystem no-replace support.",
+            repository_checkout_failed:
+              "Repository preparation did not complete. Repair the repository access or requested ref, then resume this same setup.",
+            configuration_failed:
+              "Fixed guest configuration did not complete. Inspect local prerequisite diagnostics before resuming this same setup.",
+          };
+          throw new LocalRefusal("LOCAL_SETUP_INCOMPLETE", remedies[setup.reason]);
+        }
         const probe = z
           .object({
             environmentIdentity: z.string().regex(/^[a-f0-9]{64}$/),
@@ -376,36 +415,34 @@ export class RuntimeOwner {
               ).toString("utf8"),
             ),
           );
-        let remote;
-        try {
-          remote = await new LocalRelay(this.records).workspaceCredential(
-            space.id,
-            space.repositoryId,
-            probe.environmentIdentity,
+        const authority = await this.remoteAuthority();
+        // Local Unix readiness precedes optional cloud enrollment. The daemon's
+        // existing reconciliation will acquire authority outside work lanes.
+        const connection = authority.connection;
+        const remoteState = connection?.authorityRefused ? "refused" : "unconfigured";
+        const configureLocal =
+          space.lastStartedAt === null ||
+          space.failure !== null ||
+          space.workspaceReadiness?.release !== assets.payload.release ||
+          space.workspaceReadiness?.environmentIdentity !== probe.environmentIdentity;
+        if (configureLocal)
+          await runtime.runFixedGuest(
+            identity,
+            "configure",
+            Buffer.from(
+              JSON.stringify({
+                version: 1,
+                repositoryFullName: repository.fullName,
+                root: `/workspaces/${repository.fullName.split("/")[1]}`,
+                expectedOrigin: `http://${space.id}:${space.brokerToken}@127.0.0.1:3437/git/${repository.fullName}.git`,
+                environmentIdentity: probe.environmentIdentity,
+                mode: "local-only",
+                remoteState,
+              }),
+            ),
+            30_000,
             this.controller.signal,
           );
-        } catch (error) {
-          if (!(error instanceof LocalRefusal) || error.code !== "LOCAL_RELAY_UNAVAILABLE")
-            throw error;
-          // A confirmed transport outage affects the remote observer, not locally approved work.
-          // Authorization refusal/revocation never enters this explicit local-only mode.
-        }
-        await runtime.runFixedGuest(
-          identity,
-          "configure",
-          Buffer.from(
-            JSON.stringify({
-              version: 1,
-              repositoryFullName: repository.fullName,
-              root: `/workspaces/${repository.fullName.split("/")[1]}`,
-              expectedOrigin: `http://${space.id}:${space.brokerToken}@127.0.0.1:3437/git/${repository.fullName}.git`,
-              environmentIdentity: probe.environmentIdentity,
-              ...(remote ? { remote } : { mode: "local-only" }),
-            }),
-          ),
-          30_000,
-          this.controller.signal,
-        );
         await runtime.runFixedGuest(
           identity,
           "start-service",
@@ -413,7 +450,7 @@ export class RuntimeOwner {
           null,
           this.controller.signal,
         );
-        await this.waitWorkspaceHealth(
+        const observed = await this.waitWorkspaceHealth(
           runtime,
           identity,
           probe.environmentIdentity,
@@ -423,6 +460,13 @@ export class RuntimeOwner {
         space.phase = "usable";
         space.lastStartedAt = Date.now();
         space.failure = null;
+        space.remote = observed;
+        if (configureLocal) space.remoteAuthority = authority.identity;
+        space.workspaceReadiness = {
+          release: assets.payload.release,
+          environmentIdentity: probe.environmentIdentity,
+        };
+        delete space.setupFailure;
         await this.persist(space);
       }),
     );
@@ -436,7 +480,7 @@ export class RuntimeOwner {
     identity: { name: string; runtimeId: string },
     environmentIdentity: string,
     releaseIdentity: string,
-  ): Promise<void> {
+  ): Promise<LocalSpace["remote"]> {
     const value = JSON.parse(
       (
         await runtime.runFixedGuest(identity, "health", undefined, 30_000, this.controller.signal)
@@ -450,6 +494,168 @@ export class RuntimeOwner {
         "LOCAL_IDENTITY_CHANGED",
         "Workspace readiness belongs to another release or guest.",
       );
+    return value.remote === undefined
+      ? undefined
+      : workspaceRemoteObservationSchema.parse(value.remote);
+  }
+
+  private async remoteAuthority() {
+    const connection = await this.records.state.read(
+      "connection.json",
+      localConnectionSchema.parse,
+    );
+    const identity = controllerIdentitySchema.safeParse(connection);
+    return { identity: identity.success ? identity.data : undefined, connection };
+  }
+
+  /** Re-enroll an already ready Unix owner; never clone, start a VM, or retry a command. */
+  refreshRemote(): Promise<void> {
+    if (this.enrollment) return this.enrollment;
+    const work = this.refreshEnrollment().finally(() => {
+      if (this.enrollment === work) this.enrollment = undefined;
+    });
+    this.enrollment = work;
+    return work;
+  }
+
+  private async refreshEnrollment(): Promise<void> {
+    const captured = await this.serial(async () => {
+      const admission = await this.current();
+      const runtime = admission.runtime;
+      let space = admission.space;
+      if (space.phase !== "usable" || space.failure !== null || !space.runtimeId) return;
+      const identity = { name: space.name, runtimeId: space.runtimeId };
+      const release =
+        space.workspaceReadiness?.release ?? (await this.ownerAssets()).payload.release;
+      const health = JSON.parse(
+        (
+          await runtime.runFixedGuest(identity, "health", undefined, 30_000, this.controller.signal)
+        ).toString("utf8"),
+      );
+      if (health.releaseIdentity !== release || !/^[a-f0-9]{64}$/.test(health.environmentIdentity))
+        throw new LocalRefusal(
+          "LOCAL_IDENTITY_CHANGED",
+          "Workspace readiness belongs to another release or guest.",
+        );
+      const observed =
+        health.remote === undefined
+          ? undefined
+          : workspaceRemoteObservationSchema.parse(health.remote);
+      if (!observed) return;
+      const authority = await this.remoteAuthority();
+      const sameAuthority =
+        JSON.stringify(space.remoteAuthority) === JSON.stringify(authority.identity);
+      if (
+        sameAuthority &&
+        ["connecting", "connected", "unavailable", "refused"].includes(observed.state)
+      ) {
+        ({ space } = await this.current());
+        if (JSON.stringify(space.remote) !== JSON.stringify(observed))
+          await this.persist({ ...space, remote: observed });
+        return;
+      }
+      const { policy } = await this.current();
+      const repository = requireSpaceGrant(policy, space);
+      const probe = z
+        .object({
+          environmentIdentity: z.literal(health.environmentIdentity),
+          architecture: z.string(),
+        })
+        .strict()
+        .parse(
+          JSON.parse(
+            (
+              await runtime.runFixedGuest(
+                identity,
+                "probe",
+                undefined,
+                30_000,
+                this.controller.signal,
+              )
+            ).toString("utf8"),
+          ),
+        );
+      return { space, repository, probe, release, authority, runtime, identity };
+    });
+    if (!captured) return;
+    const { space: original, repository, probe, release, authority, runtime, identity } = captured;
+    let remote: Awaited<ReturnType<LocalRelay["workspaceCredential"]>> | undefined,
+      remoteState: "unconfigured" | "enrollment_unavailable" | "refused" = "unconfigured";
+    try {
+      remote = await new LocalRelay(this.records).workspaceCredential(
+        original.id,
+        original.repositoryId,
+        probe.environmentIdentity,
+        this.controller.signal,
+      );
+    } catch (error) {
+      if (error instanceof LocalDeviceAuthorityFailure) remoteState = "refused";
+      else if (error instanceof LocalRefusal && error.code === "LOCAL_RELAY_UNAVAILABLE")
+        remoteState = "enrollment_unavailable";
+      else if (!(
+        error instanceof LocalRefusal &&
+        error.code === "LOCAL_NOT_ENROLLED" &&
+        (await this.records.state.read("connection.json", localConnectionSchema.parse)) === null
+      ))
+        throw error;
+    }
+    // A cloud response has no right to enter a newer local generation or a
+    // replacement controller authority. Only this short effect owns the lane.
+    await this.serial(async () => {
+      const { space, policy } = await this.current();
+      if (
+        space.generation !== original.generation ||
+        space.runtimeId !== original.runtimeId ||
+        space.repositoryId !== original.repositoryId ||
+        space.operationMarker !== original.operationMarker ||
+        space.phase !== "usable" ||
+        space.failure !== null
+      )
+        throw new LocalRefusal(
+          "LOCAL_GENERATION_CONFLICT",
+          "Workspace enrollment belongs to an older local admission.",
+        );
+      requireSpaceGrant(policy, space);
+      if (JSON.stringify(await this.remoteAuthority()) !== JSON.stringify(authority))
+        throw new LocalRefusal(
+          "LOCAL_IDENTITY_CHANGED",
+          "Workspace enrollment authority changed while acquiring its credential.",
+        );
+      await runtime.runFixedGuest(
+        identity,
+        "configure",
+        Buffer.from(
+          JSON.stringify({
+            version: 1,
+            repositoryFullName: repository.fullName,
+            root: `/workspaces/${repository.fullName.split("/")[1]}`,
+            expectedOrigin: `http://${space.id}:${space.brokerToken}@127.0.0.1:3437/git/${repository.fullName}.git`,
+            environmentIdentity: probe.environmentIdentity,
+            ...(remote ? { remote } : { mode: "local-only", remoteState }),
+          }),
+        ),
+        30_000,
+        this.controller.signal,
+      );
+      const observed = await this.waitWorkspaceHealth(
+        runtime,
+        identity,
+        probe.environmentIdentity,
+        release,
+      );
+      const current = await this.current();
+      if (JSON.stringify(await this.remoteAuthority()) !== JSON.stringify(authority))
+        throw new LocalRefusal(
+          "LOCAL_IDENTITY_CHANGED",
+          "Workspace enrollment authority changed during configuration.",
+        );
+      await this.persist({
+        ...current.space,
+        remote: observed,
+        remoteAuthority: authority.identity,
+        workspaceReadiness: { release, environmentIdentity: probe.environmentIdentity },
+      });
+    });
   }
 
   private async boundary(space: LocalSpace, runtime: LocalVmRuntime): Promise<void> {
@@ -611,10 +817,14 @@ export class RuntimeOwner {
         if (!space || space.generation !== generation)
           throw new LocalRefusal("LOCAL_GENERATION_CONFLICT", "The recovery target changed.");
         requireSpaceGrant(policy, space);
+        const incomplete =
+          space.lastStartedAt === null &&
+          space.phase === "failed" &&
+          space.failure === "LOCAL_GUEST_SETTLEMENT_UNKNOWN";
         if (
           !space.runtimeId ||
           space.desiredState !== "stopped" ||
-          space.phase !== "stopped" ||
+          (space.phase !== "stopped" && !incomplete) ||
           (space.failure !== null && space.failure !== "LOCAL_GUEST_SETTLEMENT_UNKNOWN")
         )
           throw new LocalRefusal(
@@ -655,7 +865,7 @@ export class RuntimeOwner {
           ...space,
           generation: generation + 1,
           recoveryGeneration: generation + 1,
-          failure: null,
+          failure: incomplete ? "LOCAL_SETUP_INCOMPLETE" : null,
         };
         await this.records.put(recovered);
         this.space = recovered;

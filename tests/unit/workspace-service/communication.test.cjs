@@ -1,5 +1,5 @@
 const { test, expect, afterEach } = require("@jest/globals");
-const { mkdtemp, realpath, rm, readdir, readFile, lstat } = require("node:fs/promises");
+const { mkdtemp, realpath, rm, readdir, readFile, writeFile, lstat } = require("node:fs/promises");
 const { watch } = require("node:fs");
 const { tmpdir } = require("node:os");
 const { join } = require("node:path");
@@ -63,6 +63,156 @@ async function fixture(transport, sourceOpener, options = {}) {
 }
 const prepare = async () => ({
   channels: [{ channelId: "telegram", authorityDigest: "a".repeat(64), provider: "telegram" }],
+});
+
+test("a local-only Unix owner gains remote publication without replacing work and captures each delivery configuration", async () => {
+  const { startWorkspaceService } =
+    await import("../../../packages/workspace-service/src/server.mjs");
+  const previousLife = process.env.MOIRA_ENVIRONMENT_ID;
+  process.env.MOIRA_ENVIRONMENT_ID ??= "service-test";
+  cleanup.push(() => {
+    if (previousLife === undefined) delete process.env.MOIRA_ENVIRONMENT_ID;
+    else process.env.MOIRA_ENVIRONMENT_ID = previousLife;
+  });
+  const value = guest.createFixture();
+  cleanup.push(() => guest.dispose(value));
+  value.socketPath = join(await realpath("/tmp"), `remote-config-${randomUUID()}.sock`);
+  const service = await startWorkspaceService(value);
+  cleanup.push(() => service.close());
+  const owner = service.owner;
+  const health = await owner.health();
+  const scope = {
+    resourceId: randomUUID(),
+    resourceGeneration: 1,
+    authorizationGeneration: 1,
+    publicOrigin: "https://moira.example",
+  };
+  const commandId = "ws1-" + randomUUID();
+  const releasePath = join(value.binding.root, "release");
+  cleanup.push(() => writeFile(releasePath, "release"));
+  let observed;
+  const started = new Promise((resolve) => {
+    observed = resolve;
+  });
+  const inspectEffect = async () => {
+    if (await readFile(join(value.binding.root, "effects"), "utf8").catch(() => null)) observed();
+  };
+  const watcher = watch(value.binding.root, () => void inspectEffect());
+  cleanup.push(() => watcher.close());
+  await owner.execute({
+    requestId: commandId,
+    argv: [
+      process.execPath,
+      "-e",
+      "const f=require('node:fs');f.appendFileSync('effects','once\\n');const t=setInterval(()=>{if(f.existsSync('release'))clearInterval(t)},10)",
+    ],
+  });
+  await inspectEffect();
+  await started;
+  const input = {
+    action: "deliver",
+    requestId: "ws1-" + randomUUID(),
+    source: {
+      type: "inline",
+      fileName: "owned.txt",
+      mimeType: "text/plain",
+      data: Buffer.from("same owner bytes").toString("base64"),
+    },
+    kind: "document",
+    text: "Original delivery",
+  };
+  await expect(owner.submitCommunication(input)).rejects.toMatchObject({
+    publicCode: "COMMUNICATION_OWNER_UNAVAILABLE",
+  });
+  let entered, resume;
+  const preparing = new Promise((resolve) => {
+    entered = resolve;
+  });
+  const held = new Promise((resolve) => {
+    resume = resolve;
+  });
+  cleanup.push(() => resume());
+  const sends = [];
+  const transport = (name, delayed = false) => ({
+    async prepare(control) {
+      if (delayed) {
+        entered();
+        await held;
+      }
+      return prepare(control);
+    },
+    async send(control, source) {
+      const chunks = [];
+      for await (const bytes of source) chunks.push(bytes);
+      sends.push({ name, scope: control.scope, bytes: Buffer.concat(chunks) });
+      return { status: "delivered" };
+    },
+  });
+  await owner.configureRemote({
+    publicationScope: scope,
+    communicationTransport: transport("original", true),
+  });
+  const original = owner.submitCommunication(input);
+  await preparing;
+  const nextScope = { ...scope, resourceGeneration: 2, authorizationGeneration: 2 };
+  await owner.configureRemote({
+    publicationScope: nextScope,
+    communicationTransport: transport("successor"),
+  });
+  await owner.configureRemote({});
+  resume();
+  const receipt = await original;
+  expect(receipt).toMatchObject({
+    state: "completed",
+    outcome: { ok: true, result: { status: "delivered" } },
+  });
+  expect(sends).toEqual([
+    {
+      name: "original",
+      scope: {
+        kind: "workspace",
+        resourceId: scope.resourceId,
+        resourceGeneration: 1,
+        authorizationGeneration: 1,
+        environmentIdentity: health.environmentIdentity,
+      },
+      bytes: Buffer.from("same owner bytes"),
+    },
+  ]);
+  const recordPath = join(value.stateRoot, "communication", input.requestId + ".json");
+  const originalBytes = await readFile(recordPath);
+  expect(await owner.inspectCommunication(input.requestId)).toEqual(receipt);
+  expect(await owner.submitCommunication(input)).toEqual(receipt);
+  await expect(
+    owner.submitCommunication({ ...input, requestId: "ws1-" + randomUUID() }),
+  ).rejects.toMatchObject({ publicCode: "COMMUNICATION_OWNER_UNAVAILABLE" });
+  await expect(owner.publish({ path: "effects", fileName: "effects.txt" })).rejects.toMatchObject({
+    publicCode: "FILE_PUBLICATION_UNAVAILABLE",
+  });
+  await owner.configureRemote({
+    publicationScope: nextScope,
+    communicationTransport: transport("successor"),
+  });
+  expect(
+    await owner.submitCommunication({ ...input, requestId: "ws1-" + randomUUID() }),
+  ).toMatchObject({ outcome: { ok: true } });
+  expect(sends[1]).toMatchObject({
+    name: "successor",
+    scope: { resourceGeneration: 2, authorizationGeneration: 2 },
+  });
+  expect(await owner.inspect(input.requestId)).toEqual(receipt);
+  expect(await readFile(recordPath)).toEqual(originalBytes);
+  await expect(
+    owner.configureRemote({ publicationScope: { ...nextScope, resourceId: randomUUID() } }),
+  ).rejects.toMatchObject({ publicCode: "FILE_PUBLICATION_SCOPE_CHANGED" });
+  expect(await owner.health()).toEqual(health);
+  await writeFile(releasePath, "release");
+  let result;
+  do {
+    result = await owner.observe(commandId, 1000);
+  } while (result.state === "running" || result.state === "starting");
+  expect(result).toMatchObject({ requestId: commandId, state: "succeeded" });
+  expect(await readFile(join(value.binding.root, "effects"), "utf8")).toBe("once\n");
 });
 
 test("workspace collection reads the original communication receipt without a second logical result", async () => {

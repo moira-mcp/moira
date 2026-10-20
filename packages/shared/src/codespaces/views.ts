@@ -6,6 +6,7 @@ import {
   type CodespaceObservedState,
   type CodespaceRetentionPolicy,
 } from "./resource-types.js";
+import type { WorkspaceSetupFailure, WorkspaceRemoteObservation } from "./local-protocol.js";
 
 /**
  * Sanitized codespace summary shared by the website and the MCP tools. It omits
@@ -39,6 +40,9 @@ export interface CodespaceSummaryView {
   /** Null until an exact provider observation succeeds; retries do not advance it. */
   observed_at: number | null;
   lifecycle_error: CodespaceResourceErrorCode | null;
+  /** Last verified guest transport observation; absence means not observed. */
+  remote?: WorkspaceRemoteObservation;
+  setup_failure?: WorkspaceSetupFailure;
   generation: number;
   created_at: number;
   updated_at: number;

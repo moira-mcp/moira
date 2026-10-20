@@ -248,7 +248,9 @@ The browser fixture pairs and confirms its own device but does not connect a con
 It checks honest offline state, absence of effective settings, pre-admission write refusal
 and the same unavailable state after reload. Separate mocked owner responses exercise the rendered
 English/Russian enabled, disabled, pending, rejected and unavailable cards, including persistent
-permission without expiry controls. Those images establish UI behavior, not physical settings effects.
+permission without expiry controls. Setup cards distinguish explicit same-VM resume and its
+preserved-root remedy, usable local work with unavailable enrollment or transport, and unknown
+creation with collection only. Those images establish UI behavior, not physical settings or VM effects.
 UI unit cases separately check retained drafts,
 actual applied consent and original-ID recovery. Neither fixture claims a complete browser
 settings effect on a physical VM.
@@ -261,6 +263,13 @@ work. Journal cases check canonical-target serialization, failure cleanup and pr
 custody; controller receipt cases cover durable original-ID collection and uncertainty
 after restarting an accepted request without replay.
 
+Provider/controller cases exercise setup resume on the same known runtime while retaining the
+failed original create receipt; unknown creation and custody recovery remain separate.
+Host orchestration fixtures use the real owner and private records with controlled runtime/cloud
+boundaries. They distinguish stopped initial-UNKNOWN acknowledgement from completed setup, then
+resume the same VM. Held credential/optional-author responses do not block local readiness or
+validation; generation, authority, revocation, stop and release changes reject stale enrollment.
+These fixtures do not establish native SDK recovery or an installed-owner update.
 Native recovery cases distinguish SDK/Engine custody from guest readiness, preserve
 peer state and unknown receipts, and exercise persistent permission, parent loss and emergency
 shutdown. Storage fixtures check retained image reattachment, sector/byte sizing,
@@ -292,7 +301,11 @@ npm run workspace:verify:guest
 This builds and packages the canonical payload, then exercises its installer, daemon
 and CLI in a network-disabled pinned Linux container. It checks actual startup refusal
 and readiness, single ownership, repository binding, exact binary/Unicode bytes, files,
-sessions, cancellation and restart receipts. The pinned image must already exist locally.
+sessions, cancellation and restart receipts. Setup scenarios exercise owned-stage continuation,
+exclusive publication without replacing occupied targets, and preserved repository/user contents.
+They distinguish usable Unix commands from unavailable cloud authority, automatic transport
+reconnection and later configuration reload into the same owner without replaying accepted work.
+The pinned image must already exist locally.
 Container compatibility and `npm run verify:docker` do not establish physical sbx
 ownership or host/LAN/VPN/metadata/other-VM isolation.
 

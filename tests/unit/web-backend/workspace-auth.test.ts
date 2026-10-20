@@ -11,6 +11,7 @@ import { CodespaceResourceError } from "../../../packages/shared/src/codespaces/
 import { getAccountAccessDenial } from "../../../packages/shared/src/auth/account-admission.js";
 import {
   CODESPACE_PROVIDER_LOCAL,
+  LocalDeviceError,
   localPublicPolicySchema,
 } from "../../../packages/shared/src/codespaces/local-device-types.js";
 import { migrate } from "drizzle-orm/better-sqlite3/migrator";
@@ -42,6 +43,7 @@ jest.unstable_mockModule("@mcp-moira/shared", () => ({
   WorkspaceAuthRepository,
   LocalDeviceRepository,
   LocalDeviceService,
+  LocalDeviceError,
   getSqliteInstance: () => authorityDb,
   getCodespaceResourcePolicy: () => ({ enabled: providerEnabled }),
   getBaseUrl: () => "https://workspace.example.test",
@@ -80,7 +82,7 @@ test("opaque workspace credentials rotate one scoped binding without persisting 
       Date.now() + 60_000,
     );
     expect(second).not.toBe(first);
-    expect(() => repo.authenticate(first)).toThrow();
+    expect(() => repo.authenticate(first)).toThrow(CodespaceResourceError);
     expect(repo.authenticate(second)).toMatchObject({
       ...binding,
       environmentIdentity: "b".repeat(64),
@@ -91,7 +93,7 @@ test("opaque workspace credentials rotate one scoped binding without persisting 
         .count,
     ).toBe(1);
     db.prepare("UPDATE workspaceAgentCredential SET expiresAt=0").run();
-    expect(() => repo.authenticate(second)).toThrow();
+    expect(() => repo.authenticate(second)).toThrow(CodespaceResourceError);
     repo.revoke(resourceId);
     expect(repo.getOwned(userId, resourceId)).toBeNull();
   } finally {
@@ -99,8 +101,23 @@ test("opaque workspace credentials rotate one scoped binding without persisting 
   }
 });
 
+test("workspace credential store failure is not a confirmed credential refusal", () => {
+  const db = new Database(":memory:");
+  const repo = new WorkspaceAuthRepository(db);
+  db.close();
+  let failure: unknown;
+  try {
+    repo.authenticate("a".repeat(43));
+  } catch (error) {
+    failure = error;
+  }
+  expect(failure).toMatchObject({ message: "The database connection is not open" });
+  expect(failure).not.toBeInstanceOf(CodespaceResourceError);
+});
+
 test.each([
   "current enrollment",
+  "temporary credential store failure",
   "resource generation",
   "authorization generation",
   "expired credential",
@@ -256,6 +273,34 @@ test.each([
       }
       const original = issueWorkspaceAgentCredential(userId, resourceId, "a".repeat(64));
       await connectControl(original);
+      if (change === "temporary credential store failure") {
+        const unavailable = jest
+          .spyOn(WorkspaceAuthRepository.prototype, "authenticate")
+          .mockImplementationOnce(() => {
+            throw new Error("Injected unavailable workspace credential store");
+          });
+        try {
+          await expect(connectControl(original)).rejects.toThrow("Control refused (503)");
+        } finally {
+          unavailable.mockRestore();
+        }
+        await connectControl(original);
+        new WorkspaceAuthRepository(authorityDb).revoke(resourceId);
+        await expect(connectControl(original)).rejects.toThrow("Control refused (403)");
+        // Restore exactly the original credential for the normal dispatch and
+        // blocked-account assertions below; this is not a replacement enrollment.
+        new WorkspaceAuthRepository(authorityDb).issue(
+          {
+            userId,
+            resourceId,
+            resourceGeneration: original.resourceGeneration,
+            authorizationGeneration: original.authorizationGeneration,
+            environmentIdentity: original.environmentIdentity,
+          },
+          null,
+          original.credential,
+        );
+      }
       const originalDigest = createHash("sha256").update(original.credential).digest("hex");
       if (change.endsWith("from another process")) {
         const controller = change === "controller authorization from another process";
@@ -377,6 +422,7 @@ test.each([
       else if (change === "disabled provider") providerEnabled = false;
       if (
         change === "current enrollment" ||
+        change === "temporary credential store failure" ||
         (change.endsWith("from another process") && change !== "offline actor from another process")
       ) {
         const abort = new AbortController();
@@ -433,6 +479,7 @@ test.each([
       }
       expect(dispatched).toHaveBeenCalledTimes(
         change === "current enrollment" ||
+          change === "temporary credential store failure" ||
           (change.endsWith("from another process") &&
             change !== "offline actor from another process")
           ? 1

@@ -15,6 +15,7 @@ import {
 import type { AuthenticatedRequest } from "../types/express-types.js";
 import { asyncHandler } from "../middleware/error-middleware.js";
 import { GitHubResourceService } from "../services/github-resource-service.js";
+import { LocalCodespaceResourceService } from "../services/local-codespace-resource-service.js";
 import {
   getCodespaceConnectionService,
   getCodespaceObservabilityService,
@@ -478,7 +479,7 @@ export function createCodespaceManagementRoutes(
     }),
   );
 
-  for (const action of ["start", "stop"] as const) {
+  for (const action of ["start", "stop", "resume_setup"] as const) {
     router.post(
       `/:codespaceId/${action}`,
       asyncHandler(async (req, res) => {
@@ -503,20 +504,35 @@ export function createCodespaceManagementRoutes(
             res.status(failure.status).json(failure.body);
             return;
           }
+          if (
+            action === "resume_setup" &&
+            !(selected.resource instanceof LocalCodespaceResourceService)
+          )
+            throw new CodespaceResourceError(
+              "CODESPACE_RESOURCE_INVALID",
+              "Setup recovery requires an existing owned Local codespace.",
+            );
           const codespace =
-            action === "start"
-              ? await selected.resource.startCodespace(
+            action === "resume_setup" && selected.resource instanceof LocalCodespaceResourceService
+              ? await selected.resource.resumeSetup(
                   userId,
                   id,
                   req.body?.request_id,
                   req.body?.expected_generation,
                 )
-              : await selected.resource.stopCodespace(
-                  userId,
-                  id,
-                  req.body?.request_id,
-                  req.body?.expected_generation,
-                );
+              : action === "start"
+                ? await selected.resource.startCodespace(
+                    userId,
+                    id,
+                    req.body?.request_id,
+                    req.body?.expected_generation,
+                  )
+                : await selected.resource.stopCodespace(
+                    userId,
+                    id,
+                    req.body?.request_id,
+                    req.body?.expected_generation,
+                  );
           res.json({
             success: true,
             data: {

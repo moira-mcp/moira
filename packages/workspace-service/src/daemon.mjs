@@ -235,6 +235,24 @@ export async function configureWorkspace(input) {
     (!input.remote && input.mode !== "local-only")
   )
     throw new Error("Invalid workspace bootstrap configuration");
+  if (input.remote) {
+    workspaceBootstrapCredentialSchema.parse(input.remote);
+    const origin = new URL(input.remote.origin);
+    if (
+      origin.protocol !== "https:" ||
+      origin.username ||
+      origin.password ||
+      origin.pathname !== "/" ||
+      origin.search ||
+      origin.hash ||
+      input.remoteState !== undefined
+    )
+      throw new Error("Invalid workspace remote authority");
+  } else if (
+    input.remoteState !== undefined &&
+    !["unconfigured", "enrollment_unavailable", "refused"].includes(input.remoteState)
+  )
+    throw new Error("Invalid workspace remote observation");
   const metadata = await lstat(input.root);
   if (
     !metadata.isDirectory() ||
@@ -264,7 +282,8 @@ export async function configureWorkspace(input) {
   const environmentIdentity = input.environmentIdentity ?? input.remote?.environmentIdentity;
   if (
     !/^[a-f0-9]{64}$/.test(environmentIdentity ?? "") ||
-    environmentIdentity !== (await life(binding))
+    environmentIdentity !== (await life(binding)) ||
+    (input.remote && input.remote.environmentIdentity !== environmentIdentity)
   )
     throw new Error("Workspace bootstrap guest life changed");
   let proxy;
@@ -311,15 +330,24 @@ export async function configureWorkspace(input) {
       throw new Error("Previous Git owner binding changed");
     if (!approvedGitHubOrigin(previous, selection, input.root, metadata, canonicalOrigin))
       throw new Error("Workspace bootstrap repository identity changed");
-    const capability = randomBytes(32).toString("hex");
-    origin = `http://${input.remote.resourceId}:${capability}@127.0.0.1:3437/git/${input.repositoryFullName}.git`;
-    github = {
-      repositoryId: selection.repositoryId,
-      repositoryFullName: input.repositoryFullName,
-      canonicalOrigin,
-      brokerOrigin: origin,
-      authorization: `Basic ${Buffer.from(`${input.remote.resourceId}:${capability}`).toString("base64")}`,
-    };
+    if (
+      numericGitHubOwner(previous, selection, input.root, metadata) &&
+      previous.github.repositoryFullName === input.repositoryFullName &&
+      previous.github.canonicalOrigin === canonicalOrigin
+    ) {
+      github = previous.github;
+      origin = github.brokerOrigin;
+    } else {
+      const capability = randomBytes(32).toString("hex");
+      origin = `http://${input.remote.resourceId}:${capability}@127.0.0.1:3437/git/${input.repositoryFullName}.git`;
+      github = {
+        repositoryId: selection.repositoryId,
+        repositoryFullName: input.repositoryFullName,
+        canonicalOrigin,
+        brokerOrigin: origin,
+        authorization: `Basic ${Buffer.from(`${input.remote.resourceId}:${capability}`).toString("base64")}`,
+      };
+    }
     await configureOwnerGit(input.root, canonicalOrigin, origin, previous?.github);
     binding = { ...binding, origin, canonicalOrigin };
   }
@@ -328,6 +356,7 @@ export async function configureWorkspace(input) {
     binding,
     environmentIdentity,
     ...(proxy ? { proxy } : {}),
+    ...(!input.remote ? { remoteState: input.remoteState ?? "unconfigured" } : {}),
     ...(github ? { github } : {}),
     ...(input.remote ? { remote: { ...input.remote, ...(proxy ? { proxy } : {}) } } : {}),
     ...(input.renewal
@@ -340,6 +369,17 @@ export async function configureWorkspace(input) {
       : {}),
     releaseIdentity: await releaseIdentity(),
   });
+  // This fixed local request carries no credentials or selected paths. The
+  // existing owner re-observes its private published configuration itself.
+  const running = await health().catch((error) => {
+    if (!["ENOENT", "ECONNREFUSED"].includes(error.code)) throw error;
+    return null;
+  });
+  if (
+    running?.releaseIdentity === (await releaseIdentity()) &&
+    running.repositoryFullName === input.repositoryFullName
+  )
+    await health("POST", "/v1/configuration/reload");
   return {
     configured: true,
     releaseIdentity: await releaseIdentity(),
@@ -439,9 +479,9 @@ export async function renewWorkspaceConfiguration(config, release) {
   return next;
 }
 
-function health() {
+function health(method = "GET", path = "/v1/health") {
   return new Promise((done, failed) => {
-    const call = request({ socketPath, path: "/v1/health", agent: false }, (response) => {
+    const call = request({ socketPath, method, path, agent: false }, (response) => {
       const chunks = [];
       let size = 0;
       response.on("data", (chunk) => {
@@ -515,8 +555,13 @@ async function stopOwnedService() {
 async function serve() {
   let config = await privateJson(configurationPath);
   const release = await releaseIdentity();
-  if (config.environmentIdentity !== (await life(config.binding)))
+  if (config.environmentIdentity !== (await life(config.binding))) {
+    if (config.proxy)
+      throw new Error(
+        "Local workspace life changed; the host owner must refresh its fixed binding",
+      );
     config = await renewWorkspaceConfiguration(config, release);
+  }
   if (
     config.version !== 1 ||
     config.releaseIdentity !== release ||
@@ -573,6 +618,66 @@ async function serve() {
     : null;
   const gitProxy = config.proxy ?? config.github?.brokerOrigin;
   let service, remote;
+  let closing;
+  let reloading = Promise.resolve();
+  const remoteConfiguration = (value) =>
+    value.remote
+      ? {
+          publicationScope: {
+            resourceId: value.remote.resourceId,
+            resourceGeneration: value.remote.resourceGeneration,
+            authorizationGeneration: value.remote.authorizationGeneration,
+            publicOrigin: value.remote.publicOrigin ?? value.remote.origin,
+          },
+          communicationTransport: createOwnerCommunicationTransport({
+            origin: value.remote.origin,
+            credential: value.remote.credential,
+            proxy: value.proxy,
+          }),
+        }
+      : {};
+  const reloadConfiguration = () => {
+    const work = reloading.then(async () => {
+      if (closing) throw new Error("Workspace owner is closing");
+      const next = await privateJson(configurationPath);
+      if (
+        next.version !== 1 ||
+        next.releaseIdentity !== release ||
+        next.environmentIdentity !== config.environmentIdentity ||
+        JSON.stringify(next.binding) !== JSON.stringify(config.binding) ||
+        next.proxy !== config.proxy ||
+        JSON.stringify(next.github) !== JSON.stringify(config.github) ||
+        next.environmentIdentity !== (await life(next.binding))
+      )
+        throw new Error("Running workspace configuration identity changed");
+      await createWorkspaceEngine({ stateRoot, binding: next.binding }).verifyBinding();
+      if (next.remote) {
+        const credential = { ...next.remote };
+        delete credential.proxy;
+        const checked = workspaceBootstrapCredentialSchema.parse(credential);
+        if (
+          checked.environmentIdentity !== next.environmentIdentity ||
+          (config.remote &&
+            (checked.resourceId !== config.remote.resourceId ||
+              checked.origin !== config.remote.origin))
+        )
+          throw new Error("Running workspace remote authority changed owner");
+      }
+      if (
+        JSON.stringify(next.remote) === JSON.stringify(config.remote) &&
+        next.remoteState === config.remoteState
+      )
+        return;
+      await service.owner.configureRemote(remoteConfiguration(next));
+      githubBroker?.configureRemote(next.remote);
+      await remote?.close();
+      remote = undefined;
+      config = next;
+      if (next.remote) remote = startWorkspaceRemote({ socketPath, ...next.remote });
+    });
+    reloading = work.catch(() => undefined);
+    return work;
+  };
   try {
     service = await startWorkspaceService({
       socketPath,
@@ -581,25 +686,13 @@ async function serve() {
       releaseIdentity: release,
       searchExecutable: fileURLToPath(new URL("../runtime/bin/rg", import.meta.url)),
       sourceProxy: config.proxy,
+      remoteStatus: () => remote?.status() ?? { state: config.remoteState ?? "unconfigured" },
+      reloadConfiguration,
       ...(githubBroker ? { collectCredentialRequest: githubBroker.collect } : {}),
       ...(gitProxy
         ? { pullRequest: (action, input) => brokerPullRequest(gitProxy, action, input) }
         : {}),
-      ...(config.remote
-        ? {
-            communicationTransport: createOwnerCommunicationTransport({
-              origin: config.remote.origin,
-              credential: config.remote.credential,
-              proxy: config.proxy,
-            }),
-            publicationScope: {
-              resourceId: config.remote.resourceId,
-              resourceGeneration: config.remote.resourceGeneration,
-              authorizationGeneration: config.remote.authorizationGeneration,
-              publicOrigin: config.remote.publicOrigin ?? config.remote.origin,
-            },
-          }
-        : {}),
+      ...remoteConfiguration(config),
     });
     if (config.remote) remote = await startWorkspaceRemote({ socketPath, ...config.remote });
     const owner = {
@@ -610,9 +703,9 @@ async function serve() {
       environmentIdentity: await life(config.binding),
     };
     await publish(ownerPath, owner);
-    let closing;
     const close = () =>
       (closing ??= (async () => {
+        await reloading;
         await remote?.close();
         await service.close();
         await githubBroker?.close();
@@ -629,7 +722,6 @@ async function serve() {
           () => process.exit(1),
         );
       });
-    await remote?.whenConnected();
     const ready = await health();
     if (ready.releaseIdentity !== release)
       throw new Error("Workspace service release is not current");
@@ -771,10 +863,16 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
         const running = await health().catch(() => null);
         if (
           running?.releaseIdentity === (await releaseIdentity()) &&
-          running?.environmentIdentity === (await life(configured.binding))
+          running?.environmentIdentity === (await life(configured.binding)) &&
+          running?.repositoryFullName === configured.binding.repositoryFullName
         )
           process.stdout.write(`${JSON.stringify(running)}\n`);
-        else process.stdout.write(`${JSON.stringify(await startOwnedService())}\n`);
+        else {
+          // A new payload replaces only the proved owned service observer.
+          // A same-release lost reply never stops the existing Unix owner.
+          if (running) await stopOwnedService();
+          process.stdout.write(`${JSON.stringify(await startOwnedService())}\n`);
+        }
       } else
         process.stdout.write(`${JSON.stringify({ workspaceService: "enrollment-required" })}\n`);
     } else if (process.argv[2] === "--start") {

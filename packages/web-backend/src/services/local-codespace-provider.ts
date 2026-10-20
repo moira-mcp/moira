@@ -122,11 +122,7 @@ export class LocalCodespaceProvider {
       space.failure === "LOCAL_SETUP_INCOMPLETE" ||
       ((space.phase === "stopped" || space.phase === "usable") &&
         space.lastStartedAt === null &&
-        space.failure === null) ||
-      (space.phase === "failed" &&
-        space.lastStartedAt === null &&
-        space.failure === "LOCAL_GUEST_SETTLEMENT_UNKNOWN" &&
-        space.state !== "unknown");
+        space.failure === null);
     return {
       name: record.id,
       displayName: record.operationMarker,
@@ -135,6 +131,8 @@ export class LocalCodespaceProvider {
       repositoryId: localRepositoryTargetId(binding.deviceId, binding.repositoryId),
       repositoryFullName: record.repositoryFullName,
       ref: null,
+      ...(space.remote ? { remote: space.remote } : {}),
+      ...(space.setupFailure ? { setupFailure: space.setupFailure } : {}),
       ...(setupIncomplete
         ? { stateError: "CODESPACE_LOCAL_SETUP_INCOMPLETE" as const }
         : space.state === "unknown" || space.failure !== null

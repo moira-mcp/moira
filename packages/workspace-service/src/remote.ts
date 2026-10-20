@@ -51,6 +51,7 @@ export function startWorkspaceRemote(options: WorkspaceRemoteOptions) {
   let heartbeat: NodeJS.Timeout | undefined;
   let connected: Duplex | undefined;
   let authorityRefusal: WorkspaceAuthorityRefusal | undefined;
+  let state: "connecting" | "connected" | "unavailable" | "refused" = "connecting";
   const readiness = new Set<{ resolve(): void; reject(error: Error): void }>();
   const whenConnected = () => {
     if (authorityRefusal) return Promise.reject(authorityRefusal);
@@ -129,6 +130,7 @@ export function startWorkspaceRemote(options: WorkspaceRemoteOptions) {
   };
   const reconnect = () => {
     if (closed || retry) return;
+    state = "unavailable";
     // This reconnects observation transport only; no request payload is retained here.
     retry = setTimeout(() => {
       retry = undefined;
@@ -179,10 +181,12 @@ export function startWorkspaceRemote(options: WorkspaceRemoteOptions) {
     });
   const retireRefusedAuthority = (error: WorkspaceAuthorityRefusal) => {
     authorityRefusal ??= error;
+    state = "refused";
     return close();
   };
   const control = async () => {
     try {
+      state = "connecting";
       if ((await measuredLife()) !== endpointIdentity)
         throw new Error("Owner endpoint identity changed; enrollment required");
       const socket = await upgrade("/api/workspaces/connect");
@@ -207,6 +211,7 @@ export function startWorkspaceRemote(options: WorkspaceRemoteOptions) {
             ) {
               id = message.connectionId;
               connected = socket;
+              state = "connected";
               for (const waiter of readiness) waiter.resolve();
               readiness.clear();
               heartbeat = setInterval(
@@ -239,6 +244,7 @@ export function startWorkspaceRemote(options: WorkspaceRemoteOptions) {
   };
   const close = async () => {
     closed = true;
+    if (!authorityRefusal) state = "unavailable";
     connected = undefined;
     for (const waiter of readiness)
       waiter.reject(authorityRefusal ?? new Error("Workspace transport closed before readiness"));
@@ -260,5 +266,5 @@ export function startWorkspaceRemote(options: WorkspaceRemoteOptions) {
   options.signal?.addEventListener("abort", close, { once: true });
   if (options.signal?.aborted) void close();
   else void control();
-  return { close, whenConnected };
+  return { close, whenConnected, status: () => ({ state }) };
 }

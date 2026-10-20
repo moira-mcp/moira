@@ -1,5 +1,6 @@
 import { createHash, randomBytes } from "node:crypto";
 import type Database from "better-sqlite3";
+import { CodespaceResourceError } from "./resource-types.js";
 
 export interface WorkspaceAgentBinding {
   userId: string;
@@ -57,12 +58,19 @@ export class WorkspaceAuthRepository {
   }
 
   authenticate(credential: string): WorkspaceAgentCredentialRecord {
-    if (!/^[A-Za-z0-9_-]{43}$/.test(credential)) throw new Error("Workspace credential refused");
+    if (!/^[A-Za-z0-9_-]{43}$/.test(credential))
+      throw new CodespaceResourceError(
+        "CODESPACE_AUTHORIZATION_REQUIRED",
+        "Workspace credential refused",
+      );
     const record = this.db
       .prepare("SELECT * FROM workspaceAgentCredential WHERE credentialDigest=?")
       .get(this.digest(credential)) as WorkspaceAgentCredentialRecord | undefined;
     if (!record || (record.expiresAt !== null && record.expiresAt <= Date.now()))
-      throw new Error("Workspace credential refused");
+      throw new CodespaceResourceError(
+        "CODESPACE_AUTHORIZATION_REQUIRED",
+        "Workspace credential refused",
+      );
     return record;
   }
 

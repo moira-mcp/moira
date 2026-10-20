@@ -19,6 +19,8 @@ import { LocalCodespaceResourceService } from "../../packages/web-backend/src/se
 import { controllerFixture } from "../fixtures/local-controller.js";
 import { createLocalDeviceRoutes } from "../../packages/web-backend/src/routes/local-devices.js";
 import { LocalRefusal } from "../../packages/local/src/policy.js";
+import { createCodespaceManagementRoutes } from "../../packages/web-backend/src/routes/codespace-management.js";
+import { createLocalCodespaceServices } from "../../packages/web-backend/src/services/local-codespace-services.js";
 
 let db: Database.Database,
   directory: string,
@@ -80,6 +82,97 @@ async function create(requestId = createWorkspaceRequestId()) {
 }
 
 describe("Local cloud facade routes to the authoritative owner", () => {
+  test("setup recovery addresses the same known VM and preserves the failed original create receipt", async () => {
+    const createId = createWorkspaceRequestId(),
+      originalCreate = owner!.manager.create;
+    let creations = 0,
+      recoveries = 0;
+    owner!.manager.create = async (...args) => {
+      creations++;
+      const space = await originalCreate(...args);
+      space.phase = "failed";
+      space.failure = "LOCAL_SETUP_INCOMPLETE";
+      space.setupFailure = "prerequisite_unavailable";
+      space.lastStartedAt = null;
+      await owner!.records.put(space);
+      throw new LocalRefusal("LOCAL_SETUP_INCOMPLETE", "Controlled preparation interruption");
+    };
+    await expect(create(createId)).rejects.toMatchObject({
+      code: "CODESPACE_LOCAL_SETUP_INCOMPLETE",
+    });
+    const original = await devices.getOperation("owner", deviceId, createId),
+      incomplete = await resource.getCodespace("owner", createId.slice(4)),
+      binding = (await owner!.controller.state.binding(incomplete.codespace_id, owner!.identity))!,
+      before = (await owner!.records.get(binding.localSpaceId!))!;
+    expect(incomplete.lifecycle_error).toBe("CODESPACE_LOCAL_SETUP_INCOMPLETE");
+    expect(incomplete.setup_failure).toBe("prerequisite_unavailable");
+    owner!.manager.resumeSetup = async (id, onAdmitted) => {
+      recoveries++;
+      const space = await owner!.records.get(id);
+      if (!space?.runtimeId) throw new LocalRefusal("LOCAL_CREATE_UNKNOWN", "No known VM");
+      space.generation++;
+      await owner!.records.put(space);
+      await onAdmitted?.();
+      space.phase = "usable";
+      space.failure = null;
+      delete space.setupFailure;
+      space.remote = { state: "enrollment_unavailable" };
+      space.lastStartedAt = Date.now();
+      await owner!.records.put(space);
+      return space;
+    };
+    await expect(
+      resource.resumeSetup(
+        "other",
+        incomplete.codespace_id,
+        createWorkspaceRequestId(),
+        incomplete.generation,
+      ),
+    ).rejects.toMatchObject({ code: "CODESPACE_NOT_FOUND" });
+    const requestId = createWorkspaceRequestId();
+    const app = express();
+    app.use(express.json(), (req, _res, next) => {
+      Object.assign(req, { userId: "owner" });
+      next();
+    });
+    app.use(
+      createCodespaceManagementRoutes({
+        ...createLocalCodespaceServices({ sqlite: db, controller: owner!.client }),
+        provider: "local-sandboxes",
+        resource,
+      }),
+    );
+    const response = await request(app)
+      .post(`/${incomplete.codespace_id}/resume_setup`)
+      .send({ request_id: requestId, expected_generation: incomplete.generation });
+    expect(response.status).toBe(200);
+    const recovered = response.body.data.codespace;
+    expect(recovered).toMatchObject({
+      codespace_id: incomplete.codespace_id,
+      state: "usable",
+      generation: incomplete.generation + 1,
+      lifecycle_error: null,
+    });
+    expect(recovered.remote).toEqual({ state: "enrollment_unavailable" });
+    expect(recovered).not.toHaveProperty("setup_failure");
+    expect(await owner!.records.get(before.id)).toMatchObject({
+      id: before.id,
+      runtimeId: before.runtimeId,
+      operationMarker: before.operationMarker,
+      repositoryId: before.repositoryId,
+    });
+    expect(await devices.getOperation("owner", deviceId, createId)).toEqual(original);
+    await expect(
+      resource.resumeSetup(
+        "owner",
+        incomplete.codespace_id,
+        createWorkspaceRequestId(),
+        incomplete.generation,
+      ),
+    ).rejects.toMatchObject({ code: "CODESPACE_GENERATION_CONFLICT" });
+    expect(creations).toBe(1);
+    expect(recoveries).toBe(1);
+  });
   test("a closed create without a native space remains discoverable without hiding usable peers or inventing lifecycle authority", async () => {
     const healthy = await create(),
       failedRequest = createWorkspaceRequestId(),

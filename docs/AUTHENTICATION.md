@@ -446,6 +446,15 @@ does not override locally approved rights or request physical Local stop. Accoun
 revocation and explicit local enabled/disabled permission remain separate authority
 boundaries.
 
+Workspace/device credential fallback is limited to explicit typed mismatches:
+`CODESPACE_AUTHORIZATION_REQUIRED` for workspace credentials and `LOCAL_UNAUTHORIZED`
+for device credentials. A database or internal failure does not establish mismatch,
+revocation or permission to try another authority. The same rule applies to workspace
+routing, communication and scoped credential issuance. Upgrade endpoints return an
+empty-body 503 for temporary failures and 403 for typed authority, identity or protocol
+refusal. The remote adapter reconnects temporary CONTROL failures; CONTROL 401/403
+retires that remote authority without replaying accepted work or stopping a Local VM.
+
 An admitted browser session can confirm deletion of one owned local codespace at its current
 generation while the paired device and web-control approval remain active. The existing durable
 owner journal records this confirmation. Controller routing binds cleanup authority to the exact user,
@@ -490,6 +499,24 @@ Existing owner-admitted VMs and direct local CLI access retain only their curren
 local grants and enabled permission when cloud transport is unavailable. A confirmed
 authorization refusal does not enable fallback; fresh creation needs cloud route
 registration and initial Git authority.
+
+Verified local Unix readiness is independent of remote enrollment and CONTROL
+availability. A local-only owner can later enroll through fixed configuration reload
+without replacing its command engine, journal or accepted commands. Reload requires
+the same principal and verified repository binding, guest life and packaged release.
+New publication and communication work capture current authority, while original
+delivery and security receipts retain their original binding. Git metadata calls use
+the current credential through the same broker and child-custody store. Disabling
+remote authority refuses new acquisition and delivery without discarding unresolved
+children or rewriting original outcomes. Current cloud authorization and genuine
+provider/credential expiry still apply.
+
+On Local, optional enrollment begins after verified Unix readiness and waits outside
+local lifecycle/work admission. A returned credential can configure only the captured
+runtime, repository and generation under the still-current grant and connection.
+Changed pairing authority, revocation, stop or observer release fences a late reply;
+it cannot restore remote access or change local desired state through stale authority.
+
 See [Local Device Enrollment and Controller API](API.md#local-device-enrollment-and-controller-api)
 for endpoints and [Codespaces](CODESPACES.md) for local setup and recovery.
 

@@ -60,6 +60,8 @@ Usage: moira-local <command> [options]
   create OWNER/REPO --ref BRANCH | start SPACE_ID
                Call the running owner controller using the currently observed generation
                Create requires cloud route registration and initial Git credential authority
+  resume-setup SPACE_ID
+               Resume preparation of the same known VM; preserve files and original create outcome
   collect REQUEST_ID
                Inspect the original ws1 request ID without repeating the operation
   github-start RESOURCE_ID | github-stop RESOURCE_ID
@@ -237,7 +239,7 @@ export async function main(args: string[], environment: NodeJS.ProcessEnv): Prom
     );
     return;
   }
-  if (["create", "start", "stop", "remove", "collect"].includes(command)) {
+  if (["create", "start", "resume-setup", "stop", "remove", "collect"].includes(command)) {
     const socketPath = join((await state.ipcDirectory()).root, "controller.sock");
     if (command === "collect") {
       const maintenance = await collectServiceMaintenance(state, target);
@@ -297,7 +299,8 @@ export async function main(args: string[], environment: NodeJS.ProcessEnv): Prom
       input = {
         requestId,
         expectedGeneration: binding.resourceGeneration,
-        action: command === "remove" ? "delete" : command,
+        action:
+          command === "remove" ? "delete" : command === "resume-setup" ? "resume_setup" : command,
         ...(command === "remove" ? { ownerConfirmed: true } : {}),
       };
     }

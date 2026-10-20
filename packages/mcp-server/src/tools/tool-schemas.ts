@@ -811,10 +811,13 @@ export const codespaceStartSchema = codespaceGetSchema.extend({
       "Generation from the current get/list observation for either provider. Stale values are refused",
     ),
   request_id: controllerRequestIdSchema.describe(
-    "Fresh ws1-<lowercase UUID> chosen before start/stop. Recover with operation and the same ID instead of repeating the mutation",
+    "Fresh ws1-<lowercase UUID> chosen before start, stop or resume_setup. Recover with operation and the same ID instead of repeating the mutation",
   ),
 });
 export const codespaceStopSchema = codespaceStartSchema;
+export const codespaceResumeSetupSchema = codespaceStartSchema.describe(
+  "Explicitly resume preparation of the same known Local VM without replacing its disk or replaying creation",
+);
 
 export const codespaceDeleteSchema = z
   .object({
@@ -1103,6 +1106,7 @@ export const CODESPACE_ACTION_REQUEST_SCHEMAS = {
   adopt: codespaceAdoptSchema,
   get: codespaceGetSchema,
   start: codespaceStartSchema,
+  resume_setup: codespaceResumeSetupSchema,
   stop: codespaceStopSchema,
   delete: codespaceDeleteSchema,
   exec: codespaceExecRequestSchema,

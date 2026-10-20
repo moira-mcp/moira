@@ -10,6 +10,13 @@ import {
 } from "./policy.js";
 import { PrivateState } from "./private-state.js";
 import type { BrokerGrant } from "./broker.js";
+import { controllerIdentitySchema } from "../../shared/src/codespaces/local-controller-protocol.js";
+
+import {
+  workspaceRemoteObservationSchema,
+  workspaceSetupFailureSchema,
+} from "../../shared/src/codespaces/local-protocol.js";
+export { workspaceRemoteObservationSchema } from "../../shared/src/codespaces/local-protocol.js";
 
 export const spaceSchema = z
   .object({
@@ -36,6 +43,16 @@ export const spaceSchema = z
     generation: z.number().int().positive(),
     recoveryGeneration: z.number().int().positive().optional(),
     failure: z.string().max(128).nullable(),
+    remote: workspaceRemoteObservationSchema.optional(),
+    remoteAuthority: controllerIdentitySchema.optional(),
+    setupFailure: workspaceSetupFailureSchema.optional(),
+    workspaceReadiness: z
+      .object({
+        release: z.string().regex(/^[a-f0-9]{64}$/),
+        environmentIdentity: z.string().regex(/^[a-f0-9]{64}$/),
+      })
+      .strict()
+      .optional(),
   })
   .strict()
   .superRefine((space, context) => {
@@ -44,11 +61,42 @@ export const spaceSchema = z
       (!space.runtimeId ||
         space.recoveryGeneration > space.generation ||
         (space.recoveryGeneration === space.generation &&
-          (space.failure !== null || space.desiredState !== "stopped")))
+          ((space.failure !== null &&
+            !(
+              space.failure === "LOCAL_SETUP_INCOMPLETE" &&
+              space.phase === "failed" &&
+              space.lastStartedAt === null
+            )) ||
+            space.desiredState !== "stopped")))
     )
       context.addIssue({ code: "custom", message: "Invalid local recovery acknowledgement." });
   });
 export type LocalSpace = z.infer<typeof spaceSchema>;
+
+/** Recovery is a new setup intent for one proved native identity, never name adoption. */
+export function requireSetupRecovery(space: LocalSpace): void {
+  if (!space.runtimeId)
+    throw new LocalRefusal(
+      "LOCAL_CREATE_UNKNOWN",
+      "Collect the original creation; its VM identity is not confirmed.",
+    );
+  if (space.failure === "LOCAL_GUEST_SETTLEMENT_UNKNOWN")
+    throw new LocalRefusal(
+      "LOCAL_GUEST_SETTLEMENT_UNKNOWN",
+      "Acknowledge the retained unknown guest outcome before setup recovery.",
+    );
+  if (
+    !space.admittedMachine ||
+    space.desiredState === "deleted" ||
+    !["creating", "failed", "stopped"].includes(space.phase) ||
+    (space.failure !== null && space.failure !== "LOCAL_SETUP_INCOMPLETE") ||
+    (space.lastStartedAt !== null && space.failure !== "LOCAL_SETUP_INCOMPLETE")
+  )
+    throw new LocalRefusal(
+      "LOCAL_SETUP_INCOMPLETE",
+      "Setup recovery requires the original known incomplete sandbox and its admitted machine.",
+    );
+}
 
 /** Defaults can change without pretending an existing VM was resized. */
 export function policyForSpace(policy: LocalPolicy, space: LocalSpace): LocalPolicy {
@@ -127,7 +175,10 @@ export class LocalRecords {
   async put(space: LocalSpace): Promise<void> {
     await this.state.write(`space-${space.id}.json`, spaceSchema.parse(space));
   }
-  async authorize(header: string): Promise<BrokerGrant | null> {
+  async authorize(
+    header: string,
+    preparing?: (space: LocalSpace) => boolean,
+  ): Promise<BrokerGrant | null> {
     const match = /^Basic ([A-Za-z0-9+/]+={0,2})$/.exec(header);
     if (!match) return null;
     const decoded = Buffer.from(match[1], "base64");
@@ -135,12 +186,18 @@ export class LocalRecords {
     const credentials = /^([a-f0-9-]{36}):([a-f0-9]{64})$/.exec(decoded.toString("utf8"));
     if (!credentials || !z.string().uuid().safeParse(credentials[1]).success) return null;
     const space = await this.get(credentials[1]);
+    const setup =
+      space &&
+      preparing?.(space) === true &&
+      (space.failure === null || space.failure === "LOCAL_SETUP_INCOMPLETE") &&
+      ["creating", "failed", "stopped"].includes(space.phase);
     if (
       !space ||
       space.desiredState !== "running" ||
       !space.runtimeId ||
-      space.failure !== null ||
-      (space.phase !== "creating" &&
+      (!setup && (space.failure !== null || space.lastStartedAt === null)) ||
+      (!setup &&
+        space.phase !== "creating" &&
         space.phase !== "usable" &&
         (space.phase !== "stopped" || space.lastStartedAt === null)) ||
       !timingSafeEqual(Buffer.from(space.brokerToken), Buffer.from(credentials[2]))

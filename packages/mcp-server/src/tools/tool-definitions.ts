@@ -458,6 +458,12 @@ export const TOOL_DEFINITIONS = [
         request_id: "ws1-33333333-3333-4333-8333-333333333333",
       },
       {
+        action: "resume_setup",
+        codespace_id: "00000000-0000-4000-8000-000000000000",
+        generation: 4,
+        request_id: "ws1-33333333-3333-4333-8333-333333333333",
+      },
+      {
         action: "exec",
         codespace_id: "00000000-0000-4000-8000-000000000000",
         request_id: "ws1-11111111-1111-4111-8111-111111111111",
@@ -510,12 +516,14 @@ export const TOOL_DEFINITIONS = [
     documentation: {
       en: {
         summary:
+          "For known incomplete Local preparation, resume_setup uses the existing codespace_id, observed generation and a new ws1 request_id. It preserves the VM's files and original create receipt; unknown creation/settlement requires original collection instead. Local readiness is independent of optional remote.state. " +
           "Work in a persistent GitHub or local Docker Sandboxes codespace: lifecycle, commands and files, by action. Both providers' lifecycle mutations require a caller-selected ws1 request_id; start/stop/delete and adoption by codespace_id require the observed generation from get/list. GitHub create/adopt runs through the selected available paired controller. Recover through operation with device_id and the original request_id, including a lost create reply before a codespace_id is known.",
         result:
           "Discovery, lifecycle state, owner operation receipts, workspace-owned command state and output, guarded file results, a private download link or PNG/JPEG preview. Lifecycle collection never resubmits or provisions an effect; accepted/unconfirmed receipts retain the original identity. An offline Local owner returns unavailable to MCP, without queuing; direct owner/guest CLI access to existing VMs remains subject to current local grants and enabled work permission, which lasts until explicit disable. New creation requires cloud route registration and initial Git authority. Choose a fresh ws1-<lowercase UUID> request_id for commands and file mutations; legacy UUIDs cannot execute. Collect a command through exec with the original request_id and no command fields. Background commands use codespace_process.",
       },
       ru: {
         summary:
+          "Для известной незавершённой подготовки Local используйте resume_setup с существующим codespace_id, наблюдаемым generation и новым request_id вида ws1. Диск VM и исходная квитанция create сохраняются; неизвестный результат создания или завершения гостя требует чтения исходного запроса. Локальная готовность не зависит от необязательного remote.state. " +
           "Работа в постоянном codespace GitHub или локальной Docker Sandboxes VM: жизненный цикл, команды и файлы, по action. Для обоих провайдеров выберите request_id вида ws1 до изменения; start/stop/delete и adopt по codespace_id требуют наблюдаемое generation из get/list. GitHub create/adopt выполняет выбранный доступный сопряжённый контроллер. После потери ответа используйте operation с device_id и исходным request_id, в том числе если create ещё не вернул codespace_id.",
         result:
           "Обнаружение сред, состояние жизненного цикла, квитанции операций владельца, состояние команды и вывод, защищённые изменения файлов, приватная ссылка или PNG/JPEG preview. Чтение квитанции не повторяет действие и подготовку среды; accepted/unconfirmed сохраняют исходную идентичность. Недоступный Local owner возвращает MCP unavailable без постановки в очередь; прямой CLI владельца или среды работает с существующими VM в рамках текущих локальных прав и разрешения работы, действующего до явного отключения. Новое создание требует облачной регистрации маршрута и начальных Git-полномочий. Для команды или изменения файла выберите новый request_id вида ws1-<UUID в нижнем регистре>; старые UUID не выполняются. Получайте результат команды через exec с исходным request_id без полей команды. Для фоновых команд используйте codespace_process.",

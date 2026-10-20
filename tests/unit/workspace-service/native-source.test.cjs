@@ -260,6 +260,132 @@ test("accepted source bodies exceed former byte quotas with the header timer rel
   });
 });
 
+test("one Git authority rotates metadata credentials without losing active child custody or rebinding original receipts", async () => {
+  const stateRoot = join(directory, "rotated-security");
+  const resourceId = randomUUID();
+  const requests = [];
+  const credentials = new Map();
+  const expiresAt = Date.now() + 3600000;
+  const server = createHttpsServer(
+    { key: readFileSync(key), cert: readFileSync(ca) },
+    (request, response) => {
+      void (async () => {
+        const chunks = [];
+        for await (const chunk of request) chunks.push(chunk);
+        const body = JSON.parse(Buffer.concat(chunks).toString());
+        requests.push({ path: request.url, authorization: request.headers.authorization, body });
+        response.writeHead(200, { "content-type": "application/json" });
+        if (request.url.endsWith("/acquire")) {
+          const credential = {
+            credentialId: randomUUID(),
+            token: "fixture_child_" + credentials.size,
+            repositoryFullName: "owner/project",
+            expiresAt,
+            useUntil: expiresAt,
+          };
+          credentials.set(body.requestId, credential);
+          response.end(JSON.stringify(credential));
+        } else if (request.url.includes("/requests/")) {
+          response.end(
+            JSON.stringify({ state: "live", credential: credentials.get(body.requestId) }),
+          );
+        } else if (request.url.endsWith("/release"))
+          response.end(JSON.stringify({ released: true }));
+        else throw new Error("Unexpected issuer route");
+      })().catch((error) => response.destroy(error));
+    },
+  );
+  await new Promise((done) => server.listen(0, "127.0.0.1", done));
+  try {
+    const broker = pathToFileURL(resolve("packages/workspace-service/src/github-broker.mjs")).href;
+    const storeModule = pathToFileURL(
+      resolve("packages/workspace-service/src/credential-workspace-store.mjs"),
+    ).href;
+    const result = await child(
+      `
+      import {workspaceGitAuthority} from ${JSON.stringify(broker)};
+      import {credentialWorkspaceStore} from ${JSON.stringify(storeModule)};
+      import {readFile} from 'node:fs/promises';
+      const stateRoot=${JSON.stringify(stateRoot)},base=credentialWorkspaceStore(stateRoot),ids=[];
+      const store={read:base.read,write:async(id,record)=>{if(record.state==='prepared')ids.push(id);return base.write(id,record)}};
+      const original={origin:'https://127.0.0.1:${server.address().port}',credential:'fixture_first',resourceId:${JSON.stringify(resourceId)},resourceGeneration:1,environmentIdentity:'a'.repeat(64)};
+      const authority=workspaceGitAuthority(original,'owner/project',store,async()=>true);
+      const first=await authority.acquire('fetch');
+      const renewed={...original,credential:'fixture_second',resourceGeneration:2};
+      authority.configureRemote(renewed);
+      let changedPrincipal;
+      try{authority.configureRemote({...renewed,resourceId:${JSON.stringify(randomUUID())}})}catch(error){changedPrincipal=error.publicCode}
+      const active=await authority.collect(ids[0]);
+      await first.validate();await first.dispose();
+      const disposedFirst=await store.read(ids[0]);
+      authority.configureRemote();let disabledAcquire;
+      try{await authority.acquire('push')}catch(error){disabledAcquire=error.publicCode}
+      authority.configureRemote(renewed);
+      const second=await authority.acquire('push');
+      authority.configureRemote();let disabledValidate,disabledDispose;
+      try{await second.validate()}catch(error){disabledValidate=error.publicCode}
+      try{await second.dispose()}catch(error){disabledDispose={code:error.publicCode,requestId:error.securityRequestId}}
+      const pending=await store.read(ids[1]);
+      authority.configureRemote({...renewed,credential:'fixture_third',resourceGeneration:3});
+      const recovered=await authority.collect(ids[1]);
+      const retained=await Promise.all(ids.map(id=>readFile(stateRoot+'/requests/'+id+'/result.json','utf8')));
+      console.log(JSON.stringify({ids,active,disposedFirst,disabledAcquire,disabledValidate,disabledDispose,pending,recovered,changedPrincipal,secretFree:retained.every(value=>!value.includes('fixture_'))}));
+    `,
+      { NODE_EXTRA_CA_CERTS: ca },
+    );
+    expect(result.ids).toHaveLength(2);
+    expect(result.active).toMatchObject({
+      requestId: result.ids[0],
+      state: "live",
+      resourceGeneration: 1,
+    });
+    expect(result.disposedFirst).toMatchObject({
+      requestId: result.ids[0],
+      state: "disposed",
+      resourceGeneration: 1,
+    });
+    expect(result.changedPrincipal).toBe("SCOPED_CREDENTIAL_AUTHORITY_REFUSED");
+    expect(result.disabledAcquire).toBe("SCOPED_CREDENTIAL_UNAVAILABLE");
+    expect(result.disabledValidate).toBe("SCOPED_CREDENTIAL_UNAVAILABLE");
+    expect(result.disabledDispose).toEqual({
+      code: "SCOPED_CREDENTIAL_OUTCOME_UNCONFIRMED",
+      requestId: result.ids[1],
+    });
+    expect(result.pending).toMatchObject({
+      requestId: result.ids[1],
+      state: "dispose_pending",
+      resourceGeneration: 2,
+    });
+    expect(result.recovered).toMatchObject({
+      requestId: result.ids[1],
+      state: "disposed",
+      resourceGeneration: 2,
+    });
+    expect(result.secretFree).toBe(true);
+    expect(
+      requests.map(({ authorization, body }) => [authorization, body.resourceGeneration]),
+    ).toEqual([
+      ["Bearer fixture_first", 1],
+      ["Bearer fixture_second", 1],
+      ["Bearer fixture_second", 1],
+      ["Bearer fixture_second", 2],
+      ["Bearer fixture_third", 2],
+      ["Bearer fixture_third", 2],
+    ]);
+    expect(requests.map(({ path }) => path)).toEqual([
+      "/api/codespaces/github/credentials/acquire",
+      `/api/codespaces/github/credentials/requests/${result.ids[0]}`,
+      `/api/codespaces/github/credentials/${result.disposedFirst.credentialId}/release`,
+      "/api/codespaces/github/credentials/acquire",
+      `/api/codespaces/github/credentials/requests/${result.ids[1]}`,
+      `/api/codespaces/github/credentials/${result.pending.credentialId}/release`,
+    ]);
+  } finally {
+    server.closeAllConnections();
+    await new Promise((done) => server.close(done));
+  }
+});
+
 test("a redirect into an untrusted origin refuses before opening it and hides signed authority", async () => {
   const result = await child(
     controlledSource +

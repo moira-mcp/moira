@@ -33,10 +33,11 @@ export class LocalDaemon {
     failure?: unknown;
     work: Promise<void>;
   };
-  private remote?: ReturnType<typeof startWorkspaceRemote>;
+  private remote?: Pick<ReturnType<typeof startWorkspaceRemote>, "close">;
   private authorityRefused = false;
   private maintaining = false;
   private cycling?: Promise<boolean>;
+  private enrollment?: Promise<void>;
   constructor(
     readonly manager: LocalManager,
     readonly relay: LocalRelay,
@@ -44,7 +45,9 @@ export class LocalDaemon {
       wait?: typeof wait;
       report?: (status: LocalDaemonStatus) => void;
       startController?: typeof startLocalController;
-      startRemote?: typeof startWorkspaceRemote;
+      startRemote?: (
+        ...args: Parameters<typeof startWorkspaceRemote>
+      ) => Pick<ReturnType<typeof startWorkspaceRemote>, "close">;
     } = {},
   ) {}
   get status(): Readonly<LocalDaemonStatus> {
@@ -114,6 +117,23 @@ export class LocalDaemon {
       const policy = await this.manager.records.policyOrNull();
       if (policy && !policy.enabled) await this.manager.stopWork();
       this.update("connected", null);
+      if (!this.enrollment && this.manager.refreshWorkspaceEnrollments) {
+        const enrollment = this.manager
+          .refreshWorkspaceEnrollments()
+          .then((unavailable) => {
+            if (unavailable.length)
+              process.stderr.write(`${JSON.stringify({ workspaceEnrollment: unavailable })}\n`);
+          })
+          .catch((error: unknown) => {
+            process.stderr.write(
+              `${JSON.stringify({ workspaceEnrollment: { code: error instanceof LocalRefusal ? error.code : "LOCAL_OBSERVATION_UNKNOWN" } })}\n`,
+            );
+          });
+        this.enrollment = enrollment;
+        void enrollment.finally(() => {
+          if (this.enrollment === enrollment) this.enrollment = undefined;
+        });
+      }
       return true;
     } catch (error) {
       if (signal?.aborted) throw error;

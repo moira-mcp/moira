@@ -53,7 +53,25 @@ export async function createOwnerCommunication({
   extensionHelperPath,
   admit,
 }) {
-  scope = communicationOwnerScopeSchema.parse(scope);
+  scope = scope ? communicationOwnerScopeSchema.parse(scope) : undefined;
+  let enabled = Boolean(scope);
+  const samePrincipal = (left, right) =>
+    left &&
+    right &&
+    left.kind === right.kind &&
+    (left.kind === "workspace"
+      ? left.resourceId === right.resourceId &&
+        left.environmentIdentity === right.environmentIdentity
+      : canonicalJson(left) === canonicalJson(right));
+  const configure = (next = {}) => {
+    const selected = next.scope ? communicationOwnerScopeSchema.parse(next.scope) : undefined;
+    if (selected && scope && !samePrincipal(selected, scope))
+      throw refused("COMMUNICATION_SCOPE_REFUSED", 403);
+    if (selected) scope = selected;
+    enabled = Boolean(selected);
+    transport = next.transport;
+    extensionArtifact = next.extensionArtifact;
+  };
   const root = join(stateRoot, "communication");
   await mkdir(root, { recursive: true, mode: 0o700 });
   const info = await lstat(root);
@@ -76,7 +94,7 @@ export async function createOwnerCommunication({
     if (
       record &&
       (record.requestId !== requestId ||
-        canonicalJson(record.scope) !== canonicalJson(scope) ||
+        !samePrincipal(record.scope, scope) ||
         record.version !== 1)
     )
       throw refused("COMMUNICATION_SCOPE_REFUSED", 403);
@@ -92,7 +110,7 @@ export async function createOwnerCommunication({
       stages: record.stages,
     };
   };
-  const tokenFor = (reference) => {
+  const tokenFor = (reference, scope) => {
     const owner = scope.kind === "controller" ? scope.deviceId : scope.resourceId;
     const prefix = `owner-file://${scope.kind}/${owner}/`;
     if (
@@ -102,9 +120,12 @@ export async function createOwnerCommunication({
       throw refused("COMMUNICATION_SOURCE_REFUSED", 403);
     return reference.slice(prefix.length);
   };
-  const prepareSource = async (source, stream) => {
+  const prepareSource = async (source, stream, scope, publications) => {
     if (source.type === "publication") {
-      const opened = await publications.openSource(tokenFor(source.referenceId), shutdown.signal);
+      const opened = await publications.openSource(
+        tokenFor(source.referenceId, scope),
+        shutdown.signal,
+      );
       try {
         return Object.fromEntries(
           Object.entries(opened).filter(([key]) => !["settled", "close"].includes(key)),
@@ -192,6 +213,11 @@ export async function createOwnerCommunication({
   };
   const submit = async (value, { stream } = {}) => {
     const input = communicationOwnerSubmitSchema.parse(value);
+    const selectedScope = scope;
+    const selectedEnabled = enabled;
+    const selectedPublications = enabled ? publications.snapshot() : undefined;
+    const selectedTransport = transport;
+    const selectedArtifact = extensionArtifact;
     if (input.expectedScope && canonicalJson(input.expectedScope) !== canonicalJson(scope))
       throw refused("COMMUNICATION_SCOPE_REFUSED", 403);
     const inputDigest = hash(immutableInput(input));
@@ -206,13 +232,14 @@ export async function createOwnerCommunication({
       return running.work;
     }
     if (closing) throw refused("COMMUNICATION_OWNER_UNAVAILABLE", 503);
+    if (!selectedEnabled) throw refused("COMMUNICATION_OWNER_UNAVAILABLE", 503);
     const work = (async () => {
       // Acquisition is preparation: a refused source has no admitted vendor operation.
-      const file = await prepareSource(input.source, stream);
+      const file = await prepareSource(input.source, stream, selectedScope, selectedPublications);
       if (shutdown.signal.aborted || closing) throw refused("SOURCE_REFUSED", 422);
       const record = {
         version: 1,
-        scope,
+        scope: selectedScope,
         requestId: input.requestId,
         inputDigest,
         file,
@@ -221,11 +248,11 @@ export async function createOwnerCommunication({
       const save = () => writeDurableJson(root, input.requestId + ".json", record);
       let channels = [];
       if (input.action === "deliver") {
-        if (!transport) throw refused("COMMUNICATION_TRANSPORT_UNAVAILABLE", 503);
+        if (!selectedTransport) throw refused("COMMUNICATION_TRANSPORT_UNAVAILABLE", 503);
         channels = communicationOwnerPreparationSchema.parse(
-          await transport.prepare(
+          await selectedTransport.prepare(
             {
-              scope,
+              scope: selectedScope,
               requestId: input.requestId,
               channelIds: input.channelIds,
               kind: input.kind,
@@ -265,13 +292,16 @@ export async function createOwnerCommunication({
                     close: async () => {},
                     settled: Promise.resolve(),
                   }
-                : await publications.openSource(tokenFor(file.referenceId), signal);
+                : await selectedPublications.openSource(
+                    tokenFor(file.referenceId, selectedScope),
+                    signal,
+                  );
               const stage = { channelId: channel.channelId, operationId, status: "accepted" };
               try {
                 record.stages.push(stage);
                 await save();
                 const control = {
-                  scope,
+                  scope: selectedScope,
                   requestId: input.requestId,
                   channelId: channel.channelId,
                   authorityDigest: channel.authorityDigest,
@@ -301,7 +331,7 @@ export async function createOwnerCommunication({
                   },
                 };
                 const result = communicationVendorResultSchema.parse(
-                  await transport.send(control, checkedSource, signal),
+                  await selectedTransport.send(control, checkedSource, signal),
                 );
                 if (result.status === "delivered" && !complete)
                   throw refused("WORKSPACE_OUTCOME_UNCONFIRMED", 503);
@@ -330,13 +360,13 @@ export async function createOwnerCommunication({
               }
             };
             if (channel.provider === "extension") {
-              if (!deliverExtension || !extensionArtifact || !channel.bundleDigest)
+              if (!deliverExtension || !selectedArtifact || !channel.bundleDigest)
                 throw refused("COMMUNICATION_EXTENSION_UNAVAILABLE", 503);
               await deliverExtension({
-                artifact: await extensionArtifact(
+                artifact: await selectedArtifact(
                   channel.channelId,
                   channel.bundleDigest,
-                  scope,
+                  selectedScope,
                   shutdown.signal,
                 ),
                 directory: join(root, "extensions"),
@@ -352,7 +382,10 @@ export async function createOwnerCommunication({
                     sha256: file.sha256,
                   },
                   open: async (signal) => {
-                    const value = await publications.openSource(tokenFor(file.referenceId), signal);
+                    const value = await selectedPublications.openSource(
+                      tokenFor(file.referenceId, selectedScope),
+                      signal,
+                    );
                     return { stream: value, close: value.close, settled: value.settled };
                   },
                 },
@@ -419,6 +452,7 @@ export async function createOwnerCommunication({
     }
   };
   return {
+    configure,
     submit,
     inspect,
     async close() {

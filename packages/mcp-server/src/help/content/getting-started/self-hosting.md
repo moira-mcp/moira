@@ -590,8 +590,28 @@ their sign-in handling.
 
 Physical VM startup is distinct from guest readiness: commands become available only after guest
 preparation completes. `CODESPACE_LOCAL_SETUP_INCOMPLETE` means that preparation failed, even if
-the VM is confirmed stopped. Delete it and confirm removal before creating a replacement;
-restarting or `recover` does not complete initial setup.
+the VM is confirmed stopped. Repair the reported prerequisite, then choose **Resume setup** or
+`codespace({ action: "resume_setup", codespace_id, generation, request_id })` with the current
+generation and a fresh ws1 identity. This continues the same proved VM/disk and preserves files
+and the original create result. Ordinary start and custody `recover` do not resume setup.
+Unknown creation remains collection of its original operation, not permission to adopt or replace a VM.
+The optional `setup_failure` distinguishes a preserved unproved repository (`repository_unproven`,
+inspect locally), missing Python3/libc/filesystem exclusive-publication support
+(`prerequisite_unavailable`), repository access/ref repair (`repository_checkout_failed`) and
+fixed guest-configuration diagnostics (`configuration_failed`). Proved published repositories keep
+their branch and user changes; redirected Git metadata or an unproved existing root is preserved
+and refused rather than overwritten.
+
+The working guest Unix API is ready before optional workspace credentials or cloud registration.
+Waiting for that cloud response does not block local validation or stop, and a changed runtime,
+generation or authority prevents applying a stale reply. Warm preparation uses configured or exact
+retained Git author data; public checkout does not wait for optional author lookup. Initial private
+checkout still needs current authorization. Optional observed
+`remote.state` distinguishes `unconfigured`, `enrollment_unavailable`, `connecting`, `connected`,
+`unavailable` and `refused`; an absent observation stays unknown. Temporary enrollment failure
+does not prevent locally authorized work. Existing remote transport reconnects without command
+replay; confirmed refusal retires that remote authority. Later enrollment reloads the same Unix
+owner without restarting accepted commands. Remote MCP work still needs current authority and a live route.
 
 Install matching server and companion builds. Their strict snapshot and management-result contract
 includes exact creation identity, guest readiness and native stop confirmation. Records remain
@@ -605,7 +625,7 @@ unconfirmed. Inspect the original operation instead of
 restarting the companion to recover a lost reply. Client exit and observer disconnect do not
 authorize physical VM stop; explicit stop, disable and physical maintenance retain that boundary.
 
-The host CLI supports `create OWNER/REPO --ref BRANCH`, `start SPACE_ID`, `stop SPACE_ID`,
+The host CLI supports `create OWNER/REPO --ref BRANCH`, `start SPACE_ID`, `resume-setup SPACE_ID`, `stop SPACE_ID`,
 `remove SPACE_ID --confirm` and `collect REQUEST_ID` through the running private controller.
 Choose `--request-id` before mutation; the CLI prints it before observing the result. Fresh create
 requires live cloud route registration and initial Git authority. Already admitted VMs can start,
@@ -648,7 +668,10 @@ same edit or modifying affected files; a failed delivery is not proof that an ed
 stop/start requires no manual synchronization. If runtime ownership itself needs recovery, first
 confirm that the VM is physically stopped, then use `recover SPACE_ID --confirm` with the same
 state directory. It checks exact identity and network policy without replaying jobs; retained jobs
-and unknown outcomes remain unchanged.
+and unknown outcomes remain unchanged. If the acknowledged unknown occurred during initial
+preparation, the VM remains setup-incomplete. Repair its prerequisite and explicitly use
+`resume-setup SPACE_ID` on that same VM; acknowledgement alone does not complete setup or enable
+ordinary start.
 For an orphan device
 shutdown, `recover --confirm` requires disabled work, proves physical stop and retains jobs/data.
 See [Troubleshooting](/docs/integration/troubleshooting/#local-codespaces) for refusal recovery.

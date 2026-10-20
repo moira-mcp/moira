@@ -177,6 +177,12 @@ export interface CodespaceToolServices {
         | "stopCodespace"
         | "deleteCodespace"
       > & {
+        resumeSetup?: (
+          userId: string,
+          id: string,
+          requestId: string,
+          expectedGeneration: number,
+        ) => Promise<CodespaceSummaryView>;
         create: (
           userId: string,
           repositoryId: string,
@@ -360,6 +366,8 @@ function projectCodespace(summary: CodespaceSummaryView): Record<string, unknown
     state: summary.state,
     provider: summary.provider,
     generation: summary.generation,
+    ...(summary.remote ? { remote: summary.remote } : {}),
+    ...(summary.setup_failure ? { setup_failure: summary.setup_failure } : {}),
     pending_request_ids: summary.pending_request_ids ?? [],
     ...(summary.device_id
       ? { device_id: summary.device_id }
@@ -677,7 +685,8 @@ export async function executeCodespaceTool(
   let guidanceLinks: CodespaceProviderGuidance["links"] = [];
   let acceptedCodespaceId: string | undefined;
   const lifecycleIdentity =
-    ["create", "start", "stop", "delete", "adopt"].includes(action) && "request_id" in params
+    ["create", "start", "resume_setup", "stop", "delete", "adopt"].includes(action) &&
+    "request_id" in params
       ? {
           request_id: params.request_id,
           ...("device_id" in params && params.device_id ? { device_id: params.device_id } : {}),
@@ -784,7 +793,7 @@ export async function executeCodespaceTool(
     }
 
     if (
-      ["create", "start", "stop", "delete", "adopt"].includes(action) &&
+      ["create", "start", "resume_setup", "stop", "delete", "adopt"].includes(action) &&
       !("request_id" in params && params.request_id)
     )
       return errorResult(
@@ -796,7 +805,7 @@ export async function executeCodespaceTool(
 
     const ready = requireReady(status, guidanceLinks);
     if (
-      ["start", "stop", "delete"].includes(action) &&
+      ["start", "resume_setup", "stop", "delete"].includes(action) &&
       !("generation" in params && params.generation)
     )
       return errorResult(
@@ -819,6 +828,24 @@ export async function executeCodespaceTool(
     const observeLifecycle = (resourceId: string) =>
       services.resource!.getCodespace(userId, resourceId);
     switch (action) {
+      case "resume_setup": {
+        const input = params as CodespaceToolParams["resume_setup"];
+        if (services.provider !== "local-sandboxes" || !services.resource.resumeSetup)
+          return errorResult(
+            "CODESPACE_REQUEST_INVALID",
+            undefined,
+            false,
+            "Setup recovery requires the same known Local codespace.",
+          );
+        const recovered = await services.resource.resumeSetup(
+          userId,
+          input.codespace_id,
+          input.request_id,
+          input.generation,
+        );
+        acceptedCodespaceId = input.codespace_id;
+        return jsonResult({ ...projectCodespace(recovered), request_id: input.request_id });
+      }
       case "create": {
         const input = params as CodespaceToolParams["create"];
         if (services.provider === "local-sandboxes" && (input.device_id || input.devcontainer_path))

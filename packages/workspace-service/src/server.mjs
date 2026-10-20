@@ -122,7 +122,15 @@ export async function startWorkspaceService(options) {
         refuse("COMMUNICATION_REQUEST_INVALID", 404);
       }
       if (request.method === "GET" && url.pathname === "/v1/health")
+        return json(response, {
+          ...(await owner.health()),
+          ...(options.remoteStatus ? { remote: options.remoteStatus() } : {}),
+        });
+      if (request.method === "POST" && url.pathname === "/v1/configuration/reload") {
+        if (!options.reloadConfiguration) refuse("NOT_FOUND", 404);
+        await options.reloadConfiguration();
         return json(response, await owner.health());
+      }
       if (request.method === "POST" && url.pathname === "/v1/tools") {
         const controller = new globalThis.AbortController();
         const closed = () => controller.abort();

@@ -203,6 +203,8 @@ export class LocalCodespaceResourceService {
         observed_at: snapshot.observedAt,
         updated_at: snapshot.observedAt,
         lifecycle_error: actual.stateError ?? null,
+        ...(actual.remote ? { remote: actual.remote } : {}),
+        ...(actual.setupFailure ? { setup_failure: actual.setupFailure } : {}),
       });
     } catch (error) {
       this.failure(error);
@@ -396,7 +398,7 @@ export class LocalCodespaceResourceService {
   private async lifecycle(
     userId: string,
     resourceId: string,
-    action: "start" | "stop" | "delete",
+    action: "start" | "resume_setup" | "stop" | "delete",
     requestId: string | undefined,
     expectedGeneration?: number,
     ownerConfirmed = false,
@@ -468,6 +470,9 @@ export class LocalCodespaceResourceService {
     expectedGeneration?: number,
   ) {
     return this.lifecycle(userId, resourceId, "stop", requestId, expectedGeneration);
+  }
+  resumeSetup(userId: string, resourceId: string, requestId?: string, expectedGeneration?: number) {
+    return this.lifecycle(userId, resourceId, "resume_setup", requestId, expectedGeneration);
   }
   deleteCodespace(
     userId: string,

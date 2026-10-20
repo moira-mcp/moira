@@ -78,7 +78,7 @@ export type CodespaceManagementScope =
 type ResourceRequestError = { message: string; origin: CodespaceSummaryView };
 type RetainedOperation = {
   requestId: string;
-  action: "create" | "start" | "stop" | "delete" | "adopt";
+  action: "create" | "start" | "resume_setup" | "stop" | "delete" | "adopt";
 };
 
 function errorStillCurrent(error: ResourceRequestError | undefined, current: CodespaceSummaryView) {
@@ -160,7 +160,7 @@ export function CodespaceManagement({ scope }: { scope: CodespaceManagementScope
   const [creating, setCreating] = useState(false);
   const [busyCodespaces, setBusyCodespaces] = useState<Set<string>>(new Set());
   const [actionErrors, setActionErrors] = useState<
-    Record<string, ResourceRequestError & { action: "start" | "stop" }>
+    Record<string, ResourceRequestError & { action: "start" | "resume_setup" | "stop" }>
   >({});
   const [createError, setCreateError] = useState<string | null>(null);
   const [adopting, setAdopting] = useState(false);
@@ -439,7 +439,10 @@ export function CodespaceManagement({ scope }: { scope: CodespaceManagementScope
     }
   };
 
-  const lifecycle = async (codespace: CodespaceSummaryView, action: "start" | "stop") => {
+  const lifecycle = async (
+    codespace: CodespaceSummaryView,
+    action: "start" | "resume_setup" | "stop",
+  ) => {
     if (
       !accessEnabled ||
       (action === "start" && codespace.lifecycle_error === "CODESPACE_LOCAL_SETUP_INCOMPLETE")
@@ -463,20 +466,26 @@ export function CodespaceManagement({ scope }: { scope: CodespaceManagementScope
         return next;
       });
       const next =
-        action === "start"
-          ? await apiClient.startGitHubCodespace(
+        action === "resume_setup"
+          ? await apiClient.resumeLocalCodespaceSetup(
               codespace.codespace_id,
               requestId,
               codespace.generation,
             )
-          : await apiClient.stopGitHubCodespace(
-              codespace.codespace_id,
-              requestId,
-              codespace.generation,
-            );
+          : action === "start"
+            ? await apiClient.startGitHubCodespace(
+                codespace.codespace_id,
+                requestId,
+                codespace.generation,
+              )
+            : await apiClient.stopGitHubCodespace(
+                codespace.codespace_id,
+                requestId,
+                codespace.generation,
+              );
       if (!owned()) return;
       replaceCodespace(next);
-      const completed = action === "start" ? next.state === "usable" : next.state === "stopped";
+      const completed = action !== "stop" ? next.state === "usable" : next.state === "stopped";
       if (!completed)
         retainOperation(
           codespace.codespace_id,
@@ -487,7 +496,7 @@ export function CodespaceManagement({ scope }: { scope: CodespaceManagementScope
       if (completed)
         toast.success(
           t(
-            action === "start"
+            action !== "stop"
               ? "pages.settings.codespaces.started"
               : "pages.settings.codespaces.stopped",
           ),
@@ -1083,6 +1092,14 @@ export function CodespaceManagement({ scope }: { scope: CodespaceManagementScope
                           : t(`pages.settings.codespaces.states.${codespace.state}`)}
                       </Badge>
                     </div>
+                    {codespace.remote && (
+                      <p
+                        className="mt-2 text-xs text-muted-foreground"
+                        data-testid={`codespace-remote-${codespace.codespace_id}`}
+                      >
+                        {t(`localDevices.codespaces.remote.${codespace.remote.state}`)}
+                      </p>
+                    )}
                     {codespace.machine && (
                       <p className="mt-2 text-xs text-muted-foreground">
                         {t("localDevices.codespaces.resources", {
@@ -1117,7 +1134,27 @@ export function CodespaceManagement({ scope }: { scope: CodespaceManagementScope
                         message={errorMessage}
                       />
                     )}
+                    {setupIncomplete && codespace.setup_failure && (
+                      <p
+                        className="mt-2 text-sm text-muted-foreground"
+                        data-testid={`codespace-setup-remedy-${codespace.codespace_id}`}
+                      >
+                        {t(`localDevices.codespaces.setupFailure.${codespace.setup_failure}`)}
+                      </p>
+                    )}
                     <div className="mt-3 flex flex-wrap items-center gap-2">
+                      {computer && setupIncomplete && codespace.desired_state !== "deleted" && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={requestBusy || !accessEnabled || outcomeUnconfirmed}
+                          onClick={() => void lifecycle(codespace, "resume_setup")}
+                          data-testid={`codespace-resume-setup-${codespace.codespace_id}`}
+                        >
+                          <Play className="mr-1 h-4 w-4" aria-hidden="true" />
+                          {t("localDevices.codespaces.resumeSetup")}
+                        </Button>
+                      )}
                       {!computer && codespace.state !== "usable" && !outcomeUnconfirmed && (
                         <Button
                           size="sm"

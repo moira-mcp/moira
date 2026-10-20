@@ -430,7 +430,7 @@ describe("codespace lifecycle and discovery adapter", () => {
       /secret-(connection|capability|marker|claim)|authorizationGeneration/,
     );
   });
-  it.each(["start", "stop", "delete"] as const)(
+  it.each(["start", "resume_setup", "stop", "delete"] as const)(
     "Local %s keeps caller observed CAS rather than refreshing it before dispatch",
     async (action) => {
       const dependencies = services({ provider: "local-sandboxes" });
@@ -441,6 +441,8 @@ describe("codespace lifecycle and discovery adapter", () => {
         return codespace();
       };
       dependencies.resource!.startCodespace = async (_user, _id, _request, generation) =>
+        check(generation);
+      dependencies.resource!.resumeSetup = async (_user, _id, _request, generation) =>
         check(generation);
       dependencies.resource!.stopCodespace = async (_user, _id, _request, generation) =>
         check(generation);
@@ -466,6 +468,56 @@ describe("codespace lifecycle and discovery adapter", () => {
       });
     },
   );
+  it("resumes the same known Local environment and projects remote failure separately from local readiness", async () => {
+    const dependencies = services({ provider: "local-sandboxes" });
+    dependencies.resource!.resumeSetup = jest.fn(async () =>
+      codespace({
+        provider: "local-sandboxes",
+        device_id: OTHER_CODESPACE_ID,
+        state: "usable",
+        generation: 4,
+        remote: { state: "unavailable" },
+      }),
+    );
+    const result = await executeCodespaceTool(
+      parseCodespaceToolParams({
+        action: "resume_setup",
+        codespace_id: CODESPACE_ID,
+        request_id: REQUEST_ID,
+        generation: 3,
+      }),
+      USER_ID,
+      dependencies,
+    );
+    expect(dependencies.resource!.resumeSetup).toHaveBeenCalledWith(
+      USER_ID,
+      CODESPACE_ID,
+      REQUEST_ID,
+      3,
+    );
+    expect(data(result)).toMatchObject({
+      codespace_id: CODESPACE_ID,
+      state: "usable",
+      generation: 4,
+      remote: { state: "unavailable" },
+      request_id: REQUEST_ID,
+    });
+    expect(dependencies.resource!.create).not.toHaveBeenCalled();
+    expect(dependencies.resource!.startCodespace).not.toHaveBeenCalled();
+    const cloud = services({ provider: "github-codespaces" });
+    const refused = await executeCodespaceTool(
+      parseCodespaceToolParams({
+        action: "resume_setup",
+        codespace_id: CODESPACE_ID,
+        request_id: REQUEST_ID,
+        generation: 3,
+      }),
+      USER_ID,
+      cloud,
+    );
+    expect(refused.isError).toBe(true);
+    expect(data(refused)).toMatchObject({ error: { code: "CODESPACE_REQUEST_INVALID" } });
+  });
   it("publishes and accepts the same Unicode PR branches as Git", () => {
     const input = {
       action: "pull_request_create",

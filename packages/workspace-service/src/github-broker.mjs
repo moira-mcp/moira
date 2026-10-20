@@ -82,6 +82,32 @@ export function workspaceGitAuthority(
   verifyExclusiveOwner = async () => false,
 ) {
   const active = new Set();
+  let currentRemote;
+  let principal;
+  const configureRemote = (next) => {
+    if (next) {
+      if (
+        principal &&
+        ["origin", "resourceId", "environmentIdentity"].some((key) => next[key] !== principal[key])
+      )
+        throw new GitHubOwnerError("SCOPED_CREDENTIAL_AUTHORITY_REFUSED", 403);
+      principal ??= {
+        origin: next.origin,
+        resourceId: next.resourceId,
+        environmentIdentity: next.environmentIdentity,
+      };
+    }
+    currentRemote = next ? { ...next } : undefined;
+  };
+  const requireRemote = () => {
+    if (!currentRemote) throw new GitHubOwnerError("SCOPED_CREDENTIAL_UNAVAILABLE", 503);
+    return currentRemote;
+  };
+  const currentMetadata = (path, body, signal) => {
+    const selected = requireRemote();
+    return metadata(selected.origin, path, selected.credential, body, signal);
+  };
+  configureRemote(remote);
   const dispose = async (receipt, child) => {
     try {
       let publicationError;
@@ -95,10 +121,8 @@ export function workspaceGitAuthority(
       } catch (error) {
         publicationError = error;
       }
-      const released = await metadata(
-        remote.origin,
+      const released = await currentMetadata(
         `/api/codespaces/github/credentials/${child.credentialId}/release`,
-        remote.credential,
         { resourceId: receipt.resourceId, resourceGeneration: receipt.resourceGeneration },
       );
       if (released.released !== true)
@@ -115,13 +139,11 @@ export function workspaceGitAuthority(
   };
   return {
     repositoryFullName,
+    configureRemote,
     async collect(requestId) {
       const receipt = await inspectCredentialRequest(store, requestId);
       if (!receipt || active.has(requestId)) return receipt;
-      if (
-        receipt.resourceId !== remote.resourceId ||
-        receipt.resourceGeneration !== remote.resourceGeneration
-      )
+      if (receipt.resourceId !== requireRemote().resourceId)
         throw new GitHubOwnerError("SCOPED_CREDENTIAL_AUTHORITY_REFUSED", 403);
       const credentialId = receipt.credentialId;
       const input = {
@@ -131,12 +153,7 @@ export function workspaceGitAuthority(
         requestId: receipt.requestId,
       };
       const collection = scopedCredentialCollectionSchema.parse(
-        await metadata(
-          remote.origin,
-          `/api/codespaces/github/credentials/requests/${requestId}`,
-          remote.credential,
-          input,
-        ),
+        await currentMetadata(`/api/codespaces/github/credentials/requests/${requestId}`, input),
       );
       if (collection.state === "live") {
         if (await verifyExclusiveOwner()) await dispose(receipt, collection.credential);
@@ -153,9 +170,10 @@ export function workspaceGitAuthority(
       return inspectCredentialRequest(store, requestId);
     },
     async acquire(action, signal) {
+      const selected = requireRemote();
       const binding = {
-        resourceId: remote.resourceId,
-        resourceGeneration: remote.resourceGeneration,
+        resourceId: selected.resourceId,
+        resourceGeneration: selected.resourceGeneration,
       };
       let preparingId;
       const receipt = await prepareCredentialRequest(
@@ -175,13 +193,7 @@ export function workspaceGitAuthority(
       const input = { ...binding, action, requestId: receipt.requestId };
       let result;
       try {
-        result = await metadata(
-          remote.origin,
-          "/api/codespaces/github/credentials/acquire",
-          remote.credential,
-          input,
-          signal,
-        );
+        result = await currentMetadata("/api/codespaces/github/credentials/acquire", input, signal);
       } catch (error) {
         const outcome = scopedCredentialFailureOutcome(error.publicCode);
         const unconfirmed =
@@ -240,10 +252,8 @@ export function workspaceGitAuthority(
         repositoryFullName: result.repositoryFullName,
         validate: async (checkSignal) => {
           const collection = scopedCredentialCollectionSchema.parse(
-            await metadata(
-              remote.origin,
+            await currentMetadata(
               `/api/codespaces/github/credentials/requests/${receipt.requestId}`,
-              remote.credential,
               input,
               checkSignal,
             ),
@@ -366,6 +376,7 @@ export async function startWorkspaceGitBroker(config, remote, store, verifyExclu
   let closing;
   return {
     collect: authority.collect,
+    configureRemote: authority.configureRemote,
     close: () =>
       (closing ??= (async () => {
         abort.abort();

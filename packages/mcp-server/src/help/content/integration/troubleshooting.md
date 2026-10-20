@@ -392,14 +392,14 @@ before dispatch; routing does not implicitly start a VM or perform cloud bootstr
 A disconnected computer requires restoring the companion connection.
 `CODESPACE_PROVIDER_DISABLED` indicates disabled GitHub provider configuration. Local work
 uses its owner's grants, enabled permission and physical capacity rather than cloud operational controls.
-For GitHub create/start/adopt, reconnect the assigned paired controller; a usable guest also
-requires its authenticated outbound registration. Configuration `ready` alone does not prove that.
+For GitHub create/start/adopt, reconnect the assigned paired controller; remote guest access also
+requires authenticated outbound registration. Configuration `ready` alone does not prove that.
 A confirmed registration 401/403 requires current authority repair; temporary network loss can
 reconnect the same valid identity without replaying the original operation.
 
 `CODESPACE_AUTHORIZATION_REQUIRED` requires restoring actual account, device or
 repository access in Settings. The host CLI supports `create OWNER/REPO --ref BRANCH`,
-`start SPACE_ID`, `stop SPACE_ID`, `remove SPACE_ID --confirm` and `collect REQUEST_ID`
+`start SPACE_ID`, `resume-setup SPACE_ID`, `stop SPACE_ID`, `remove SPACE_ID --confirm` and `collect REQUEST_ID`
 through the running private controller; raw host execution is unsupported. Fresh create
 requires live cloud route registration and initial Git authority. Already admitted VMs can
 start, stop or be cleaned up offline under applicable current owner authority. Starting requires
@@ -494,13 +494,20 @@ does not create another VM. Do not substitute the stable guest route generation 
 owner lifecycle generation. A nullable `machine` in a successful summary, including confirmed
 deletion, is not a default profile or permission to start.
 
-| Diagnostic                                 | Owner action                                                                                                                                                                                                       |
-| ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `CODESPACE_LOCAL_CREATION_UNKNOWN`         | Check the same codespace again. Its physical outcome is unconfirmed; do not create a replacement.                                                                                                                  |
-| `CODESPACE_LOCAL_SETUP_INCOMPLETE`         | Guest preparation did not complete. Delete the codespace and confirm removal before recreating it; start or `recover` cannot finish initial setup. The cause remains visible even after a confirmed physical stop. |
-| `CODESPACE_LOCAL_PROTOCOL_ERROR`           | Coordinate matching server/companion builds and inspect saved-state compatibility. Preserve identity and journals.                                                                                                 |
-| `CODESPACE_LOCAL_RUNTIME_ERROR`            | Inspect the local runtime's diagnostics, repair that runtime and check the same codespace again. Shutdown is not implied.                                                                                          |
-| `CODESPACE_LOCAL_DELETE_APPROVAL_REQUIRED` | Confirm deletion of the same codespace in Settings → Development → Local computers with active local web control. Permanent agent deletion permission is not required for owner cleanup.                           |
+| Diagnostic                                 | Owner action                                                                                                                                                                                                                                     |
+| ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `CODESPACE_LOCAL_CREATION_UNKNOWN`         | Check the same codespace again. Its physical outcome is unconfirmed; do not create a replacement.                                                                                                                                                |
+| `CODESPACE_LOCAL_SETUP_INCOMPLETE`         | Repair the reported prerequisite, then explicitly resume setup of the same known VM with a fresh request and current generation. Ordinary start and custody `recover` do not resume preparation. Preserve the original create outcome and files. |
+| `CODESPACE_LOCAL_PROTOCOL_ERROR`           | Coordinate matching server/companion builds and inspect saved-state compatibility. Preserve identity and journals.                                                                                                                               |
+| `CODESPACE_LOCAL_RUNTIME_ERROR`            | Inspect the local runtime's diagnostics, repair that runtime and check the same codespace again. Shutdown is not implied.                                                                                                                        |
+| `CODESPACE_LOCAL_DELETE_APPROVAL_REQUIRED` | Confirm deletion of the same codespace in Settings → Development → Local computers with active local web control. Permanent agent deletion permission is not required for owner cleanup.                                                         |
+
+Use **Resume setup**, Local `resume_setup`, or host `resume-setup SPACE_ID`. The optional
+`setup_failure` gives the remedy: inspect the preserved root for `repository_unproven`; provide
+Python3/libc/filesystem exclusive-publication support for `prerequisite_unavailable`; repair access
+or the requested ref for `repository_checkout_failed`; inspect fixed configuration diagnostics for
+`configuration_failed`. Setup preserves occupied roots and user changes. Unknown runtime creation
+or guest settlement requires original-result collection, not adoption or a replacement.
 
 After a confirmed refusal and repair, an explicit lifecycle action can create a fresh guarded
 attempt. Owner confirmation can also replace a local delete intent that retained only state
@@ -573,7 +580,17 @@ per-response byte, connection-count or established-transfer duration quota. Host
 Its bounded diagnostic window does not establish settlement of pending work. Current authority
 is checked while SDK startup is pending; installation and registration have no general work deadline.
 Device `active`/`enabled` and setup `ready` describe authorization and configuration, not a
-successful guest connection. Check the companion's current diagnostic when guest calls time out.
+successful guest connection. A working guest Unix API is ready before optional workspace-credential
+acquisition and can remain ready while remote access is not. A held cloud reply does not hold local
+work/lifecycle admission; current runtime, generation, grant and connection are revalidated before
+applying it. Warm preparation uses configured or exact retained author data; public checkout does
+not depend on optional Git author lookup. Initial private checkout still requires current authority.
+Optional observed `remote.state` is `unconfigured`, `enrollment_unavailable`, `connecting`, `connected`,
+`unavailable` or `refused`; missing observation is unknown. Enrollment unavailability needs current
+registration to become available; an existing unavailable transport reconnects with the same
+authority. Temporary network/store failure is not confirmed revocation. A confirmed refusal closes
+that remote authority without stopping locally authorized work. Later enrollment updates the same
+Unix owner without replaying accepted commands. Check the current diagnostic when guest calls time out.
 After login or a cold owner restart, the installed service restores intended work for the same
 known VM identities and disks when runtime, credentials and current work permission are available.
 `run` starts or connects to that owner. Recovery reclaims a stale runner marker only when its runner
@@ -681,6 +698,10 @@ For a runtime-owner refusal such as `LOCAL_GUEST_SETTLEMENT_UNKNOWN`, confirm ph
 boundary while preserving jobs and unknown outcomes without replay. With a running owner, first
 use the maintenance pause above, then resume that original maintenance ID and use `run` if needed.
 Use the same `--state PATH`. Ordinary stop/start requires no separate counter-recovery step.
+If the acknowledged unknown arose during initial preparation, recovery preserves its original
+operation and leaves setup incomplete. Repair the reported prerequisite, then explicitly
+`resume-setup SPACE_ID` on the same known VM; do not treat acknowledgement as completed setup
+or permission for ordinary start.
 `npm run local -- recover --confirm` is the separate
 disabled-device orphan-shutdown acknowledgement. Neither deletes codespace data or authorizes
 adoption by SDK name. If shutdown remains pending or identity is unknown, retain the records

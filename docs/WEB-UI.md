@@ -931,10 +931,18 @@ execution inspector) receive `null` for a user that no longer exists and show th
   show their device label, and a repository selected under another provider cannot
   be submitted. Local agent work requires a live confirmed owner and enabled local permission;
   it does not require a GitHub App connection. The combined codespace list retains
-  provider context and the existing Start/Stop/Delete controls. Creation and actions
+  provider context and the existing Start/Stop/Delete controls. A known incomplete Local setup
+  shows **Resume setup** separately from disabled ordinary Start. It sends a fresh lifecycle
+  identity with the observed generation to prepare the same VM; unknown creation offers original
+  state collection instead. Closed setup reasons explain preserved-root inspection, missing
+  publication prerequisites, repository access/ref repair or fixed configuration diagnostics.
+  Optional observed remote state distinguishes unconfigured, enrollment unavailable, connecting,
+  connected, connection unavailable and refused authority. Local usability remains independent
+  of these remote observations; absent health is not guessed from controller connectivity.
+  Creation and actions
   use the shared management endpoints under `/api/integrations/github/codespaces`;
   the prefix does not restrict routing to GitHub. Every create chooses a ws1 request ID before
-  dispatch; Start/Stop/Delete also send the observed resource generation. A stale action is refused
+  dispatch; Start/Resume setup/Stop/Delete also send the observed resource generation. A stale action is refused
   and requires a fresh observation and decision. **Check state again** collects the original
   pending IDs from the owner journal, or refreshes state when none is pending; it does not repeat
   lifecycle mutations. Pending identities survive page reload through owner observations.

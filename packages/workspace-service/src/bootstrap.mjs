@@ -94,7 +94,7 @@ export const WORKSPACE_CONFIGURE_SCRIPT = `${RELEASE_SELECTION}\nexec "$program/
 export const WORKSPACE_LOCAL_BOOTSTRAP_SCRIPT = `${RELEASE_SELECTION}\nexec "$program/runtime/bin/node" "$program/service/local-bootstrap.mjs"`;
 export const WORKSPACE_HEALTH_SCRIPT = `${RELEASE_SELECTION}\nexec "$program/runtime/bin/node" "$program/service/daemon.mjs" --health`;
 export const WORKSPACE_GITHUB_PROOF_SCRIPT = `${RELEASE_SELECTION}\nexec "$program/runtime/bin/node" "$program/service/daemon.mjs" --github-proof`;
-export const WORKSPACE_START_SCRIPT = `${RELEASE_SELECTION}\n"$program/runtime/bin/node" "$program/service/daemon.mjs" --stop\nexec "$program/runtime/bin/node" "$program/service/daemon.mjs" --start`;
+export const WORKSPACE_START_SCRIPT = `${RELEASE_SELECTION}\nexec "$program/runtime/bin/node" "$program/service/daemon.mjs" --start-if-configured`;
 
 export async function loadWorkspacePayload(directory, architecture) {
   if (!["x64", "arm64"].includes(architecture))

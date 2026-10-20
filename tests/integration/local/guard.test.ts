@@ -128,7 +128,8 @@ else if(args[0]==='api-guest'){
     f.writeFileSync(pending,JSON.stringify({pid:process.pid}));
     const timer=setInterval(()=>{if(f.existsSync(release)){clearInterval(timer);f.writeFileSync(sentinel,'service ready');finish();}},10);
   }else if(args[2]==='probe')process.stdout.write(JSON.stringify({environmentIdentity:'e'.repeat(64),architecture:'aarch64'})),finish();
-  else if(args[2]==='health')process.stdout.write(JSON.stringify({environmentIdentity:'e'.repeat(64),releaseIdentity:'f'.repeat(64)})),finish();
+  else if(args[2]==='configure'){f.writeFileSync(path+'.guest-config',bytes);finish();}
+  else if(args[2]==='health'){const config=f.existsSync(path+'.guest-config')?JSON.parse(f.readFileSync(path+'.guest-config')):{};process.stdout.write(JSON.stringify({environmentIdentity:'e'.repeat(64),releaseIdentity:'f'.repeat(64),remote:{state:config.remote?'connected':config.remoteState||'unconfigured'}}));finish();}
   else finish();
 }
 else if(args[0]==='api-start'){
@@ -232,7 +233,7 @@ int main(int argc,char **argv){
   if(!vm){char *initial[]={argv[0],"initial-worker",0};if(!command(2,initial))ensure_worker(argv[0],path,${JSON.stringify(local.space.name)});}
   while(!stopped){if(!vm)reconcile_workers();struct pollfd p[2]={{.fd=fd,.events=POLLIN},{.fd=docker,.events=POLLIN}};if(poll(p,vm?1:2,100)>0&&!vm){int c=accept((p[0].revents&POLLIN)?fd:docker,0,0);if(c>=0){
     struct pollfd client={.fd=c,.events=POLLIN};if(poll(&client,1,1000)>0){char request[32768];ssize_t n=read_request(c,request,sizeof(request));if(n>0){request[n]=0;
-      if(!strncmp(request,"POST /sandbox/",14)&&strstr(request,"/exec/attach ")){char name[39]={0};memcpy(name,request+14,38);char *args[]={argv[0],"worker-id",name,0};if(!command(3,args)){char id[65]={0};FILE *record=fopen(${JSON.stringify(observation + ".worker-id")},"r");if(record){fread(id,1,64,record);fclose(record);}pid_t child=fork();if(!child){close(fd);close(docker);attach_guest(c,argv[0],name,strstr(request,"/service/local-bootstrap.mjs")?"bootstrap":strstr(request,"kernel/random/boot_id")?"probe":strstr(request,"--configure")?"configure":strstr(request,"--health")?"health":strstr(request,"--stop")?"start-service":"install");close(c);_exit(0);}if(child>0){guests[guest_count]=child;strcpy(guest_ids[guest_count++],id);}}}
+      if(!strncmp(request,"POST /sandbox/",14)&&strstr(request,"/exec/attach ")){char name[39]={0};memcpy(name,request+14,38);char *args[]={argv[0],"worker-id",name,0};if(!command(3,args)){char id[65]={0};FILE *record=fopen(${JSON.stringify(observation + ".worker-id")},"r");if(record){fread(id,1,64,record);fclose(record);}pid_t child=fork();if(!child){close(fd);close(docker);attach_guest(c,argv[0],name,strstr(request,"/service/local-bootstrap.mjs")?"bootstrap":strstr(request,"kernel/random/boot_id")?"probe":strstr(request,"--configure")?"configure":strstr(request,"--health")?"health":strstr(request,"--start-if-configured")?"start-service":"install");close(c);_exit(0);}if(child>0){guests[guest_count]=child;strcpy(guest_ids[guest_count++],id);}}}
       else if(!strncmp(request,"GET /sandbox/",13)&&strstr(request,"/exec/")){char name[39]={0},file[1024];memcpy(name,request+13,38);snprintf(file,sizeof(file),"%s.guest-exit.%s",${JSON.stringify(observation)},name);FILE *exit=fopen(file,"r");if(exit){fclose(exit);reply(c,200,"{\\"id\\":\\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\\",\\"running\\":false,\\"exit_code\\":0}");}else reply(c,500,"");}
       else if(!strncmp(request,"POST /sandbox/",14)&&strstr(request,"/start ")){char name[39]={0};memcpy(name,request+14,38);char *args[]={argv[0],"api-start",name,0};int status=command(3,args);if(!status)ensure_worker(argv[0],path,name);reply(c,status?500:200,"");}
       else if(!strncmp(request,"POST /sandbox ",14)){char *body=strstr(request,"\\r\\n\\r\\n");char *args[]={argv[0],"api-create",body?body+4:"",0};int status=command(3,args);if(!status){ensure_worker(argv[0],path,${JSON.stringify(local.space.name)});body_reply(c,201,${JSON.stringify(observation + ".create-response")});}else reply(c,500,"");}
@@ -478,7 +479,10 @@ function observeInventoryRead(marker: string) {
   };
 }
 
-function driver(local: Awaited<ReturnType<typeof fixture>>) {
+function driver(
+  local: Awaited<ReturnType<typeof fixture>>,
+  activation: boolean | "resume-setup" = false,
+) {
   return `
     import {startGuard} from ${JSON.stringify(`file://${join(root, "guard.js")}`)};
     import f from 'node:fs/promises';
@@ -488,9 +492,9 @@ function driver(local: Awaited<ReturnType<typeof fixture>>) {
     const spacePath=${JSON.stringify(join(local.state.root, `space-${local.space.id}.json`))};
     const driverRecords=new DriverLocalRecords(await DriverPrivateState.open(${JSON.stringify(local.state.root)}));
     const space=await driverRecords.get(${JSON.stringify(local.space.id)});
-    if(space.desiredState!=='running')await driverRecords.put({...space,desiredState:'running'});
+    if(${JSON.stringify(activation)}!=='resume-setup'&&space.desiredState!=='running')await driverRecords.put({...space,desiredState:'running'});
     const device=await startGuard(${JSON.stringify(local.state.root)});
-    const guard=await device.space(${JSON.stringify(local.space.id)});
+    const guard=await device.space(${JSON.stringify(local.space.id)},${JSON.stringify(activation)});
     const wait=()=>new Promise((resolve,reject)=>{
       const changed=()=>{void f.readFile(${JSON.stringify(local.pending)}).then(()=>{observer.close();resolve();},error=>{if(error.code!=='ENOENT'){observer.close();reject(error);}});};
       const observer=watch(${JSON.stringify(root)},changed);observer.unref();observer.on('error',reject);changed();
@@ -563,6 +567,64 @@ const vmTest = process.platform === "darwin" ? test : test.skip;
 const supportedGuard = process.platform === "darwin" ? describe : describe.skip;
 
 supportedGuard("independent guard with a real subprocess SDK substitute", () => {
+  vmTest.each(["bootstrap", "service"] as const)(
+    "explicit setup recovery preserves original identity and failure through the held %s stage",
+    async (stage) => {
+      const local = await fixture(false, true);
+      Object.assign(local.space, {
+        phase: "failed",
+        desiredState: "stopped",
+        lastStartedAt: null,
+        failure: "LOCAL_SETUP_INCOMPLETE",
+        setupFailure: "configuration_failed",
+        admittedMachine: {
+          cpuCores: local.policy.runtime.cpuCores,
+          memoryBytes: local.policy.runtime.memoryBytes,
+          dockerBytes: local.policy.runtime.dockerBytes,
+        },
+      });
+      await local.records.put(local.space);
+      const original = Buffer.from(
+        '{"state":"completed","outcome":{"ok":false,"code":"original-setup-failure"}}',
+      );
+      const originalPath = join(local.state.root, "original-create.json");
+      await writeFile(originalPath, original);
+      await writeFile(
+        local.observation + (stage === "bootstrap" ? ".bootstrap-wait" : ".service-wait"),
+        "hold",
+      );
+      await execute(process.execPath, [
+        "--input-type=module",
+        "-e",
+        driver(local, "resume-setup") +
+          `
+        const work=guard.prepare();const outcome=work.then(()=>({ok:true}),error=>({ok:false,error}));
+        try {
+          await Promise.race([wait(),work.then(()=>{throw new Error('Setup skipped its real guest-stage barrier');})]);
+          const pending=JSON.parse(await f.readFile(spacePath,'utf8'));
+          if(pending.runtimeId!==${JSON.stringify(local.space.runtimeId)}||pending.generation!==2||pending.failure!=='LOCAL_SETUP_INCOMPLETE'||pending.setupFailure!=='configuration_failed')throw new Error('Recovery discarded the original VM, failure or generation');
+          if(guard.setupGeneration!==2)throw new Error('Pending preparation lacks its exact egress scope');
+          const authorization=${JSON.stringify(local.authorization)};
+          if(await driverRecords.authorize(authorization))throw new Error('Incomplete setup leaked ordinary broker admission');
+          if(!(await driverRecords.authorize(authorization,row=>guard.setupGeneration===row.generation)))throw new Error('Actual pending setup lacks egress');
+          await f.writeFile(${JSON.stringify(local.release)},'continue');
+          const result=await outcome;if(!result.ok)throw result.error;
+          const ready=await driverRecords.get(${JSON.stringify(local.space.id)});
+          if(ready.phase!=='usable'||ready.failure!==null||ready.setupFailure!==undefined||ready.runtimeId!==pending.runtimeId||ready.generation!==2)throw new Error('Recovery did not complete this same admitted VM');
+          if(guard.setupGeneration!==undefined)throw new Error('Setup egress scope survived operation completion');
+          const calls=(await f.readFile(${JSON.stringify(local.observation + ".calls")},'utf8')).trim().split(String.fromCharCode(10)).map(JSON.parse);
+          if(calls.some(argv=>argv[0]==='api-create'||argv[0]==='create'))throw new Error('Recovery created another VM');
+        } finally {await device.stop();await outcome;}
+      `,
+      ]);
+      expect(await readFile(originalPath)).toEqual(original);
+      expect(await local.records.get(local.space.id)).toMatchObject({
+        runtimeId: local.space.runtimeId,
+        phase: "stopped",
+        failure: null,
+      });
+    },
+  );
   vmTest.each(["disabled"] as const)(
     "cleanup-only guard removes the exact confirmed VM with %s work permission and preserves its peer",
     async (permission) => {

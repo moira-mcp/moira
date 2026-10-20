@@ -2,10 +2,10 @@ import { randomBytes, randomUUID } from "node:crypto";
 import { test, expect } from "./fixtures.js";
 import { createTestUser, login, loginAsAdmin } from "./helpers/auth-helper.js";
 import { getTestBaseUrl } from "../utils/test-config.js";
-import type { LocalDeviceView } from "@mcp-moira/shared";
+import type { CodespaceSummaryView, LocalDeviceView } from "@mcp-moira/shared";
 
 for (const language of ["en", "ru"] as const)
-  test(`persistent Local permission states are visible without renewal controls in ${language}`, async ({
+  test(`persistent Local permission and independent setup/readiness states are visible in ${language}`, async ({
     page,
   }, testInfo) => {
     await loginAsAdmin(page);
@@ -80,6 +80,47 @@ for (const language of ["en", "ru"] as const)
               },
       };
     });
+    const setupStates = [
+      "incomplete",
+      "ready-remote-unavailable",
+      "ready-enrollment-unavailable",
+      "unknown",
+    ] as const;
+    const codespaces: CodespaceSummaryView[] = setupStates.map((state, index) => ({
+      codespace_id: `44444444-4444-4444-8444-44444444444${index}`,
+      device_id: devices[0].deviceId,
+      provider: "local-sandboxes",
+      repository_id: `local:${devices[0].deviceId}:55555555-5555-4555-8555-555555555555`,
+      repository: `fixture/${state}`,
+      requested_ref: "main",
+      current_ref: null,
+      machine: null,
+      state: state === "incomplete" ? "stopped" : state === "unknown" ? "ambiguous" : "usable",
+      retention_policy: "persistent",
+      desired_state: "running",
+      observed_state:
+        state === "incomplete" ? "stopped" : state === "unknown" ? "unknown" : "running",
+      observed_at: 0,
+      lifecycle_error:
+        state === "incomplete"
+          ? "CODESPACE_LOCAL_SETUP_INCOMPLETE"
+          : state === "unknown"
+            ? "CODESPACE_LOCAL_CREATION_UNKNOWN"
+            : null,
+      ...(state === "incomplete" ? { setup_failure: "repository_unproven" as const } : {}),
+      generation: 3,
+      created_at: 0,
+      updated_at: 0,
+      ...(state === "ready-remote-unavailable"
+        ? { remote: { state: "unavailable" as const } }
+        : {}),
+      ...(state === "ready-enrollment-unavailable"
+        ? { remote: { state: "enrollment_unavailable" as const } }
+        : {}),
+      ...(state === "unknown"
+        ? { pending_request_ids: ["ws1-66666666-6666-4666-8666-666666666666"] }
+        : {}),
+    }));
     await page.route("**/api/integrations/local/devices", (route) =>
       route.fulfill({ json: { success: true, data: { devices, pairings: [] } } }),
     );
@@ -91,7 +132,7 @@ for (const language of ["en", "ru"] as const)
         json: {
           success: true,
           data: {
-            codespaces: [],
+            codespaces,
             unavailable: [],
             provider_errors: [],
             repositories: [],
@@ -153,6 +194,61 @@ for (const language of ["en", "ru"] as const)
       await card.evaluate((element) => element.scrollIntoView({ block: "center" }));
       await expect(card).toBeInViewport({ ratio: 1 });
       await testInfo.attach(`local-permission-${language}-${state}`, {
+        body: await card.screenshot(),
+        contentType: "image/png",
+      });
+    }
+    // Controlled presentation fixtures distinguish known setup recovery from an unknown
+    // original create and do not claim that these cards are physical VM observations.
+    for (const [index, state] of setupStates.entries()) {
+      const card = page.getByTestId(`github-codespace-${codespaces[index].codespace_id}`);
+      await expect(card).toBeVisible();
+      const resume = card.getByRole("button", {
+        name: language === "en" ? "Resume setup" : "Продолжить подготовку",
+        exact: true,
+      });
+      if (state === "incomplete") {
+        await expect(resume).toBeEnabled();
+        await expect(
+          card.getByTestId(`codespace-setup-remedy-${codespaces[index].codespace_id}`),
+        ).toContainText(language === "en" ? "Its files were preserved" : "Файлы сохранены");
+        await expect(
+          card.getByRole("button", {
+            name: language === "en" ? "Start" : "Запустить",
+            exact: true,
+          }),
+        ).toBeDisabled();
+      } else {
+        await expect(resume).toHaveCount(0);
+        if (state === "ready-remote-unavailable" || state === "ready-enrollment-unavailable") {
+          await expect(
+            card.getByTestId(`github-codespace-state-${codespaces[index].codespace_id}`),
+          ).toContainText(language === "en" ? "Running" : "Работает");
+          await expect(
+            card.getByTestId(`codespace-remote-${codespaces[index].codespace_id}`),
+          ).toContainText(
+            language === "en"
+              ? "local readiness is independent"
+              : "локальная готовность определяется отдельно",
+          );
+        } else {
+          await expect(
+            card.getByRole("button", {
+              name: language === "en" ? "Check state again" : "Проверить состояние снова",
+              exact: true,
+            }),
+          ).toBeEnabled();
+        }
+      }
+      const bounds = await card.boundingBox();
+      if (!bounds) throw new Error("Codespace card has no visible bounds");
+      await page.setViewportSize({
+        width: page.viewportSize()!.width,
+        height: Math.ceil(bounds.height) + 256,
+      });
+      await card.evaluate((element) => element.scrollIntoView({ block: "center" }));
+      await expect(card).toBeInViewport({ ratio: 1 });
+      await testInfo.attach(`local-setup-${language}-${state}`, {
         body: await card.screenshot(),
         contentType: "image/png",
       });

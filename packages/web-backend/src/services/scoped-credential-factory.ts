@@ -35,7 +35,12 @@ export function createScopedCredentialService(): ScopedCredentialService {
   const authenticate = (bearer: string) => {
     try {
       return new WorkspaceAuthRepository(sqlite).authenticate(bearer).userId;
-    } catch {
+    } catch (error) {
+      if (
+        !(error instanceof CodespaceResourceError) ||
+        error.code !== "CODESPACE_AUTHORIZATION_REQUIRED"
+      )
+        throw error;
       try {
         return getLocalDeviceService().authenticateDevice(bearer).userId;
       } catch (error) {

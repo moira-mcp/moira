@@ -192,18 +192,22 @@ the separately requested `communication` action `deliver-file`. See
 for current authority, link expiry and guarded target replacement. The common OCI image is
 `ghcr.io/moira-mcp/moira-workspace-service`; a project keeping its own Linux Dev Container can use
 the optional `ghcr.io/moira-mcp/features/workspace-service` Feature with a published release tag.
-Host `moira-local create`, `start`, `stop` and `remove` call the running owner controller with the
+Host `moira-local create`, `start`, `resume-setup`, `stop` and `remove` call the running owner controller with the
 observed generation and an original request ID; `collect` inspects that ID without repeating work.
 Creation also needs cloud route registration and initial Git authority. Existing owner-admitted
 Local work and its guest CLI remain subject to current local grants and enabled permission during a temporary
 cloud outage. A confirmed authority refusal does not grant offline access. Raw host `request` and
 credential-export commands are unsupported; `recover` remains an explicit custody action.
+After repairing a preparation prerequisite, `resume-setup` continues the same proved incomplete
+VM and disk without changing the original create result or replacing user files. Unknown creation
+remains collection of its original operation.
 
 For GitHub, a repository without the workspace Feature needs an online assigned controller for
 fixed installation. An existing environment uses explicit adoption without replacement; a checked-in
-Feature is an opt-in startup path. Guest readiness requires authenticated outbound registration.
-A definitive registration refusal fails startup, while temporary network loss reconnects observation
-without replaying commands or lifecycle operations.
+Feature is an opt-in startup path. A working guest Unix API is ready independently of cloud
+reachability; remote work requires authenticated outbound registration. Temporary registration or
+network failure reconnects observation, while confirmed refusal retires that remote authority.
+Neither condition replays commands or lifecycle operations.
 
 Workflow materialization resolves authorized text in Moira and creates its UTF-8 tar at a selected
 paired controller. The download grant pins that controller and original publication request; repeated

@@ -125,6 +125,21 @@ export async function createOwnerPublications({
   const records = await privateDirectory(join(root.path, "records"));
   const opened = new Map();
   let closed = false;
+  let principal = scope ? scopeValue(scope) : undefined;
+  const configureScope = (next) => {
+    const selected = next ? scopeValue(next) : undefined;
+    if (
+      selected &&
+      principal &&
+      (selected.kind !== principal.kind ||
+        (selected.kind === "controller"
+          ? ["userId", "deviceId", "connectionId"].some((key) => selected[key] !== principal[key])
+          : selected.resourceId !== principal.resourceId))
+    )
+      refuse("FILE_PUBLICATION_SCOPE_CHANGED");
+    principal ??= selected;
+    scope = selected;
+  };
 
   const checkDirectory = async (binding) => {
     const stat = await lstat(binding.path);
@@ -231,17 +246,19 @@ export async function createOwnerPublications({
     expiresAt: record.expiresAt,
   });
 
-  const publish = async ({
-    path,
-    fileName,
-    mimeType = "application/octet-stream",
-    maxBytes,
-    expiresInSeconds = 3600,
-    stream,
-    sourceIdentity,
-  }) => {
+  const publish = async (
+    {
+      path,
+      fileName,
+      mimeType = "application/octet-stream",
+      maxBytes,
+      expiresInSeconds = 3600,
+      stream,
+      sourceIdentity,
+    },
+    selectedScope = scopeValue(scope),
+  ) => {
     await checkRoots();
-    const selectedScope = scopeValue(scope);
     if (
       !validName(fileName) ||
       typeof mimeType !== "string" ||
@@ -315,8 +332,7 @@ export async function createOwnerPublications({
     }
   };
 
-  const openSource = async (token, signal) => {
-    const selectedScope = scopeValue(scope);
+  const openSource = async (token, signal, selectedScope = scopeValue(scope)) => {
     const loaded = await readRecord(token);
     await loaded.manifest.handle.close();
     const { record } = loaded;
@@ -502,17 +518,26 @@ export async function createOwnerPublications({
         });
   }, 30_000);
   timer.unref();
+  const capture = (input, selectedScope = scopeValue(scope)) => {
+    if (
+      !input.stream ||
+      typeof input.stream[Symbol.asyncIterator] !== "function" ||
+      !input.sourceIdentity
+    )
+      refuse("INVALID_PUBLICATION_INPUT", 400);
+    return publish(input, selectedScope);
+  };
   return {
-    publish,
-    capture(input) {
-      if (
-        !input.stream ||
-        typeof input.stream[Symbol.asyncIterator] !== "function" ||
-        !input.sourceIdentity
-      )
-        refuse("INVALID_PUBLICATION_INPUT", 400);
-      return publish(input);
+    configureScope,
+    snapshot() {
+      const selectedScope = scopeValue(scope);
+      return {
+        capture: (input) => capture(input, selectedScope),
+        openSource: (token, signal) => openSource(token, signal, selectedScope),
+      };
     },
+    publish,
+    capture,
     openSource,
     serve: (token, response) => serveOwnerPublication(openSource, token, response),
     async close() {

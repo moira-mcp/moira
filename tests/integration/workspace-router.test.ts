@@ -1,5 +1,6 @@
 import { afterEach, expect, jest, test } from "@jest/globals";
 import { createWorkspaceRequestId } from "@mcp-moira/shared/workspace-request-id";
+import { CodespaceResourceError } from "@mcp-moira/shared/codespace-resource-types";
 import { createServer } from "node:https";
 import { createServer as createHttpServer } from "node:http";
 import { request as httpsRequest } from "node:https";
@@ -117,21 +118,27 @@ async function fixture(expiresAt: number | null = null) {
   };
   let binding: WorkspaceBinding | undefined = undefined;
   let allowed = true;
+  let authorityUnavailable = false;
+  let observeOutage: (() => void) | undefined;
   const credential = "fixture-credential";
   const router = new WorkspaceRouter({
     async credential(value) {
+      if (authorityUnavailable) {
+        observeOutage?.();
+        throw new Error("Fixture authority store unavailable");
+      }
       if (
         !binding ||
         value !== credential ||
         !allowed ||
         (expiresAt !== null && expiresAt <= Date.now())
       )
-        throw new Error("Denied");
+        throw new CodespaceResourceError("CODESPACE_AUTHORIZATION_REQUIRED", "Fixture denied");
       return { ...binding, expiresAt };
     },
     async request(user, id) {
       if (!binding || user !== binding.userId || id !== binding.resourceId || !allowed)
-        throw new Error("Denied");
+        throw new CodespaceResourceError("CODESPACE_AUTHORIZATION_REQUIRED", "Fixture denied");
       return { ...binding };
     },
   });
@@ -264,6 +271,16 @@ async function fixture(expiresAt: number | null = null) {
       allowed = true;
       expiresAt = null;
     },
+    interruptAuthorityStore: () => {
+      authorityUnavailable = true;
+      return new Promise<void>((resolve) => {
+        observeOutage = resolve;
+      });
+    },
+    restoreAuthorityStore: () => {
+      authorityUnavailable = false;
+      observeOutage = undefined;
+    },
   };
 }
 
@@ -278,7 +295,7 @@ async function disconnect(child: ChildProcess) {
   expect(String((await ended)[0]).trim()).toBe("disconnected");
 }
 
-test("owner readiness requires authenticated control registration and pending readiness rejects on close", async () => {
+test("remote availability requires authenticated control while the Unix owner stays independently ready", async () => {
   const f = await fixture();
   const observe = (marker: string) =>
     new Promise<string>((resolve) => {
@@ -328,6 +345,36 @@ test("owner readiness requires authenticated control registration and pending re
     f.server.off("upgrade", unavailable);
     f.child.stdout!.off("data", premature);
   }
+});
+
+test("a temporary authority-store outage reconnects the same remote owner while its Unix API remains ready", async () => {
+  const f = await fixture();
+  const local = createWorkspaceClient(join(f.root, "service.sock"));
+  const before = await local.json(f.binding.userId, f.binding.resourceId, {
+    method: "GET",
+    path: "/v1/health",
+  });
+  await disconnect(f.child);
+  const outageObserved = f.interruptAuthorityStore();
+  const reconnected = once(f.router, "connected");
+  f.child.stdin!.write("reconnect\n");
+  await outageObserved;
+  expect(f.router.isConnected(f.binding)).toBe(false);
+  expect(
+    await local.json(f.binding.userId, f.binding.resourceId, {
+      method: "GET",
+      path: "/v1/health",
+    }),
+  ).toEqual(before);
+  f.restoreAuthorityStore();
+  // No reconnect instruction or new credential is supplied after the outage.
+  await reconnected;
+  expect(
+    await f.client.json(f.binding.userId, f.binding.resourceId, {
+      method: "GET",
+      path: "/v1/health",
+    }),
+  ).toEqual(before);
 });
 
 test.each([401, 403])(

@@ -200,7 +200,7 @@ closure and connection-capacity reservation/release. A CONNECT reservation finis
 shutdown is released without destination lookup or connection, so closed service ownership does
 not leave an upstream connection running after shutdown.
 
-The host CLI supports `create OWNER/REPO --ref BRANCH`, `start SPACE_ID`, `stop SPACE_ID`,
+The host CLI supports `create OWNER/REPO --ref BRANCH`, `start SPACE_ID`, `resume-setup SPACE_ID`, `stop SPACE_ID`,
 `remove SPACE_ID --confirm` and `collect REQUEST_ID` through the running private controller.
 Choose `--request-id` before mutation; the CLI prints the identity before observing its outcome.
 Fresh create requires live cloud route registration and initial Git authority. Already admitted
@@ -586,10 +586,11 @@ provisioning requires explicit adopt. No match does not prove create was never d
 An explicit delete can retire an exact known provider name after a currently authorized GET
 confirms 404; ordinary list/get does not perform retirement.
 
-Command/file calls require the already enrolled live guest. They never implicitly start a stopped
+Remote command/file calls require the already enrolled live guest. They never implicitly start a stopped
 Codespace or bootstrap from cloud. Owner `running` and provider `available` alone are insufficient:
 the router must have the current resource/authorization/life connection. Explicit registration
-401/403 rejects startup readiness; temporary transport loss reconnects observation without replay.
+401/403 retires that remote authority; temporary transport or authority-store failure reconnects
+observation without replay. Local Unix readiness does not wait for cloud registration.
 
 Disconnect revokes guest/renewal routes, retires known scoped children and parent authorization.
 It neither stops nor deletes a VM or disk. Explicitly stop a running VM to end compute use;
@@ -622,9 +623,42 @@ only when its durable phase is `usable`, preparation has completed and no guest 
 Preparing guests stay pending without adoption or a new work generation. A failed preparation,
 including a retained stopped VM without completed first-use preparation, reports
 `CODESPACE_LOCAL_SETUP_INCOMPLETE`. A confirmed physical stop can settle stop intent while keeping
-that cause visible through both lifecycle settlement and read-only refresh. Start and guest work
-remain refused; delete and confirm removal before recreating. Recovery of an initialized clean
-stop never completes a failed initial preparation.
+that cause visible through both lifecycle settlement and read-only refresh. Ordinary start and
+guest work remain refused. After repairing the reported prerequisite, use Local `resume_setup`
+(host `resume-setup SPACE_ID`) with a fresh request identity and the observed generation to
+continue preparation on that same known runtime and disk. The original create result remains
+unchanged. Custody acknowledgement with `recover` is a separate operation.
+
+Repository preparation records an owned unpublished stage and publishes it exclusively: even an
+existing empty destination is preserved. A proved published root resumes without repeating
+checkout or overwriting its branch or user files. Git's effective worktree, Git directory, common
+directory and ordinary local configuration must remain within the proved repository. Unproved
+or redirected roots are preserved for inspection. Local exclusive publication requires Python3,
+libc `renameat2` and filesystem no-replace support; unsupported prerequisites have no unsafe fallback.
+The optional `setup_failure` gives a closed remedy: `repository_unproven` requires local inspection
+of preserved contents; `prerequisite_unavailable` requires the publication prerequisites;
+`repository_checkout_failed` requires repairing repository access or the requested ref;
+`configuration_failed` requires inspecting fixed guest-configuration diagnostics before resuming.
+Unknown creation remains original-operation collection, not setup permission or name-based adoption.
+For a known VM whose initial preparation has `LOCAL_GUEST_SETTLEMENT_UNKNOWN`, explicit custody
+acknowledgement first proves exact physical stop. It preserves the unknown operation and leaves
+preparation incomplete; only a subsequent `resume_setup` continues that same VM. Acknowledgement
+alone never marks it usable.
+
+A working local Unix API is ready before optional workspace-credential acquisition, not just before
+CONTROL connects. Warm preparation uses configured or exact repository/runtime-cached Git author
+data; public checkout does not wait for optional remote author lookup. Initial private checkout
+still requires genuine current authorization. Cloud credential acquisition runs outside local
+lifecycle and work lanes, so validation, stop and observation release do not wait for that response.
+Before applying it, the owner rechecks the original runtime, repository, generation, grant and
+connection; a stale response cannot configure another admission.
+Optional observed `remote.state`
+reports `unconfigured`, `enrollment_unavailable`, `connecting`, `connected`, `unavailable` or `refused`;
+an absent field means no observation. Unavailable enrollment can be retried by the host under current
+authority; an existing unavailable connection reconnects without reissuing credentials or replaying
+work. Confirmed refusal retires its remote authority, without declaring the VM unusable or stopping
+locally authorized work. Later enrollment reloads the same Unix owner's current configuration;
+accepted commands and their original results are retained.
 
 Local status inspection is scoped to the retained resource and its exact owned creation marker.
 It can recover the owned durable manifest after the create reply expires, without adopting an

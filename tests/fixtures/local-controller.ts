@@ -37,6 +37,8 @@ export async function controllerFixture(directory: string, identity: ControllerI
           generation: space.generation,
           phase: space.phase,
           failure: space.failure,
+          ...(space.remote ? { remote: space.remote } : {}),
+          ...(space.setupFailure ? { setupFailure: space.setupFailure } : {}),
           desiredState: space.desiredState,
           state:
             space.phase === "deleted"

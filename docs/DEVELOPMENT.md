@@ -71,7 +71,7 @@ and controller owner programs with `build-workspace-service.js`. It does not dow
 guest archives or GitHub toolchains or package renderer dependencies. Complete payload
 packaging and the packaged guest verifier remain separate checks; this prerequisite
 does not run the SDK or validate a microVM.
-Host `create OWNER/REPO --ref BRANCH`, `start SPACE_ID`, `stop SPACE_ID` and
+Host `create OWNER/REPO --ref BRANCH`, `start SPACE_ID`, `resume-setup SPACE_ID`, `stop SPACE_ID` and
 `remove SPACE_ID --confirm` use the running owner controller. Raw `request` envelopes are
 unsupported. Supply `--request-id ws1-<lowercase UUID>` to choose a lifecycle identity;
 otherwise the CLI chooses one and prints it before observing the effect. After a lost reply,
@@ -85,7 +85,18 @@ Current account/device/repository authority gates remote admission and routing. 
 management retains its own local approval guards; existing offline work retains its finite
 owner grants, while fresh creation requires cloud registration. Readiness is configuration
 observation, not an administrative stop/control surface.
-Use host `recover` for explicit local custody recovery. Active lifecycle/command/mutation IDs
+Use `resume-setup` after repairing a known incomplete guest's prerequisite: it continues the same
+VM/disk and preserves the original create result and user files. Unknown creation is collected,
+not adopted or retried. Use host `recover` for separate explicit local custody recovery. Acknowledging
+an initial unknown guest outcome on the exact stopped VM retains incomplete setup; follow it with
+explicit `resume-setup`, not ordinary start.
+A working guest Unix API does not await workspace credentials or cloud CONTROL. Optional enrollment
+acquisition runs outside both local work lanes; applying a response revalidates the original runtime,
+generation, repository, grant and controller connection. Warm author input comes from configured or
+exact retained local state; initial private checkout still needs current authorization. Later enrollment
+reloads the same owner without restarting accepted commands. Remote calls still require current
+authority and a live route.
+Active lifecycle/command/mutation IDs
 use ws1; repository-admission UUIDs are a different domain.
 
 The persistent service contains the daemon/controller, native guard and broker/tunnel. Client exit

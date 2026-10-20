@@ -806,6 +806,7 @@ test("incomplete preparation blocks Start while permitting confirmed deletion of
   const row = {
     ...localCodespace(deviceId, "66666666-6666-4666-8666-666666666666", "stopped"),
     lifecycle_error: "CODESPACE_LOCAL_SETUP_INCOMPLETE" as const,
+    setup_failure: "repository_unproven" as const,
   };
   jest.mocked(apiClient.getGitHubCodespaces).mockResolvedValue({
     readiness: { state: "ready" },
@@ -826,6 +827,10 @@ test("incomplete preparation blocks Start while permitting confirmed deletion of
   fireEvent.click(startButton);
   expect(startButton).toBeDisabled();
   expect(start).not.toHaveBeenCalled();
+  expect(within(card).getByTestId(`codespace-setup-remedy-${row.codespace_id}`)).toHaveTextContent(
+    "Its files were preserved",
+  );
+  expect(within(card).getByRole("button", { name: "Resume setup" })).toBeEnabled();
   expect(within(card).getByRole("button", { name: "Delete" })).toBeEnabled();
   fireEvent.click(within(card).getByRole("button", { name: "Delete" }));
   const dialog = screen.getByRole("alertdialog");
@@ -874,6 +879,79 @@ test.each(["running", "stopped"] as const)(
     expect(within(card).getByRole("alert")).toHaveTextContent(
       "Environment preparation did not finish",
     );
+  },
+);
+
+test.each(["unavailable", "enrollment_unavailable"] as const)(
+  "same-environment setup recovery collects a lost reply without resubmission while remote is %s",
+  async (remoteState) => {
+    devices = [editableDevice()];
+    const row = {
+      ...localCodespace(deviceId, "66666666-6666-4666-8666-666666666666", "stopped"),
+      lifecycle_error: "CODESPACE_LOCAL_SETUP_INCOMPLETE" as const,
+    };
+    const fixture = {
+      readiness: { state: "ready" },
+      connection: { state: "connected" },
+      repositories: [],
+      codespaces: [row],
+    };
+    jest.mocked(apiClient.getGitHubCodespaces).mockResolvedValue(fixture as never);
+    const adapter = axios.defaults.adapter as import("axios").AxiosAdapter;
+    axios.defaults.adapter = async (config) => {
+      if (!config.url?.endsWith("/resume_setup")) return adapter(config);
+      requests.push({
+        method: config.method!,
+        url: config.url,
+        body: JSON.parse(String(config.data)),
+      });
+      throw new Error("Recovery reply lost");
+    };
+    const client = new MoiraApiClient();
+    const resume = jest
+      .spyOn(apiClient, "resumeLocalCodespaceSetup")
+      .mockImplementation(client.resumeLocalCodespaceSetup.bind(client));
+    const ready = {
+      ...row,
+      generation: row.generation + 1,
+      state: "usable" as const,
+      lifecycle_error: null,
+      remote: { state: remoteState },
+    };
+    const collect = jest
+      .spyOn(apiClient, "getLocalControllerOperation")
+      .mockImplementation(async (_device, requestId) => ({
+        requestId,
+        state: "completed",
+        outcome: { ok: true, result: {} },
+      }));
+    jest
+      .spyOn(apiClient, "refreshGitHubCodespaces")
+      .mockResolvedValue({ ...fixture, codespaces: [ready] } as never);
+    await show({ openSettings: false });
+    const card = await screen.findByTestId(`github-codespace-${row.codespace_id}`);
+    fireEvent.click(within(card).getByRole("button", { name: "Resume setup" }));
+    await waitFor(() => expect(resume).toHaveBeenCalledTimes(1));
+    const requestId = resume.mock.calls[0][1];
+    expect(requests.find((request) => request.url.endsWith("/resume_setup"))?.body).toEqual({
+      request_id: requestId,
+      expected_generation: row.generation,
+    });
+    await waitFor(() =>
+      expect(within(card).getByRole("button", { name: "Resume setup" })).toBeDisabled(),
+    );
+    fireEvent.click(within(card).getByRole("button", { name: "Check state again" }));
+    await within(card).findByText(
+      remoteState === "unavailable"
+        ? "The remote connection is unavailable; local readiness is independent."
+        : "Cloud registration is temporarily unavailable; local readiness is independent.",
+    );
+    expect(
+      within(card).getByTestId(`github-codespace-state-${row.codespace_id}`),
+    ).toHaveTextContent("Running");
+    expect(collect).toHaveBeenCalledWith(deviceId, requestId);
+    expect(resume).toHaveBeenCalledTimes(1);
+    expect(within(card).queryByRole("button", { name: "Resume setup" })).toBeNull();
   },
 );
 

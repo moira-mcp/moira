@@ -1,6 +1,7 @@
 /** Idle timeout bounds and default, in minutes: GitHub's own idle-timeout range. */
 import type { GitHubProviderFailure, providerReplySchema } from "./local-controller-protocol.js";
 import type { z } from "zod";
+import type { WorkspaceSetupFailure, WorkspaceRemoteObservation } from "./local-protocol.js";
 export const CODESPACE_IDLE_TIMEOUT_MINUTES = { minimum: 5, maximum: 240, default: 30 } as const;
 
 export interface CodespaceRepositoryTarget {
@@ -66,6 +67,8 @@ export interface CodespaceProviderResource {
   state: CodespaceProviderState;
   /** Bounded physical-state or guest-readiness diagnosis; a confirmed shutdown may still have incomplete guest preparation. */
   stateError?: CodespaceResourceErrorCode;
+  remote?: WorkspaceRemoteObservation;
+  setupFailure?: WorkspaceSetupFailure;
   /**
    * When the provider last started the codespace (GitHub's `last_used_at`, documented as "last
    * known time this codespace was started"). It is not a sign of use and is shown for information

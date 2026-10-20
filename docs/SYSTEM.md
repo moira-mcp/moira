@@ -591,7 +591,7 @@ Presentation-only Astro components remain in the shells, and runtime never parse
 
 `communication` uses the ordinary authenticated MCP user context. Text calls `UserCommunicationService`; binary submission calls the shared `CommunicationFileOwner` composition. `LiveCommunicationFileOwner` resolves an immutable reference's original workspace/controller, or selects the explicit or sole active registered paired controller for nonworkspace sources. Selection resolves identity without a health/snapshot preflight; actual availability belongs to the router at dispatch. A neutral controller does not need Local VM policy to own communication. Source acquisition, immutable publication, rasterization, source digest and original delivery receipts live with that owner. Current credential, generation, registration and scope checks remain mandatory. A route refusal during collection cannot certify that the historical effect was never admitted.
 
-`createOwnerCommunication` in `packages/workspace-service/src/owner-communication.mjs` composes owner publications, direct native source acquisition, packaged progress rendering and extension execution. `/v1/communication` submits a typed descriptor; `/v1/communication/stream` accepts framed control plus raw bytes; `/v1/communication/operations/:requestId` collects the original receipt. Existing owner admission also binds the original ID across action namespaces. The journal retains immutable input identity, source publication and per-channel stages, excluding signed native URLs, base64 payloads and file bytes. Same-ID collection or repetition never refetches an accepted source or replays a vendor effect. Changing input or owner scope refuses the request.
+`createOwnerCommunication` in `packages/workspace-service/src/owner-communication.mjs` composes owner publications, direct native source acquisition, packaged progress rendering and extension execution. `/v1/communication` submits a typed descriptor; `/v1/communication/stream` accepts framed control plus raw bytes; `/v1/communication/operations/:requestId` collects the original receipt. Existing owner admission also binds the original ID across action namespaces. The journal retains immutable input identity, source publication and per-channel stages, excluding signed native URLs, base64 payloads and file bytes. Same-ID collection or repetition never refetches an accepted source or replays a vendor effect. Changing original input or the authorized principal refuses the request; same-principal renewal preserves the original captured scope and receipt.
 
 The cloud's fixed communication transport resolves installed/configured channel authority and injects the current secret and recipient. It receives opaque file bytes through the shared length-prefixed metadata/stream format, preserving backpressure and cancelling unread ingress after a known reply is flushed. It neither fetches native source URLs nor spools attachments or keeps a delivery queue. Account, actor, channel configuration and workflow frame checks remain independent of the owner journal. Public publication routes retain current owner authorization and forward the immutable source without cloud claim storage.
 
@@ -651,9 +651,64 @@ replace the computer owner's device/grant authority or explicit work permission.
 inside each workspace. Its service and `moira-workspace` CLI share private Unix HTTP
 and durable journals. Fixed bootstrap installs the same owned payload/runtime in Local
 and GitHub. The paired controller uses GitHub SSH only for fixed bootstrap/readiness, never command dispatch.
-Workspace calls require an already enrolled live service; they do not implicitly start or bootstrap it.
+Remote workspace calls require an enrolled live service; they do not implicitly start or bootstrap it.
+The verified local Unix service becomes ready independently of remote enrollment or
+CONTROL registration. Optional owner observations report remote state separately as
+`unconfigured`, `enrollment_unavailable`, `connecting`, `connected`, `unavailable` or
+`refused`; absence of that observation does not establish remote availability.
+
+The Local host configures, starts and verifies that Unix service before optional
+workspace credential acquisition. Warm preparation uses exact locally retained Git
+author input or explicit owner configuration. Public checkout does not await optional
+author lookup for later push/PR grants; initial private checkout still requires genuine
+current repository authority. The existing daemon observation cycle coalesces remote
+enrollment outside both manager and runtime-owner work lanes, so a held cloud response
+does not block local validation, explicit stop or observer release. Before applying a
+reply, the owner rechecks the original runtime, repository, marker, generation, current
+grant and connection authority, and checks authority again after configuration.
+
+Initialized configuration is retained only when the packaged release and freshly
+measured guest life both match the last verified Unix readiness observation. That
+observation is saved only after matching health. A same-life owner retains its remote
+configuration; a changed life refreshes the fixed Local binding before service startup
+and optional enrollment on the same VM, preserving its repository and original setup
+identity.
+
 Local lifecycle and settings reach the device controller through the same live transport,
 independently of guest startup. Disabled agent work does not remove approved management access.
+
+An explicit Local `resume_setup` lifecycle intent continues incomplete preparation
+on the same known VM, disk and admitted machine, guarded by the observed lifecycle
+generation and a fresh original request identity. The host CLI exposes `resume-setup`.
+The original creation receipt remains immutable. Unknown creation requires original
+receipt collection; unknown guest settlement requires local custody recovery before
+setup can continue. Bounded setup reasons distinguish an unproved repository,
+unavailable prerequisite, failed checkout and failed configuration. They clear only
+after the matching guest life and packaged release pass Unix health verification.
+
+Custody acknowledgement of an interrupted initial setup requires exact physical stop.
+It preserves the failed phase and original VM/setup provenance, replacing acknowledged
+guest uncertainty with `LOCAL_SETUP_INCOMPLETE`. Ordinary start remains refused until
+explicit setup resume completes verified readiness; acknowledgement does not replay
+creation or grant work permission.
+
+Repository preparation retains a private stage with parent and stage filesystem
+identity and explicit checkout, ready and published provenance. Publication uses an
+exclusive no-replace directory rename; an occupied or symlink target is preserved.
+Recovery recognizes a committed rename only from the exact recorded ready directory.
+A published repository is validated without checking out again or replacing user edits.
+Missing exclusive-rename support is a prerequisite refusal, with no overwrite fallback.
+Before Git writes, the helper proves the effective canonical worktree, Git directory
+and common directory belong to the admitted root; `.git` must be an owned real
+directory. Local configuration must be an ordinary owned regular file with one hard
+link; symlink configuration is refused. Ambient
+`GIT_*` variables and global/system configuration do not redirect preparation.
+An unpublished interrupted init with only benign local configuration can continue:
+Git parses that exact file without includes, refusing includes, extensions and
+worktree redirection, and requiring an explicitly non-bare repository. Provenance and
+configuration survive recovery, and effective locations are proved again after init.
+For an initialized repository, an explicit worktree setting is accepted only when
+the effective locations still resolve to that same proved root.
 
 Mutation IDs use `ws1-<lowercase UUID>`, bound to immutable input. Bare historical UUIDs,
 SQL operation rows and old host receipts are non-runnable archives: no automatic
@@ -674,6 +729,21 @@ provider probes establish life before issuance; the adapter verifies its local s
 Current account/provider/resource and Local device/grant/work authority are rechecked.
 Server-owned revalidation and exact expiry close CONTROL/all DATA independently of
 peer heartbeats, without command cancellation or replay.
+
+Only an explicit typed credential mismatch permits trying the other workspace/device
+credential family. Authority-store and internal failures remain temporary: Upgrade
+returns an empty-body 503, while typed authority, identity and protocol refusals return 403. Temporary CONTROL failure reconnects; CONTROL 401/403 retires remote authority.
+DATA failure closes its transport epoch. None of these paths replays accepted work or
+changes VM desired state.
+
+Fixed configuration reload revalidates repository binding, life, release and the same
+principal, then configures the existing owner's publication, communication and Git
+authority and replaces only its remote transport. Initial local-only startup can thus
+enroll later without replacing the Unix service, journal or command engine. New
+communication submissions capture their scope and transport before asynchronous work;
+rotation cannot rewrite original inputs or outcomes. Disabling remote configuration
+refuses new publications and delivery while retaining original receipt inspection for
+the same authorized principal. Foreign-principal configuration is refused.
 
 Before-dispatch loss is a known refusal; after-dispatch loss may be unknown. Collect
 the original request explicitly. Admission may return starting while a session owner
@@ -791,6 +861,12 @@ retirement explicitly disposes known children. Local permission has no work dead
 children retain finite provider and parent use bounds. An unrelated settings revision
 does not retire an unchanged device/resource/exact-grant authority.
 
+The Git broker resolves current remote credentials for metadata acquire, collection,
+validation and disposal while retaining each original security receipt's binding.
+Rotation or temporary disable does not replace its authority store or active child
+custody. Disabled authority refuses new acquisition; unresolved disposal remains
+pending until collection can establish the original child's outcome.
+
 Each security acquisition has a durably recorded token-free original ws1 identity
 before provider submission. Pure original-ID collection cannot mint or refresh;
 confirmed absence never automatically remints. Unknown issuance and retained
@@ -849,6 +925,8 @@ jobs and data without enabling work. A different boot identifies a stale process
 not grant custody over a VM. Do not remove lock files manually.
 
 `service.ts` owns the daemon/controller, native guard and broker/tunnel independently of CLI clients.
+It establishes the controller before restoring intended-running environments, so
+restoration can obtain enrollment without waiting on its own startup dependency.
 Its private `service.sock` reports actual running release, readiness/failure and active/staged
 selection. `service-install.ts` seals the complete executable closure, including a copied Node,
 under `STATE/service-releases/` and publishes selection durably. Ordinary install only stages;
@@ -872,7 +950,7 @@ its required worker-ownership capability is unsupported. `run` starts or connect
 service and returns; client exit does not stop VMs. On service restart, known intended-running
 environments are observed or prepared under current policy without replaying commands. After host
 reboot, login registration needs original storage, runtime and available credentials; guest boot
-identity and pre-reboot process continuity cannot be preserved. Host create/start/stop/remove call that private controller;
+identity and pre-reboot process continuity cannot be preserved. Host create/start/resume-setup/stop/remove call that private controller;
 collect reads the original ws1 receipt without effects. Existing owner-admitted VM work
 can continue under current local grants and enabled permission when cloud transport is unavailable; confirmed
 authority refusal is not offline permission. Fresh create registers an authenticated cloud

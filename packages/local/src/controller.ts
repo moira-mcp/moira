@@ -1359,7 +1359,7 @@ export class LocalController {
               binding = await this.requireBinding(resourceId, value.expectedGeneration);
               const space = await this.manager.require(binding.localSpaceId!);
               if (
-                value.action === "start" &&
+                (value.action === "start" || value.action === "resume_setup") &&
                 space.generation !== binding.localGeneration &&
                 space.recoveryGeneration !== space.generation
               )
@@ -1382,18 +1382,21 @@ export class LocalController {
               binding.routeGeneration ??= binding.resourceGeneration;
               binding.resourceGeneration++;
               await this.state.putBinding(binding);
-              if (value.action === "start") {
+              if (value.action === "start" || value.action === "resume_setup") {
                 await this.manager.open();
-                effect = this.manager.start(space.id, captureAdmission);
+                effect =
+                  value.action === "resume_setup"
+                    ? this.manager.resumeSetup(space.id, captureAdmission)
+                    : this.manager.start(space.id, captureAdmission);
               } else if (value.action === "stop")
                 effect = this.manager.stop(space.id, space.generation);
               else {
                 effect = this.manager.remove(space.id, space.generation, value.ownerConfirmed);
               }
             }
-            // Start/create publish the exact native admission before preparation. Stop
+            // Preparation publishes exact native admission before long work. Stop
             // uses the native owner's retire gate and must not wait for that preparation.
-            if (value.action === "create" || value.action === "start")
+            if (["create", "start", "resume_setup"].includes(value.action))
               await Promise.race([nativeAdmission, effect.then(() => undefined)]);
             return { binding, effect };
           } catch (error) {

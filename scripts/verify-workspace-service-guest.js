@@ -127,6 +127,65 @@ verification: try {
   assert.equal(installed.releaseIdentity, payload.release);
   const program = `/home/agent/.local/share/moira-workspace/releases/${payload.release}`;
   const node = `${program}/runtime/bin/node`;
+  const directoryPublication = await build({
+    stdin: {
+      contents: `
+        import assert from 'node:assert/strict';
+        import {mkdir,writeFile,readFile,symlink,lstat,rename} from 'node:fs/promises';
+        import {publishDirectoryNoReplace,openDirectory,directoryIdentity} from ${JSON.stringify(resolve("packages/workspace-service/src/file-primitives.mjs"))};
+        import {verifyGuestSetupRecovery} from ${JSON.stringify(resolve("tests/helpers/guest-setup-recovery.ts"))};
+        const root='/workspaces/directory-publication';await mkdir(root,{mode:448});
+        const parent=await openDirectory(root);
+        try{
+          for(const kind of ['absent','empty','nonempty','file','symlink']){
+            const stageName='stage-'+kind,targetName='target-'+kind;
+            await mkdir(root+'/'+stageName);await writeFile(root+'/'+stageName+'/sentinel','owned-stage');
+            if(kind==='empty'||kind==='nonempty')await mkdir(root+'/'+targetName);
+            if(kind==='nonempty')await writeFile(root+'/'+targetName+'/user-content','preserved');
+            if(kind==='file')await writeFile(root+'/'+targetName,'preserved');
+            if(kind==='symlink')await symlink(stageName,root+'/'+targetName);
+            const before=kind==='absent'?null:await lstat(root+'/'+targetName);
+            const stage=await openDirectory(root,stageName);
+            try{
+              const expected=await directoryIdentity(stage);
+              if(kind==='absent'){
+                assert.deepEqual(await publishDirectoryNoReplace(parent,stageName,targetName,stage),expected);
+                const published=await openDirectory(root,targetName);
+                try{assert.deepEqual(await directoryIdentity(published),expected);}finally{await published.close();}
+                assert.equal(await readFile(root+'/'+targetName+'/sentinel','utf8'),'owned-stage');
+              }else{
+                await assert.rejects(publishDirectoryNoReplace(parent,stageName,targetName,stage),error=>error.fileReason==='concurrent_change');
+                const after=await lstat(root+'/'+targetName);assert.equal(after.dev,before.dev);assert.equal(after.ino,before.ino);
+                assert.equal(await readFile(root+'/'+stageName+'/sentinel','utf8'),'owned-stage');
+                if(kind==='nonempty')assert.equal(await readFile(root+'/'+targetName+'/user-content','utf8'),'preserved');
+                if(kind==='file')assert.equal(await readFile(root+'/'+targetName,'utf8'),'preserved');
+              }
+            }finally{await stage.close();}
+          }
+          await mkdir(root+'/changed-stage');const held=await openDirectory(root,'changed-stage');
+          try{await rename(root+'/changed-stage',root+'/original-stage');await mkdir(root+'/changed-stage');
+            await assert.rejects(publishDirectoryNoReplace(parent,'changed-stage','not-published',held),error=>error.fileReason==='concurrent_change');
+            await assert.rejects(lstat(root+'/not-published'),{code:'ENOENT'});
+          }finally{await held.close();}
+        }finally{await parent.close();}
+        console.log('Linux exclusive directory publication preserves occupied targets and refuses a replaced stage');
+        await verifyGuestSetupRecovery('/workspaces/setup-recovery-proof');
+        console.log('Linux setup recovery preserves original stage, published inode, sentinels and user branch');
+      `,
+      resolveDir: process.cwd(),
+      sourcefile: "directory-publication-fixture.mjs",
+      loader: "js",
+    },
+    bundle: true,
+    platform: "node",
+    target: "node24",
+    format: "esm",
+    write: false,
+  });
+  await docker(
+    ["exec", "--interactive", container, node, "--input-type=module"],
+    directoryPublication.outputFiles[0].contents,
+  );
   // Execute the shipped renderer, with its private native modules and fonts. A
   // callback backed by the checkout's Sharp cannot satisfy this observation.
   const progressGraph = sdfWorkflow();
@@ -179,16 +238,19 @@ verification: try {
       import {readFile} from 'node:fs/promises';
       import assert from 'node:assert/strict';
       import {createHash} from 'node:crypto';
+      import {once} from 'node:events';
       import {WorkspaceRouter} from ${JSON.stringify(resolve("packages/web-backend/src/services/workspace-router.ts"))};
       import {readOwnerFrame} from ${JSON.stringify(resolve("packages/workspace-service/src/stream-frame.mjs"))};
       const input=JSON.parse(await readFile('/tmp/router-input.json','utf8'));
       const binding={kind:'workspace',userId:input.resourceId,resourceId:input.resourceId,resourceGeneration:1,authorizationGeneration:1,environmentIdentity:input.environmentIdentity};
-      const router=new WorkspaceRouter({credential:async credential=>{if(credential!==input.credential)throw new Error('Fixture credential refused');return binding;},request:async(user,id)=>{if(user!==binding.userId||id!==binding.resourceId)throw new Error('Fixture principal refused');return binding;}});
+      let unavailable=true;
+      const router=new WorkspaceRouter({credential:async credential=>{if(unavailable)throw new Error('Fixture authority store unavailable');if(credential!==input.credential)throw new Error('Fixture credential refused');return binding;},request:async(user,id)=>{if(user!==binding.userId||id!==binding.resourceId)throw new Error('Fixture principal refused');return binding;}});
       const observed={prepared:0,artifacts:0,sent:0,size:0,sha256:null};
       const server=createServer({key:await readFile('/tmp/owner-key.pem'),cert:await readFile('/tmp/owner-ca.pem')},async(request,response)=>{
         const json=value=>{response.writeHead(200,{'content-type':'application/json'});response.end(JSON.stringify(value));};
         try {
-          if(request.url==='/fixture/connected')return json({connected:router.isConnected(binding)});
+          if(request.url==='/fixture/connected'){if(!router.isConnected(binding))await once(router,'connected');return json({connected:router.isConnected(binding)});}
+          if(request.url==='/fixture/authority-ready'){unavailable=false;return json({available:true});}
           if(request.url==='/fixture/extension')return json(observed);
           assert.equal(request.headers.authorization,'Bearer '+input.credential);
           if(request.method==='GET'&&request.url==='/api/communication/owner/artifacts/channel-probe.notifications/'+input.extensionDigest){
@@ -276,7 +338,10 @@ verification: try {
   assert.ok(Number.isSafeInteger(router.processId) && router.processId > 1);
   // Missing configuration must fail the actual startup owner. A request to
   // start is not readiness, and offline health must settle without a waiter.
-  await assert.rejects(fixed(WORKSPACE_START_SCRIPT));
+  assert.equal(
+    JSON.parse(await fixed(WORKSPACE_START_SCRIPT)).workspaceService,
+    "enrollment-required",
+  );
   await assert.rejects(fixed(WORKSPACE_HEALTH_SCRIPT));
   const configuration = {
     version: 1,
@@ -287,6 +352,7 @@ verification: try {
     remote: {
       version: 1,
       origin: router.origin,
+      publicOrigin: router.origin,
       resourceId,
       resourceGeneration: 1,
       authorizationGeneration: 1,
@@ -294,28 +360,51 @@ verification: try {
       credential: "x".repeat(43),
     },
   };
-  await fixed(
-    WORKSPACE_CONFIGURE_SCRIPT,
-    JSON.stringify({
-      ...configuration,
-      remote: { ...configuration.remote, origin: "http://moira.example.invalid" },
-    }),
+  await assert.rejects(
+    fixed(
+      WORKSPACE_CONFIGURE_SCRIPT,
+      JSON.stringify({
+        ...configuration,
+        remote: { ...configuration.remote, origin: "http://moira.example.invalid" },
+      }),
+    ),
   );
-  // This refusal occurs after the private HTTP service has opened: the failed
-  // child must close that partial owner and report failure to its controller.
-  await assert.rejects(fixed(WORKSPACE_START_SCRIPT));
   await assert.rejects(fixed(WORKSPACE_HEALTH_SCRIPT));
   await fixed(WORKSPACE_CONFIGURE_SCRIPT, JSON.stringify(configuration));
   const ready = JSON.parse(await fixed(WORKSPACE_START_SCRIPT));
   assert.equal(ready.releaseIdentity, payload.release);
   assert.ok(Number.isSafeInteger(ready.processId) && ready.processId > 1);
+  assert.notEqual(ready.remote.state, "connected");
+  const offlineCommand = createWorkspaceRequestId();
+  await cli(
+    "exec",
+    "--request-id",
+    offlineCommand,
+    "--",
+    node,
+    "-e",
+    "process.stdout.write('ready-before-cloud')",
+  );
+  let offlineResult;
+  do {
+    offlineResult = JSON.parse(await cli("status", offlineCommand));
+  } while (["starting", "running"].includes(offlineResult.state));
+  assert.equal(offlineResult.state, "succeeded");
+  assert.equal((await cli("output", offlineCommand, "stdout")).toString(), "ready-before-cloud");
+  await docker([
+    "exec",
+    container,
+    node,
+    "-e",
+    "const https=require('node:https');const fs=require('node:fs');const c=JSON.parse(fs.readFileSync('/home/agent/.local/share/moira-workspace/config.json'));https.get(new URL('/fixture/authority-ready',c.remote.origin),{ca:fs.readFileSync('/tmp/owner-ca.pem')},r=>r.pipe(process.stdout)).once('error',()=>process.exit(1));",
+  ]);
   const registered = JSON.parse(
     await docker([
       "exec",
       container,
       node,
       "-e",
-      "const {request}=require('node:https');const fs=require('node:fs');const config=JSON.parse(fs.readFileSync('/home/agent/.local/share/moira-workspace/config.json'));const request_=request(new URL('/fixture/connected',config.remote.origin),{ca:fs.readFileSync('/tmp/owner-ca.pem')},response=>{response.pipe(process.stdout);});request_.once('error',()=>process.exit(1));request_.end();",
+      "const {request}=require('node:https');const fs=require('node:fs');const config=JSON.parse(fs.readFileSync('/home/agent/.local/share/moira-workspace/config.json'));const call=request(new URL('/fixture/connected',config.remote.origin),{ca:fs.readFileSync('/tmp/owner-ca.pem')},response=>response.pipe(process.stdout));call.once('error',()=>process.exit(1));call.end();",
     ]),
   );
   assert.equal(registered.connected, true);
@@ -771,11 +860,113 @@ verification: try {
   } while (["running", "starting"].includes(status.state));
   assert.equal(status.state, "succeeded");
   assert.equal((await cli("output", localId, "stdout")).toString(), "local-owner-ready");
+  const heldId = createWorkspaceRequestId();
+  await cli(
+    "exec",
+    "--request-id",
+    heldId,
+    "--",
+    node,
+    "-e",
+    "const fs=require('node:fs');fs.appendFileSync('setup-continuity','once\\n');fs.writeFileSync('setup-job-ready','ready');const timer=setInterval(()=>{if(fs.existsSync('setup-job-release')){clearInterval(timer);process.stdout.write('continued-after-enrollment')}},10)",
+  );
+  await docker([
+    "exec",
+    container,
+    node,
+    "--input-type=module",
+    "-e",
+    "import {watch,existsSync} from 'node:fs';await new Promise(done=>{const observe=()=>{if(existsSync('/workspaces/project/setup-job-ready')){watcher.close();done()}};const watcher=watch('/workspaces/project',observe);observe()});",
+  ]);
+  // A real fixed Local CONNECT gateway inside this disposable container lets
+  // the shipped daemon enroll after starting local-only. No host port is opened.
+  const gateway = await build({
+    stdin: {
+      contents: `
+        import {createServer} from 'node:http';import {connect} from 'node:net';
+        const target=new URL(${JSON.stringify(router.origin)}),server=createServer();
+        server.on('connect',(request,socket,head)=>{
+          if(request.url!==target.host||head.length||request.headers['proxy-authorization']!=='Basic '+Buffer.from('fixture:owner-proxy').toString('base64')){socket.end('HTTP/1.1 403 Forbidden\\r\\n\\r\\n');return;}
+          const upstream=connect(Number(target.port),target.hostname);upstream.once('error',()=>socket.destroy());socket.once('error',()=>upstream.destroy());
+          socket.once('close',()=>upstream.destroy());upstream.once('close',()=>socket.destroy());
+          upstream.once('connect',()=>{socket.write('HTTP/1.1 200 Connection Established\\r\\n\\r\\n');socket.pipe(upstream);upstream.pipe(socket);});
+        });
+        await new Promise((done,reject)=>{server.once('error',reject);server.listen(3437,'127.0.0.1',done)});process.send({ready:true});
+      `,
+      resolveDir: process.cwd(),
+      sourcefile: "guest-local-gateway.mjs",
+      loader: "js",
+    },
+    bundle: true,
+    platform: "node",
+    target: "node24",
+    format: "esm",
+    write: false,
+  });
+  await docker(
+    [
+      "exec",
+      "--interactive",
+      container,
+      node,
+      "-e",
+      "require('node:fs').writeFileSync('/tmp/local-gateway.mjs',require('node:fs').readFileSync(0),{mode:384})",
+    ],
+    gateway.outputFiles[0].contents,
+  );
+  await docker([
+    "exec",
+    container,
+    node,
+    "-e",
+    "const {spawn}=require('node:child_process');const child=spawn(process.execPath,['/tmp/local-gateway.mjs'],{detached:true,stdio:['ignore','ignore','inherit','ipc']});child.once('error',()=>process.exit(1));child.once('exit',()=>process.exit(1));child.once('message',value=>{if(!value.ready)process.exit(1);child.disconnect();child.unref();});",
+  ]);
+  await fixed(
+    WORKSPACE_CONFIGURE_SCRIPT,
+    JSON.stringify({ ...localOnly, remote: configuration.remote }),
+  );
+  const enrolled = JSON.parse(await fixed(WORKSPACE_START_SCRIPT));
+  assert.equal(enrolled.processId, localReady.processId);
+  assert.equal(enrolled.environmentIdentity, localReady.environmentIdentity);
+  await docker([
+    "exec",
+    container,
+    node,
+    "-e",
+    "const https=require('node:https');const fs=require('node:fs');const c=JSON.parse(fs.readFileSync('/home/agent/.local/share/moira-workspace/config.json'));https.get(new URL('/fixture/connected',c.remote.origin),{ca:fs.readFileSync('/tmp/owner-ca.pem')},r=>r.pipe(process.stdout)).once('error',()=>process.exit(1));",
+  ]);
+  assert.equal(JSON.parse(await fixed(WORKSPACE_HEALTH_SCRIPT)).remote.state, "connected");
+  const enrolledPublication = JSON.parse(
+    await cli("publish", "binary.dat", "binary.dat", "application/octet-stream"),
+  );
+  assert.ok(!enrolledPublication.isError, "Live enrollment did not enable owner publication");
+  assert.equal(
+    enrolledPublication.structuredContent.file.sha256,
+    createHash("sha256").update(bytes).digest("hex"),
+  );
+  await docker([
+    "exec",
+    container,
+    node,
+    "-e",
+    "require('node:fs').writeFileSync('/workspaces/project/setup-job-release','release')",
+  ]);
+  do {
+    status = JSON.parse(await cli("status", heldId));
+  } while (["starting", "running"].includes(status.state));
+  assert.equal(status.state, "succeeded");
+  assert.equal((await cli("output", heldId, "stdout")).toString(), "continued-after-enrollment");
+  assert.equal((await cli("read", "setup-continuity")).toString(), "once\n");
   await docker(["exec", container, node, `${program}/service/daemon.mjs`, "--stop"]);
   await assert.rejects(fixed(WORKSPACE_HEALTH_SCRIPT));
   console.log(
-    "Verified pinned Linux runtime installation, authenticated registration with the actual disposable loopback WorkspaceRouter, startup failure, single-owner locking, explicit Local-only configuration with measured guest life and proxy, offline Unix CLI, exact exit/output, binary files, owner publication with repeated immutable reads, packaged UTF-8 materialize tar and original publication replay/collect, packaged custom binary extension delivery with original-receipt replay/collect, exact PNG preview and in-place restart preserving workspace data and receipts. Real GitHub provisioning, vendor delivery and native source networking were not exercised.",
+    "Verified pinned Linux payload, exclusive directory publication preserving occupied targets and refusing replaced stages, invalid bootstrap refusal, single-owner locking, Unix command readiness before cloud authority registration and automatic reconnect, Local-only configuration and later live enrollment/publication through a confined gateway with unchanged owner PID/life and one continuing command, exact exit/output and binary files, immutable publication reads, packaged UTF-8 materialize tar, custom binary extension delivery and original-receipt collection, and exact PNG preview. Real GitHub provisioning, vendor delivery and native source networking were not exercised.",
   );
+} catch (error) {
+  // Imported application logging can handle uncaught exceptions; a failed
+  // verifier must still return failure to its caller.
+  process.exitCode = 1;
+  throw error;
 } finally {
   if (container && /^[a-f0-9]{64}$/.test(container)) await docker(["rm", "--force", container]);
   if (fixtureDirectory) await rm(fixtureDirectory, { recursive: true, force: true });

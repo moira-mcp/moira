@@ -152,6 +152,7 @@ export async function runLocalService(
   const releaseGate = await gate.lock({ recoverStale: true });
   const controller = new AbortController();
   const physicalController = new AbortController();
+  const daemonController = new AbortController();
   const manager =
     dependencies.manager ?? new LocalManager(records, { signal: physicalController.signal });
   const daemon = dependencies.daemon ?? new LocalDaemon(manager, new LocalRelay(records));
@@ -159,6 +160,7 @@ export async function runLocalService(
   let maintenance: Promise<void> | undefined;
   let admission: Promise<unknown> = Promise.resolve();
   let daemonStarted = false;
+  let daemonWork: Promise<void> | undefined;
   let physicalStop = false;
   let work: Promise<void> | undefined;
   let failure: unknown;
@@ -552,6 +554,15 @@ export async function runLocalService(
         return;
       }
       const policy = await records.policyOrNull();
+      // Controller routing/registration must exist while guest restoration
+      // obtains its workspace credential. It does not wait for VM readiness.
+      daemonStarted = true;
+      daemonWork = daemon.run(
+        AbortSignal.any([physicalController.signal, daemonController.signal]),
+        () => physicalStop,
+        true,
+      );
+      void daemonWork.catch(() => undefined);
       let recovery: Awaited<ReturnType<LocalManager["restoreIntendedWork"]>> = {
         restored: [],
         unavailable: [],
@@ -567,6 +578,7 @@ export async function runLocalService(
           .filter((space) => space.desiredState === "running")
           .map((space) => ({ spaceId: space.id, code: "LOCAL_NOT_RUNNING" }));
       }
+      if (physicalController.signal.aborted) return daemonWork;
       ready = true;
       await records.state.remove("service-failure.json");
       for (const receipt of selected) {
@@ -576,8 +588,7 @@ export async function runLocalService(
           recovery,
         });
       }
-      daemonStarted = true;
-      await daemon.run(physicalController.signal, () => physicalStop, true);
+      await daemonWork;
     })().catch(async (error) => {
       if (physicalStop) throw error;
       ready = false;
@@ -587,6 +598,8 @@ export async function runLocalService(
           : error instanceof Error && error.cause instanceof LocalRefusal
             ? error.cause
             : undefined;
+      daemonController.abort();
+      await daemonWork;
       await manager.release();
       await records.state.write("service-failure.json", {
         release,

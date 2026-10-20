@@ -185,9 +185,20 @@ export class WorkspaceRouter extends EventEmitter {
   private readonly upgrade = (request: IncomingMessage, socket: Duplex, head: Buffer) => {
     socket.pause();
     socket.once("error", () => socket.destroy());
-    void this.accept(request, socket, head).catch(() => {
+    void this.accept(request, socket, head).catch((error: unknown) => {
+      const refused =
+        error instanceof CodespaceResourceError &&
+        [
+          "CODESPACE_AUTHORIZATION_REQUIRED",
+          "CODESPACE_GENERATION_CONFLICT",
+          "CODESPACE_PROVIDER_DISABLED",
+          "CODESPACE_NOT_FOUND",
+          "CODESPACE_RESOURCE_INVALID",
+        ].includes(error.code);
       if (!socket.destroyed)
-        socket.end("HTTP/1.1 403 Forbidden\r\nConnection: close\r\nContent-Length: 0\r\n\r\n");
+        socket.end(
+          `HTTP/1.1 ${refused ? "403 Forbidden" : "503 Service Unavailable"}\r\nConnection: close\r\nContent-Length: 0\r\n\r\n`,
+        );
     });
   };
 
@@ -201,20 +212,28 @@ export class WorkspaceRouter extends EventEmitter {
         .split(/\s*,\s*/)
         .includes("upgrade")
     )
-      throw new Error("Invalid workspace handshake");
+      throw new CodespaceResourceError("CODESPACE_RESOURCE_INVALID", "Invalid workspace handshake");
     const path = request.url ?? "";
     const call = /^\/api\/workspaces\/calls\/([a-f0-9-]{36})$/.exec(path);
-    if (path !== "/api/workspaces/connect" && !call) throw new Error("Unknown workspace endpoint");
+    if (path !== "/api/workspaces/connect" && !call)
+      throw new CodespaceResourceError("CODESPACE_RESOURCE_INVALID", "Unknown workspace endpoint");
     const token = /^Bearer ([A-Za-z0-9_.-]{1,4096})$/.exec(
       String(request.headers.authorization ?? ""),
     )?.[1];
-    if (!token) throw new Error("Workspace credential required");
+    if (!token)
+      throw new CodespaceResourceError(
+        "CODESPACE_AUTHORIZATION_REQUIRED",
+        "Workspace credential required",
+      );
     const binding = await this.authority.credential(token);
     if (
       request.headers["x-moira-endpoint-kind"] !== binding.kind ||
       request.headers["x-moira-endpoint-identity"] !== endpointIdentity(binding)
     )
-      throw new Error("Owner endpoint identity changed");
+      throw new CodespaceResourceError(
+        "CODESPACE_GENERATION_CONFLICT",
+        "Owner endpoint identity changed",
+      );
     if (socket.destroyed) return;
     if (call) {
       const pending = this.pending.get(call[1]);
@@ -225,7 +244,10 @@ export class WorkspaceRouter extends EventEmitter {
         identity(pending.connection.binding) !== identity(binding) ||
         this.connections.get(key(binding)) !== pending.connection
       )
-        throw new Error("Workspace rendezvous changed");
+        throw new CodespaceResourceError(
+          "CODESPACE_GENERATION_CONFLICT",
+          "Workspace rendezvous changed",
+        );
       this.pending.delete(call[1]);
       pending.connection.data.add(socket);
       socket.once("close", () => pending.connection.data.delete(socket));
@@ -236,7 +258,11 @@ export class WorkspaceRouter extends EventEmitter {
       pending.resolve(socket);
       return;
     }
-    if (head.length) throw new Error("Control handshake cannot contain data");
+    if (head.length)
+      throw new CodespaceResourceError(
+        "CODESPACE_RESOURCE_INVALID",
+        "Control handshake cannot contain data",
+      );
     const previous = this.connections.get(key(binding));
     if (previous) this.disconnect(previous);
     const connection: Connection = {

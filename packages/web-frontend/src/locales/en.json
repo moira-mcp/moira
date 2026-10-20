@@ -3277,7 +3277,7 @@
       "CODESPACE_GENERATION_CONFLICT": "The codespace changed in the meantime. Refresh the list and try again.",
       "CODESPACE_RESOURCE_INVALID": "The codespace request could not be verified. Refresh its state before retrying.",
       "CODESPACE_LOCAL_CREATION_UNKNOWN": "The computer has not confirmed the creation outcome. Check this codespace again; do not create a replacement until its outcome is known.",
-      "CODESPACE_LOCAL_SETUP_INCOMPLETE": "Environment preparation did not finish. Delete this codespace; after deletion is confirmed, you can create a new one.",
+      "CODESPACE_LOCAL_SETUP_INCOMPLETE": "Environment preparation did not finish. Repair the reported prerequisite, then resume setup of this same codespace. Its files and original creation result are preserved.",
       "CODESPACE_LOCAL_PROTOCOL_ERROR": "Moira and the local companion could not exchange a valid response. Update them together and check this codespace again.",
       "CODESPACE_LOCAL_RUNTIME_ERROR": "The computer's VM runtime could not complete the operation. Check the local companion diagnostics, then retry this codespace.",
       "CODESPACE_LOCAL_DELETE_APPROVAL_REQUIRED": "Confirm deletion of this same codespace in Moira Settings → Development → Local computers.",
