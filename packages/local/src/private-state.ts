@@ -1,11 +1,31 @@
 import { constants } from "node:fs";
-import { lstat, mkdir, open, readdir, realpath, rename, unlink } from "node:fs/promises";
+import { lstat, mkdir, open, readdir, readFile, realpath, rename, unlink } from "node:fs/promises";
 import { createHash, randomBytes } from "node:crypto";
 import { dirname, join, resolve } from "node:path";
 import { LocalRefusal } from "./policy.js";
 import { PassThrough } from "node:stream";
 import { runProcess } from "./process.js";
 import { runtimeControlAsset } from "./assets.js";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+
+/** Kernel boot identity makes a reboot distinguishable from PID reuse; it grants no custody. */
+export async function hostBootIdentity(): Promise<string> {
+  const value =
+    process.platform === "linux"
+      ? await readFile("/proc/sys/kernel/random/boot_id", "utf8")
+      : process.platform === "darwin"
+        ? (
+            await promisify(execFile)("/usr/sbin/sysctl", ["-n", "kern.bootsessionuuid"], {
+              env: {},
+              maxBuffer: 1024,
+            })
+          ).stdout
+        : "";
+  if (!/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(value.trim()))
+    throw new LocalRefusal("LOCAL_STATE_UNSAFE", "The host kernel boot identity is unavailable.");
+  return value.trim().toLowerCase();
+}
 
 const KEY = /^[a-z][a-z0-9-]{0,127}\.json$/;
 // All instances of this module share ownership of each canonical document target.
@@ -222,6 +242,8 @@ export class PrivateState {
 
   /** Default callers retain markers; stale recovery requires a proven absent PID under the gate. */
   async lock(options?: { recoverStale: boolean }): Promise<() => Promise<void>> {
+    const boot = await hostBootIdentity();
+    const markerBytes = JSON.stringify({ pid: process.pid, boot });
     const releaseGate = await acquireGate(this.root);
     const path = join(this.root, "runner.lock");
     let handle: Awaited<ReturnType<typeof open>> | undefined;
@@ -242,25 +264,46 @@ export class PrivateState {
               metadata.nlink !== 1 ||
               (metadata.mode & 0o077) !== 0 ||
               metadata.size < 1 ||
-              metadata.size > 10 ||
+              metadata.size > 256 ||
               (process.getuid && metadata.uid !== process.getuid())
             )
               throw new LocalRefusal("LOCAL_STATE_UNSAFE", "Unsafe runner lock marker.");
-            const buffer = Buffer.alloc(11);
+            const buffer = Buffer.alloc(257);
             const read = await old.read(buffer, 0, buffer.length, 0);
             const bytes = buffer.subarray(0, read.bytesRead);
             const value = bytes.toString("utf8");
+            let owner: { pid: number; boot?: string };
+            if (/^[1-9][0-9]{0,9}$/.test(value)) owner = { pid: Number(value) };
+            else {
+              let parsed: { pid: number; boot: string };
+              try {
+                parsed = JSON.parse(value);
+              } catch {
+                throw new LocalRefusal("LOCAL_STATE_UNSAFE", "Unknown runner lock owner.");
+              }
+              if (
+                !parsed ||
+                Object.keys(parsed).sort().join(",") !== "boot,pid" ||
+                typeof parsed.boot !== "string" ||
+                !/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(parsed.boot)
+              )
+                throw new LocalRefusal("LOCAL_STATE_UNSAFE", "Unknown runner lock owner.");
+              owner = parsed;
+            }
             if (
-              !/^[1-9][0-9]{0,9}$/.test(value) ||
-              Number(value) > 2147483647 ||
+              !Number.isInteger(owner.pid) ||
+              owner.pid < 1 ||
+              owner.pid > 2147483647 ||
               bytes.length !== metadata.size
             )
               throw new LocalRefusal("LOCAL_STATE_UNSAFE", "Unknown runner lock owner.");
-            try {
-              process.kill(Number(value), 0);
-              throw busy();
-            } catch (error) {
-              if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw busy();
+            if (!owner.boot || owner.boot === boot) {
+              try {
+                process.kill(owner.pid, 0);
+                throw busy();
+              } catch (error) {
+                if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw busy();
+              }
             }
             const current = await lstat(path);
             const again = Buffer.alloc(bytes.length + 1);
@@ -284,7 +327,7 @@ export class PrivateState {
         constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY | constants.O_NOFOLLOW,
         0o600,
       );
-      await handle.writeFile(String(process.pid));
+      await handle.writeFile(markerBytes);
       await handle.sync();
       const own = await handle.stat();
       await handle.close();
@@ -299,7 +342,7 @@ export class PrivateState {
             );
             try {
               const current = await marker.stat();
-              const bytes = Buffer.alloc(11);
+              const bytes = Buffer.alloc(257);
               const read = await marker.read(bytes, 0, bytes.length, 0);
               if (
                 current.dev !== own.dev ||
@@ -307,7 +350,7 @@ export class PrivateState {
                 current.nlink !== 1 ||
                 !current.isFile() ||
                 (current.mode & 0o077) !== 0 ||
-                bytes.subarray(0, read.bytesRead).toString("utf8") !== String(process.pid)
+                bytes.subarray(0, read.bytesRead).toString("utf8") !== markerBytes
               )
                 throw new LocalRefusal("LOCAL_STATE_CHANGED", "The runner lock owner changed.");
               const named = await lstat(path);

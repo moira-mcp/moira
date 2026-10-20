@@ -20,13 +20,13 @@ export class RuntimeDeviceOwner {
   private stopping?: Promise<void>;
   private startup?: Promise<void>;
   private unknownStartup = false;
-  private opened = false;
   private readonly preparations = new Map<string, { origin: LocalSpace; active: boolean }>();
 
   constructor(
     private readonly records: LocalRecords,
     private readonly initial: LocalPolicy,
     private readonly mode: "work" | "setup" | "cleanup" = "work",
+    private readonly execute: RunProcess = runProcess,
   ) {
     this.control = this.createControl();
     this.runtime = new SbxRuntime(initial, this.run);
@@ -69,44 +69,100 @@ export class RuntimeDeviceOwner {
     return work;
   }
 
+  private fixedObservation(request: ProcessRequest, names: ReadonlySet<string>): boolean {
+    if (request.stdin || request.input) return false;
+    const args = request.argv;
+    if (request.binary === this.initial.runtime.binary) {
+      return (
+        (args.length === 1 && args[0] === "version") ||
+        (args.length === 2 && args[0] === "ls" && args[1] === "--json") ||
+        (args.length === 3 &&
+          args[0] === "daemon" &&
+          args[1] === "status" &&
+          args[2] === "--json") ||
+        (args.length === 3 &&
+          args[0] === "settings" &&
+          args[1] === "list" &&
+          args[2] === "--json") ||
+        (args.length === 4 &&
+          args[0] === "settings" &&
+          args[1] === "get" &&
+          args[2] === "feature.network-user-prompts" &&
+          args[3] === "--json") ||
+        (args.length === 3 &&
+          args[0] === "inspect" &&
+          args[1] === "--json" &&
+          names.has(args[2])) ||
+        (args.length === 3 && args[0] === "policy" && args[1] === "ls" && args[2] === "--json") ||
+        (args.length === 4 &&
+          args[0] === "policy" &&
+          args[1] === "ls" &&
+          names.has(args[2]) &&
+          args[3] === "--json")
+      );
+    }
+    return (
+      request.binary === process.execPath &&
+      args.length === 5 &&
+      args[0] === runtimeApiAsset() &&
+      args[1] === this.runtime.home &&
+      args[2] === this.runtime.environment.DOCKER_SANDBOXES_APP_NAME &&
+      args[3] === "container-identity" &&
+      names.has(args[4])
+    );
+  }
+
   private inventoryRead(
     control: DeviceRuntimeControl,
     request: ProcessRequest,
-    names: Set<string>,
+    names: ReadonlySet<string>,
+    admission: () => Promise<void> = () => this.current(),
   ) {
     return this.track(
       (async () => {
-        await this.current();
+        await admission();
         await control.assertDockerHeld();
-        const sdkRead =
-          request.binary === this.initial.runtime.binary &&
-          request.argv.length === 2 &&
-          request.argv[0] === "ls" &&
-          request.argv[1] === "--json";
-        const containerRead =
-          request.binary === process.execPath &&
-          request.argv.length === 5 &&
-          request.argv[0] === runtimeApiAsset() &&
-          request.argv[1] === this.runtime.home &&
-          request.argv[2] === this.runtime.environment.DOCKER_SANDBOXES_APP_NAME &&
-          request.argv[3] === "container-identity" &&
-          names.has(request.argv[4]);
-        if ((!sdkRead && !containerRead) || request.stdin || request.input)
+        if (!this.fixedObservation(request, names))
           throw new LocalRefusal(
             "LOCAL_CONTROL_WORKER_UNVERIFIED",
-            "Only the fixed owned inventory read is admitted.",
+            "Only fixed owned runtime metadata can use observation custody.",
           );
-        const result = await runProcess({
+        const result = await this.execute({
           ...request,
           signal: request.signal
             ? AbortSignal.any([request.signal, this.controller.signal])
             : this.controller.signal,
         });
-        await this.current();
+        await admission();
         await control.assertDockerHeld();
         return result;
       })(),
     );
+  }
+
+  /** Fixed metadata is not guest admission; its scope and native custody remain fresh. */
+  async readRuntime(space: LocalSpace, request: ProcessRequest) {
+    const names = new Set([space.name]);
+    if (!this.fixedObservation(request, names)) return undefined;
+    const admission = async () => {
+      await this.current();
+      const current = await this.records.get(space.id);
+      if (
+        !current ||
+        current.generation !== space.generation ||
+        current.name !== space.name ||
+        current.runtimeId !== space.runtimeId ||
+        current.repositoryId !== space.repositoryId ||
+        current.operationMarker !== space.operationMarker ||
+        current.desiredState !== "running"
+      )
+        throw new LocalRefusal(
+          "LOCAL_GENERATION_CONFLICT",
+          "The runtime observation admission changed.",
+        );
+      requireSpaceGrant(await this.records.policy(), current, Date.now());
+    };
+    return this.inventoryRead(this.control, request, names, admission);
   }
 
   private async coverage(
@@ -258,7 +314,7 @@ export class RuntimeDeviceOwner {
               argv[2] === "--json"));
         if (!startupRead) await this.protect();
       }
-      return runProcess({
+      return this.execute({
         ...request,
         signal: request.signal
           ? AbortSignal.any([request.signal, this.controller.signal])
@@ -276,7 +332,6 @@ export class RuntimeDeviceOwner {
           "LOCAL_RUNTIME_WORKER_UNSUPPORTED",
           "This host lacks a verified kernel-identity capture contract for Docker Sandboxes VM workers.",
         );
-      this.opened = true;
       try {
         await this.control.protect();
       } catch (error) {
@@ -460,7 +515,9 @@ export class RuntimeDeviceOwner {
       const unknown =
         row.observationUnknown ||
         (required && (!row.containerId || !this.control.holdsWorker(row.containerId))) ||
-        (row.state === "stopped" && row.containerId && this.control.hasWorker(row.containerId));
+        // A contradictory full CID cannot hide retained custody at its native
+        // endpoint. The prefix is a refusal fence only, never a binding or stop target.
+        (row.state === "stopped" && row.containerId && this.control.hasWorkerAt(row.containerId));
       return {
         id: row.runtimeId,
         name: row.name,
@@ -478,13 +535,30 @@ export class RuntimeDeviceOwner {
     this.controller.abort();
   }
 
+  /** Drop observations without declaring or causing physical shutdown. */
+  async release(): Promise<void> {
+    this.revoke();
+    await Promise.allSettled([...this.children]);
+    await this.startup?.catch(() => undefined);
+    const results = await Promise.allSettled([
+      this.control.release(),
+      ...(this.launch ? [this.launch.release()] : []),
+    ]);
+    const failures = results.filter((result) => result.status === "rejected");
+    if (failures.length)
+      throw new AggregateError(
+        failures.map((result) => result.reason),
+        "Native observation release is unconfirmed.",
+      );
+  }
+
   stop(): Promise<void> {
     this.stopping ??= (async () => {
       this.revoke();
       await Promise.allSettled([...this.children]);
       await this.startup?.catch(() => undefined);
       let unknown = false;
-      if (this.opened) {
+      {
         try {
           await this.control.captureForShutdown();
         } catch (error) {
@@ -496,7 +570,7 @@ export class RuntimeDeviceOwner {
         ...(this.control.captured ? [this.control.stop()] : []),
         ...(this.launch ? [this.launch.stop()] : []),
       ]);
-      if (this.opened) {
+      {
         const remaining = new DeviceRuntimeControl(this.initial);
         try {
           await remaining.captureForShutdown();
@@ -504,6 +578,10 @@ export class RuntimeDeviceOwner {
         } catch (error) {
           if (!(error instanceof LocalRefusal) || error.code !== "LOCAL_CONTROL_ABSENT")
             unknown = true;
+        } finally {
+          await remaining.release().catch(() => {
+            unknown = true;
+          });
         }
       }
       if (unknown || this.unknownStartup || results.some((result) => result.status === "rejected"))

@@ -45,6 +45,7 @@ export class DeviceRuntimeControl {
   private readonly controls = new Map<string, RuntimeControl>();
   private tail: Promise<void> = Promise.resolve();
   private stopping?: Promise<void>;
+  private releasing?: Promise<void>;
   private retired = false;
   private readonly bindings = new Map<string, CapturedBinding>();
   constructor(
@@ -255,15 +256,20 @@ export class DeviceRuntimeControl {
           };
           this.bindings.set(id, binding);
         }
+        // An explicit newer stop retains its original attested binding even if
+        // current SDK container metadata contradicts the captured kernel CID.
+        // That metadata never selects a replacement handle or establishes a binding.
+        const stopRow = binding
+          ? rows.find((item) => item.runtimeId === binding.runtimeId && item.name === binding.name)
+          : undefined;
         if (
-          indexed &&
           binding?.generation !== undefined &&
-          row.expectedStopGeneration !== undefined &&
-          row.expectedStopGeneration > binding.generation &&
-          (row.containerState === "exited" ||
-            row.containerState === "created" ||
-            (row.containerState === undefined &&
-              (row.state === "stopped" || row.state === "created")))
+          stopRow?.expectedStopGeneration !== undefined &&
+          stopRow.expectedStopGeneration > binding.generation &&
+          (stopRow.containerState === "exited" ||
+            stopRow.containerState === "created" ||
+            (stopRow.containerState === undefined &&
+              (stopRow.state === "stopped" || stopRow.state === "created")))
         ) {
           try {
             await control.stop();
@@ -274,16 +280,9 @@ export class DeviceRuntimeControl {
           this.bindings.delete(id);
           continue;
         }
-        if (!control.active) {
-          try {
-            await control.stop();
-          } catch {
-            continue;
-          }
-          this.controls.delete(socket);
-          this.bindings.delete(id);
-          continue;
-        }
+        // A retired observation still holds the original identities for explicit stop.
+        // Metadata refresh must neither signal those peers nor discard their custody.
+        if (!control.active) continue;
         try {
           await control.check();
         } catch {
@@ -304,21 +303,10 @@ export class DeviceRuntimeControl {
           binding.generation = row.generation;
       }
     });
-    const settled = work.catch(async (error: unknown) => {
-      if (error instanceof LocalRefusal && error.code === "LOCAL_OBSERVATION_UNKNOWN") throw error;
-      this.retired = true;
-      const cleanup = await Promise.allSettled(
-        [...this.controls.values()].map((control) => control.stop()),
-      );
-      if (cleanup.some((result) => result.status === "rejected"))
-        throw new LocalRefusal(
-          "LOCAL_STOP_PENDING",
-          "Partially captured runtime shutdown is unconfirmed.",
-        );
-      throw error;
-    });
-    this.tail = settled.catch(() => undefined);
-    return settled;
+    // A refused observation cannot revoke custody already held for another peer.
+    // Preserve both the handles and their bindings for a later observation or explicit stop.
+    this.tail = work.catch(() => undefined);
+    return work;
   }
 
   async protect(rows?: RuntimeCoverage[]): Promise<void> {
@@ -342,6 +330,13 @@ export class DeviceRuntimeControl {
   }
 
   stop(): Promise<void> {
+    if (this.releasing)
+      return Promise.reject(
+        new LocalRefusal(
+          "LOCAL_STOP_PENDING",
+          "Released custody cannot confirm physical shutdown.",
+        ),
+      );
     this.stopping ??= (async () => {
       await this.tail;
       const results = await Promise.allSettled([...this.controls.values()].map((c) => c.stop()));
@@ -350,16 +345,38 @@ export class DeviceRuntimeControl {
     })();
     return this.stopping;
   }
+
+  /** Relinquish observation only; this is never a physical settlement receipt. */
+  release(): Promise<void> {
+    if (this.stopping) return this.stopping;
+    this.retired = true;
+    this.releasing ??= (async () => {
+      await this.tail;
+      const results = await Promise.allSettled(
+        [...this.controls.values()].map((control) => control.release()),
+      );
+      if (results.some((result) => result.status === "rejected"))
+        throw new LocalRefusal(
+          "LOCAL_CONTROL_RELEASE_UNCONFIRMED",
+          "Native observation release is unconfirmed; physical shutdown is not confirmed.",
+        );
+      this.controls.clear();
+      this.bindings.clear();
+    })();
+    return this.releasing;
+  }
 }
 
-/** The companion holds audit tokens/pidfds until fixed stop or parent pipe loss. */
+/** Hold audit tokens/pidfds; observation release never signals the captured incarnation. */
 export class RuntimeControl {
   private readonly input = new PassThrough();
   private completion: Promise<ProcessResult>;
   private stopping?: Promise<void>;
+  private releasing?: Promise<void>;
   private alive = true;
   private checkTail: Promise<void> = Promise.resolve();
   private acknowledge?: () => void;
+  private rejectCheck?: (error: Error) => void;
   private container?: string;
   private constructor(
     identity: RuntimeControlIdentity | RuntimeLaunchIdentity,
@@ -395,8 +412,13 @@ export class RuntimeControl {
             this.container = JSON.parse(line).containerId;
             ready();
           } else if (line === '{"held":true}') this.acknowledge?.();
-          else if (line === '{"retired":true}') this.alive = false;
-          else if (line !== '{"settled":true}') throw new Error("Invalid fixed control response");
+          else if (line === '{"retired":true}') {
+            this.alive = false;
+            this.rejectCheck?.(
+              new LocalRefusal("LOCAL_CONTROL_RETIRED", "The captured incarnation retired."),
+            );
+          } else if (line !== '{"settled":true}' && line !== '{"released":true}')
+            throw new Error("Invalid fixed control response");
         }
         if (frame.length > 1024) throw new Error("Control response exceeds its bound");
       },
@@ -412,7 +434,7 @@ export class RuntimeControl {
   }
 
   get active(): boolean {
-    return this.alive && !this.stopping;
+    return this.alive && !this.stopping && !this.releasing;
   }
 
   get containerId(): string | undefined {
@@ -423,8 +445,9 @@ export class RuntimeControl {
     const work = this.checkTail.then(async () => {
       if (!this.active)
         throw new LocalRefusal("LOCAL_CONTROL_RETIRED", "The captured incarnation retired.");
-      const acknowledgement = new Promise<void>((done) => {
+      const acknowledgement = new Promise<void>((done, reject) => {
         this.acknowledge = done;
+        this.rejectCheck = reject;
       });
       this.input.write("check\n");
       try {
@@ -441,6 +464,7 @@ export class RuntimeControl {
           throw new LocalRefusal("LOCAL_CONTROL_RETIRED", "The captured incarnation retired.");
       } finally {
         this.acknowledge = undefined;
+        this.rejectCheck = undefined;
       }
     });
     this.checkTail = work.catch(() => undefined);
@@ -496,6 +520,13 @@ export class RuntimeControl {
 
   /** Call only after all SDK work children have been cancelled and reaped. */
   stop(): Promise<void> {
+    if (this.releasing)
+      return Promise.reject(
+        new LocalRefusal(
+          "LOCAL_STOP_PENDING",
+          "Released custody cannot confirm physical shutdown.",
+        ),
+      );
     this.stopping ??= (async () => {
       this.input.end("stop\n");
       const result = await this.completion;
@@ -503,5 +534,19 @@ export class RuntimeControl {
         throw new LocalRefusal("LOCAL_STOP_PENDING", "Captured runtime processes did not exit.");
     })();
     return this.stopping;
+  }
+
+  release(): Promise<void> {
+    if (this.stopping) return this.stopping;
+    this.releasing ??= (async () => {
+      this.input.end("release\n");
+      const result = await this.completion;
+      if (result.exitCode !== 0 || !result.stdout.toString("utf8").endsWith('{"released":true}\n'))
+        throw new LocalRefusal(
+          "LOCAL_CONTROL_RELEASE_UNCONFIRMED",
+          "Captured observation release is unconfirmed.",
+        );
+    })();
+    return this.releasing;
   }
 }

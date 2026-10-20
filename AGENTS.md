@@ -333,8 +333,16 @@ retains separate account/device and local approval guards. File bytes, immutable
 and original delivery receipts remain with their workspace or controller owner. Archived uncertain receipts are
 not dispatched or replayed.
 
-The companion runs on the user's machine and retains physical VM custody, local repository
-grants and finite work leases. The server cannot choose host commands or expand those grants.
+The persistent host service runs on the user's machine and retains native VM custody, local
+repository grants, finite work leases and broker/tunnel ownership. The companion CLI is a client:
+`run` starts or connects and returns; its exit does not stop VMs. `install` stages a complete sealed
+release without replacing the active owner. `service-status` distinguishes running from staged
+selection. Physical-owner updates require explicit `maintenance --confirm`, positive old-owner
+settlement and same-VM recovery without command replay. Native observation release is not settlement.
+Cold/reboot recovery retains identities and intended state, subject to login/storage/credential
+availability; it never adopts by PID or replays pre-reboot commands. See the canonical
+[owner lifecycle and update procedures](docs/CODESPACES.md#owner-web-control-and-bundle-updates).
+The server cannot choose host commands or expand those grants.
 GitHub and Local resources retain their provider identity for subsequent lifecycle calls.
 
 Build the companion with `npm run local:build`; invoke it through `npm run local --`

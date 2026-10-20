@@ -159,6 +159,7 @@ export class LocalController {
   readonly control: LocalWebControl;
   private settingsTail: Promise<unknown> = Promise.resolve();
   private resourceTails = new Map<string, Promise<unknown>>();
+  private readonly physicalClosures = new Set<Promise<unknown>>();
   private retiring = false;
   private githubEffects = new Map<
     string,
@@ -225,6 +226,7 @@ export class LocalController {
     return false;
   }
   async snapshot(completingRequestId?: string) {
+    if (!completingRequestId) this.requireAdmission();
     const configured = await this.manager.records.policyOrNull();
     const local = configured ? await this.localSnapshot(completingRequestId) : undefined;
     const pending = await this.state.pendingResources(this.identity);
@@ -291,6 +293,19 @@ export class LocalController {
         failures.map((result) => result.reason),
         "Owner retirement is not confirmed.",
       );
+  }
+  /** Freeze admission before a locally requested service maintenance boundary. */
+  fenceAdmission(): void {
+    this.retiring = true;
+  }
+  async prepareMaintenance(): Promise<void> {
+    this.retiring = true;
+    await this.stopProvisioning();
+    // Native admission publishes its record before long guest preparation. Do not
+    // wait for that work to finish before an explicitly requested interruption.
+    await Promise.allSettled([this.settingsTail, ...this.resourceTails.values()]);
+    // A previously admitted user stop/delete is intent, not work to resurrect.
+    await Promise.allSettled([...this.physicalClosures]);
   }
   private requireAdmission(): void {
     if (this.retiring)
@@ -1232,7 +1247,7 @@ export class LocalController {
         state: "completed" as const,
         outcome: { ok: true as const, result: await this.resource(resourceId, value) },
       };
-    return this.state.run(
+    const operation = this.state.run(
       value.requestId,
       this.identity,
       { resourceId, ...value, localOwner },
@@ -1418,6 +1433,11 @@ export class LocalController {
         });
       },
     );
+    if (value.action === "stop" || value.action === "delete") {
+      this.physicalClosures.add(operation);
+      void operation.finally(() => this.physicalClosures.delete(operation)).catch(() => undefined);
+    }
+    return operation;
   }
   private async requireBinding(resourceId: string, expectedGeneration: number) {
     const binding = await this.state.binding(resourceId, this.identity);
@@ -1630,19 +1650,15 @@ export async function startLocalController(controller: LocalController) {
   });
   await chmod(socketPath, 0o600);
   const own = await lstat(socketPath);
-  return {
-    socketPath,
-    connectionId: controller.identity.connectionId,
-    incarnation,
-    retire: () => controller.retire(),
-    close: async () => {
+  let detached: Promise<void> | undefined;
+  let closing: Promise<void> | undefined;
+  const detach = (): Promise<void> => {
+    controller.fenceAdmission();
+    return (detached ??= (async () => {
       server.closeAllConnections();
       await new Promise<void>((resolve, reject) =>
         server.close((error) => (error ? reject(error) : resolve())),
       );
-      await controller.stopProvisioning();
-      await controller.closeCommunication();
-      await controller.state.drain();
       const current = await lstat(socketPath).catch((error: NodeJS.ErrnoException) => {
         if (error.code !== "ENOENT") throw error;
         return null;
@@ -1656,7 +1672,21 @@ export async function startLocalController(controller: LocalController) {
         await rmdir(directory.root).catch((error: NodeJS.ErrnoException) => {
           if (error.code !== "ENOENT" && error.code !== "ENOTEMPTY") throw error;
         });
-    },
+    })());
+  };
+  return {
+    socketPath,
+    connectionId: controller.identity.connectionId,
+    incarnation,
+    detach,
+    retire: () => controller.retire(),
+    close: () =>
+      (closing ??= (async () => {
+        await detach();
+        await controller.stopProvisioning();
+        await controller.closeCommunication();
+        await controller.state.drain();
+      })()),
   };
 }
 

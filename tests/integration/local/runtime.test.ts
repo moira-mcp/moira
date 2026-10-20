@@ -52,6 +52,13 @@ const virtualDefault = {
   origin: "local",
   editable: false,
 };
+// SDK 0.46.0 also reports these display/source metadata fields on its virtual rule.
+const reportedVirtualDefault = {
+  ...virtualDefault,
+  name: "default-deny-all",
+  policy_name: "default-deny-all",
+  layer: "local",
+};
 const safeSettings = {
   "feature.network-user-prompts": { enabled: false, variant: "", variantPayload: "" },
   "env.rememberHostCommands": false,
@@ -295,6 +302,14 @@ describe("Docker Sandboxes lifecycle boundary", () => {
   test.each([
     { label: "empty persistent rules", initialRules: [{ resource_type: "filesystem:read" }] },
     { label: "pinned readonly virtual default", initialRules: [virtualDefault] },
+    {
+      label: "pinned readonly virtual default with SDK display metadata",
+      initialRules: [
+        { resource_type: "filesystem:read" },
+        { resource_type: "filesystem:write" },
+        reportedVirtualDefault,
+      ],
+    },
   ])(
     "fresh setup from $label persists UDP denial across repeat setup",
     async ({ initialRules }) => {
@@ -326,7 +341,7 @@ describe("Docker Sandboxes lifecycle boundary", () => {
         if (request.argv[0] === "policy" && request.argv[1] === "deny") {
           expect(request.argv).toEqual(["policy", "deny", "network", "--protocol", "udp", "**"]);
           rules = [
-            ...rules.filter((rule) => rule !== virtualDefault),
+            ...rules.filter((rule) => rule !== virtualDefault && rule !== reportedVirtualDefault),
             { ...baseline, id: "persisted-udp", origin: "local", editable: true },
           ];
           additions++;
@@ -944,7 +959,10 @@ describe("Docker Sandboxes lifecycle boundary", () => {
         { ...baseline, scope: "sandbox", decision: "allow", resources: ["localhost:12345"] },
       ],
     },
-    { label: "missing UDP denial", rules: [{ ...baseline, actions: ["net:connect:tcp"] }] },
+    {
+      label: "missing UDP denial",
+      rules: [{ ...reportedVirtualDefault, actions: ["net:connect:tcp"] }],
+    },
     { label: "wrong resources", rules: [{ ...baseline, resources: ["example.org"] }] },
     { label: "inactive denial", rules: [{ ...baseline, status: "inactive" }] },
     {

@@ -17,6 +17,13 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
+import { connect } from "node:net";
+import {
+  DeviceRuntimeControl,
+  RuntimeControl,
+} from "../../../packages/local/src/runtime-control.js";
+import { SbxRuntime } from "../../../packages/local/src/sbx-runtime.js";
+import { localPolicy } from "./fixtures.js";
 
 const execute = promisify(execFile);
 const vmTest = process.platform === "darwin" ? test : test.skip;
@@ -26,7 +33,9 @@ let helper: string;
 let executable: string;
 let children: ChildProcess[];
 beforeEach(async () => {
-  root = await realpath(await mkdtemp(join(tmpdir(), "ml-watch-")));
+  root = await realpath(
+    await mkdtemp(join(process.platform === "darwin" ? "/private/tmp" : tmpdir(), "ml-watch-")),
+  );
   await chmod(root, 0o700);
   helper = join(root, "control");
   executable = join(root, "owned-node");
@@ -63,7 +72,7 @@ async function socketProcess(name: string, ignoresTerm = false) {
     executable,
     [
       "-e",
-      `const n=require('node:net');${ignoresTerm ? "process.on('SIGTERM',()=>{});" : ""}n.createServer(c=>c.on('error',()=>{})).listen(process.argv[1],()=>process.stdout.write('ready\\n'));`,
+      `const n=require('node:net');${ignoresTerm ? "process.on('SIGTERM',()=>{});" : ""}n.createServer(c=>{c.on('error',()=>{});c.on('data',bytes=>c.write(bytes));}).listen(process.argv[1],()=>process.stdout.write('ready\\n'));`,
       socket,
     ],
     { env: {}, stdio: ["ignore", "pipe", "pipe"] },
@@ -108,7 +117,7 @@ function nextOutput(child: ChildProcess): Promise<string> {
   });
 }
 
-async function vmProcess(foreign = false) {
+async function vmProcess(foreign = false, containerId = "a".repeat(64)) {
   const sdk = join(root, "Sbx.app", "Contents", "MacOS", "sbx");
   const worker = join(root, "Sbx.app", "Contents", "Helpers", "containerd-shim-nerdbox-v1");
   await mkdir(join(root, "Sbx.app", "Contents", "MacOS"), { recursive: true, mode: 0o700 });
@@ -134,13 +143,25 @@ async function vmProcess(foreign = false) {
   const socket = join(root, "aaaaaaaaaaaa-vm.sock");
   const activeBinary = foreign ? join(root, "foreign-worker") : worker;
   if (foreign) await copyFile(worker, activeBinary);
-  const child = spawn(activeBinary, [socket, "-namespace", "docker", "-id", "a".repeat(64)], {
+  const child = spawn(activeBinary, [socket, "-namespace", "docker", "-id", containerId], {
     env: {},
     stdio: ["ignore", "pipe", "pipe"],
   });
   children.push(child);
   expect(await nextOutput(child)).toBe("ready\n");
   return { sdk, worker, socket, child };
+}
+
+async function roundTrip(socketPath: string) {
+  const socket = connect(socketPath);
+  try {
+    await once(socket, "connect");
+    const received = once(socket, "data");
+    socket.write("still-owned");
+    expect((await received)[0]).toEqual(Buffer.from("still-owned"));
+  } finally {
+    socket.destroy();
+  }
 }
 
 describe("credential-independent captured process shutdown", () => {
@@ -175,6 +196,18 @@ describe("credential-independent captured process shutdown", () => {
     expect((await exited)[1]).toBe("SIGTERM");
     expect((await closed)[0]).toBe(0);
   });
+  vmTest(
+    "a captured VM with an invalid container identity is refused without stopping its worker",
+    async () => {
+      const vm = await vmProcess(false, "a".repeat(63));
+      await expect(execute(helper, ["--vm", root, vm.sdk, vm.socket])).rejects.toMatchObject({
+        code: 2,
+      });
+      expect(vm.child.exitCode).toBeNull();
+      expect(vm.child.signalCode).toBeNull();
+      process.kill(vm.child.pid!, 0);
+    },
+  );
   test.each(["symlink", "writable", "different-sdk", "foreign-peer"] as const)(
     "VM capture refuses %s identity without signalling its process",
     async (variant) => {
@@ -216,7 +249,25 @@ describe("credential-independent captured process shutdown", () => {
     const response = await retired;
     expect(response).toContain('{"retired":true}');
     expect(response).not.toContain('{"held":true}');
+    const settlement = nextOutput(watch);
+    watch.stdin!.end("stop\n");
+    expect(await settlement).toBe('{"settled":true}\n');
     expect((await closed)[0]).toBe(0);
+  });
+  test("natural peer exit rejects held checks but retains exact kernel proof for later explicit stop", async () => {
+    const owned = await socketProcess("owned.sock");
+    const control = await RuntimeControl.capture({ root, executable, sockets: [owned.socket] });
+    try {
+      await control.check();
+      const exited = once(owned.child, "close");
+      owned.child.kill("SIGTERM");
+      await exited;
+      await expect(control.check()).rejects.toMatchObject({ code: "LOCAL_CONTROL_RETIRED" });
+      await control.stop();
+      expect(control.active).toBe(false);
+    } finally {
+      await control.release();
+    }
   });
   test("captures a short private SDK link whose canonical socket path exceeds sockaddr capacity", async () => {
     const directory = join(root, "Library", "Application Support", "sandboxes", "x".repeat(60));
@@ -260,20 +311,33 @@ describe("credential-independent captured process shutdown", () => {
     },
   );
 
-  test("parent pipe loss stops the captured process without any SDK or credential call", async () => {
-    const owned = await socketProcess("owned.sock");
-    const watch = spawn(helper, [root, executable, owned.socket], {
-      env: {},
-      stdio: ["pipe", "pipe", "pipe"],
-    });
-    children.push(watch);
-    const watchExit = once(watch, "close");
-    expect(JSON.parse(await nextOutput(watch))).toEqual({ ready: true });
-    const ownedExit = once(owned.child, "close");
-    watch.stdin!.end();
-    expect((await ownedExit)[1]).toBe("SIGTERM");
-    expect((await watchExit)[0]).toBe(0);
-  });
+  test.each([
+    ["parent pipe loss", "", 0],
+    ["explicit observation release", "release\n", 0],
+    ["invalid observer command", "invalid\n", 2],
+  ] as const)(
+    "%s releases observation without signalling or claiming settlement",
+    async (_name, command, code) => {
+      const owned = await socketProcess("owned.sock");
+      const watch = spawn(helper, [root, executable, owned.socket], {
+        env: {},
+        stdio: ["pipe", "pipe", "pipe"],
+      });
+      children.push(watch);
+      const watchExit = once(watch, "close");
+      expect(JSON.parse(await nextOutput(watch))).toEqual({ ready: true });
+      let receipt = "";
+      watch.stdout!.on("data", (bytes: Buffer) => {
+        receipt += bytes.toString("utf8");
+      });
+      watch.stdin!.end(command);
+      expect((await watchExit)[0]).toBe(code);
+      expect(receipt).toBe('{"released":true}\n');
+      expect(owned.child.exitCode).toBeNull();
+      expect(owned.child.signalCode).toBeNull();
+      await roundTrip(owned.socket);
+    },
+  );
 
   test("an executable mismatch refuses capture and leaves the socket owner alive", async () => {
     const owned = await socketProcess("owned.sock");
@@ -287,15 +351,75 @@ describe("credential-independent captured process shutdown", () => {
     expect(owned.child.signalCode).toBeNull();
   });
 
-  test("a later missing socket refuses capture only after already captured peers exit", async () => {
+  test("a later missing socket refuses capture without signalling already captured peers", async () => {
     const owned = await socketProcess("owned.sock");
     const peer = await socketProcess("peer.sock");
-    const closed = once(owned.child, "close");
     await expect(
       execute(helper, [root, executable, owned.socket, join(root, "missing.sock")]),
     ).rejects.toMatchObject({ code: 4 });
-    expect((await closed)[1]).toBe("SIGTERM");
+    expect(owned.child.exitCode).toBeNull();
+    expect(owned.child.signalCode).toBeNull();
     expect(peer.child.signalCode).toBeNull();
+    await roundTrip(owned.socket);
+    await roundTrip(peer.socket);
+  });
+
+  test("retirement of one captured peer releases observation without stopping the other", async () => {
+    const owned = await socketProcess("owned.sock");
+    const peer = await socketProcess("peer.sock");
+    const watch = spawn(helper, [root, executable, owned.socket, peer.socket], {
+      env: {},
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    children.push(watch);
+    const closed = once(watch, "close");
+    expect(JSON.parse(await nextOutput(watch))).toEqual({ ready: true });
+    let receipt = "";
+    watch.stdout!.on("data", (bytes: Buffer) => {
+      receipt += bytes.toString("utf8");
+    });
+    const retired = nextOutput(watch);
+    const exited = once(owned.child, "close");
+    owned.child.kill("SIGKILL");
+    await exited;
+    expect(await retired).toBe('{"retired":true}\n');
+    await roundTrip(peer.socket);
+    watch.stdin!.end("release\n");
+    expect((await closed)[0]).toBe(0);
+    expect(receipt).toBe('{"retired":true}\n{"released":true}\n');
+    await roundTrip(peer.socket);
+  });
+
+  test("device capture failure retains held daemon custody for retry, then releases without physical stop", async () => {
+    const policy = localPolicy(root);
+    policy.runtime.binary = executable;
+    policy.runtime.storageRoot = root;
+    const runtime = new SbxRuntime(policy);
+    const directory = join(
+      "runtime",
+      ".sbx",
+      `run_${runtime.environment.DOCKER_SANDBOXES_APP_NAME}`,
+      "d",
+    );
+    await mkdir(join(root, directory), { recursive: true, mode: 0o700 });
+    const daemon = await socketProcess(join(directory, "sandboxd.sock"));
+    const control = new DeviceRuntimeControl(policy);
+    try {
+      await expect(control.protect()).rejects.toMatchObject({
+        code: "LOCAL_CONTROL_WORKER_UNVERIFIED",
+      });
+      await control.assertDaemonHeld();
+      await roundTrip(daemon.socket);
+      const docker = await socketProcess(join(directory, "docker.sock"));
+      await control.protect();
+      await control.assertDockerHeld();
+      await control.release();
+      await expect(control.stop()).rejects.toMatchObject({ code: "LOCAL_STOP_PENDING" });
+      await roundTrip(daemon.socket);
+      await roundTrip(docker.socket);
+    } finally {
+      await control.release();
+    }
   });
 
   test.each([false, true])(

@@ -3,6 +3,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <sys/stat.h>
+#include <limits.h>
 
 static void jsonString(const char *value) {
   putchar('"');
@@ -71,6 +72,8 @@ int main(int argc, char **argv) {
     SecKeychainSettings settings = {SEC_KEYCHAIN_SETTINGS_VERS1, false, false, 0};
     OSStatus state = opened == errSecSuccess ? SecKeychainGetStatus(own, &flags) : opened;
     OSStatus copied = opened == errSecSuccess ? SecKeychainCopySettings(own, &settings) : opened;
+    // CopySettings does not populate useLockInterval; report the effective native timer.
+    settings.useLockInterval = copied == errSecSuccess && settings.lockInterval != INT_MAX;
     printf("{\"status\":%d,\"settingsStatus\":%d,\"unlocked\":%s,\"lockOnSleep\":%s,\"useLockInterval\":%s,\"lockInterval\":%u}\n", (int)state, (int)copied, (flags & kSecUnlockStateStatus) ? "true" : "false", settings.lockOnSleep ? "true" : "false", settings.useLockInterval ? "true" : "false", (unsigned)settings.lockInterval);
     if (own) CFRelease(own);
     return state == errSecSuccess && copied == errSecSuccess ? 0 : 1;
@@ -96,15 +99,16 @@ int main(int argc, char **argv) {
   if (status == errSecSuccess && (!strcmp(argv[1], "create") || !strcmp(argv[1], "unlock-machine"))) {
     SecKeychainSettings settings = {SEC_KEYCHAIN_SETTINGS_VERS1, false, false, 0};
     status = SecKeychainCopySettings(keychain, &settings);
-    if (status == 0 && !strcmp(argv[1], "create")) {
-      // New SDK machine stores stay available to their background process after sleep.
-      // Existing or personal Keychain policies are never rewritten.
+    if (status == 0 && (settings.lockOnSleep || settings.lockInterval != INT_MAX)) {
+      // Only device-owned machine stores reach this boundary. macOS ignores
+      // useLockInterval: its own security tool uses INT_MAX for no idle timeout.
       settings.lockOnSleep = false;
       settings.useLockInterval = false;
+      settings.lockInterval = INT_MAX;
       status = SecKeychainSetSettings(keychain, &settings);
       if (status == 0) status = SecKeychainCopySettings(keychain, &settings);
     }
-    if (status == 0 && (settings.lockOnSleep || settings.useLockInterval)) status = errSecParam;
+    if (status == 0 && (settings.lockOnSleep || settings.lockInterval != INT_MAX)) status = errSecParam;
   }
   volatile unsigned char *clear = password;
   for (size_t i = 0; i < sizeof(password); i++) clear[i] = 0;

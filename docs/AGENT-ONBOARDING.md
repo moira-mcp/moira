@@ -181,7 +181,7 @@ Automatic node types (execute without agent interaction):
 - GitHub and local Docker Sandboxes share the resource, operation, file and native-transfer contracts.
 - Creation selects a discovered repository target; subsequent calls use the persisted resource's provider and identity.
 - Moira Local is a companion on the user's machine, distinct from the `moira-local` Docker MCP-server alias in the testing examples. It connects to the selected Moira instance through authenticated outbound HTTPS.
-- Local repository grants, finite leases and physical stop belong to the companion's independent owner. Cloud messages cannot expand them or select host commands.
+- Local repository grants, finite leases, native custody and broker/tunnel belong to the persistent host owner. The CLI's exit does not stop VMs; ordinary complete-package installation only stages an update. Explicit owner maintenance confirms physical settlement and preserves original VM/disk identities and receipts without command replay. Cloud messages cannot expand grants or select host commands.
 - Build and operational instructions, supported-host constraints and isolation evidence are in [Codespaces](CODESPACES.md).
 
 ### File Organization Logic

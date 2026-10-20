@@ -167,6 +167,11 @@ The package is private and is not a published global npm installer. Pair the con
 **Settings → Development → Local computers**; the pairing token reaches the companion through stdin.
 For Local VM work, initialize the physical capability and approve repository rights and a finite
 work lease on that computer. Review effective owner grants in the browser before remote work.
+`npm run local -- run` starts or connects to the persistent login-started host owner and returns;
+closing the client does not stop its VMs. `install` stages a complete immutable release without
+replacing that running owner. Inspect `service-status` before an explicit interrupting
+`maintenance --confirm` update. Maintenance preserves disks and original receipts, requires exact
+old-owner settlement and reports each VM's recovery separately; it never replays commands.
 See [Codespaces: Moira Local](docs/CODESPACES.md#moira-local-companion)
 for setup, run, stop, recovery and the limits of isolation evidence. Codespace contents are visible
 to Moira; review returned code before executing it on your computer. The `moira-local` MCP connection

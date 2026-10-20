@@ -804,13 +804,16 @@ checks current work or `doctor` authority before opening the SDK and throughout 
 setup and cleanup retain their separate local authority. SDK startup, installation,
 bootstrap and authenticated guest registration have no aggregate work clock. Fixed
 identity/health observations and the bounded `doctor` diagnostic retain their own bounds;
-an expired observation never proves physical settlement. Disable, lease expiry,
-caller cancellation and parent death remain effective during pending startup. The guard
+an expired observation never proves physical settlement. Disable and lease expiry retain explicit
+physical-stop authority during startup; caller cancellation fences its admitted request. Parent/IPC
+loss releases observation rather than signalling previously captured peers. The guard
 cancels and reaps tracked calls, holds exact kernel identities for the SDK daemon
 and VM workers, and maps SDK UUIDs to private container identities before admitting
-work. Shutdown does not depend on a readable SDK credential store. It signals only
+work. Explicit shutdown does not depend on a readable SDK credential store. It signals only
 captured incarnations, preserves disks, and records settlement only after confirmed
-exit. Missing ownership, unsupported capture, expired policy or uncertain guest
+exit. `released: true` retains `settled: false`; helper EOF, capture failure and observation
+retirement cannot manufacture physical-stop evidence. Retired native handles remain available for
+an explicit exact stop. Missing ownership, unsupported capture, expired policy or uncertain guest
 transport fails closed. A lost ordinary guest response does not retire the whole
 VM or prevent independent commands. Confirmed physical stop does not erase unknown
 job markers. Explicit local recovery of uncertain native settlement checks identity
@@ -819,19 +822,41 @@ acknowledge that recovery.
 
 Runner ownership also uses a persistent `runner-gate.lock` inode with a kernel
 file lock. The fixed native helper holds it until release or parent pipe closure;
-the gate file is never removed or replaced. Companion startup may reclaim an
-unchanged, safe `runner.lock` marker only when its PID is confirmed absent under
-that gate. It also requires the recorded independent guard to be absent before
+the gate file is never removed or replaced. Persistent-owner startup may reclaim an
+unchanged, safe `runner.lock` marker only after same-boot PID absence or a verified different
+kernel boot identity under that gate. It also requires the recorded independent guard to be absent before
 starting another owner. A live PID, unverifiable unsettled owner or malformed
 receipt refuses startup. This admission preserves policy and retained jobs rather
 than acknowledging their outcomes. Explicit device recovery while disabled retains
 the exact profile and receipt checks, confirms fresh physical shutdown and preserves
-jobs and data without enabling work. Do not remove lock files manually.
+jobs and data without enabling work. A different boot identifies a stale process record but does
+not grant custody over a VM. Do not remove lock files manually.
+
+`service.ts` owns the daemon/controller, native guard and broker/tunnel independently of CLI clients.
+Its private `service.sock` reports actual running release, readiness/failure and active/staged
+selection. `service-install.ts` seals the complete executable closure, including a copied Node,
+under `STATE/service-releases/` and publishes selection durably. Ordinary install only stages;
+first registration starts the active release after macOS login with launchd `SessionCreate=true`.
+The dedicated security session is separate from Background scheduling. Owned machine-Keychain
+preparation verifies the effective no-idle-timeout interval and sleep-lock policy after unlock,
+without replacing saved passwords or changing personal Keychain selection.
+
+Explicit maintenance freezes admission, records intended-running VM identities and the original
+pre-stop custody witness, then requires exact settlement before selection. The selected successor
+restores known environments independently and retains per-resource failures; completion is not a
+promise that every VM recovered. Paused maintenance releases the physical gate for explicit local
+setup/credential recovery and resumes only under its original identity. Unconfirmed maintenance
+requires fresh exact-profile recovery proof, not another stop or receipt substitution. Original
+jobs are never replayed. Existing live legacy endpoints block first registration until an explicit
+controlled cutover; no PID-only live handoff is implemented.
 
 The supported runtime is macOS with the pinned SDK contract described in
 [Codespaces](CODESPACES.md). Linux VM execution is refused before creation while
-its required worker-ownership capability is unsupported. Long-lived `run` owns the
-controller and VM lifetime. Host create/start/stop/remove call that private controller;
+its required worker-ownership capability is unsupported. `run` starts or connects to the persistent
+service and returns; client exit does not stop VMs. On service restart, known intended-running
+environments are observed or prepared under current policy without replaying commands. After host
+reboot, login registration needs original storage, runtime and available credentials; guest boot
+identity and pre-reboot process continuity cannot be preserved. Host create/start/stop/remove call that private controller;
 collect reads the original ws1 receipt without effects. Existing owner-admitted VM work
 can continue under local grants and leases when cloud transport is unavailable; confirmed
 authority refusal is not offline permission. Fresh create registers an authenticated cloud

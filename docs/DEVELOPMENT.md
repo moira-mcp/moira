@@ -46,9 +46,13 @@ Do not copy a single JavaScript entry without its companion assets.
 `workspace:verify:guest` packages the common Linux service and exercises actual installation,
 startup acknowledgment, Unix health/CLI, binary files, repository ownership and shutdown in an
 offline container. It is not proof of microVM isolation or physical SDK lifecycle.
-Building mutable checkout assets does not replace a running host owner. Install a complete immutable
-executable release before selecting its `cli.js` in the launcher; an asset directory outside the
-checkout is supported. Keep initialized companion state, SDK HOME/storage/profile, credentials,
+Building mutable checkout assets does not replace a running host owner. `npm run local -- install`
+stages the complete immutable closure, including its copied Node executable, under the selected
+state's `service-releases/`. The macOS login registration starts the active release in a dedicated
+security session; ordinary staging does not reload that registration or replace an active owner.
+`npm run local -- run` starts or connects and returns. `service-status` reports the actual running
+release and staged selection, readiness and failure independently of client lifetime.
+Keep initialized companion state, SDK HOME/storage/profile, credentials,
 grants and VM disks at their existing paths. Do not copy stale ignored worker outputs as release assets.
 Host runtime validation requires the supported macOS SDK and locally approved
 state. Linux VM execution fails closed before creation.
@@ -83,6 +87,30 @@ owner grants, while fresh creation requires cloud registration. Readiness is con
 observation, not an administrative stop/control surface.
 Use host `recover` for explicit local custody recovery. Active lifecycle/command/mutation IDs
 use ws1; repository-admission UUIDs are a different domain.
+
+The persistent service contains the daemon/controller, native guard and broker/tunnel. Client exit
+and native observation release do not authorize physical stop; `released` is not `settled`.
+Explicit physical-owner replacement uses `maintenance --confirm` only within an approved interruption.
+Collect its printed original identity with `collect REQUEST_ID`; never manufacture a fresh update
+after a lost reply. It preserves VM/disk identities and intended state, confirms exact old custody
+settlement, selects the staged release, then reports per-VM restored/unavailable outcomes without
+command replay. Unconfirmed settlement blocks replacement. Native setup/login/recovery can instead
+use `maintenance --pause --confirm` and, after the original receipt is `paused`, resume using
+`maintenance --resume --request-id ORIGINAL_REQUEST_ID --confirm`. Commands such as
+`login --new-store` still require disabled work; a pause does not renew permission.
+
+Cold-owner startup observes surviving workers and recovers only verified known intended-running
+VMs. Login startup after a host reboot requires the original storage and available SDK credentials;
+it does not preserve guest boot identity or replay pre-reboot work. Runner markers and native receipts
+include kernel boot identity, with exact profile checks and the physical gate retained. A retained
+legacy owner/endpoint requires explicit backed-up initial cutover, never PID-only adoption or manual
+lock removal. See [owner updates and recovery](CODESPACES.md#owner-web-control-and-bundle-updates).
+
+The native machine-Keychain helper verifies the effective no-idle-timeout interval and sleep-lock
+policy only for the owned SDK store, including an existing store after successful saved-password
+unlock. Do not infer policy from the native `useLockInterval` boolean alone, change personal Keychain
+selection, print passwords, or rotate an unreadable store automatically. Dedicated-session startup
+does not replace a genuine vendor authentication requirement.
 
 The Local build bundles the common fixed Git/typed PR primitive into the trusted host
 broker. It uses private repository/action-scoped child credentials from the live issuer;

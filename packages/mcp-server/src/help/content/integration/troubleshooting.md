@@ -441,8 +441,12 @@ returns an error, never successful pending image content.
 Use **Settings → Development → Local computers** and the companion's `status` to distinguish pending
 browser approval, revocation, an offline computer and an expired local lease. An offline row is
 not proof that the computer or its VM has physically stopped. Renew a lease on the computer with
-`npm run local -- enable --hours 8`, then run the confirmed companion in the foreground with
-`npm run local -- run`. A revoked device requires a new pairing and browser confirmation.
+`npm run local -- enable --hours 8`. Use `npm run local -- install` to stage the complete owner
+release and register login startup, then `npm run local -- run` to start or connect to it.
+The persistent host owner holds VM custody and the broker/tunnel; this client exits without
+stopping them. Ordinary installation stages a release without replacing a running owner.
+`npm run local -- service-status` reports its running release, readiness, cloud connection,
+staged release and startup failure. A revoked device requires a new pairing and browser confirmation.
 Open that computer's codespace card and use **Check state again** for a pending start, stop or
 delete. It collects the original lifecycle receipt when its identity is known, otherwise it
 performs a read-only refresh. It never resubmits start/stop/delete or creates a replacement VM.
@@ -517,8 +521,9 @@ The daemon reports `connected`, `offline`, `faulted` or `disabled` in its struct
 Network/5xx failures make remote owner state unavailable without stopping admitted VM work.
 New remote mutations are refused rather than queued. An addressed resource refusal returns a
 bounded error for that request; a lost reply to an accepted effect requires original receipt collection.
-Device-endpoint unauthorized responses or confirmed device identity/revocation failures stop work;
-local disable, lease expiry and explicit shutdown do so independently. Current grants and finite
+Device-endpoint unauthorized responses or confirmed device identity/revocation failures retire
+the remote route without turning local VM intent into stop. Local disable, lease expiry and
+explicit physical stop remain independent controls. Current grants and finite
 deadlines remain unchanged. Cached results can return without repeating effects; an offline row
 cannot promise immediate delivery of a remote revocation.
 
@@ -563,28 +568,54 @@ Its bounded diagnostic window does not establish settlement of pending work. Cur
 is checked while SDK startup is pending; installation and registration have no general work deadline.
 Device `active`/`enabled` and setup `ready` describe authorization and configuration, not a
 successful guest connection. Check the companion's current diagnostic when guest calls time out.
-After a crash or reboot, `run` safely reclaims a stale runner marker when its runner and guard are
-proven absent under the system lock. It preserves saved work and never replays unknown operations.
+After login or a cold owner restart, the installed service restores intended work for the same
+known VM identities and disks when runtime, credentials and current work permission are available.
+`run` starts or connects to that owner. Recovery reclaims a stale runner marker only when its runner
+and guard are proven absent under the system lock. It preserves saved work and never replays
+accepted commands or unknown operations. A host reboot can interrupt commands and requires fresh
+kernel custody; it is not uninterrupted execution.
 Live or unverifiable owners remain refused; do not clear their lock or receipt to bypass the check.
-If the default macOS storage mount is absent after reboot, restart `run` with the same state.
-Startup attaches only its existing owned `storage.sparsebundle`, verifies the native mount binding
+If the default macOS storage mount is absent after reboot, inspect `service-status` with the same
+state. Startup attaches only its existing owned `storage.sparsebundle`, verifies the native mount binding
 and repeats volume ownership and approved capacity admission without a fixed free-space reserve. A lost attach reply is resolved
 by observing that binding. `LOCAL_STORAGE_NOT_MOUNTED` means storage remains unavailable: mount a
 custom volume manually, or check that the saved default image is present and can be mounted.
 `LOCAL_STORAGE_OWNER` requires resolving an unsafe image/mount or conflicting binding. Preserve
 the image and state; startup never creates a replacement disk or resets data to bypass a refusal.
+After repairing a startup prerequisite, repeating `run` while the failed service endpoint remains
+reachable only prints its retained status; it does not retry initialization. If no owner is
+running, `run` starts the selected owner instead. If the original maintenance receipt remains in
+phase `selected` for this running release, repeat that original intent with
+`maintenance --request-id ORIGINAL_ID --confirm`;
+for an original pause, use `maintenance --resume --request-id ORIGINAL_ID --confirm` instead.
+This restarts the failed owner without repeating its already confirmed physical stop or selection.
+Keep collecting the same ID; only the successor's recovery result confirms completion.
+Other unconfirmed maintenance phases still require the physical-settlement repair described below;
+they do not qualify for this startup-only retry.
+If there is no unresolved maintenance request, explicitly restart the active release with
+`maintenance --pause --confirm`, retain its ID, collect until `paused`, then use
+`maintenance --resume --request-id ORIGINAL_ID --confirm`. This pause needs no newly staged
+release and declares physical interruption. Use `run` if needed to start the selected owner,
+then check `service-status` and the original receipt. Keep the same `--state PATH` throughout;
+do not edit locks or sockets, replace pairing, or replay interrupted commands.
 If the companion reports `LOCAL_STORAGE_FULL` during shrink, the requested size cannot preserve
 existing data or the native APFS minimum. Check the computer's shared backing-image capacity and
 actual disk space separately from free space on the Mac; admission imposes no extra reserve.
-To raise its approved maximum, stop
-the foreground companion through Ctrl+C or ordinary owner-managed shutdown and repeat locally:
+To raise its approved maximum, pause the physical owner explicitly and retain the printed
+maintenance request ID. Wait until collection reports `paused` before changing local approval:
 
 ```bash
+npm run local -- maintenance --pause --confirm
+npm run local -- collect ORIGINAL_MAINTENANCE_ID
 npm run local -- web-control --confirm --storage-gib 50
+npm run local -- maintenance --resume --request-id ORIGINAL_MAINTENANCE_ID --confirm
 npm run local -- run
 ```
 
-Use the same `--state PATH` on both commands when configured. Do not use `disable` just to revise
+Use the same `--state PATH` on every command when configured. Collect the same maintenance ID
+until its result is known; pause/resume declares physical interruption and restores saved intent,
+not the interrupted commands. Closing a client or pressing Ctrl+C is not this pause.
+Do not use `disable` just to revise
 the maximum, since it changes work enablement and its lease. Omitted limits retain the existing
 approval. Refresh **Local computers**, request Storage 50 in the computer's editor and wait for
 the applied revision and actual capacity. Approval itself does not resize storage, renew the lease
@@ -592,12 +623,26 @@ or clear a pending request. A failed or interrupted resize keeps its existing re
 do not reset state or recreate codespaces. An expired work lease does not prevent management
 from reporting the approval, but guest work still requires valid work permission. If the approval
 reply is lost, reconnect with the same state so the same saved approval is reported again.
-Stop the foreground companion before commands that require its runner lock. Unsupported SDK
+Direct local `login`, `setup`, `recover` and web-control approval require the physical runner gate.
+With an installed owner, use the same explicit maintenance pause/resume boundary before those
+commands; the paused service retains its management endpoint while releasing physical ownership.
+Unsupported SDK
 versions, Linux runtime ownership, unsafe mounts/settings or unknown identity refuse work;
 do not reset the personal Docker profile, substitute an ordinary directory for bounded storage,
 or relax network policy. For Docker sign-in use `npm run local -- login`. An unreadable SDK store
 can be recovered explicitly with `login --new-store` only after local disable and owned shutdown;
 existing stores are preserved.
+
+For an owner update, stage the complete package with `install`, inspect `service-status`, then
+request `maintenance --confirm`. Retain its printed request ID and use `collect ORIGINAL_ID`
+after a lost reply. The owner settles exact physical custody before selecting the staged release;
+the successor restores the same saved VM identities, disks and intended running state. Accepted
+commands are not replayed, and commands interrupted by maintenance may have uncertain outcomes.
+If settlement is unconfirmed, no replacement owner starts. Preserve the receipt and resolve the
+physical refusal; do not issue another stop or replace the maintenance identity. After an explicit
+`recover --confirm` of the disabled device, resubmit that same maintenance intent to check its fresh
+settlement proof. Pure collection does not perform recovery. An incompatible client reports
+`LOCAL_SERVICE_MAINTENANCE_REQUIRED` rather than replacing a live owner.
 
 After an update, a strict heartbeat or `web-control.json` rejection can mean the server, companion
 and owner guard use different control-contract editions, even with delegation disabled. Rebuilding
@@ -606,11 +651,11 @@ Fixed guest bootstrap refreshes the common workspace service in place. A receipt
 launch proof keeps that start unconfirmed.
 Inspect the original operation; an unknown
 command result alone does not require restarting the companion or stopping its VM.
-For an incompatible control-contract edition, arrange ordinary owner-managed shutdown and confirmed
-settlement. With both sides stopped, back up the server database, the complete private companion
+For an incompatible control-contract edition, use the explicit maintenance interruption and confirm
+settlement. Before the coordinated cutover, back up the server database, the complete private companion
 state and SDK backing storage, including VM disks. Keep matching bundles, coordinate server/companion
-editions, then restart with the same state and disks. Rollback restores that complete paired backup
-and matching bundles together.
+editions, then start the selected owner with the same state and disks. A coordinated rollback must
+preserve any writes made since the backup; do not restore an old database over new accepted work.
 Do not erase approval/journals, create replacement state or kill arbitrary guard processes. Management
 can be interrupted; mixed-edition rolling upgrade is unsupported. Live append in a matched edition
 does not make the upgrade itself uninterrupted.
@@ -627,8 +672,9 @@ that effect or modifying those files. Independent work does not need to resolve 
 outcome. Do not automatically replay an unknown edit or clear its journal to admit new work.
 For a runtime-owner refusal such as `LOCAL_GUEST_SETTLEMENT_UNKNOWN`, confirm physical stop before
 `npm run local -- recover SPACE_ID --confirm`. This checks exact native identity and the network
-boundary while preserving jobs and unknown outcomes without replay. Use the same `--state PATH`
-and restart `run`. Ordinary stop/start requires no separate counter-recovery step.
+boundary while preserving jobs and unknown outcomes without replay. With a running owner, first
+use the maintenance pause above, then resume that original maintenance ID and use `run` if needed.
+Use the same `--state PATH`. Ordinary stop/start requires no separate counter-recovery step.
 `npm run local -- recover --confirm` is the separate
 disabled-device orphan-shutdown acknowledgement. Neither deletes codespace data or authorizes
 adoption by SDK name. If shutdown remains pending or identity is unknown, retain the records

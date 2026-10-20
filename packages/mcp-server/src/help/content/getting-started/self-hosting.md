@@ -241,7 +241,9 @@ The companion makes outbound HTTPS requests and exposes no public listening port
 
 Enrollment and `run` require neither `init`, a Local SDK nor a disk image. For GitHub and
 communication files, run the browser-provided `enroll` command, confirm the device, then
-`npm run local -- run`. Configure physical Local capability separately.
+`npm run local -- install` and `npm run local -- run`. Installation stages a complete immutable
+release and registers login startup on macOS; `run` starts or connects to the persistent host owner
+and returns. Closing that client does not stop VMs. Configure physical Local capability separately.
 
 Use Node.js 24 and macOS on Apple silicon with the pinned Docker Sandboxes `sbx` 0.46.0
 signed bundle from [Docker's release artifacts](https://github.com/docker/sandboxes/releases/tag/v0.46.0).
@@ -269,12 +271,15 @@ choose local resource allocations at initialization. `setup` requires an empty d
 `liveVmIsolationVerified: false` is not a live microVM isolation result.
 
 The companion keeps Docker sign-in in a separate encrypted SDK store and does not alter personal
-Docker or Keychain selection. For credential-store recovery, first disable local work and stop
-the companion, then use `npm run local -- login --new-store`. This explicit action checks owned
+Docker or Keychain selection. If the host owner is running, use the explicit maintenance pause
+described below before local login, setup or credential recovery. Credential-store replacement
+additionally requires disabled work and `npm run local -- login --new-store`. This explicit action checks owned
 shutdown, creates a separate store and preserves existing credentials. It never automatically
 rotates a failed store or imports personal credentials.
 This machine-only store trusts the host account: its generated password is kept in an owner-only
 local file, and sleep/interval auto-lock is disabled only for that SDK store, not personal Keychain.
+The macOS login service runs in its own non-GUI security session. A failed unlock remains a
+credential refusal; the service does not reset the store or repeatedly start browser sign-in.
 
 Repository permissions are granted on the computer. `approve OWNER/REPO` allows read access.
 Add `--private`, `--push` or `--delete` only for those rights.
@@ -292,20 +297,41 @@ the app prefix when configured and contains no credentials, query or fragment.
 Refresh the browser, verify the pending computer's identity, then confirm. Current rights
 are read from the reachable Local controller after connection.
 
-The server, companion and running owner guards need a matching control-contract edition.
-Strict heartbeat/approval schemas refuse mixed editions even with delegation off; rebuilding the
-CLI does not update a live guard. Before updating, use the companion's ordinary owner-managed
-shutdown and confirm settlement of its owned work and guards. While both sides are stopped,
-back up the server database, the complete private companion state and its SDK backing storage,
-including VM disks. Keep the matching server and companion bundles with that backup. Build with
-`npm ci` and `npm run local:build`, then install the complete executable release in an immutable
-owner-only directory, which may be outside the source checkout. Point the host launcher at that
-release's `cli.js`; copy the CLI, guard, runtime API, configuration bundle, native helpers and
-workspace payload together. Rebuilding mutable checkout assets does not replace a running owner.
-Restart with the same state,
-disks, SDK profile, credentials and connection. Management and running jobs may be interrupted;
-there is no uninterrupted mixed-edition rolling upgrade. Live repository append within the matched
-edition separately preserves existing VMs.
+The server and owner require matching control contracts. `service-status` reports the running
+release separately from a staged update. Ordinary installation retains the active owner, its
+broker/tunnel and running VMs; an incompatible client reports a maintenance requirement.
+To replace the physical owner, back up the server database, complete private Local state and SDK
+backing storage, including VM disks, and retain the matching executable bundles. Build and stage:
+
+```bash
+npm run local:build
+npm run local -- install
+npm run local -- service-status
+npm run local -- maintenance --confirm
+```
+
+Maintenance prints its original request ID before submission. Use `collect ORIGINAL_REQUEST_ID`
+after a lost reply; do not create another maintenance request. Replacement waits for exact physical
+settlement, preserves VM identities/disks and intended running state, then recovers the same known
+environments without replaying commands. This operation interrupts work and reports unavailable
+environments separately. Unconfirmed settlement blocks replacement. Rebuilding a checkout or
+staging a package alone does not replace the running owner.
+
+Direct local administration that needs the owner gate uses an explicit pause. Collect the printed
+request until its phase is `paused`, perform the intended local action, then resume that same ID:
+
+```bash
+npm run local -- maintenance --pause --confirm
+npm run local -- collect ORIGINAL_REQUEST_ID
+# Perform the intended local login, setup or approval action only after phase paused.
+npm run local -- maintenance --resume --request-id ORIGINAL_REQUEST_ID --confirm
+```
+
+Repeat `--state PATH` throughout when configured. Pausing interrupts physical work while retaining
+the original intent; it does not reset credentials or authorize a second owner. Preserve original
+receipts and repair an unconfirmed pause before resuming. A host reboot also interrupts execution;
+login startup recovers saved known VM intent when runtime and credentials are available, without
+replaying commands. It does not run before login or promise uninterrupted guest processes.
 
 Migration 0061 preserves old cloud Local policy/control, relay, grants and operational rows in
 immutable archives; those rows are not current authority or queued work. The owner imports only
@@ -336,12 +362,12 @@ The server, account, computer and connection must remain the same. Existing perm
 application/recovery state are preserved; browser or agent requests cannot raise these maxima.
 Approval alone neither renews the work lease nor changes the actual disk size.
 
-For example, to permit a shared storage size of 50 GiB, first stop the foreground companion with
-Ctrl+C or its ordinary owner-managed shutdown so the local state lock is released. Then run:
+For example, to permit a shared storage size of 50 GiB while the owner is running, pause through
+the maintenance procedure above and wait for `paused`. Then run:
 
 ```bash
 npm run local -- web-control --confirm --storage-gib 50
-npm run local -- run
+npm run local -- maintenance --resume --request-id ORIGINAL_REQUEST_ID --confirm
 ```
 
 Repeat the same `--state PATH` on both commands when configured. Do not use `disable` just to
@@ -350,7 +376,7 @@ set Storage to 50 in that computer's existing editor and choose **Request settin
 The companion applies the requested size through the existing stopped-runtime resize path.
 Wait for the applied revision and actual size; a pending request is not a completed resize.
 Local confirmation preserves the existing disk and codespaces; it does not create replacement VMs.
-Start the foreground companion after confirmation and local approval:
+If the owner has not been installed or started, start or connect after local approval:
 
 ```bash
 npm run local -- run
@@ -563,14 +589,15 @@ restarting or `recover` does not complete initial setup.
 
 Install matching server and companion builds. Their strict snapshot and management-result contract
 includes exact creation identity, guest readiness and native stop confirmation. Records remain
-unobserved until a verified read. Follow the coordinated shutdown and backup procedure above;
+unobserved until a verified read. Follow the explicit maintenance and backup procedure above;
 rollback restores the matching server database, complete local state, SDK storage and bundles
 together. Preserve unsupported private owner state for diagnosis; old cloud state stays archival.
 Updating the server or rebuilding the CLI does not replace an already running daemon's journal and
 installed executable release. Fixed guest bootstrap refreshes the common service in place.
 A receipt without start proof leaves that start
 unconfirmed. Inspect the original operation instead of
-restarting the companion to recover a lost reply. Companion shutdown stops its owned VM processes.
+restarting the companion to recover a lost reply. Client exit and observer disconnect do not
+authorize physical VM stop; explicit stop, disable and physical maintenance retain that boundary.
 
 The host CLI supports `create OWNER/REPO --ref BRANCH`, `start SPACE_ID`, `stop SPACE_ID`,
 `remove SPACE_ID --confirm` and `collect REQUEST_ID` through the running private controller.
@@ -580,10 +607,15 @@ stop or be cleaned up offline under applicable current owner authority. Starting
 finite work lease; owner-confirmed cleanup does not renew it. Raw host execution is
 unsupported; ordinary commands/files use the guest `moira-workspace` CLI or MCP. `recover` remains
 a custody tool. Persistent paired lifecycle work uses `run`.
-After a crash or computer reboot, start `run` with the same state directory. It automatically
+After a crash or computer reboot, login registration starts the selected release; `run` with the
+same state directory also starts or connects to it. Startup automatically
 reclaims a stale runner marker only under the system lock and after proving both previous host
 owners absent. Saved policy, VM records and unknown operations are retained without replay.
 Live, unknown or malformed ownership stays refused; do not delete its marker manually.
+If `service-status` reports a retained startup failure, repeating `run` only reads that service's
+status. After repairing the prerequisite, use the explicit maintenance recovery procedure in
+[Troubleshooting](/docs/integration/troubleshooting/#local-codespaces), preserving any original
+maintenance identity; a client connection does not retry owner initialization.
 On macOS, startup also remounts the existing default disk image from that same state directory
 when needed. It verifies the native image/mount binding and the volume's ownership and approved
 capacity before work, without a fixed free-space reserve; a lost attach reply is checked against the observed binding. Custom
@@ -593,15 +625,17 @@ Sparse image growth does not require full logical preallocation or an extra host
 Shrinking still requires the native APFS minimum and enough capacity for existing data;
 uncertain physical changes retain their original resize journal.
 Work and `doctor` enforce current authority from SDK startup onward. Installation, bootstrap and
-guest registration wait for actual completion; disable, lease expiry, cancellation and parent loss
-still stop owned work. Fixed metadata checks and the bounded `doctor` diagnostic are observations,
+guest registration wait for actual completion; explicit disable, lease expiry and addressed
+cancellation retain their physical effect. Parent/observer loss releases observation without
+manufacturing stop intent. Fixed metadata checks and the bounded `doctor` diagnostic are observations,
 not proof that a pending operation has settled.
 The local daemon separates server contact from VM lifetime. Network/5xx failures reconnect;
 remote owner state is unavailable until connection succeeds, without stopping already-admitted
 work. Remote mutations are refused rather than queued. An addressed resource refusal stays with
-that request. Confirmed device revocation/identity failure, local disable and lease expiry
-stop work. Existing grants and finite deadlines are never extended; cached results do not repeat effects.
-Ctrl+C closes the foreground companion; `npm run local -- disable` stops owned work independently
+that request. Confirmed remote device revocation/identity failure fences the remote route;
+local disable and lease expiry remain physical policy. Existing grants and finite deadlines are
+never extended; cached results do not repeat effects.
+Closing the `run` client leaves the persistent owner running; `npm run local -- disable` stops owned work independently
 and keeps VM data. Stop keeps files, while `remove SPACE_ID --confirm` deletes the exact owned VM.
 An uncertain command or edit is retained by its own operation identity and is not retried
 automatically. It does not block independent work. Inspect the saved result before repeating the

@@ -1,8 +1,8 @@
 import { mkdir } from "node:fs/promises";
 import { realpathSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { parseArgs } from "node:util";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { spawn } from "node:child_process";
 import { randomBytes, randomUUID } from "node:crypto";
 import { z } from "zod";
@@ -18,7 +18,19 @@ import {
 } from "../../shared/src/codespaces/local-controller-protocol.js";
 import { createWorkspaceRequestId } from "../../shared/src/codespaces/workspace-request-id.js";
 import { LocalWebControl } from "./web-control.js";
-import { LocalDaemon } from "./daemon.js";
+import {
+  runLocalService,
+  serviceRequest,
+  collectServiceMaintenance,
+  serviceFailure,
+} from "./service.js";
+import {
+  stageLocalService,
+  ensureLocalServiceStarted,
+  serviceInstallation,
+  serviceBundleIdentity,
+  LOCAL_SERVICE_PROTOCOL,
+} from "./service-install.js";
 import {
   localControlCeilingSchema,
   MAX_LOCAL_WORK_LEASE_MS,
@@ -64,7 +76,16 @@ Usage: moira-local <command> [options]
   enroll --server HTTPS_URL --pairing-id UUID
                Read the browser's pairing token from stdin; confirm device identity in Moira
                Enrollment and run do not require Local SDK initialization or storage
-  run          Serve the paired Moira account through outbound HTTPS until stopped
+  install      Stage a complete owner/client release and register login startup
+               An existing physical owner continues running unchanged
+  run          Start or connect to the persistent host owner; exiting this client does not stop VMs
+  maintenance --confirm [--request-id ID]
+               Explicitly interrupt and settle the owner, activate its staged release and recover intent
+               Collect the original request after a lost reply; accepted commands are never replayed
+  maintenance --pause --confirm | maintenance --resume --request-id ID --confirm
+               Pause physical ownership for login/setup/recover, then resume the original saved intent
+  service-status
+               Observe the actual running release and staged maintenance requirement
   web-control --confirm [--max-lease-hours 168]
                Approve or revise owner web settings within locally confirmed resource limits
                Omitted limits retain the previous approval; changing a limit does not resize VMs
@@ -130,6 +151,8 @@ export async function main(args: string[], environment: NodeJS.ProcessEnv): Prom
       "docker-gib": { type: "string" },
       ref: { type: "string" },
       "request-id": { type: "string" },
+      pause: { type: "boolean" },
+      resume: { type: "boolean" },
     },
   });
   const [command, target] = parsed.positionals;
@@ -222,6 +245,11 @@ export async function main(args: string[], environment: NodeJS.ProcessEnv): Prom
   if (["create", "start", "stop", "remove", "collect"].includes(command)) {
     const socketPath = join((await state.ipcDirectory()).root, "controller.sock");
     if (command === "collect") {
+      const maintenance = await collectServiceMaintenance(state, target);
+      if (maintenance) {
+        output(maintenance);
+        return;
+      }
       const credential = await new LocalRelay(records).collectGitCredentialRequest(target);
       if (credential) {
         output(credential);
@@ -306,19 +334,79 @@ export async function main(args: string[], environment: NodeJS.ProcessEnv): Prom
     );
     return;
   }
-  if (command === "run") {
-    const controller = new AbortController();
-    const stop = () => controller.abort();
-    process.once("SIGINT", stop);
-    process.once("SIGTERM", stop);
-    const manager = new LocalManager(records);
-    const relay = new LocalRelay(records);
+  if (command === "service") {
+    const bundle = await serviceBundleIdentity(dirname(fileURLToPath(import.meta.url)));
+    await runLocalService(records, bundle.release);
+    return;
+  }
+  if (command === "install" || command === "run" || command === "service-status") {
+    if (command === "install")
+      await stageLocalService(state, dirname(fileURLToPath(import.meta.url)));
+    let status: unknown;
     try {
-      await new LocalDaemon(manager, relay).run(controller.signal);
-    } finally {
-      process.removeListener("SIGINT", stop);
-      process.removeListener("SIGTERM", stop);
+      status = await serviceRequest(state);
+    } catch (error) {
+      if (!["ENOENT", "ECONNREFUSED"].includes((error as NodeJS.ErrnoException).code ?? ""))
+        throw error;
+      if (command === "service-status") {
+        output({
+          running: false,
+          installation: await serviceInstallation(state),
+          failure: await serviceFailure(state),
+        });
+        return;
+      }
+      if (!(await serviceInstallation(state)).active && command === "run")
+        await stageLocalService(state, dirname(fileURLToPath(import.meta.url)));
+      await ensureLocalServiceStarted(state);
+      output({
+        state: "starting",
+        installation: await serviceInstallation(state),
+        lastFailure: await serviceFailure(state),
+      });
+      return;
     }
+    const protocol = z.object({ protocol: z.number().int() }).passthrough().parse(status);
+    if (protocol.protocol !== LOCAL_SERVICE_PROTOCOL)
+      throw new LocalRefusal(
+        "LOCAL_SERVICE_MAINTENANCE_REQUIRED",
+        "The running owner requires explicit maintenance before this client can connect.",
+      );
+    output(status);
+    return;
+  }
+  if (command === "maintenance") {
+    if (options.pause && options.resume)
+      throw new LocalRefusal("LOCAL_OPTION_INVALID", "Choose either pause or resume.");
+    if (options.resume && !options["request-id"])
+      throw new LocalRefusal(
+        "LOCAL_REQUEST_INVALID",
+        "Resume requires the original maintenance request ID.",
+      );
+    if (!options.confirm)
+      throw new LocalRefusal(
+        "LOCAL_MAINTENANCE_CONFIRM",
+        "Pass --confirm to interrupt the physical owner and update its executable.",
+      );
+    const requestId = controllerRequestIdSchema.parse(
+      options["request-id"] ?? createWorkspaceRequestId(),
+    );
+    const retained = await collectServiceMaintenance(state, requestId);
+    const installed = await serviceInstallation(state);
+    const release = retained?.release ?? (options.pause ? installed.active : installed.staged);
+    if (!release)
+      throw new LocalRefusal(
+        "LOCAL_SERVICE_UPDATE_MISSING",
+        "Install the new release before explicit maintenance.",
+      );
+    process.stderr.write(`${JSON.stringify({ requestId, interruption: true })}\n`);
+    output(
+      await serviceRequest(state, "POST", "/v1/service/maintenance", {
+        requestId,
+        release,
+        action: options.resume ? "resume" : options.pause ? "pause" : "update",
+      }),
+    );
     return;
   }
   if (command === "web-control") {
@@ -359,7 +447,18 @@ export async function main(args: string[], environment: NodeJS.ProcessEnv): Prom
   }
   if (command === "status") {
     const policy = await records.policyOrNull();
+    let service: unknown;
+    try {
+      service = await serviceRequest(state);
+    } catch {
+      service = {
+        state: "unavailable",
+        installation: await serviceInstallation(state),
+        failure: await serviceFailure(state),
+      };
+    }
     output({
+      service,
       ...(policy ? publicPolicy(policy) : {}),
       device: await records.deviceIdentity(),
       localCapability: policy ? "configured" : "unconfigured",
@@ -450,7 +549,7 @@ async function runManagerCommand(
     }
     throw new LocalRefusal("LOCAL_COMMAND_UNKNOWN", "Unknown command; run moira-local --help.");
   } finally {
-    await manager.close();
+    await manager.release();
   }
 }
 

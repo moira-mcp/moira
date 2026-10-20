@@ -10,7 +10,7 @@ import { LocalRelay } from "./relay.js";
 import { localManagementOutcomeSchema } from "../../shared/src/codespaces/local-protocol.js";
 import type { LocalVmRuntime } from "./local-vm-runtime.js";
 import { createLocalVmRuntime } from "./local-vm-runtime-factory.js";
-import { runProcess, type RunProcess } from "./process.js";
+import { runProcess, type RunProcess, type ProcessRequest, type ProcessResult } from "./process.js";
 import { guestAssets, installGuest, runtimeApiAsset } from "./assets.js";
 import { LocalRefusal, type LocalPolicy } from "./policy.js";
 
@@ -24,6 +24,8 @@ export class RuntimeOwner {
   private closing?: Promise<void>;
   private drained?: Promise<void>;
   private stopping = false;
+  private releasing = false;
+  private readonly preparations = new Set<Promise<void>>();
   private unknownGuest = false;
   private stopOrigin?: LocalSpace;
   private confirmingStop?: Promise<void>;
@@ -43,6 +45,10 @@ export class RuntimeOwner {
     private readonly protectRuntime: (closure?: boolean) => Promise<void>,
     private readonly prepareCredentials: () => Promise<void>,
     private readonly loadAssets: typeof guestAssets = guestAssets,
+    private readonly readRuntime?: (
+      space: LocalSpace,
+      request: ProcessRequest,
+    ) => Promise<ProcessResult | undefined>,
   ) {}
 
   get active(): boolean {
@@ -69,8 +75,14 @@ export class RuntimeOwner {
       if (
         request.binary === this.policy?.runtime.binary ||
         (request.binary === process.execPath && request.argv[0] === runtimeApiAsset())
-      )
+      ) {
+        if (this.readRuntime && this.space) {
+          const observation = await this.readRuntime(this.space, { ...request, signal });
+          if (observation) return observation;
+        }
         await this.protectRuntime();
+        await this.current();
+      }
       return runProcess({ ...request, signal });
     })();
     this.children.add(child);
@@ -171,6 +183,11 @@ export class RuntimeOwner {
       space.desiredState !== "running"
     )
       throw new LocalRefusal("LOCAL_NOT_RUNNING", "The locally owned sandbox changed.");
+    if (space.generation !== this.space.generation)
+      throw new LocalRefusal(
+        "LOCAL_GENERATION_CONFLICT",
+        "The independent work admission changed.",
+      );
     requireSpaceGrant(policy, space, Date.now());
     if (
       policy.deviceId !== this.policy.deviceId ||
@@ -214,6 +231,7 @@ export class RuntimeOwner {
         throw error;
       this.stopping = true;
       this.unknownGuest = true;
+      if (this.releasing) throw error;
       this.controller.abort();
       await this.quiesce();
       const space = await this.records.get(this.id);
@@ -239,7 +257,7 @@ export class RuntimeOwner {
   }
 
   prepare(): Promise<void> {
-    return this.settleGuestResult(
+    const work = this.settleGuestResult(
       this.serial(async () => {
         const { space, policy, runtime } = await this.current();
         const repository = requireSpaceGrant(policy, space, Date.now());
@@ -408,6 +426,9 @@ export class RuntimeOwner {
         await this.persist(space);
       }),
     );
+    this.preparations.add(work);
+    void work.finally(() => this.preparations.delete(work)).catch(() => undefined);
+    return work;
   }
 
   private async waitWorkspaceHealth(
@@ -453,6 +474,34 @@ export class RuntimeOwner {
         throw new LocalRefusal("LOCAL_NOT_RUNNING", "The owned sandbox is stopped.");
       await this.boundary(space, runtime);
     });
+  }
+
+  /** Observer/service loss cannot replace the saved physical intent with a stop. */
+  async release(): Promise<void> {
+    this.releasing = true;
+    this.stopping = true;
+    this.controller.abort();
+    this.cleanupController.abort();
+    await Promise.allSettled([...this.children, ...this.guestContacts]);
+    await this.admission?.catch(() => undefined);
+    await this.tail.catch(() => undefined);
+    await Promise.allSettled([...this.preparations]);
+    await this.managementTail.catch(() => undefined);
+    if (this.unknownGuest && this.space) {
+      const current = await this.records.get(this.id);
+      if (
+        current &&
+        current.runtimeId === this.space.runtimeId &&
+        current.operationMarker === this.space.operationMarker &&
+        current.generation === this.space.generation &&
+        current.desiredState === "running"
+      )
+        await this.records.put({
+          ...current,
+          phase: "failed",
+          failure: "LOCAL_GUEST_SETTLEMENT_UNKNOWN",
+        });
+    }
   }
 
   quiesce(emergency = false): Promise<void> {

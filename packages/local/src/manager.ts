@@ -27,6 +27,7 @@ import { NetworkBudget } from "./network-budget.js";
 import { guestAssets } from "./assets.js";
 
 export interface ManagerDependencies {
+  signal?: AbortSignal;
   brokerPorts?: { http: number; tunnel: number };
   runtime?: LocalVmRuntimeFactory;
   storage?: typeof admitStorage;
@@ -78,10 +79,16 @@ export class LocalManager {
     const managementOnly = cleanupOnly && (!policy.enabled || policy.leaseUntil <= this.now());
     if (!this.device?.active || this.cleanupOnlyOwner !== managementOnly) {
       this.openingOwner ??= (async () => {
-        await this.device?.stop();
+        await this.holdRunnerLock();
+        if (this.device && !this.device.active) {
+          // Losing a guard is not a physical stop. Under the retained runner
+          // gate, only proven absence for this profile permits a new observer.
+          await this.requireInactiveOwnerAbsent();
+        } else await this.device?.stop();
         this.device = await (this.dependencies.guard ?? startGuard)(
           this.records.state.root,
           managementOnly ? "cleanup" : "work",
+          this.dependencies.signal,
         );
         this.cleanupOnlyOwner = managementOnly;
         return this.device;
@@ -91,6 +98,11 @@ export class LocalManager {
       return this.openingOwner;
     }
     return this.device;
+  }
+
+  private async requireInactiveOwnerAbsent(): Promise<void> {
+    await this.holdRunnerLock();
+    await requireRuntimeOwnerAbsent(this.records, await this.records.policy());
   }
 
   async holdRunnerLock(): Promise<void> {
@@ -144,7 +156,7 @@ export class LocalManager {
       await this.records.state.write("broker.json", { port: this.tunnel.port });
     } catch (error) {
       try {
-        await this.close();
+        await this.release();
       } catch (cleanup) {
         throw new AggregateError([error, cleanup], "Local startup and cleanup failed", {
           cause: error,
@@ -156,6 +168,54 @@ export class LocalManager {
 
   async stopWork(): Promise<void> {
     await this.closeResources(true);
+  }
+  /** Restore only saved, known VM intent after the owner and its egress are ready. */
+  async restoreIntendedWork(): Promise<{
+    restored: string[];
+    unavailable: { spaceId: string; code: string }[];
+  }> {
+    const device = await this.owner();
+    const rows = await device.observe();
+    const result = {
+      restored: [] as string[],
+      unavailable: [] as { spaceId: string; code: string }[],
+    };
+    for (const space of await this.records.list()) {
+      if (space.desiredState !== "running") continue;
+      if (
+        !space.runtimeId ||
+        space.failure !== null ||
+        (space.phase !== "usable" && space.phase !== "stopped") ||
+        space.lastStartedAt === null
+      ) {
+        result.unavailable.push({
+          spaceId: space.id,
+          code:
+            space.failure ?? (!space.runtimeId ? "LOCAL_CREATE_UNKNOWN" : "LOCAL_SETUP_INCOMPLETE"),
+        });
+        continue;
+      }
+      const row = rows.find((item) => item.id === space.runtimeId && item.name === space.name);
+      // Unknown/missing physical identities remain observations, never a create/adopt request.
+      if (row?.status === "running") {
+        result.restored.push(space.id);
+        continue;
+      }
+      if (!row || row.status !== "stopped") {
+        result.unavailable.push({ spaceId: space.id, code: "LOCAL_OBSERVATION_UNKNOWN" });
+        continue;
+      }
+      try {
+        const guard = await device.space(space.id);
+        this.guards.set(space.id, guard);
+        await guard.prepare();
+        result.restored.push(space.id);
+      } catch (error) {
+        if (!(error instanceof LocalRefusal) || !device.active) throw error;
+        result.unavailable.push({ spaceId: space.id, code: error.code });
+      }
+    }
+    return result;
   }
   /** The same runner/lifecycle gate admits an exact repository-only expansion. */
   async appendRepositoryPolicy(previous: LocalPolicy, next: LocalPolicy): Promise<void> {
@@ -184,8 +244,29 @@ export class LocalManager {
       if (current !== JSON.stringify(next)) await this.records.state.write("policy.json", next);
     });
   }
-  async close(): Promise<void> {
-    await this.closeResources(false);
+  async close(keepLock = false): Promise<void> {
+    await this.closeResources(keepLock);
+  }
+  /** The host service relinquishes observations; no VM stop intent is manufactured. */
+  async release(): Promise<void> {
+    await this.openingOwner?.catch(() => undefined);
+    if (this.device) {
+      if (!this.device.active) await this.requireInactiveOwnerAbsent();
+      else if (!this.device.release)
+        throw new LocalRefusal(
+          "LOCAL_GUARD_UNAVAILABLE",
+          "Native observation release is unavailable.",
+        );
+      else await this.device.release();
+      this.device = undefined;
+    }
+    this.guards.clear();
+    await this.tunnel?.close();
+    this.tunnel = undefined;
+    await this.broker?.close();
+    this.broker = undefined;
+    await this.releaseLock?.();
+    this.releaseLock = undefined;
   }
   private async closeResources(keepLock: boolean): Promise<void> {
     const errors: unknown[] = [];
@@ -216,7 +297,7 @@ export class LocalManager {
       errors.push(error);
     }
     try {
-      if (!keepLock) {
+      if (!keepLock && errors.length === 0) {
         await this.releaseLock?.();
         this.releaseLock = undefined;
       }
@@ -324,8 +405,13 @@ export class LocalManager {
       await guard.prepare();
       return await this.require(space.id);
     } catch (error) {
-      await guard.stop();
-      this.guards.delete(space.id);
+      // A failed observation or restart preparation does not authorize stopping
+      // an existing VM. Retain its guard for later observation or explicit stop.
+      // Initial creation still owns cleanup of its newly admitted setup work.
+      if (clone) {
+        await guard.stop();
+        this.guards.delete(space.id);
+      }
       throw error;
     }
   }
