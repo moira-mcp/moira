@@ -82,7 +82,7 @@ materialized file it uses.
 The first download resolves current registry defaults, own Notes and Playbooks as authorized text.
 A live paired controller encodes that text as UTF-8, streams the tar and retains its immutable
 publication. Cloud Moira does not build or spool the archive. The controller may run without a Local
-VM or Local SDK work lease; connect it before downloading.
+VM or enabled physical Local work; connect it before downloading.
 
 The grant pins that controller's full user/device/generation/connection identity and an original
 `ws1-<lowercase UUID>` request ID before submission. Every repeat collects that same owner's

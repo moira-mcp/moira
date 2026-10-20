@@ -27,9 +27,8 @@ function fixture() {
       policy: async () => ({
         deviceId: connection.deviceId,
         enabled: true,
-        leaseUntil: Date.now() + 60_000,
       }),
-      policyOrNull: async () => ({ enabled: true, leaseUntil: Date.now() + 60_000 }),
+      policyOrNull: async () => ({ enabled: true }),
       deviceIdentity: async () => ({ deviceId: connection.deviceId, label: "controller" }),
     },
   } as unknown as LocalManager;

@@ -558,7 +558,6 @@ export async function runLocalService(
       };
       if (
         policy?.enabled &&
-        policy.leaseUntil > Date.now() &&
         (await records.list()).some((space) => space.desiredState === "running" && space.runtimeId)
       ) {
         await manager.open();

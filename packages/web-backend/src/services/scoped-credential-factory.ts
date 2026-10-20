@@ -95,7 +95,6 @@ export function createScopedCredentialService(): ScopedCredentialService {
         resourceId: witness.resourceId,
         routeGeneration: witness.resourceGeneration,
         ownerResourceGeneration: witness.ownerResourceGeneration,
-        ownerAppliedRevision: witness.appliedRevision,
         grant: repository,
       }),
     };

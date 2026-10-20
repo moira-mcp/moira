@@ -254,7 +254,7 @@ GitHub authorization happens on the Moira website. Install the Moira GitHub App 
 repositories the agent may use; accept permission updates on GitHub. `setup_help` returns the
 current missing condition, provider instruction and applicable configured links without provisioning
 anything. `repositories` discovers approved targets and `local_devices` discovers owned computers.
-Local pairing, repository admission and finite work permission remain owner-controlled and do not
+Local pairing, repository admission and work permission until explicit disable remain owner-controlled and do not
 require the GitHub Codespaces provider to be enabled.
 
 For both providers, `create`, `start`, `stop`, `delete` and GitHub `adopt` require a caller-chosen `request_id` in
@@ -285,7 +285,7 @@ Settings shows unavailable identities read-only until a current observation supp
 On the computer, the host CLI uses the running private controller for `create`, `start`, `stop`,
 `remove --confirm` and `collect`. Fresh creation needs live cloud route registration and initial
 Git authority; admitted VMs can be managed offline under applicable current owner rights.
-Starting requires the finite work lease; owner-confirmed cleanup does not renew it. Ordinary
+Starting requires enabled work permission; owner-confirmed cleanup does not enable it. Ordinary
 commands/files use the guest `moira-workspace` CLI.
 
 GitHub create/adopt runs at a paired controller with an active registration; choose `device_id`
@@ -302,7 +302,7 @@ dispatch requires a usable guest. Stop preserves repository data, and delete req
 confirmed absence. Local agent deletion also requires its repository permission and current work
 authority. The owner can instead confirm cleanup of that exact environment in **Settings →
 Development → Local computers**, with paired local web control, without granting agent deletion
-or renewing an expired work lease.
+or enabling agent work.
 
 Unknown or foreign resources disclose no other owner's data. Ordinary resource calls return
 `CODESPACE_NOT_FOUND`; process authority refusal uses `CODESPACE_AUTHORIZATION_REQUIRED`.
@@ -315,7 +315,7 @@ GitHub creation supports personal-account billing. Organization-billed creation 
 `CODESPACE_BILLING_UNSUPPORTED`. Settings shows current resources and separately available current-month GitHub billing. Local has no cloud billing limits;
 its resource and policy observations come from the owner.
 Billing may be unavailable without `Plan: read` or while its API is unavailable; that does not grant
-or revoke resource access. Physical Local storage, CPU/RAM admission and finite work leases remain
+or revoke resource access. Physical Local storage, CPU/RAM admission and current owner permission remain
 effective.
 
 GitHub idle preferences apply when Moira creates a new Codespace:

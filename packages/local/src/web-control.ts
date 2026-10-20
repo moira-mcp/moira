@@ -17,22 +17,7 @@ import { LocalManager } from "./manager.js";
 import { localPolicySchema, LocalRefusal, type LocalPolicy } from "./policy.js";
 import { replaceStoppedPolicy } from "./guard.js";
 import { resizeStorage } from "./storage.js";
-
-const approvalSchema = z
-  .object({
-    origin: z.string().url(),
-    userId: z.string().min(1),
-    deviceId: z.string().uuid(),
-    deviceGeneration: z.number().int().positive(),
-    connectionId: z.string().uuid(),
-    ceiling: localControlCeilingSchema,
-    appliedRevision: z.number().int().nonnegative(),
-    agentRepositoryManagement: agentRepositoryManagementSchema.nullable().default(null),
-    repositoryRequests: z.array(z.string().uuid()).default([]),
-    rejectedRevision: z.number().int().positive().optional(),
-    error: z.object({ code: z.string(), message: z.string() }).strict().optional(),
-  })
-  .strict();
+import { controlApprovalSchema as approvalSchema } from "./control-approval.js";
 
 type ControlIdentity = {
   origin: string;
@@ -59,12 +44,11 @@ function assertApprovalIdentity(
 
 export function controlSettings(
   policy: LocalPolicy,
-  delegation: AgentRepositoryManagement | null = null,
+  delegation: AgentRepositoryManagement | null = policy.agentRepositoryManagement,
 ): LocalDeviceSettingsValue {
   return localDeviceSettingsSchema.parse({
     label: policy.label,
     enabled: policy.enabled,
-    leaseUntil: policy.leaseUntil,
     cpuCores: policy.runtime.cpuCores,
     memoryBytes: policy.runtime.memoryBytes,
     storageBytes: policy.runtime.maxStorageBytes,
@@ -96,11 +80,7 @@ export class LocalWebControl {
     try {
       ceiling = localControlCeilingSchema.parse(ceiling);
       const policy = await this.records.policy();
-      assertLocalControlSettings(
-        { ...controlSettings(policy), enabled: false },
-        ceiling,
-        Date.now(),
-      );
+      assertLocalControlSettings({ ...controlSettings(policy), enabled: false }, ceiling);
       const previous = await this.records.state.read("web-control.json", approvalSchema.parse);
       if (previous) assertApprovalIdentity(previous, identity);
       await this.records.state.write(
@@ -115,7 +95,6 @@ export class LocalWebControl {
                 deviceGeneration: identity.deviceGeneration,
                 connectionId: identity.connectionId,
                 ceiling,
-                appliedRevision: 0,
               },
         ),
       );
@@ -127,24 +106,25 @@ export class LocalWebControl {
     const approval = await this.records.state.read("web-control.json", approvalSchema.parse);
     if (!approval) return undefined;
     assertApprovalIdentity(approval, identity);
+    const policy = await this.records.policy();
     return {
       ceiling: approval.ceiling,
-      settings: controlSettings(await this.records.policy(), approval.agentRepositoryManagement),
-      appliedRevision: approval.appliedRevision,
-      ...(approval.rejectedRevision
+      settings: controlSettings(policy),
+      appliedRevision: policy.appliedRevision,
+      ...(approval.rejectedRevision && approval.rejectedRevision > policy.appliedRevision
         ? { rejectedRevision: approval.rejectedRevision, error: approval.error }
         : {}),
     };
   }
   async hasUnsettledEffect(): Promise<boolean> {
-    const approval = await this.records.state.read("web-control.json", approvalSchema.parse);
+    if (await this.records.state.read("policy-transition.json", (value) => value)) return true;
     const intent = await this.records.state.read("control-intent.json", (value) =>
       z.object({ revision: z.number().int().positive() }).passthrough().parse(value),
     );
     if (!intent) return false;
     // The durable owner receipt proves completion; retiring its final intent
     // requires no native effect and does not retry an unknown transition.
-    if (approval && intent.revision <= approval.appliedRevision) {
+    if (intent.revision <= (await this.records.policy()).appliedRevision) {
       await this.records.state.remove("control-intent.json");
       return false;
     }
@@ -156,6 +136,7 @@ export class LocalWebControl {
     kind: "settings" | "repository" = "settings",
   ): Promise<boolean | "live"> {
     const approval = await this.records.state.read("web-control.json", approvalSchema.parse);
+    const currentPolicy = await this.records.policy();
     const intentSchema = z
       .object({
         revision: z.number().int().positive(),
@@ -171,7 +152,7 @@ export class LocalWebControl {
     if (
       !approval ||
       !view ||
-      view.revision <= approval.appliedRevision ||
+      view.revision <= currentPolicy.appliedRevision ||
       view.revision === approval.rejectedRevision
     )
       return false;
@@ -180,24 +161,15 @@ export class LocalWebControl {
         "LOCAL_CONTROL_CONFLICT",
         "The server cannot replace a local web-control envelope.",
       );
-    const currentPolicy = await this.records.policy();
     const previousPolicy = intent?.livePrevious ?? currentPolicy;
     const previousDelegation = intent?.livePrevious
       ? (intent.previousDelegation ?? null)
-      : approval.agentRepositoryManagement;
+      : currentPolicy.agentRepositoryManagement;
     const delegatedRequest = kind === "repository";
-    const repositoriesUnchanged =
-      JSON.stringify(previousPolicy.repositories) === JSON.stringify(view.settings.repositories);
-    const live =
-      isLiveLocalSettingsChange(
-        controlSettings(previousPolicy, previousDelegation),
-        view.settings,
-      ) &&
-      (delegatedRequest ||
-        (repositoriesUnchanged &&
-          JSON.stringify(previousDelegation) !==
-            JSON.stringify(view.settings.agentRepositoryManagement)) ||
-        Boolean(intent?.livePrevious));
+    const live = isLiveLocalSettingsChange(
+      controlSettings(previousPolicy, previousDelegation),
+      view.settings,
+    );
     let effectStarted = false;
     try {
       if (delegatedRequest && !live)
@@ -205,12 +177,11 @@ export class LocalWebControl {
           "LOCAL_CONTROL_CONFLICT",
           "Delegated admission cannot alter existing local settings.",
         );
-      assertLocalControlSettings(view.settings, approval.ceiling, Date.now());
+      assertLocalControlSettings(view.settings, approval.ceiling);
       // Persist intent before any native effect; retry only this same revision/settings.
       const retrySettings = (settings: LocalDeviceSettingsValue) => ({
         ...settings,
         enabled: false,
-        leaseUntil: 0,
       });
       if (
         intent &&
@@ -223,12 +194,24 @@ export class LocalWebControl {
         );
       if (live) {
         const additions = view.settings.repositories.slice(previousPolicy.repositories.length);
-        if (delegatedRequest && additions.length !== 1)
-          throw new LocalRefusal(
-            "LOCAL_CONTROL_CONFLICT",
-            "Admit exactly one verified repository request at a time.",
-          );
-        if (additions.length) {
+        if (delegatedRequest) {
+          const stable = (settings: LocalDeviceSettingsValue) => ({
+            ...settings,
+            repositories: [],
+          });
+          if (
+            JSON.stringify(stable(controlSettings(previousPolicy, previousDelegation))) !==
+              JSON.stringify(stable(view.settings)) ||
+            additions.length !== 1 ||
+            previousPolicy.repositories.some(
+              (repository, index) =>
+                JSON.stringify(repository) !== JSON.stringify(view.settings.repositories[index]),
+            )
+          )
+            throw new LocalRefusal(
+              "LOCAL_CONTROL_CONFLICT",
+              "Delegated admission may only append its exact repository grant.",
+            );
           if (
             JSON.stringify(previousDelegation) !==
             JSON.stringify(view.settings.agentRepositoryManagement)
@@ -269,17 +252,25 @@ export class LocalWebControl {
           previousDelegation,
         });
         effectStarted = true;
-        await manager.appendRepositoryPolicy(previousPolicy, {
+        await manager.applyLivePolicy(previousPolicy, {
           ...previousPolicy,
+          appliedRevision: view.revision,
+          agentRepositoryManagement: view.settings.agentRepositoryManagement,
+          label: view.settings.label,
+          gitAuthor: view.settings.gitAuthor,
+          runtime: {
+            ...previousPolicy.runtime,
+            cpuCores: view.settings.cpuCores,
+            memoryBytes: view.settings.memoryBytes,
+            dockerBytes: view.settings.dockerBytes,
+          },
           repositories: view.settings.repositories,
         });
         const receipt = view.repositoryAdmissions?.find(
           (entry) => entry.revision === view.revision,
         );
-        if (additions.length && receipt && !approval.repositoryRequests.includes(receipt.requestId))
+        if (delegatedRequest && receipt && !approval.repositoryRequests.includes(receipt.requestId))
           approval.repositoryRequests.push(receipt.requestId);
-        approval.agentRepositoryManagement = view.settings.agentRepositoryManagement;
-        approval.appliedRevision = view.revision;
         delete approval.rejectedRevision;
         delete approval.error;
         await this.records.state.write("web-control.json", approval);
@@ -323,9 +314,10 @@ export class LocalWebControl {
       const s = view.settings;
       const next = localPolicySchema.parse({
         ...policy,
+        appliedRevision: view.revision,
+        agentRepositoryManagement: s.agentRepositoryManagement,
         label: s.label,
         enabled: s.enabled,
-        leaseUntil: s.leaseUntil,
         gitAuthor: s.gitAuthor,
         runtime: {
           ...policy.runtime,
@@ -337,8 +329,6 @@ export class LocalWebControl {
         repositories: s.repositories,
       });
       await (this.dependencies.replacePolicy ?? replaceStoppedPolicy)(this.records, next);
-      approval.appliedRevision = view.revision;
-      approval.agentRepositoryManagement = view.settings.agentRepositoryManagement;
       delete approval.rejectedRevision;
       delete approval.error;
       await this.records.state.write("web-control.json", approval);

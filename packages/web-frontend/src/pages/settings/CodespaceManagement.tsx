@@ -125,8 +125,7 @@ export function CodespaceManagement({ scope }: { scope: CodespaceManagementScope
     !computer ||
     (computer.status === "active" &&
       computer.owner.state === "available" &&
-      localCapability?.policy.enabled === true &&
-      localCapability.policy.leaseUntil > Date.now());
+      localCapability?.policy.enabled === true);
   const ownerDeleteEnabled =
     !computer ||
     (computer.status === "active" &&

@@ -183,7 +183,14 @@ export class LocalController {
     return next;
   }
   private settingsLane<T>(work: () => Promise<T>): Promise<T> {
-    const next = this.settingsTail.catch(() => undefined).then(work);
+    const next = this.settingsTail
+      .catch(() => undefined)
+      .then(async () => {
+        // Every path acquires physical ownership before settings exclusion.
+        // Admission may itself convert private settings under that same gate.
+        await this.manager.holdRunnerLock();
+        return this.manager.records.withSettingsChange(work);
+      });
     this.settingsTail = next;
     return next;
   }
@@ -1054,7 +1061,7 @@ export class LocalController {
       (settingsOperation?.state === "accepted" || settingsOperation?.state === "unconfirmed")
         ? settingsEffect
         : undefined;
-    const appliedRevision = report?.appliedRevision ?? 0;
+    const appliedRevision = policy.appliedRevision;
     const revision = Math.max(
       appliedRevision,
       report?.rejectedRevision ?? 0,
@@ -1081,7 +1088,7 @@ export class LocalController {
         error: report?.error ?? null,
         repositoryAdmissions: admissions,
         ...(pending ? { pendingRequestId: pending.requestId } : {}),
-        appliedAgentRepositoryManagement: report?.settings.agentRepositoryManagement ?? null,
+        appliedAgentRepositoryManagement: policy.agentRepositoryManagement,
       },
       resources,
       pendingResourceOperations: [...pendingResources].map(([resourceId, requestIds]) => ({
@@ -1300,7 +1307,7 @@ export class LocalController {
           try {
             if (value.action === "create") {
               const policy = await this.manager.records.policy();
-              requireLocalGrant(policy, value.repositoryId, Date.now());
+              requireLocalGrant(policy, value.repositoryId);
               if (await this.state.binding(resourceId, this.identity))
                 throw new LocalRefusal(
                   "LOCAL_CREATE_UNKNOWN",

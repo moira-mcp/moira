@@ -31,10 +31,7 @@ import {
   serviceBundleIdentity,
   LOCAL_SERVICE_PROTOCOL,
 } from "./service-install.js";
-import {
-  localControlCeilingSchema,
-  MAX_LOCAL_WORK_LEASE_MS,
-} from "../../shared/src/codespaces/local-management-types.js";
+import { localControlCeilingSchema } from "../../shared/src/codespaces/local-management-types.js";
 import { SbxRuntime } from "./sbx-runtime.js";
 import { admitStorage } from "./storage.js";
 import { LocalRefusal, publicPolicy } from "./policy.js";
@@ -55,8 +52,8 @@ Usage: moira-local <command> [options]
   setup        Initialize an empty dedicated runtime with host integrations disabled
   approve OWNER/REPO [--private] [--push] [--delete]
                Grant repository and optional destructive rights locally
-  enable [--hours 8] | disable
-               Grant a finite local work lease, or stop all owned sandboxes
+  enable | disable
+               Enable work until explicitly disabled, or stop all owned sandboxes
   status | doctor
                Inspect controller/capability state; doctor checks the configured Local SDK
   stop SPACE_ID | remove SPACE_ID --confirm
@@ -86,7 +83,7 @@ Usage: moira-local <command> [options]
                Pause physical ownership for login/setup/recover, then resume the original saved intent
   service-status
                Observe the actual running release and staged maintenance requirement
-  web-control --confirm [--max-lease-hours 168]
+  web-control --confirm
                Approve or revise owner web settings within locally confirmed resource limits
                Omitted limits retain the previous approval; changing a limit does not resize VMs
 
@@ -99,7 +96,7 @@ Lifecycle commands print their requestId before waiting for the result.
 After a lost reply, run collect with that original ID; do not submit a replacement mutation.
 An unconfirmed outcome does not prove that the effect did not happen.
 With cloud transport unavailable, existing owner-admitted VMs and their guest CLI remain
-subject to current local grants and leases. A confirmed authority refusal is not offline access.
+subject to current local grants. A confirmed authority refusal is not offline access.
 
 The physical Local VM runtime supports macOS; init creates a private bounded disk image.
 Linux Local VM execution is refused until its kernel ownership contract is supported.
@@ -136,7 +133,6 @@ export async function main(args: string[], environment: NodeJS.ProcessEnv): Prom
       cpus: { type: "string" },
       "memory-gib": { type: "string" },
       label: { type: "string" },
-      hours: { type: "string" },
       private: { type: "boolean" },
       push: { type: "boolean" },
       delete: { type: "boolean" },
@@ -147,7 +143,6 @@ export async function main(args: string[], environment: NodeJS.ProcessEnv): Prom
       help: { type: "boolean" },
       server: { type: "string" },
       "pairing-id": { type: "string" },
-      "max-lease-hours": { type: "string" },
       "docker-gib": { type: "string" },
       ref: { type: "string" },
       "request-id": { type: "string" },
@@ -210,7 +205,7 @@ export async function main(args: string[], environment: NodeJS.ProcessEnv): Prom
     return;
   }
   if (command === "enable") {
-    output(await setEnabled(records, true, number(options.hours) ?? 8));
+    output(await setEnabled(records, true));
     return;
   }
   if (["github-start", "github-stop", "github-adopt", "github-remove"].includes(command)) {
@@ -425,7 +420,6 @@ export async function main(args: string[], environment: NodeJS.ProcessEnv): Prom
       memoryBytes: policy.runtime.memoryBytes,
       storageBytes: policy.runtime.maxStorageBytes,
       dockerBytes: policy.runtime.dockerBytes,
-      maxLeaseMs: MAX_LOCAL_WORK_LEASE_MS,
     };
     await control.optIn(
       identity,
@@ -437,7 +431,6 @@ export async function main(args: string[], environment: NodeJS.ProcessEnv): Prom
           (number(options["storage-gib"]) ?? defaults.storageBytes / 1024 ** 3) * 1024 ** 3,
         dockerBytes:
           (number(options["docker-gib"]) ?? defaults.dockerBytes / 1024 ** 3) * 1024 ** 3,
-        maxLeaseMs: (number(options["max-lease-hours"]) ?? defaults.maxLeaseMs / 3600000) * 3600000,
       }),
       options.confirm === true,
     );

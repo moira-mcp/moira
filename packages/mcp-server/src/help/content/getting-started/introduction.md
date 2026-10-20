@@ -71,7 +71,7 @@ Use `codespace` for persistent GitHub or local Docker Sandboxes environments.
 Approve pairing on your computer; its companion applies pending owner settings within local limits.
 Both providers run the same guest workspace service. MCP and the direct guest
 `moira-workspace` CLI share its commands, files and retained output; its owned Node
-runtime is independent of the project. Owner permissions, leases and physical resources
+runtime is independent of the project. Current owner permissions and physical resources
 remain enforced without command/file quotas.
 [Setup, permissions and security](/docs/getting-started/self-hosting/#connect-local-codespaces).
 

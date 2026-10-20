@@ -12,6 +12,7 @@ const { join } = require("node:path");
 const { pathToFileURL } = require("node:url");
 const { createFixture, start, call, dispose } = require("../../fixtures/workspace-service.cjs");
 let configureOwnerGit, originalGitOrigin, createWorkspaceEngine, createWorkspaceRequestId;
+let serveOwnerGit;
 const fixtures = [];
 const socketDirectories = [];
 beforeAll(async () => {
@@ -20,6 +21,7 @@ beforeAll(async () => {
   ({ createWorkspaceEngine } = await import("../../../packages/workspace-service/src/engine.mjs"));
   ({ createWorkspaceRequestId } =
     await import("../../../packages/shared/src/codespaces/workspace-request-id.ts"));
+  ({ serveOwnerGit } = await import("../../../packages/workspace-service/src/github-owner.mjs"));
 });
 afterEach(async () => {
   try {
@@ -37,6 +39,36 @@ function fixture() {
 function git(value, ...args) {
   return execFileSync("git", ["-C", value.root, ...args], { encoding: "utf8" }).trim();
 }
+
+test("anonymous Git admission has no work expiry and still obeys owner cancellation before transport", async () => {
+  const controller = new AbortController();
+  controller.abort();
+  let disposed = false;
+  await expect(
+    serveOwnerGit(
+      {
+        url: "/git/owner/project.git/info/refs?service=git-upload-pack",
+        method: "GET",
+        headers: {},
+      },
+      {},
+      {
+        repositoryFullName: "owner/project",
+        allowPush: false,
+        signal: controller.signal,
+        acquire: async () => ({
+          mode: "anonymous",
+          repositoryFullName: "owner/project",
+          useUntil: null,
+          dispose: async () => {
+            disposed = true;
+          },
+        }),
+      },
+    ),
+  ).rejects.toThrow("TLS transport refused");
+  expect(disposed).toBe(true);
+});
 
 test("owned Git transport retains canonical remote and unchanged life but refuses a foreign effective push mapping", async () => {
   const value = fixture();

@@ -219,11 +219,7 @@ export class LocalCodespaceResourceService {
     const repository = device.owner.local.policy.repositories.find(
       (entry) => entry.id === target.repositoryId,
     );
-    if (
-      !repository ||
-      !device.owner.local.policy.enabled ||
-      device.owner.local.policy.leaseUntil <= this.now()
-    )
+    if (!repository || !device.owner.local.policy.enabled)
       throw new CodespaceResourceError(
         "CODESPACE_AUTHORIZATION_REQUIRED",
         "The owner has not admitted this work.",
@@ -292,11 +288,7 @@ export class LocalCodespaceResourceService {
     const repository = device.owner.local.policy.repositories.find(
       (entry) => entry.id === input.repositoryId,
     );
-    if (
-      !repository ||
-      !device.owner.local.policy.enabled ||
-      device.owner.local.policy.leaseUntil <= this.now()
-    )
+    if (!repository || !device.owner.local.policy.enabled)
       throw new CodespaceResourceError(
         "CODESPACE_AUTHORIZATION_REQUIRED",
         "The owner has not admitted this repository.",

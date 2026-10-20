@@ -2,7 +2,7 @@ import { setTimeout as pause } from "node:timers/promises";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { z } from "zod";
-import { LocalRefusal, type LocalPolicy } from "./policy.js";
+import { LocalRefusal, physicalRuntimeProfile, type LocalPolicy } from "./policy.js";
 import { LocalRecords, requireSpaceGrant, type LocalSpace } from "./space-record.js";
 import { SbxRuntime } from "./sbx-runtime.js";
 import { runProcess, type RunProcess, type ProcessRequest } from "./process.js";
@@ -48,7 +48,7 @@ export class RuntimeDeviceOwner {
     const space = await this.records.get(spaceId);
     if (!space || space.generation !== generation || space.desiredState !== "running")
       throw new LocalRefusal("LOCAL_GENERATION_CONFLICT", "Native preparation admission changed.");
-    requireSpaceGrant(await this.records.policy(), space, Date.now());
+    requireSpaceGrant(await this.records.policy(), space);
     const preparation = { origin: { ...space }, active: true };
     this.preparations.set(spaceId, preparation);
     try {
@@ -160,7 +160,7 @@ export class RuntimeDeviceOwner {
           "LOCAL_GENERATION_CONFLICT",
           "The runtime observation admission changed.",
         );
-      requireSpaceGrant(await this.records.policy(), current, Date.now());
+      requireSpaceGrant(await this.records.policy(), current);
     };
     return this.inventoryRead(this.control, request, names, admission);
   }
@@ -280,12 +280,12 @@ export class RuntimeDeviceOwner {
   private async current(): Promise<void> {
     const policy = await this.records.policy();
     if (
-      policy.deviceId !== this.initial.deviceId ||
-      JSON.stringify(policy.runtime) !== JSON.stringify(this.initial.runtime)
+      JSON.stringify(physicalRuntimeProfile(policy)) !==
+      JSON.stringify(physicalRuntimeProfile(this.initial))
     )
       throw new LocalRefusal("LOCAL_RUNTIME_CHANGED", "The local runtime profile changed.");
-    if (this.mode === "work" && (!policy.enabled || policy.leaseUntil <= Date.now()))
-      throw new LocalRefusal("LOCAL_NOT_RUNNING", "Local work is disabled or its lease expired.");
+    if (this.mode === "work" && !policy.enabled)
+      throw new LocalRefusal("LOCAL_NOT_RUNNING", "Local work is disabled.");
     if (this.stopping || this.controller.signal.aborted)
       throw new LocalRefusal("LOCAL_NOT_RUNNING", "The local device is stopping.");
   }

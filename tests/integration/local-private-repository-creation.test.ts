@@ -4,7 +4,7 @@ import { drizzle } from "drizzle-orm/better-sqlite3";
 import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 import { randomBytes, randomUUID } from "node:crypto";
 import { join, resolve } from "node:path";
-import { mkdtemp, realpath, rm } from "node:fs/promises";
+import { mkdtemp, realpath, rm, readFile } from "node:fs/promises";
 import { controllerFixture } from "../fixtures/local-controller.js";
 import { createWorkspaceRequestId } from "@mcp-moira/shared";
 import {
@@ -70,7 +70,6 @@ async function fixture() {
   const settings: LocalDeviceSettingsValue = {
     label: "Owned",
     enabled: true,
-    leaseUntil: now + 3600000,
     cpuCores: 2,
     memoryBytes: 4 * GiB,
     storageBytes: 32 * GiB,
@@ -246,6 +245,52 @@ async function fixture() {
 }
 
 describe("Private repository creation precedes local admission without repeating unknown effects", () => {
+  test("historical original admission proves creation separately from the current exact grant without rewriting its receipt", async () => {
+    const f = await fixture();
+    await f.makeService().createRepository("owner", f.input);
+    const current = await f.devices.getActiveDevice("owner", f.deviceId);
+    const admitted = current.owner.local.control.repositoryAdmissions![0];
+    const key = "controller-operation-ws1-" + admitted.requestId + ".json";
+    const original = (await f.local.state.read(key, (value) => value)) as {
+      outcome: {
+        result: {
+          local: {
+            policy: Record<string, unknown>;
+            control: { settings: Record<string, unknown>; ceiling: Record<string, unknown> };
+          };
+        };
+      };
+    };
+    original.outcome.result.local.policy.leaseUntil = 1;
+    original.outcome.result.local.control.settings.leaseUntil = 1;
+    original.outcome.result.local.control.ceiling.maxLeaseMs = 3600000;
+    await f.local.state.write(key, original);
+    const before = await readFile(join(f.local.state.root, key));
+    sqlite
+      .prepare("UPDATE codespaceRepositoryRequest SET reservationHeld=1 WHERE requestId=?")
+      .run(f.input.requestId);
+    const repeated = { ...admitted, expectedRevision: current.owner.local.control.revision };
+    await expect(
+      f.devices.requestRepositoryAdmission("owner", f.deviceId, repeated),
+    ).resolves.toMatchObject({ deviceId: f.deviceId });
+    expect(f.repository.getOwned("owner", f.input.requestId)!.reservationHeld).toBe(0);
+    expect(await readFile(join(f.local.state.root, key))).toEqual(before);
+    await f.devices.requestSettings("owner", f.deviceId, {
+      requestId: createWorkspaceRequestId(),
+      expectedGeneration: 1,
+      expectedRevision: current.owner.local.control.revision,
+      settings: f.settings,
+    });
+    sqlite
+      .prepare("UPDATE codespaceRepositoryRequest SET reservationHeld=1 WHERE requestId=?")
+      .run(f.input.requestId);
+    await expect(
+      f.devices.requestRepositoryAdmission("owner", f.deviceId, repeated),
+    ).rejects.toMatchObject({ code: "LOCAL_CONFLICT" });
+    expect(f.repository.getOwned("owner", f.input.requestId)!.reservationHeld).toBe(1);
+    expect(await readFile(join(f.local.state.root, key))).toEqual(before);
+    expect(f.state.posts).toBe(1);
+  });
   test("admission completes from the post-verification witness and physical owner receipt when discovery disconnects", async () => {
     const f = await fixture();
     f.observation.disconnectAfterVerified = true;
@@ -627,14 +672,14 @@ describe("Private repository creation precedes local admission without repeating
     );
     expect(f.state.posts).toBe(0);
   });
-  test("a settings lease outside the physical ceiling is refused before GitHub POST", async () => {
+  test("settings beyond the physical resource ceiling are refused before GitHub POST", async () => {
     const f = await fixture();
     await expect(
       f.devices.requestSettings("owner", f.deviceId, {
         requestId: createWorkspaceRequestId(),
         expectedGeneration: 1,
         expectedRevision: 1,
-        settings: { ...f.settings, leaseUntil: now + 7200000 },
+        settings: { ...f.settings, cpuCores: 5 },
       }),
     ).rejects.toThrow();
     expect(f.state.posts).toBe(0);
@@ -754,7 +799,7 @@ describe("Private repository creation precedes local admission without repeating
     expect(completed.repositories.slice(0, 65)).toEqual(original.repositories);
     expect(completed.repositories[66].fullName).toBe("owner/new-project");
     expect(completed.machine).toEqual(original.machine);
-    expect(completed.leaseUntil).toBe(original.leaseUntil);
+    expect(completed.enabled).toBe(original.enabled);
     expect(f.state.posts).toBe(1);
   });
   test("personal installation projection excludes organizations and stale connected accounts", async () => {

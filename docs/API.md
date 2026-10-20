@@ -1642,7 +1642,7 @@ Unavailable does not contain cached policy or imply an empty grant set. Contact 
 is registry metadata, not permission to dispatch. `LocalPairingView` contains `id`,
 `revision`, nullable `deviceId`, `state`
 (`waiting_local|waiting_confirmation|confirmed|expired`) and `expiresAt`.
-Timestamps are epoch milliseconds. Public policy exposes enabled state, finite lease,
+Timestamps are epoch milliseconds. Public policy exposes persistent enabled state,
 repository permissions and machine defaults; it contains no host paths or secrets.
 
 ### Owner settings control
@@ -1670,7 +1670,9 @@ interface LocalDeviceControlView {
 ```
 
 `revision` identifies the latest admitted settings revision; `appliedRevision`
-identifies the physically applied revision. A known rejection permits a corrected
+identifies the applied owner policy revision. CLI and web settings share a private
+cross-process settings gate; policy, applied revision and delegated permission publish
+together. A known rejection permits a corrected
 request against the next observed revision. A pending or uncertain physical change
 does not permit a replacement effect. `pendingRequestId` points to the original
 unfinished owner operation and clears on completion; collect it after a lost reply
@@ -1678,19 +1680,28 @@ or page reload without resubmitting settings. Collection returns `requestId`,
 `state: absent|accepted|completed|unconfirmed` and, when settled, an `outcome`
 discriminated by `ok` with `result` or `error`. An unconfirmed result is not proof
 that no effect occurred.
-The settings-specific collection route also returns the live device view in top-level
-`result` after a successful completed receipt.
+The settings-specific collection route preserves the original receipt unchanged. It
+adds top-level `result` only when the successful original result validates as a current
+device snapshot. A historical success can lack that projection: collect the original
+request, then read the current owner view rather than treating old permission as current.
 
 Settings and ceilings are defined by
 `packages/shared/src/codespaces/local-management-types.ts`. Settings include label,
-enabled state, epoch-ms lease, CPU/RAM/shared disk and guest Docker capacity, repository
+enabled state, CPU/RAM/shared disk and guest Docker capacity, repository
 read/push/PR/delete permissions, Git author and optional repository-management
 delegation. Numeric resources are positive safe integers; storage exceeds Docker
-capacity, and leases are finite and at most seven days. Settings cannot exceed the
+capacity. Enabled work permission lasts until explicit disable; current settings and
+policy schemas reject work-deadline fields. Settings cannot exceed the
 locally approved envelope. Physical disk alignment, capacity and SDK failures remain
 owner-enforced. CPU/RAM/Docker are new-VM defaults; existing VM profiles come from
 their actual admission. Human whole-settings replacement is distinct from delegated
 repository admission, which can append only the exactly authorized repository.
+Label, Git identity, grants/delegation and new-VM defaults apply live without stopping
+unrelated VMs. The Git author setting is used during workspace preparation; saving
+it does not rewrite Git configuration in an existing running checkout.
+Existing VM admission remains pinned; unresolved missing admission
+proof refuses a default change. Enablement and shared-storage changes use explicit
+stopped control, and uncertain physical effects retain their original recovery identity.
 
 ### Companion enrollment and routing
 
@@ -1713,13 +1724,13 @@ The companion pins its chosen HTTPS application URL and refuses redirects.
 | `POST /workspaces/bootstrap`                     | `{resourceId,environmentIdentity}`                                   | Scoped workspace agent configuration           |
 
 Heartbeat does not upload or retrieve operational policy/settings. Resource registration
-checks the authenticated device, live approved repository and finite work authority
+checks the authenticated device, current approved repository and enabled work permission
 before creating a minimal cloud route. Exact existing registration is idempotent;
 conflicting identity/ref/marker is refused. Host CLI create registers that route before
 Git/bootstrap or physical SDK work. Fresh creation therefore requires cloud route
 registration and initial Git credential authority.
 
-The always-on controller retains management access while work is disabled or expired;
+The always-on controller retains management access while work is disabled;
 that access does not authorize new jobs or Git. Browser-confirmed deletion requires
 the exact active owner/device/resource binding and local web-control approval. It
 does not require enabled agent work or agent delete permission; MCP cleanup retains
@@ -1740,7 +1751,7 @@ are excluded from request-context logging. There are no relay claim/renew/ACK en
 `GET /api/local-devices/github/:resourceId/:resourceGeneration/identity` is a
 device-authenticated metadata operation. It returns the verified GitHub login as
 `name` and numeric-account noreply `email` inside `{success:true,data:{name,email}}`.
-It checks the current device/resource binding, enabled finite lease, exact approved
+It checks the current device/resource binding, enabled permission, exact approved
 repository and current GitHub App grant. `resourceGeneration` is the stable
 route-authority generation, distinct from the Local lifecycle generation used for
 start/stop/delete. Invalid parameters return 400, device/domain authority refusals
@@ -1783,7 +1794,10 @@ derives the exact repository and permissions from current authority, not caller
 repository names, URLs or permission objects. Fetch receives contents read, push
 contents write, PR read receives pull-requests read, and PR create pull-requests write;
 each also receives metadata read. Parent generation, App repository grant, account,
-device/resource binding and finite owner authority are rechecked.
+device/resource binding and current owner authority are rechecked. Local work permission
+has no deadline; child credentials retain finite vendor and parent use bounds.
+An unrelated settings revision does not retire unchanged child authority; actual
+device, resource or exact-grant revocation still does.
 
 The private acquire response contains `credentialId`, `token`, `expiresAt`,
 `useUntil` and `repositoryFullName`; only the trusted broker consumes it in memory.
@@ -1849,7 +1863,7 @@ active registered paired controller or the sole eligible registered one; multipl
 The optional devcontainer path selects repository configuration, not commands or a host.
 Local repository targets already identify their device. Creation requires current
 account/repository authority and a controller reachable at actual dispatch; Local additionally checks
-owner-approved repository rights and finite work lease. Offline work is never queued.
+owner-approved repository rights and enabled work permission. Offline work is never queued.
 
 GitHub creation verifies personal billing; an organization payer is rejected with
 `422 CODESPACE_BILLING_UNSUPPORTED`. The controller owns admission, provider creation,
@@ -1874,7 +1888,7 @@ returns `{codespace,data_preserved:true}`; deletion returns
 `{codespace,data_preserved:false}` only after exact physical absence is established.
 
 Local browser deletion uses owner-approved web control for that exact generation,
-independently of agent delete permission or an enabled work lease. MCP retains agent
+independently of agent delete permission or enabled agent work. MCP retains agent
 permissions. Current account/device and binding authority remain mandatory.
 
 After a lost reply, retain the original request and assigned device. Collect through
@@ -1907,7 +1921,7 @@ The transport distinguishes `controller` and `workspace` endpoint kinds.
 A Local controller authenticates the paired user/device generation and pairing
 connection UUID without inventing a guest identity. Workspace credentials retain
 resource, stable route generation and measured guest-life bindings. Local workspace
-authority additionally checks device/repository grants and finite lease.
+authority additionally checks current device/repository grants and enabled permission.
 Current account, assigned actor and resource authority gate routing. A paired controller
 can remain available without Local VM configuration; no administrative cloud kill-switch
 is an operational authority.

@@ -112,8 +112,7 @@ export class LocalDaemon {
       }
       await this.relay.confirmed(signal);
       const policy = await this.manager.records.policyOrNull();
-      if (policy && (!policy.enabled || policy.leaseUntil <= Date.now()))
-        await this.manager.stopWork();
+      if (policy && !policy.enabled) await this.manager.stopWork();
       this.update("connected", null);
       return true;
     } catch (error) {

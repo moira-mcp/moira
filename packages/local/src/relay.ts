@@ -310,7 +310,7 @@ export class LocalRelay {
         "LOCAL_IDENTITY_CHANGED",
         "Git requires its original locally admitted native space.",
       );
-    requireSpaceGrant(await this.records.policy(), space, Date.now());
+    requireSpaceGrant(await this.records.policy(), space);
     const state = new ControllerState(this.records);
     await state.importBindings(connection);
     const binding = await state.forSpace(space, connection);
@@ -679,7 +679,7 @@ export class LocalRelay {
             "The scoped Git credential authority changed.",
           );
       },
-      // Disposal uses its captured authenticated binding even after physical work/lease is stopped.
+      // Disposal uses its captured authenticated binding even after explicit local disable or stop.
       dispose: async () => {
         try {
           await this.disposeGitCredential(connection, input, child.credentialId);

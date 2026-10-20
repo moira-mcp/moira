@@ -642,10 +642,10 @@ GitHub cloud services retain current account/repository authorization, provider 
 billing and unresolved billable retirement witnesses. The selected paired controller owns
 GitHub lifecycle admission, fixed provisioning and explicit adoption, as well as Local
 physical custody. Cloud services neither run SSH workers nor reconcile lifecycle state.
-Existing offline Local work remains governed by owner grants and finite leases; fresh
+Existing offline Local work remains governed by current owner grants and enabled permission; fresh
 creation still needs cloud route registration and initial credential authority.
 Local services work without GitHub configuration; the GitHub enabled flag does not
-replace the computer owner's device/grant/lease authority.
+replace the computer owner's device/grant authority or explicit work permission.
 
 `packages/workspace-service/` owns commands, sessions, input/output and guarded files
 inside each workspace. Its service and `moira-workspace` CLI share private Unix HTTP
@@ -653,7 +653,7 @@ and durable journals. Fixed bootstrap installs the same owned payload/runtime in
 and GitHub. The paired controller uses GitHub SSH only for fixed bootstrap/readiness, never command dispatch.
 Workspace calls require an already enrolled live service; they do not implicitly start or bootstrap it.
 Local lifecycle and settings reach the device controller through the same live transport,
-independently of guest startup. A disabled work lease does not remove approved management access.
+independently of guest startup. Disabled agent work does not remove approved management access.
 
 Mutation IDs use `ws1-<lowercase UUID>`, bound to immutable input. Bare historical UUIDs,
 SQL operation rows and old host receipts are non-runnable archives: no automatic
@@ -671,7 +671,7 @@ authority instead binds the paired user/device generation and connection UUID; i
 no guest life. Controller routing strips supplied identity headers and injects the verified
 binding. A random live transport incarnation remains distinct from pairing identity. Fixed
 provider probes establish life before issuance; the adapter verifies its local service.
-Current account/provider/resource and Local device/grant/lease authority are rechecked.
+Current account/provider/resource and Local device/grant/work authority are rechecked.
 Server-owned revalidation and exact expiry close CONTROL/all DATA independently of
 peer heartbeats, without command cancellation or replay.
 
@@ -685,7 +685,7 @@ There are no aggregate Moira command/session/input/output/file quotas or implici
 deadlines. Safe representation, filesystem/process failures, caller response windows and
 provider/owner lifetime still apply. GitHub idle is selected for new Codespaces: off
 requests 240 minutes, not infinite running. Existing resources retain provider parameters
-and silent commands may stop; Local lifetime follows finite owner authorization.
+and silent commands may stop; Local work permission remains enabled until explicit disable.
 
 Files retain confined no-follow descriptors and target/parent/link identity. Input,
 write, read and output stream without whole transport buffers. Writes/patches stage
@@ -701,7 +701,7 @@ reference and a separately retained original delivery identity.
 `0065_owner_communication.sql` retains complete transfer and attachment-grant rows in immutable `archiveCommunicationTransfer` and `archiveCommunicationAttachmentGrant`. These are not active authority or replayable work. Existing private object directories remain retained; startup does not consume, redispatch or TTL-delete them. Active communication has no cloud transfer/grant table or singleton object-cleanup service.
 
 Local device services separate browser pairing and credential digests from owner-private
-repository/machine policy and finite leases. Enrollment sends device ID and label, not
+repository/machine policy and persistent enabled permission. Enrollment sends device ID and label, not
 operational policy; heartbeat carries no settings. Outbound contact exposes no TCP host
 command listener or Docker API. A private Unix controller endpoint and authenticated live
 routing serve the same owner. Cloud stores no Local claim/renew/ACK queue or settings state
@@ -711,12 +711,17 @@ See [API](API.md#workspace-streaming-transport) and [Codespaces](CODESPACES.md).
 `LocalWebControl` applies owner-requested settings only within a separately pinned
 local approval. The browser sends a fresh ws1 request ID, device-generation and revision
 guards. Owner journals retain admitted settings separately from applied policy;
-`revision` and `appliedRevision` distinguish them. Known rejection permits a corrected next
+`revision` and `appliedRevision` distinguish them. Policy, applied revision and delegated
+permission publish together, and CLI/web writers share a private cross-process settings
+gate. Controller settings establish physical owner admission before entering that gate;
+CLI policy writers use the same settings exclusion. Known rejection permits a corrected next
 revision; unresolved physical work blocks replacement. An offline owner refuses new remote
 writes rather than queuing them. `pendingRequestId` and resource `pending_request_ids`
 come from the original owner journal, allowing collection after reload without replay.
-The controller keeps management available after disable or lease expiry, so an approved
-owner can renew a finite lease of up to seven days through a live website connection.
+Historical collection preserves the original outcome; a typed current projection is
+included only when its result validates against the current snapshot schema. Consumers
+read current state separately. The controller keeps approved management available while
+agent work is disabled; there is no work-deadline field or renewal ceiling.
 
 Local resource generation is an exact compare-and-swap guard on lifecycle admission;
 the stable cloud route generation remains the Git/bootstrap authority fence. Admission
@@ -725,11 +730,20 @@ long native preparation. Stop retires the exact admitted native owner without wa
 that preparation; late completion cannot overwrite newer binding state. Human whole-settings
 changes and exact delegated repository append use distinct authorization paths.
 
-Applying settings first settles owned work under the runner lock. Durable control
-and stopped-policy intents fence interrupted changes; a persisted applied revision
+Ordinary label, Git identity, grants/delegation and new-VM defaults apply live without
+stopping unrelated VMs. Git author policy is consumed during workspace preparation;
+saving it does not rewrite an existing running checkout's Git configuration.
+Enablement and shared-storage changes use explicit stopped
+control under the runner lock. Durable control and stopped-policy intents fence
+interrupted changes; a persisted applied revision
 permits cleanup of its completed intent, not a newer uncertain intent. CPU, RAM and
 Docker disk changes are defaults for new VMs. Existing VMs retain their admitted
-machine and repository identity. Storage resizing uses only the exact owned disk
+machine and repository identity. Physical custody identifies the device, runtime
+binary/template, storage root and shared capacity; new-VM defaults do not change it.
+Proved missing legacy admission is pinned before native writers start; unresolved
+missing machine admission refuses a default change. Live settings never rewrite space
+records. Repository withdrawal closes affected authority without a global VM stop.
+Storage resizing uses only the exact owned disk
 image and APFS container, checks native bounds, actual used-data fit and capacity, and preserves data;
 uncertain native settlement retains its journal and disables work.
 Sparse image creation and growth require no synthetic host reserve or full logical preallocation.
@@ -744,8 +758,8 @@ after a lost attach reply. Custom mounts remain manually managed. Missing images
 unsafe mount points and conflicting bindings refuse startup without creating or
 resetting storage.
 
-`packages/local` owns the host policy and SDK profile. A local
-finite lease, repository grants, machine/storage ceilings and explicit permissions
+`packages/local` owns the host policy and SDK profile. Persistent local
+enabled permission, repository grants and machine/storage ceilings
 bound remote work. Each codespace has a persistent mountless VM. The common workspace
 service verifies the provider-owned repository root and binding; both providers
 reuse its command/session/file behavior. SDK creation, start and guest attachment
@@ -773,7 +787,9 @@ closure. No child is placed in project files, argv, environment, logs or agent
 results. The GitHub guest follows the existing same-UID trust model; memory custody
 does not establish an OS sandbox against authorized project commands. Provider
 expiry metadata and local usage fences do not establish parent-token cascade;
-retirement explicitly disposes known children.
+retirement explicitly disposes known children. Local permission has no work deadline;
+children retain finite provider and parent use bounds. An unrelated settings revision
+does not retire an unchanged device/resource/exact-grant authority.
 
 Each security acquisition has a durably recorded token-free original ws1 identity
 before provider submission. Pure original-ID collection cannot mint or refresh;
@@ -804,7 +820,7 @@ checks current work or `doctor` authority before opening the SDK and throughout 
 setup and cleanup retain their separate local authority. SDK startup, installation,
 bootstrap and authenticated guest registration have no aggregate work clock. Fixed
 identity/health observations and the bounded `doctor` diagnostic retain their own bounds;
-an expired observation never proves physical settlement. Disable and lease expiry retain explicit
+an expired observation never proves physical settlement. Explicit disable retains
 physical-stop authority during startup; caller cancellation fences its admitted request. Parent/IPC
 loss releases observation rather than signalling previously captured peers. The guard
 cancels and reaps tracked calls, holds exact kernel identities for the SDK daemon
@@ -813,7 +829,7 @@ work. Explicit shutdown does not depend on a readable SDK credential store. It s
 captured incarnations, preserves disks, and records settlement only after confirmed
 exit. `released: true` retains `settled: false`; helper EOF, capture failure and observation
 retirement cannot manufacture physical-stop evidence. Retired native handles remain available for
-an explicit exact stop. Missing ownership, unsupported capture, expired policy or uncertain guest
+an explicit exact stop. Missing ownership, unsupported capture, disabled work or uncertain guest
 transport fails closed. A lost ordinary guest response does not retire the whole
 VM or prevent independent commands. Confirmed physical stop does not erase unknown
 job markers. Explicit local recovery of uncertain native settlement checks identity
@@ -858,12 +874,12 @@ environments are observed or prepared under current policy without replaying com
 reboot, login registration needs original storage, runtime and available credentials; guest boot
 identity and pre-reboot process continuity cannot be preserved. Host create/start/stop/remove call that private controller;
 collect reads the original ws1 receipt without effects. Existing owner-admitted VM work
-can continue under local grants and leases when cloud transport is unavailable; confirmed
+can continue under current local grants and enabled permission when cloud transport is unavailable; confirmed
 authority refusal is not offline permission. Fresh create registers an authenticated cloud
 route before Git/bootstrap and SDK effects and requires initial Git credential authority.
 Device revocation fences server work, but cannot promise
-instant physical stop while the machine is offline; local lease expiry and disable
-remain authoritative. These boundaries do not assert tested reachability controls
+instant physical stop while the machine is offline; explicit local disable
+remains authoritative. These boundaries do not assert tested reachability controls
 for every remote VPN, cloud metadata endpoint or separate physical VM.
 
 ### Communication adapters

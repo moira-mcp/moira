@@ -67,7 +67,7 @@ export function gitBroker(
           return {
             mode: "anonymous",
             repositoryFullName: grant.repository.fullName,
-            useUntil: grant.policy.leaseUntil,
+            useUntil: null,
             dispose: async () => {},
           };
         return acquire(grant, action, admissionSignal);

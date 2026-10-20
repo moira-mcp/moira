@@ -319,7 +319,6 @@ describe("Local cloud facade routes to the authoritative owner", () => {
           changed = true;
           await owner!.state.write("policy.json", {
             ...policy,
-            leaseUntil: policy.leaseUntil - 1,
             repositories: policy.repositories.map((repository) => ({
               ...repository,
               allowPush: false,
@@ -346,7 +345,7 @@ describe("Local cloud facade routes to the authoritative owner", () => {
         resourceGeneration: 1,
         ownerResourceGeneration: 1,
         appliedRevision: snapshot.control.appliedRevision,
-        useUntil: policy.leaseUntil,
+        useUntil: null,
         repository: { ...policy.repositories[0], allowPush: true, allowPullRequests: true },
       });
       await expect(

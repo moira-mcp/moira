@@ -322,7 +322,7 @@ Optional `max_bytes` is the caller's whole-image bound, not permission to return
 Container validation does not fully decode pixels.
 
 The service does not impose fixed byte, concurrency or duration quotas on commands
-and files. Physical storage, current owner permissions and leases, repository/path
+and files. Physical storage, current owner permissions, repository/path
 safety, expected versions and caller-selected bounds still apply. Binary transfers
 stream directly; increasing a bound does not bypass these checks.
 
@@ -391,7 +391,7 @@ before calling workspace tools. An unavailable owner returns `CODESPACE_PROVIDER
 before dispatch; routing does not implicitly start a VM or perform cloud bootstrap.
 A disconnected computer requires restoring the companion connection.
 `CODESPACE_PROVIDER_DISABLED` indicates disabled GitHub provider configuration. Local work
-uses its owner's grants, finite lease and physical capacity rather than cloud operational controls.
+uses its owner's grants, enabled permission and physical capacity rather than cloud operational controls.
 For GitHub create/start/adopt, reconnect the assigned paired controller; a usable guest also
 requires its authenticated outbound registration. Configuration `ready` alone does not prove that.
 A confirmed registration 401/403 requires current authority repair; temporary network loss can
@@ -403,14 +403,14 @@ repository access in Settings. The host CLI supports `create OWNER/REPO --ref BR
 through the running private controller; raw host execution is unsupported. Fresh create
 requires live cloud route registration and initial Git authority. Already admitted VMs can
 start, stop or be cleaned up offline under applicable current owner authority. Starting requires
-the finite work lease; owner-confirmed cleanup does not renew it.
+enabled work permission; owner-confirmed cleanup does not enable it.
 
 For `repository_add`, inspect applied consent in Settings, discover the device with `local_devices` and reuse the original
 `request_id` with the same device/repository. Pending returns no usable local repository identity;
 rejected or changed account/grants require owner action. The repository must be private, owned by
 the connected personal GitHub account and exposed by the App installation. Another pending owner
 revision must settle before admission. An admission refusal does not permit the agent to broaden
-consent or the lease. An existing local grant is discovered, not added twice.
+consent. An existing local grant is discovered, not added twice.
 
 For `repository_create`, choose a personal `installation_id` from `local_devices`; organization
 installations and public creation are unsupported. A discovery warning directs the owner to
@@ -439,9 +439,9 @@ The ordinary call waits for complete bytes and returns native image content; an 
 returns an error, never successful pending image content.
 
 Use **Settings → Development → Local computers** and the companion's `status` to distinguish pending
-browser approval, revocation, an offline computer and an expired local lease. An offline row is
-not proof that the computer or its VM has physically stopped. Renew a lease on the computer with
-`npm run local -- enable --hours 8`. Use `npm run local -- install` to stage the complete owner
+browser approval, revocation, an offline computer and disabled local work. An offline row is
+not proof that the computer or its VM has physically stopped. Enable work on the computer with
+`npm run local -- enable`; it remains permitted until explicit disable. Use `npm run local -- install` to stage the complete owner
 release and register login startup, then `npm run local -- run` to start or connect to it.
 The persistent host owner holds VM custody and the broker/tunnel; this client exits without
 stopping them. Ordinary installation stages a release without replacing a running owner.
@@ -456,9 +456,9 @@ local state when a current summary supplies the owner generation. An unavailable
 no lifecycle controls. Deletion addresses only the same owned codespace and finishes after confirmed absence.
 
 Owner cleanup requires the active paired computer, current local web-control approval and a
-running, reachable companion. It does not require agent deletion permission, enabled work or
-lease renewal, and changes none of those permissions. MCP deletion retains its agent grant and
-work-lease checks. A deletion refusal remains visible inside the confirmation dialog and ends
+running, reachable companion. It does not require agent deletion permission or enabled work,
+and changes neither permission. MCP deletion retains its agent grant and
+enabled-permission checks. A deletion refusal remains visible inside the confirmation dialog and ends
 the spinner; **Cancel** is available while a separate read refreshes the current generation.
 An operation's 403 refusal does not sign out the owner; session expiry and account admission
 errors retain their authentication handling. Do not clear journals, edit database state or create
@@ -509,22 +509,28 @@ original generation and identity. A repeated active request or an unknown outcom
 retained intent;
 it does not dispatch a duplicate effect. Read-only inspection can recover exact creation identity
 from the owned durable manifest after a reply expires; an unavailable inventory is never absence.
-With locally approved `web-control`, request a finite renewal in the device editor within its
-ceiling, up to seven days. Pending means the computer has not applied the request; rejected shows
+With locally approved `web-control`, request settings within the resource ceilings in the device editor.
+Pending means the computer has not applied the request; rejected shows
 the refusal and retains the last successfully acknowledged revision. A failed application can
 disable work in the reported policy; that revision alone does not mean work remains enabled.
 An offline computer exposes no current policy or grants. Saving is refused and the settings
 draft remains in the editor; reconnect and refresh before explicitly saving. An already accepted
-settings request retains its original identity for collection, which cannot renew the lease.
+settings request retains its original identity for collection, which cannot repeat the effect.
+An original historical success may have no typed current device projection; refresh current owner
+settings separately rather than submitting the change again. Ordinary label/grant/Git-identity and
+new-VM-default edits apply live when enablement and shared storage are unchanged. Existing admitted
+VM profiles remain intact; changing enablement or shared storage uses the physical transition.
+Git author changes update policy; repository-local Git config uses the value during workspace
+preparation. Saving the setting does not force a rewrite in an already running checkout.
 
 The daemon reports `connected`, `offline`, `faulted` or `disabled` in its structured stderr status.
 Network/5xx failures make remote owner state unavailable without stopping admitted VM work.
 New remote mutations are refused rather than queued. An addressed resource refusal returns a
 bounded error for that request; a lost reply to an accepted effect requires original receipt collection.
 Device-endpoint unauthorized responses or confirmed device identity/revocation failures retire
-the remote route without turning local VM intent into stop. Local disable, lease expiry and
-explicit physical stop remain independent controls. Current grants and finite
-deadlines remain unchanged. Cached results can return without repeating effects; an offline row
+the remote route without turning local VM intent into stop. Local disable and
+explicit physical stop remain independent controls. Current grants remain enforced.
+Cached results can return without repeating effects; an offline row
 cannot promise immediate delivery of a remote revocation.
 
 Git and PR requests execute directly in the trusted owner's fixed broker. Original OAuth/refresh
@@ -555,15 +561,15 @@ add this repository to the App installation, or reconnect the verified GitHub id
 Other response text remains private; a refusal never permits using a host token or widening rights.
 The proxy authenticates package requests with its installed per-space broker
 permission; package clients need not send a proxy-auth header. The host still enforces the computer's
-lease, repository authority and public-address/computer-network checks. A proxy refusal is not permission to broaden them
+enabled permission, repository authority and public-address/computer-network checks. A proxy refusal is not permission to broaden them
 or use a host/GitHub token.
 Local CONNECT timeouts guard establishment. After the fixed broker connection and verified
 upstream connection are established, these guards no longer impose an idle deadline. Current
-leases, revocation, socket closure and broker shutdown still end access.
+permission, revocation, socket closure and broker shutdown still end access.
 Public destinations are independent of technology; network downloads have no cumulative traffic or
 per-response byte, connection-count or established-transfer duration quota. Host, LAN and service destinations remain denied.
 
-`doctor` requires an enabled, unexpired lease and checks prerequisites, not live VM isolation.
+`doctor` requires enabled work permission and checks prerequisites, not live VM isolation.
 Its bounded diagnostic window does not establish settlement of pending work. Current authority
 is checked while SDK startup is pending; installation and registration have no general work deadline.
 Device `active`/`enabled` and setup `ready` describe authorization and configuration, not a
@@ -616,11 +622,11 @@ Use the same `--state PATH` on every command when configured. Collect the same m
 until its result is known; pause/resume declares physical interruption and restores saved intent,
 not the interrupted commands. Closing a client or pressing Ctrl+C is not this pause.
 Do not use `disable` just to revise
-the maximum, since it changes work enablement and its lease. Omitted limits retain the existing
+the maximum, since it disables and stops owned work. Omitted limits retain the existing
 approval. Refresh **Local computers**, request Storage 50 in the computer's editor and wait for
-the applied revision and actual capacity. Approval itself does not resize storage, renew the lease
+the applied revision and actual capacity. Approval itself does not resize storage, enable work
 or clear a pending request. A failed or interrupted resize keeps its existing recovery records;
-do not reset state or recreate codespaces. An expired work lease does not prevent management
+do not reset state or recreate codespaces. Disabled work does not prevent management
 from reporting the approval, but guest work still requires valid work permission. If the approval
 reply is lost, reconnect with the same state so the same saved approval is reported again.
 Direct local `login`, `setup`, `recover` and web-control approval require the physical runner gate.

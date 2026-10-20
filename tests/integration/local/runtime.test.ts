@@ -178,15 +178,14 @@ async function startupRuntime(
 }
 
 describe("Docker Sandboxes lifecycle boundary", () => {
-  test.each(["disabled", "expired"])(
+  test.each(["disabled"])(
     "snapshot without %s observation never presents a historical stopped phase as physical proof",
     async (reason) => {
       const fixture = await localFixture(state);
       fixture.space.phase = "stopped";
       fixture.space.desiredState = "stopped";
       await fixture.records.put(fixture.space);
-      if (reason === "disabled") fixture.policy.enabled = false;
-      else fixture.policy.leaseUntil = Date.now() - 1;
+      fixture.policy.enabled = false;
       await state.write("policy.json", fixture.policy);
       const snapshot = await new LocalManager(fixture.records).snapshot();
       expect(snapshot.spaces).toHaveLength(1);

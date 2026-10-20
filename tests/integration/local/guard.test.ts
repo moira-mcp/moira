@@ -18,6 +18,7 @@ import { build } from "esbuild";
 import { createHash, randomUUID } from "node:crypto";
 import { PrivateState } from "../../../packages/local/src/private-state.js";
 import { localFixture } from "./fixtures.js";
+import { localRuntimeProfileHash } from "../../../packages/local/src/policy.js";
 
 const execute = promisify(execFile);
 let root: string;
@@ -562,13 +563,12 @@ const vmTest = process.platform === "darwin" ? test : test.skip;
 const supportedGuard = process.platform === "darwin" ? describe : describe.skip;
 
 supportedGuard("independent guard with a real subprocess SDK substitute", () => {
-  vmTest.each(["disabled", "expired"] as const)(
+  vmTest.each(["disabled"] as const)(
     "cleanup-only guard removes the exact confirmed VM with %s work permission and preserves its peer",
     async (permission) => {
       const local = await fixture();
       const peer = await addPeer(local);
-      if (permission === "disabled") local.policy.enabled = false;
-      else local.policy.leaseUntil = Date.now() - 1;
+      local.policy.enabled = false;
       await local.state.write("policy.json", local.policy);
       const policyBytes = await readFile(join(local.state.root, "policy.json"));
       const peerBytes = await readFile(join(local.state.root, `space-${peer.id}.json`));
@@ -855,14 +855,18 @@ supportedGuard("independent guard with a real subprocess SDK substitute", () => 
       let device;
       const manager=new LocalManager(records,{
         storage:async()=>{},
-        guard:async(...args)=>(device=await startGuard(...args)),
+        guard:async(...args)=>{
+          const beforeLaunch=await records.get(${JSON.stringify(local.space.id)});
+          assert.ok(beforeLaunch.admittedMachine,'Legacy machine must be pinned before guard admission');
+          return device=await startGuard(...args);
+        },
       });
       const spacePath=${JSON.stringify(join(local.state.root, `space-${local.space.id}.json`))};
       const peerPath=${JSON.stringify(join(local.state.root, `space-${peer.id}.json`))};
       const jobPath=${JSON.stringify(join(local.state.root, jobKey))};
       const marker=${JSON.stringify(local.observation + ".container-error-name")};
-      const before=await f.readFile(spacePath),beforePeer=await f.readFile(peerPath),beforeJob=await f.readFile(jobPath);
       await manager.open();
+      const before=await f.readFile(spacePath),beforePeer=await f.readFile(peerPath),beforeJob=await f.readFile(jobPath);
       try {
         // This manager has no cached space guard. The admitted callback encounters
         // a real per-VM Engine response failure, then the external observation recovers.
@@ -878,15 +882,34 @@ supportedGuard("independent guard with a real subprocess SDK substitute", () => 
         assert.equal(rows.find(row=>row.name===${JSON.stringify(local.space.name)})?.status,'running');
         assert.equal(rows.find(row=>row.name===${JSON.stringify(peer.name)})?.status,'running');
         await (await device.space(${JSON.stringify(local.space.id)})).validate();
-        const stopped=await manager.stop(${JSON.stringify(local.space.id)},${local.space.generation});
+        const previous=await records.policy();
+        const next={...previous,label:'Live defaults',runtime:{...previous.runtime,cpuCores:2,memoryBytes:2*previous.runtime.memoryBytes,dockerBytes:2*previous.runtime.dockerBytes}};
+        const list=records.list.bind(records);
+        let captured,releaseCapture;
+        const capturing=new Promise(resolve=>{captured=resolve;});
+        const resumeCapture=new Promise(resolve=>{releaseCapture=resolve;});
+        let first=true;
+        records.list=async()=>{const rows=await list();if(first){first=false;captured('captured');await resumeCapture;}return rows;};
+        const applying=manager.applyLivePolicy(previous,next);
+        await Promise.race([capturing,applying.then(()=>'published')]);
+        let stopped;
+        try{stopped=await manager.stop(${JSON.stringify(local.space.id)},${local.space.generation});}
+        finally{releaseCapture();}
+        await applying;
+        records.list=list;
+        assert.deepEqual((await records.get(${JSON.stringify(local.space.id)})).admittedMachine,{cpuCores:previous.runtime.cpuCores,memoryBytes:previous.runtime.memoryBytes,dockerBytes:previous.runtime.dockerBytes});
+        await (await device.space(${JSON.stringify(peer.id)})).validate();
+        assert.equal((await records.get(${JSON.stringify(local.space.id)})).generation,${local.space.generation + 1},'Live defaults overwrote the native stop generation');
+        assert.equal((await records.get(${JSON.stringify(local.space.id)})).desiredState,'stopped');
+        const admittedPeer=await f.readFile(peerPath);
         assert.equal(stopped.desiredState,'stopped');assert.equal(stopped.phase,'stopped');
         assert.equal(stopped.generation,${local.space.generation + 1});
         const after=await device.observe();
         assert.equal(after.find(row=>row.name===${JSON.stringify(local.space.name)})?.status,'stopped');
         assert.equal(after.find(row=>row.name===${JSON.stringify(peer.name)})?.status,'running');
-        assert.deepEqual(await f.readFile(peerPath),beforePeer);
+        assert.deepEqual(await f.readFile(peerPath),admittedPeer);
         assert.deepEqual(await f.readFile(jobPath),beforeJob);
-      } finally {await manager.close();}
+      } catch(error){console.error(error);throw error;} finally {await manager.close();}
     `,
       ]);
       expect(await local.records.get(local.space.id)).toMatchObject({
@@ -1142,11 +1165,7 @@ supportedGuard("independent guard with a real subprocess SDK substitute", () => 
       await local.state.write("policy.json", local.policy);
       const receipt = {
         owner: randomUUID(),
-        profile: createHash("sha256")
-          .update(
-            JSON.stringify({ deviceId: local.policy.deviceId, runtime: local.policy.runtime }),
-          )
-          .digest("hex"),
+        profile: localRuntimeProfileHash(local.policy),
         settled: false,
       };
       await local.state.write("runtime-owner.json", receipt);
@@ -1215,11 +1234,7 @@ supportedGuard("independent guard with a real subprocess SDK substitute", () => 
       await local.state.write("policy.json", local.policy);
       const receipt = {
         owner: randomUUID(),
-        profile: createHash("sha256")
-          .update(
-            JSON.stringify({ deviceId: local.policy.deviceId, runtime: local.policy.runtime }),
-          )
-          .digest("hex"),
+        profile: localRuntimeProfileHash(local.policy),
         settled: false,
         ...(reason.startsWith("live-owner") ? { ownerPID: process.pid } : {}),
       };
@@ -1262,7 +1277,7 @@ supportedGuard("independent guard with a real subprocess SDK substitute", () => 
       }
     },
   );
-  vmTest.each(["daemon-retired", "lease-expired"] as const)(
+  vmTest.each(["daemon-retired", "disabled"] as const)(
     "a controlled stopped inventory read refuses %s before accepting its result",
     async (reason) => {
       const local = await fixture(false, true);
@@ -1316,7 +1331,7 @@ supportedGuard("independent guard with a real subprocess SDK substitute", () => 
         daemon.kill("SIGTERM");
         await exited;
       } else {
-        local.policy.leaseUntil = Date.now() - 1;
+        local.policy.enabled = false;
         await local.state.write("policy.json", local.policy);
       }
       await writeFile(local.observation + ".inventory-release", "release");
@@ -1649,7 +1664,7 @@ supportedGuard("independent guard with a real subprocess SDK substitute", () => 
       ]);
       expect(JSON.parse(disabled.stdout)).toEqual({ enabled: false });
       expect((await daemonExited)[0]).toBe(0);
-      expect(await local.records.policy()).toMatchObject({ enabled: false, leaseUntil: 0 });
+      expect(await local.records.policy()).toMatchObject({ enabled: false });
       const after = await local.state.read(
         "runtime-owner.json",
         (value) => value as { owner: string },
@@ -1676,14 +1691,7 @@ supportedGuard("independent guard with a real subprocess SDK substitute", () => 
         profile:
           obstruction === "another profile"
             ? "f".repeat(64)
-            : createHash("sha256")
-                .update(
-                  JSON.stringify({
-                    deviceId: local.policy.deviceId,
-                    runtime: local.policy.runtime,
-                  }),
-                )
-                .digest("hex"),
+            : localRuntimeProfileHash(local.policy),
         settled: false,
         released: true,
         ...(obstruction === "live owner" ? { ownerPID: process.pid } : {}),
@@ -1711,7 +1719,7 @@ supportedGuard("independent guard with a real subprocess SDK substitute", () => 
       }
     },
   );
-  test.each(["disabled", "expired"] as const)(
+  test.each(["disabled"] as const)(
     "local diagnostics cannot restart a stopped SDK when policy is %s",
     async (reason) => {
       const local = await fixture();
@@ -1719,8 +1727,7 @@ supportedGuard("independent guard with a real subprocess SDK substitute", () => 
       const closed = once(daemon, "close");
       daemon.kill("SIGTERM");
       await closed;
-      if (reason === "disabled") local.policy.enabled = false;
-      else local.policy.leaseUntil = Date.now() - 1;
+      local.policy.enabled = false;
       await local.state.write("policy.json", local.policy);
       await execute(process.execPath, [
         "--input-type=module",
@@ -1742,12 +1749,11 @@ supportedGuard("independent guard with a real subprocess SDK substitute", () => 
       });
       expect(await local.state.read("runtime-owner.json", (value) => value)).toMatchObject({
         settled: reason === "disabled",
-        ...(reason === "expired" ? { released: true } : {}),
       });
     },
   );
 
-  test.each(["lease", "disabled"] as const)(
+  test.each(["disabled"] as const)(
     "%s revocation settles a held foreground startup metadata child",
     async (reason) => {
       const local = await fixture();
@@ -1778,8 +1784,7 @@ supportedGuard("independent guard with a real subprocess SDK substitute", () => 
       const exited = once(caller, "close");
       try {
         await readiness.wait(caller, () => stderr);
-        if (reason === "lease") local.policy.leaseUntil = Date.now();
-        else local.policy.enabled = false;
+        local.policy.enabled = false;
         await local.state.write("policy.json", local.policy);
         await waitFor(
           async () =>
@@ -1884,7 +1889,6 @@ supportedGuard("independent guard with a real subprocess SDK substitute", () => 
     const closed = once(daemon, "close");
     daemon.kill("SIGTERM");
     await closed;
-    local.policy.leaseUntil = Date.now() + 120_000;
     await local.state.write("policy.json", local.policy);
     const barrier = local.observation + ".daemon-ready-wait";
     const observed = local.observation + ".daemon-observed";
@@ -2330,7 +2334,7 @@ supportedGuard("independent guard with a real subprocess SDK substitute", () => 
     expect(JSON.parse(await readFile(local.observation, "utf8"))).toEqual({ status: "stopped" });
   });
 
-  test("lease expiry cancels guest bootstrap and prevents later admission without parent cooperation", async () => {
+  test("explicit disable cancels guest bootstrap and prevents later admission without parent cooperation", async () => {
     const local = await fixture();
     await execute(process.execPath, [
       "--input-type=module",
@@ -2341,11 +2345,11 @@ supportedGuard("independent guard with a real subprocess SDK substitute", () => 
       try{await Promise.race([wait(),work.then(()=>{throw new Error('Operation completed before barrier');})]);}
       catch(error){await guard.stop();await device.stop();throw error;}
       const policyPath=${JSON.stringify(join(local.state.root, "policy.json"))};
-      const policy=JSON.parse(await f.readFile(policyPath,'utf8'));policy.leaseUntil=Date.now();
+      const policy=JSON.parse(await f.readFile(policyPath,'utf8'));policy.enabled=false;
       await f.writeFile(policyPath,JSON.stringify(policy));
-      await work.then(()=>{throw new Error('Expired native operation succeeded');},()=>{});
+      await work.then(()=>{throw new Error('Disabled native operation succeeded');},()=>{});
       await guard.stop();
-      await guard.validate().then(()=>{throw new Error('Expired owner accepted new work');},()=>{});
+      await guard.validate().then(()=>{throw new Error('Disabled owner accepted new work');},()=>{});
     `,
     ]);
     const { pid } = JSON.parse(await readFile(local.pending, "utf8"));
@@ -2358,7 +2362,7 @@ supportedGuard("independent guard with a real subprocess SDK substitute", () => 
     expect(JSON.parse(await readFile(local.observation, "utf8"))).toEqual({ status: "stopped" });
   });
 
-  test("lease expiry stops the captured runtime after credentials and the SDK command path become unusable", async () => {
+  test("explicit disable stops the captured runtime after credentials and the SDK command path become unusable", async () => {
     const local = await fixture();
     await execute(process.execPath, [
       "--input-type=module",
@@ -2371,7 +2375,7 @@ supportedGuard("independent guard with a real subprocess SDK substitute", () => 
         if(process.platform==='darwin')await f.writeFile(home+'/keychain-current.json','{}');
         await f.rename(${JSON.stringify(local.policy.runtime.binary)},${JSON.stringify(local.policy.runtime.binary + ".unavailable")});
         const p=${JSON.stringify(join(local.state.root, "policy.json"))};
-        const policy=JSON.parse(await f.readFile(p,'utf8'));policy.leaseUntil=Date.now();await f.writeFile(p,JSON.stringify(policy));
+        const policy=JSON.parse(await f.readFile(p,'utf8'));policy.enabled=false;await f.writeFile(p,JSON.stringify(policy));
         await settled;await device.stop().then(()=>{throw new Error('Unverifiable SDK path reported settled closure');},error=>{if(!['LOCAL_STOP_PENDING','LOCAL_GUARD_UNAVAILABLE'].includes(error.code))throw error;});
       }finally{await device.stop().catch(()=>{});await settled;}
     `,

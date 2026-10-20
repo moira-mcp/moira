@@ -234,7 +234,7 @@ account. Local and GitHub development environments share `codespace` for ordinar
 public repository reads and basic local work do not require the GitHub App or server credential
 vault. Enrolled private-repository access, push and PR operations require the server's GitHub App
 OAuth connection and vault configuration. Local work requires the owner's current computer grants
-and finite lease, without cloud operational controls or an aggregate resource quota.
+and enabled work permission until explicit disable, without cloud operational controls or an aggregate resource quota.
 The GitHub `CODESPACE_CODESPACES_ENABLED` switch does not gate Local.
 
 The companion makes outbound HTTPS requests and exposes no public listening port.
@@ -259,7 +259,7 @@ npm run local -- init --sbx /absolute/path/to/Sbx.app/Contents/MacOS/sbx --label
 npm run local -- login
 npm run local -- setup
 npm run local -- approve OWNER/REPO
-npm run local -- enable --hours 8
+npm run local -- enable
 npm run local -- doctor
 ```
 
@@ -267,7 +267,7 @@ npm run local -- doctor
 device-owned mount path for the SDK sockets. `--state PATH` chooses another state directory;
 repeat it on every command. `--storage-gib`, `--cpus` and `--memory-gib`
 choose local resource allocations at initialization. `setup` requires an empty dedicated SDK profile.
-`doctor` checks prerequisites under an enabled, unexpired lease; its
+`doctor` checks prerequisites under enabled work permission; its
 `liveVmIsolationVerified: false` is not a live microVM isolation result.
 
 The companion keeps Docker sign-in in a separate encrypted SDK store and does not alter personal
@@ -285,8 +285,8 @@ Repository permissions are granted on the computer. `approve OWNER/REPO` allows 
 Add `--private`, `--push` or `--delete` only for those rights.
 Manual repository tokens are not accepted. Paired private access and push use the approved
 GitHub App grant through the trusted owner's scoped credential broker, with no host-token fallback.
-The finite work lease defaults to 8 hours and cannot exceed seven days. Renew it locally with
-`enable --hours N`. The browser can change these settings only after you explicitly approve web
+`enable` permits work until you explicitly run `disable`. There is no work-duration or renewal
+parameter. The browser can change these settings only after you explicitly approve web
 control on this computer, as described below.
 
 In **Local computers**, choose **Connect a computer**. Copy the displayed command and pairing token
@@ -351,16 +351,16 @@ pre-migration database and matching owner backup for rollback; do not rebuild wo
 After pairing is confirmed, approve local web control:
 
 ```bash
-npm run local -- web-control --confirm --max-lease-hours 168
+npm run local -- web-control --confirm
 ```
 
 Use the same `--state PATH` as setup. On first approval, unspecified resource ceilings use the
-current local values and the lease ceiling defaults to seven days. Repeat `web-control --confirm`
+current local values. Repeat `web-control --confirm`
 on this computer to revise its approval; unspecified options then retain the previously approved
 ceilings. Supply a changed maximum with `--cpus`, `--memory-gib`, `--storage-gib` or `--docker-gib`.
 The server, account, computer and connection must remain the same. Existing permissions and
 application/recovery state are preserved; browser or agent requests cannot raise these maxima.
-Approval alone neither renews the work lease nor changes the actual disk size.
+Approval alone neither enables work nor changes the actual disk size.
 
 For example, to permit a shared storage size of 50 GiB while the owner is running, pause through
 the maintenance procedure above and wait for `paused`. Then run:
@@ -371,7 +371,7 @@ npm run local -- maintenance --resume --request-id ORIGINAL_REQUEST_ID --confirm
 ```
 
 Repeat the same `--state PATH` on both commands when configured. Do not use `disable` just to
-revise a maximum: that also changes work enablement and its lease. Refresh **Local computers**,
+revise a maximum: that also disables and stops owned work. Refresh **Local computers**,
 set Storage to 50 in that computer's existing editor and choose **Request settings change**.
 The companion applies the requested size through the existing stopped-runtime resize path.
 Wait for the applied revision and actual size; a pending request is not a completed resize.
@@ -382,17 +382,23 @@ If the owner has not been installed or started, start or connect after local app
 npm run local -- run
 ```
 
-In **Local computers**, edit the device name, enabled state, expiry, CPU/RAM, bounded disk and
-guest Docker capacity, repository permissions and commit author. **Allow seven days** sets
-a finite expiry within the locally approved ceiling; it does not renew automatically.
+In **Local computers**, edit the device name, enabled state, CPU/RAM, bounded disk and
+guest Docker capacity, repository permissions and commit author. Enabled permission remains
+effective until you explicitly disable it.
 Commands and file streams have no Moira concurrency, byte, output-retention or runtime quotas.
 An explicitly requested command deadline and real machine/storage capacity still apply.
 **Request settings change** sends a caller-identified request to the live owner, not effective
 permission. Offline saves are refused and the draft remains in the editor; reconnect and refresh
 before explicitly saving. Applied and rejected revisions identify what the owner accepted. Read the
 effective permissions above the editor before starting work. Errors preserve the draft; updates
-adopt untouched fields without replacing independent edits. The control connection can receive a
-renewal while work is disabled or expired, but guest work remains off until it applies.
+adopt untouched fields without replacing independent edits. The control connection can receive
+settings while work is disabled, but guest work remains off until enablement is applied.
+Changes to labels, grants, Git identity, delegation and new-VM defaults apply live when enablement
+and shared storage are unchanged; they do not stop unrelated VMs. Settings from the CLI and browser
+share the same guarded revision. Git author changes update policy; workspace preparation applies
+that value to repository-local Git config. Saving the setting does not rewrite an already running checkout.
+After a lost reply, collect the original settings request rather
+than submitting it again. Historical outcomes stay original; refresh current permissions separately.
 CPU/RAM and guest Docker defaults apply to new environments; existing VMs retain their admitted
 profile. The storage capacity is the computer's shared SDK backing image, not a separate allocation
 of that size to every codespace. Bounded disk changes require stopped owned work and verified resizing; a refused change
@@ -413,7 +419,7 @@ consent in Settings. `repository_add` takes `device_id`, the GitHub numeric `rep
 and a stable UUID `request_id`. MCP calls live owner admission and returns `repository_id`
 only after access is applied. An unconfirmed or rejected request is not permission; resume its same
 identity after the applicable repair. The App must already expose the repository. Agent additions
-preserve existing grants, VMs and lease; agents cannot change consent or supply rights.
+preserve existing grants and VMs; agents cannot change consent or supply rights.
 For a new empty private repository, enable and apply new-private consent, then use `repository_create`
 with `device_id`, stable UUID `request_id`, `repository_name` and discovered `installation_id`.
 Only the connected personal account is supported. Resume the same complete payload: `unknown`
@@ -521,8 +527,8 @@ image and set `overrideCommand: true` so the container can start before paired b
 the service. These assets install the runtime; they do not grant cloud or repository authority.
 
 Public package registries and public DNS destinations use approved brokered egress. There is no
-socket-count or transfer-duration quota; streaming backpressure, public-address checks, finite
-owner lease and revocation remain. Host/LAN/service destinations stay denied. Browser compatibility
+socket-count or transfer-duration quota; streaming backpressure, public-address checks, current
+permission and revocation remain. Host/LAN/service destinations stay denied. Browser compatibility
 requires the project's guest packages. `preview_image` reads a current repository PNG/JPEG and
 checks its container before returning native image content; inspect it before treating it as
 visual evidence. Optional `max_bytes` sets the caller's whole-image bound. There is no generic byte,
@@ -537,7 +543,7 @@ offering the same repository are distinct choices. Further operations use the ex
 `codespace_id`, execution/session/file and native-transfer contracts. The GitHub provider remains
 independently available. Settings can revoke one device; **Refresh** rereads current state. Browser revocation
 denies new server work but cannot prove physical shutdown of an offline computer; local disable
-and lease expiry enforce shutdown independently.
+enforces shutdown independently.
 
 Before Local create/start/stop/delete, choose `request_id` in `ws1-<lowercase UUID>` form;
 start/stop/delete also send the observed `generation` from get/list. A stale generation returns
@@ -572,10 +578,10 @@ removal; a failed observation cannot remove the card as if the VM were absent. A
 not prevent healthy sibling codespaces from refreshing or running.
 
 Owner deletion requires an active paired computer with local web-control approval and a running,
-reachable companion. It remains available with agent deletion permission denied, work disabled
-or its lease expired. Confirmation authorizes only exact observation and removal; it does not
-change repository grants or renew work permission. MCP deletion still requires the agent's
-deletion grant and enabled, unexpired work authority.
+reachable companion. It remains available when agent deletion permission is denied or work is
+disabled. Confirmation authorizes only exact observation and removal; it does not
+change repository grants or enable work. MCP deletion still requires the agent's
+deletion grant and enabled work permission.
 
 A refused deletion shows its error in the dialog and ends the spinner. **Cancel** stays available
 while a separate read obtains the current generation for another confirmation. An operation's
@@ -604,7 +610,7 @@ The host CLI supports `create OWNER/REPO --ref BRANCH`, `start SPACE_ID`, `stop 
 Choose `--request-id` before mutation; the CLI prints it before observing the result. Fresh create
 requires live cloud route registration and initial Git authority. Already admitted VMs can start,
 stop or be cleaned up offline under applicable current owner authority. Starting requires the
-finite work lease; owner-confirmed cleanup does not renew it. Raw host execution is
+enabled work permission; owner-confirmed cleanup does not enable it. Raw host execution is
 unsupported; ordinary commands/files use the guest `moira-workspace` CLI or MCP. `recover` remains
 a custody tool. Persistent paired lifecycle work uses `run`.
 After a crash or computer reboot, login registration starts the selected release; `run` with the
@@ -625,7 +631,7 @@ Sparse image growth does not require full logical preallocation or an extra host
 Shrinking still requires the native APFS minimum and enough capacity for existing data;
 uncertain physical changes retain their original resize journal.
 Work and `doctor` enforce current authority from SDK startup onward. Installation, bootstrap and
-guest registration wait for actual completion; explicit disable, lease expiry and addressed
+guest registration wait for actual completion; explicit disable and addressed
 cancellation retain their physical effect. Parent/observer loss releases observation without
 manufacturing stop intent. Fixed metadata checks and the bounded `doctor` diagnostic are observations,
 not proof that a pending operation has settled.
@@ -633,8 +639,7 @@ The local daemon separates server contact from VM lifetime. Network/5xx failures
 remote owner state is unavailable until connection succeeds, without stopping already-admitted
 work. Remote mutations are refused rather than queued. An addressed resource refusal stays with
 that request. Confirmed remote device revocation/identity failure fences the remote route;
-local disable and lease expiry remain physical policy. Existing grants and finite deadlines are
-never extended; cached results do not repeat effects.
+local disable remains physical policy. Existing grants remain enforced; cached results do not repeat effects.
 Closing the `run` client leaves the persistent owner running; `npm run local -- disable` stops owned work independently
 and keeps VM data. Stop keeps files, while `remove SPACE_ID --confirm` deletes the exact owned VM.
 An uncertain command or edit is retained by its own operation identity and is not retried
@@ -751,7 +756,7 @@ and `codespaces.idle_timeout_minutes` (30 by default, 5 to 240) are sent when a 
 created. Turning the preference off requests GitHub's maximum 240 minutes, not unlimited runtime.
 Existing Codespaces retain their provider settings. GitHub observes editor, browser and terminal
 input/output; a silent command can be interrupted by its idle shutdown. Local follows its computer
-owner's lease and policy. Current resources and GitHub billing are shown separately; billing
+owner's current permission and policy. Current resources and GitHub billing are shown separately; billing
 unavailability does not revoke workspace access. Admin Settings → Codespaces is a read-only
 configuration view with refresh, not a lifecycle kill-switch panel.
 
@@ -880,8 +885,8 @@ you want to rejoin the normal release channel.
 ## File owners and notification images
 
 Run a paired controller for native attachment capture and workflow progress rendering.
-Owning these communication files requires neither a Local VM nor an enabled Local SDK work
-lease. Select `device_id` when several active controllers are registered, even if only one is
+Owning these communication files requires neither a Local VM nor enabled physical Local work.
+Select `device_id` when several active controllers are registered, even if only one is
 reachable. The selected identity stays fixed; an unavailable route does not authorize another
 owner or prove that a previous submission never ran. Preserve the owner's private
 immutable files and delivery journal when updating its matched executable release.

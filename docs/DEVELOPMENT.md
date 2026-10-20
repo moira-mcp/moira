@@ -77,7 +77,7 @@ unsupported. Supply `--request-id ws1-<lowercase UUID>` to choose a lifecycle id
 otherwise the CLI chooses one and prints it before observing the effect. After a lost reply,
 run `collect REQUEST_ID` with that original identity instead of repeating the mutation.
 Existing owner-admitted VMs and their `~/.local/bin/moira-workspace` CLI remain subject to
-local grants and leases while cloud transport is unavailable. Confirmed authority refusal
+local grants and enabled permission while cloud transport is unavailable. Confirmed authority refusal
 does not permit offline fallback. Fresh host create requires cloud route registration and
 initial Git credential authority; a verified Git identity cache is restricted to existing
 VMs. MCP requires a live authenticated owner and queues no offline lifecycle/settings work.
@@ -97,7 +97,7 @@ settlement, selects the staged release, then reports per-VM restored/unavailable
 command replay. Unconfirmed settlement blocks replacement. Native setup/login/recovery can instead
 use `maintenance --pause --confirm` and, after the original receipt is `paused`, resume using
 `maintenance --resume --request-id ORIGINAL_REQUEST_ID --confirm`. Commands such as
-`login --new-store` still require disabled work; a pause does not renew permission.
+`login --new-store` still require disabled work; a pause does not enable work.
 
 Cold-owner startup observes surviving workers and recovers only verified known intended-running
 VMs. Login startup after a host reboot requires the original storage and available SDK credentials;
@@ -124,8 +124,10 @@ token bytes are not active authority and must not be erased during binding migra
 new issuance or Git/PR replay. Collection of a live stream is metadata-only; orphan
 retirement requires the existing runner-lock and confirmed owner-absence proof.
 Retain original identities across custody/outcome/disposal uncertainty and await actual
-upstream closure before disposal. Do not describe a local lease deadline as provider
-expiry or assume that parent revocation automatically revokes a derived child.
+upstream closure before disposal. Local permission has no work deadline; the child's actual
+provider and parent expiration still bound use. An unrelated settings revision preserves unchanged
+credential authority; device/resource/grant revocation still retires affected children.
+Do not assume that parent revocation automatically revokes a derived child.
 
 ### Common workspace payload
 

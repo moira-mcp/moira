@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { timingSafeEqual } from "node:crypto";
+import { join } from "node:path";
 import {
   localPolicySchema,
   requireLocalGrant,
@@ -53,8 +54,8 @@ export type LocalSpace = z.infer<typeof spaceSchema>;
 export function policyForSpace(policy: LocalPolicy, space: LocalSpace): LocalPolicy {
   return { ...policy, runtime: { ...policy.runtime, ...space.admittedMachine } };
 }
-export function requireSpaceGrant(policy: LocalPolicy, space: LocalSpace, now: number) {
-  const repository = requireLocalGrant(policy, space.repositoryId, now);
+export function requireSpaceGrant(policy: LocalPolicy, space: LocalSpace) {
+  const repository = requireLocalGrant(policy, space.repositoryId);
   if (space.admittedRepositoryFullName && space.admittedRepositoryFullName !== repository.fullName)
     throw new LocalRefusal(
       "LOCAL_REPOSITORY_DENIED",
@@ -65,6 +66,23 @@ export function requireSpaceGrant(policy: LocalPolicy, space: LocalSpace, now: n
 
 export class LocalRecords {
   constructor(readonly state: PrivateState) {}
+  /** One private kernel gate excludes settings writers across CLI and owner processes. */
+  async withSettingsChange<T>(action: () => Promise<T>): Promise<T> {
+    const settings = await PrivateState.open(join(this.state.root, "settings-control"));
+    const release = await settings.lock({ recoverStale: true }).catch((error: unknown) => {
+      if (error instanceof LocalRefusal && error.code === "LOCAL_ALREADY_RUNNING")
+        throw new LocalRefusal(
+          error.code,
+          "Another settings change is in progress; inspect its result before submitting a new change.",
+        );
+      throw error;
+    });
+    try {
+      return await action();
+    } finally {
+      await release();
+    }
+  }
   async policyOrNull(): Promise<LocalPolicy | null> {
     return this.state.read("policy.json", localPolicySchema.parse);
   }
@@ -109,7 +127,7 @@ export class LocalRecords {
   async put(space: LocalSpace): Promise<void> {
     await this.state.write(`space-${space.id}.json`, spaceSchema.parse(space));
   }
-  async authorize(header: string, now = Date.now()): Promise<BrokerGrant | null> {
+  async authorize(header: string): Promise<BrokerGrant | null> {
     const match = /^Basic ([A-Za-z0-9+/]+={0,2})$/.exec(header);
     if (!match) return null;
     const decoded = Buffer.from(match[1], "base64");
@@ -130,7 +148,7 @@ export class LocalRecords {
       return null;
     const policy = await this.policy();
     try {
-      const repository = requireLocalGrant(policy, space.repositoryId, now);
+      const repository = requireLocalGrant(policy, space.repositoryId);
       if (
         space.admittedRepositoryFullName &&
         space.admittedRepositoryFullName !== repository.fullName

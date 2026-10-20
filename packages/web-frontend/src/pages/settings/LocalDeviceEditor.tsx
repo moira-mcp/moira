@@ -2,7 +2,6 @@ import React, { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   assertLocalControlSettings,
-  MAX_LOCAL_WORK_LEASE_MS,
   localDeviceSettingsSchema,
   type LocalDeviceSettingsValue,
 } from "@mcp-moira/shared/local-management-types";
@@ -115,7 +114,7 @@ export function LocalDeviceEditor({
     }
     try {
       if (!control.ceiling) throw new Error("Unknown local ceiling");
-      assertLocalControlSettings(parsed.data, control.ceiling, Date.now());
+      assertLocalControlSettings(parsed.data, control.ceiling);
     } catch {
       setError(t("localDevices.editor.invalid"));
       return;
@@ -256,39 +255,6 @@ export function LocalDeviceEditor({
             <Label htmlFor={`${prefix}-enabled`}>{t("localDevices.editor.enabled")}</Label>
           </div>
           {numeric()}
-          <div className="space-y-1.5">
-            <Label htmlFor={`${prefix}-lease`}>{t("localDevices.editor.lease")}</Label>
-            <Input
-              id={`${prefix}-lease`}
-              type="datetime-local"
-              value={
-                Number.isFinite(draft.leaseUntil)
-                  ? new Date(
-                      draft.leaseUntil - new Date(draft.leaseUntil).getTimezoneOffset() * 60_000,
-                    )
-                      .toISOString()
-                      .slice(0, 16)
-                  : ""
-              }
-              onChange={(event) =>
-                change("leaseUntil", new Date(event.currentTarget.value).getTime())
-              }
-            />
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              disabled={control.ceiling.maxLeaseMs < MAX_LOCAL_WORK_LEASE_MS}
-              onClick={() => change("leaseUntil", Date.now() + MAX_LOCAL_WORK_LEASE_MS)}
-            >
-              {t("localDevices.editor.week")}
-            </Button>
-            <p className="text-xs text-muted-foreground">
-              {t("localDevices.editor.leaseCeiling", {
-                hours: control.ceiling.maxLeaseMs / 3600_000,
-              })}
-            </p>
-          </div>
         </div>
         <fieldset className="space-y-3 rounded-md border p-4">
           <legend className="px-1 font-medium">{t("localDevices.editor.agent.title")}</legend>

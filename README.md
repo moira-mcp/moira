@@ -165,8 +165,9 @@ npm run local -- --help
 
 The package is private and is not a published global npm installer. Pair the controller through
 **Settings → Development → Local computers**; the pairing token reaches the companion through stdin.
-For Local VM work, initialize the physical capability and approve repository rights and a finite
-work lease on that computer. Review effective owner grants in the browser before remote work.
+For Local VM work, initialize the physical capability, approve repository rights and enable
+work on that computer. Permission remains enabled until you explicitly disable it. Review
+effective owner grants in the browser before remote work.
 `npm run local -- run` starts or connects to the persistent login-started host owner and returns;
 closing the client does not stop its VMs. `install` stages a complete immutable release without
 replacing that running owner. Inspect `service-status` before an explicit interrupting
@@ -194,7 +195,7 @@ the optional `ghcr.io/moira-mcp/features/workspace-service` Feature with a publi
 Host `moira-local create`, `start`, `stop` and `remove` call the running owner controller with the
 observed generation and an original request ID; `collect` inspects that ID without repeating work.
 Creation also needs cloud route registration and initial Git authority. Existing owner-admitted
-Local work and its guest CLI remain subject to current local grants and leases during a temporary
+Local work and its guest CLI remain subject to current local grants and enabled permission during a temporary
 cloud outage. A confirmed authority refusal does not grant offline access. Raw host `request` and
 credential-export commands are unsupported; `recover` remains an explicit custody action.
 

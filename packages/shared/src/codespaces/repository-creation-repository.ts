@@ -3,7 +3,6 @@ import type Database from "better-sqlite3";
 import { canonicalJson } from "../utils/canonical-json.js";
 import { LocalDeviceRepository, digestLocalSecret } from "./local-device-repository.js";
 import { LocalDeviceError, type LocalDeviceView } from "./local-device-types.js";
-import { MAX_LOCAL_WORK_LEASE_MS } from "./local-management-types.js";
 
 export interface RepositoryCreationInput {
   deviceId: string;
@@ -59,7 +58,6 @@ export class RepositoryCreationRepository {
     userId: string,
     input: RepositoryCreationInput,
     authority: RepositoryCreationAuthority,
-    now: number,
     device: LocalDeviceView,
     admissionPending = false,
   ) {
@@ -81,13 +79,11 @@ export class RepositoryCreationRepository {
       !delegation?.allowNewPrivate ||
       delegation.githubUserId !== authority.githubUserId ||
       delegation.owner.toLowerCase() !== authority.owner.toLowerCase() ||
-      !device.owner.local.policy.enabled ||
-      device.owner.local.policy.leaseUntil <= now ||
-      device.owner.local.policy.leaseUntil > now + MAX_LOCAL_WORK_LEASE_MS
+      !device.owner.local.policy.enabled
     )
       throw new LocalDeviceError(
         "LOCAL_UNAUTHORIZED",
-        "Apply new-private-repository delegation and a valid work lease first.",
+        "Apply new-private-repository delegation and enable local work first.",
       );
     return { device, delegation };
   }
@@ -110,13 +106,7 @@ export class RepositoryCreationRepository {
             );
           return old;
         }
-        const { device, delegation } = this.deviceAuthority(
-          userId,
-          input,
-          authority,
-          now,
-          observed,
-        );
+        const { device, delegation } = this.deviceAuthority(userId, input, authority, observed);
         if (
           this.sqlite
             .prepare(
@@ -161,7 +151,6 @@ export class RepositoryCreationRepository {
   async assertCurrent(
     record: RepositoryCreationRecord,
     authority: RepositoryCreationAuthority,
-    now: number,
   ): Promise<void> {
     const observed = await this.readDevice(record.userId, record.deviceId);
     if (observed.owner.state !== "available" || observed.owner.local.state !== "configured")
@@ -179,7 +168,6 @@ export class RepositoryCreationRepository {
       record.userId,
       record,
       authority,
-      now,
       observed,
       admissionPending,
     );
@@ -221,7 +209,7 @@ export class RepositoryCreationRepository {
     authority: RepositoryCreationAuthority,
     now: number,
   ): Promise<void> {
-    await this.assertCurrent(record, authority, now);
+    await this.assertCurrent(record, authority);
     this.sqlite
       .transaction(() => {
         const device = this.devices.getDeviceIdentity(record.userId, record.deviceId);

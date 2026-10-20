@@ -2,18 +2,18 @@ import { afterEach, expect, test } from "@jest/globals";
 import { mkdtemp, realpath, rm, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { setImmediate as nextTurn } from "node:timers/promises";
 import { PrivateState } from "../../../packages/local/src/private-state.js";
 import { LocalRecords } from "../../../packages/local/src/space-record.js";
 import { LocalManager } from "../../../packages/local/src/manager.js";
 import { LocalDaemon } from "../../../packages/local/src/daemon.js";
-import { LocalRefusal } from "../../../packages/local/src/policy.js";
+import { LocalRefusal, localRuntimeProfileHash } from "../../../packages/local/src/policy.js";
 import { LocalRelay, LocalDeviceAuthorityFailure } from "../../../packages/local/src/relay.js";
 import {
   startLocalController,
   controllerRequest,
-  type LocalController,
+  LocalController,
 } from "../../../packages/local/src/controller.js";
 import { runProcess } from "../../../packages/local/src/process.js";
 import {
@@ -678,9 +678,7 @@ test.each(["unconfirmed", "settling", "resuming"] as const)(
       target = paused ? release : staged,
       action = paused ? "resume" : "update",
       f = await fixture(false, { requestId: id, phase, ...(paused ? { pause: true } : {}) });
-    const profile = createHash("sha256")
-      .update(JSON.stringify({ deviceId: f.policy.deviceId, runtime: f.policy.runtime }))
-      .digest("hex");
+    const profile = localRuntimeProfileHash(f.policy);
     const before = { owner: randomUUID(), profile, settled: false };
     const command = { requestId: requestId(), state: "unconfirmed", result: "retain original" };
     try {
@@ -853,6 +851,47 @@ test("the real persistent service exposes local control without a Local SDK conf
   } finally {
     abort.abort();
     await running;
+    await rm((await state.ipcDirectory()).root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("a paired GitHub-only controller acquires real owner admission without configuring a Local SDK", async () => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), "moira-github-only-owner-")));
+  const state = await PrivateState.open(root),
+    records = new LocalRecords(state);
+  const identity = {
+    userId: "owner",
+    deviceId: randomUUID(),
+    deviceGeneration: 1,
+    connectionId: randomUUID(),
+  };
+  await state.write("connection.json", {
+    ...identity,
+    origin: "https://moira.example",
+    credential: "fixture-controller-credential",
+  });
+  const manager = new LocalManager(records);
+  const controller = new LocalController(manager, identity);
+  let endpoint: Awaited<ReturnType<typeof startLocalController>> | undefined;
+  try {
+    await controller.initialize();
+    endpoint = await startLocalController(controller);
+    expect(await controllerRequest(endpoint.socketPath, "GET", "/v1/controller")).toMatchObject({
+      ...identity,
+      local: { state: "unconfigured" },
+      github: { resources: [] },
+    });
+    expect(await records.policyOrNull()).toBeNull();
+    expect(await state.read("runtime-owner.json", (value) => value)).toBeNull();
+    await endpoint.close();
+    endpoint = undefined;
+    await manager.release();
+    await state.write("policy.json", { version: 2, enabled: true });
+    await expect(new LocalManager(records).holdRunnerLock()).rejects.toThrow();
+  } finally {
+    await endpoint?.close();
+    await manager.release();
     await rm((await state.ipcDirectory()).root, { recursive: true, force: true });
     await rm(root, { recursive: true, force: true });
   }

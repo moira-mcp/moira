@@ -415,8 +415,8 @@ through `/api/local-devices`; they cannot act as another device or user.
 Repository, resource, connection and generation checks remain additional authority
 boundaries. Device revocation invalidates its requests without revoking other
 devices. It does not promise instantaneous physical stop on an offline host:
-the independent companion guard enforces the locally granted finite work lease
-and disable state. Local SDK sign-in remains in the machine's owned credential
+the independent companion guard enforces explicit local disable. Work permission has
+no automatic deadline. Local SDK sign-in remains in the machine's owned credential
 store and is not sent as enrollment policy or forwarded into guest environment.
 
 Owner web control requires a separate, explicit local `web-control --confirm`
@@ -432,21 +432,25 @@ policy, approved ceilings and settings revisions belong to the always-on control
 not cloud enrollment or heartbeat state. A settings write carries its caller-selected
 ws1 request ID and reaches the live owner; unavailable refuses before dispatch instead
 of queuing a request or authorizing from cached policy. Approved management access
-remains available while work is disabled or expired without authorizing jobs or Git.
+remains available while work is disabled without authorizing jobs or Git.
+CLI and web settings use the same private cross-process gate, and current policy,
+applied revision and delegated permission publish together. Ordinary settings apply
+live; enablement and shared-storage changes use explicit stopped control.
 Original operation collection does not repeat accepted or uncertain work. Observer
 disconnect does not revoke a previously admitted effect.
 
-The global cloud control is an additional remote admission gate: it can refuse Local
-create/start and workspace routing while the device remains paired and its local policy
-remains valid. It does not block the controller management route, request physical Local
-stop or revoke existing offline owner grants. Account/device revocation and the owner's
-finite lease remain separate authority boundaries.
+Current account, device, connection and resource authority gate cloud routing. Local
+create/start additionally require the current owner's enabled permission and exact
+repository grant. The GitHub provider's enabled flag is not a Local admission gate and
+does not override locally approved rights or request physical Local stop. Account/device
+revocation and explicit local enabled/disabled permission remain separate authority
+boundaries.
 
 An admitted browser session can confirm deletion of one owned local codespace at its current
 generation while the paired device and web-control approval remain active. The existing durable
 owner journal records this confirmation. Controller routing binds cleanup authority to the exact user,
 device, connection, resource and generation, and the companion rechecks local approval. Only exact
-observation and deletion are authorized; enabled agent work, its lease and agent deletion grants
+observation and deletion are authorized; enabled agent work and agent deletion grants
 are not prerequisites for this cleanup and are not changed by it. MCP callers and a bare request
 flag cannot grant owner cleanup authority.
 
@@ -458,7 +462,7 @@ verified HTTPS. The issuer checks current account, parent generation, App grant
 and device/resource authority; Local uses its stable route-authority generation,
 while the separately observed lifecycle generation guards start/stop/delete. Each Local phase
 returns one coherent owner observation of the repository grant, route/lifecycle generations,
-applied settings revision and finite lease. Issuer and identity consumers reuse it within that
+applied settings revision and current enabled permission. Issuer and identity consumers reuse it within that
 phase; asynchronous grant refresh and issuance still require fresh authorization.
 The original OAuth/refresh credential and Local device credential never reach
 project commands. Derived tokens remain broker-private memory and must not enter
@@ -477,10 +481,13 @@ does not mint or refresh, and even confirmed absence does not automatically
 reacquire. Custody/outcome/disposal uncertainty remains uncertain with the same
 identity. PR creation has its own original mutation receipt; credential failure
 before dispatch does not prove a PR effect. Known children are disposed after the
-physical upstream closes and on authority retirement. Local usage expiry is not
+physical upstream closes and on authority retirement. An unrelated settings revision
+does not revoke unchanged device/resource/exact-grant authority. Children retain finite
+provider and parent use bounds even though Local work permission has no deadline.
+Local credential usage expiry is not
 proof of GitHub expiry enforcement or parent-to-child revocation cascade.
 Existing owner-admitted VMs and direct local CLI access retain only their current
-local grants and finite lease when cloud transport is unavailable. A confirmed
+local grants and enabled permission when cloud transport is unavailable. A confirmed
 authorization refusal does not enable fallback; fresh creation needs cloud route
 registration and initial Git authority.
 See [Local Device Enrollment and Controller API](API.md#local-device-enrollment-and-controller-api)

@@ -97,7 +97,6 @@ export class LocalRepositoryAdmissionService {
               : {
                   state: "configured" as const,
                   enabled: device.owner.local.policy.enabled,
-                  lease_until: device.owner.local.policy.leaseUntil,
                   delegation: device.owner.local.control.appliedAgentRepositoryManagement ?? null,
                   control_status: device.owner.local.control.status,
                   revision: device.owner.local.control.revision,

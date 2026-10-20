@@ -24,7 +24,7 @@ import { CodespaceManagement } from "./CodespaceManagement";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 
 function DevicePermissions({ device }: { device: LocalDeviceView }) {
-  const { t, i18n } = useTranslation();
+  const { t } = useTranslation();
   if (device.owner.state !== "available")
     return <p role="status">{t("localDevices.ownerUnavailable")}</p>;
   if (device.owner.local.state === "unconfigured")
@@ -39,11 +39,7 @@ function DevicePermissions({ device }: { device: LocalDeviceView }) {
           storage: policy.machine.storageBytes / 1024 ** 3,
         })}
       </p>
-      <p>
-        {t("localDevices.lease", {
-          expires: new Date(policy.leaseUntil).toLocaleString(i18n.language),
-        })}
-      </p>
+      <p>{t("localDevices.persistentPermission")}</p>
       {!policy.enabled && <p>{t("localDevices.disabled")}</p>}
       <h4 className="font-medium">{t("localDevices.repositories")}</h4>
       {policy.repositories.length === 0 ? (
@@ -194,19 +190,21 @@ export function LocalDeviceSettings({ active = true }: { active?: boolean }) {
     const owned = guard(false);
     const receipt = await apiClient.getLocalDeviceSettingsOperation(device.deviceId, requestId);
     if (!owned()) throw new Error("Retired local device operation");
+    if (receipt.requestId !== requestId) throw new Error("Settings request identity changed");
     if (
       receipt.state === "absent" ||
       (receipt.state === "completed" && receipt.outcome?.ok === false)
     )
       return false;
-    if (receipt.state !== "completed" || !receipt.result)
+    if (receipt.state !== "completed" || receipt.outcome?.ok !== true)
       throw new Error("Settings outcome is not confirmed");
-    resource.update((value) => ({
-      ...value,
-      devices: value.devices.map((current) =>
-        current.deviceId === receipt.result!.deviceId ? receipt.result! : current,
-      ),
-    }));
+    if (receipt.result)
+      resource.update((value) => ({
+        ...value,
+        devices: value.devices.map((current) =>
+          current.deviceId === receipt.result!.deviceId ? receipt.result! : current,
+        ),
+      }));
     await resource.refresh();
     if (owned()) await reloadManagement({ silent: true });
     return true;

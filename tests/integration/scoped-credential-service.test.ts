@@ -685,29 +685,28 @@ describe("Scoped credential issuer custody", () => {
     expect(create).toHaveBeenCalledTimes(1);
     expect(revoke).toHaveBeenCalledWith("ghu_child");
   });
-  test("replaying an old resource or settings retirement preserves children issued under later owner authority", async () => {
+  test("replaying an old resource retirement preserves children issued under later owner authority", async () => {
     const deviceId = randomUUID();
     authority = {
       ...authority,
-      identity: JSON.stringify({ deviceId, ownerResourceGeneration: 1, ownerAppliedRevision: 1 }),
+      identity: JSON.stringify({ deviceId, ownerResourceGeneration: 1 }),
     };
     await service.acquire("owner-bearer", input);
     authority = {
       ...authority,
-      identity: JSON.stringify({ deviceId, ownerResourceGeneration: 2, ownerAppliedRevision: 1 }),
+      identity: JSON.stringify({ deviceId, ownerResourceGeneration: 2 }),
     };
     candidate = { ...candidate, token: "ghu_admitting" };
     await service.acquire("owner-bearer", { ...input, requestId: "ws1-" + randomUUID() });
     const later = { ...input, requestId: "ws1-" + randomUUID() };
     authority = {
       ...authority,
-      identity: JSON.stringify({ deviceId, ownerResourceGeneration: 3, ownerAppliedRevision: 3 }),
+      identity: JSON.stringify({ deviceId, ownerResourceGeneration: 3 }),
     };
     candidate = { ...candidate, token: "ghu_later" };
     const latest = await service.acquire("owner-bearer", later);
     await service.disposeResource("owner", input.resourceId, 2);
     await service.disposeResource("owner", input.resourceId, 2);
-    await service.disposeDevice("owner", deviceId, 1);
     expect(revoke.mock.calls.map(([token]) => token).sort()).toEqual([
       "ghu_admitting",
       "ghu_child",
@@ -725,6 +724,63 @@ describe("Scoped credential issuer custody", () => {
     ]);
     expect(create).toHaveBeenCalledTimes(3);
   });
+  test.each([false, true])(
+    "settings revalidation preserves current children and retires only the device grant that changed with unrelated malformed custody=%s",
+    async (malformedOther) => {
+      const deviceId = randomUUID();
+      authority = {
+        ...authority,
+        useUntil: null,
+        identity: JSON.stringify({ deviceId, grant: "unchanged" }),
+      };
+      const preserved = await service.acquire("owner-bearer", input);
+      const revokedInput = { ...input, requestId: "ws1-" + randomUUID() };
+      authority = { ...authority, identity: JSON.stringify({ deviceId, grant: "revoked" }) };
+      candidate = { ...candidate, token: "ghu_revoked" };
+      const revoked = await service.acquire("owner-bearer", revokedInput);
+      const otherDevice = randomUUID();
+      authority = {
+        ...authority,
+        identity: JSON.stringify({ deviceId: otherDevice, grant: "other" }),
+      };
+      candidate = { ...candidate, token: "ghu_other" };
+      const other = await service.acquire("owner-bearer", {
+        ...input,
+        requestId: "ws1-" + randomUUID(),
+      });
+      if (malformedOther)
+        sqlite
+          .prepare(
+            "UPDATE codespaceCredentialRevocation SET ciphertext='invalid-other-device-envelope' WHERE id=?",
+          )
+          .run(other.credentialId);
+      const otherBefore = sqlite
+        .prepare("SELECT * FROM codespaceCredentialRevocation WHERE id=?")
+        .get(other.credentialId);
+      currentAuthority.mockImplementation(
+        async (current) => JSON.parse(current.identity).grant !== "revoked",
+      );
+      await service.revalidateDevice("owner", deviceId);
+      for (const [child, state] of [
+        [preserved, "live"],
+        [revoked, "disposed"],
+        [other, "live"],
+      ] as const)
+        expect(
+          repository.getScopedCredential("owner", CODESPACE_PROVIDER_GITHUB, {
+            credentialId: child.credentialId,
+          })?.state,
+        ).toBe(state);
+      expect(preserved.useUntil).toBe(expiresAt);
+      expect(revoke.mock.calls.map(([token]) => token)).toEqual(["ghu_revoked"]);
+      expect(create).toHaveBeenCalledTimes(3);
+      expect(
+        sqlite
+          .prepare("SELECT * FROM codespaceCredentialRevocation WHERE id=?")
+          .get(other.credentialId),
+      ).toEqual(otherBefore);
+    },
+  );
   test("parent witness is taken after refresh, and a mid-issuance parent replacement disposes candidate", async () => {
     parent = {
       ...parent,

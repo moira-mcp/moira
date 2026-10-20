@@ -1,7 +1,6 @@
 import { z } from "zod";
 import { WORKSPACE_REQUEST_ID_PATTERN } from "./workspace-request-id.js";
 
-export const MAX_LOCAL_WORK_LEASE_MS = 7 * 24 * 60 * 60_000;
 const integer = (min: number, max: number) => z.number().int().min(min).max(max);
 const text = (maximum: number) =>
   z
@@ -51,7 +50,6 @@ export const localDeviceSettingsSchema = z
   .object({
     label: text(80),
     enabled: z.boolean(),
-    leaseUntil: integer(0, Number.MAX_SAFE_INTEGER),
     cpuCores: integer(1, Number.MAX_SAFE_INTEGER),
     memoryBytes: integer(1, Number.MAX_SAFE_INTEGER),
     storageBytes: integer(1, Number.MAX_SAFE_INTEGER),
@@ -78,7 +76,6 @@ export const localControlCeilingSchema = z
     memoryBytes: integer(1, Number.MAX_SAFE_INTEGER),
     storageBytes: integer(1, Number.MAX_SAFE_INTEGER),
     dockerBytes: integer(1, Number.MAX_SAFE_INTEGER),
-    maxLeaseMs: integer(1, MAX_LOCAL_WORK_LEASE_MS),
   })
   .strict();
 export type LocalControlCeiling = z.infer<typeof localControlCeilingSchema>;
@@ -150,39 +147,20 @@ export function assertAgentRepositoryAdmission(
     throw new Error("Repository addition exceeds the applied agent delegation.");
 }
 
-/** Compare parsed settings, preserving the exact order and content of every previous grant. */
+/** Classify physical interruption, independently of who may change repository authority. */
 export function isLiveLocalSettingsChange(
   previous: LocalDeviceSettingsValue,
   next: LocalDeviceSettingsValue,
 ): boolean {
-  const stable = (settings: LocalDeviceSettingsValue) => ({
-    ...settings,
-    repositories: [],
-    agentRepositoryManagement: null,
-  });
-  return (
-    JSON.stringify(stable(previous)) === JSON.stringify(stable(next)) &&
-    next.repositories.length >= previous.repositories.length &&
-    previous.repositories.every(
-      (repository, index) =>
-        JSON.stringify(repository) === JSON.stringify(next.repositories[index]),
-    )
-  );
+  return previous.enabled === next.enabled && previous.storageBytes === next.storageBytes;
 }
 
-/** The local opt-in and server save use exactly the same finite upper-bound decision. */
+/** The local opt-in and server save use the same approved resource bounds. */
 export function assertLocalControlSettings(
   settings: LocalDeviceSettingsValue,
   ceiling: LocalControlCeiling,
-  now: number,
 ): void {
   for (const key of Object.keys(ceiling) as (keyof LocalControlCeiling)[]) {
-    if (key !== "maxLeaseMs" && settings[key] > ceiling[key])
-      throw new Error(`Local control ceiling exceeded: ${key}`);
+    if (settings[key] > ceiling[key]) throw new Error(`Local control ceiling exceeded: ${key}`);
   }
-  if (
-    settings.enabled &&
-    (settings.leaseUntil <= now || settings.leaseUntil > now + ceiling.maxLeaseMs)
-  )
-    throw new Error("Local work lease exceeds its finite approval");
 }

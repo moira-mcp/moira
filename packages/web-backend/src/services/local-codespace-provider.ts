@@ -184,7 +184,7 @@ export class LocalCodespaceProvider {
           "Connect Moira Local in Settings and approve the pairing on this computer.",
         repository_not_approved:
           "Approve this repository with moira-local approve on the selected computer.",
-        ready: "Run moira-local run on the selected computer with a current local work lease.",
+        ready: "Run moira-local run on the selected computer with local work enabled.",
       },
     };
   }

@@ -246,7 +246,10 @@ a revoked binding with unresolved disk custody must still prevent metadata delet
 
 The browser fixture pairs and confirms its own device but does not connect a controller.
 It checks honest offline state, absence of effective settings, pre-admission write refusal
-and the same unavailable state after reload. UI unit cases separately check retained drafts,
+and the same unavailable state after reload. Separate mocked owner responses exercise the rendered
+English/Russian enabled, disabled, pending, rejected and unavailable cards, including persistent
+permission without expiry controls. Those images establish UI behavior, not physical settings effects.
+UI unit cases separately check retained drafts,
 actual applied consent and original-ID recovery. Neither fixture claims a complete browser
 settings effect on a physical VM.
 
@@ -259,11 +262,11 @@ custody; controller receipt cases cover durable original-ID collection and uncer
 after restarting an accepted request without replay.
 
 Native recovery cases distinguish SDK/Engine custody from guest readiness, preserve
-peer state and unknown receipts, and exercise lease expiry, parent loss and emergency
+peer state and unknown receipts, and exercise persistent permission, parent loss and emergency
 shutdown. Storage fixtures check retained image reattachment, sector/byte sizing,
 lost replies and unsafe binding refusal without native disk tools. Broker cases check
 all resolved addresses, peer pinning, streaming backpressure, establishment-only timers
-and later revocation/lease closure. Network admission has no socket-count or traffic-ledger
+and later grant revocation or explicit disable. Network admission has no socket-count or traffic-ledger
 workload quota; authority remains mandatory. Local physical budgets and cloud billing
 capacity have separate fixtures.
 
@@ -314,8 +317,9 @@ Local physical VM/network acceptance remains separate below.
 Use the supported macOS runtime described in [CODESPACES.md](../docs/CODESPACES.md) with
 an explicitly approved disposable profile and repository. Validate usable mountless
 creation, guest Docker, command exits and separate output streams, native byte integrity,
-session directory/variables and file persistence across stop/start. Lease expiry and local
-emergency disable must stop physical work independently of the parent process, retain
+session directory/variables and file persistence across stop/start. Permission remains enabled
+without a work deadline; controlled authority clocks distinguish that contract from finite credential
+expiry. Explicit local disable must stop physical work independently of the client process, retain
 data and produce settled ownership before restart. Check that host files, credentials
 and SSH sockets are not forwarded; credential-shaped guest variables require classification
 against documented public placeholders rather than assuming that their presence means

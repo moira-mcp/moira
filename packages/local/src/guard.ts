@@ -9,7 +9,15 @@ import { RuntimeOwner } from "./runtime-owner.js";
 import { DeviceRuntimeControl } from "./runtime-control.js";
 import { RuntimeDeviceOwner } from "./runtime-device-owner.js";
 import type { LocalVmObservation } from "./local-vm-runtime.js";
-import { LocalRefusal, localPolicySchema, type LocalPolicy } from "./policy.js";
+import {
+  LocalRefusal,
+  localPolicySchema,
+  legacyLocalPolicySchema,
+  localRuntimeProfileHash,
+  physicalRuntimeProfile,
+  type LocalPolicy,
+} from "./policy.js";
+import { prepareControlApprovalUpgrade } from "./control-approval.js";
 import {
   localManagementOutcomeSchema,
   type LocalManagementOutcome,
@@ -25,10 +33,128 @@ const receiptSchema = z
     released: z.literal(true).optional(),
   })
   .strict();
-const profile = (policy: LocalPolicy) =>
-  createHash("sha256")
-    .update(JSON.stringify({ deviceId: policy.deviceId, runtime: policy.runtime }))
+const profile = localRuntimeProfileHash;
+
+/** Caller holds the physical runner gate; this is not a public compatibility decoder. */
+export async function upgradeLocalPolicyState(
+  records: LocalRecords,
+  options: { recoverLegacy?: boolean } = {},
+): Promise<boolean> {
+  return records.withSettingsChange(() => upgradeLocalPolicyStateLocked(records, options));
+}
+
+async function upgradeLocalPolicyStateLocked(
+  records: LocalRecords,
+  options: { recoverLegacy?: boolean },
+): Promise<boolean> {
+  await requireRuntimeOwnerAbsent(records);
+  const raw = await records.state.read("policy.json", (value) => value);
+  const approvalRaw = await records.state.read("web-control.json", (value) => value);
+  const approval = approvalRaw === null ? null : prepareControlApprovalUpgrade(approvalRaw);
+  if (raw === null) {
+    if (approval?.changed) await records.state.write("web-control.json", approval.approval);
+    return false;
+  }
+  const current = localPolicySchema.safeParse(raw);
+  if (current.success) {
+    if (approval && approval.approval.deviceId !== current.data.deviceId)
+      throw new LocalRefusal(
+        "LOCAL_IDENTITY_CHANGED",
+        "The retained approval names another device.",
+      );
+    const receipt = await readRuntimeSettlement(records);
+    if (receipt && receipt.profile !== profile(current.data))
+      throw new LocalRefusal(
+        "LOCAL_RUNTIME_CHANGED",
+        "The retained owner belongs to another physical profile.",
+      );
+    if (
+      approval?.legacySettings &&
+      (approval.legacySettings.appliedRevision !== current.data.appliedRevision ||
+        JSON.stringify(approval.legacySettings.agentRepositoryManagement) !==
+          JSON.stringify(current.data.agentRepositoryManagement))
+    )
+      throw new LocalRefusal(
+        "LOCAL_CONTROL_CONFLICT",
+        "The converted settings do not match their retained approval.",
+      );
+    if (approval?.changed) await records.state.write("web-control.json", approval.approval);
+    return false;
+  }
+  const previous = legacyLocalPolicySchema.parse(raw);
+  const intent = await records.state.read("control-intent.json", (value) =>
+    z
+      .object({ revision: z.number().int().positive(), livePrevious: z.unknown().optional() })
+      .passthrough()
+      .parse(value),
+  );
+  if (
+    (await records.state.read("policy-transition.json", (value) => value)) !== null ||
+    (intent &&
+      intent.livePrevious === undefined &&
+      (!approval || intent.revision > (approval.legacySettings?.appliedRevision ?? 0)))
+  )
+    throw new LocalRefusal(
+      "LOCAL_CONTROL_PENDING",
+      "A retained physical settings effect needs settlement before policy conversion.",
+    );
+  if (approval && approval.approval.deviceId !== previous.deviceId)
+    throw new LocalRefusal("LOCAL_IDENTITY_CHANGED", "The retained approval names another device.");
+  const { leaseUntil, ...fields } = previous;
+  const now = Date.now();
+  const next = localPolicySchema.parse({
+    ...fields,
+    ...approval?.legacySettings,
+    version: 2,
+    enabled: previous.enabled && leaseUntil > now && leaseUntil <= now + 7 * 24 * 60 * 60_000,
+  });
+  const receipt = await readRuntimeSettlement(records);
+  const legacyProfile = createHash("sha256")
+    .update(JSON.stringify({ deviceId: previous.deviceId, runtime: previous.runtime }))
     .digest("hex");
+  if (receipt && receipt.profile !== legacyProfile && receipt.profile !== profile(next))
+    throw new LocalRefusal(
+      "LOCAL_RUNTIME_CHANGED",
+      "The retained owner does not identify the previous physical profile.",
+    );
+  let recovered = false;
+  if (receipt && !receipt.settled) {
+    if (!options.recoverLegacy)
+      throw new LocalRefusal(
+        "LOCAL_STOP_PENDING",
+        "Explicit exact shutdown recovery is required before policy conversion.",
+      );
+    if (previous.enabled)
+      throw new LocalRefusal(
+        "LOCAL_DISABLED_REQUIRED",
+        "Disable local work before recovering the previous owner.",
+      );
+    await settlePrivateRuntime(next);
+    if (
+      JSON.stringify(await records.state.read("policy.json", (value) => value)) !==
+        JSON.stringify(raw) ||
+      JSON.stringify(await readRuntimeSettlement(records)) !== JSON.stringify(receipt)
+    )
+      throw new LocalRefusal(
+        "LOCAL_RUNTIME_CHANGED",
+        "The retained runtime changed during recovery.",
+      );
+    await requireRuntimeOwnerAbsent(records);
+    await records.state.write("runtime-owner.json", {
+      owner: randomUUID(),
+      profile: profile(next),
+      settled: true,
+    });
+    recovered = true;
+  } else if (receipt && receipt.profile !== profile(next)) {
+    // Translate the proof domain, never its settlement assertion. Receipt-first
+    // publication makes interruption recoverable with the exact old policy still present.
+    await records.state.write("runtime-owner.json", { ...receipt, profile: profile(next) });
+  }
+  await records.state.write("policy.json", next);
+  if (approval?.changed) await records.state.write("web-control.json", approval.approval);
+  return recovered;
+}
 
 /** Losing an observer must not crash the owner before its release receipt is durable. */
 function sendGuardMessage(value: object | string, done?: () => void): void {
@@ -73,7 +199,7 @@ export async function replaceStoppedPolicy(
     .strict();
   let transition = await records.state.read("policy-transition.json", transitionSchema.parse);
   const equal = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
-  const withoutLease = (policy: LocalPolicy) => ({ ...policy, enabled: false, leaseUntil: 0 });
+  const withoutEnablement = (policy: LocalPolicy) => ({ ...policy, enabled: false });
   if (!transition && receipt && (!receipt.settled || receipt.profile !== profile(previous)))
     throw new LocalRefusal(
       "LOCAL_STOP_PENDING",
@@ -104,10 +230,13 @@ export async function replaceStoppedPolicy(
         (!transition.before.settled ||
           transition.before.profile !== profile(transition.previous))) ||
       transition.after.profile !== profile(transition.next) ||
-      !equal(withoutLease(next), withoutLease(transition.next)) ||
+      !equal(withoutEnablement(next), withoutEnablement(transition.next)) ||
       (transition.intermediate &&
-        !equal(withoutLease(transition.intermediate), withoutLease(transition.previous)) &&
-        !equal(withoutLease(transition.intermediate), withoutLease(transition.next)))
+        !equal(
+          withoutEnablement(transition.intermediate),
+          withoutEnablement(transition.previous),
+        ) &&
+        !equal(withoutEnablement(transition.intermediate), withoutEnablement(transition.next)))
     )
       throw new LocalRefusal(
         "LOCAL_RUNTIME_CHANGED",
@@ -244,9 +373,9 @@ export async function recoverLocalDevice(records: LocalRecords, confirmed: boole
       "LOCAL_RECOVERY_CONFIRM",
       "Pass --confirm to acknowledge this device owner's unknown shutdown locally.",
     );
-  await recoveryAdmission(records);
   const release = await records.state.lock({ recoverStale: true });
   try {
+    if (await upgradeLocalPolicyState(records, { recoverLegacy: true })) return;
     const { policy, receipt } = await recoveryAdmission(records);
     await settlePrivateRuntime(policy);
     const current = await records.policy();
@@ -273,6 +402,8 @@ export async function recoverLocalDevice(records: LocalRecords, confirmed: boole
 
 /** Disable first; an active owner must settle its tracked calls before physical shutdown is acknowledged. */
 export async function stopLocalDevice(records: LocalRecords): Promise<void> {
+  const raw = await records.state.read("policy.json", (value) => value);
+  if (legacyLocalPolicySchema.safeParse(raw).success) return recoverLocalDevice(records, true);
   const policy = await records.policy();
   if (policy.enabled)
     throw new LocalRefusal(
@@ -752,13 +883,11 @@ async function runGuard(
   const owners = new Map<string, RuntimeOwner>();
   let stopping: Promise<void> | undefined;
   let poll: ReturnType<typeof setTimeout> | undefined;
-  let leaseTimer: ReturnType<typeof setTimeout> | undefined;
   let releasing = false;
   let settled = false;
   const admissionTails = new Map<string, Promise<unknown>>();
   const shutdown = (): Promise<void> => {
     if (poll) clearTimeout(poll);
-    if (leaseTimer) clearTimeout(leaseTimer);
     stopping ??= (async () => {
       control.revoke();
       if (releasing) {
@@ -1021,21 +1150,15 @@ async function runGuard(
       if (stopping) return;
       const policy = await records.policy();
       if (stopping) return;
-      if (leaseTimer) clearTimeout(leaseTimer);
-      if (workAuthority)
-        leaseTimer = setTimeout(emergency, Math.max(1, policy.leaseUntil - Date.now()));
-      if (workAuthority && (!policy.enabled || policy.leaseUntil <= Date.now())) {
-        const error = new LocalRefusal(
-          "LOCAL_NOT_RUNNING",
-          "Local work is disabled or its lease expired.",
-        );
+      if (workAuthority && !policy.enabled) {
+        const error = new LocalRefusal("LOCAL_NOT_RUNNING", "Local work is disabled.");
         if (action === "doctor") release(error);
         else emergency(error);
         return;
       }
       if (
-        policy.deviceId !== initial.deviceId ||
-        JSON.stringify(policy.runtime) !== JSON.stringify(initial.runtime)
+        JSON.stringify(physicalRuntimeProfile(policy)) !==
+        JSON.stringify(physicalRuntimeProfile(initial))
       ) {
         emergency();
         return;
@@ -1054,6 +1177,9 @@ async function runGuard(
               release(error);
               return;
             }
+            // Repository permission is an access boundary, not a VM stop request.
+            // Keep exact native custody so later explicit management can settle it.
+            if (error instanceof LocalRefusal && error.code === "LOCAL_REPOSITORY_DENIED") continue;
             // Rejected admission has no guest effects. Metadata refusal must not become
             // a native stop intent merely because the checker observed its promise.
             if (
@@ -1077,12 +1203,9 @@ async function runGuard(
           }
         }
       if (!stopping)
-        poll = setTimeout(
-          () => {
-            void check();
-          },
-          workAuthority ? Math.max(1, Math.min(1000, policy.leaseUntil - Date.now())) : 1000,
-        );
+        poll = setTimeout(() => {
+          void check();
+        }, 1000);
     } catch (error) {
       release(error);
     }

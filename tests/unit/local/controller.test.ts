@@ -362,11 +362,9 @@ describe("One owner HTTP surface for local and remote control", () => {
         memoryBytes: 8 * GiB,
         storageBytes: 64 * GiB,
         dockerBytes: 8 * GiB,
-        maxLeaseMs: 3600000,
       },
       true,
     );
-    await f.manager.stopWork();
     const requestId = createWorkspaceRequestId(),
       settings = { ...controlSettings(f.policy), label: "Owner applies here" };
     const result = await controllerRequest(
@@ -393,6 +391,7 @@ describe("One owner HTTP surface for local and remote control", () => {
       },
     });
     const before = await f.records.policy();
+    expect((await f.records.get(f.space.id))?.desiredState).toBe("running");
     const refused = await controllerRequest(
       f.endpoint.socketPath,
       "PUT",
@@ -473,6 +472,7 @@ describe("One owner HTTP surface for local and remote control", () => {
           );
         await records.state.write("policy.json", next);
       },
+      resize: async () => undefined,
     });
     await f.control.optIn(
       { ...f.identity, origin: "https://moira.example" },
@@ -481,7 +481,6 @@ describe("One owner HTTP surface for local and remote control", () => {
         memoryBytes: 8 * GiB,
         storageBytes: 64 * GiB,
         dockerBytes: 8 * GiB,
-        maxLeaseMs: 3600000,
       },
       true,
     );
@@ -505,7 +504,7 @@ describe("One owner HTTP surface for local and remote control", () => {
     });
     uncertain = true;
     const applied = controlSettings(await f.records.policy());
-    expect(await send(2, { ...applied, label: "Uncertain" })).toMatchObject({
+    expect(await send(2, { ...applied, storageBytes: 48 * GiB })).toMatchObject({
       outcome: { ok: false, error: { code: "LOCAL_STORAGE_UNSAFE" } },
     });
     const intent = await f.state.read("control-intent.json", (value) => value);

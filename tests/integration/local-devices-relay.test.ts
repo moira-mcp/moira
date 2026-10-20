@@ -650,7 +650,6 @@ describe("Local registration, revocation and owner routing", () => {
         settings: {
           label: "Draft",
           enabled: true,
-          leaseUntil: now + 3600000,
           cpuCores: 2,
           memoryBytes: 4 * 1024 ** 3,
           storageBytes: 8 * 1024 ** 3,

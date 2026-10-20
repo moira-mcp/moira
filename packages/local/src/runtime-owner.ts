@@ -134,7 +134,7 @@ export class RuntimeOwner {
         "LOCAL_SETUP_INCOMPLETE",
         "Guest preparation did not finish. Delete this codespace after confirmed cleanup, then create a new one.",
       );
-    requireSpaceGrant(this.policy, this.space, Date.now());
+    requireSpaceGrant(this.policy, this.space);
     if (activate) {
       if (this.space.phase !== "usable" && this.space.phase !== "stopped")
         throw new LocalRefusal(
@@ -188,7 +188,7 @@ export class RuntimeOwner {
         "LOCAL_GENERATION_CONFLICT",
         "The independent work admission changed.",
       );
-    requireSpaceGrant(policy, space, Date.now());
+    requireSpaceGrant(policy, space);
     if (
       policy.deviceId !== this.policy.deviceId ||
       JSON.stringify(policy.runtime) !== JSON.stringify(this.policy.runtime)
@@ -203,8 +203,8 @@ export class RuntimeOwner {
   }
 
   async check(): Promise<number> {
-    const { policy } = await this.current();
-    return Math.max(1, Math.min(1000, policy.leaseUntil - Date.now()));
+    await this.current();
+    return 1000;
   }
 
   private serial<T>(work: () => Promise<T>): Promise<T> {
@@ -260,7 +260,7 @@ export class RuntimeOwner {
     const work = this.settleGuestResult(
       this.serial(async () => {
         const { space, policy, runtime } = await this.current();
-        const repository = requireSpaceGrant(policy, space, Date.now());
+        const repository = requireSpaceGrant(policy, space);
         const clone = space.phase === "creating";
         await this.protectRuntime();
         if (!space.runtimeId) {
@@ -610,7 +610,7 @@ export class RuntimeOwner {
         const policy = space ? policyForSpace(configured, space) : configured;
         if (!space || space.generation !== generation)
           throw new LocalRefusal("LOCAL_GENERATION_CONFLICT", "The recovery target changed.");
-        requireSpaceGrant(policy, space, Date.now());
+        requireSpaceGrant(policy, space);
         if (
           !space.runtimeId ||
           space.desiredState !== "stopped" ||
@@ -640,7 +640,7 @@ export class RuntimeOwner {
         await this.protectRuntime();
         const current = await this.records.get(this.id);
         const latest = policyForSpace(await this.records.policy(), space);
-        requireSpaceGrant(latest, space, Date.now());
+        requireSpaceGrant(latest, space);
         if (
           !current ||
           JSON.stringify(current) !== JSON.stringify(space) ||
@@ -680,7 +680,7 @@ export class RuntimeOwner {
             "The local sandbox generation changed.",
           );
         if (remove && !localApproval) {
-          const repository = requireSpaceGrant(policy, space, Date.now());
+          const repository = requireSpaceGrant(policy, space);
           if (!repository.allowDelete)
             throw new LocalRefusal(
               "LOCAL_DELETE_APPROVAL_REQUIRED",

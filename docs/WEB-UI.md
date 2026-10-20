@@ -889,31 +889,38 @@ execution inspector) receive `null` for a user that no longer exists and show th
   The token remains page-local and is absent from later device-list responses.
   After local enrollment, confirmation binds the device ID and label using the pairing
   revision; revoke uses the device generation. Current repository permissions, resource
-  settings and lease are read from the live owner's configured `owner.local.policy` and
+  settings and enabled permission are read from the live owner's configured `owner.local.policy` and
   `owner.local.control`. A neutral paired controller has `owner.local.state:"unconfigured"`:
   its connection and GitHub capability remain visible without fabricated Local settings.
   A refused decision keeps the selected device and accessible local error inside
   `ConfirmDialog`. Owner guards retire delayed actions after identity changes.
   Device cards show localized pending/active/revoked status and nullable last-seen
-  time. Revocation fences server access; local lease expiry and disable enforce
-  physical stop when a device cannot reach Moira.
+  time. Revocation fences server access; explicit local disable remains the owner's
+  physical-stop choice, including when the device cannot reach Moira.
   An unavailable owner shows explicit local feedback rather than cached policy as current;
   that state does not mean the device has no grants. Registry last-seen time remains separate.
-  `LocalDeviceEditor` edits the name, enabled state, finite lease, CPU/RAM, bounded disk and guest
+  `LocalDeviceEditor` edits the name, persistent enabled state, CPU/RAM, bounded disk and guest
   Docker capacity, repository read/push/PR/delete permissions, repository-management delegation
   and Git commit identity. It validates through the pure
   `@mcp-moira/shared/local-management-types` export. Web control requires explicit local
-  `web-control --confirm` approval; numeric ceilings remain locally owned and the lease cannot
-  exceed seven days. A PUT carries a fresh ws1 request ID, expected device generation and control revision.
+  `web-control --confirm` approval; numeric ceilings remain locally owned. Work remains
+  enabled until explicit disable; there is no datetime or renewal control. A PUT carries
+  a fresh ws1 request ID, expected device generation and control revision.
   Admitted owner settings and pending/applied/rejected revisions stay separate from effective policy;
   offline saves are refused before dispatch and drafts remain editable. A refusal
   exposes its reason while preserving fields. Fresh accepted settings update untouched fields;
   a pending save cannot discard a newer draft, including when submitted text is normalized.
   CPU/RAM/Docker defaults apply to new environments; existing environments retain their admitted
-  profile. Bounded disk changes require stopped owned work and companion verification.
+  profile. Label, Git identity, repository rights/delegation and default edits apply live
+  without stopping unrelated VMs. Git author settings take effect during workspace
+  preparation; saving them does not rewrite an existing running checkout's Git configuration.
+  Enablement and shared-disk changes use explicit stopped
+  control and companion verification. Missing proved VM admission refuses a default change.
   Owner `pendingRequestId` restores **Check settings result** after reload; it collects only the
   original receipt, without restoring or resending a saved draft. A known rejection allows a
   corrected request against the newly observed revision; an unresolved physical change remains blocked.
+  Historical success without a typed current snapshot clears only its matching pending
+  identity and refreshes current owner state; it does not install the old result as current policy.
 - Codespace provider choice: the existing `GitHubCodespaceManagement` card offers
   GitHub and Local providers. Readiness and connection use the selected provider's facts.
   Readiness reports configuration as `disabled|misconfigured|ready`, not cached guest health
@@ -922,7 +929,7 @@ execution inspector) receive `null` for a user that no longer exists and show th
   creation is refused before admission when none is eligible; multiple owners require selection.
   Repository choices are filtered by provider, local targets also
   show their device label, and a repository selected under another provider cannot
-  be submitted. Local agent work requires a live confirmed owner and enabled finite local lease;
+  be submitted. Local agent work requires a live confirmed owner and enabled local permission;
   it does not require a GitHub App connection. The combined codespace list retains
   provider context and the existing Start/Stop/Delete controls. Creation and actions
   use the shared management endpoints under `/api/integrations/github/codespaces`;
@@ -932,7 +939,8 @@ execution inspector) receive `null` for a user that no longer exists and show th
   pending IDs from the owner journal, or refreshes state when none is pending; it does not repeat
   lifecycle mutations. Pending identities survive page reload through owner observations.
   Provider-specific disclosures
-  explain that local work stays inside locally approved bounds and lease. The
+  explain that local work stays inside current locally approved rights and resource bounds,
+  with permission lasting until explicit disable. The
   Settings screen tour includes the local-device anchor; the GitHub task tour
   retains its separate GitHub setup steps. English and Russian local-device text
   is merged under `localDevices` from the matching locale modules.

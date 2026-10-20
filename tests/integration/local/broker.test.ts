@@ -3,7 +3,7 @@ import { once } from "node:events";
 import supertest from "supertest";
 import { mkdtemp, rm, realpath, writeFile, readFile } from "node:fs/promises";
 import { spawn } from "node:child_process";
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { connect, createServer, Socket } from "node:net";
@@ -15,7 +15,7 @@ import { localFixture } from "./fixtures.js";
 import { LocalManager } from "../../../packages/local/src/manager.js";
 import { SbxRuntime } from "../../../packages/local/src/sbx-runtime.js";
 import { adaptSbxRuntime } from "../../../packages/local/src/local-vm-runtime-factory.js";
-import { LocalRefusal } from "../../../packages/local/src/policy.js";
+import { LocalRefusal, localRuntimeProfileHash } from "../../../packages/local/src/policy.js";
 import { gitBroker } from "../../../packages/local/src/git-broker.js";
 import {
   serveOwnerGit,
@@ -131,7 +131,7 @@ describe("local broker authority and address boundary", () => {
         credentialId: randomUUID(),
         repositoryFullName: grant.repository.fullName,
         expiresAt: Date.now() + 60000,
-        useUntil: grant.policy.leaseUntil,
+        useUntil: Date.now() + 60000,
         validate: async () => {},
         dispose: async () => {},
       }),
@@ -310,7 +310,6 @@ describe("local broker authority and address boundary", () => {
     "bad token",
     "revoked repository",
     "renamed repository",
-    "expired lease",
     "disabled policy",
   ])("resume CONNECT refuses %s before opening an upstream", async (reason) => {
     const fixture = await localFixture(state);
@@ -328,7 +327,6 @@ describe("local broker authority and address boundary", () => {
     else if (reason === "revoked repository") fixture.policy.repositories = [];
     else if (reason === "renamed repository")
       fixture.space.admittedRepositoryFullName = "owner/previous";
-    else if (reason === "expired lease") fixture.policy.leaseUntil = Date.now() - 1;
     else if (reason === "disabled policy") fixture.policy.enabled = false;
     await fixture.records.put(fixture.space);
     await state.write("policy.json", fixture.policy);
@@ -408,7 +406,7 @@ describe("local broker authority and address boundary", () => {
     await state.write("runtime-owner.json", {
       owner: randomUUID(),
       ownerPID: deadPid,
-      profile: "a".repeat(64),
+      profile: localRuntimeProfileHash(fixture.policy),
       settled: false,
     });
     const retained = { state: "running", remoteMarker: "retained-unknown-operation" };
@@ -476,11 +474,7 @@ describe("local broker authority and address boundary", () => {
         peer.stdin!.write(value);
         expect(String((await reply)[0])).toBe(value);
       };
-      const profile = createHash("sha256")
-        .update(
-          JSON.stringify({ deviceId: fixture.policy.deviceId, runtime: fixture.policy.runtime }),
-        )
-        .digest("hex");
+      const profile = localRuntimeProfileHash(fixture.policy);
       let retiring = false,
         cleaning = false;
       const manager = new LocalManager(fixture.records, {
@@ -848,7 +842,7 @@ describe("local broker authority and address boundary", () => {
     expect(dials).toBe(0);
   });
 
-  test.each(["revoked", "expired"] as const)(
+  test.each(["revoked"] as const)(
     "the validated address is used once and active access is cut when locally %s",
     async (reason) => {
       const fixture = await localFixture(state);
@@ -903,8 +897,15 @@ describe("local broker authority and address boundary", () => {
       expect(Buffer.concat(received).toString()).toContain("guest-payload");
       expect(destinations).toEqual(["8.8.8.8:443"]);
       expect(lookups).toBe(1);
-      if (reason === "revoked") fixture.policy.enabled = false;
-      else fixture.policy.leaseUntil = Date.now() - 1;
+      // Controlled authority time crosses the former maximum. This observes
+      // exact bytes on the established socket, without changing the Mac clock.
+      jest.spyOn(Date, "now").mockReturnValue(Date.now() + 8 * 24 * 60 * 60_000);
+      const later = once(client, "data");
+      const binary = Buffer.from([0, 255, 128, 1]);
+      client.write(binary);
+      expect((await later)[0]).toEqual(binary);
+      expect(await fixture.records.authorize(fixture.authorization)).not.toBeNull();
+      fixture.policy.enabled = false;
       await state.write("policy.json", fixture.policy);
       await new Promise<void>((resolve, reject) => {
         const timer = setTimeout(() => {

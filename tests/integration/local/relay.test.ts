@@ -319,7 +319,7 @@ describe("Native owner boundaries and device authority", () => {
           { ...local.policy.repositories[0], id: randomUUID(), fullName: "owner/another" },
         ],
       };
-      await manager.appendRepositoryPolicy(local.policy, next);
+      await manager.applyLivePolicy(local.policy, next);
       expect((await local.records.policy()).repositories).toEqual(next.repositories);
       expect(await manager.stop(creatingId)).toMatchObject({
         desiredState: "stopped",

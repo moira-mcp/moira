@@ -63,7 +63,7 @@ test("known scoped acquisition rechecks the same original security ID and stable
       credentialId,
       token: "ghu_scoped_child",
       expiresAt,
-      useUntil: f.policy.leaseUntil,
+      useUntil: expiresAt,
       repositoryFullName: f.policy.repositories[0].fullName,
     };
     const data = path.endsWith("/heartbeat")
@@ -313,6 +313,7 @@ test.each(["live", "absent", "unconfirmed"] as const)(
     const records = new LocalRecords(reopened);
     const calls: Array<{ path: string; body: unknown }> = [];
     const credentialId = randomUUID();
+    const expiresAt = Date.now() + 3600000;
     const fetcher = async (url: string | URL | Request, options?: RequestInit) => {
       const path = new URL(String(url)).pathname,
         body = JSON.parse(String(options?.body));
@@ -328,8 +329,8 @@ test.each(["live", "absent", "unconfirmed"] as const)(
                   credential: {
                     credentialId,
                     token: "ghu_scoped_child",
-                    expiresAt: Date.now() + 3600000,
-                    useUntil: f.policy.leaseUntil,
+                    expiresAt,
+                    useUntil: expiresAt,
                     repositoryFullName: f.policy.repositories[0].fullName,
                   },
                 }

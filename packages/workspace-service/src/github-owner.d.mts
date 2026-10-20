@@ -3,14 +3,14 @@ export { readOwnerJsonBody as readOwnerPullRequestInput } from "./request-body.m
 export type GitHubOwnerAction = "fetch" | "push" | "pull_request_read" | "pull_request_create";
 interface GitHubOwnerLeaseBase {
   repositoryFullName: string;
-  useUntil: number;
   dispose(): Promise<void>;
 }
 export type GitHubOwnerLease = GitHubOwnerLeaseBase &
   (
-    | { mode: "anonymous" }
+    | { mode: "anonymous"; useUntil: number | null }
     | {
         mode: "scoped";
+        useUntil: number;
         token: string;
         credentialId: string;
         expiresAt: number;

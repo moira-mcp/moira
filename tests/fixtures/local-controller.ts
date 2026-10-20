@@ -15,7 +15,6 @@ export async function controllerFixture(directory: string, identity: ControllerI
   const state = await PrivateState.open(directory),
     local = await localFixture(state);
   local.policy.deviceId = identity.deviceId;
-  local.policy.leaseUntil = Date.now() + 3600000;
   await state.write("policy.json", local.policy);
   await state.write("connection.json", { ...identity, origin: "https://moira.example" });
   const manager = new LocalManager(local.records);
@@ -66,7 +65,7 @@ export async function controllerFixture(directory: string, identity: ControllerI
   manager.start = async (id, onAdmitted) => {
     const space = await local.records.get(id);
     if (!space) throw new Error("Controlled native space is absent");
-    requireLocalGrant(await local.records.policy(), space.repositoryId, Date.now());
+    requireLocalGrant(await local.records.policy(), space.repositoryId);
     space.desiredState = "running";
     space.phase = "stopped";
     space.generation++;
@@ -87,7 +86,7 @@ export async function controllerFixture(directory: string, identity: ControllerI
   };
   manager.create = async (repositoryId, ref, operationMarker, onAdmitted) => {
     const policy = await local.records.policy();
-    requireLocalGrant(policy, repositoryId, Date.now());
+    requireLocalGrant(policy, repositoryId);
     const id = randomUUID(),
       space = {
         ...local.space,
@@ -128,7 +127,6 @@ export async function controllerFixture(directory: string, identity: ControllerI
       memoryBytes: 8 * GiB,
       storageBytes: 64 * GiB,
       dockerBytes: 8 * GiB,
-      maxLeaseMs: 3600000,
     },
     true,
   );

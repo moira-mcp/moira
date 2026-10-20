@@ -6,6 +6,8 @@ import {
   localControlRequestSchema,
   localDeviceControlViewSchema,
   assertAgentRepositoryAdmission,
+  localRepositoryAdmissionReceiptSchema,
+  localManagementRepositorySchema,
   type LocalRepositoryAdmissionReceipt,
 } from "./local-management-types.js";
 import {
@@ -107,7 +109,7 @@ type ActiveDevice = LocalDeviceView & {
 };
 export type LocalCredentialRetirement =
   | { kind: "device" }
-  | { kind: "settings"; throughRevision: number }
+  | { kind: "settings" }
   | { kind: "resource"; resourceId: string; throughGeneration: number };
 
 /** One current owner observation used throughout a single Git authorization decision. */
@@ -117,7 +119,7 @@ export interface LocalGitAuthorization {
   resourceGeneration: number;
   ownerResourceGeneration: number;
   appliedRevision: number;
-  useUntil: number;
+  useUntil: null;
   repository: LocalPublicPolicy["repositories"][number];
 }
 
@@ -412,7 +414,6 @@ export class LocalDeviceService {
     );
     await this.retireDeviceCredentials?.(userId, deviceId, {
       kind: "settings",
-      throughRevision: input.expectedRevision,
     });
     return this.projectResult(userId, deviceId, result);
   }
@@ -424,7 +425,11 @@ export class LocalDeviceService {
       { method: "GET", path: "/v1/controller/operations/" + requestId },
       requestId,
     );
-    return operation.state === "completed" && operation.outcome?.ok
+    // Journal results are original evidence, not a source of current policy. A historical
+    // successful result remains collectable even when its policy shape is no longer current.
+    return operation.state === "completed" &&
+      operation.outcome?.ok &&
+      snapshotSchema.safeParse(operation.outcome.result).success
       ? { ...operation, result: this.projectResult(userId, deviceId, operation.outcome.result) }
       : operation;
   }
@@ -471,11 +476,43 @@ export class LocalDeviceService {
         throw new LocalDeviceError("LOCAL_CONFLICT", "Repository request identity changed.");
       // Admission metadata can precede the physical policy write. Its presence is
       // not a certificate that this original owner operation completed successfully.
-      const original = this.projectResult(
-        userId,
-        deviceId,
-        this.completed(await this.getOperation(userId, deviceId, "ws1-" + input.requestId)),
+      // Read only the admission proof from the immutable original result. Its old policy
+      // fields are not accepted as current settings or rewritten during collection.
+      const original = z
+        .object({
+          userId: z.literal(userId),
+          deviceId: z.literal(deviceId),
+          deviceGeneration: z.literal(device.deviceGeneration),
+          connectionId: z.literal(device.connectionId),
+          ownerConnectionId: z.literal(device.connectionId),
+          local: z.object({
+            state: z.literal("configured"),
+            control: z.object({
+              status: z.literal("applied"),
+              appliedRevision: generation,
+              repositoryAdmissions: z.array(localRepositoryAdmissionReceiptSchema),
+            }),
+            policy: z.object({ repositories: z.array(localManagementRepositorySchema) }),
+          }),
+        })
+        .parse(this.completed(await this.getOperation(userId, deviceId, "ws1-" + input.requestId)));
+      const originalReceipt = original.local.control.repositoryAdmissions.find(
+        (receipt) => receipt.requestId === input.requestId,
       );
+      if (
+        !originalReceipt ||
+        canonicalJson(originalReceipt) !== canonicalJson(previous) ||
+        original.local.control.appliedRevision < previous.revision ||
+        canonicalJson(
+          original.local.policy.repositories.find(
+            (entry) => entry.id === previous.localRepositoryId,
+          ),
+        ) !== canonicalJson(previous.repository)
+      )
+        throw new LocalDeviceError(
+          "LOCAL_CONFLICT",
+          "The original repository admission is not confirmed.",
+        );
       const applied = device.owner.local.policy.repositories.find(
         (repository) => repository.id === previous.localRepositoryId,
       );
@@ -489,7 +526,13 @@ export class LocalDeviceService {
           "The original repository grant is not currently applied on its owner.",
         );
       if (input.creationRequestId) {
-        this.repository.validateRepositoryCreation(userId, original, {
+        const originalIdentity: LocalDeviceAuth = {
+          userId: z.string().min(1).parse(original.userId),
+          deviceId: id.parse(original.deviceId),
+          deviceGeneration: generation.parse(original.deviceGeneration),
+          connectionId: id.parse(original.connectionId),
+        };
+        this.repository.validateRepositoryCreation(userId, originalIdentity, {
           creationRequestId: input.creationRequestId,
           requestId: input.requestId,
           githubRepositoryId: input.githubRepositoryId,
@@ -637,7 +680,6 @@ export class LocalDeviceService {
       resource.repositoryId !== binding.repositoryId ||
       !grant ||
       !snapshot.policy.enabled ||
-      snapshot.policy.leaseUntil <= this.now() ||
       (action === "push" && !grant.allowPush) ||
       (action === "pull_request" && grant.allowPullRequests !== true)
     )
@@ -656,7 +698,7 @@ export class LocalDeviceService {
       resourceGeneration: resource.routeGeneration,
       ownerResourceGeneration: resource.resourceGeneration,
       appliedRevision: snapshot.control.appliedRevision,
-      useUntil: snapshot.policy.leaseUntil,
+      useUntil: null,
       repository: grant,
     };
   }

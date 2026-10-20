@@ -195,11 +195,6 @@ export async function startBroker(options: BrokerOptions, port = 0) {
         }
         client.once("close", release);
         client.once("error", release);
-        const lifetime = setTimeout(
-          () => client.destroy(),
-          Math.max(1, grant.policy.leaseUntil - Date.now()),
-        );
-        client.once("close", () => clearTimeout(lifetime));
         try {
           const target = await resolvePublicTarget(match[1], options.resolve);
           if (client.destroyed) {

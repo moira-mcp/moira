@@ -61,7 +61,7 @@ export const settingsGuide: GuideDefinition = {
       id: "local-devices",
       anchor: "settings.local-devices",
       kind: "look",
-      revision: 9,
+      revision: 10,
       prepare: { section: "integrations-local" },
     },
     {

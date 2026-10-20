@@ -17,7 +17,7 @@ capabilities. Agents reach codespaces through the authenticated MCP
 offers the same basic codespace management (list, create, start, stop, confirmed
 delete and GitHub adoption) over the same services. Cloud checks current account, repository and
 assigned-device authority. Physical lifecycle and its original-operation journal belong to the
-paired controller; existing Local work follows its owner grants and finite lease.
+paired controller; existing Local work follows current owner grants and permission enabled until explicit disable.
 
 ## Component boundary
 
@@ -73,7 +73,7 @@ identity, mounts and network receipt once, then rechecks the current local grant
 after those asynchronous proofs and before dispatch.
 
 Moira Local uses outbound authenticated HTTPS to a locally selected Moira application URL.
-Local work requires the computer owner's current grant and lease. Remote work also checks the
+Local work requires the computer owner's current grant and enabled permission. Remote work also checks the
 current account, device and resource binding. No cloud control replaces physical owner rights. `CODESPACE_CODESPACES_ENABLED` gates GitHub only; GitHub App credentials and the
 GitHub provisioner are not required for public read-only Local work.
 Private Git, push and pull-request creation use the connected GitHub App user authorization.
@@ -105,7 +105,7 @@ npm run local -- init --sbx /absolute/path/to/Sbx.app/Contents/MacOS/sbx --label
 npm run local -- login
 npm run local -- setup
 npm run local -- approve OWNER/REPO
-npm run local -- enable --hours 8
+npm run local -- enable
 npm run local -- doctor
 ```
 
@@ -124,10 +124,10 @@ manual mounting; a missing image or unsafe binding remains a refusal. Startup ne
 replacement image, resets storage or substitutes an unbounded directory.
 
 `setup` initializes only an empty dedicated SDK profile. `doctor` checks storage, supported SDK,
-settings, global network policy and owned inventory under an enabled, unexpired lease. Its
+settings, global network policy and owned inventory under enabled work permission. Its
 `liveVmIsolationVerified: false` result is explicit: it does not execute a microVM isolation test.
-Work and `doctor` check current authority from the start of SDK startup. Disable and lease expiry
-retain their physical-stop authority; caller cancellation fences its affected startup request. Observer or parent loss releases
+Work and `doctor` check current authority from the start of SDK startup. Explicit disable
+retains its physical-stop authority; caller cancellation fences its affected startup request. Observer or parent loss releases
 native observation without manufacturing a VM stop or physical settlement receipt.
 Installation, bootstrap and registration wait for actual completion rather than a general work
 deadline; fixed metadata observations and the bounded `doctor` diagnostic remain distinct.
@@ -150,7 +150,7 @@ against another process already acting as that same user. Personal Keychain lock
 An enrolled private/write repository uses the server's GitHub connection and
 repository grant; the guest receives no original OAuth token. Public read-only Git is direct
 and needs no App grant. Controller operations cannot expand local authority.
-`enable --hours N` grants at most 168 hours (8 by default), not indefinite permission.
+`enable` permits work until explicit `disable`; no work-duration or renewal parameter is required.
 
 Open **Settings → Development → Local computers** (`/settings#integrations-local`, under the app's
 configured prefix), choose **Connect a computer**, and copy the enrollment command and token
@@ -187,9 +187,9 @@ there is no cloud or browser dispatch queue. A failed response to an accepted op
 requires collection of its original identity after connection returns.
 Only device-endpoint unauthorized responses or confirmed device identity/revocation failures
 invalidate remote device authority. They fence the remote controller route without converting
-local intended-running state into a physical stop. Local disable, lease expiry and explicit
+local intended-running state into a physical stop. Local disable and explicit
 physical maintenance retain their independent stop boundaries. Existing work remains bounded by its current
-local grant and finite lease without extension. Reconnection may return retained receipts, but
+local grant and enabled permission. Reconnection may return retained receipts, but
 their effects are not redispatched.
 The browser can revoke a specific device; revocation invalidates its generation and denies new
 work. Local `disable` independently stops owned SDK/VM processes and preserves data, including when
@@ -205,7 +205,7 @@ The host CLI supports `create OWNER/REPO --ref BRANCH`, `start SPACE_ID`, `stop 
 Choose `--request-id` before mutation; the CLI prints the identity before observing its outcome.
 Fresh create requires live cloud route registration and initial Git authority. Already admitted
 VMs can start, stop or be cleaned up offline under applicable current owner authority.
-Starting requires the finite work lease; owner-confirmed cleanup does not renew it.
+Starting requires enabled work permission; owner-confirmed cleanup does not enable it.
 Raw host execution is unsupported; commands/files use the guest `moira-workspace` CLI.
 `status` and `recover SPACE_ID --confirm` retain their custody/recovery roles. Native observation
 release is distinct from physical settlement: helper EOF, failed partial capture or a client exit
@@ -263,8 +263,8 @@ npm run local -- collect ORIGINAL_REQUEST_ID
 
 Maintenance records intended-running identities, fences admission and settles the exact old native
 owner before selecting the staged release. The successor recovers each known VM independently;
-inspect `recovery.restored` and `recovery.unavailable`, not just `phase: completed`. Disabled or
-expired work permission still refuses VM start. Interruption can change guest boot and interrupt
+inspect `recovery.restored` and `recovery.unavailable`, not just `phase: completed`. Disabled
+work permission still refuses VM start. Interruption can change guest boot and interrupt
 commands; original receipts remain collectable and are never replayed. Unconfirmed custody blocks
 replacement. After an explicit local recovery, continue maintenance with its original `--request-id`
 rather than creating another interruption. A missing legacy service registration or retained old
@@ -280,6 +280,10 @@ refusal. `login --new-store` and device recovery additionally require disabled w
 
 Persisted policy/control shapes must match their installed reader. An unsupported
 shape is a refusal, not permission to clear journals or adopt replacement state.
+The current private policy is version 2. Its guarded, one-way conversion from the recognized
+version 1 policy requires the physical runner gate and exact previous-owner settlement. It preserves
+disabled or expired permission as disabled, retains original receipts and publishes settings revision
+and delegation with policy. An unresolved physical settings effect must settle before conversion.
 Migration 0061 archives old cloud Local policy/control/relay/grant and operational records;
 the archived rows are not dispatchable authority. The owner imports only verified existing
 native bindings, preserving VM/profile/disk identity and unknown receipts. Do not reconstruct
@@ -291,15 +295,15 @@ already running, first request `maintenance --pause --confirm` and collect its p
 until the receipt is `paused`; `web-control` requires that released runner gate. Then run:
 
 ```bash
-npm run local -- web-control --confirm --max-lease-hours 168
+npm run local -- web-control --confirm
 # When paused, resume using the SAME original maintenance request ID:
 npm run local -- maintenance --resume --request-id ORIGINAL_REQUEST_ID --confirm
 ```
 
 Use the same `--state` argument when configured. On first approval, omitted resource
-ceilings use the current local policy and the lease ceiling defaults to seven days.
+ceilings use the current local policy.
 Repeat `web-control --confirm` to revise an existing approval; omitted options then retain
-the previously approved ceilings, including the lease ceiling. The exact server, user,
+the previously approved resource ceilings. The exact server, user,
 device and connection must match. Applied and rejected revisions, delegation, repository
 receipts and pending recovery records are preserved. Web or agent settings requests cannot
 change these locally approved maxima. Applied resources must still fit them; a pending
@@ -313,16 +317,16 @@ npm run local -- web-control --confirm --storage-gib 50
 
 Use the same `--state PATH` when configured and the pause/resume procedure above if an owner is
 running. Closing its CLI does not release the runner gate; do not use `disable` to change only a maximum, because that also
-changes work enablement and its lease. Refresh Local computers after the companion reports
+changes work enablement and stops owned work. Refresh Local computers after the companion reports
 the approval, then request Storage 50 in that computer's existing settings editor. Raising
-the maximum alone neither resizes storage nor renews work permission. Physical resizing
+the maximum alone neither resizes storage nor enables work. Physical resizing
 happens only when the companion applies that settings revision through its existing
 stopped-runtime path. Read the applied policy rather than treating a pending request as success.
-Management reports remain available after a work lease expires without authorizing guest work.
+Management reports remain available while work is disabled without authorizing guest work.
 A lost approval-report reply is resolved by reporting the same saved approval again; do not
 erase local approval or recovery records or enroll a replacement computer.
 
-The Local computers editor controls enablement, finite lease, defaults, storage,
+The Local computers editor controls persistent enablement, defaults, storage,
 repository grants and permissions and optional Git author identity.
 Saving creates a requested revision. Applied means the companion confirmed that
 revision; pending or rejected settings are distinct from the applied device policy.
@@ -330,25 +334,31 @@ Browser settings admission checks the session and matching Origin before increme
 parsing, then revalidates the session and unchanged account before owner submission. Variable
 repository policy does not pass through the ordinary web API body ceiling. Native enrollment
 and bootstrap use a separate bounded parser for their closed identity metadata.
-Successful settings responses and original-request collection project the checked snapshot
-stored in that owner operation, with current cloud device registration revalidated. They do not
-perform another discovery or report a newer policy as the original operation's result.
+Successful settings responses project the checked snapshot stored in that owner operation,
+with current cloud device registration revalidated. Collection preserves the original outcome;
+a typed device result is added only when that original snapshot matches the current contract.
+A historical success can lack that projection. Refresh current owner state separately rather
+than treating historical permission as current authority or resubmitting the settings effect.
 Offline contact does not imply application: saving is refused and the editor retains its draft.
 Reconnect and refresh before explicitly saving. The live controller can receive management
-changes while work is disabled or expired, without authorizing guest work. Offline revocation cannot promise
+changes while work is disabled, without authorizing guest work. Offline revocation cannot promise
 instant physical shutdown.
 
 An admitted owner can confirm deletion of one owned local codespace in Settings while the
 paired computer remains active and local web control is approved. This cleanup does not require
-enabled agent work, an unexpired work lease or the repository's agent `allowDelete` permission.
+enabled agent work or the repository's agent `allowDelete` permission.
 It authorizes only observation and deletion of that exact codespace at its current generation;
-it does not extend the lease, change grants or permit creation, start or guest commands. The
+it does not enable work, change grants or permit creation, start or guest commands. The
 companion must be running and reachable to complete the removal.
 
-Ordinary settings changes settle owned work before changing policy. A consent-only revision or
-verified delegated repository append that preserves all other settings applies live without stopping
-existing VMs or changing their grants, generation, runtime, Git identity or lease. A refusal before
-that append preserves the effective policy; an uncertain transition retains its durable intent.
+Settings that preserve enablement and shared storage capacity apply live: labels, repository rights,
+Git identity, delegation and new-VM defaults do not stop unrelated VMs. Current grants still gate
+affected access. A Git author change updates policy immediately; workspace preparation uses that
+value to configure repository-local Git identity. Saving the setting does not force a rewrite in an already running checkout.
+A delegated repository request can only append its separately authorized exact grant.
+Changing enablement or shared storage uses the stopped-runtime transition. CLI and browser settings
+share the owner settings gate; applied revision and delegation publish with policy. Interrupted
+conversion or application preserves newer explicit decisions and original uncertain evidence.
 CPU, RAM and Docker disk
 defaults apply to new VMs; existing VMs restart with their admitted machine and
 repository identity. The storage setting bounds the computer's SDK backing filesystem, while
@@ -358,7 +368,7 @@ image creation and growth do not require the entire logical capacity plus a fixe
 to be free in advance; actual filesystem failures still refuse the operation. Storage and Docker byte
 values must be positive safe integers, storage must exceed Docker capacity, and native
 sector alignment and usable filesystem capacity remain authoritative. Unknown physical changes retain their journal
-and keep work fenced. Collecting the original settings receipt cannot renew a lease or
+and keep work fenced. Collecting the original settings receipt cannot enable work or
 repeat a resize; an unrelated request cannot erase an uncertain resize.
 
 ### Delegated repository additions
@@ -369,7 +379,7 @@ account, separate permissions for existing and new private repositories and opti
 There is no repository-count quota or technology-specific network profile.
 Saving requests a revision; only confirmed owner application makes its delegation effective.
 The MCP caller cannot enable that consent, change
-its account, supply rights, or extend the computer's lease. New-private consent authorizes the
+its account or supply rights. New-private consent authorizes the
 separate `repository_create` action; it does not authorize adding unrelated existing repositories.
 
 `codespace({ action: "local_devices" })` returns owned device IDs, labels, contact status and
@@ -392,8 +402,8 @@ admission metadata alone cannot release a repository-creation reservation.
 `installation_id` from discovery. The name is 1–100 ASCII letters, digits, underscores, dots or
 hyphens, excluding `.`/`..` and a `.git` suffix. The server creates only an empty private repository
 in the connected user's personal account through fixed GitHub API endpoints; callers cannot select
-another owner or visibility. Current applied new-private consent, device/account identity, finite
-lease are checked before the durable submit fence permits an external create.
+another owner or visibility. Current applied new-private consent, enabled work permission and
+device/account identity are checked before the durable submit fence permits an external create.
 
 Resume using the same complete payload. `pending`, `unknown`, `setup_required` and `rejected` are
 not local authority. A confirmed `github_repository_id` and `full_name` may remain available while
@@ -437,13 +447,13 @@ Ordinary `git fetch` and `git push` use the installed private broker. The Local 
 and GitHub guest use the same fixed HTTPS Git and pull-request implementation;
 cloud Moira authorizes scoped credential issuance and retains verified author metadata,
 without forwarding Git packfiles or executing pull-request requests. The broker holds
-the child token in memory, checks finite authority and disposes it after the upstream
+the child token in memory, checks its finite credential authority and disposes it after the upstream
 transport physically closes. Its same-UID trust boundary is not an OS sandbox against
 authorized project commands. Explicitly approved public read-only Local fetch can use
 anonymous access; failed scoped issuance never enables that branch.
 
 Each Local Git authorization phase returns one coherent owner observation: repository rights,
-stable route generation, owner lifecycle generation, applied settings revision and finite lease.
+stable route generation, owner lifecycle generation and applied settings revision.
 The issuer and author-identity resolver reuse that observation within the phase. They reauthorize
 after asynchronous GitHub grant refresh and credential issuance; an earlier observation cannot
 authorize use after those rights change.
@@ -493,15 +503,15 @@ The broker admits public DNS destinations and verifies connected addresses.
 SDK network-user prompts are disabled rather than allowed to expand access.
 When internal socket capacity is busy, a bounded FIFO queue applies backpressure rather than an
 authorization refusal. Closed consumers and broker shutdown cancel their wait; admission refreshes
-the bound authority after waiting. Revoked grants and expired leases remain refusals.
+the bound authority after waiting. Revoked grants and disabled work remain refusals.
 The guest loopback proxy authenticates CONNECT and absolute-HTTP requests to the host broker with
 its installed per-space broker credential, so clients such as npm need not send a proxy-auth header.
 A client-supplied proxy credential cannot select another space. Repository Git authorization remains
-separate. The host still checks the current lease, grant, destination and public network address;
+separate. The host still checks enabled permission, current grant, destination and public network address;
 this credential is neither a GitHub token nor a forwarded host credential.
 The fixed tunnel's five-second framing guard ends when its broker connection is established.
 The broker's 15-second CONNECT guard ends after the connected peer passes address verification.
-These guards do not impose an idle deadline on an established tunnel. Current leases, revocation,
+These guards do not impose an idle deadline on an established tunnel. Current permission, revocation,
 socket closure and broker shutdown still govern its lifetime.
 The guest may contain public SDK credential placeholders: API sentinel values and the pinned SDK's
 public GitHub sentinel are not forwarded user tokens. Their presence alone neither proves forwarding
@@ -597,7 +607,7 @@ Collect the original owner/request before deciding on another mutation.
 For Local browser deletion, the controller binds explicit owner confirmation to the exact
 device/resource, observed generation and original request identity. Its durable lifecycle journal
 retains that authority; cloud storage does not queue the mutation. MCP deletion retains the agent's
-repository permission and work-lease requirements; a preflight refusal records no new delete intent.
+repository permission and enabled-work requirements; a preflight refusal records no new delete intent.
 
 The local provider reports `created` separately from provisioning. It is an actionable
 observation, so a stop can address the exact existing VM without starting it. It does not
@@ -628,10 +638,10 @@ Local original receipts live in the controller journal. `pending_request_ids` in
 resource summaries identifies accepted/unconfirmed work for collection after a page reload;
 confirmed terminal receipts retire those pointers; retained uncertain errors remain collectable.
 Collection and read-only snapshots do not repeat an
-effect, advance a lifecycle generation or extend a lease. Ordinary work retains current
-account/device/connection/repository/lease checks. Owner cleanup instead requires the current
+effect or advance a lifecycle generation. Ordinary work retains current
+account/device/connection/repository and enabled-permission checks. Owner cleanup instead requires the current
 admitted account, active device, exact connection/resource binding and web-control approval,
-without extending repository grants or the work lease.
+without expanding repository grants or enabling work.
 Finishing a command, disconnecting an MCP client or ending a conversation never
 deletes a persistent codespace.
 
@@ -691,8 +701,8 @@ Only explicit `timeout_seconds` imposes an execution deadline. Observation windo
 and transport authentication checks do not stop commands. Moira imposes no aggregate
 command/session/stdin/output or implicit runtime ceiling. Caller output windows bound
 one response, not retained output. Actual disk/process failures, scoped authority and
-provider lifecycle still apply: GitHub may stop silent work; Local requires an enabled,
-unexpired owner lease.
+provider lifecycle still apply: GitHub may stop silent work; Local requires current owner grants
+and enabled work permission.
 
 The adapter opens outbound authenticated CONTROL carrying bounded call identities and
 per-call DATA carrying raw HTTP. Native backpressure bounds stream buffers. Offline
@@ -792,8 +802,8 @@ or MCP `codespace` action `operation` with `device_id` and `request_id`, includi
 a resource ID returns. See [Codespace Management API](API.md#codespace-management-api) for wire fields.
 
 Offline owners expose no cached policy/grants as current authority; settings drafts stay editable,
-but saves are refused. Existing admitted VM work can continue under its local grants and finite
-lease. Fresh create needs cloud registration and initial Git authority; confirmed authority refusal
+but saves are refused. Existing admitted VM work can continue under its current local grants and
+enabled permission. Fresh create needs cloud registration and initial Git authority; confirmed authority refusal
 does not allow offline fallback. Local diagnostic recovery is defined by
 `packages/shared/src/codespaces/local-failure-guidance.ts` and the
 [owner recovery guide](../packages/mcp-server/src/help/content/integration/troubleshooting.md#local-codespaces).
@@ -803,7 +813,7 @@ does not allow offline fallback. Local diagnostic recovery is defined by
 `CodespaceObservabilityService.readiness()` reports configuration only: `disabled`,
 `misconfigured` or `ready`, with `configuration`, `resources_enabled`, `reason` and `checked_at`.
 It performs no connector probe, SSH check, reconciliation or cached lifecycle observation.
-Ready configuration does not prove a controller/guest online; Local policy/device/grant/lease
+Ready configuration does not prove a controller/guest online; Local policy/device/grant
 checks remain independent of GitHub configuration.
 
 Authenticated management and `GET /api/admin/codespaces` expose this metadata. Public backend/MCP
@@ -888,7 +898,7 @@ The remaining environment defaults control provider lifecycle and billing, not c
 `CODESPACE_CODESPACES_ENABLED` defaults false and accepts only `true` or `false`.
 Local availability is independent. There are no cloud machine/count ceilings, create throttles,
 operation deadlines, claim leases, reconciliation intervals or command/file aggregate quotas.
-Provider constraints, actual storage and finite owner authority remain applicable.
+Provider constraints, actual storage, current owner authority and actual credential expiry remain applicable.
 
 ## Website authorization API
 

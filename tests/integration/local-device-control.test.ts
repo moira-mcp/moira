@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "@jest/globals";
 import Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import { migrate } from "drizzle-orm/better-sqlite3/migrator";
-import { mkdtemp, realpath, rm } from "node:fs/promises";
+import { mkdtemp, realpath, rm, readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { randomBytes, randomUUID } from "node:crypto";
 import express from "express";
@@ -96,6 +96,47 @@ function save(value: ReturnType<typeof app>, body: Record<string, unknown>) {
     .send(body);
 }
 describe("Browser-authorized settings reach one live owner", () => {
+  test("historical successful settings remain exact original evidence while current policy stays strict and independent", async () => {
+    const requestId = createWorkspaceRequestId();
+    await service.requestSettings("owner", deviceId, {
+      requestId,
+      expectedGeneration: 1,
+      expectedRevision: 0,
+      settings: {
+        ...controlSettings(await owner!.records.policy()),
+        label: "Original old edition",
+      },
+    });
+    const key = "controller-operation-" + requestId + ".json";
+    const original = (await owner!.state.read(key, (value) => value)) as {
+      outcome: {
+        result: {
+          local: {
+            policy: Record<string, unknown>;
+            control: { settings: Record<string, unknown>; ceiling: Record<string, unknown> };
+          };
+        };
+      };
+    };
+    original.outcome.result.local.policy.leaseUntil = 1;
+    original.outcome.result.local.control.settings.leaseUntil = 1;
+    original.outcome.result.local.control.ceiling.maxLeaseMs = 3600000;
+    await owner!.state.write(key, original);
+    const before = await readFile(join(owner!.state.root, key));
+    await owner!.controller.settings({
+      requestId: createWorkspaceRequestId(),
+      expectedGeneration: 1,
+      expectedRevision: 1,
+      settings: { ...controlSettings(await owner!.records.policy()), label: "Current edition" },
+    });
+    const receipt = await service.collectSettings("owner", deviceId, requestId);
+    expect(receipt).toMatchObject({ requestId, state: "completed", outcome: original.outcome });
+    expect(receipt).not.toHaveProperty("result");
+    expect(await readFile(join(owner!.state.root, key))).toEqual(before);
+    expect((await service.getActiveDevice("owner", deviceId)).owner.local.policy.label).toBe(
+      "Current edition",
+    );
+  });
   test("a completed settings snapshot cannot project authority revoked while its reply arrives", async () => {
     revokeAfterSettings = true;
     const settings = {
@@ -239,7 +280,6 @@ describe("Browser-authorized settings reach one live owner", () => {
       settings: {
         label: "Offline",
         enabled: false,
-        leaseUntil: 0,
         cpuCores: 1,
         memoryBytes: 1024 ** 3,
         storageBytes: 32 * 1024 ** 3,

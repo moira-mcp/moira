@@ -152,7 +152,7 @@ describe("GitHub Codespaces Settings", () => {
                 state: "available",
                 local: {
                   state: "configured",
-                  policy: { enabled: true, leaseUntil: Date.now() + 600_000 },
+                  policy: { enabled: true },
                 },
                 github: { resources: [] },
               },
@@ -351,7 +351,7 @@ describe("GitHub Codespaces Settings", () => {
                 state: "available",
                 local: {
                   state: "configured",
-                  policy: { enabled: true, leaseUntil: Date.now() + 600_000 },
+                  policy: { enabled: true },
                 },
                 github: { resources: [] },
               },

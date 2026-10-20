@@ -115,7 +115,7 @@ export class LocalPrivateRepositoryCreationService {
       github_connection:
         "Refresh the GitHub connection and selected personal App installation in Moira Settings, then resume this same request.",
       device_delegation:
-        "Apply permission to create new private repositories on this local computer for the connected GitHub account and a valid work lease, then resume this same request.",
+        "Apply permission to create new private repositories on this local computer for the connected GitHub account and enable local work, then resume this same request.",
       authority_validation:
         "The saved repository request no longer matches the connected account or applied computer permission. Restore its original authority and resume this same request; do not create a replacement request.",
       repository_lookup:
@@ -180,7 +180,7 @@ export class LocalPrivateRepositoryCreationService {
         "LOCAL_UNAUTHORIZED",
         "GitHub credentials changed before repository mutation.",
       );
-    await this.dependencies.repository.assertCurrent(record, current, this.now());
+    await this.dependencies.repository.assertCurrent(record, current);
     return current;
   }
   async createRepository(
@@ -326,7 +326,7 @@ export class LocalPrivateRepositoryCreationService {
           record.repositoryId!,
         );
         // Refresh may legitimately rotate an expiring token; consent and pinned account still hold.
-        await ledger.assertCurrent(record, this.dependencies.currentAuthority(userId), this.now());
+        await ledger.assertCurrent(record, this.dependencies.currentAuthority(userId));
         ledger.confirmInstallation(record, this.now());
         record = ledger.getOwned(userId, input.requestId)!;
       }

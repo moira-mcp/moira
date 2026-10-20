@@ -327,14 +327,14 @@ their original-operation journals. The selected paired controller owns GitHub li
 fixed bootstrap and explicit adoption; cloud services retain current account/repository
 authority, routing identity, billing and unresolved retirement witnesses. Workspace calls
 require the already enrolled live owner and do not trigger cloud SSH or startup.
-Existing offline Local work retains its owner grants and finite lease; fresh creation
+Existing offline Local work retains its current owner grants and enabled permission; fresh creation
 requires cloud route registration and initial credential authority. Controller management
 retains separate account/device and local approval guards. File bytes, immutable publications
 and original delivery receipts remain with their workspace or controller owner. Archived uncertain receipts are
 not dispatched or replayed.
 
 The persistent host service runs on the user's machine and retains native VM custody, local
-repository grants, finite work leases and broker/tunnel ownership. The companion CLI is a client:
+repository grants, persistent enabled permission and broker/tunnel ownership. The companion CLI is a client:
 `run` starts or connects and returns; its exit does not stop VMs. `install` stages a complete sealed
 release without replacing the active owner. `service-status` distinguishes running from staged
 selection. Physical-owner updates require explicit `maintenance --confirm`, positive old-owner

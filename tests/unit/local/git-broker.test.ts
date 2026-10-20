@@ -19,7 +19,7 @@ function grant(): BrokerGrant {
       allowPullRequests: true,
       allowDelete: false,
     },
-    policy: { enabled: true, leaseUntil: Date.now() + 60000 } as BrokerGrant["policy"],
+    policy: { enabled: true } as BrokerGrant["policy"],
   };
 }
 function incoming(relative: string, method = "POST") {
@@ -71,6 +71,7 @@ describe("Local direct Git owner adapter", () => {
         git: async (_request, response, authority) => {
           const lease = await authority.acquire("fetch", authority.signal);
           try {
+            if (lease.mode === "anonymous") expect(lease.useUntil).toBeNull();
             response.end(
               lease.mode === "anonymous" ? "anonymous-direct-fetch" : "scoped-direct-fetch",
             );

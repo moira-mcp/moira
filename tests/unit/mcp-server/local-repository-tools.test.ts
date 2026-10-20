@@ -185,7 +185,6 @@ describe("local repository MCP admission", () => {
           status: "active",
           owner_available: true,
           enabled: true,
-          lease_until: 123,
           revision: 4,
         },
       ],

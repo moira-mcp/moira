@@ -11,11 +11,10 @@ import { publicAddress, resolvePublicTarget } from "../../../packages/local/src/
 
 const repositoryId = "3777b02c-473b-4aec-90b4-2319e03c0405";
 const rawPolicy = {
-  version: 1,
+  version: 2,
   deviceId: "3c5f7b3b-24e3-44c5-8f18-72bb137cb02b",
   label: "Local test",
   enabled: true,
-  leaseUntil: 60_000,
   runtime: {
     binary: "/usr/bin/sbx",
     template: `docker.io/test/shell@sha256:${"a".repeat(64)}`,
@@ -36,18 +35,14 @@ const rawPolicy = {
 };
 
 describe("local authority remains independent of cloud assertions", () => {
-  test("only a locally approved repository inside the work lease is admitted", () => {
+  test("only explicit enabled permission and the current repository grant admit work", () => {
     const policy = localPolicySchema.parse(rawPolicy);
-    expect(requireLocalGrant(policy, repositoryId, 1000).fullName).toBe("owner/project");
-    expect(() => requireLocalGrant(policy, "7916f308-85bf-4619-ab52-f27f2cb40a39", 1000)).toThrow(
+    expect(requireLocalGrant(policy, repositoryId).fullName).toBe("owner/project");
+    expect(() => requireLocalGrant(policy, "7916f308-85bf-4619-ab52-f27f2cb40a39")).toThrow(
       "Approve this repository locally",
     );
-    expect(() => requireLocalGrant({ ...policy, enabled: false }, repositoryId, 1000)).toThrow(
+    expect(() => requireLocalGrant({ ...policy, enabled: false }, repositoryId)).toThrow(
       "Enable work",
-    );
-    expect(() => requireLocalGrant(policy, repositoryId, 60_001)).toThrow("Renew the work lease");
-    expect(() => requireLocalGrant({ ...policy, leaseUntil: 1e12 }, repositoryId, 1000)).toThrow(
-      "Renew the work lease",
     );
   });
   test("unknown fields cannot introduce host execution, mounts or approval", () => {

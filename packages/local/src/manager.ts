@@ -7,6 +7,7 @@ import {
   requireRef,
   publicPolicy,
   localPolicySchema,
+  physicalRuntimeProfile,
   type LocalPolicy,
 } from "./policy.js";
 import type { LocalVmRuntime, LocalVmIdentity, LocalVmRuntimeFactory } from "./local-vm-runtime.js";
@@ -15,6 +16,7 @@ import { admitStorage, ensureStorageMounted } from "./storage.js";
 import {
   startGuard,
   requireRuntimeOwnerAbsent,
+  upgradeLocalPolicyState,
   type SpaceGuard,
   type StartGuard,
   type DeviceGuard,
@@ -76,7 +78,7 @@ export class LocalManager {
 
   private async owner(cleanupOnly = false): Promise<DeviceGuard> {
     const policy = await this.records.policy();
-    const managementOnly = cleanupOnly && (!policy.enabled || policy.leaseUntil <= this.now());
+    const managementOnly = cleanupOnly && !policy.enabled;
     if (!this.device?.active || this.cleanupOnlyOwner !== managementOnly) {
       this.openingOwner ??= (async () => {
         await this.holdRunnerLock();
@@ -111,6 +113,32 @@ export class LocalManager {
       const release = await this.records.state.lock({ recoverStale: true });
       try {
         await requireRuntimeOwnerAbsent(this.records);
+        await upgradeLocalPolicyState(this.records);
+        await this.records.withSettingsChange(async () => {
+          const policy = await this.records.policyOrNull();
+          if (!policy) return;
+          await requireRuntimeOwnerAbsent(this.records);
+          // No independent guard can write space records at this admission
+          // boundary. Unknown outcomes are retained rather than reinterpreted.
+          for (const space of await this.records.list()) {
+            if (
+              !space.runtimeId ||
+              space.failure !== null ||
+              (space.phase !== "usable" && space.phase !== "stopped")
+            )
+              continue;
+            const repository = policy.repositories.find((row) => row.id === space.repositoryId);
+            if (space.admittedMachine && (space.admittedRepositoryFullName || !repository))
+              continue;
+            space.admittedMachine ??= {
+              cpuCores: policy.runtime.cpuCores,
+              memoryBytes: policy.runtime.memoryBytes,
+              dockerBytes: policy.runtime.dockerBytes,
+            };
+            space.admittedRepositoryFullName ??= repository?.fullName;
+            await this.records.put(space);
+          }
+        });
         await new LocalRelay(this.records).markOrphanedGitCredentials();
         this.releaseLock = release;
       } catch (error) {
@@ -141,7 +169,7 @@ export class LocalManager {
       });
       this.broker = await startBroker(
         {
-          authorize: (credential) => this.records.authorize(credential, this.now()),
+          authorize: (credential) => this.records.authorize(credential),
           budget,
           ...github,
           onFault,
@@ -217,23 +245,19 @@ export class LocalManager {
     }
     return result;
   }
-  /** The same runner/lifecycle gate admits an exact repository-only expansion. */
-  async appendRepositoryPolicy(previous: LocalPolicy, next: LocalPolicy): Promise<void> {
+  /** Publish ordinary settings under the existing runner gate without stopping admitted VMs. */
+  async applyLivePolicy(previous: LocalPolicy, next: LocalPolicy): Promise<void> {
     await this.serial("policy", async () => {
       await this.holdRunnerLock();
       next = localPolicySchema.parse(next);
-      const stable = (policy: LocalPolicy) => JSON.stringify({ ...policy, repositories: [] });
       if (
-        stable(previous) !== stable(next) ||
-        next.repositories.length < previous.repositories.length ||
-        previous.repositories.some(
-          (repository, index) =>
-            JSON.stringify(repository) !== JSON.stringify(next.repositories[index]),
-        )
+        previous.enabled !== next.enabled ||
+        JSON.stringify(physicalRuntimeProfile(previous)) !==
+          JSON.stringify(physicalRuntimeProfile(next))
       )
         throw new LocalRefusal(
           "LOCAL_CONTROL_CONFLICT",
-          "Live control may only append repository grants.",
+          "Physical runtime or enablement changes require explicit stopped control.",
         );
       const current = JSON.stringify(await this.records.policy());
       if (current !== JSON.stringify(previous) && current !== JSON.stringify(next))
@@ -241,7 +265,22 @@ export class LocalManager {
           "LOCAL_CONTROL_CONFLICT",
           "Local policy changed before repository admission.",
         );
-      if (current !== JSON.stringify(next)) await this.records.state.write("policy.json", next);
+      if (current !== JSON.stringify(next)) {
+        const machineChanged = (["cpuCores", "memoryBytes", "dockerBytes"] as const).some(
+          (key) => previous.runtime[key] !== next.runtime[key],
+        );
+        if (
+          machineChanged &&
+          (await this.records.list()).some(
+            (space) => space.phase !== "deleted" && !space.admittedMachine,
+          )
+        )
+          throw new LocalRefusal(
+            "LOCAL_OBSERVATION_UNKNOWN",
+            "Retained sandbox admission must be established before changing machine defaults.",
+          );
+        await this.records.state.write("policy.json", next);
+      }
     });
   }
   async close(keepLock = false): Promise<void> {
@@ -326,7 +365,7 @@ export class LocalManager {
   ): Promise<LocalSpace> {
     const admitted = await this.serial(`create:${operationMarker}`, async () => {
       const policy = await this.records.policy();
-      requireLocalGrant(policy, repositoryId, this.now());
+      requireLocalGrant(policy, repositoryId);
       requireRef(ref);
       z.string()
         .regex(/^moira-[a-f0-9]{24}$/)
@@ -434,7 +473,7 @@ export class LocalManager {
     return this.serial(`space:${id}`, async () => {
       const space = await this.require(id);
       const policy = await this.records.policy();
-      requireLocalGrant(policy, space.repositoryId, this.now());
+      requireLocalGrant(policy, space.repositoryId);
       if (workspaceReleases) {
         const assets = await guestAssets();
         if (workspaceReleases[assets.payload.architecture] !== assets.payload.release)
@@ -635,7 +674,7 @@ export class LocalManager {
     const policy = await this.records.policy();
     if (ownerCleanup && !spaceId)
       throw new LocalRefusal("LOCAL_UNAUTHORIZED", "Owner cleanup requires one exact sandbox.");
-    const admitted = ownerCleanup || (policy.enabled && policy.leaseUntil > this.now());
+    const admitted = ownerCleanup || policy.enabled;
     let observationFailure: string | null = null;
     const observed = await (async () => {
       try {
