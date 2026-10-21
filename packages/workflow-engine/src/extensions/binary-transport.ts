@@ -100,6 +100,23 @@ export const binaryTransportSchema = z
 export type BinaryTransport = z.infer<typeof binaryTransportSchema>;
 export type BinaryControls = z.infer<typeof binaryControlsSchema>;
 
+/** Runtime handler data excludes all fixed transport destinations and secret aliases. */
+export function binaryHandlerSettings(
+  channel: ExtensionCommunicationChannelDeclaration,
+  settings: Record<string, unknown>,
+): Record<string, unknown> {
+  const excluded = new Set(channel.permissions?.secrets ?? []);
+  for (const operation of channel.binaryTransport?.operations ?? []) {
+    excluded.add(operation.recipient.setting);
+    if ("baseUrlSetting" in operation.endpoint) excluded.add(operation.endpoint.baseUrlSetting);
+  }
+  return Object.fromEntries(
+    (channel.settings ?? []).flatMap((key) =>
+      !excluded.has(key) && Object.hasOwn(settings, key) ? [[key, settings[key]]] : [],
+    ),
+  );
+}
+
 /** A declaration grants a fixed transport, never an owner-selected URL or credential. */
 export function binaryTransportProblems(
   channel: ExtensionCommunicationChannelDeclaration,

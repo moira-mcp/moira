@@ -47,8 +47,8 @@ const purposes: Record<WorkspaceToolName, [string, string]> = {
     "Создаёт одну среду по возвращённой цели и ветке.",
   ],
   workspace_lifecycle: [
-    "Start, stop or resume incomplete Local setup using the captured workspace reference.",
-    "Запускает, останавливает или продолжает подготовку Local по сохранённой ссылке.",
+    "Start, stop or resume incomplete Local or GitHub setup using the captured workspace reference.",
+    "Запускает, останавливает или продолжает подготовку Local или GitHub по сохранённой ссылке.",
   ],
   workspace_adopt: [
     "Prepare an observed GitHub workspace at the explicitly selected registered controller.",

@@ -1193,18 +1193,20 @@ export function CodespaceManagement({ scope }: { scope: CodespaceManagementScope
                       </p>
                     )}
                     <div className="mt-3 flex flex-wrap items-center gap-2">
-                      {computer && setupIncomplete && codespace.desired_state !== "deleted" && (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          disabled={requestBusy || !accessEnabled || outcomeUnconfirmed}
-                          onClick={() => void lifecycle(codespace, "resume_setup")}
-                          data-testid={`codespace-resume-setup-${codespace.codespace_id}`}
-                        >
-                          <Play className="mr-1 h-4 w-4" aria-hidden="true" />
-                          {t("localDevices.codespaces.resumeSetup")}
-                        </Button>
-                      )}
+                      {(computer || codespace.controller) &&
+                        setupIncomplete &&
+                        codespace.desired_state !== "deleted" && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            disabled={requestBusy || !accessEnabled || outcomeUnconfirmed}
+                            onClick={() => void lifecycle(codespace, "resume_setup")}
+                            data-testid={`codespace-resume-setup-${codespace.codespace_id}`}
+                          >
+                            <Play className="mr-1 h-4 w-4" aria-hidden="true" />
+                            {t("localDevices.codespaces.resumeSetup")}
+                          </Button>
+                        )}
                       {!computer && codespace.state !== "usable" && !outcomeUnconfirmed && (
                         <Button
                           size="sm"

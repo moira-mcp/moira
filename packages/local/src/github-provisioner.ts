@@ -2,6 +2,7 @@ import { mkdtemp, mkdir, writeFile, rm, realpath } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
+import { workspaceRemoteObservationSchema } from "../../shared/src/codespaces/local-protocol.js";
 import {
   githubProvisionProofSchema,
   type GitHubProvisionProof,
@@ -34,6 +35,9 @@ export interface GitHubProvisionTarget {
 }
 export type GitHubEnrollment = WorkspaceBootstrapCredential;
 export interface GitHubProvisionDependencies {
+  tools?: typeof githubToolchain;
+  payload?: typeof loadWorkspacePayload;
+  run?: typeof runProcess;
   signal?: AbortSignal;
   custody: {
     directory: string;
@@ -52,11 +56,21 @@ export interface GitHubProvisionDependencies {
     signal?: AbortSignal,
   ): Promise<{ name: string; repositoryId: string; repositoryFullName: string; state: string }>;
   enroll(proof: GitHubProvisionProof): Promise<GitHubEnrollment>;
+  prepared(proof: GitHubProvisionProof): Promise<void>;
+  ready(health: GitHubWorkspaceHealth): Promise<void>;
 }
 export interface GitHubProvisionResult {
   proof: GitHubProvisionProof;
-  health: unknown;
+  health: GitHubWorkspaceHealth;
 }
+const healthSchema = z
+  .object({
+    releaseIdentity: z.string().regex(/^[a-f0-9]{64}$/),
+    environmentIdentity: z.string().regex(/^[a-f0-9]{64}$/),
+    remote: workspaceRemoteObservationSchema,
+  })
+  .passthrough();
+export type GitHubWorkspaceHealth = z.infer<typeof healthSchema>;
 const unavailable = () =>
   new LocalRefusal(
     "GITHUB_PROVISIONING_UNAVAILABLE",
@@ -100,18 +114,22 @@ export function validateGitHubSshConfig(
   return host;
 }
 
-export async function githubProvisioningReadiness(): Promise<{
+export type GitHubReadinessPurpose = "install" | "enrollment";
+export async function githubProvisioningReadiness(
+  purpose: GitHubReadinessPurpose = "install",
+): Promise<{
   state: "available" | "unavailable";
 }> {
   if (!["darwin", "linux"].includes(process.platform)) return { state: "unavailable" };
   const home = await realpath(await mkdtemp("/tmp/moira-gh-"));
   try {
     await githubToolchain(home);
-    await Promise.all(
-      ["x64", "arm64"].map((architecture) =>
-        loadWorkspacePayload(payloadDirectory(), architecture),
-      ),
-    );
+    if (purpose === "install")
+      await Promise.all(
+        ["x64", "arm64"].map((architecture) =>
+          loadWorkspacePayload(payloadDirectory(), architecture),
+        ),
+      );
     return { state: "available" };
   } catch {
     return { state: "unavailable" };
@@ -124,13 +142,35 @@ export async function provisionGitHubWorkspace(
   target: GitHubProvisionTarget,
   dependencies: GitHubProvisionDependencies,
 ): Promise<GitHubProvisionResult> {
+  return prepareGitHubWorkspace(target, dependencies);
+}
+
+/** Continue only an exactly proved existing Unix owner, never provider or payload preparation. */
+export async function resumeGitHubWorkspaceEnrollment(
+  target: GitHubProvisionTarget,
+  originalProof: GitHubProvisionProof,
+  dependencies: Omit<GitHubProvisionDependencies, "prepared">,
+): Promise<GitHubProvisionResult> {
+  return prepareGitHubWorkspace(
+    target,
+    dependencies,
+    githubProvisionProofSchema.parse(originalProof),
+  );
+}
+
+async function prepareGitHubWorkspace(
+  target: GitHubProvisionTarget,
+  dependencies: Omit<GitHubProvisionDependencies, "prepared"> &
+    Partial<Pick<GitHubProvisionDependencies, "prepared">>,
+  originalProof?: GitHubProvisionProof,
+): Promise<GitHubProvisionResult> {
   if (!["darwin", "linux"].includes(process.platform)) throw unavailable();
   if (!/^[A-Za-z0-9_-]+$/.test(target.providerResourceName)) throw unavailable();
   const home = await realpath(await mkdtemp("/tmp/moira-gh-"));
   let child: Awaited<ReturnType<GitHubProvisionDependencies["acquire"]>> | undefined;
   let custodyUnconfirmed = false;
   try {
-    const tools = await githubToolchain(home);
+    const tools = await (dependencies.tools ?? githubToolchain)(home);
     const observed = await dependencies.inspect(dependencies.signal);
     if (
       observed.name !== target.providerResourceName ||
@@ -163,7 +203,7 @@ export async function provisionGitHubWorkspace(
       stdin?: Uint8Array,
     ) => {
       await child!.validate(dependencies.signal);
-      const result = await runProcess({
+      const result = await (dependencies.run ?? runProcess)({
         binary,
         argv,
         cwd: home,
@@ -228,15 +268,19 @@ export async function provisionGitHubWorkspace(
       })
       .strict()
       .parse(JSON.parse(await fixed(WORKSPACE_PROBE_SCRIPT)));
-    const payload = await loadWorkspacePayload(
-      payloadDirectory(),
-      before.architecture === "x86_64" ? "x64" : "arm64",
-    );
-    const installed = JSON.parse(
-      await fixed(WORKSPACE_INSTALL_SCRIPT, workspaceInstallInput(payload)),
-    );
-    if (installed.installed !== true || installed.releaseIdentity !== payload.release)
-      throw unavailable();
+    const payload = originalProof
+      ? undefined
+      : await (dependencies.payload ?? loadWorkspacePayload)(
+          payloadDirectory(),
+          before.architecture === "x86_64" ? "x64" : "arm64",
+        );
+    if (!originalProof) {
+      const installed = JSON.parse(
+        await fixed(WORKSPACE_INSTALL_SCRIPT, workspaceInstallInput(payload!)),
+      );
+      if (installed.installed !== true || installed.releaseIdentity !== payload!.release)
+        throw unavailable();
+    }
     const measured = z
       .object({
         root: z.string().startsWith("/"),
@@ -275,49 +319,84 @@ export async function provisionGitHubWorkspace(
     });
     if (
       proof.environmentIdentity !== before.environmentIdentity ||
-      proof.release !== payload.release
+      proof.release !== (originalProof?.release ?? payload!.release) ||
+      (originalProof &&
+        Object.entries(originalProof).some(
+          ([key, value]) => proof[key as keyof GitHubProvisionProof] !== value,
+        ))
     )
       throw unavailable();
-    const remote = await dependencies.enroll(proof);
-    if (
-      remote.resourceId !== target.resourceId ||
-      remote.resourceGeneration !== target.resourceGeneration ||
-      remote.authorizationGeneration !== target.authorizationGeneration ||
-      remote.environmentIdentity !== proof.environmentIdentity
-    )
-      throw unavailable();
-    const { renewal, ...credential } = remote;
-    const configured = JSON.parse(
-      await fixed(
-        WORKSPACE_CONFIGURE_SCRIPT,
-        undefined,
-        Buffer.from(
-          JSON.stringify({
-            version: 1,
-            root: proof.root,
-            rootDevice: proof.rootDevice,
-            rootInode: proof.rootInode,
-            repositoryFullName: target.repositoryFullName,
-            resourceId: target.resourceId,
-            repositoryId: target.repositoryId,
-            ...(target.previousRepositoryFullName
-              ? { previousRepositoryFullName: target.previousRepositoryFullName }
-              : {}),
-            environmentIdentity: proof.environmentIdentity,
-            remote: credential,
-            ...(renewal ? { renewal } : {}),
-          }),
+    if (!originalProof) await dependencies.prepared!(proof);
+    const configure = async (remote?: GitHubEnrollment, remoteState = "unconfigured") => {
+      const { renewal, ...credential } = remote ?? {};
+      const configured = JSON.parse(
+        await fixed(
+          WORKSPACE_CONFIGURE_SCRIPT,
+          undefined,
+          Buffer.from(
+            JSON.stringify({
+              version: 1,
+              root: proof.root,
+              rootDevice: proof.rootDevice,
+              rootInode: proof.rootInode,
+              repositoryFullName: target.repositoryFullName,
+              resourceId: target.resourceId,
+              repositoryId: target.repositoryId,
+              ...(target.previousRepositoryFullName
+                ? { previousRepositoryFullName: target.previousRepositoryFullName }
+                : {}),
+              environmentIdentity: proof.environmentIdentity,
+              expectedRelease: proof.release,
+              ownerSelector: { kind: "github", resourceId: target.resourceId },
+              ...(remote ? { remote: credential } : { mode: "local-only", remoteState }),
+              ...(renewal ? { renewal } : {}),
+            }),
+          ),
         ),
-      ),
-    );
+      );
+      if (
+        configured.configured !== true ||
+        configured.releaseIdentity !== proof.release ||
+        configured.environmentIdentity !== proof.environmentIdentity
+      )
+        throw unavailable();
+    };
+    await configure();
+    await fixed(WORKSPACE_START_SCRIPT);
+    let health = healthSchema.parse(JSON.parse(await fixed(WORKSPACE_HEALTH_SCRIPT)));
     if (
-      configured.configured !== true ||
-      configured.releaseIdentity !== proof.release ||
-      configured.environmentIdentity !== proof.environmentIdentity
+      health.releaseIdentity !== proof.release ||
+      health.environmentIdentity !== proof.environmentIdentity
     )
       throw unavailable();
-    await fixed(WORKSPACE_START_SCRIPT);
-    const health = JSON.parse(await fixed(WORKSPACE_HEALTH_SCRIPT));
+    await dependencies.ready(health);
+    let remote: GitHubEnrollment | undefined;
+    let remoteState = "enrollment_unavailable";
+    try {
+      remote = await dependencies.enroll(proof);
+    } catch (error) {
+      if (!(error instanceof LocalRefusal)) throw error;
+      if (
+        [
+          "CODESPACE_AUTHORIZATION_REQUIRED",
+          "LOCAL_UNAUTHORIZED",
+          "LOCAL_IDENTITY_CHANGED",
+        ].includes(error.code)
+      )
+        remoteState = "refused";
+      else if (!["WORKSPACE_OUTCOME_UNCONFIRMED", "LOCAL_RELAY_UNAVAILABLE"].includes(error.code))
+        throw error;
+    }
+    if (
+      remote &&
+      (remote.resourceId !== target.resourceId ||
+        remote.resourceGeneration !== target.resourceGeneration ||
+        remote.authorizationGeneration !== target.authorizationGeneration ||
+        remote.environmentIdentity !== proof.environmentIdentity)
+    )
+      throw unavailable();
+    await configure(remote, remoteState);
+    health = healthSchema.parse(JSON.parse(await fixed(WORKSPACE_HEALTH_SCRIPT)));
     if (
       health.releaseIdentity !== proof.release ||
       health.environmentIdentity !== proof.environmentIdentity

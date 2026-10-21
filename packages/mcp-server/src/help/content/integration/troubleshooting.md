@@ -343,6 +343,32 @@ resubmit or change owners. HTTP 422 reports an owner error and HTTP 503 an unava
 Do not complete a workflow step without its files. A fresh `current_step` presentation is an
 explicit separate attempt; the `session materialize` text fallback requires no file owner.
 
+## GitHub setup and remote readiness
+
+Provider `available`, verified local Unix readiness and a live remote route are separate facts.
+The guest CLI can work before first enrollment completes. Remote command/file tools require a
+current enrolled connection; a saved `running` observation alone does not provide it.
+
+For initial `unconfigured` or `enrollment_unavailable` remote state, first collect the original
+operation and settle its scoped SSH custody. If `CODESPACE_LOCAL_SETUP_INCOMPLETE` remains on a
+known GitHub environment, restore the selected controller and current GitHub access, then choose
+**Resume setup** or use `workspace_lifecycle({ workspace, action: "resume_setup" })` with its
+returned workspace reference. The controller uses the saved original root/repository, guest life,
+installed release and assignment proof. It performs fixed configuration and enrollment without
+provider start, payload installation, adoption or another VM. Missing proof or changed life,
+generation or authority refuses continuation. Collection itself never enrolls or opens SSH.
+
+An already enrolled guest's `connecting` or `unavailable` transport uses its existing reconnect
+loop; do not use setup continuation to replace that authority. After a genuine cold life change,
+retained renewal authority allows the Unix API to become ready before remote renewal. Network
+and store failures retry the same durable renewal request; old-life credentials cannot open a
+connection. Confirmed refusal requires authority repair and leaves locally authorized work
+available. A guest that never enrolled cannot renew or regenerate its original proof after a
+life change. Preserve its state and inspect the original with the assigned controller.
+
+Later enrollment or renewal attaches to the same running Unix owner without replaying commands.
+A cold restart can interrupt processes and does not promise uninterrupted command execution.
+
 ## Local codespaces
 
 Use `command_run` or `command_run_native` with the returned workspace reference.
@@ -442,7 +468,7 @@ provider failures. All-provider failure is not an empty inventory. A pending unk
 remains collectable as its original operation, not a replacement VM. A nullable machine is not a
 default profile or permission to start.
 
-For `CODESPACE_LOCAL_SETUP_INCOMPLETE`, repair the reported prerequisite and choose **Resume setup**,
+For Local `CODESPACE_LOCAL_SETUP_INCOMPLETE`, repair the reported prerequisite and choose **Resume setup**,
 `workspace_lifecycle({ workspace, action: "resume_setup" })`, or host
 `resume-setup WORKSPACE_REF`. This prepares the same known VM and preserves its files and original
 create outcome. Ordinary Start and custody `recover` do not resume setup.

@@ -164,8 +164,9 @@ Each entry in `communicationChannels` declares one ordinary outbound transport:
   by itself.
 - `enabledSetting` names a declared boolean user setting. A false value disables ordinary delivery
   through this channel for that user.
-- `settings` lists non-secret aliases passed to the handler as JSON. `configurationSchema` validates
-  the object formed from exactly those aliases before delivery.
+- `settings` lists non-secret configuration aliases. `configurationSchema` validates the object
+  formed from exactly those aliases before delivery. The ordinary text handler receives that
+  configuration; the binary handler receives the filtered settings described below.
 - channel `permissions.network` and `permissions.secrets` grant only that channel handler. Secret
   aliases are read with `services.secret` and must not also appear in `settings`.
 
@@ -323,14 +324,27 @@ async binaryHandler({ message, signal, services }) {
 }
 ```
 
-The binary handler receives nonsecret settings, cancellation and `message.attachment` metadata:
+The binary handler receives declared handler settings, cancellation and `message.attachment` metadata:
 `kind`, `filename`, `mimeType`, `size`, `sha256`, plus `open()` returning a
 `ReadableStream<Uint8Array>`. It runs beside the immutable source at the selected workspace
 or paired controller, not in the ordinary text runner. It receives no cloud secret or arbitrary
-authenticated fetch.
+authenticated fetch. Runtime values used by any declared operation as `recipient.setting` or
+`endpoint.baseUrlSetting`, and all secret aliases, are excluded both before owner export and
+before child invocation. Other declared settings, such as the enabled flag or formatting options,
+remain available. The installed manifest still describes the operations; its static metadata does
+not grant outbound authority.
+
+Channel preparation checks current authority and configuration without receiving file metadata or
+message content. It returns capabilities, permitted operation identifiers and actual provider
+constraints. The owner checks its captured file's type and size and the complete selected delivery
+plan before any vendor stage. An explicitly selected unsupported channel refuses the delivery;
+implicit selection may filter unsupported channels, but no eligible channel is a failure rather
+than successful file delivery. The built-in Telegram path chooses a caption or a separate text
+stage at the owner, preserving the full message without truncation.
 
 `services.send` chooses a declared operation and streams that captured source. Cloud Moira
-resolves the current secret and recipient and constructs vendor framing. The handler cannot
+rechecks current actor, workflow frame and configuration digest, resolves the fixed secret and
+recipient, and constructs vendor framing for the owner-selected stage. The handler cannot
 supply a URL, request headers, credentials, destination or prebuilt multipart.
 An endpoint may instead use a declared nonsecret `baseUrlSetting` plus a fixed path;
 the resolved host must still be granted. Raw mode uses the declared recipient header,

@@ -151,6 +151,51 @@ function renderSettings(content: React.ReactNode) {
 
 describe("GitHub Codespaces Settings", () => {
   test.each([
+    ["unconfigured", true],
+    ["enrollment_unavailable", true],
+    ["connecting", false],
+    ["unavailable", false],
+    ["refused", false],
+  ] as const)(
+    "GitHub remote %s offers explicit original setup resume=%s without starting another environment",
+    async (state, resumable) => {
+      const current: CodespaceManagementView = {
+        ...management,
+        codespaces: [
+          {
+            ...management.codespaces[0],
+            state: "start_pending",
+            lifecycle_error: resumable ? "CODESPACE_LOCAL_SETUP_INCOMPLETE" : null,
+            remote: { state },
+          },
+        ],
+      };
+      jest.mocked(apiClient.getGitHubCodespaces).mockResolvedValue(current);
+      jest.mocked(apiClient.refreshGitHubCodespaces).mockResolvedValue(current);
+      const change = jest
+        .spyOn(apiClient, "changeWorkspace")
+        .mockResolvedValue({ operation, state: "pending" });
+      const adopt = jest.spyOn(apiClient, "adoptWorkspace");
+      renderSettings(<GitHubCodespaceManagement />);
+      expect(await screen.findByTestId(`codespace-remote-${CODESPACE_ID}`)).toHaveTextContent(
+        i18n.t(`localDevices.codespaces.remote.${state}`),
+      );
+      const resume = screen.queryByTestId(`codespace-resume-setup-${CODESPACE_ID}`);
+      if (resumable) {
+        expect(resume).toBeEnabled();
+        await act(async () => fireEvent.click(resume!));
+        expect(change).toHaveBeenCalledWith(management.codespaces[0].workspace, "resume_setup");
+        expect(change).toHaveBeenCalledTimes(1);
+        expect(resume).toBeDisabled();
+        expect(screen.getByTestId(`workspace-original-${CODESPACE_ID}`)).toBeInTheDocument();
+      } else {
+        expect(resume).toBeNull();
+        expect(change).not.toHaveBeenCalled();
+      }
+      expect(adopt).not.toHaveBeenCalled();
+    },
+  );
+  test.each([
     ["admission", "completed", "LOCAL_CONTROL_PENDING"],
     ["collection", "completed", "LOCAL_CONTROL_PENDING"],
     ["admission", "unconfirmed", "LOCAL_CUSTODY_UNCONFIRMED"],

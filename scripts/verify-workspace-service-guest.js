@@ -63,6 +63,7 @@ const payload = await loadWorkspacePayload(
 );
 let container;
 let fixtureDirectory;
+const ownedVolumes = [];
 let activeHome = "/home/agent";
 verification: try {
   await mkdir(resolve("../agent_temp_files_local"), { recursive: true });
@@ -87,6 +88,28 @@ verification: try {
     caPath,
   ]);
   await docker(["image", "inspect", DEFAULT_TEMPLATE, "--format", "{{.Id}}"]);
+  for (const role of ["home", "repositories"]) {
+    const name = `moira-guest-${role}-${randomUUID()}`;
+    await docker(["volume", "create", name]);
+    ownedVolumes.push(name);
+  }
+  await docker([
+    "run",
+    "--rm",
+    "--network",
+    "none",
+    "--user",
+    "0:0",
+    "--mount",
+    `type=volume,src=${ownedVolumes[0]},dst=/owned-home`,
+    "--mount",
+    `type=volume,src=${ownedVolumes[1]},dst=/owned-repositories`,
+    "--entrypoint",
+    "/bin/sh",
+    DEFAULT_TEMPLATE,
+    "-c",
+    "chown 1000:1000 /owned-home /owned-repositories; chmod 700 /owned-home /owned-repositories",
+  ]);
   container = (
     await docker([
       "run",
@@ -106,10 +129,10 @@ verification: try {
       "no-new-privileges",
       "--tmpfs",
       "/tmp:rw,nosuid,nodev,mode=1777",
-      "--tmpfs",
-      "/workspaces:rw,nosuid,nodev,mode=1777",
-      "--tmpfs",
-      "/home/agent:rw,exec,nosuid,nodev,mode=700,uid=1000,gid=1000",
+      "--mount",
+      `type=volume,src=${ownedVolumes[1]},dst=/workspaces`,
+      "--mount",
+      `type=volume,src=${ownedVolumes[0]},dst=/home/agent`,
       "--entrypoint",
       "/bin/sh",
       DEFAULT_TEMPLATE,
@@ -281,6 +304,16 @@ verification: try {
       const server=createServer({key:await readFile('/tmp/owner-key.pem'),cert:await readFile('/tmp/owner-ca.pem')},async(request,response)=>{
         const json=value=>{response.writeHead(200,{'content-type':'application/json'});response.end(JSON.stringify(value));};
         try {
+          if(request.method==='POST'&&request.url==='/api/codespaces/github/resources/'+input.resourceId+'/renew-enrollment'){
+            assert.equal(request.headers.authorization,'Bearer '+input.renewalCredential);
+            let text='';for await(const chunk of request)text+=chunk;const proof=JSON.parse(text);
+            const {writeFile}=await import('node:fs/promises');
+            let original;try{original=JSON.parse(await readFile('/home/agent/renewal-observed.json','utf8'))}catch(error){if(error.code!=='ENOENT')throw error;}
+            if(original)assert.deepEqual(proof,original);else await writeFile('/home/agent/renewal-observed.json',JSON.stringify(proof));
+            try{await readFile('/home/agent/renewal-ready')}catch{response.writeHead(503).end();return;}
+            input.credential='z'.repeat(43);binding.environmentIdentity=proof.environmentIdentity;unavailable=false;
+            return json({version:1,origin:input.origin,publicOrigin:input.origin,resourceId:input.resourceId,resourceGeneration:1,authorizationGeneration:1,environmentIdentity:proof.environmentIdentity,credential:input.credential,renewal:{credential:input.renewalCredential}});
+          }
           if(request.url==='/fixture/connected'){if(!router.isConnected(binding))await once(router,'connected');return json({connected:router.isConnected(binding)});}
           if(request.url==='/fixture/authority-ready'){unavailable=false;return json({available:true});}
           if(request.url==='/fixture/extension')return json(observed);
@@ -297,7 +330,7 @@ verification: try {
             assert.equal(value.scope.environmentIdentity,input.environmentIdentity);
             assert.deepEqual(value.channelIds,['channel-probe.notifications']);
             observed.prepared++;
-            return json({channels:[{channelId:'channel-probe.notifications',provider:'extension',authorityDigest:'a'.repeat(64),bundleDigest:input.extensionDigest,settings:{'channel-probe.enabled':true,'channel-probe.destination':'configured'}}]});
+            return json({channels:[{channelId:'channel-probe.notifications',provider:'extension',capabilities:{text:true,image:true,document:true},operations:['upload'],authorityDigest:'a'.repeat(64),bundleDigest:input.extensionDigest,settings:{'channel-probe.enabled':true}}]});
           }
           if(request.method==='POST'&&request.url==='/api/communication/owner/send'){
             const frame=await readOwnerFrame(request);
@@ -315,7 +348,7 @@ verification: try {
         }catch{response.writeHead(500);response.end();}
       });
       router.attach(server);
-      await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(0,'127.0.0.1',resolve);});
+      await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(input.port??0,'127.0.0.1',resolve);});
       process.on('SIGTERM',()=>{void router.close().then(()=>{server.closeAllConnections();server.close(()=>process.exit(0));});});
       process.send({ready:true,origin:'https://127.0.0.1:'+server.address().port,processId:process.pid});
     `,
@@ -329,44 +362,47 @@ verification: try {
     format: "esm",
     write: false,
   });
-  for (const [path, bytes] of [
+  const routerInput = {
+    resourceId,
+    environmentIdentity: measured.environmentIdentity,
+    credential: "x".repeat(43),
+    renewalCredential: "y".repeat(43),
+    extensionDigest: extensionArtifact.digest,
+  };
+  const routerAssets = [
     ["/tmp/owner-key.pem", await readFile(keyPath)],
     ["/tmp/owner-ca.pem", await readFile(caPath)],
     ["/tmp/router.mjs", routerBundle.outputFiles[0].contents],
     ["/tmp/extension-artifact.json", extensionArtifact.bytes],
-    [
-      "/tmp/router-input.json",
-      Buffer.from(
-        JSON.stringify({
-          resourceId,
-          environmentIdentity: measured.environmentIdentity,
-          credential: "x".repeat(43),
-          extensionDigest: extensionArtifact.digest,
-        }),
-      ),
-    ],
-  ]) {
-    await docker(
-      [
+    ["/tmp/router-input.json", Buffer.from(JSON.stringify(routerInput))],
+  ];
+  const installRouterAssets = async () => {
+    for (const [path, bytes] of routerAssets) {
+      await docker(
+        [
+          "exec",
+          "--interactive",
+          container,
+          node,
+          "-e",
+          `require('node:fs').writeFileSync(${JSON.stringify(path)},require('node:fs').readFileSync(0),{mode:384})`,
+        ],
+        bytes,
+      );
+    }
+  };
+  await installRouterAssets();
+  const startRouter = async () =>
+    JSON.parse(
+      await docker([
         "exec",
-        "--interactive",
         container,
         node,
         "-e",
-        `require('node:fs').writeFileSync(${JSON.stringify(path)},require('node:fs').readFileSync(0),{mode:384})`,
-      ],
-      bytes,
+        "const {spawn}=require('node:child_process');const child=spawn(process.execPath,['/tmp/router.mjs'],{detached:true,stdio:['ignore','ignore','inherit','ipc']});child.once('error',()=>process.exit(1));child.once('exit',()=>process.exit(1));child.once('message',value=>{if(!value.ready)process.exit(1);process.stdout.write(JSON.stringify(value));child.disconnect();child.unref();});",
+      ]),
     );
-  }
-  const router = JSON.parse(
-    await docker([
-      "exec",
-      container,
-      node,
-      "-e",
-      "const {spawn}=require('node:child_process');const child=spawn(process.execPath,['/tmp/router.mjs'],{detached:true,stdio:['ignore','ignore','inherit','ipc']});child.once('error',()=>process.exit(1));child.once('exit',()=>process.exit(1));child.once('message',value=>{if(!value.ready)process.exit(1);process.stdout.write(JSON.stringify(value));child.disconnect();child.unref();});",
-    ]),
-  );
+  const router = await startRouter();
   assert.ok(Number.isSafeInteger(router.processId) && router.processId > 1);
   // Missing configuration must fail the actual startup owner. A request to
   // start is not readiness, and offline health must settle without a waiter.
@@ -381,6 +417,15 @@ verification: try {
     resourceId,
     repositoryFullName: "owner/project",
     root: "/workspaces/project",
+    ...JSON.parse(
+      await fixed(
+        WORKSPACE_GITHUB_PROOF_SCRIPT,
+        JSON.stringify({ resourceId, repositoryId: "1", repositoryFullName: "owner/project" }),
+      ),
+    ),
+    expectedRelease: payload.release,
+    ownerSelector: { kind: "github", resourceId },
+    renewal: { credential: routerInput.renewalCredential },
     remote: {
       version: 1,
       origin: router.origin,
@@ -402,7 +447,11 @@ verification: try {
     ),
   );
   await assert.rejects(fixed(WORKSPACE_HEALTH_SCRIPT));
-  await fixed(WORKSPACE_CONFIGURE_SCRIPT, JSON.stringify(configuration));
+  const { remote: initialRemote, renewal: initialRenewal, ...withoutCredential } = configuration;
+  await fixed(
+    WORKSPACE_CONFIGURE_SCRIPT,
+    JSON.stringify({ ...withoutCredential, mode: "local-only" }),
+  );
   const ready = JSON.parse(await fixed(WORKSPACE_START_SCRIPT));
   assert.equal(ready.releaseIdentity, payload.release);
   assert.ok(Number.isSafeInteger(ready.processId) && ready.processId > 1);
@@ -413,6 +462,29 @@ verification: try {
   assert.equal(offlineResult.state, "completed");
   assert.equal(offlineResult.outcome.ok, true);
   assert.equal(offlineResult.stdout, "ready-before-cloud");
+  const githubHeld = JSON.parse(
+    await cli(
+      "exec",
+      "--background",
+      "--",
+      node,
+      "-e",
+      "const fs=require('node:fs');fs.appendFileSync('github-continuity','once\\n');fs.writeFileSync('github-ready','ready');const t=setInterval(()=>{if(fs.existsSync('github-release')){clearInterval(t);process.stdout.write('same-github-owner')}},10)",
+    ),
+  ).structuredContent;
+  await docker([
+    "exec",
+    container,
+    node,
+    "--input-type=module",
+    "-e",
+    "import {watch,existsSync} from 'node:fs';await new Promise(done=>{const watcher=watch('/workspaces/project',()=>{if(existsSync('/workspaces/project/github-ready')){watcher.close();done()}});if(existsSync('/workspaces/project/github-ready')){watcher.close();done()}})",
+  ]);
+  await fixed(
+    WORKSPACE_CONFIGURE_SCRIPT,
+    JSON.stringify({ ...withoutCredential, remote: initialRemote, renewal: initialRenewal }),
+  );
+  assert.equal(JSON.parse(await fixed(WORKSPACE_HEALTH_SCRIPT)).processId, ready.processId);
   await docker([
     "exec",
     container,
@@ -430,6 +502,23 @@ verification: try {
     ]),
   );
   assert.equal(registered.connected, true);
+  await docker([
+    "exec",
+    container,
+    node,
+    "-e",
+    "require('node:fs').writeFileSync('/workspaces/project/github-release','release')",
+  ]);
+  let githubStatus;
+  do {
+    githubStatus = JSON.parse(await cli("get", githubHeld.operation)).structuredContent;
+  } while (githubStatus.state === "pending");
+  assert.equal(githubStatus.outcome.ok, true);
+  assert.equal(
+    JSON.parse(await cli("output", githubHeld.process)).structuredContent.text,
+    "same-github-owner",
+  );
+  assert.equal(JSON.parse(await cli("read", "github-continuity")).structuredContent.text, "once\n");
   if (process.argv.includes("--rename-only")) {
     const renamed = {
       ...configuration,
@@ -980,8 +1069,131 @@ verification: try {
     "--stop",
   ]);
   await assert.rejects(fixed(WORKSPACE_HEALTH_SCRIPT));
+  // Persistent disposable volumes keep physical root identity while the container's
+  // real PID1 start changes. This is a cold guest life, not an observer restart.
+  activeHome = "/home/agent/unenrolled-owner";
+  await docker([
+    "exec",
+    container,
+    node,
+    "-e",
+    "const fs=require('node:fs'),{execFileSync}=require('node:child_process');fs.mkdirSync('/home/agent/unenrolled-owner',{mode:448});fs.mkdirSync('/workspaces/unenrolled',{mode:448});execFileSync('/usr/bin/git',['init','/workspaces/unenrolled']);execFileSync('/usr/bin/git',['-C','/workspaces/unenrolled','remote','add','origin','https://github.com/owner/unenrolled.git']);fs.writeFileSync('/workspaces/unenrolled/sentinel','preserved')",
+  ]);
+  await fixed(WORKSPACE_INSTALL_SCRIPT, workspaceInstallInput(payload));
+  const unenrolledId = randomUUID();
+  const unenrolledProof = JSON.parse(
+    await fixed(
+      WORKSPACE_GITHUB_PROOF_SCRIPT,
+      JSON.stringify({
+        resourceId: unenrolledId,
+        repositoryId: "2",
+        repositoryFullName: "owner/unenrolled",
+      }),
+    ),
+  );
+  await fixed(
+    WORKSPACE_CONFIGURE_SCRIPT,
+    JSON.stringify({
+      version: 1,
+      mode: "local-only",
+      resourceId: unenrolledId,
+      repositoryId: "2",
+      repositoryFullName: "owner/unenrolled",
+      ownerSelector: { kind: "github", resourceId: unenrolledId },
+      ...unenrolledProof,
+      expectedRelease: payload.release,
+    }),
+  );
+  activeHome = "/home/agent";
+  const coldBefore = JSON.parse(
+    await docker([
+      "exec",
+      container,
+      node,
+      "-e",
+      "const fs=require('node:fs');const c=JSON.parse(fs.readFileSync('/home/agent/.local/share/moira-workspace/config.json'));const s=fs.statSync(c.binding.root);process.stdout.write(JSON.stringify({dev:s.dev,ino:s.ino,life:c.environmentIdentity}))",
+    ]),
+  );
+  await docker(["restart", container]);
+  // Node reads NODE_EXTRA_CA_CERTS at process startup. Restore only passive
+  // fixture assets before the daemon starts; the authority server stays down.
+  routerAssets[4][1] = Buffer.from(
+    JSON.stringify({
+      ...routerInput,
+      port: Number(new URL(router.origin).port),
+      origin: router.origin,
+    }),
+  );
+  await installRouterAssets();
+  const coldLife = JSON.parse(await fixed(WORKSPACE_PROBE_SCRIPT));
+  assert.notEqual(coldLife.environmentIdentity, coldBefore.life);
+  activeHome = "/home/agent/unenrolled-owner";
+  await assert.rejects(fixed(WORKSPACE_START_SCRIPT));
+  await assert.rejects(fixed(WORKSPACE_HEALTH_SCRIPT));
+  await docker([
+    "exec",
+    container,
+    node,
+    "-e",
+    `const fs=require('node:fs'),assert=require('node:assert/strict');const c=JSON.parse(fs.readFileSync('/home/agent/unenrolled-owner/.local/share/moira-workspace/config.json'));assert.equal(c.environmentIdentity,${JSON.stringify(unenrolledProof.environmentIdentity)});assert.equal(fs.readFileSync('/workspaces/unenrolled/sentinel','utf8'),'preserved');assert.equal(fs.existsSync('/home/agent/unenrolled-owner/.local/state/moira/workspace-service/renewal-'+${JSON.stringify(coldLife.environmentIdentity)}+'.json'),false)`,
+  ]);
+  activeHome = "/home/agent";
+  const coldReady = JSON.parse(await fixed(WORKSPACE_START_SCRIPT));
+  assert.equal(coldReady.environmentIdentity, coldLife.environmentIdentity);
+  assert.notEqual(coldReady.remote.state, "connected");
+  assert.equal(JSON.parse(await cli("read", "github-continuity")).structuredContent.text, "once\n");
+  const coldRoot = JSON.parse(
+    await docker([
+      "exec",
+      container,
+      node,
+      "-e",
+      "const s=require('node:fs').statSync('/workspaces/project');process.stdout.write(JSON.stringify({dev:s.dev,ino:s.ino}))",
+    ]),
+  );
+  assert.deepEqual(coldRoot, { dev: coldBefore.dev, ino: coldBefore.ino });
+  await startRouter();
+  await docker([
+    "exec",
+    container,
+    node,
+    "--input-type=module",
+    "-e",
+    "import {watch,existsSync} from 'node:fs';await new Promise(done=>{const watcher=watch('/home/agent',()=>{if(existsSync('/home/agent/renewal-observed.json')){watcher.close();done()}});if(existsSync('/home/agent/renewal-observed.json')){watcher.close();done()}})",
+  ]);
+  assert.equal(JSON.parse(await fixed(WORKSPACE_HEALTH_SCRIPT)).processId, coldReady.processId);
+  assert.equal(
+    JSON.parse(await cli("exec", "--", "/bin/echo", "usable-during-renewal")).structuredContent
+      .stdout,
+    "usable-during-renewal\n",
+  );
+  await docker([
+    "exec",
+    container,
+    node,
+    "-e",
+    "require('node:fs').writeFileSync('/home/agent/renewal-ready','ready')",
+  ]);
+  await docker([
+    "exec",
+    container,
+    node,
+    "-e",
+    "const https=require('node:https');const fs=require('node:fs');const c=JSON.parse(fs.readFileSync('/home/agent/.local/share/moira-workspace/config.json'));https.get(new URL('/fixture/connected',c.remote.origin),{ca:fs.readFileSync('/tmp/owner-ca.pem')},r=>r.pipe(process.stdout)).once('error',()=>process.exit(1))",
+  ]);
+  const renewedHealth = JSON.parse(await fixed(WORKSPACE_HEALTH_SCRIPT));
+  assert.equal(renewedHealth.processId, coldReady.processId);
+  assert.equal(renewedHealth.environmentIdentity, coldLife.environmentIdentity);
+  assert.equal(renewedHealth.remote.state, "connected");
+  await docker([
+    "exec",
+    container,
+    node,
+    "-e",
+    "const fs=require('node:fs'),assert=require('node:assert/strict');const c=JSON.parse(fs.readFileSync('/home/agent/.local/share/moira-workspace/config.json'));const observed=JSON.parse(fs.readFileSync('/home/agent/renewal-observed.json'));const original=JSON.parse(fs.readFileSync('/home/agent/.local/state/moira/workspace-service/renewal-'+c.environmentIdentity+'.json'));assert.deepEqual(observed,original);assert.equal(c.remote.credential,'z'.repeat(43));assert.equal(c.renewalPending,undefined)",
+  ]);
   console.log(
-    "Verified pinned Linux payload, exclusive directory publication preserving occupied targets and refusing replaced stages, invalid bootstrap refusal, single-owner locking, Unix command readiness before cloud authority registration and automatic reconnect, Local-only configuration and later live enrollment/publication through a confined gateway with unchanged owner PID/life and one continuing command, exact exit/output and binary files, immutable publication reads, packaged UTF-8 materialize tar, custom binary extension delivery and original-receipt collection, and exact PNG preview. Real GitHub provisioning, vendor delivery and native source networking were not exercised.",
+    "Verified pinned Linux payload, exclusive directory publication preserving occupied targets and refusing replaced stages, credential-free GitHub Unix readiness and later enrollment with unchanged owner PID/life and one continuing command, a genuinely changed guest life with unchanged persistent root/inode/sentinels and local-ready renewal through the same durable request, refusal to regenerate a never-enrolled original proof across life changes, single-owner locking, Local-only configuration and later live enrollment/publication, exact exit/output and binary files, immutable publications, packaged UTF-8 materialize tar, custom binary extension delivery and original-receipt collection, and PNG preview. Real GitHub provisioning, vendor delivery and native source networking were not exercised.",
   );
 } catch (error) {
   // Imported application logging can handle uncaught exceptions; a failed
@@ -990,5 +1202,6 @@ verification: try {
   throw error;
 } finally {
   if (container && /^[a-f0-9]{64}$/.test(container)) await docker(["rm", "--force", container]);
+  for (const volume of ownedVolumes) await docker(["volume", "rm", volume]);
   if (fixtureDirectory) await rm(fixtureDirectory, { recursive: true, force: true });
 }

@@ -179,8 +179,9 @@ to Moira; review returned code before executing it on your computer. The `moira-
 name in the examples below is independent of the companion executable.
 
 The same workspace service owns commands, files, sessions and output in Local and GitHub guests.
-The Local owner prepares its guest; the paired controller performs fixed GitHub provisioning or
-explicit in-place adoption. The service includes its own Node.js 24.21.0 and ripgrep 15.2.0, independent of
+The Local owner prepares its guest; the paired controller saves GitHub machine and idle/retention
+choices and performs fixed provisioning or explicit in-place adoption. Cloud Moira brokers fixed
+provider calls with current authorization and billing checks. The service includes its own Node.js 24.21.0 and ripgrep 15.2.0, independent of
 project Node/PATH. Inside a prepared workspace, `~/.local/bin/moira-workspace --help` exposes the
 direct Unix-socket CLI. Purpose-specific tools return workspace, operation and process references;
 copy them unchanged instead of choosing request IDs or generations. After a lost reply, collect
@@ -209,6 +210,10 @@ Feature is an opt-in startup path. A working guest Unix API is ready independent
 reachability; remote work requires authenticated outbound registration. Temporary registration or
 network failure reconnects observation, while confirmed refusal retires that remote authority.
 Neither condition replays commands or lifecycle operations.
+GitHub setup continuation requires the original measured root, guest life and release; it does
+not reinstall the service or start the provider. An enrolled guest can renew its remote authority
+after a cold start while its Unix API is already usable. A never-enrolled guest cannot replace
+its original setup proof after its life changes.
 
 Workflow materialization resolves authorized text in Moira and creates its UTF-8 tar at a selected
 paired controller. The download grant pins that controller and original publication request; repeated

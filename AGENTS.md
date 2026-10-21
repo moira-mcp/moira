@@ -328,12 +328,17 @@ Commands, sessions, guarded file mutations and durable results belong to that gu
 owner through live streaming routing. Cloud Moira owns authorization, revocation and minimal
 Local route bindings; the always-on Local controller owns physical lifecycle, settings and
 their original-operation journals. The selected paired controller owns GitHub lifecycle admission,
-fixed bootstrap and explicit adoption; cloud services retain current account/repository
+saves machine and idle/retention choices before submission, and performs fixed bootstrap and explicit
+adoption; cloud services broker fixed provider calls and retain current account/repository
 authority, routing identity, billing and unresolved retirement witnesses. Remote workspace calls
 require the already enrolled live owner and do not trigger cloud SSH or startup. Direct Unix API
 readiness is independent of remote enrollment and connection. Explicit `resume_setup` continues
-preparation on the same proved incomplete Local VM; unknown creation remains original collection,
-and custody `recover` remains separate. Preserve repository contents and original create outcomes.
+the same proved incomplete Local or GitHub environment. GitHub continuation uses the original
+generation, measured root, guest life and release; it does not reinstall or start the provider.
+An enrolled guest renews authority after a cold start through its existing connection loop;
+a never-enrolled guest cannot mint replacement proof after its life changes. Unknown creation
+remains original collection, and custody `recover` remains separate. Preserve repository contents
+and original create outcomes.
 Existing offline Local work retains its current owner grants and enabled permission; fresh creation
 requires cloud route registration and initial credential authority. Controller management
 retains separate account/device and local approval guards. File bytes, immutable publications

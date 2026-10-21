@@ -578,7 +578,7 @@ while a separate explicit read closes that decision and obtains a new observatio
 their sign-in handling.
 
 Physical VM startup is distinct from guest readiness: commands become available only after guest
-preparation completes. `CODESPACE_LOCAL_SETUP_INCOMPLETE` means that preparation failed, even if
+preparation completes. For Local, `CODESPACE_LOCAL_SETUP_INCOMPLETE` means that preparation failed, even if
 the VM is confirmed stopped. Repair the reported prerequisite, then choose **Resume setup** or
 `workspace_lifecycle({ workspace, action: "resume_setup" })` with its returned workspace
 reference. This continues the same proved VM/disk and preserves files
@@ -734,12 +734,15 @@ tool or agent. When setup is
 missing or a credential must be renewed, the user returns to this website.
 
 GitHub Codespaces requires `CODESPACE_CODESPACES_ENABLED=true`, current App grants and an
-active registered paired controller. Choose `device_id` if more than one controller is registered,
+active registered paired controller. Choose a returned controller reference if more than one controller is registered,
 even when only one is reachable. Selection does not probe each controller; the normal route
 reports whether the chosen owner can receive the request and never switches to another owner.
 The controller owns original-operation journals and fixed provisioning through its packaged gh,
 trusted SSH and verified Linux payload; cloud Moira retains minimal resource/account authority
 and fixed provider API calls. No cloud connector Compose service is required.
+The selected controller reads personal-payer preflight and offered machines, then saves its
+machine choice and applicable idle/retention settings before the fixed create request. The cloud
+rechecks current authority and settings; it does not choose a different machine or controller.
 
 Use `workspace_list`, `workspace_targets` and `workspace_setup_help` for discovery.
 Create with a returned target; start/stop/delete use the captured workspace reference.
@@ -748,6 +751,23 @@ Create with a returned target; start/stop/delete use the captured workspace refe
 Both preserve the disk. Explicit adoption of a stopped environment can start it.
 Pending/unconfirmed preparation is not usable readiness: collect its original operation without
 creating, starting or installing again. `GITHUB_PROVISIONING_INCOMPLETE` remains actionable.
+
+The GitHub guest starts its verified local Unix API before optional cloud enrollment. If first
+enrollment is unavailable, local CLI work remains available, while remote MCP work does not.
+Once the original operation and SSH custody have settled, choose **Resume setup** or call
+`workspace_lifecycle({ workspace, action: "resume_setup" })` with the returned observation.
+The selected controller checks the saved original repository/root, guest life, installed release
+and current assignment, then continues fixed configuration and enrollment on that same environment.
+It does not reinstall, start the provider, adopt or create another VM. A changed life or authority
+refuses continuation. `operation_get` only collects; it never performs this setup step.
+
+After a cold restart, an already enrolled GitHub guest with retained renewal authority makes its
+Unix API ready before remote renewal. Temporary network/store failures retry in the existing
+reconnect loop without using the previous life's remote credential or replaying work. Confirmed
+refusal closes remote authority. Later enrollment or renewal keeps the same live Unix owner and
+accepted commands; the cold restart itself can interrupt processes. A never-enrolled guest cannot
+replace its original proof after a life change. Preserve the environment and use explicit owner
+inspection through the assigned controller before choosing another lifecycle action.
 
 Only an authenticated enrolled guest admits remote command/file work. Ordinary routing does not
 start a VM or open SSH. Unix readiness alone does not prove remote registration. Confirmed 401/403
@@ -901,7 +921,7 @@ you want to rejoin the normal release channel.
 
 Run a paired controller for native attachment capture and workflow progress rendering.
 Owning these communication files requires neither a Local VM nor enabled physical Local work.
-Select `device_id` when several active controllers are registered, even if only one is
+Select a returned controller reference when several active controllers are registered, even if only one is
 reachable. The selected identity stays fixed; an unavailable route does not authorize another
 owner or prove that a previous submission never ran. Preserve the owner's private
 immutable files and delivery journal when updating its matched executable release.

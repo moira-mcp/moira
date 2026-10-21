@@ -578,10 +578,14 @@ Creation consumes a returned target that binds its repository, provider and sele
 controller. Selection never substitutes a different owner. The actual route reports whether that
 selected controller can receive the request; discovery availability is not dispatch authority.
 The controller admits the original operation before invoking fixed provider
-actions. Cloud rechecks account, App grant, numeric repository, personal payer and assignment at
+actions. It reads payer preflight and offered machines, chooses the machine and saves that choice
+with the applicable idle and retention settings before create. Cloud rechecks account, App grant,
+numeric repository, personal payer, settings and assignment at
 those boundaries; parent authorization never leaves cloud. The controller receives narrowly scoped
-provisioning authority, installs the packaged service, measures repository/root/release and enrolls
-the outbound guest. Caller commands, SSH configuration or bootstrap URLs cannot select this work.
+provisioning authority, installs the packaged service and retains measured repository/root,
+guest-life and release proof in its original journal. It configures and verifies the Unix owner
+before requesting outbound enrollment. Caller commands, SSH configuration or bootstrap URLs cannot
+select this work.
 
 Start, stop and delete consume the observed workspace reference; adoption also selects its controller.
 Their adapters retain the internal original identity and the generation captured in that reference.
@@ -597,8 +601,9 @@ epoch and reproving the guest. Another device cannot silently replace that custo
 identities with no assignment stay fenced until earlier custody can actually be proved settled.
 
 A lost create reply retains the original unknown marker and receipt. Pure collection can discover
-that exact Codespace, but never repeats create, start or SSH. A found environment with incomplete
-provisioning requires explicit adopt. No match does not prove create was never dispatched.
+that exact Codespace, but never repeats create, start or SSH. A found environment without retained
+setup proof requires explicit adopt. A known environment with matching proof can instead continue
+initial enrollment through explicit `resume_setup`. No match does not prove create was never dispatched.
 An explicit delete can retire an exact known provider name after a currently authorized GET
 confirms 404; ordinary list/get does not perform retirement.
 
@@ -606,7 +611,27 @@ Remote command/file calls require the already enrolled live guest. They never im
 Codespace or bootstrap from cloud. Owner `running` and provider `available` alone are insufficient:
 the router must have the current resource/authorization/life connection. Explicit registration
 401/403 retires that remote authority; temporary transport or authority-store failure reconnects
-observation without replay. Local Unix readiness does not wait for cloud registration.
+observation without replay. Unix readiness for either provider does not wait for cloud registration.
+
+For GitHub, verified local readiness and remote availability are separate observations. The guest
+CLI can work while initial enrollment is unavailable; remote tools still require the live route.
+After the initial operation and its scoped SSH custody settle, **Resume setup** or
+`workspace_lifecycle({ workspace, action: "resume_setup" })` asks the selected controller to
+continue that same known environment. It compares the original repository/root, guest life,
+installed release and current assignment before fixed configuration, health checks and enrollment.
+It does not install a payload, start the provider, adopt another environment or create a VM.
+The original proof and create result remain unchanged. A changed life, generation or authority
+refuses this continuation; ordinary collection never performs enrollment. A guest that has never
+enrolled has no authority to enroll itself after a life change.
+
+An enrolled GitHub guest with installed renewal authority can recover from a genuine cold life
+change on its preserved root. It verifies the local binding and opens the Unix API first, while
+withholding the previous life's remote authority. Its existing reconnect loop renews with one
+durable original renewal request before opening CONTROL or DATA connections. Temporary network or
+store failure leaves local work available and retries renewal; confirmed refusal closes remote
+authority. Successful enrollment or renewal attaches to the same running Unix owner without
+replaying commands. A cold restart itself can interrupt processes; it does not promise command
+continuity across the restart.
 
 Disconnect revokes guest/renewal routes, retires known scoped children and parent authorization.
 It neither stops nor deletes a VM or disk. Explicitly stop a running VM to end compute use;
@@ -825,6 +850,14 @@ An unavailable route refuses the current dispatch, with no cloud queue or fallba
 owner. It does not prove that a previous submission never ran. `communication_send` sends ordinary
 text independently of a file owner.
 
+Preparation supplies channel authority, declared text/image/document capabilities, allowed
+operation IDs and actual provider constraints. The owner validates the complete selected delivery
+plan before any vendor stage. An explicitly unsupported channel or no eligible implicit channel
+refuses delivery. The owner chooses caption and follow-up text stages without truncating content.
+Extension handlers receive declared nonsecret settings; secrets and settings used for recipients
+or endpoint addresses remain at the trusted transport. The cloud broker checks current authority,
+fixed destinations, secrets and HTTP framing without downloading the source or choosing the plan.
+
 ## MCP tools
 
 Strict purpose-specific tools expose workspace discovery/lifecycle, commands, files, processes,
@@ -939,6 +972,13 @@ approve the updated permission on GitHub and obtain a new App user token through
 | Repository: Pull requests              | write | create approved local pull requests and read their metadata            |
 | Repository: Metadata                   | read  | enumerate the installation's approved repositories                     |
 | Account: Plan                          | read  | read the connected personal account's monthly Codespaces billing usage |
+
+Fixed provider brokerage keeps these permissions tied to actions: preflight, machine offers and
+inspection are reads; create/delete use Codespaces write; start/stop use lifecycle admin write.
+The controller's provisioning child has only its declared Codespaces read and lifecycle-admin
+authority for trusted SSH, not the parent create/delete capability. Parent credentials stay in
+the server vault. Configured permission declarations and controlled fixtures do not establish
+that a live GitHub grant or scoped token is accepted; check actual provider refusal guidance.
 
 For local private repository creation, GitHub requires **Repository creation: write** or
 **Administration: write**. Adding the confirmed repository to a selected installation requires
@@ -1150,6 +1190,7 @@ Use the root project commands; do not call Jest directly:
 ```bash
 npm run test:unit
 npm run test:integration
+npm run workspace:verify:guest
 docker compose config --quiet --no-env-resolution --no-path-resolution --no-interpolate
 ```
 
@@ -1159,6 +1200,7 @@ and configuration-readiness suites, including the ChatGPT-compatible client
 scenario over real services, the HTTP contracts against the local container
 (`npm run test:mcp-tools`, `npm run test:api`) and the Settings browser scenarios
 (`npm run test:e2e`). Deterministic tests and container fixtures do not establish live GitHub or ChatGPT
-compatibility, genuine native attachment transfer or physical SDK isolation. Report only
-the external acceptance actually performed; live GitHub validation is excluded from the
-current work.
+compatibility, genuine native attachment transfer or physical SDK isolation. Packaged Linux
+verification exercises Unix readiness before enrollment and cold-life renewal using disposable
+persistent guest storage; it does not provision a real GitHub Codespace. Live provider acceptance
+requires separately authorized external verification.

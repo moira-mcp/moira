@@ -16,6 +16,7 @@ interface WorkspaceRemoteTransport {
   credential: string;
   proxy?: string;
   signal?: AbortSignal;
+  prepareCredential?: (signal: AbortSignal) => Promise<string>;
 }
 export type WorkspaceRemoteOptions = WorkspaceRemoteTransport &
   (
@@ -23,7 +24,7 @@ export type WorkspaceRemoteOptions = WorkspaceRemoteTransport &
     | { kind: "controller"; connectionId: string }
   );
 
-class WorkspaceAuthorityRefusal extends Error {}
+export class WorkspaceAuthorityRefusal extends Error {}
 
 /** Outbound byte transport only. Reconnection never resubmits an operation. */
 export function startWorkspaceRemote(options: WorkspaceRemoteOptions) {
@@ -66,7 +67,7 @@ export function startWorkspaceRemote(options: WorkspaceRemoteOptions) {
     if (closed) socket.destroy();
     return socket;
   };
-  const upgrade = async (path: string, controlId?: string): Promise<Duplex> => {
+  const upgrade = async (path: string, credential: string, controlId?: string): Promise<Duplex> => {
     const socket = track(
       await connectHttps({
         hostname: origin.hostname,
@@ -83,7 +84,7 @@ export function startWorkspaceRemote(options: WorkspaceRemoteOptions) {
         method: "GET",
         signal: shutdown.signal,
         headers: {
-          authorization: `Bearer ${options.credential}`,
+          authorization: `Bearer ${credential}`,
           "x-moira-endpoint-kind": kind,
           "x-moira-endpoint-identity": endpointIdentity,
           connection: "Upgrade",
@@ -116,8 +117,8 @@ export function startWorkspaceRemote(options: WorkspaceRemoteOptions) {
       request.end();
     });
   };
-  const data = async (callId: string, controlId: string) => {
-    const remote = await upgrade(`/api/workspaces/calls/${callId}`, controlId);
+  const data = async (callId: string, controlId: string, credential: string) => {
+    const remote = await upgrade(`/api/workspaces/calls/${callId}`, credential, controlId);
     if (closed) return remote.destroy();
     const local = track(connect({ path: options.socketPath }));
     remote.once("close", () => local.destroy());
@@ -189,7 +190,11 @@ export function startWorkspaceRemote(options: WorkspaceRemoteOptions) {
       state = "connecting";
       if ((await measuredLife()) !== endpointIdentity)
         throw new Error("Owner endpoint identity changed; enrollment required");
-      const socket = await upgrade("/api/workspaces/connect");
+      const credential = options.prepareCredential
+        ? await options.prepareCredential(shutdown.signal)
+        : options.credential;
+      if (closed) return;
+      const socket = await upgrade("/api/workspaces/connect", credential);
       let id: string | undefined;
       let buffered = "";
       socket.on("data", (chunk: Buffer) => {
@@ -222,7 +227,7 @@ export function startWorkspaceRemote(options: WorkspaceRemoteOptions) {
             } else if (typeof message.callId === "string" && uuid.test(message.callId) && id) {
               // Failed rendezvous closes its control epoch: the cloud rejects pending calls,
               // and reconnect never repeats their payloads. Existing core jobs remain alive.
-              void data(message.callId, id).catch(() => socket.destroy());
+              void data(message.callId, id, credential).catch(() => socket.destroy());
             } else if (message.pong !== true) throw new Error();
           } catch {
             socket.destroy();

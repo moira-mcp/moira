@@ -1789,11 +1789,14 @@ they bypass generic request/body/error-context logging.
 | `POST /requests/:requestId`   | The same complete binding/action/original ID; pure collection, never issuance or parent refresh                        |
 | `POST /:credentialId/release` | `{resourceId,resourceGeneration}`; retires the exact child                                                             |
 
-`action` is `fetch`, `push`, `pull_request_read` or `pull_request_create`. The server
+`action` is `fetch`, `push`, `pull_request_read`, `pull_request_create` or
+`codespaces_provision`. The server
 derives the exact repository and permissions from current authority, not caller
 repository names, URLs or permission objects. Fetch receives contents read, push
 contents write, PR read receives pull-requests read, and PR create pull-requests write;
-each also receives metadata read. Parent generation, App repository grant, account,
+each also receives metadata read. Host-only `codespaces_provision` receives metadata
+read, Codespaces read and Codespaces lifecycle-admin write for fixed SSH provisioning;
+it does not authorize provider creation or deletion. Parent generation, App repository grant, account,
 device/resource binding and current owner authority are rechecked. Local work permission
 has no deadline; child credentials retain finite vendor and parent use bounds.
 An unrelated settings revision does not retire unchanged child authority; actual
@@ -1805,8 +1808,9 @@ Collection returns `state: absent|unconfirmed|disposed|refused`, or
 `{state:"live",credential:…}` with that private credential view. Release returns
 `{released:true}`. The original OAuth/refresh credential stays in the cloud vault;
 derived children are retained under separate encrypted custody before validation
-or delivery. Neither credential belongs in project files, argv, environment, logs
-or agent results.
+or delivery. Neither credential belongs in project files, project-command environment,
+argv, logs or agent results. The trusted host provisioner supplies its scoped child
+only to its isolated fixed `gh` subprocess environment, never the parent credential.
 
 The owner durably records token-free original security metadata before acquire.
 After an uncertain reply or restart, collect the original identity; even confirmed
@@ -1821,6 +1825,31 @@ submission or revocation cannot establish a confirmed authority refusal.
 The broker rechecks authority during work and disposes a known child after the
 upstream transport physically closes. `useUntil` is a local usage fence, not proof
 of GitHub expiry enforcement or automatic child revocation when a parent changes.
+
+### Private GitHub controller provider broker
+
+Paired controllers use `/api/codespaces/github/resources/:resourceId` with their
+device Bearer credential. `GET /assignment` returns the current exact assignment,
+including private `billableOwnerId` and `creationSettings` (auto-stop, idle timeout
+and retention). These captured account inputs are not public resource observations.
+`POST /register` advances verified controller authority; `POST /provider` accepts
+only the closed actions `preflight`, `machines`, `get`, `create`, `start`, `stop`
+and `delete`, with original `requestId` and `resourceGeneration`.
+
+The selected controller chooses and journals the machine, idle timeout and retention
+before dispatching `create` with `prepared: {machine,idleTimeoutMinutes,retentionMinutes}`.
+Repository, ref, operation marker and devcontainer path come from the verified
+assignment. The fixed broker rechecks current authority, assignment/settings and
+personal payer before the creation POST; it does not choose a machine or run setup.
+The original billable acceptance/unknown witness is retained across a lost reply.
+Creation/deletion use parent authorization inside the broker, not the read/provision
+child exported to the host.
+
+`POST /enroll` validates the original measured setup proof against current controller
+authority. The controller saves that proof in the original journal before publishing
+its binding pointer. `POST /renew-enrollment` uses the installed guest's finite
+renewal authority for the same known binding; it is not initial self-enrollment.
+Neither endpoint turns a stale or different guest life into the original setup.
 
 ## Codespace Management API
 
@@ -1908,6 +1937,15 @@ unknown creation requires original collection; unknown guest settlement requires
 separate exact local custody recovery. Custody acknowledgement preserves failed setup
 and does not authorize ordinary Start. None of these paths guesses a VM identity.
 
+GitHub `resume_setup` continues initial enrollment of the same known VM and
+resource generation using its retained original measured proof. It obtains fresh
+scoped SSH custody and performs fixed configuration/health work, without provider
+start, installation, adoption or replacement. Changed life, repository, release or
+authority refuses continuation. A verified local Unix owner can remain ready while
+remote enrollment is unavailable or refused; this does not certify a cloud route.
+An already enrolled owner's temporary transport or cold-renewal outage uses its
+existing reconnect loop, rather than initial-enrollment resume.
+
 ### Original operation recovery
 
 MCP `operation_get({reference})` and the HTTP purpose above inspect the original
@@ -1981,16 +2019,17 @@ epoch without replay. These outcomes do not change Local VM desired state.
 
 The Local controller's private API provides:
 
-| Method and path                            | Contract                                                                                                                      |
-| ------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------- |
-| `GET /v1/controller/health`                | Pairing `connectionId` and live `incarnation`                                                                                 |
-| `GET /v1/controller`                       | Current policy, control, resource observations and unfinished original IDs                                                    |
-| `PUT /v1/controller/settings`              | `{requestId,expectedGeneration,expectedRevision,settings}`                                                                    |
-| `POST /v1/controller/repositories`         | Exact delegated repository admission with identity/revision guards                                                            |
-| `POST /v1/resources/:resourceId/lifecycle` | Create/start/resume_setup/stop/delete/snapshot with original `requestId` and exact `expectedGeneration`                       |
-| `GET /v1/controller/operations/:requestId` | Inspect the original receipt; no effect dispatch                                                                              |
-| `POST /v1/controller/operations/find`      | Read retained admission/delivery descriptors with `{kind?,query?,cursor?}`; no effect collection                              |
-| `POST /v1/controller/workspaces/resolve`   | Resolve `{deviceId,resourceId}` or `{deviceId,spaceId,operationMarker}` from exact retained records, without native inventory |
+| Method and path                                    | Contract                                                                                                                      |
+| -------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| `GET /v1/controller/health`                        | Pairing `connectionId` and live `incarnation`                                                                                 |
+| `GET /v1/controller`                               | Current policy, control, resource observations and unfinished original IDs                                                    |
+| `PUT /v1/controller/settings`                      | `{requestId,expectedGeneration,expectedRevision,settings}`                                                                    |
+| `POST /v1/controller/repositories`                 | Exact delegated repository admission with identity/revision guards                                                            |
+| `POST /v1/resources/:resourceId/lifecycle`         | Create/start/resume_setup/stop/delete/snapshot with original `requestId` and exact `expectedGeneration`                       |
+| `POST /v1/controller/github/resources/:resourceId` | GitHub create/start/stop/delete/adopt/resume_setup with original `requestId` and captured `expectedGeneration`                |
+| `GET /v1/controller/operations/:requestId`         | Inspect the original receipt; no effect dispatch                                                                              |
+| `POST /v1/controller/operations/find`              | Read retained admission/delivery descriptors with `{kind?,query?,cursor?}`; no effect collection                              |
+| `POST /v1/controller/workspaces/resolve`           | Resolve `{deviceId,resourceId}` or `{deviceId,spaceId,operationMarker}` from exact retained records, without native inventory |
 
 The device controller owns physical VM lifecycle, settings and their durable journals.
 Resource admission serializes validation, generation change and durable binding before
@@ -2123,15 +2162,23 @@ the original without another send.
 
 The trusted owner uses private endpoints under `/api/communication/owner` with its existing device or workspace Bearer credential. User MCP tokens and browser cookies are not owner credentials. Workspace scope binds the resource, resource and authorization generations and measured environment identity; controller scope binds the user, device, device generation and pairing connection. Current account and actor authority are checked independently of the delivery journal.
 
-| Method and relative path            | Contract                                                                                                                                                                                                                       |
-| ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `POST /prepare`                     | Strict `communicationOwnerPrepareSchema`: scope, original `requestId`, optional `channelIds`, exact file metadata, kind/text/format/silent and optional workflow frame; returns configured channel descriptors without secrets |
-| `POST /send`                        | Framed `communicationOwnerSendSchema` followed by the original opaque file stream; returns sanitized `delivered`, `refused` or `unconfirmed` vendor status                                                                     |
-| `GET /artifacts/:channelId/:digest` | Authenticated current channel and scope resolve the exact installed immutable binary-extension artifact; scope travels in `x-moira-communication-scope`                                                                        |
+| Method and relative path            | Contract                                                                                                                                                                                                         |
+| ----------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `POST /prepare`                     | Strict authority-only `communicationOwnerPrepareSchema`: scope, original `requestId`, optional `channelIds` and optional workflow frame; returns authorized channel contracts without file or presentation input |
+| `POST /send`                        | Framed `communicationOwnerSendSchema` followed by the original opaque file stream; returns sanitized `delivered`, `refused` or `unconfirmed` vendor status                                                       |
+| `GET /artifacts/:channelId/:digest` | Authenticated current channel and scope resolve the exact installed immutable binary-extension artifact; scope travels in `x-moira-communication-scope`                                                          |
 
 `/send` uses `Content-Type: application/vnd.moira.owner-stream`. Its body is a four-byte unsigned big-endian JSON byte length, the UTF-8 JSON control and the opaque file bytes. `Content-Length` must equal four plus the JSON byte length plus the declared file size. `encodeOwnerFrame`, `readOwnerFrame` and `settleOwnerFrame` in `packages/workspace-service/src/stream-frame.mjs` own this format and response/ingress lifetime. Authentication happens before reading the metadata frame; typed scope authorization follows parsing. File bytes never enter the JSON parser, temporary cloud storage or a whole-file buffer. A known refusal is flushed before unread ingress is closed.
 
-The cloud resolves the current registered channel, configured recipient, fixed endpoint and granted secret. Owners cannot supply a destination, URL, arbitrary header or credential. Configuration and installed-artifact digests must still match at dispatch; workflow frame revision and task identity are rechecked before vendor submission. The cloud constructs fixed raw or multipart vendor framing around the stream. Provider refusal is distinct from a lost or incomplete dispatched result.
+Prepared channels declare `capabilities` for text/image/document, named `operations`,
+optional text/caption length and file MIME/size constraints, and any immutable
+`bundleDigest`. Declared nonsecret handler settings may cross this boundary;
+recipient, endpoint and secret settings remain at the broker. The owner checks its
+owned bytes and selected channels, then journals the complete upload/text plan before
+vendor effects. Explicit unsupported selection refuses; no eligible channel is not
+a successful delivery. Caption and follow-up text are owner decisions.
+
+The cloud resolves the current registered channel, configured recipient, fixed endpoint and granted secret. Owners cannot supply a destination, URL, arbitrary header or credential. Configuration and installed-artifact digests must still match at dispatch; workflow frame revision and task identity are rechecked before vendor submission. The fixed broker validates the owner-prepared stage and constructs raw or multipart vendor framing around the stream; it does not choose the delivery plan. Provider refusal is distinct from a lost or incomplete dispatched result.
 
 Work HTTP requests to vendors use a dedicated dispatcher without default response-header or
 body-idle work clocks. Connection establishment, caller cancellation and explicit deadlines remain

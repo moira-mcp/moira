@@ -42,12 +42,13 @@ afterEach(async () => {
 const childProgram = `
   const c=JSON.parse(process.env.WORKSPACE_TEST_CONFIG);
   const {startWorkspaceService}=await import(c.serviceModule);
-  const {startWorkspaceRemote}=await import(c.remoteModule);
+  const {startWorkspaceRemote,WorkspaceAuthorityRefusal}=await import(c.remoteModule);
   const service=await startWorkspaceService(c.service);
   service.server.on('request',request=>{
     if(request.url?.includes('waitMs=60000'))process.stdout.write('observing\\n');
   });
   let remote;
+  let preparation;
   const {createInterface}=await import('node:readline');
   const lines=createInterface({input:process.stdin});
   lines.on('line',async line=>{
@@ -59,6 +60,17 @@ const childProgram = `
     }
     else if(line==='disconnect'){await remote.close();process.stdout.write('disconnected\\n');}
     else if(line==='reconnect'){remote=startWorkspaceRemote(c.remote);}
+    else if(line.startsWith('prepare:')){
+      preparation=line.slice('prepare:'.length);
+      remote=startWorkspaceRemote({...c.remote,credential:'stale-must-not-upgrade',prepareCredential:async signal=>{
+        process.stdout.write('preparing-credential\\n');
+        if(preparation==='refused')throw new WorkspaceAuthorityRefusal('Original renewal refused');
+        if(preparation==='abort')return new Promise((resolve,reject)=>{signal.addEventListener('abort',()=>{process.stdout.write('preparation-aborted\\n');reject(signal.reason)},{once:true});});
+        if(preparation!=='ready')throw new Error('Renewal store unavailable');
+        return c.remote.credential;
+      }});
+    }
+    else if(line==='prepare-ready'){preparation='ready';}
     else if(line==='when-ready'){
       process.stdout.write('awaiting-connection\\n');
       try{await remote.whenConnected();process.stdout.write('connection-ready\\n');}
@@ -294,6 +306,74 @@ async function disconnect(child: ChildProcess) {
   child.stdin!.write("disconnect\n");
   expect(String((await ended)[0]).trim()).toBe("disconnected");
 }
+
+function childOutput(child: ChildProcess, marker: string) {
+  return new Promise<string>((resolve) => {
+    let output = "";
+    const receive = (bytes: Buffer) => {
+      output += String(bytes);
+      if (output.includes(marker)) {
+        child.stdout!.off("data", receive);
+        resolve(output);
+      }
+    };
+    child.stdout!.on("data", receive);
+  });
+}
+
+test("credential preparation retries before CONTROL and pins the prepared credential to DATA without blocking Unix work", async () => {
+  const f = await fixture();
+  await disconnect(f.child);
+  const authorizations: unknown[] = [];
+  f.server.prependListener("upgrade", (request) =>
+    authorizations.push(request.headers.authorization),
+  );
+  const prepared = childOutput(f.child, "preparing-credential\n");
+  f.child.stdin!.write("prepare:unavailable\n");
+  await prepared;
+  const local = createWorkspaceClient(join(f.root, "service.sock"));
+  expect(
+    await local.json(f.binding.userId, f.binding.resourceId, { method: "GET", path: "/v1/health" }),
+  ).toMatchObject({ environmentIdentity: f.binding.environmentIdentity });
+  expect(authorizations).toEqual([]);
+  const connected = once(f.router, "connected");
+  f.child.stdin!.write("prepare-ready\n");
+  await connected;
+  expect(
+    await f.client.json(f.binding.userId, f.binding.resourceId, {
+      method: "GET",
+      path: "/v1/health",
+    }),
+  ).toMatchObject({ version: 1 });
+  expect(authorizations.length).toBeGreaterThanOrEqual(2);
+  expect(new Set(authorizations)).toEqual(new Set([`Bearer ${f.credential}`]));
+});
+
+test.each(["refused", "abort"])(
+  "credential preparation %s never upgrades stale authority and shutdown cancels its original wait",
+  async (mode) => {
+    const f = await fixture();
+    await disconnect(f.child);
+    const upgrades: string[] = [];
+    f.server.prependListener("upgrade", (request) => upgrades.push(request.url ?? ""));
+    const observed = childOutput(
+      f.child,
+      mode === "refused" ? "connection-error:" : "preparing-credential\n",
+    );
+    f.child.stdin!.write(`prepare:${mode}\nwhen-ready\n`);
+    await observed;
+    if (mode === "refused") {
+      const repeated = childOutput(f.child, "connection-error:");
+      f.child.stdin!.write("when-ready\n");
+      expect(await repeated).toContain("Original renewal refused");
+    } else {
+      const aborted = childOutput(f.child, "preparation-aborted\n");
+      f.child.stdin!.write("disconnect\n");
+      await aborted;
+    }
+    expect(upgrades).toEqual([]);
+  },
+);
 
 test("remote availability requires authenticated control while the Unix owner stays independently ready", async () => {
   const f = await fixture();

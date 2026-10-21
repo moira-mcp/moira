@@ -342,7 +342,13 @@ test("delivery discovery does not create state and old-life receipt reads never 
       transport: {
         prepare: async () => ({
           channels: [
-            { channelId: "telegram", provider: "telegram", authorityDigest: "a".repeat(64) },
+            {
+              channelId: "telegram",
+              provider: "telegram",
+              authorityDigest: "a".repeat(64),
+              capabilities: { text: true, image: true, document: true },
+              operations: ["send_message"],
+            },
           ],
         }),
         send: async (input, source) => {

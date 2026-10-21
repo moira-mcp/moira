@@ -366,8 +366,15 @@ async function setup(fileDatabase = false) {
               .environmentIdentity,
           ),
         };
+        await dependencies.prepared(proof);
+        const health = {
+          releaseIdentity: proof.release,
+          environmentIdentity: proof.environmentIdentity,
+          remote: { state: "unconfigured" as const },
+        };
+        await dependencies.ready(health);
         await dependencies.enroll(proof);
-        return { proof, health: {} };
+        return { proof, health };
       },
     });
   const endpoint = await startLocalController(owner);
@@ -680,13 +687,6 @@ describe("registered MCP tools against actual workspace and lifecycle services",
             scope: currentScope,
             requestId: createWorkspaceRequestId(),
             channelIds: ["telegram"],
-            kind: "document",
-            text: "Report",
-            file: {
-              fileName: "binary.bin",
-              mimeType: "application/octet-stream",
-              size: value.nativeBytes.length,
-            },
           }),
         );
       });

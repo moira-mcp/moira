@@ -102,7 +102,13 @@ describe("cloud file-owner receipt boundary", () => {
         transport: {
           prepare: async () => ({
             channels: [
-              { channelId: "telegram", provider: "telegram", authorityDigest: "a".repeat(64) },
+              {
+                channelId: "telegram",
+                provider: "telegram",
+                authorityDigest: "a".repeat(64),
+                capabilities: { text: true, image: true, document: true },
+                operations: ["send_message"],
+              },
             ],
           }),
           send: async (_input, source) => {

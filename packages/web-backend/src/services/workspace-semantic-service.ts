@@ -941,7 +941,7 @@ export function createWorkspaceSemanticServices(dependencies: WorkspaceSemanticD
               );
             case "resume_setup":
               if (!("resumeSetup" in resource))
-                invalid("Setup resume applies to a known Local environment.");
+                invalid("Setup resume requires an environment with a retained preparation proof.");
               return project(
                 userId,
                 await resource.resumeSetup(

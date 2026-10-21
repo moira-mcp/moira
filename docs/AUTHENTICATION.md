@@ -500,7 +500,9 @@ applied settings revision and current enabled permission. Issuer and identity co
 phase; asynchronous grant refresh and issuance still require fresh authorization.
 The original OAuth/refresh credential and Local device credential never reach
 project commands. Derived tokens remain broker-private memory and must not enter
-project files, argv, environment, logs or agent output. This is the existing
+project files, argv, project-command environment, logs or agent output. Fixed host
+SSH provisioning supplies only its scoped child to an isolated trusted `gh`
+subprocess environment. This is the existing
 trusted same-UID guest model, not an OS sandbox against an authorized agent.
 
 Local public read-only fetch needs no App grant only on its explicitly approved
@@ -535,6 +537,26 @@ the current credential through the same broker and child-custody store. Disablin
 remote authority refuses new acquisition and delivery without discarding unresolved
 children or rewriting original outcomes. Current cloud authorization and genuine
 provider/credential expiry still apply.
+
+For GitHub provisioning, the selected controller journals its machine and captured
+account settings before creation. The cloud's fixed broker independently checks
+the exact assignment, current authority and personal payer before using parent
+authorization for create/delete. The host's repository-scoped provision child has
+Codespaces read and lifecycle-admin write; it does not inherit those parent write
+permissions or choose arbitrary provider endpoints.
+
+Initial GitHub setup saves the original measured repository/root, release, life and
+authority proof before publishing the binding pointer. Verified Unix readiness is
+published before optional enrollment, so a held or refused enrollment does not turn
+approved local work into failed VM setup. Explicit `resume_setup` uses that same
+proof and resource generation with fresh scoped SSH custody; it cannot regenerate
+proof for a changed life, install a replacement or replay provider startup. Current
+authority is checked across enrollment before applying a reply. An already enrolled
+guest can renew through its existing reconnect loop after a cold life change using
+its finite renewal authority and verified retained binding. A never-enrolled guest
+cannot use that path to manufacture initial enrollment. CONTROL and DATA for a
+connection use the same prepared credential; terminal authority refusal stops remote
+reconnection without stopping the local Unix owner.
 
 On Local, optional enrollment begins after verified Unix readiness and waits outside
 local lifecycle/work admission. A returned credential can configure only the captured
@@ -656,8 +678,13 @@ generations and measured life. Authentication precedes preparation JSON/framed c
 complete scope and current channel authority are rechecked after configuration resolution.
 These checks do not consult a presence API: actual dispatch uses the backend router's
 current connection. A channel descriptor grants no caller-selected recipient, endpoint,
-header or secret. The fixed cloud request injects provider credentials; project commands
-and binary handlers receive none. Public publication URLs have their own current owner
+header or secret. Preparation receives only scope, original identity, optional channel
+selection and workflow frame, and returns declared capabilities/constraints plus
+sanitized nonsecret handler settings. Recipient and endpoint runtime values remain
+at the broker. The owner validates the complete delivery plan against its owned bytes
+before any vendor stage; the cloud rechecks the prepared stage and current configured
+authority, then injects provider credentials and fixed recipient/framing. Project commands
+and binary handlers receive no provider secrets. Public publication URLs have their own current owner
 authorization and expiry contract; ordinary returned references do not replace it.
 
 Public progress-image grants remain run-bound authorization, distinct from both MCP identity and private owner credentials. Minting requires a selected or unique active registered controller; missing or ambiguous selection returns `COMMUNICATION_OWNER_UNAVAILABLE`. Rendering and publication require that owner's actual route. A route failure does not prove that an original request was never admitted. Existing task/context/step/version binding and response-finish consumption remain enforced.

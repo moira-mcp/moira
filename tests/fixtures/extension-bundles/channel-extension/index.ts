@@ -51,6 +51,10 @@ const notifications = defineChannel({
     }
     if ("secret" in services || "fetch" in services || "channel-probe.token" in settings)
       throw new Error("Cloud authority crossed into owner context");
+    if ("channel-probe.destination" in settings || "channel-probe.baseUrl" in settings)
+      throw new Error("Transport-role configuration crossed into owner context");
+    if (settings["channel-probe.enabled"] !== true)
+      throw new Error("Legitimate nonsecret handler configuration was lost");
     const reader = message.attachment.open().getReader();
     let size = 0;
     let completed = false;

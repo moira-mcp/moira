@@ -7,7 +7,7 @@ import { ControllerState } from "./controller-state.js";
 import {
   controllerIdentitySchema,
   controllerResourceRegistrationSchema,
-  githubControllerResourceSchema,
+  githubAssignmentSchema,
   githubProviderActionSchema,
   githubResourceAuthoritySchema,
   githubProvisionProofSchema,
@@ -338,7 +338,7 @@ export class LocalRelay {
   async githubAssignment(resourceId: string, signal?: AbortSignal, purpose?: "adopt" | "retire") {
     uuid.parse(resourceId);
     const connection = await this.confirmed(signal);
-    return githubControllerResourceSchema.parse(
+    return githubAssignmentSchema.parse(
       await this.json(
         connection,
         `/${resourceId}/assignment${purpose ? `?purpose=${purpose}` : ""}`,
@@ -405,15 +405,19 @@ export class LocalRelay {
       signal,
     );
   }
-  async enrollGitHubWorkspace(resourceId: string, proof: GitHubProvisionProof) {
+  async enrollGitHubWorkspace(
+    resourceId: string,
+    proof: GitHubProvisionProof,
+    signal?: AbortSignal,
+  ) {
     uuid.parse(resourceId);
-    const connection = await this.confirmed();
+    const connection = await this.confirmed(signal);
     const credential = workspaceBootstrapCredentialSchema.parse(
       await this.json(
         connection,
         `/${resourceId}/enroll`,
         githubProvisionProofSchema.parse(proof),
-        undefined,
+        signal,
         "github",
       ),
     );

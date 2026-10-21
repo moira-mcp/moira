@@ -221,10 +221,8 @@ export async function createOwnerCommunication({
         fileName = source.file.fileName ?? "attachment";
         mimeType = source.file.mimeType ?? opened.mimeType ?? "application/octet-stream";
       } else if (source.type === "inline") {
-        if (
-          source.data.length % 4 ||
-          !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(source.data)
-        )
+        const padding = source.data.indexOf("=");
+        if (source.data.length % 4 || (padding !== -1 && padding < source.data.length - 2))
           throw refused("SOURCE_REFUSED", 422);
         body = (async function* () {
           for (let offset = 0; offset < source.data.length; offset += 65536) {
@@ -332,12 +330,7 @@ export async function createOwnerCommunication({
               scope: selectedScope,
               requestId: input.requestId,
               channelIds: input.channelIds,
-              kind: input.kind,
-              text: input.text,
-              format: input.format,
-              silent: input.silent,
               workflowFrame: input.workflowFrame,
-              file: { fileName: file.fileName, mimeType: file.mimeType, size: file.size },
             },
             shutdown.signal,
           ),
@@ -351,8 +344,50 @@ export async function createOwnerCommunication({
       const perform = async () => {
         await save();
         try {
+          if (input.action === "deliver") {
+            const eligible = (channel) => {
+              const constraints = channel.constraints?.file?.[input.kind];
+              return (
+                channel.capabilities[input.kind] &&
+                (!constraints?.mimeTypes || constraints.mimeTypes.includes(file.mimeType)) &&
+                (constraints?.minBytes === undefined || file.size >= constraints.minBytes) &&
+                (constraints?.maxBytes === undefined || file.size <= constraints.maxBytes)
+              );
+            };
+            if (
+              input.channelIds &&
+              (input.channelIds.some(
+                (id) => !channels.some((channel) => channel.channelId === id),
+              ) ||
+                channels.some((channel) => !eligible(channel)))
+            )
+              throw refused("COMMUNICATION_DELIVERY_REFUSED");
+            channels = channels.filter(eligible);
+            if (!channels.length) throw refused("COMMUNICATION_DELIVERY_REFUSED");
+            // Validate the complete plan before admitting any vendor stage.
+            for (const channel of channels) {
+              if (
+                channel.constraints?.text &&
+                input.text.length > channel.constraints.text.maxLength
+              )
+                throw refused("COMMUNICATION_DELIVERY_REFUSED");
+              if (
+                channel.provider === "telegram" &&
+                channel.constraints?.caption &&
+                input.text.length > channel.constraints.caption.maxLength &&
+                (!channel.capabilities.text || !channel.operations.includes("send_message"))
+              )
+                throw refused("COMMUNICATION_DELIVERY_REFUSED");
+            }
+          }
           for (const channel of channels) {
+            const followup =
+              channel.provider === "telegram" &&
+              channel.constraints?.caption !== undefined &&
+              input.text.length > channel.constraints.caption.maxLength;
             const send = async (operationId, controls, signal = shutdown.signal) => {
+              if (operationId !== undefined && !channel.operations.includes(operationId))
+                throw refused("COMMUNICATION_DELIVERY_REFUSED");
               const existing = record.stages.find(
                 (stage) =>
                   stage.channelId === channel.channelId && stage.operationId === operationId,
@@ -383,10 +418,7 @@ export async function createOwnerCommunication({
                   channelId: channel.channelId,
                   authorityDigest: channel.authorityDigest,
                   kind: input.kind,
-                  text:
-                    channel.provider === "telegram" && !textStage && input.text.length > 1024
-                      ? ""
-                      : input.text,
+                  text: !textStage && followup ? "" : input.text,
                   format: input.format,
                   silent: input.silent,
                   workflowFrame: input.workflowFrame,
@@ -479,7 +511,7 @@ export async function createOwnerCommunication({
                 throw refused("COMMUNICATION_DELIVERY_REFUSED");
             } else {
               await send();
-              if (input.text.length > 1024) await send("send_message");
+              if (followup) await send("send_message");
             }
           }
           record.outcome = {
@@ -488,7 +520,7 @@ export async function createOwnerCommunication({
               file,
               ...(input.action === "deliver"
                 ? {
-                    status: channels.length ? "delivered" : "no_configured_channels",
+                    status: "delivered",
                     channels: record.stages,
                   }
                 : {}),

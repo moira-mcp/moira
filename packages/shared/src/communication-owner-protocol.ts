@@ -56,33 +56,35 @@ export const communicationFileMetadataSchema = z
     size: z.number().int().nonnegative().safe(),
   })
   .strict();
+const workflowFrame = z
+  .object({
+    executionId: z.string().min(1),
+    workflowId: z.string().min(1),
+    revision: z.number().int().nonnegative().safe(),
+    taskIdentityRevision: z.string().min(1),
+  })
+  .strict()
+  .optional();
 const presentation = {
   kind: z.enum(["image", "document"]),
   text: z.string(),
   format: z.enum(["plain", "markdown", "html"]).optional(),
   silent: z.boolean().optional(),
-  workflowFrame: z
-    .object({
-      executionId: z.string().min(1),
-      workflowId: z.string().min(1),
-      revision: z.number().int().nonnegative().safe(),
-      taskIdentityRevision: z.string().min(1),
-    })
-    .strict()
-    .optional(),
+  workflowFrame,
 };
 export const communicationOwnerPrepareSchema = z
   .object({
     scope: communicationOwnerScopeSchema,
     requestId,
     channelIds: z.array(z.string().min(1)).optional(),
-    file: communicationFileMetadataSchema,
-    ...presentation,
+    workflowFrame,
   })
   .strict();
 export const communicationOwnerSendSchema = communicationOwnerPrepareSchema
   .omit({ channelIds: true })
   .extend({
+    file: communicationFileMetadataSchema,
+    ...presentation,
     channelId: z.string().min(1),
     authorityDigest: digest,
     operationId: z.string().min(1).optional(),
@@ -90,11 +92,33 @@ export const communicationOwnerSendSchema = communicationOwnerPrepareSchema
     controls: z.record(z.string(), z.unknown()).optional(),
   })
   .strict();
+const fileConstraints = z
+  .object({
+    mimeTypes: z.array(communicationFileMetadataSchema.shape.mimeType).optional(),
+    minBytes: z.number().int().nonnegative().safe().optional(),
+    maxBytes: z.number().int().positive().safe().optional(),
+  })
+  .strict();
 export const communicationOwnerChannelSchema = z
   .object({
     channelId: z.string().min(1),
     authorityDigest: digest,
     provider: z.enum(["telegram", "extension"]),
+    capabilities: z
+      .object({ text: z.boolean(), image: z.boolean(), document: z.boolean() })
+      .strict(),
+    operations: z.array(z.string().min(1)),
+    constraints: z
+      .object({
+        text: z.object({ maxLength: z.number().int().positive().safe() }).strict().optional(),
+        caption: z.object({ maxLength: z.number().int().positive().safe() }).strict().optional(),
+        file: z
+          .object({ image: fileConstraints.optional(), document: fileConstraints.optional() })
+          .strict()
+          .optional(),
+      })
+      .strict()
+      .optional(),
     bundleDigest: digest.optional(),
     settings: z.record(z.string(), z.unknown()).optional(),
   })

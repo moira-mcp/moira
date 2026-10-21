@@ -59,8 +59,10 @@ state. Linux VM execution fails closed before creation.
 
 The common workspace service owns ordinary command/file/session execution in both providers.
 The Local controller owns physical lifecycle/settings through private Unix HTTP and live routing;
-The selected paired controller performs GitHub fixed trusted bootstrap and provider management;
-cloud services do not run an SSH connector.
+The selected paired controller saves GitHub machine and idle/retention choices before provider
+submission and performs fixed trusted bootstrap and provider management. Cloud services broker
+fixed provider calls, recheck current account authority and billing ownership before an effect,
+and retain unresolved billable outcomes; they do not run an SSH connector or choose the machine.
 Neither is a command transport. Changes to lifecycle or guest behavior must preserve
 durable replay receipts, independent kernel ownership and unknown-outcome fences;
 an injected test runtime does not establish physical SDK isolation. Use root
@@ -96,6 +98,11 @@ VM/disk and preserves the original create result and user files. Unknown creatio
 not adopted or retried. Use host `recover` for separate explicit local custody recovery. Acknowledging
 an initial unknown guest outcome on the exact stopped VM retains incomplete setup; follow it with
 explicit `resume-setup`, not ordinary start.
+GitHub setup continuation also uses the original saved proof and generation. The measured root,
+guest life and release must still match; continuation neither loads a host payload nor installs
+or starts the provider environment. A never-enrolled guest whose life changed cannot mint a
+replacement proof. An enrolled guest instead renews from its installed authority in the existing
+remote connection loop before opening CONTROL; DATA uses that established credential epoch.
 A working guest Unix API does not await workspace credentials or cloud CONTROL. Optional enrollment
 acquisition runs outside both local work lanes; applying a response revalidates the original runtime,
 generation, repository, grant and controller connection. Warm author input comes from configured or
@@ -162,6 +169,12 @@ with its 256 KiB budget. Do not restore cloud Buffer files or archive quotas.
 The owner release also carries `owner-renderer.mjs`, the binary extension handler host and process-group supervisor. Renderer dependencies are private packaged Sharp/libvips and font assets, independent of project `node_modules` and cloud authentication/database configuration. `renderOwnerProgress` sets its packaged font configuration before loading the rasterizer. Local host assets use the `owner-runtime` directory; the guest uses its installed `service` assets. Preserve the complete release and asset manifest rather than copying a JavaScript entry alone.
 
 Binary-extension packaging uses the existing esbuild/registry path: installed handler code, canonical manifest and declared regular assets form one immutable artifact. The private owner installs only its checked digest and runs `binaryHandler` under the packaged supervisor. Native/platform or unresolved dynamic dependencies that cannot form the supported owner artifact are refused before delivery admission.
+
+Binary-handler runtime settings use one shared projection before both broker export and child
+invocation: secret aliases and every operation's recipient/base-URL setting are excluded, while
+declared nonsecret format settings remain. This does not rewrite the installed manifest or alter
+the ordinary text-extension runner. The owner chooses and validates the complete attachment/text
+plan before vendor staging; an explicitly unsupported kind or no eligible delivery is a refusal.
 
 ```bash
 npm run workspace:build

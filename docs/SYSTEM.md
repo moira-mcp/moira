@@ -597,7 +597,18 @@ vendor replay. A current route refusal cannot certify historical non-admission.
 
 `createOwnerCommunication` in `packages/workspace-service/src/owner-communication.mjs` composes owner publications, direct native source acquisition, packaged progress rendering and extension execution. `/v1/communication` submits a typed descriptor; `/v1/communication/stream` accepts framed control plus raw bytes; `/v1/communication/operations/:requestId` collects the original receipt. Existing owner admission also binds the original ID across action namespaces. The journal retains immutable input identity, source publication and per-channel stages, excluding signed native URLs, base64 payloads and file bytes. Same-ID collection or repetition never refetches an accepted source or replays a vendor effect. Changing original input or the authorized principal refuses the request; same-principal renewal preserves the original captured scope and receipt.
 
-The cloud's fixed communication transport resolves installed/configured channel authority and injects the current secret and recipient. It receives opaque file bytes through the shared length-prefixed metadata/stream format, preserving backpressure and cancelling unread ingress after a known reply is flushed. It neither fetches native source URLs nor spools attachments or keeps a delivery queue. Account, actor, channel configuration and workflow frame checks remain independent of the owner journal. Public publication routes retain current owner authorization and forward the immutable source without cloud claim storage.
+The cloud's fixed communication transport prepares only current channel authority: scope, original
+request, optional channel selection and workflow frame. It receives no file metadata or message
+content during preparation. Descriptors expose capabilities, permitted operation IDs, actual
+provider constraints and filtered handler settings. The owner validates the complete selected
+file/text plan before any vendor stage and chooses Telegram caption or follow-up text stages.
+Explicit unsupported selection refuses; implicit selection with no eligible channel is not
+successful delivery. The broker validates the selected stage against current actor, frame,
+configuration digest and fixed transport declaration, injects the configured secret and recipient,
+and wraps opaque file bytes in the vendor's HTTP framing. The shared length-prefixed stream format
+preserves backpressure and cancels unread ingress after a known reply is flushed. The broker
+neither fetches native sources nor spools attachments or keeps a delivery queue. Public publication
+routes retain current owner authorization and forward the immutable source without cloud claim storage.
 
 Completion requires the actual source and vendor work to settle. Extension execution additionally waits for the supervised process group and byte pipe. Observer loss, a vendor response before full upload or missing physical settlement retains uncertainty. Shutdown fences admission, aborts source preparation and settles owned resources; startup failure also closes already acquired brokers and services.
 
@@ -676,9 +687,15 @@ rows in read-only archives, separately from earlier archives, while retaining re
 IDs, approved bindings and guest credentials without executing native work.
 
 GitHub cloud services retain current account/repository authorization, provider identity,
-billing and unresolved billable retirement witnesses. The selected paired controller owns
+personal-payer authorization and unresolved billable retirement witnesses. The selected paired controller owns
 GitHub lifecycle admission, fixed provisioning and explicit adoption, as well as Local
 physical custody. Cloud services neither run SSH workers nor reconcile lifecycle state.
+For creation, the controller verifies the assigned payer, reads fixed provider machine offers,
+chooses the machine and idle/retention parameters, and durably saves that prepared choice in its
+original journal before provider submission. The cloud broker validates the current assignment,
+settings and personal payer before forwarding the prepared parameters. It retains the necessary
+billable submission/unknown witness but does not choose a replacement machine or resume an
+uncertain create. Collection does not repeat preflight, preparation or provider creation.
 Existing offline Local work remains governed by current owner grants and enabled permission; fresh
 creation still needs cloud route registration and initial credential authority.
 Local services work without GitHub configuration; the GitHub enabled flag does not
@@ -723,6 +740,24 @@ receipt collection; unknown guest settlement requires local custody recovery bef
 setup can continue. Bounded setup reasons distinguish an unproved repository,
 unavailable prerequisite, failed checkout and failed configuration. They clear only
 after the matching guest life and packaged release pass Unix health verification.
+
+GitHub provisioning also configures and verifies the local Unix owner before optional cloud
+enrollment. The controller saves the exact measured repository/root, guest life and release proof
+in its original operation before publishing its binding pointer. Initial GitHub `resume_setup`
+uses that original proof and generation after settling prior provisioning custody. It repeats
+fixed verification, configuration and enrollment only: no provider Start, adoption, payload
+installation or replacement VM. Changed life, root or authority refuses this continuation.
+An observed `unconfigured` or `enrollment_unavailable` owner can require this explicit initial
+continuation; existing-credential `connecting` or `unavailable` states use reconnect instead,
+and refused authority cannot be replaced automatically.
+
+An already enrolled GitHub guest can renew after a real guest-life change using its installed
+renewal authority. The daemon verifies the retained root/device/inode, release and new life,
+establishes Unix readiness, and prepares the credential in its existing remote reconnect loop.
+Its durable original renewal request is reused after a lost reply; CONTROL and DATA retain the
+validated connection epoch. Temporary enrollment failure leaves local work available, while
+confirmed authority refusal retires remote access. A never-enrolled guest has no renewal
+authority and cannot regenerate its original initial proof for another life.
 
 Custody acknowledgement of an interrupted initial setup requires exact physical stop.
 It preserves the failed phase and original VM/setup provenance, replacing acknowledged
@@ -1012,7 +1047,17 @@ for every remote VPN, cloud metadata endpoint or separate physical VM.
 
 ### Communication adapters
 
-Binary-capable extensions declare `binaryTransport` named operations with fixed HTTPS endpoint or granted nonsecret endpoint setting, method, credential alias, configured recipient and raw/multipart body mode. `binaryHandler` receives nonsecret settings, file metadata, `message.attachment.open()` and `services.send(operationId,controls)`. It receives neither secret lookup nor arbitrary authenticated fetch. The source cannot be replaced by a child-selected path, URL or preframed body.
+Binary-capable extensions declare `binaryTransport` named operations with fixed HTTPS endpoint or
+granted nonsecret endpoint setting, method, credential alias, configured recipient and raw/multipart
+body mode. `binaryHandler` receives filtered declared settings, file metadata,
+`message.attachment.open()` and `services.send(operationId,controls)`. The pure
+`binaryHandlerSettings` projection in `extensions/binary-transport.ts` excludes secret aliases and
+the union of all operations' recipient and base-URL setting roles, both before broker export and
+before child invocation. Other declared handler settings remain available. The installed manifest
+retains its static operation metadata. The binary child receives neither runtime destinations,
+secret lookup nor arbitrary authenticated fetch. It cannot replace the captured source with a
+child-selected path, URL or preframed body. Ordinary text handlers retain their independently
+authorized configuration and runner services.
 
 `compileBinaryExtensionArtifact` compiles trusted installed code and regular declared assets into a digest-bound artifact. The artifact includes the canonical manifest and bundled handler bytes, not user configuration or secrets. The current registry/channel authenticates artifact retrieval; the owner verifies and atomically installs it privately before supervised execution. Unsupported dynamic/native dependency closure refuses packaging. Node handlers and ordinary text channels retain their existing runner services and lifecycle.
 

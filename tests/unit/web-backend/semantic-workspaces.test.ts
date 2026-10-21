@@ -282,21 +282,34 @@ describe("semantic workspace backend", () => {
       expect(f.resource.create).not.toHaveBeenCalled();
     },
   );
-  test("resume setup retains the same resource and separates remote failure from local usability", async () => {
-    const f = fixture("local-sandboxes");
-    const result = await f.service.invoke(
-      USER,
-      "workspace_lifecycle",
-      { workspace: workspace("local-sandboxes"), action: "resume_setup" },
-      REQUEST,
-    );
-    expect(result).toMatchObject({
-      state: "completed",
-      outcome: { ok: true, result: { state: "usable", remote: { state: "unavailable" } } },
-    });
-    expect(f.resource.resumeSetup).toHaveBeenCalledWith(USER, RESOURCE, REQUEST, 3);
-    expect(f.resource.startCodespace).not.toHaveBeenCalled();
-  });
+  test.each(["local-sandboxes", "github-codespaces"])(
+    "%s setup resume retains the same resource and separates remote failure from local readiness",
+    async (provider) => {
+      const f = fixture(provider);
+      const state = provider === "github-codespaces" ? "start_pending" : "usable";
+      f.resource.resumeSetup.mockResolvedValue(
+        view({ provider, state, generation: 3, remote: { state: "unavailable" } }),
+      );
+      const result = await f.service.invoke(
+        USER,
+        "workspace_lifecycle",
+        {
+          workspace: workspace(provider as "local-sandboxes" | "github-codespaces"),
+          action: "resume_setup",
+        },
+        REQUEST,
+      );
+      const observation = { state, remote: { state: "unavailable" } };
+      expect(result).toMatchObject(
+        provider === "github-codespaces"
+          ? { state: "pending", original: observation }
+          : { state: "completed", outcome: { ok: true, result: observation } },
+      );
+      expect(f.resource.resumeSetup).toHaveBeenCalledWith(USER, RESOURCE, REQUEST, 3);
+      expect(f.resource.startCodespace).not.toHaveBeenCalled();
+      expect(f.resource.create).not.toHaveBeenCalled();
+    },
+  );
   test("deletion needs confirmation and carries the captured precondition", async () => {
     const f = fixture();
     await expect(

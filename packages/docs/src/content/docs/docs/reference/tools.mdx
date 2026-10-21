@@ -48,7 +48,10 @@ operation_get({ reference: "<returned operation reference>" });
 
 The file owner retains the bytes and original delivery receipt. Cloud Moira authorizes the
 channel and streams the source to its fixed vendor transport without acquiring the native file
-or retaining a temporary copy. Ordinary text needs no file owner. A delivery returns its original
+or retaining a temporary copy. The owner receives channel capabilities and provider constraints
+and validates the complete file/text plan before vendor staging. An explicitly selected unsupported
+kind is refused rather than silently changed; no eligible delivery cannot report success.
+Ordinary text needs no file owner. A delivery returns its original
 operation reference; collect it without resending. If the first reply was lost, use
 `operation_find` at the selected owner and choose the original explicitly. No match, absence or
 an unavailable observation does not prove that delivery never happened.
@@ -234,7 +237,7 @@ controllers and installation choices. An unavailable identity is observe-only, w
 invented state, machine or generation. Provider failures remain explicit alongside healthy peers.
 
 Use `workspace_create` with a returned target and branch. `workspace_lifecycle` starts,
-stops or resumes incomplete Local setup against its captured workspace reference.
+stops or resumes incomplete Local or GitHub setup against its captured workspace reference.
 `workspace_adopt` assigns an observed GitHub environment to an explicitly selected controller;
 `workspace_adopt_external` prepares an owned environment by its known provider name.
 `workspace_delete` requires `confirm_delete: true` and the captured reference.
@@ -246,12 +249,18 @@ Current owner permission and exact repository grants remain required. Owner sett
 Local resource admission. CPU/RAM/Docker defaults affect new VMs, not existing admitted profiles.
 GitHub requires current account/App grants, personal billing and the explicitly selected paired
 controller. Controller discovery uses registration, not an availability fallback.
+The controller saves the machine and idle/retention choices before cloud submission; cloud Moira
+brokers fixed provider calls with current authority and billing checks.
 Provider idle policy applies to new GitHub Codespaces: disabling auto-stop requests GitHub's
 240-minute maximum, not unlimited uptime. A silent command can be interrupted by provider idle stop.
 
-Local `resume_setup` continues the same proved incomplete VM after repairing its prerequisite.
+`resume_setup` continues the same proved incomplete environment after repairing its prerequisite.
+GitHub continuation requires the original generation, measured root, guest life and release;
+it neither reinstalls the service nor starts the provider. An enrolled guest renews authority
+after a cold start before reconnecting remotely, while its Unix API is already usable. A
+never-enrolled guest cannot mint replacement setup proof after its life changes.
 Ordinary start and custody acknowledgement are separate. Unknown creation remains collection of
-the original operation, not permission to replace a VM. Local Unix readiness is independent of
+the original operation, not permission to replace a VM. Guest Unix readiness is independent of
 remote enrollment; MCP work additionally needs its authorized live route. The observed remote
 state can be unconfigured, enrollment unavailable, connecting, connected, unavailable or refused.
 Temporary loss reconnects; confirmed refusal retires remote authority. Neither replays commands.

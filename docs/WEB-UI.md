@@ -936,6 +936,11 @@ execution inspector) receive `null` for a user that no longer exists and show th
   reference to prepare the same VM; unknown creation offers original
   state collection instead. Closed setup reasons explain preserved-root inspection, missing
   publication prerequisites, repository access/ref repair or fixed configuration diagnostics.
+  A GitHub environment with verified local preparation and initial remote state `unconfigured`
+  or `enrollment_unavailable` also offers **Resume setup**. It continues enrollment from its
+  original retained proof on the same known VM, without another provider Start or installation.
+  Existing-credential `connecting` or `unavailable` states do not offer initial setup resume;
+  refused authority requires its own repair rather than automatic credential replacement.
   Optional observed remote state distinguishes unconfigured, enrollment unavailable, connecting,
   connected, connection unavailable and refused authority. Local usability remains independent
   of these remote observations; absent health is not guessed from controller connectivity.

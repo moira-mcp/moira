@@ -62,8 +62,98 @@ async function fixture(transport, sourceOpener, options = {}) {
   return { root, owner, open, scope, publications, bytes, input };
 }
 const prepare = async () => ({
-  channels: [{ channelId: "telegram", authorityDigest: "a".repeat(64), provider: "telegram" }],
+  channels: [
+    {
+      channelId: "telegram",
+      authorityDigest: "a".repeat(64),
+      provider: "telegram",
+      capabilities: { text: true, image: true, document: true },
+      operations: ["send_message"],
+      constraints: { text: { maxLength: 4096 }, caption: { maxLength: 1024 } },
+    },
+  ],
 });
+
+test.each(["unsupported explicit", "unsupported implicit", "MIME", "size", "empty", "text"])(
+  "owner delivery policy refuses %s before any vendor stage and retains its original result",
+  async (condition) => {
+    const calls = [];
+    const value = await fixture({
+      async prepare(control) {
+        expect(control).not.toHaveProperty("file");
+        expect(control).not.toHaveProperty("text");
+        expect(control).not.toHaveProperty("kind");
+        return {
+          channels: [
+            {
+              channelId: "telegram",
+              authorityDigest: "a".repeat(64),
+              provider: "telegram",
+              capabilities: {
+                text: true,
+                image: true,
+                document: !condition.startsWith("unsupported"),
+              },
+              operations: ["send_message"],
+              constraints: {
+                text: { maxLength: 4096 },
+                caption: { maxLength: 1024 },
+                file: {
+                  image: {
+                    mimeTypes: ["image/png", "image/jpeg"],
+                    minBytes: 1,
+                    maxBytes: 10 * 1024 * 1024,
+                  },
+                  document: { minBytes: 1, maxBytes: 50 * 1024 * 1024 },
+                },
+              },
+            },
+          ],
+        };
+      },
+      async send(control, source) {
+        calls.push(control);
+        for await (const _chunk of source) {
+          /* Drain any incorrectly admitted stage so the policy assertion observes it. */
+        }
+        return { status: "delivered" };
+      },
+    });
+    const input = {
+      ...value.input,
+      ...(condition === "unsupported explicit" ? { channelIds: ["telegram"] } : {}),
+      ...(condition === "MIME"
+        ? { kind: "image", source: { ...value.input.source, mimeType: "application/octet-stream" } }
+        : {}),
+      ...(condition === "size"
+        ? {
+            kind: "image",
+            source: {
+              ...value.input.source,
+              mimeType: "image/png",
+              data: Buffer.alloc(10 * 1024 * 1024 + 1).toString("base64"),
+            },
+          }
+        : {}),
+      ...(condition === "empty" ? { source: { ...value.input.source, data: "" } } : {}),
+      ...(condition === "text" ? { text: "x".repeat(4097) } : {}),
+    };
+    const receipt = await value.owner.submit(input);
+    expect(receipt).toMatchObject({
+      state: "completed",
+      stages: [],
+      outcome: { ok: false, error: { code: "COMMUNICATION_DELIVERY_REFUSED" } },
+    });
+    expect(calls).toEqual([]);
+    const record = await readFile(join(value.root, "communication", input.requestId + ".json"));
+    expect(await value.owner.submit(input)).toEqual(receipt);
+    expect(await value.owner.inspect(input.requestId)).toEqual(receipt);
+    expect(await readFile(join(value.root, "communication", input.requestId + ".json"))).toEqual(
+      record,
+    );
+    expect(calls).toEqual([]);
+  },
+);
 
 test("a local-only Unix owner gains remote publication without replacing work and captures each delivery configuration", async () => {
   const { startWorkspaceService } =

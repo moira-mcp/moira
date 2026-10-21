@@ -1,5 +1,5 @@
-import { afterEach, expect, test } from "@jest/globals";
-import { mkdtemp, realpath, rm } from "node:fs/promises";
+import { afterEach, expect, jest, test } from "@jest/globals";
+import { mkdtemp, realpath, rm, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
@@ -8,18 +8,38 @@ import { promisify } from "node:util";
 import { PrivateState } from "../../../packages/local/src/private-state.js";
 import { LocalRecords } from "../../../packages/local/src/space-record.js";
 import { LocalManager } from "../../../packages/local/src/manager.js";
-import { LocalController } from "../../../packages/local/src/controller.js";
 import { LocalRelay } from "../../../packages/local/src/relay.js";
 import { LocalRefusal } from "../../../packages/local/src/policy.js";
 import type {
-  GitHubControllerResource,
+  GitHubAssignment,
+  GitHubProvisionProof,
   GitHubProviderAction,
 } from "../../../packages/shared/src/codespaces/local-controller-protocol.js";
-import type { provisionGitHubWorkspace } from "../../../packages/local/src/github-provisioner.js";
+import { githubPreparedCreateSchema } from "../../../packages/shared/src/codespaces/local-controller-protocol.js";
+import type {
+  provisionGitHubWorkspace,
+  resumeGitHubWorkspaceEnrollment,
+} from "../../../packages/local/src/github-provisioner.js";
 import {
   prepareProcessCustody,
   inspectProcessCustody,
 } from "../../../packages/local/src/process-custody.js";
+
+const bootstrap = await import("../../../packages/workspace-service/src/bootstrap.mjs");
+const toolchain = await import("../../../packages/local/src/github-toolchain.js");
+const tools = jest.fn<typeof toolchain.githubToolchain>();
+const payload = jest.fn<typeof bootstrap.loadWorkspacePayload>();
+jest.unstable_mockModule("../../../packages/local/src/github-toolchain.js", () => ({
+  ...toolchain,
+  githubToolchain: tools,
+}));
+jest.unstable_mockModule("../../../packages/workspace-service/src/bootstrap.mjs", () => ({
+  ...bootstrap,
+  loadWorkspacePayload: payload,
+}));
+const { githubProvisioningReadiness } =
+  await import("../../../packages/local/src/github-provisioner.js");
+const { LocalController } = await import("../../../packages/local/src/controller.js");
 
 const directories: string[] = [];
 afterEach(async () => {
@@ -45,7 +65,7 @@ async function fixture() {
   });
   const requestId = `ws1-${randomUUID()}`,
     resourceId = requestId.slice(4);
-  const assignment: GitHubControllerResource = {
+  const assignment: GitHubAssignment = {
     resourceId,
     resourceGeneration: 1,
     authorizationGeneration: 3,
@@ -61,7 +81,22 @@ async function fixture() {
     pendingRequestIds: [],
     observedAt: null,
     providerResource: null,
+    billableOwnerId: "101",
+    creationSettings: { autoStopEnabled: false, idleTimeoutMinutes: 30, retentionMinutes: 1440 },
   };
+  const machine = {
+    name: "owner-choice",
+    displayName: "Owner choice",
+    operatingSystem: "linux",
+    cpuCores: 2,
+    memoryBytes: 4096,
+    storageBytes: 8192,
+  };
+  let createJournal: unknown;
+  let assignmentRefused = false;
+  let measuredLife = "c".repeat(64);
+  let enrollment: ((proof: GitHubProvisionProof) => Promise<void>) | undefined;
+  const enrollments: GitHubProvisionProof[] = [];
   let physicalState = "available",
     createLost = false,
     providerFound = false,
@@ -93,6 +128,11 @@ async function fixture() {
       _signal?: AbortSignal,
       purpose?: "adopt" | "retire",
     ) {
+      if (assignmentRefused)
+        throw new LocalRefusal(
+          "CODESPACE_AUTHORIZATION_REQUIRED",
+          "Current remote authority was refused.",
+        );
       if (purpose === "adopt" && providerFound)
         return {
           ...assignment,
@@ -111,7 +151,7 @@ async function fixture() {
       _id: string,
       input: {
         resourceGeneration: number;
-        retirement: GitHubControllerResource["retirement"];
+        retirement: GitHubAssignment["retirement"];
         authorizationGeneration: number;
         providerResourceName: string | null;
       },
@@ -135,6 +175,13 @@ async function fixture() {
     }
     override async githubProvider(_id: string, input: GitHubProviderAction) {
       calls.push({ action: input.action, generation: input.resourceGeneration });
+      if (input.action === "preflight") return { billableOwnerId: assignment.billableOwnerId };
+      if (input.action === "machines") return [machine];
+      if (input.action === "create")
+        createJournal = await records.state.read(
+          `controller-operation-${input.requestId}.json`,
+          (value) => value,
+        );
       if (input.action === "create" && createLost) {
         assignment.retirement = "unknown";
         throw new LocalRefusal("WORKSPACE_OUTCOME_UNCONFIRMED", "Unconfirmed provider result.");
@@ -162,28 +209,73 @@ async function fixture() {
           }
         : resource;
     }
+    override async enrollGitHubWorkspace(_id: string, proof: GitHubProvisionProof) {
+      enrollments.push(proof);
+      await enrollment?.(proof);
+      return {
+        version: 1 as const,
+        origin: "https://moira.example",
+        publicOrigin: "https://moira.example",
+        resourceId,
+        resourceGeneration: proof.resourceGeneration,
+        authorizationGeneration: proof.authorizationGeneration,
+        environmentIdentity: proof.environmentIdentity,
+        credential: "e".repeat(43),
+      };
+    }
   }
   const helper = join(root, "process-group-helper");
   const relay = new Relay(records, securityFetch, (witness) =>
       inspectProcessCustody(witness, helper),
     ),
     manager = new LocalManager(records);
-  const immediate: typeof provisionGitHubWorkspace = async (target) => ({
-    proof: {
-      ...target,
+  const immediate: typeof provisionGitHubWorkspace = async (target, dependencies) => {
+    const { resourceId: _resource, previousRepositoryFullName: _previous, ...original } = target;
+    const proof = {
+      ...original,
       root: "/workspaces/repository",
       rootDevice: "1",
       rootInode: "2",
       release: "b".repeat(64),
-      environmentIdentity: "c".repeat(64),
-    },
-    health: {},
-  });
-  const make = (provision = immediate, ready = true) =>
+      environmentIdentity: measuredLife,
+    };
+    await dependencies.prepared(proof);
+    const health = {
+      releaseIdentity: proof.release,
+      environmentIdentity: proof.environmentIdentity,
+      remote: { state: "enrollment_unavailable" as const },
+    };
+    await dependencies.ready(health);
+    return { proof, health };
+  };
+  const resume: typeof resumeGitHubWorkspaceEnrollment = async (_target, proof, dependencies) => {
+    await dependencies.ready({
+      releaseIdentity: proof.release,
+      environmentIdentity: proof.environmentIdentity,
+      remote: { state: "enrollment_unavailable" },
+    });
+    await dependencies.enroll(proof);
+    return {
+      proof,
+      health: {
+        releaseIdentity: proof.release,
+        environmentIdentity: proof.environmentIdentity,
+        remote: { state: "connected" },
+      },
+    };
+  };
+  const make = (
+    provision = immediate,
+    ready: boolean | typeof githubProvisioningReadiness = true,
+  ) =>
     new LocalController(manager, identity, undefined, undefined, {
       relay,
       provision,
-      readiness: async () => ({ state: ready ? ("available" as const) : ("unavailable" as const) }),
+      resume,
+      readiness:
+        typeof ready === "function"
+          ? ready
+          : async () => ({ state: ready ? ("available" as const) : ("unavailable" as const) }),
     });
   const create = {
     requestId,
@@ -207,6 +299,20 @@ async function fixture() {
     securityCalls,
     credentialId,
     helper,
+    assignment,
+    machine,
+    createJournal: () => createJournal,
+    enrollments,
+    setEnrollment: (value: typeof enrollment) => {
+      enrollment = value;
+    },
+    refuseAssignments: () => {
+      assignmentRefused = true;
+    },
+    immediate,
+    setLife: (life: string) => {
+      measuredLife = life;
+    },
     failRegistration: () => {
       registrationPending = true;
     },
@@ -251,6 +357,214 @@ test("lost GitHub creation keeps its original owner receipt and cannot create ag
   });
   expect(await f.records.policyOrNull()).toBeNull();
   expect(await f.records.list()).toEqual([]);
+});
+
+test("owner saves its exact machine and account settings before provider dispatch and retains that choice after lost reply", async () => {
+  const f = await fixture();
+  f.loseCreate();
+  const original = await f.make().githubLifecycle(f.resourceId, f.create);
+  const prepared = githubPreparedCreateSchema.parse(
+    (f.createJournal() as { preparedCreate: unknown }).preparedCreate,
+  );
+  expect(prepared).toEqual({ machine: f.machine, idleTimeoutMinutes: 240, retentionMinutes: 1440 });
+  const bytes = await readFile(
+    join(f.records.state.root, `controller-operation-${f.requestId}.json`),
+  );
+  f.assignment.creationSettings.retentionMinutes = 2880;
+  f.machine.name = "changed-offer";
+  expect(await f.make().collectOperation(f.requestId)).toEqual(original);
+  expect(
+    await readFile(join(f.records.state.root, `controller-operation-${f.requestId}.json`)),
+  ).toEqual(bytes);
+  expect(f.calls.filter((row) => row.action === "create")).toHaveLength(1);
+  expect(f.createJournal()).toMatchObject({
+    phase: { name: "provider_create", resourceGeneration: 2 },
+  });
+});
+
+test("explicit setup resume keeps original proof without host payloads or provider lifecycle replay while new installation still requires payloads", async () => {
+  const f = await fixture();
+  tools.mockImplementation(async (home) => ({
+    gh: join(home, "gh"),
+    ssh: "/usr/bin/ssh",
+    version: "2.102.0",
+  }));
+  payload.mockImplementation(async (_directory, architecture) => {
+    if (architecture !== "x64" && architecture !== "arm64")
+      throw new Error("Unexpected host payload architecture");
+    return {
+      version: 1,
+      architecture,
+      libc: "glibc",
+      release: "b".repeat(64),
+      archiveSha256: "a".repeat(64),
+      fileName: "fixture.tar.gz",
+      path: "/controlled-host-payload",
+      size: 1,
+      identity: { dev: 1, ino: 2, size: 1, mtimeMs: 0, ctimeMs: 0 },
+    };
+  });
+  const controller = f.make(undefined, githubProvisioningReadiness);
+  const created = await controller.githubLifecycle(f.resourceId, f.create);
+  expect(created).toMatchObject({
+    outcome: {
+      ok: true,
+      result: { state: "running", remote: { state: "enrollment_unavailable" } },
+    },
+  });
+  const originalKey = `controller-operation-${f.requestId}.json`;
+  const bytes = await readFile(join(f.records.state.root, originalKey));
+  const proof = await controller.state.githubSetupProof(f.resourceId, f.identity);
+  expect((await controller.state.githubBinding(f.resourceId, f.identity))?.setupRequestId).toBe(
+    f.requestId,
+  );
+  expect((await controller.snapshot()).github.resources[0]).not.toHaveProperty("setupRequestId");
+  expect((await controller.snapshot()).github.resources[0]).not.toHaveProperty("creationSettings");
+  payload.mockRejectedValue(new Error("The current host payload is unavailable after upgrade"));
+  const fresh = await fixture();
+  await expect(
+    fresh
+      .make(undefined, githubProvisioningReadiness)
+      .githubLifecycle(fresh.resourceId, fresh.create),
+  ).rejects.toMatchObject({ code: "GITHUB_PROVISIONING_UNAVAILABLE" });
+  expect(await fresh.records.state.keys("controller-operation-")).toEqual([]);
+  expect(fresh.calls).toEqual([]);
+  payload.mockClear();
+  const requestId = `ws1-${randomUUID()}`;
+  const resumed = await f
+    .make(undefined, githubProvisioningReadiness)
+    .githubLifecycle(f.resourceId, { action: "resume_setup", requestId, expectedGeneration: 2 });
+  expect(resumed).toMatchObject({
+    outcome: {
+      ok: true,
+      result: { resourceGeneration: 2, state: "running", remote: { state: "connected" } },
+    },
+  });
+  expect(f.enrollments).toEqual([proof]);
+  expect(payload).not.toHaveBeenCalled();
+  expect(await readFile(join(f.records.state.root, originalKey))).toEqual(bytes);
+  expect(
+    f.calls.filter((row) => ["create", "start", "stop", "delete"].includes(row.action)),
+  ).toEqual([{ action: "create", generation: 2 }]);
+  expect(await controller.collectOperation(f.requestId)).toEqual(created);
+});
+
+test("authority changed during a held setup enrollment cannot publish late ready configuration", async () => {
+  const f = await fixture();
+  const controller = f.make();
+  await controller.githubLifecycle(f.resourceId, f.create);
+  let entered!: () => void, release!: () => void;
+  const pending = new Promise<void>((yes) => {
+    entered = yes;
+  });
+  const held = new Promise<void>((yes) => {
+    release = yes;
+  });
+  f.setEnrollment(async () => {
+    entered();
+    await held;
+  });
+  const requestId = `ws1-${randomUUID()}`;
+  const work = controller.githubLifecycle(f.resourceId, {
+    action: "resume_setup",
+    requestId,
+    expectedGeneration: 2,
+  });
+  await pending;
+  expect((await controller.snapshot()).github.resources[0]).toMatchObject({
+    state: "running",
+    remote: { state: "enrollment_unavailable" },
+    pendingRequestIds: [requestId],
+  });
+  f.reauthorize();
+  release();
+  expect(await work).toMatchObject({
+    outcome: { ok: false, error: { code: "LOCAL_IDENTITY_CHANGED" } },
+  });
+  expect((await controller.snapshot()).github.resources[0]).toMatchObject({
+    resourceGeneration: 2,
+    remote: { state: "enrollment_unavailable" },
+  });
+  expect(f.enrollments[0].requestId).toBe(f.requestId);
+});
+
+test("confirmed remote refusal after verified Unix readiness does not turn approved local work into failed setup", async () => {
+  const f = await fixture();
+  const provision: typeof provisionGitHubWorkspace = async (target, deps) => {
+    const result = await f.immediate(target, deps);
+    f.refuseAssignments();
+    return {
+      ...result,
+      health: {
+        ...(result.health as object),
+        releaseIdentity: result.proof.release,
+        environmentIdentity: result.proof.environmentIdentity,
+        remote: { state: "refused" },
+      },
+    };
+  };
+  const result = await f.make(provision).githubLifecycle(f.resourceId, f.create);
+  expect(result).toMatchObject({
+    outcome: { ok: true, result: { state: "running", remote: { state: "refused" } } },
+  });
+  expect((await f.make().snapshot()).github.resources[0]).toMatchObject({
+    state: "running",
+    remote: { state: "refused" },
+    environmentIdentity: "c".repeat(64),
+  });
+  expect(f.calls.filter((row) => ["stop", "delete"].includes(row.action))).toEqual([]);
+});
+
+test("a stopped known GitHub VM starts with a newly measured life without inheriting old verification", async () => {
+  const f = await fixture();
+  const controller = f.make();
+  await controller.githubLifecycle(f.resourceId, f.create);
+  const originalProof = await controller.state.githubSetupProof(f.resourceId, f.identity);
+  const originalBytes = await readFile(
+    join(f.records.state.root, `controller-operation-${f.requestId}.json`),
+  );
+  expect(
+    await controller.githubLifecycle(f.resourceId, {
+      requestId: `ws1-${randomUUID()}`,
+      expectedGeneration: 2,
+      action: "stop",
+    }),
+  ).toMatchObject({
+    outcome: {
+      ok: true,
+      result: { state: "stopped", environmentIdentity: originalProof.environmentIdentity },
+    },
+  });
+  f.setLife("d".repeat(64));
+  const startId = `ws1-${randomUUID()}`;
+  const started = await controller.githubLifecycle(f.resourceId, {
+    requestId: startId,
+    expectedGeneration: 3,
+    action: "start",
+  });
+  expect(started).toMatchObject({
+    outcome: {
+      ok: true,
+      result: {
+        state: "running",
+        resourceGeneration: 4,
+        environmentIdentity: "d".repeat(64),
+        remote: { state: "enrollment_unavailable" },
+      },
+    },
+  });
+  expect(await controller.state.githubSetupProof(f.resourceId, f.identity)).toMatchObject({
+    requestId: startId,
+    resourceGeneration: 4,
+    environmentIdentity: "d".repeat(64),
+  });
+  expect(
+    await readFile(join(f.records.state.root, `controller-operation-${f.requestId}.json`)),
+  ).toEqual(originalBytes);
+  expect(f.calls.filter((row) => row.action === "create")).toHaveLength(1);
+  expect(f.calls.filter((row) => row.action === "start")).toEqual([
+    { action: "start", generation: 4 },
+  ]);
 });
 
 test("original lost-create collection observes only its exact VM and reports incomplete provisioning without replay", async () => {
@@ -342,6 +656,7 @@ test.each([
           requestId: f.requestId,
           resourceGeneration: 2,
           action: "create",
+          prepared: { machine: f.machine, idleTimeoutMinutes: 240, retentionMinutes: 1440 },
         }),
     );
     expect(receipt).toMatchObject({
@@ -554,19 +869,9 @@ test("explicit adopt preserves owner CAS while the cloud fence lags after child 
   f.existingStopped();
   f.failRegistration();
   const targets: Parameters<typeof provisionGitHubWorkspace>[0][] = [];
-  const provision: typeof provisionGitHubWorkspace = async (target) => {
+  const provision: typeof provisionGitHubWorkspace = async (target, dependencies) => {
     targets.push(target);
-    return {
-      proof: {
-        ...target,
-        root: "/workspaces/repository",
-        rootDevice: "1",
-        rootInode: "2",
-        release: "b".repeat(64),
-        environmentIdentity: "c".repeat(64),
-      },
-      health: {},
-    };
+    return f.immediate(target, dependencies);
   };
   const controller = f.make(provision),
     originalId = `ws1-${randomUUID()}`;

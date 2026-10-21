@@ -7,6 +7,10 @@ import {
   controllerOperationDescriptorSchema,
   controllerOperationFindSchema,
   githubControllerResourceSchema,
+  githubPreparedCreateSchema,
+  githubProvisionProofSchema,
+  type GitHubPreparedCreate,
+  type GitHubProvisionProof,
   providerFailureSchema,
   type GitHubControllerResource,
   type ControllerIdentity,
@@ -31,7 +35,10 @@ export const controllerBindingSchema = controllerIdentitySchema
   .strict();
 export type ControllerBinding = z.infer<typeof controllerBindingSchema>;
 const githubBindingSchema = githubControllerResourceSchema
-  .extend(controllerIdentitySchema.shape)
+  .extend({
+    ...controllerIdentitySchema.shape,
+    setupRequestId: controllerRequestIdSchema.optional(),
+  })
   .strict();
 export type ControllerGitHubBinding = z.infer<typeof githubBindingSchema>;
 const operationSchema = z
@@ -44,6 +51,8 @@ const operationSchema = z
     state: z.enum(["accepted", "completed"]),
     outcome: z.unknown().optional(),
     originalOutcome: z.unknown().optional(),
+    preparedCreate: githubPreparedCreateSchema.optional(),
+    enrollmentProof: githubProvisionProofSchema.optional(),
     custody: z
       .object({
         securityRequestId: controllerRequestIdSchema,
@@ -214,7 +223,7 @@ export class ControllerState {
     return binding;
   }
   async putGitHubBinding(
-    binding: GitHubControllerResource,
+    binding: GitHubControllerResource & { setupRequestId?: string },
     identity: ControllerIdentity,
   ): Promise<void> {
     await this.records.state.write(
@@ -329,6 +338,91 @@ export class ControllerState {
         );
       await this.records.state.write(key, operationSchema.parse({ ...entry, phase }));
     });
+  }
+  async recordGitHubPreparedCreate(
+    requestId: string,
+    identity: ControllerIdentity,
+    choice: GitHubPreparedCreate,
+  ): Promise<void> {
+    await this.recordGitHubPreparation(
+      requestId,
+      identity,
+      "preparedCreate",
+      githubPreparedCreateSchema.parse(choice),
+    );
+  }
+  async recordGitHubEnrollmentProof(
+    requestId: string,
+    identity: ControllerIdentity,
+    proof: GitHubProvisionProof,
+  ): Promise<void> {
+    proof = githubProvisionProofSchema.parse(proof);
+    if (proof.requestId !== requestId)
+      throw new LocalRefusal(
+        "LOCAL_REPLAY_CONFLICT",
+        "Setup proof must retain its original request.",
+      );
+    await this.recordGitHubPreparation(requestId, identity, "enrollmentProof", proof);
+  }
+  private async recordGitHubPreparation(
+    requestId: string,
+    identity: ControllerIdentity,
+    field: "preparedCreate" | "enrollmentProof",
+    value: GitHubPreparedCreate | GitHubProvisionProof,
+  ): Promise<void> {
+    await this.serial(async () => {
+      const key = `controller-operation-${controllerRequestIdSchema.parse(requestId)}.json`;
+      const entry = await this.records.state.read(key, operationSchema.parse);
+      if (
+        !entry ||
+        entry.state !== "accepted" ||
+        !entry.resourceId ||
+        !sameIdentity(entry.identity, identity) ||
+        (field === "enrollmentProof" &&
+          (entry.phase?.name !== "provision" ||
+            entry.phase.resourceGeneration !==
+              ("resourceGeneration" in value ? value.resourceGeneration : undefined))) ||
+        (entry[field] && canonicalJson(entry[field]) !== canonicalJson(value))
+      )
+        throw new LocalRefusal(
+          "LOCAL_REPLAY_CONFLICT",
+          "Original GitHub preparation cannot change or be attached to another operation.",
+        );
+      await this.records.state.write(key, operationSchema.parse({ ...entry, [field]: value }));
+    });
+  }
+  async githubSetupProof(
+    resourceId: string,
+    identity: ControllerIdentity,
+  ): Promise<GitHubProvisionProof> {
+    const binding = await this.githubBinding(resourceId, identity);
+    const entry = binding?.setupRequestId
+      ? await this.records.state.read(
+          `controller-operation-${binding.setupRequestId}.json`,
+          operationSchema.parse,
+        )
+      : null;
+    const proof = entry?.enrollmentProof;
+    if (
+      !binding ||
+      !entry ||
+      !proof ||
+      !sameIdentity(entry.identity, identity) ||
+      entry.resourceId !== resourceId ||
+      proof.requestId !== binding.setupRequestId ||
+      proof.resourceGeneration !== binding.resourceGeneration ||
+      proof.authorizationGeneration !== binding.authorizationGeneration ||
+      proof.providerResourceName !== binding.providerResourceName ||
+      proof.repositoryId !== binding.repositoryId ||
+      proof.repositoryFullName !== binding.repositoryFullName ||
+      (binding.environmentIdentity !== null &&
+        proof.environmentIdentity !== binding.environmentIdentity)
+    )
+      throw new LocalRefusal(
+        "GITHUB_PROVISIONING_INCOMPLETE",
+        "No exact original setup proof is available; do not infer a new identity.",
+      );
+    return proof;
   }
   async originalProviderCreation(requestId: string, identity: ControllerIdentity) {
     const entry = await this.records.state.read(
@@ -641,6 +735,8 @@ export class ControllerState {
               ...(accepted?.phase ? { phase: accepted.phase } : {}),
               ...(accepted?.custody ? { custody: accepted.custody } : {}),
               ...(accepted?.descriptor ? { descriptor: accepted.descriptor } : {}),
+              ...(accepted?.preparedCreate ? { preparedCreate: accepted.preparedCreate } : {}),
+              ...(accepted?.enrollmentProof ? { enrollmentProof: accepted.enrollmentProof } : {}),
             });
           } catch {
             // The effect already ran. Publishing/fsync failure cannot become a refusal,

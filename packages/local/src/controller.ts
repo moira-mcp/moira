@@ -16,10 +16,16 @@ import {
   controllerRepositorySchema,
   controllerGitHubLifecycleSchema,
   githubControllerResourceSchema,
+  githubCreatePreflightSchema,
+  githubMachineOffersSchema,
+  githubPreparedCreateSchema,
+  githubProvisionProofSchema,
   providerFailureSchema,
   providerObservationSchema,
   providerReplySchema,
   type GitHubControllerResource,
+  type GitHubProvisionProof,
+  type ControllerGitHubLifecycle,
   type ControllerIdentity,
   type ControllerLifecycle,
 } from "../../shared/src/codespaces/local-controller-protocol.js";
@@ -31,9 +37,17 @@ import {
 import { LocalManager } from "./manager.js";
 import { LocalRelay } from "./relay.js";
 import { ControllerState, type ControllerBinding } from "./controller-state.js";
+import { canonicalJson } from "../../shared/src/utils/canonical-json.js";
+import { CODESPACE_IDLE_TIMEOUT_MINUTES } from "../../shared/src/codespaces/resource-types.js";
+import { workspaceRemoteObservationSchema } from "../../shared/src/codespaces/local-protocol.js";
 import { LocalWebControl, controlSettings } from "./web-control.js";
 import { LocalRefusal, requireLocalGrant, publicPolicy } from "./policy.js";
-import { provisionGitHubWorkspace, githubProvisioningReadiness } from "./github-provisioner.js";
+import {
+  provisionGitHubWorkspace,
+  resumeGitHubWorkspaceEnrollment,
+  githubProvisioningReadiness,
+  type GitHubReadinessPurpose,
+} from "./github-provisioner.js";
 import { scopedCredentialFailureOutcome } from "../../shared/src/codespaces/scoped-credential-types.js";
 import { localConnectionSchema, relayOrigin } from "./relay.js";
 import { createOwnerPublications } from "../../workspace-service/src/publications.mjs";
@@ -206,10 +220,16 @@ export class LocalController {
     control = new LocalWebControl(manager.records),
     private readonly registerResource: LocalRelay["registerResource"] = (input) =>
       new LocalRelay(manager.records).registerResource(input),
-    private readonly github = {
+    private readonly github: {
+      relay: LocalRelay;
+      provision: typeof provisionGitHubWorkspace;
+      resume?: typeof resumeGitHubWorkspaceEnrollment;
+      readiness: typeof githubProvisioningReadiness;
+    } = {
       relay: new LocalRelay(manager.records),
       provision: provisionGitHubWorkspace,
       readiness: githubProvisioningReadiness,
+      resume: resumeGitHubWorkspaceEnrollment,
     },
   ) {
     this.identity = controllerIdentitySchema.parse(identity);
@@ -266,6 +286,7 @@ export class LocalController {
               deviceId: _device,
               deviceGeneration: _generation,
               connectionId: _connection,
+              setupRequestId: _setupRequest,
               ...resource
             } = binding;
             return {
@@ -428,6 +449,7 @@ export class LocalController {
       return this.state.run(value.requestId, this.identity, { resourceId, ...value }, async () => {
         throw new LocalRefusal("LOCAL_REPLAY_CONFLICT", "Original owner work cannot be replayed.");
       });
+    if (value.action === "resume_setup") return this.resumeGitHubSetup(resourceId, value);
     let rebindPurpose: "adopt" | "retire" | undefined;
     if (value.action === "adopt") rebindPurpose = "adopt";
     else if (value.action === "delete") {
@@ -520,9 +542,14 @@ export class LocalController {
               }
             }
           }
+          const {
+            billableOwnerId: _payer,
+            creationSettings: _settings,
+            ...assignedResource
+          } = assignment;
           await this.state.putGitHubBinding(
             {
-              ...assignment,
+              ...assignedResource,
               resourceGeneration: prior?.resourceGeneration ?? assignment.resourceGeneration,
             },
             this.identity,
@@ -546,7 +573,8 @@ export class LocalController {
               "LOCAL_IDENTITY_CHANGED",
               "Creation differs from its verified assignment.",
             );
-          await this.state.putGitHubBinding(assignment, this.identity);
+          const { billableOwnerId: _payer, creationSettings: _settings, ...resource } = assignment;
+          await this.state.putGitHubBinding(resource, this.identity);
           binding = (await this.state.githubBinding(resourceId, this.identity))!;
         } else if (value.action === "create") {
           throw new LocalRefusal(
@@ -571,16 +599,28 @@ export class LocalController {
           deviceId: _device,
           deviceGeneration: _deviceGeneration,
           connectionId: _connection,
+          setupRequestId: _setupRequest,
           ...resource
         } = binding;
-        const next: GitHubControllerResource = githubControllerResourceSchema.parse({
-          ...resource,
-          resourceGeneration: binding.resourceGeneration + 1,
-          desiredState:
-            value.action === "delete" ? "deleted" : value.action === "stop" ? "stopped" : "running",
-          state: value.action === "create" ? "creating" : "unknown",
-          pendingRequestIds: [value.requestId],
-        });
+        const preparing = ["create", "start", "adopt"].includes(value.action);
+        const next: GitHubControllerResource & { setupRequestId?: string } = {
+          ...githubControllerResourceSchema.parse({
+            ...resource,
+            ...(preparing ? { environmentIdentity: null, remote: undefined } : {}),
+            resourceGeneration: binding.resourceGeneration + 1,
+            desiredState:
+              value.action === "delete"
+                ? "deleted"
+                : value.action === "stop"
+                  ? "stopped"
+                  : "running",
+            state: value.action === "create" ? "creating" : "unknown",
+            pendingRequestIds: [value.requestId],
+          }),
+          ...(!preparing && binding.setupRequestId
+            ? { setupRequestId: binding.setupRequestId }
+            : {}),
+        };
         await this.state.putGitHubBinding(next, this.identity);
         const abort = new AbortController();
         let custodyUnconfirmed = false;
@@ -614,6 +654,56 @@ export class LocalController {
             );
             let observed: unknown;
             if (value.action === "create") {
+              const assignment = await this.github.relay.githubAssignment(resourceId, abort.signal);
+              if (
+                assignment.resourceGeneration !== next.resourceGeneration ||
+                assignment.authorizationGeneration !== next.authorizationGeneration ||
+                assignment.repositoryId !== next.repositoryId ||
+                assignment.repositoryFullName !== next.repositoryFullName ||
+                assignment.requestedRef !== next.requestedRef ||
+                assignment.operationMarker !== next.operationMarker ||
+                assignment.devcontainerPath !== next.devcontainerPath
+              )
+                throw new LocalRefusal(
+                  "LOCAL_IDENTITY_CHANGED",
+                  "Creation assignment changed before preparation.",
+                );
+              const request = {
+                requestId: value.requestId,
+                resourceGeneration: next.resourceGeneration,
+              };
+              const preflight = githubCreatePreflightSchema.parse(
+                await this.github.relay.githubProvider(
+                  resourceId,
+                  { ...request, action: "preflight" },
+                  abort.signal,
+                ),
+              );
+              if (preflight.billableOwnerId !== assignment.billableOwnerId)
+                throw new LocalRefusal(
+                  "CODESPACE_BILLING_UNSUPPORTED",
+                  "Provider payer does not match the assigned account.",
+                );
+              const machines = githubMachineOffersSchema.parse(
+                await this.github.relay.githubProvider(
+                  resourceId,
+                  { ...request, action: "machines" },
+                  abort.signal,
+                ),
+              );
+              if (!machines.length)
+                throw new LocalRefusal(
+                  "CODESPACE_RESOURCE_INVALID",
+                  "Provider offers no machine for this ref.",
+                );
+              const prepared = githubPreparedCreateSchema.parse({
+                machine: machines[0],
+                idleTimeoutMinutes: assignment.creationSettings.autoStopEnabled
+                  ? assignment.creationSettings.idleTimeoutMinutes
+                  : CODESPACE_IDLE_TIMEOUT_MINUTES.maximum,
+                retentionMinutes: assignment.creationSettings.retentionMinutes,
+              });
+              await this.state.recordGitHubPreparedCreate(value.requestId, this.identity, prepared);
               await this.state.recordPhase(value.requestId, this.identity, {
                 name: "provider_create",
                 resourceGeneration: next.resourceGeneration,
@@ -647,6 +737,7 @@ export class LocalController {
                       requestId: value.requestId,
                       resourceGeneration: next.resourceGeneration,
                       action: "create",
+                      prepared,
                     },
                     abort.signal,
                   ),
@@ -832,6 +923,53 @@ export class LocalController {
               },
               {
                 signal: abort.signal,
+                prepared: async (proof) => {
+                  await this.requireGitHubLocalAuthority(next, abort.signal);
+                  if (
+                    proof.requestId !== value.requestId ||
+                    proof.resourceGeneration !== next.resourceGeneration ||
+                    proof.authorizationGeneration !== next.authorizationGeneration ||
+                    proof.providerResourceName !== next.providerResourceName ||
+                    proof.repositoryId !== next.repositoryId ||
+                    proof.repositoryFullName !== next.repositoryFullName
+                  )
+                    throw new LocalRefusal(
+                      "LOCAL_IDENTITY_CHANGED",
+                      "Measured setup proof differs from its admitted resource.",
+                    );
+                  await this.state.recordGitHubEnrollmentProof(
+                    value.requestId,
+                    this.identity,
+                    proof,
+                  );
+                  await this.resourceLane(resourceId, async () => {
+                    const current = await this.state.githubBinding(resourceId, this.identity);
+                    if (
+                      !current ||
+                      current.resourceGeneration !== next.resourceGeneration ||
+                      abort.signal.aborted
+                    )
+                      throw new LocalRefusal(
+                        "LOCAL_GENERATION_CONFLICT",
+                        "Setup was retired before its proof could be bound.",
+                      );
+                    await this.state.putGitHubBinding(
+                      { ...current, setupRequestId: value.requestId },
+                      this.identity,
+                    );
+                  });
+                },
+                ready: async (health) => {
+                  await this.requireGitHubLocalAuthority(next, abort.signal);
+                  const proof = await this.state.githubSetupProof(resourceId, this.identity);
+                  const observed = this.verifiedGitHubHealth(proof, health);
+                  await this.settleGitHub(next, {
+                    state: "running",
+                    environmentIdentity: proof.environmentIdentity,
+                    remote: observed.remote,
+                    observedAt: Date.now(),
+                  });
+                },
                 custody: {
                   directory: this.manager.records.state.root,
                   prepared: (witness, securityRequestId) =>
@@ -860,14 +998,32 @@ export class LocalController {
                       signal,
                     ),
                   ),
-                enroll: (proof) => this.github.relay.enrollGitHubWorkspace(resourceId, proof),
+                enroll: async (proof) => {
+                  await this.requireGitHubSetupAuthority(next, abort.signal);
+                  const credential = await this.github.relay.enrollGitHubWorkspace(
+                    resourceId,
+                    proof,
+                    abort.signal,
+                  );
+                  await this.requireGitHubSetupAuthority(next, abort.signal);
+                  return credential;
+                },
               },
             );
+            await this.requireGitHubLocalAuthority(next, abort.signal);
+            const savedProof = await this.state.githubSetupProof(resourceId, this.identity);
+            if (canonicalJson(savedProof) !== canonicalJson(result.proof))
+              throw new LocalRefusal(
+                "LOCAL_IDENTITY_CHANGED",
+                "Ready workspace must retain its original measured proof.",
+              );
+            const health = this.verifiedGitHubHealth(result.proof, result.health);
             await this.settleGitHub(next, {
               state: "running",
               environmentIdentity: result.proof.environmentIdentity,
               pendingRequestIds: [],
               observedAt: Date.now(),
+              remote: health.remote,
             });
             return this.githubResource(resourceId, value.requestId);
           })
@@ -891,6 +1047,228 @@ export class LocalController {
                   "The admitted provider operation outcome is unconfirmed; collect its original owner identity.",
                 )
               : error;
+          })
+          .finally(() => {
+            if (!custodyUnconfirmed && this.githubEffects.get(resourceId)?.abort === abort)
+              this.githubEffects.delete(resourceId);
+          });
+        this.githubEffects.set(resourceId, {
+          requestId: value.requestId,
+          abort,
+          settled,
+          custodyUnconfirmed: false,
+        });
+        return { settled };
+      });
+      return admitted.settled;
+    });
+  }
+  private verifiedGitHubHealth(proof: GitHubProvisionProof, value: unknown) {
+    const health = z
+      .object({
+        releaseIdentity: z.string(),
+        environmentIdentity: z.string(),
+        remote: workspaceRemoteObservationSchema,
+      })
+      .passthrough()
+      .parse(value);
+    if (
+      health.releaseIdentity !== proof.release ||
+      health.environmentIdentity !== proof.environmentIdentity
+    )
+      throw new LocalRefusal(
+        "LOCAL_IDENTITY_CHANGED",
+        "Workspace health differs from its measured setup proof.",
+      );
+    return health;
+  }
+  private async requireGitHubLocalAuthority(
+    binding: GitHubControllerResource,
+    signal: AbortSignal,
+  ) {
+    this.requireAdmission();
+    const current = await this.state.githubBinding(binding.resourceId, this.identity);
+    const connection = await this.manager.records.state.read(
+      "connection.json",
+      localConnectionSchema.parse,
+    );
+    if (
+      signal.aborted ||
+      !current ||
+      current.resourceGeneration !== binding.resourceGeneration ||
+      current.authorizationGeneration !== binding.authorizationGeneration ||
+      current.desiredState !== "running" ||
+      current.repositoryId !== binding.repositoryId ||
+      current.repositoryFullName !== binding.repositoryFullName ||
+      current.providerResourceName !== binding.providerResourceName ||
+      !connection ||
+      connection.authorityRefused ||
+      !identityKeys.every((key) => connection[key] === this.identity[key])
+    )
+      throw new LocalRefusal("LOCAL_IDENTITY_CHANGED", "Original setup authority changed.");
+  }
+  private async requireGitHubSetupAuthority(
+    binding: GitHubControllerResource,
+    signal: AbortSignal,
+  ) {
+    await this.requireGitHubLocalAuthority(binding, signal);
+    const assignment = await this.github.relay.githubAssignment(binding.resourceId, signal);
+    if (
+      assignment.resourceGeneration !== binding.resourceGeneration ||
+      assignment.authorizationGeneration !== binding.authorizationGeneration ||
+      assignment.repositoryId !== binding.repositoryId ||
+      assignment.repositoryFullName !== binding.repositoryFullName ||
+      assignment.providerResourceName !== binding.providerResourceName ||
+      assignment.operationMarker !== binding.operationMarker
+    )
+      throw new LocalRefusal("LOCAL_IDENTITY_CHANGED", "Original setup assignment changed.");
+    await this.requireGitHubLocalAuthority(binding, signal);
+  }
+  private async resumeGitHubSetup(
+    resourceId: string,
+    value: Extract<ControllerGitHubLifecycle, { action: "resume_setup" }>,
+  ) {
+    await this.requireGitHubReadiness("enrollment");
+    await this.requireGitHubCustodySettled(resourceId);
+    return this.state.run(value.requestId, this.identity, { resourceId, ...value }, async () => {
+      const admitted = await this.resourceLane(resourceId, async () => {
+        this.requireAdmission();
+        if (this.githubEffects.has(resourceId))
+          throw new LocalRefusal(
+            "LOCAL_CONTROL_PENDING",
+            "Original provisioning is still in progress; inspect its result.",
+          );
+        await this.requireGitHubCustodySettled(resourceId);
+        const binding = await this.state.githubBinding(resourceId, this.identity);
+        if (
+          !binding ||
+          binding.resourceGeneration !== value.expectedGeneration ||
+          binding.desiredState !== "running" ||
+          binding.retirement !== "owned"
+        )
+          throw new LocalRefusal(
+            "LOCAL_GENERATION_CONFLICT",
+            "Setup continuation requires its same known running resource generation.",
+          );
+        if (
+          binding.remote &&
+          !["unconfigured", "enrollment_unavailable"].includes(binding.remote.state)
+        )
+          throw new LocalRefusal(
+            "GITHUB_PROVISIONING_INCOMPLETE",
+            "Initial setup continuation requires unenrolled local readiness; current remote authority cannot be replaced.",
+          );
+        const proof = await this.state.githubSetupProof(resourceId, this.identity);
+        const abort = new AbortController();
+        await this.state.putGitHubBinding(
+          { ...binding, pendingRequestIds: [value.requestId] },
+          this.identity,
+        );
+        await this.state.recordPhase(value.requestId, this.identity, {
+          name: "provision",
+          resourceGeneration: binding.resourceGeneration,
+        });
+        let custodyUnconfirmed = false;
+        const settled = Promise.resolve()
+          .then(async () => {
+            await this.requireGitHubSetupAuthority(binding, abort.signal);
+            const resume = this.github.resume ?? resumeGitHubWorkspaceEnrollment;
+            const result = await resume(
+              {
+                requestId: proof.requestId,
+                resourceId,
+                providerResourceName: proof.providerResourceName,
+                repositoryId: proof.repositoryId,
+                repositoryFullName: proof.repositoryFullName,
+                resourceGeneration: proof.resourceGeneration,
+                authorizationGeneration: proof.authorizationGeneration,
+              },
+              proof,
+              {
+                signal: abort.signal,
+                ready: async (health) => {
+                  await this.requireGitHubLocalAuthority(binding, abort.signal);
+                  const observed = this.verifiedGitHubHealth(proof, health);
+                  await this.settleGitHub(binding, {
+                    state: "running",
+                    environmentIdentity: proof.environmentIdentity,
+                    remote: observed.remote,
+                    observedAt: Date.now(),
+                  });
+                },
+                custody: {
+                  directory: this.manager.records.state.root,
+                  prepared: (witness, securityRequestId) =>
+                    this.state.recordCustody(
+                      value.requestId,
+                      this.identity,
+                      witness,
+                      securityRequestId,
+                    ),
+                },
+                acquire: (signal) =>
+                  this.github.relay.acquireProvisionCredential(
+                    resourceId,
+                    binding.resourceGeneration,
+                    signal,
+                  ),
+                inspect: async (signal) =>
+                  providerObservationSchema.parse(
+                    await this.github.relay.githubProvider(
+                      resourceId,
+                      {
+                        requestId: value.requestId,
+                        resourceGeneration: binding.resourceGeneration,
+                        action: "get",
+                      },
+                      signal,
+                    ),
+                  ),
+                enroll: async (originalProof) => {
+                  if (
+                    canonicalJson(githubProvisionProofSchema.parse(originalProof)) !==
+                    canonicalJson(proof)
+                  )
+                    throw new LocalRefusal(
+                      "LOCAL_REPLAY_CONFLICT",
+                      "Setup continuation cannot replace the original measured proof.",
+                    );
+                  await this.requireGitHubSetupAuthority(binding, abort.signal);
+                  const remote = await this.github.relay.enrollGitHubWorkspace(
+                    resourceId,
+                    proof,
+                    abort.signal,
+                  );
+                  await this.requireGitHubSetupAuthority(binding, abort.signal);
+                  return remote;
+                },
+              },
+            );
+            await this.requireGitHubLocalAuthority(binding, abort.signal);
+            const health = this.verifiedGitHubHealth(proof, result.health);
+            if (canonicalJson(result.proof) !== canonicalJson(proof))
+              throw new LocalRefusal(
+                "LOCAL_IDENTITY_CHANGED",
+                "Setup continuation changed its original proof.",
+              );
+            await this.settleGitHub(binding, {
+              state: "running",
+              environmentIdentity: proof.environmentIdentity,
+              remote: health.remote,
+              pendingRequestIds: [],
+              observedAt: Date.now(),
+            });
+            return this.githubResource(resourceId, value.requestId);
+          })
+          .catch(async (error: unknown) => {
+            custodyUnconfirmed =
+              error instanceof LocalRefusal && error.code === "LOCAL_CUSTODY_UNCONFIRMED";
+            const effect = this.githubEffects.get(resourceId);
+            if (effect?.abort === abort) effect.custodyUnconfirmed = custodyUnconfirmed;
+            await this.settleGitHub(binding, {
+              ...(custodyUnconfirmed ? { state: "unknown" as const } : { pendingRequestIds: [] }),
+            });
+            throw error;
           })
           .finally(() => {
             if (!custodyUnconfirmed && this.githubEffects.get(resourceId)?.abort === abort)
@@ -1020,11 +1398,13 @@ export class LocalController {
       new Set(effect ? [effect.requestId] : []),
     );
   }
-  private async requireGitHubReadiness(): Promise<void> {
-    if ((await this.github.readiness()).state !== "available")
+  private async requireGitHubReadiness(purpose: GitHubReadinessPurpose = "install"): Promise<void> {
+    if ((await this.github.readiness(purpose)).state !== "available")
       throw new LocalRefusal(
         "GITHUB_PROVISIONING_UNAVAILABLE",
-        "The paired controller requires its verified GitHub tools and both workspace payloads before provisioning.",
+        purpose === "install"
+          ? "The paired controller requires its verified GitHub tools and both workspace payloads before provisioning."
+          : "The paired controller requires its verified GitHub tools before enrollment continuation.",
       );
   }
   private async observeGitHub(
