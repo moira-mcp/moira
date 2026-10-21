@@ -71,11 +71,17 @@ and controller owner programs with `build-workspace-service.js`. It does not dow
 guest archives or GitHub toolchains or package renderer dependencies. Complete payload
 packaging and the packaged guest verifier remain separate checks; this prerequisite
 does not run the SDK or validate a microVM.
-Host `create OWNER/REPO --ref BRANCH`, `start SPACE_ID`, `resume-setup SPACE_ID`, `stop SPACE_ID` and
-`remove SPACE_ID --confirm` use the running owner controller. Raw `request` envelopes are
-unsupported. Supply `--request-id ws1-<lowercase UUID>` to choose a lifecycle identity;
-otherwise the CLI chooses one and prints it before observing the effect. After a lost reply,
-run `collect REQUEST_ID` with that original identity instead of repeating the mutation.
+Host `workspaces` returns captured workspace observations and the current controller reference.
+`observe WORKSPACE_REF` refreshes a selection; `start WORKSPACE_REF`, `resume-setup WORKSPACE_REF`,
+`stop WORKSPACE_REF`, `remove WORKSPACE_REF --confirm` and `adopt WORKSPACE_REF` retain the supplied
+observation. `create OWNER/REPO --ref BRANCH` selects an approved Local repository. Ordinary
+lifecycle calls mint their original identity once and return an operation reference; raw `request`
+envelopes and caller `--request-id` are unsupported for them. After uncertainty, use
+`collect OPERATION_REF` or `operations CONTROLLER_REF` with optional kind/query/cursor filters,
+then inspect the selected original rather than repeating the mutation. Guest operations remain
+with the guest CLI or cloud `operation_get`; the host does not substitute another owner.
+Discovery rows expose only operation reference, state, kind and safe intent descriptor; full results
+require explicit collection.
 Existing owner-admitted VMs and their `~/.local/bin/moira-workspace` CLI remain subject to
 local grants and enabled permission while cloud transport is unavailable. Confirmed authority refusal
 does not permit offline fallback. Fresh host create requires cloud route registration and
@@ -85,7 +91,7 @@ Current account/device/repository authority gates remote admission and routing. 
 management retains its own local approval guards; existing offline work retains its finite
 owner grants, while fresh creation requires cloud registration. Readiness is configuration
 observation, not an administrative stop/control surface.
-Use `resume-setup` after repairing a known incomplete guest's prerequisite: it continues the same
+Use `resume-setup WORKSPACE_REF` after repairing a known incomplete guest's prerequisite: it continues the same
 VM/disk and preserves the original create result and user files. Unknown creation is collected,
 not adopted or retried. Use host `recover` for separate explicit local custody recovery. Acknowledging
 an initial unknown guest outcome on the exact stopped VM retains incomplete setup; follow it with
@@ -96,8 +102,8 @@ generation, repository, grant and controller connection. Warm author input comes
 exact retained local state; initial private checkout still needs current authorization. Later enrollment
 reloads the same owner without restarting accepted commands. Remote calls still require current
 authority and a live route.
-Active lifecycle/command/mutation IDs
-use ws1; repository-admission UUIDs are a different domain.
+Private lifecycle/command/mutation journals use ws1 identities; repository-admission UUIDs are a
+different internal domain. Ordinary callers copy returned references rather than choosing either.
 
 The persistent service contains the daemon/controller, native guard and broker/tunnel. Client exit
 and native observation release do not authorize physical stop; `released` is not `settled`.
@@ -109,6 +115,10 @@ command replay. Unconfirmed settlement blocks replacement. Native setup/login/re
 use `maintenance --pause --confirm` and, after the original receipt is `paused`, resume using
 `maintenance --resume --request-id ORIGINAL_REQUEST_ID --confirm`. Commands such as
 `login --new-store` still require disabled work; a pause does not enable work.
+Privileged collection also accepts original IDs from `status.credentialRequests`. It observes the
+original security request and retains the existing recovered-child cleanup rules, without minting
+another credential or replaying Git. A missing privileged record is locally absent, never a raw
+lifecycle lookup; issuer unavailability remains an error.
 
 Cold-owner startup observes surviving workers and recovers only verified known intended-running
 VMs. Login startup after a host reboot requires the original storage and available SDK credentials;
@@ -186,19 +196,32 @@ uses the existing same-UID trust boundary, not a sandbox against authorized comm
 The installed `moira-workspace` CLI supports:
 
 ```bash
-moira-workspace pull-request-create --request-id ws1-00000000-0000-4000-8000-000000000001 pr-input.json
-# Collect the original result without resubmitting the create input:
-moira-workspace pull-request-create --request-id ws1-00000000-0000-4000-8000-000000000001
-moira-workspace pull-request-get 1
-moira-workspace pull-request-find feature/example main
+moira-workspace pr-create feature/example main "Describe the change" --body description.md
+# Set OPERATION_REF to the returned reference and collect without resubmitting:
+moira-workspace get "$OPERATION_REF"
+moira-workspace find --kind pull-request --query "feature/example"
+moira-workspace pr-get 1
+moira-workspace pr-find feature/example main
 ```
 
-Choose a fresh original ID for each authorized create. `pr-input.json` contains
-`head`, `base`, `title`, optional `body` and `draft`; it contains no token, repository
-override or provider URL. An uncertain creation requires original receipt collection
-and exact head/base inspection, not automatic recreation. Security acquisition has its
-own original request identity; its uncertainty before vendor dispatch is not a PR
-mutation result. Direct CLI calls and MCP use the same owner operations and receipts.
+Each CLI effect is a new intent with an internally minted identity. `--body` reads a file or
+stdin (`-`); `--draft` is optional. An uncertain creation requires original collection and exact
+head/base inspection, not automatic recreation. If the first reply is lost, discovery returns safe
+intent labels for explicit candidate selection, without returning candidate outcome payloads;
+command text cannot prove which original ran.
+Security acquisition retains its separate `security_operation` reference. Discovery and exact
+collection use one pure owner-observation classifier: credential custody/disposal and vendor
+uncertainty remain unconfirmed, while a confirmed non-start remains a completed refusal.
+
+The guest CLI implicitly selects its fixed Unix owner. It exposes ordinary `exec`, `get`, `find`,
+`output`, `stop`, session and guarded file commands through the same `/v1/tools` semantic adapter
+used by MCP. It accepts no raw JSON dispatcher or caller mutation IDs. `read` and output windows
+preserve complete UTF-8 characters and returned cursors; stale file cursors/replacement references
+conflict without refreshing the observation. Text patches match one immutable original and reject
+ambiguous or overlapping edits. Binary upload and raw stdin retain framed streaming; native
+descriptors are read from stdin by `native-upload`, `exec --native-stdin` and `deliver --native`.
+`download` derives a basename/MIME default and retains native resource-link metadata. Internal
+byte-range endpoints remain available for their actual private consumers.
 
 See [System architecture](SYSTEM.md#local-codespace-composition-and-ownership),
 [API contracts](API.md#local-device-enrollment-and-controller-api) and

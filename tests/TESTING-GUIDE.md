@@ -164,6 +164,9 @@ Use the root runners for focused checks:
 
 ```bash
 npm run test:unit -- --file tests/unit/workspace-service/service.test.cjs
+npm run test:unit -- --file tests/unit/workspace-service/semantic-owner.test.cjs
+npm run test:unit -- --file tests/unit/workspace-service/cli-native.test.cjs
+npm run test:unit -- --file tests/unit/workspace-service/native-publication.test.cjs
 npm run test:unit -- --file tests/unit/local/controller.test.ts
 npm run test:unit -- --file tests/unit/local/controller-state.test.ts
 npm run test:integration -- --file tests/integration/workspace-router.test.ts
@@ -185,6 +188,15 @@ child or descendant effects after a response retain uncertainty. Cancellation ne
 grants signal authority to a saved foreign PID. Storage faults observe directory/output
 sync errors before durable success.
 
+Semantic owner and CLI cases use purpose-specific inputs and returned operation/process/file
+references over that same socket. They distinguish a concurrent text or inode replacement from
+the caller's captured file version, reject ambiguous/overlapping text patches, and preserve
+Cyrillic/emoji through complete-character file, initial command and output continuation windows.
+Discovery reads safe intent metadata without collecting candidates or exposing their result
+payloads. Explicit collection retains the original outcome; a lost first reply leaves candidates
+for explicit selection rather than authorizing resubmission. Two deliberately identical new calls
+remain separate intentions.
+
 Filesystem cases substitute targets and parents after staging and interrupt real
 multi-file publication. Owned recovery restores original bytes and inodes without replay.
 Same-content foreign targets or backups preserve every target, stage and backup before
@@ -204,8 +216,11 @@ remains a separate provider responsibility.
 The registered MCP fixture combines the real registry, lifecycle authority, attachment
 publication owner and Unix service. It edits and executes repository code, checks native binary
 upload/download and repeatable immutable publication, preserves files across restart and refuses
-foreign owners. Container-backed MCP cases check the advertised actions, `ws1-` command
-identities, strict action forms, setup guidance, normal path-based download and original-ID communication refusal/collection through the application origin without a configured provider.
+foreign owners. Container-backed MCP cases check the advertised purpose tools, strict semantic
+schemas, setup guidance, path-based download defaults and original-operation communication
+refusal/collection through the application origin without a configured provider. Private owner
+protocol tests retain their internal request identities; ordinary adapters do not ask callers to
+manufacture them.
 
 Local integration cases cover owner lifecycle receipts, policy, broker/device authority, SDK
 protocols, credential-store preparation, storage custody and independent shutdown.
@@ -252,7 +267,9 @@ permission without expiry controls. Setup cards distinguish explicit same-VM res
 preserved-root remedy, usable local work with unavailable enrollment or transport, and unknown
 creation with collection only. Those images establish UI behavior, not physical settings or VM effects.
 UI unit cases separately check retained drafts,
-actual applied consent and original-ID recovery. Neither fixture claims a complete browser
+actual applied consent, captured lifecycle/delete preconditions and original-operation recovery.
+Lost-first-reply cases keep explicit candidate selection even for one match; an absent original
+does not unblock resubmission. Neither fixture claims a complete browser
 settings effect on a physical VM.
 
 Host CLI cases refuse unsupported raw requests before creating private state. Supported
@@ -262,6 +279,11 @@ Git authority; transport loss does not revoke an existing paired owner's locally
 work. Journal cases check canonical-target serialization, failure cleanup and private
 custody; controller receipt cases cover durable original-ID collection and uncertainty
 after restarting an accepted request without replay.
+Host CLI cases also distinguish safe metadata discovery from full explicit collection and retain
+typed delivery uncertainty across both. Privileged maintenance/security collection uses the
+existing receipts and issuer collector: offline live custody and maintenance are readable, unknown
+IDs are locally absent without raw lifecycle fallback, issuer failure remains unconfirmed, and
+recovered-child disposal never becomes another issuance or Git effect.
 
 Provider/controller cases exercise setup resume on the same known runtime while retaining the
 failed original create receipt; unknown creation and custody recovery remain separate.
@@ -286,6 +308,13 @@ fixtures do not replace the disposable real-VM acceptance below.
 
 Owner communication fixtures distinguish source acquisition before admission from retained delivery uncertainty. The common service cases observe original-ID submit/collect, per-channel stages, source consumption and physical settlement, scope changes, separate long-message stages and no resend after a lost result. Framing cases exercise large Unicode control, coalesced prefix/file chunks and cancellation of a held original read. Actual HTTP refusal/replay fixtures require the complete known response before unread ingress closes.
 
+Native publication cases exercise successful semantic `file_upload` and `command_run_native`
+through the existing isolated source fixture. They compare exact binary bytes, discover and collect
+a lost upload reply after source refusal without reacquisition, and collect command stdin results
+across restart without a duplicate effect. This is controlled source transport evidence, not live
+ChatGPT attachment networking. Shared receipt-state cases distinguish typed credential/vendor
+uncertainty from confirmed refusal while leaving private stored receipts unchanged.
+
 `tests/integration/extension-owner.test.ts` exercises a real compiled installed binary handler, immutable artifact admission, demand-driven byte pipes, held vendor/source work and supervised completion. Fixed transport fixtures verify declared endpoint/recipient/secret authority, exact raw/multipart file bytes and early vendor completion without real provider sends. Migration fixtures compare the complete immutable transfer/grant archives and preserve retained bytes without replay.
 
 Progress tests retain run/context/task/version guards, explicit owner-unavailable MCP/HTTP errors and positive PNG rendering through a real owned publication fixture. `workspace:verify:guest` additionally executes the shipped renderer with its private native/font closure and packaged extension handler in the network-disabled guest. These observations do not certify real Telegram delivery or live GitHub compatibility. Text/PIN/reminder tests remain independent of a file owner.
@@ -305,7 +334,9 @@ sessions, cancellation and restart receipts. Setup scenarios exercise owned-stag
 exclusive publication without replacing occupied targets, and preserved repository/user contents.
 They distinguish usable Unix commands from unavailable cloud authority, automatic transport
 reconnection and later configuration reload into the same owner without replaying accepted work.
-The pinned image must already exist locally.
+The verifier uses the ordinary semantic CLI and tools, checked text references, complete UTF-8
+windows and binary streaming. Native source networking, real GitHub provisioning and actual vendor
+delivery are outside this network-disabled check. The pinned image must already exist locally.
 Container compatibility and `npm run verify:docker` do not establish physical sbx
 ownership or host/LAN/VPN/metadata/other-VM isolation.
 
@@ -316,7 +347,7 @@ endpoints, exact repository/action authority, physical upstream closure and orig
 collection. Actual CLI subprocess cases distinguish a confirmed source refusal from retained
 credential custody/disposal uncertainty and an unknown post-dispatch PR effect, preserving both
 recovery identities without redispatch. Migrated issuer/account cases check encrypted candidate
-custody, pure security collection without mint, retirement cutoffs and retention of unresolved
+custody, original security collection without mint, retirement cutoffs and retention of unresolved
 credentials/resources before account cascade. These fixtures do not prove live GitHub permissions.
 
 The packaged Linux guest check also observes the actual GH daemon's inherited kernel lock,

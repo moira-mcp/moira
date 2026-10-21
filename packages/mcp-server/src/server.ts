@@ -78,20 +78,14 @@ import { mcpLimiter } from "./middleware/rate-limit-middleware.js";
 
 import { buildReconciliationAwareInstructions } from "./reconciliation-aware-server.js";
 import { registerTools } from "./tools/register-tools.js";
-import { communicationSchema } from "./tools/tool-schemas.js";
-import { codespaceToolLogContext } from "./tools/manage-codespaces.js";
-import { codespaceProcessLogContext } from "./tools/codespace-process.js";
+import { WORKSPACE_TOOL_SCHEMAS } from "./tools/workspace-tool-contract.js";
+import { isWorkspaceToolName, workspacePurposeLogContext } from "./tools/workspace-tools.js";
 import {
   getCatalogInitializeRequest,
   requireRevisionStampBeforeInitializeResult,
 } from "./auth/mcp-catalog-lifecycle.js";
 import { evaluateMcpToolsRevision } from "./auth/mcp-tools-revision.js";
-import {
-  MCP_TOOLS_REVISION,
-  TOOL_DEFINITIONS,
-  CODESPACE_TOOL_NAME,
-  CODESPACE_PROCESS_TOOL_NAME,
-} from "./tools/tool-definitions.js";
+import { MCP_TOOLS_REVISION, TOOL_DEFINITIONS } from "./tools/tool-definitions.js";
 import { createWorkspacePublicationHandler } from "./workspace-publication-route.js";
 import { readAuthenticatedMcpRequest } from "./authenticated-request.js";
 
@@ -402,13 +396,12 @@ async function handleAuthenticatedMcpRequest(
   const mcpParams = req.body?.params;
   const toolName = mcpMethod === "tools/call" && mcpParams?.name ? mcpParams.name : undefined;
   const toolArgs = toolName ? mcpParams.arguments || {} : undefined;
-  if (toolName === "communication" && toolArgs && typeof toolArgs === "object") {
-    const allowed = new Set(Object.keys(communicationSchema.shape));
-    if (Object.keys(toolArgs).some((key) => !allowed.has(key))) {
+  if (isWorkspaceToolName(toolName)) {
+    if (!WORKSPACE_TOOL_SCHEMAS[toolName].safeParse(toolArgs).success) {
       res.status(400).json({
         jsonrpc: "2.0",
         id: req.body?.id ?? null,
-        error: { code: -32602, message: "Invalid communication parameters" },
+        error: { code: -32602, message: "Invalid workspace purpose parameters" },
       });
       return;
     }
@@ -443,12 +436,9 @@ async function handleAuthenticatedMcpRequest(
 
   await runWithMCPContext(userContext, async () => {
     if (toolName && toolArgs) {
-      const { inputData, resourceIds } =
-        toolName === CODESPACE_TOOL_NAME
-          ? codespaceToolLogContext(toolArgs)
-          : toolName === CODESPACE_PROCESS_TOOL_NAME
-            ? codespaceProcessLogContext(toolArgs)
-            : sanitizeInput(toolArgs);
+      const { inputData, resourceIds } = isWorkspaceToolName(toolName)
+        ? workspacePurposeLogContext(toolName)
+        : sanitizeInput(toolArgs);
       updateContext({ operation: `mcp:${toolName}`, inputData, resourceIds });
     }
     await transport.handleRequest(req, res, req.body);

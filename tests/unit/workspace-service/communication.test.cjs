@@ -75,6 +75,12 @@ test("a local-only Unix owner gains remote publication without replacing work an
     else process.env.MOIRA_ENVIRONMENT_ID = previousLife;
   });
   const value = guest.createFixture();
+  value.ownerSelector = {
+    kind: "local",
+    deviceId: randomUUID(),
+    spaceId: randomUUID(),
+    operationMarker: "moira-" + "a".repeat(24),
+  };
   cleanup.push(() => guest.dispose(value));
   value.socketPath = join(await realpath("/tmp"), `remote-config-${randomUUID()}.sock`);
   const service = await startWorkspaceService(value);
@@ -145,6 +151,7 @@ test("a local-only Unix owner gains remote publication without replacing work an
       const chunks = [];
       for await (const bytes of source) chunks.push(bytes);
       sends.push({ name, scope: control.scope, bytes: Buffer.concat(chunks) });
+      if (name === "uncertain") throw new Error("controlled lost vendor response");
       return { status: "delivered" };
     },
   });
@@ -202,6 +209,27 @@ test("a local-only Unix owner gains remote publication without replacing work an
   });
   expect(await owner.inspect(input.requestId)).toEqual(receipt);
   expect(await readFile(recordPath)).toEqual(originalBytes);
+  await owner.configureRemote({
+    publicationScope: nextScope,
+    communicationTransport: transport("uncertain"),
+  });
+  const published = await owner.semantic("file_download", { path: "effects" });
+  const uncertain = await owner.semantic("communication_deliver_publication", {
+    publication: published.structuredContent.file.reference_id,
+    kind: "document",
+  });
+  expect(uncertain).toMatchObject({
+    state: "unconfirmed",
+    original: { outcome: { ok: false, error: { code: "WORKSPACE_OUTCOME_UNCONFIRMED" } } },
+  });
+  const discovered = await owner.semantic("operation_find", { kind: "delivery" });
+  expect(
+    discovered.operations.find((entry) => entry.operation === uncertain.operation),
+  ).toMatchObject({ state: "unconfirmed" });
+  expect(await owner.semantic("operation_get", { reference: uncertain.operation })).toEqual(
+    uncertain,
+  );
+  expect(sends).toHaveLength(3);
   await expect(
     owner.configureRemote({ publicationScope: { ...nextScope, resourceId: randomUUID() } }),
   ).rejects.toMatchObject({ publicCode: "FILE_PUBLICATION_SCOPE_CHANGED" });
@@ -339,9 +367,21 @@ test("lost vendor reply survives owner reopen and pure collection never resends 
     outcome: { ok: false, error: { code: "WORKSPACE_OUTCOME_UNCONFIRMED" } },
     stages: [{ status: "unconfirmed" }],
   });
+  expect((await value.owner.find()).operations).toMatchObject([
+    { requestId: value.input.requestId, state: "unconfirmed" },
+  ]);
   await value.owner.close();
   const reopened = await value.open();
   cleanup.push(() => reopened.close());
+  const retained = await readFile(
+    join(value.root, "communication", value.input.requestId + ".json"),
+  );
+  expect((await reopened.find()).operations).toMatchObject([
+    { requestId: value.input.requestId, state: "unconfirmed" },
+  ]);
+  expect(
+    await readFile(join(value.root, "communication", value.input.requestId + ".json")),
+  ).toEqual(retained);
   expect(await reopened.inspect(value.input.requestId)).toMatchObject({
     requestId: value.input.requestId,
     outcome: { ok: false, error: { code: "WORKSPACE_OUTCOME_UNCONFIRMED" } },

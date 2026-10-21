@@ -11,12 +11,19 @@ import { LocalRecords } from "./space-record.js";
 import { LocalManager } from "./manager.js";
 import { LocalRelay } from "./relay.js";
 import { controllerRequest } from "./controller.js";
-import { ControllerState } from "./controller-state.js";
 import {
   controllerIdentitySchema,
   controllerRequestIdSchema,
+  controllerOperationSchema,
+  controllerOperationKindSchema,
+  controllerOperationFindResultSchema,
 } from "../../shared/src/codespaces/local-controller-protocol.js";
+import {
+  encodeReference,
+  decodeReference,
+} from "../../shared/src/codespaces/workspace-references.mjs";
 import { createWorkspaceRequestId } from "../../shared/src/codespaces/workspace-request-id.js";
+import { operationState } from "../../shared/src/codespaces/workspace-operation-state.mjs";
 import { LocalWebControl } from "./web-control.js";
 import {
   runLocalService,
@@ -56,18 +63,20 @@ Usage: moira-local <command> [options]
                Enable work until explicitly disabled, or stop all owned sandboxes
   status | doctor
                Inspect controller/capability state; doctor checks the configured Local SDK
-  stop SPACE_ID | remove SPACE_ID --confirm
-  create OWNER/REPO --ref BRANCH | start SPACE_ID
-               Call the running owner controller using the currently observed generation
+  workspaces | observe WORKSPACE_REF
+               Return selected workspace observations and meaningful references
+  stop WORKSPACE_REF | remove WORKSPACE_REF --confirm
+  create OWNER/REPO --ref BRANCH | start WORKSPACE_REF
+               Mutations retain the observation captured in the returned reference
                Create requires cloud route registration and initial Git credential authority
-  resume-setup SPACE_ID
+  resume-setup WORKSPACE_REF
                Resume preparation of the same known VM; preserve files and original create outcome
-  collect REQUEST_ID
-               Inspect the original ws1 request ID without repeating the operation
-  github-start RESOURCE_ID | github-stop RESOURCE_ID
-  github-adopt RESOURCE_ID | github-remove RESOURCE_ID --confirm
-               Use the paired controller assigned to the GitHub resource; no Local SDK is needed
-               Adopt prepares the existing VM without creating a replacement
+  collect OPERATION_REF | operations CONTROLLER_REF [--kind KIND] [--query TEXT] [--cursor CURSOR]
+               Inspect or discover original controller work without repeating it
+  collect MAINTENANCE_OR_SECURITY_REQUEST_ID
+               Collect original privileged maintenance or security custody; never submit work
+  adopt WORKSPACE_REF
+               Explicitly prepare an existing assigned GitHub VM; no Local SDK is needed
   recover SPACE_ID --confirm
                Acknowledge a verified stopped VM for recovery; prior jobs are never retried
   recover --confirm
@@ -91,11 +100,11 @@ Usage: moira-local <command> [options]
 
 Options: --state PATH --sbx PATH --template IMAGE@sha256:DIGEST
          --storage-root PATH --storage-gib 32 --cpus 2 --memory-gib 4
-         --request-id ws1-<lowercase UUID> for lifecycle commands
+         --request-id ws1-<lowercase UUID> for explicit human maintenance only
          --label NAME --json --help
 
-Lifecycle commands print their requestId before waiting for the result.
-After a lost reply, run collect with that original ID; do not submit a replacement mutation.
+Lifecycle commands return an original operation reference, including an unconfirmed reply.
+After a lost first reply, discover its original controller work; do not submit a replacement mutation.
 An unconfirmed outcome does not prove that the effect did not happen.
 With cloud transport unavailable, existing owner-admitted VMs and their guest CLI remain
 subject to current local grants. A confirmed authority refusal is not offline access.
@@ -150,6 +159,9 @@ export async function main(args: string[], environment: NodeJS.ProcessEnv): Prom
       "request-id": { type: "string" },
       pause: { type: "boolean" },
       resume: { type: "boolean" },
+      kind: { type: "string" },
+      query: { type: "string" },
+      cursor: { type: "string" },
     },
   });
   const [command, target] = parsed.positionals;
@@ -176,6 +188,18 @@ export async function main(args: string[], environment: NodeJS.ProcessEnv): Prom
     );
   const state = await openLocalState(options.state);
   const records = new LocalRecords(state);
+  const controllerSocket = async () => join((await state.ipcDirectory()).root, "controller.sock");
+  const currentController = async () => {
+    const connection = await state.read("connection.json", controllerIdentitySchema.parse);
+    if (!connection)
+      throw new LocalRefusal("LOCAL_NOT_ENROLLED", "Pair the running controller first.");
+    return connection;
+  };
+  const controllerResult = (value: unknown, operation: string) => {
+    const original = controllerOperationSchema.strip().parse(value);
+    const { requestId: _requestId, state: _phase, ...rest } = original;
+    return { operation, state: operationState(original), ...rest };
+  };
   const number = (value: string | undefined) => (value === undefined ? undefined : Number(value));
   if (command === "init") {
     const policy = await initializeLocal(
@@ -210,64 +234,176 @@ export async function main(args: string[], environment: NodeJS.ProcessEnv): Prom
     output(await setEnabled(records, true));
     return;
   }
-  if (["github-start", "github-stop", "github-adopt", "github-remove"].includes(command)) {
-    const resourceId = z.string().uuid().parse(target);
-    if (command === "github-remove" && !options.confirm)
-      throw new LocalRefusal(
-        "LOCAL_DELETE_CONFIRM",
-        "Pass --confirm to permanently delete this GitHub workspace.",
-      );
-    const relay = new LocalRelay(records),
-      connection = await relay.confirmed();
-    const binding = await new ControllerState(records).githubBinding(resourceId, connection);
-    const assignment = binding ?? (await relay.githubAssignment(resourceId));
-    const requestId = controllerRequestIdSchema.parse(
-      options["request-id"] ?? createWorkspaceRequestId(),
-    );
-    output({ requestId, resourceId });
-    output(
-      await controllerRequest(
-        join((await state.ipcDirectory()).root, "controller.sock"),
-        "POST",
-        `/v1/controller/github/resources/${resourceId}`,
-        {
-          requestId,
-          expectedGeneration: assignment.resourceGeneration,
-          action: command === "github-remove" ? "delete" : command.slice("github-".length),
-        },
-      ),
-    );
+  if (command === "workspaces" || command === "observe") {
+    const connection = await currentController();
+    const selected = command === "observe" ? decodeReference(target, "workspace") : undefined;
+    if (selected && selected.deviceId !== connection.deviceId)
+      throw new LocalRefusal("LOCAL_UNAUTHORIZED", "Select a workspace of this paired controller.");
+    const snapshot = (await controllerRequest(
+      await controllerSocket(),
+      "GET",
+      "/v1/controller",
+    )) as {
+      local: {
+        state: string;
+        resources?: Array<{
+          resourceId: string;
+          resourceGeneration: number;
+          space: Record<string, unknown> | null;
+        }>;
+      };
+      github: {
+        resources: Array<{
+          resourceId: string;
+          resourceGeneration: number;
+          repositoryFullName: string;
+          requestedRef: string;
+          state: string;
+          desiredState: string;
+        }>;
+      };
+    };
+    const local = (snapshot.local.resources ?? []).map((row) => ({
+      ...(row.space && row.space.state !== "unknown"
+        ? {
+            workspace: encodeReference("workspace", {
+              resourceId: row.resourceId,
+              provider: "local-sandboxes",
+              deviceId: connection.deviceId,
+              generation: row.resourceGeneration,
+            }),
+          }
+        : {}),
+      resourceId: row.resourceId,
+      provider: "local-sandboxes",
+      name: row.space?.name,
+      state: row.space?.state ?? "unavailable",
+      phase: row.space?.phase,
+      machine: row.space?.machine,
+      remote: row.space?.remote,
+      setupFailure: row.space?.setupFailure,
+    }));
+    const github = snapshot.github.resources.map((row) => ({
+      workspace: encodeReference("workspace", {
+        resourceId: row.resourceId,
+        provider: "github-codespaces",
+        deviceId: connection.deviceId,
+        generation: row.resourceGeneration,
+      }),
+      resourceId: row.resourceId,
+      provider: "github-codespaces",
+      repository: row.repositoryFullName,
+      branch: row.requestedRef,
+      state: row.state,
+      desiredState: row.desiredState,
+    }));
+    const rows = [...local, ...github]
+      .filter(
+        (row) =>
+          !selected ||
+          (row.resourceId === selected.resourceId && row.provider === selected.provider),
+      )
+      .map(({ resourceId: _resourceId, ...row }) => row);
+    output({
+      controller: encodeReference("controller", {
+        deviceId: connection.deviceId,
+        connectionId: connection.connectionId,
+      }),
+      workspaces: rows,
+    });
     return;
   }
-  if (["create", "start", "resume-setup", "stop", "remove", "collect"].includes(command)) {
-    const socketPath = join((await state.ipcDirectory()).root, "controller.sock");
+  if (command === "operations") {
+    const owner = decodeReference(target, "controller"),
+      current = await currentController();
+    if (owner.deviceId !== current.deviceId || owner.connectionId !== current.connectionId)
+      throw new LocalRefusal("LOCAL_UNAUTHORIZED", "Select this currently paired controller.");
+    const found = controllerOperationFindResultSchema.parse(
+      await controllerRequest(await controllerSocket(), "POST", "/v1/controller/operations/find", {
+        ...(options.kind ? { kind: controllerOperationKindSchema.parse(options.kind) } : {}),
+        ...(options.query ? { query: options.query } : {}),
+        ...(options.cursor ? { cursor: options.cursor } : {}),
+      }),
+    );
+    output({
+      ...found,
+      operations: found.operations.map((row) => ({
+        operation: encodeReference("operation", {
+          owner: { kind: "controller", ...owner },
+          requestId: row.requestId,
+          kind: row.kind,
+        }),
+        state: operationState(row),
+        kind: row.kind,
+        descriptor: row.descriptor,
+      })),
+    });
+    return;
+  }
+  if (["create", "start", "resume-setup", "stop", "remove", "adopt", "collect"].includes(command)) {
     if (command === "collect") {
-      const maintenance = await collectServiceMaintenance(state, target);
-      if (maintenance) {
-        output(maintenance);
+      const privileged = controllerRequestIdSchema.safeParse(target);
+      if (privileged.success) {
+        output(
+          (await collectServiceMaintenance(state, privileged.data)) ??
+            (await new LocalRelay(records).collectGitCredentialRequest(privileged.data)) ?? {
+              requestId: privileged.data,
+              state: "absent",
+            },
+        );
         return;
       }
-      const credential = await new LocalRelay(records).collectGitCredentialRequest(target);
-      if (credential) {
-        output(credential);
-        return;
-      }
-      output(await controllerRequest(socketPath, "GET", `/v1/controller/operations/${target}`));
+      const reference = decodeReference(target, "operation"),
+        current = await currentController();
+      if (reference.owner.kind !== "controller")
+        throw new LocalRefusal(
+          "LOCAL_GUEST_COLLECTION_REQUIRED",
+          "Collect this exact reference with the guest moira-workspace CLI or cloud operation_get; no replacement work was submitted.",
+        );
+      if (
+        reference.owner.deviceId !== current.deviceId ||
+        reference.owner.connectionId !== current.connectionId
+      )
+        throw new LocalRefusal(
+          "LOCAL_UNAUTHORIZED",
+          "The original operation belongs to another controller authority.",
+        );
+      output(
+        controllerResult(
+          await controllerRequest(
+            await controllerSocket(),
+            "GET",
+            reference.kind === "delivery"
+              ? `/v1/communication/operations/${reference.requestId}`
+              : `/v1/controller/operations/${reference.requestId}`,
+          ),
+          target,
+        ),
+      );
       return;
     }
-    const connection = await state.read("connection.json", (value) =>
-      controllerIdentitySchema.parse(value),
-    );
-    if (!connection)
-      throw new LocalRefusal("LOCAL_NOT_ENROLLED", "Pair the running controller first.");
+    const connection = await currentController();
     let resourceId: string;
     let input: Record<string, unknown>;
-    const requestId = options["request-id"] ?? createWorkspaceRequestId();
+    if (options["request-id"])
+      throw new LocalRefusal(
+        "LOCAL_OPTION_INVALID",
+        "Ordinary lifecycle calls are fresh intent; use collect or operations after uncertainty.",
+      );
+    const requestId = createWorkspaceRequestId();
+    const operation = encodeReference("operation", {
+      owner: {
+        kind: "controller",
+        deviceId: connection.deviceId,
+        connectionId: connection.connectionId,
+      },
+      requestId,
+      kind: "lifecycle",
+    });
+    let provider = "local-sandboxes";
     if (command === "create") {
       const policy = await records.policy();
-      const repository = policy.repositories.find(
-        (repository) => repository.fullName === target || repository.id === target,
-      );
+      const repository = policy.repositories.find((repository) => repository.fullName === target);
       if (!repository || !options.ref)
         throw new LocalRefusal(
           "LOCAL_REQUEST_INVALID",
@@ -283,14 +419,19 @@ export async function main(args: string[], environment: NodeJS.ProcessEnv): Prom
         operationMarker: `moira-${randomBytes(12).toString("hex")}`,
       };
     } else {
-      const space = await records.get(z.string().uuid().parse(target));
-      if (!space)
+      const workspace = decodeReference(target, "workspace");
+      if (workspace.deviceId !== connection.deviceId)
         throw new LocalRefusal(
-          "LOCAL_SANDBOX_ABSENT",
-          "This device does not own that native space.",
+          "LOCAL_UNAUTHORIZED",
+          "Select a workspace of this paired controller.",
         );
-      const binding = await new ControllerState(records).forSpace(space, connection);
-      resourceId = binding.resourceId;
+      resourceId = workspace.resourceId;
+      provider = workspace.provider;
+      if (command === "adopt" && provider !== "github-codespaces")
+        throw new LocalRefusal(
+          "LOCAL_REQUEST_INVALID",
+          "External adoption applies only to the selected GitHub workspace.",
+        );
       if (command === "remove" && !options.confirm)
         throw new LocalRefusal(
           "LOCAL_DELETE_CONFIRM",
@@ -298,17 +439,39 @@ export async function main(args: string[], environment: NodeJS.ProcessEnv): Prom
         );
       input = {
         requestId,
-        expectedGeneration: binding.resourceGeneration,
+        expectedGeneration: workspace.generation,
         action:
           command === "remove" ? "delete" : command === "resume-setup" ? "resume_setup" : command,
-        ...(command === "remove" ? { ownerConfirmed: true } : {}),
+        ...(command === "remove" && provider === "local-sandboxes" ? { ownerConfirmed: true } : {}),
       };
     }
-    // Print recovery identity before observation; transport loss never invites a fresh mutation.
-    process.stderr.write(`${JSON.stringify({ requestId, resourceId })}\n`);
-    output(
-      await controllerRequest(socketPath, "POST", `/v1/resources/${resourceId}/lifecycle`, input),
-    );
+    process.stderr.write(`${JSON.stringify({ operation })}\n`);
+    try {
+      output(
+        controllerResult(
+          await controllerRequest(
+            await controllerSocket(),
+            "POST",
+            provider === "github-codespaces"
+              ? `/v1/controller/github/resources/${resourceId}`
+              : `/v1/resources/${resourceId}/lifecycle`,
+            input,
+          ),
+          operation,
+        ),
+      );
+    } catch (error) {
+      if (error instanceof LocalRefusal) throw error;
+      output({
+        operation,
+        state: "unconfirmed",
+        error: {
+          code: "LOCAL_OBSERVATION_UNKNOWN",
+          message:
+            "The original response was lost; collect this operation or discover it, without replacement submission.",
+        },
+      });
+    }
     return;
   }
   if (command === "recover" && target === undefined) {

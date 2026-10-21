@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test } from "@jest/globals";
+import { afterEach, beforeEach, describe, expect, jest, test } from "@jest/globals";
 import { mkdtemp, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -17,6 +17,11 @@ import { policyForSpace } from "../../../packages/local/src/space-record.js";
 import type { ControllerResourceRegistration } from "../../../packages/shared/src/codespaces/local-controller-protocol.js";
 import { createWorkspaceRequestId } from "../../../packages/shared/src/codespaces/workspace-request-id.js";
 import { localFixture } from "../../integration/local/fixtures.js";
+import { main as localCli } from "../../../packages/local/src/cli.js";
+import {
+  decodeReference,
+  encodeReference,
+} from "../../../packages/shared/src/codespaces/workspace-references.mjs";
 
 let directory: string;
 const endpoints: Array<Awaited<ReturnType<typeof startLocalController>>> = [];
@@ -110,6 +115,366 @@ async function localSnapshot(controller: LocalController) {
 }
 
 describe("One owner HTTP surface for local and remote control", () => {
+  test.each([
+    ["WORKSPACE_OUTCOME_UNCONFIRMED", "unconfirmed"],
+    ["OWNER_DELIVERY_UNCONFIRMED", "unconfirmed"],
+    ["COMMUNICATION_SOURCE_REFUSED", "completed"],
+  ])(
+    "host CLI collection and discovery preserve retained delivery %s as %s without resending",
+    async (code, expectedState) => {
+      const f = await fixture();
+      await f.state.write("connection.json", {
+        ...f.identity,
+        origin: "https://moira.example",
+        credential: "d".repeat(43),
+        pairingId: randomUUID(),
+      });
+      const { delivery } = await f.controller.communication();
+      const requestId = createWorkspaceRequestId();
+      const communication = await PrivateState.open(
+        join(directory, "controller-files", "communication"),
+      );
+      const record = {
+        version: 1,
+        requestId,
+        scope: { kind: "controller", ...f.identity },
+        descriptor: { kind: "delivery", description: "Deliver document report.txt", createdAt: 1 },
+        stages: [],
+        outcome: { ok: false, error: { code, message: "Retained delivery result" } },
+      };
+      await communication.write(`${requestId}.json`, record);
+      const wrapperId = createWorkspaceRequestId();
+      const wrapper = await f.controller.state.run(
+        wrapperId,
+        f.identity,
+        { action: "communication", inputDigest: "retained-wrapper" },
+        async () => ({ privateCandidatePayload: "Only explicit collection may return this" }),
+      );
+      const wrapperRecord = await f.state.read(
+        `controller-operation-${wrapperId}.json`,
+        (value) => value,
+      );
+      const selector = {
+        kind: "controller" as const,
+        deviceId: f.identity.deviceId,
+        connectionId: f.identity.connectionId,
+      };
+      const operation = encodeReference("operation", {
+        owner: selector,
+        requestId,
+        kind: "delivery",
+      });
+      const controller = encodeReference("controller", {
+        deviceId: selector.deviceId,
+        connectionId: selector.connectionId,
+      });
+      const fetcher = jest
+        .spyOn(globalThis, "fetch")
+        .mockRejectedValue(new Error("Collection must not resend"));
+      let output = "";
+      const stdout = jest.spyOn(process.stdout, "write").mockImplementation((chunk) => {
+        output += String(chunk);
+        return true;
+      });
+      try {
+        expect(await delivery.inspect(requestId)).toMatchObject({
+          state: "completed",
+          outcome: record.outcome,
+        });
+        await localCli(["collect", operation, "--state", directory], {});
+        expect(JSON.parse(output)).toMatchObject({
+          operation,
+          state: expectedState,
+          outcome: record.outcome,
+        });
+        output = "";
+        await localCli(["operations", controller, "--kind", "delivery", "--state", directory], {});
+        const candidates = JSON.parse(output).operations;
+        expect(candidates).toHaveLength(2);
+        expect(candidates).toContainEqual({
+          operation,
+          state: expectedState,
+          kind: "delivery",
+          descriptor: record.descriptor,
+        });
+        for (const candidate of candidates) {
+          expect(Object.keys(candidate).sort()).toEqual([
+            "descriptor",
+            "kind",
+            "operation",
+            "state",
+          ]);
+        }
+        const wrapperOperation = candidates.find(
+          (candidate: { operation: string }) =>
+            decodeReference(candidate.operation, "operation").requestId === wrapperId,
+        ).operation;
+        output = "";
+        await localCli(["collect", wrapperOperation, "--state", directory], {});
+        expect(JSON.parse(output)).toMatchObject({ state: "completed", outcome: wrapper.outcome });
+        expect(fetcher).not.toHaveBeenCalled();
+        expect(await f.state.keys("controller-operation-")).toEqual([
+          `controller-operation-${wrapperId}.json`,
+        ]);
+        expect(
+          await f.state.read(`controller-operation-${wrapperId}.json`, (value) => value),
+        ).toEqual(wrapperRecord);
+        expect(await communication.read(`${requestId}.json`, (value) => value)).toEqual(record);
+      } finally {
+        stdout.mockRestore();
+        fetcher.mockRestore();
+      }
+    },
+  );
+  test("privileged CLI collection reads maintenance and live security receipts offline without admission", async () => {
+    const state = await PrivateState.open(directory);
+    const maintenanceId = createWorkspaceRequestId(),
+      securityId = createWorkspaceRequestId();
+    const maintenance = {
+      requestId: maintenanceId,
+      release: "a".repeat(64),
+      phase: "unconfirmed",
+      running: [],
+      interruption: true,
+      priorCommandsReplayed: false,
+    };
+    const security = {
+      requestId: securityId,
+      resourceId: randomUUID(),
+      resourceGeneration: 3,
+      action: "push",
+      state: "live",
+      credentialId: randomUUID(),
+    };
+    await state.write(`service-maintenance-${maintenanceId}.json`, maintenance);
+    await state.write(`credential-request-${securityId}.json`, security);
+    const keys = await state.keys("");
+    const fetcher = jest
+      .spyOn(globalThis, "fetch")
+      .mockRejectedValue(new Error("No issuer contact"));
+    let output = "";
+    const stdout = jest.spyOn(process.stdout, "write").mockImplementation((chunk) => {
+      output += String(chunk);
+      return true;
+    });
+    try {
+      for (const receipt of [maintenance, security]) {
+        output = "";
+        await localCli(["collect", receipt.requestId, "--state", directory], {});
+        expect(JSON.parse(output)).toEqual(receipt);
+      }
+      expect(fetcher).not.toHaveBeenCalled();
+      expect(await state.keys("")).toEqual(keys);
+      expect(
+        await state.read(`service-maintenance-${maintenanceId}.json`, (value) => value),
+      ).toEqual(maintenance);
+      expect(await state.read(`credential-request-${securityId}.json`, (value) => value)).toEqual(
+        security,
+      );
+    } finally {
+      stdout.mockRestore();
+      fetcher.mockRestore();
+    }
+  });
+  test("privileged CLI collection of an unknown ID is absent without pairing or raw lifecycle fallback", async () => {
+    const state = await PrivateState.open(directory),
+      requestId = createWorkspaceRequestId();
+    await state.write(`controller-operation-${requestId}.json`, { requestId, state: "accepted" });
+    const keys = await state.keys("");
+    let output = "";
+    const stdout = jest.spyOn(process.stdout, "write").mockImplementation((chunk) => {
+      output += String(chunk);
+      return true;
+    });
+    try {
+      await localCli(["collect", requestId, "--state", directory], {});
+      expect(JSON.parse(output)).toEqual({ requestId, state: "absent" });
+      expect(await state.keys("")).toEqual(keys);
+    } finally {
+      stdout.mockRestore();
+    }
+  });
+  test("privileged CLI collection observes only its original uncertain security request and propagates issuer failure", async () => {
+    const state = await PrivateState.open(directory),
+      requestId = createWorkspaceRequestId();
+    const record = {
+      requestId,
+      resourceId: randomUUID(),
+      resourceGeneration: 3,
+      action: "push",
+      state: "unconfirmed",
+    };
+    await state.write(`credential-request-${requestId}.json`, record);
+    await state.write("connection.json", {
+      origin: "https://moira.example",
+      credential: "d".repeat(43),
+      deviceId: randomUUID(),
+      pairingId: randomUUID(),
+    });
+    const keys = await state.keys("");
+    const fetcher = jest
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(Response.json({ state: "unconfirmed" }));
+    let output = "";
+    const stdout = jest.spyOn(process.stdout, "write").mockImplementation((chunk) => {
+      output += String(chunk);
+      return true;
+    });
+    try {
+      await localCli(["collect", requestId, "--state", directory], {});
+      expect(JSON.parse(output)).toEqual(record);
+      expect(fetcher).toHaveBeenCalledTimes(1);
+      const [url, options] = fetcher.mock.calls[0];
+      expect(String(url)).toBe(
+        `https://moira.example/api/codespaces/github/credentials/requests/${requestId}`,
+      );
+      expect(JSON.parse(String(options?.body))).toEqual({
+        requestId,
+        resourceId: record.resourceId,
+        resourceGeneration: 3,
+        action: "push",
+      });
+      fetcher.mockRejectedValue(new Error("Issuer unavailable"));
+      output = "";
+      await expect(
+        localCli(["collect", requestId, "--state", directory], {}),
+      ).rejects.toMatchObject({
+        code: "WORKSPACE_OUTCOME_UNCONFIRMED",
+      });
+      expect(output).toBe("");
+      expect(await state.keys("")).toEqual(keys);
+      expect(await state.read(`credential-request-${requestId}.json`, (value) => value)).toEqual(
+        record,
+      );
+    } finally {
+      stdout.mockRestore();
+      fetcher.mockRestore();
+    }
+  });
+  test("discovery merges retained delivery admissions without constructing an owner or collecting effects", async () => {
+    const f = await fixture();
+    const requestId = "ws1-10000000-0000-4000-8000-000000000001";
+    await f.controller.state.run(
+      requestId,
+      f.identity,
+      { action: "communication", inputDigest: "retained" },
+      async () => "wrapper",
+    );
+    const communication = await PrivateState.open(
+      join(directory, "controller-files", "communication"),
+    );
+    const record = {
+      version: 1,
+      requestId,
+      scope: { kind: "controller", ...f.identity },
+      descriptor: { kind: "delivery", description: "Deliver owner file", createdAt: 1 },
+      stages: [],
+    };
+    await communication.write(`${requestId}.json`, record);
+    const foreign = "ws1-f0000000-0000-4000-8000-000000000001";
+    const foreignRecord = {
+      ...record,
+      requestId: foreign,
+      scope: { ...record.scope, connectionId: randomUUID() },
+    };
+    await communication.write(`${foreign}.json`, foreignRecord);
+    f.controller.communication = async () => {
+      throw new Error("Discovery must not create a communication owner");
+    };
+    expect(await f.controller.findOperations({ kind: "delivery" })).toEqual({
+      operations: [
+        { requestId, state: "unconfirmed", kind: "delivery", descriptor: record.descriptor },
+      ],
+      nextCursor: requestId,
+    });
+    expect(await f.controller.findOperations({ kind: "delivery", cursor: requestId })).toEqual({
+      operations: [],
+    });
+    expect(await communication.read(`${requestId}.json`, (value) => value)).toEqual(record);
+    expect(await communication.read(`${foreign}.json`, (value) => value)).toEqual(foreignRecord);
+  });
+  test("ordinary host CLI retains the returned workspace observation and collects its original operation", async () => {
+    const f = await fixture();
+    let output = "";
+    const stdout = jest.spyOn(process.stdout, "write").mockImplementation((chunk) => {
+      output += String(chunk);
+      return true;
+    });
+    const stderr = jest.spyOn(process.stderr, "write").mockImplementation(() => true);
+    try {
+      await localCli(["workspaces", "--state", directory], {});
+      const selected = JSON.parse(output).workspaces[0].workspace as string;
+      expect(decodeReference(selected, "workspace").generation).toBe(3);
+      await f.controller.lifecycle(
+        f.resourceId,
+        { requestId: createWorkspaceRequestId(), expectedGeneration: 3, action: "stop" },
+        true,
+      );
+      const before = await f.records.get(f.space.id);
+      output = "";
+      await localCli(["stop", selected, "--state", directory], {});
+      const result = JSON.parse(output);
+      expect(result).toMatchObject({
+        state: "completed",
+        outcome: { ok: false, error: { code: "LOCAL_GENERATION_CONFLICT" } },
+      });
+      expect(await f.records.get(f.space.id)).toEqual(before);
+      expect(decodeReference(result.operation, "operation")).toMatchObject({
+        owner: { kind: "controller", deviceId: f.identity.deviceId },
+        kind: "lifecycle",
+      });
+      output = "";
+      await localCli(["collect", result.operation, "--state", directory], {});
+      expect(JSON.parse(output)).toEqual(result);
+    } finally {
+      stdout.mockRestore();
+      stderr.mockRestore();
+    }
+  });
+  test("exact retained selector resolution works without native observation and refuses foreign selectors", async () => {
+    const f = await fixture();
+    f.manager.snapshot = async () => {
+      throw new Error("Native observation is unavailable");
+    };
+    const bySpace = await controllerRequest(
+      f.endpoint.socketPath,
+      "POST",
+      "/v1/controller/workspaces/resolve",
+      {
+        deviceId: f.identity.deviceId,
+        spaceId: f.space.id,
+        operationMarker: f.space.operationMarker,
+      },
+    );
+    const byResource = await controllerRequest(
+      f.endpoint.socketPath,
+      "POST",
+      "/v1/controller/workspaces/resolve",
+      { deviceId: f.identity.deviceId, resourceId: f.resourceId },
+    );
+    expect(bySpace).toEqual(byResource);
+    expect(bySpace).toMatchObject({
+      resourceId: f.resourceId,
+      resourceGeneration: 3,
+      repositoryId: f.space.repositoryId,
+      localSpaceId: f.space.id,
+      operationMarker: f.space.operationMarker,
+    });
+    await expect(
+      f.controller.resolveWorkspace({ deviceId: randomUUID(), resourceId: f.resourceId }),
+    ).rejects.toMatchObject({ code: "LOCAL_UNAUTHORIZED" });
+    await expect(
+      f.controller.resolveWorkspace({
+        deviceId: f.identity.deviceId,
+        spaceId: f.space.id,
+        operationMarker: `moira-${"b".repeat(24)}`,
+      }),
+    ).rejects.toMatchObject({ code: "LOCAL_IDENTITY_CHANGED" });
+    expect(await f.state.keys("controller-operation-")).toEqual([]);
+    expect(
+      await controllerRequest(f.endpoint.socketPath, "POST", "/v1/controller/operations/find", {}),
+    ).toEqual({ operations: [] });
+  });
   test("host-owner create registers its original route before the native effect and repeats only its receipt", async () => {
     const registrations: ControllerResourceRegistration[] = [];
     const f = await fixture(async (input) => {
@@ -474,6 +839,16 @@ describe("One owner HTTP surface for local and remote control", () => {
       },
       resize: async () => undefined,
     });
+    // This fixture replaces runner admission; retain the machine pin that real
+    // quiescent owner admission establishes before allowing live defaults.
+    await f.records.put({
+      ...f.space,
+      admittedMachine: {
+        cpuCores: f.policy.runtime.cpuCores,
+        memoryBytes: f.policy.runtime.memoryBytes,
+        dockerBytes: f.policy.runtime.dockerBytes,
+      },
+    });
     await f.control.optIn(
       { ...f.identity, origin: "https://moira.example" },
       {
@@ -499,7 +874,9 @@ describe("One owner HTTP surface for local and remote control", () => {
       status: "rejected",
     });
     expect(await f.state.read("control-intent.json", (value) => value)).toBeNull();
-    expect(await send(1, { ...settings, label: "Corrected", cpuCores: 4 })).toMatchObject({
+    const corrected = await send(1, { ...settings, label: "Corrected", cpuCores: 4 });
+    expect((corrected as { outcome: { error?: unknown } }).outcome.error).toBeUndefined();
+    expect(corrected).toMatchObject({
       outcome: { ok: true, result: { local: { control: { revision: 2, appliedRevision: 2 } } } },
     });
     uncertain = true;

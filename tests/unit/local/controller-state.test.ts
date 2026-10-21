@@ -24,6 +24,87 @@ const identity = () => ({
 });
 
 describe("Controller owns lifecycle admission and original result", () => {
+  test("discovery reads the safe original admission before its effect completes and retains it after completion", async () => {
+    const local = await localFixture(await PrivateState.open(directory)),
+      owner = { ...identity(), deviceId: local.policy.deviceId },
+      journal = new ControllerState(local.records);
+    const requestId = createWorkspaceRequestId();
+    let entered!: () => void, finish!: () => void;
+    const admitted = new Promise<void>((yes) => {
+        entered = yes;
+      }),
+      held = new Promise<void>((yes) => {
+        finish = yes;
+      });
+    let effects = 0;
+    const work = journal.run(
+      requestId,
+      owner,
+      {
+        action: "create",
+        repositoryId: local.policy.repositories[0].id,
+        ref: "main",
+        credential: "do-not-copy",
+        script: "do-not-index",
+      },
+      async () => {
+        const accepted = JSON.parse(
+          await readFile(join(directory, `controller-operation-${requestId}.json`), "utf8"),
+        );
+        expect(accepted.descriptor).toMatchObject({
+          kind: "lifecycle",
+          description: "Workspace create owner/project at main",
+        });
+        expect(JSON.stringify(accepted)).not.toContain("do-not-");
+        effects++;
+        entered();
+        await held;
+        return { created: true };
+      },
+    );
+    await admitted;
+    try {
+      const pending = await journal.find(owner, { query: "owner/project" });
+      expect(pending.operations).toEqual([
+        expect.objectContaining({ requestId, state: "accepted", kind: "lifecycle" }),
+      ]);
+      expect((await new ControllerState(local.records).find(owner, {})).operations).toEqual([
+        expect.objectContaining({ requestId, state: "unconfirmed" }),
+      ]);
+      expect((await journal.find({ ...owner, userId: "foreign" }, {})).operations).toEqual([]);
+    } finally {
+      finish();
+      await work;
+    }
+    const completed = await journal.find(owner, {});
+    expect(completed.operations).toEqual([
+      expect.objectContaining({
+        requestId,
+        state: "completed",
+        descriptor: expect.objectContaining({
+          description: "Workspace create owner/project at main",
+        }),
+      }),
+    ]);
+    expect(effects).toBe(1);
+  });
+  test("descriptor-less unknown receipts remain discoverable without rewriting or admitting them", async () => {
+    const records = new LocalRecords(await PrivateState.open(directory)),
+      owner = identity(),
+      requestId = createWorkspaceRequestId();
+    const key = `controller-operation-${requestId}.json`;
+    await records.state.write(key, {
+      requestId,
+      digest: "a".repeat(64),
+      identity: owner,
+      state: "accepted",
+    });
+    const bytes = await readFile(join(directory, key));
+    expect(
+      (await new ControllerState(records).find(owner, { kind: "unknown" })).operations,
+    ).toEqual([{ requestId, state: "unconfirmed", kind: "unknown" }]);
+    expect(await readFile(join(directory, key))).toEqual(bytes);
+  });
   test("response observation loss does not dispatch another mutation, and collection reads its original outcome", async () => {
     const state = await PrivateState.open(directory);
     const records = new LocalRecords(state),

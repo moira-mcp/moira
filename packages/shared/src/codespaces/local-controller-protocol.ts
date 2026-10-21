@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { WORKSPACE_REQUEST_ID_PATTERN } from "./workspace-request-id.js";
+import { OPERATION_KINDS } from "./workspace-references.mjs";
 import {
   localDeviceSettingsSchema,
   localManagementRepositorySchema,
@@ -80,6 +81,32 @@ export const controllerIdentitySchema = z.object({
   connectionId: z.string().uuid(),
 });
 export type ControllerIdentity = z.infer<typeof controllerIdentitySchema>;
+
+export const controllerOperationKindSchema = z.enum(OPERATION_KINDS);
+export const controllerOperationDescriptorSchema = z
+  .object({
+    kind: controllerOperationKindSchema.exclude(["unknown"]),
+    description: z.string().min(1).max(512),
+    createdAt: z.number().int().nonnegative().safe(),
+  })
+  .strict();
+export const controllerOperationFindSchema = z
+  .object({
+    kind: controllerOperationKindSchema.optional(),
+    query: z.string().optional(),
+    cursor: controllerRequestIdSchema.optional(),
+  })
+  .strict();
+export const controllerWorkspaceResolveSchema = z.union([
+  z
+    .object({
+      deviceId: z.string().uuid(),
+      spaceId: z.string().uuid(),
+      operationMarker: z.string().regex(/^moira-[a-f0-9]{24}$/),
+    })
+    .strict(),
+  z.object({ deviceId: z.string().uuid(), resourceId: z.string().uuid() }).strict(),
+]);
 
 const generation = z.number().int().positive();
 export const controllerLifecycleSchema = z.discriminatedUnion("action", [
@@ -186,6 +213,17 @@ export const controllerOperationSchema = z
   })
   .strict();
 export type ControllerOperation = z.infer<typeof controllerOperationSchema>;
+export const controllerOperationFindResultSchema = z
+  .object({
+    operations: z.array(
+      controllerOperationSchema.extend({
+        kind: controllerOperationKindSchema,
+        descriptor: controllerOperationDescriptorSchema.optional(),
+      }),
+    ),
+    nextCursor: z.string().optional(),
+  })
+  .strict();
 
 /** Fixed GitHub lifecycle inputs are issued from a verified cloud assignment. */
 const githubCreation = {

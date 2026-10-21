@@ -63,6 +63,7 @@ const payload = await loadWorkspacePayload(
 );
 let container;
 let fixtureDirectory;
+let activeHome = "/home/agent";
 verification: try {
   await mkdir(resolve("../agent_temp_files_local"), { recursive: true });
   fixtureDirectory = await mkdtemp(resolve("../agent_temp_files_local/guest-router-"));
@@ -120,7 +121,10 @@ verification: try {
     .trim();
   assert.match(container, /^[a-f0-9]{64}$/);
   const fixed = (script, input) =>
-    docker(["exec", "--interactive", container, "/bin/sh", "-c", script], input);
+    docker(
+      ["exec", "--interactive", "--env", `HOME=${activeHome}`, container, "/bin/sh", "-c", script],
+      input,
+    );
   const installed = JSON.parse(
     await fixed(WORKSPACE_INSTALL_SCRIPT, workspaceInstallInput(payload)),
   );
@@ -214,7 +218,35 @@ verification: try {
   assert.equal(progressMetadata.width, 1170);
   assert.ok(progressMetadata.height > 0, "Packaged renderer returned an empty progress image");
   const cli = (...args) =>
-    docker(["exec", "--interactive", container, "/home/agent/.local/bin/moira-workspace", ...args]);
+    docker([
+      "exec",
+      "--interactive",
+      "--env",
+      `HOME=${activeHome}`,
+      container,
+      `${activeHome}/.local/bin/moira-workspace`,
+      ...args,
+    ]);
+  const deliver = (method, path, body) =>
+    docker(
+      [
+        "exec",
+        "--interactive",
+        container,
+        node,
+        "--input-type=module",
+        "-e",
+        "const {workspaceRequest}=await import(process.argv[1]);let text='';for await(const chunk of process.stdin)text+=chunk;const input=JSON.parse(text);const response=await workspaceRequest(input.socketPath,input.method,input.path,input.body===undefined?undefined:JSON.stringify(input.body),{'content-type':'application/json'});if(response.statusCode!==200)throw new Error('Packaged owner request refused');for await(const chunk of response)process.stdout.write(chunk);",
+        `file://${program}/service/cli.mjs`,
+      ],
+      JSON.stringify({
+        socketPath: `${activeHome}/.local/state/moira/workspace-service/service.sock`,
+        method,
+        path,
+        body,
+      }),
+    ).then((value) => JSON.parse(value));
+  const semantic = (action, request) => deliver("POST", "/v1/tools", { action, request });
   await docker([
     "exec",
     container,
@@ -375,22 +407,12 @@ verification: try {
   assert.equal(ready.releaseIdentity, payload.release);
   assert.ok(Number.isSafeInteger(ready.processId) && ready.processId > 1);
   assert.notEqual(ready.remote.state, "connected");
-  const offlineCommand = createWorkspaceRequestId();
-  await cli(
-    "exec",
-    "--request-id",
-    offlineCommand,
-    "--",
-    node,
-    "-e",
-    "process.stdout.write('ready-before-cloud')",
-  );
-  let offlineResult;
-  do {
-    offlineResult = JSON.parse(await cli("status", offlineCommand));
-  } while (["starting", "running"].includes(offlineResult.state));
-  assert.equal(offlineResult.state, "succeeded");
-  assert.equal((await cli("output", offlineCommand, "stdout")).toString(), "ready-before-cloud");
+  const offlineResult = JSON.parse(
+    await cli("exec", "--", node, "-e", "process.stdout.write('ready-before-cloud')"),
+  ).structuredContent;
+  assert.equal(offlineResult.state, "completed");
+  assert.equal(offlineResult.outcome.ok, true);
+  assert.equal(offlineResult.stdout, "ready-before-cloud");
   await docker([
     "exec",
     container,
@@ -498,35 +520,34 @@ verification: try {
     measured.environmentIdentity,
   );
   assert.match((await cli("--help")).toString(), /moira-workspace exec/);
-  const id = createWorkspaceRequestId();
-  const accepted = (
-    await cli(
-      "exec",
-      "--request-id",
-      id,
-      "--",
-      "/bin/sh",
-      "-c",
-      "printf owned-runtime; printf error-stream >&2; exit 23",
-    )
-  )
-    .toString()
-    .trim()
-    .split("\n");
-  assert.equal(accepted[0], id);
-  let status;
-  do {
-    status = JSON.parse(await cli("status", id));
-  } while (["running", "starting"].includes(status.state));
-  assert.equal(status.exitCode, 23);
-  assert.equal((await cli("output", id, "stdout")).toString(), "owned-runtime");
-  assert.equal((await cli("output", id, "stderr")).toString(), "error-stream");
+  await assert.rejects(
+    cli("exec", "--", "/bin/sh", "-c", "printf owned-runtime; printf error-stream >&2; exit 23"),
+  );
+  // The CLI failure loses its reply here. Discovery and pure original collection
+  // recover the one admitted command rather than submitting the script again.
+  const originals = (await semantic("operation_find", { kind: "command" })).structuredContent
+    .operations;
+  const collected = await Promise.all(
+    originals.map(({ operation }) => semantic("operation_get", { reference: operation })),
+  );
+  const failures = collected
+    .map((entry) => entry.structuredContent)
+    .filter((entry) => entry.outcome?.result?.exitCode === 23);
+  assert.equal(failures.length, 1);
+  const failedProcess = failures[0].process;
+  assert.equal(
+    JSON.parse(await cli("output", failedProcess, "--stream", "stdout")).structuredContent.text,
+    "owned-runtime",
+  );
+  assert.equal(
+    JSON.parse(await cli("output", failedProcess, "--stream", "stderr")).structuredContent.text,
+    "error-stream",
+  );
   // The command receives valid per-string Linux argv/env values, while their
   // aggregate JSON crosses the collector pipe's UTF-8 chunk boundaries.
   const unicode = "€🙂Ж".repeat(6000);
   const unicodeBytes = Buffer.from(unicode);
   const unicodeInput = Buffer.from(unicode.repeat(2));
-  const unicodeId = createWorkspaceRequestId();
   const unicodeAccepted = await docker(
     [
       "exec",
@@ -534,8 +555,6 @@ verification: try {
       container,
       "/home/agent/.local/bin/moira-workspace",
       "exec",
-      "--request-id",
-      unicodeId,
       "--stdin",
       "--",
       "/usr/bin/env",
@@ -548,12 +567,10 @@ verification: try {
     ],
     unicodeInput,
   );
-  assert.equal(unicodeAccepted.toString().split("\n")[0], unicodeId);
-  do {
-    status = JSON.parse(await cli("status", unicodeId));
-  } while (["running", "starting"].includes(status.state));
-  assert.equal(status.state, "succeeded");
-  assert.deepEqual(JSON.parse(await cli("output", unicodeId, "stdout")), {
+  const unicodeResult = JSON.parse(unicodeAccepted).structuredContent;
+  assert.equal(unicodeResult.state, "completed");
+  assert.equal(unicodeResult.outcome.ok, true);
+  assert.deepEqual(JSON.parse(unicodeResult.stdout), {
     environments: Array(3).fill({
       size: unicodeBytes.length,
       sha256: createHash("sha256").update(unicodeBytes).digest("hex"),
@@ -575,11 +592,9 @@ verification: try {
     ],
     bytes,
   );
-  await cli("write", "binary.dat", "/tmp/binary");
-  assert.deepEqual(await cli("read", "binary.dat"), bytes);
-  const publication = JSON.parse(
-    await cli("publish", "binary.dat", "binary.dat", "application/octet-stream"),
-  );
+  await cli("upload", "binary.dat", "/tmp/binary");
+  await assert.rejects(cli("read", "binary.dat"));
+  const publication = JSON.parse(await cli("download", "binary.dat"));
   const file = publication.structuredContent?.file;
   assert.ok(file && !publication.isError, "Packaged CLI publication failed");
   assert.equal(file.name, "binary.dat");
@@ -613,29 +628,18 @@ verification: try {
         container,
         node,
         "-e",
-        "const fs=require('node:fs');const {request}=require('node:http');const {token}=JSON.parse(fs.readFileSync(0,'utf8'));const req=request({socketPath:'/home/agent/.local/state/moira/workspace-service/service.sock',method:'GET',path:'/v1/publications/'+encodeURIComponent(token)},res=>{if(res.statusCode!==200){res.resume();process.stderr.write('Owner publication refused');process.exitCode=1;return;}res.on('error',()=>{process.stderr.write('Owner publication stream failed');process.exitCode=1;});res.pipe(process.stdout);});req.on('error',()=>{process.stderr.write('Owner publication unavailable');process.exitCode=1;});req.end();",
+        "const fs=require('node:fs');const {request}=require('node:http');const {token,socketPath}=JSON.parse(fs.readFileSync(0,'utf8'));const req=request({socketPath,method:'GET',path:'/v1/publications/'+encodeURIComponent(token)},res=>{if(res.statusCode!==200){res.resume();process.stderr.write('Owner publication refused');process.exitCode=1;return;}res.on('error',()=>{process.stderr.write('Owner publication stream failed');process.exitCode=1;});res.pipe(process.stdout);});req.on('error',()=>{process.stderr.write('Owner publication unavailable');process.exitCode=1;});req.end();",
       ],
-      JSON.stringify({ token: selectedToken }),
+      JSON.stringify({
+        token: selectedToken,
+        socketPath: `${activeHome}/.local/state/moira/workspace-service/service.sock`,
+      }),
     );
   assert.deepEqual(await publicationBytes(), bytes);
   assert.deepEqual(await publicationBytes(), bytes);
   // Exercise the shipped daemon, CLI transport export, binary handler and native
   // supervisor together. Only the vendor authority is a confined TLS fixture.
   const deliveryRequestId = createWorkspaceRequestId();
-  const deliver = (method, path, body) =>
-    docker(
-      [
-        "exec",
-        "--interactive",
-        container,
-        node,
-        "--input-type=module",
-        "-e",
-        "const {workspaceRequest}=await import(process.argv[1]);let text='';for await(const chunk of process.stdin)text+=chunk;const input=JSON.parse(text);const response=await workspaceRequest('/home/agent/.local/state/moira/workspace-service/service.sock',input.method,input.path,input.body===undefined?undefined:JSON.stringify(input.body),{'content-type':'application/json'});if(response.statusCode!==200)throw new Error('Packaged communication refused');for await(const chunk of response)process.stdout.write(chunk);",
-        `file://${program}/service/cli.mjs`,
-      ],
-      JSON.stringify({ method, path, body }),
-    ).then((value) => JSON.parse(value));
   const deliveryInput = {
     action: "deliver",
     requestId: deliveryRequestId,
@@ -760,7 +764,7 @@ verification: try {
     ],
     png,
   );
-  await cli("write", "preview.png", "/tmp/preview.png");
+  await cli("upload", "preview.png", "/tmp/preview.png");
   const preview = JSON.parse(await cli("preview", "preview.png"));
   assert.ok(!preview.isError, "Packaged CLI preview failed");
   assert.deepEqual(preview.structuredContent, {
@@ -776,8 +780,11 @@ verification: try {
   await fixed(WORKSPACE_INSTALL_SCRIPT, workspaceInstallInput(payload));
   await fixed(WORKSPACE_START_SCRIPT);
   assert.equal(JSON.parse(await fixed(WORKSPACE_HEALTH_SCRIPT)).releaseIdentity, payload.release);
-  assert.equal((await cli("output", id, "stdout")).toString(), "owned-runtime");
-  assert.deepEqual(await cli("read", "binary.dat"), bytes);
+  assert.equal(
+    JSON.parse(await cli("output", failedProcess, "--stream", "stdout")).structuredContent.text,
+    "owned-runtime",
+  );
+  assert.deepEqual(await publicationBytes(), bytes);
   await assert.rejects(cli("read", "../outside"));
   const previousGhOwner = JSON.parse(await fixed(WORKSPACE_HEALTH_SCRIPT));
   await docker(["exec", container, node, `${program}/service/daemon.mjs`, "--stop"]);
@@ -792,21 +799,29 @@ verification: try {
     ]),
   );
   assert.deepEqual(stoppedOwner, { actorAbsent: true, competingStatus: 0 });
-  // This fixture changes provider mode. Retire only the rewrite its verified GH
-  // configuration installed, retaining the repository's original declaration.
+  // A distinct disposable Local home/repository keeps the GitHub selector,
+  // configuration and original journals intact; provider identity is never relabelled.
+  activeHome = "/home/agent/local-owner";
   await docker([
     "exec",
     container,
     node,
     "-e",
-    "const fs=require('node:fs');const assert=require('node:assert/strict');const {execFileSync}=require('node:child_process');const c=JSON.parse(fs.readFileSync('/home/agent/.local/share/moira-workspace/config.json'));assert.equal(c.github.canonicalOrigin,'https://github.com/owner/project.git');const git=(...args)=>execFileSync('/usr/bin/git',['-C','/workspaces/project',...args],{encoding:'utf8'}).trim();assert.equal(git('remote','get-url','origin'),c.github.brokerOrigin);assert.equal(git('remote','get-url','--push','origin'),c.github.brokerOrigin);git('config','--local','--unset-all','url.'+c.github.brokerOrigin+'.insteadOf');assert.equal(git('remote','get-url','origin'),c.github.canonicalOrigin);",
+    "const fs=require('node:fs');const {execFileSync}=require('node:child_process');fs.mkdirSync('/home/agent/local-owner',{mode:448});fs.mkdirSync('/workspaces/local-project',{mode:448});execFileSync('/usr/bin/git',['init','/workspaces/local-project']);execFileSync('/usr/bin/git',['-C','/workspaces/local-project','remote','add','origin','https://github.com/owner/local-project.git']);fs.copyFileSync('/tmp/binary','/workspaces/local-project/binary.dat');",
   ]);
+  await fixed(WORKSPACE_INSTALL_SCRIPT, workspaceInstallInput(payload));
   const localOnly = {
     version: 1,
     mode: "local-only",
-    repositoryFullName: "owner/project",
-    root: "/workspaces/project",
-    expectedOrigin: "https://github.com/owner/project.git",
+    ownerSelector: {
+      kind: "local",
+      deviceId: randomUUID(),
+      spaceId: randomUUID(),
+      operationMarker: "moira-" + "a".repeat(24),
+    },
+    repositoryFullName: "owner/local-project",
+    root: "/workspaces/local-project",
+    expectedOrigin: "https://github.com/owner/local-project.git",
     environmentIdentity: measured.environmentIdentity,
   };
   // Explicit owner-only mode still requires the installed Local proxy and the
@@ -817,7 +832,7 @@ verification: try {
     container,
     node,
     "-e",
-    "const fs=require('node:fs');const path='/home/agent/.local/share/moira-local';fs.mkdirSync(path,{recursive:true,mode:448});fs.writeFileSync(path+'/environment.json',JSON.stringify({HTTPS_PROXY:'http://fixture:owner-proxy@127.0.0.1:3437'}),{mode:384})",
+    "const fs=require('node:fs');const path='/home/agent/local-owner/.local/share/moira-local';fs.mkdirSync(path,{recursive:true,mode:448});fs.writeFileSync(path+'/environment.json',JSON.stringify({HTTPS_PROXY:'http://fixture:owner-proxy@127.0.0.1:3437'}),{mode:384})",
   ]);
   await assert.rejects(
     fixed(
@@ -831,52 +846,41 @@ verification: try {
     container,
     node,
     "-e",
-    "const assert=require('node:assert/strict');const config=JSON.parse(require('node:fs').readFileSync('/home/agent/.local/share/moira-workspace/config.json'));assert.equal(Object.hasOwn(config,'remote'),false);assert.equal(new URL(config.proxy).port,'3437');assert.match(config.environmentIdentity,/^[a-f0-9]{64}$/)",
+    "const assert=require('node:assert/strict');const config=JSON.parse(require('node:fs').readFileSync('/home/agent/local-owner/.local/share/moira-workspace/config.json'));assert.equal(Object.hasOwn(config,'remote'),false);assert.equal(new URL(config.proxy).port,'3437');assert.match(config.environmentIdentity,/^[a-f0-9]{64}$/)",
   ]);
   const localReady = JSON.parse(await fixed(WORKSPACE_START_SCRIPT));
   assert.equal(localReady.environmentIdentity, measured.environmentIdentity);
   assert.equal(localReady.releaseIdentity, payload.release);
-  assert.equal((await cli("output", id, "stdout")).toString(), "owned-runtime");
-  assert.deepEqual(await cli("read", "binary.dat"), bytes);
-  const localId = createWorkspaceRequestId();
-  assert.equal(
-    (
-      await cli(
-        "exec",
-        "--request-id",
-        localId,
-        "--",
-        node,
-        "-e",
-        "const target=new URL(process.env.HTTPS_PROXY);if(target.hostname!=='127.0.0.1'||target.port!=='3437')process.exit(37);process.stdout.write('local-owner-ready')",
-      )
-    )
-      .toString()
-      .split("\n")[0],
-    localId,
-  );
-  do {
-    status = JSON.parse(await cli("status", localId));
-  } while (["running", "starting"].includes(status.state));
-  assert.equal(status.state, "succeeded");
-  assert.equal((await cli("output", localId, "stdout")).toString(), "local-owner-ready");
-  const heldId = createWorkspaceRequestId();
-  await cli(
-    "exec",
-    "--request-id",
-    heldId,
-    "--",
-    node,
-    "-e",
-    "const fs=require('node:fs');fs.appendFileSync('setup-continuity','once\\n');fs.writeFileSync('setup-job-ready','ready');const timer=setInterval(()=>{if(fs.existsSync('setup-job-release')){clearInterval(timer);process.stdout.write('continued-after-enrollment')}},10)",
-  );
+  await assert.rejects(cli("output", failedProcess, "--stream", "stdout"));
+  const localResult = JSON.parse(
+    await cli(
+      "exec",
+      "--",
+      node,
+      "-e",
+      "const target=new URL(process.env.HTTPS_PROXY);if(target.hostname!=='127.0.0.1'||target.port!=='3437')process.exit(37);process.stdout.write('local-owner-ready')",
+    ),
+  ).structuredContent;
+  assert.equal(localResult.state, "completed");
+  assert.equal(localResult.outcome.ok, true);
+  assert.equal(localResult.stdout, "local-owner-ready");
+  const held = JSON.parse(
+    await cli(
+      "exec",
+      "--background",
+      "--",
+      node,
+      "-e",
+      "const fs=require('node:fs');fs.appendFileSync('setup-continuity','once\\n');fs.writeFileSync('setup-job-ready','ready');const timer=setInterval(()=>{if(fs.existsSync('setup-job-release')){clearInterval(timer);process.stdout.write('continued-after-enrollment')}},10)",
+    ),
+  ).structuredContent;
   await docker([
     "exec",
     container,
     node,
     "--input-type=module",
     "-e",
-    "import {watch,existsSync} from 'node:fs';await new Promise(done=>{const observe=()=>{if(existsSync('/workspaces/project/setup-job-ready')){watcher.close();done()}};const watcher=watch('/workspaces/project',observe);observe()});",
+    "import {watch,existsSync} from 'node:fs';await new Promise(done=>{const observe=()=>{if(existsSync('/workspaces/local-project/setup-job-ready')){watcher.close();done()}};const watcher=watch('/workspaces/local-project',observe);observe()});",
   ]);
   // A real fixed Local CONNECT gateway inside this disposable container lets
   // the shipped daemon enroll after starting local-only. No host port is opened.
@@ -933,12 +937,10 @@ verification: try {
     container,
     node,
     "-e",
-    "const https=require('node:https');const fs=require('node:fs');const c=JSON.parse(fs.readFileSync('/home/agent/.local/share/moira-workspace/config.json'));https.get(new URL('/fixture/connected',c.remote.origin),{ca:fs.readFileSync('/tmp/owner-ca.pem')},r=>r.pipe(process.stdout)).once('error',()=>process.exit(1));",
+    "const https=require('node:https');const fs=require('node:fs');const c=JSON.parse(fs.readFileSync('/home/agent/local-owner/.local/share/moira-workspace/config.json'));https.get(new URL('/fixture/connected',c.remote.origin),{ca:fs.readFileSync('/tmp/owner-ca.pem')},r=>r.pipe(process.stdout)).once('error',()=>process.exit(1));",
   ]);
   assert.equal(JSON.parse(await fixed(WORKSPACE_HEALTH_SCRIPT)).remote.state, "connected");
-  const enrolledPublication = JSON.parse(
-    await cli("publish", "binary.dat", "binary.dat", "application/octet-stream"),
-  );
+  const enrolledPublication = JSON.parse(await cli("download", "binary.dat"));
   assert.ok(!enrolledPublication.isError, "Live enrollment did not enable owner publication");
   assert.equal(
     enrolledPublication.structuredContent.file.sha256,
@@ -949,15 +951,34 @@ verification: try {
     container,
     node,
     "-e",
-    "require('node:fs').writeFileSync('/workspaces/project/setup-job-release','release')",
+    "require('node:fs').writeFileSync('/workspaces/local-project/setup-job-release','release')",
   ]);
+  let status;
   do {
-    status = JSON.parse(await cli("status", heldId));
-  } while (["starting", "running"].includes(status.state));
-  assert.equal(status.state, "succeeded");
-  assert.equal((await cli("output", heldId, "stdout")).toString(), "continued-after-enrollment");
-  assert.equal((await cli("read", "setup-continuity")).toString(), "once\n");
-  await docker(["exec", container, node, `${program}/service/daemon.mjs`, "--stop"]);
+    status = JSON.parse(await cli("get", held.operation)).structuredContent;
+  } while (status.state === "pending");
+  assert.equal(status.state, "completed");
+  assert.equal(status.outcome.ok, true);
+  assert.equal(
+    JSON.parse(await cli("output", held.process, "--stream", "stdout")).structuredContent.text,
+    "continued-after-enrollment",
+  );
+  assert.equal(JSON.parse(await cli("read", "setup-continuity")).structuredContent.text, "once\n");
+  assert.deepEqual(
+    await publicationBytes(
+      enrolledPublication.structuredContent.file.reference_id.split("/").at(-1),
+    ),
+    bytes,
+  );
+  await docker([
+    "exec",
+    "--env",
+    `HOME=${activeHome}`,
+    container,
+    node,
+    `${program}/service/daemon.mjs`,
+    "--stop",
+  ]);
   await assert.rejects(fixed(WORKSPACE_HEALTH_SCRIPT));
   console.log(
     "Verified pinned Linux payload, exclusive directory publication preserving occupied targets and refusing replaced stages, invalid bootstrap refusal, single-owner locking, Unix command readiness before cloud authority registration and automatic reconnect, Local-only configuration and later live enrollment/publication through a confined gateway with unchanged owner PID/life and one continuing command, exact exit/output and binary files, immutable publication reads, packaged UTF-8 materialize tar, custom binary extension delivery and original-receipt collection, and exact PNG preview. Real GitHub provisioning, vendor delivery and native source networking were not exercised.",

@@ -4,7 +4,7 @@ import cors from "cors";
 import request from "supertest";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { readAuthenticatedMcpRequest } from "../../../packages/mcp-server/src/authenticated-request.js";
-import { communicationSchema } from "../../../packages/mcp-server/src/tools/tool-schemas.js";
+import { WORKSPACE_TOOL_SCHEMAS } from "../../../packages/mcp-server/src/tools/workspace-tool-contract.js";
 import { mcpLimiter } from "../../../packages/mcp-server/src/middleware/rate-limit-middleware.js";
 
 function fixture(revokeAfterAdmission = false) {
@@ -60,9 +60,11 @@ describe("authenticated incremental MCP controls", () => {
       jsonrpc: "2.0",
       id: 1,
       method: "tools/call",
-      params: { name: "communication", arguments: { action: "send", message: text } },
+      params: { name: "communication_send", arguments: { message: text } },
     };
-    expect(communicationSchema.parse(input.params.arguments).message).toBe(text);
+    expect(WORKSPACE_TOOL_SCHEMAS.communication_send.parse(input.params.arguments).message).toBe(
+      text,
+    );
     const response = await request(app)
       .post("/mcp")
       .set(headers)

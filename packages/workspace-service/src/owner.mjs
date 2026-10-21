@@ -23,6 +23,7 @@ import {
 } from "../../shared/src/codespaces/workspace-request-id.ts";
 import { validateOwnerPullRequestInput } from "./github-owner.mjs";
 import { readPrivateOwnerJson as optionalJson } from "./private-json.mjs";
+import { createSemanticOwner } from "./semantic-owner.mjs";
 
 const DEFAULT_SEARCH_RESPONSE_BYTES = 1024 * 1024;
 
@@ -54,6 +55,7 @@ export async function createWorkspaceOwner({
   sourceProxy,
   sourceOpener = openNativeFile,
   publicationScope,
+  ownerSelector,
   pullRequest,
   collectCredentialRequest,
   communicationTransport,
@@ -211,7 +213,7 @@ export async function createWorkspaceOwner({
     })();
   const operation = async (requestId) => {
     id(requestId);
-    const directory = await requestDirectory(requestId);
+    const directory = join(requestsRoot, requestId);
     const accepted = await optionalJson(join(directory, "accepted.json"));
     if (!accepted) return { requestId, state: "absent" };
     if (accepted.kind === "security-acquisition") {
@@ -345,7 +347,7 @@ export async function createWorkspaceOwner({
       throw error;
     }
   };
-  const commitWrite = (requestId, directory, path, expected, staged, source) =>
+  const commitWrite = (requestId, directory, path, expected, staged, source, intent) =>
     journalOutcome(directory, async () => {
       await engine.writeDurableJson(directory, "accepted.json", {
         kind: source ? "native-upload" : "write",
@@ -354,6 +356,10 @@ export async function createWorkspaceOwner({
         size: staged.size,
         sha256: staged.sha256,
         environmentIdentity: life,
+        intent: {
+          ...(intent ?? { kind: "file-change", description: `Write ${path}` }),
+          createdAt: Date.now(),
+        },
         ...(source ? { source, digest: digest({ path, expected, source }) } : {}),
       });
       await engine.withFileCommitLock(async () => {
@@ -374,7 +380,7 @@ export async function createWorkspaceOwner({
     });
   let publications, communication;
   const pullRequestAction = async (body) => {
-    if (Object.keys(body).some((key) => !["action", "input", "requestId"].includes(key)))
+    if (Object.keys(body).some((key) => !["action", "input", "requestId", "intent"].includes(key)))
       refuse("INVALID_PULL_REQUEST_INPUT");
     if (typeof pullRequest !== "function") refuse("CODESPACE_PROVIDER_UNAVAILABLE", 503);
     if (body.action !== "pull_request_create") {
@@ -401,6 +407,10 @@ export async function createWorkspaceOwner({
           kind: "pull-request",
           digest: identity,
           environmentIdentity: life,
+          intent: {
+            ...(body.intent ?? { kind: "pull-request", description: "Create pull request" }),
+            createdAt: Date.now(),
+          },
         });
         let receipt;
         try {
@@ -446,7 +456,15 @@ export async function createWorkspaceOwner({
       );
       return journalOutcome(directory, async () => {
         try {
-          return await commitWrite(requestId, directory, body.path, body.expected, staged, source);
+          return await commitWrite(
+            requestId,
+            directory,
+            body.path,
+            body.expected,
+            staged,
+            source,
+            body.intent,
+          );
         } finally {
           await engine.cleanupStaged([staged]);
         }
@@ -540,6 +558,10 @@ export async function createWorkspaceOwner({
                 kind: "exec",
                 digest: digest(canonical),
                 environmentIdentity: life,
+                intent: {
+                  ...(body.intent ?? { kind: "command", description: "Command" }),
+                  createdAt: Date.now(),
+                },
                 ...(native ? { source: native } : {}),
               });
               await engine.writeDurableJson(directory, "result.json", {
@@ -562,6 +584,10 @@ export async function createWorkspaceOwner({
                 kind: "exec",
                 digest: digest(canonical),
                 environmentIdentity: life,
+                intent: {
+                  ...(body.intent ?? { kind: "command", description: "Command" }),
+                  createdAt: Date.now(),
+                },
                 ...(native ? { source: native } : {}),
               });
             if (await optionalJson(join(directory, "result.json"))) return operation(requestId);
@@ -592,7 +618,7 @@ export async function createWorkspaceOwner({
     });
     return result;
   };
-  const write = async ({ requestId, path, expected, source, expectedSize = null }) => {
+  const write = async ({ requestId, path, expected, source, expectedSize = null, intent }) => {
     id(requestId);
     const result = await inLane(requestId, async () => {
       const directory = await requestDirectory(requestId);
@@ -620,7 +646,7 @@ export async function createWorkspaceOwner({
         try {
           if (expectedSize !== null && staged.size !== expectedSize)
             refuse("CONTENT_SIZE_MISMATCH", 409);
-          return await commitWrite(requestId, directory, path, expected, staged);
+          return await commitWrite(requestId, directory, path, expected, staged, undefined, intent);
         } finally {
           await engine.cleanupStaged([staged]);
         }
@@ -643,6 +669,10 @@ export async function createWorkspaceOwner({
           kind: "patch",
           digest: digest(body),
           environmentIdentity: life,
+          intent: {
+            ...(body.intent ?? { kind: "file-change", description: "Patch files" }),
+            createdAt: Date.now(),
+          },
         });
         let result;
         try {
@@ -771,7 +801,7 @@ export async function createWorkspaceOwner({
     deliverExtension,
     extensionArtifact: communicationTransport?.artifact,
     handlerHost: join(ownerRuntimeDirectory, "extension-handler-host.mjs"),
-    admit: (requestId, inputDigest, work) =>
+    admit: (requestId, inputDigest, work, descriptor) =>
       inLane(requestId, async () => {
         const directory = await requestDirectory(requestId),
           accepted = await optionalJson(join(directory, "accepted.json"));
@@ -785,6 +815,7 @@ export async function createWorkspaceOwner({
           kind: "communication",
           digest: inputDigest,
           environmentIdentity: life,
+          intent: descriptor,
         });
         return journalOutcome(directory, work);
       }),
@@ -796,7 +827,29 @@ export async function createWorkspaceOwner({
       transport: configuration.communicationTransport,
       extensionArtifact: configuration.communicationTransport?.artifact,
     });
+    publicationScope = configuration.publicationScope;
   };
+  const semantic = createSemanticOwner({
+    owner,
+    engine,
+    binding,
+    ownerSelector,
+    requestsRoot,
+    publicationScope: () => publicationScope,
+    readAccepted: (requestId) => optionalJson(join(requestsRoot, id(requestId), "accepted.json")),
+    readInput: (requestId) => optionalJson(join(requestsRoot, id(requestId), "input.json")),
+    readResult: (requestId, accepted) =>
+      optionalJson(
+        accepted.kind === "exec"
+          ? join(engine.operationDirectory(marker(requestId)), "result.json")
+          : accepted.kind === "communication"
+            ? join(stateRoot, "communication", `${requestId}.json`)
+            : join(requestsRoot, id(requestId), "result.json"),
+      ),
+    listRequests: () => readdir(requestsRoot),
+  });
+  owner.semantic = semantic.execute;
+  owner.operation_find = semantic.find;
   // Only the new service's private namespace owns these transactions. An interrupted
   // commit is rolled back from retained inode proof; it is never replayed as a request.
   for (const entry of await readdir(requestsRoot)) {

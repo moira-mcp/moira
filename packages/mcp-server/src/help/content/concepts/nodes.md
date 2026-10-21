@@ -528,9 +528,10 @@ policy; text delivery cannot silently stand in for its success. For optional
 still attempts the ordinary text notification independently. Text, waiting reminders and
 trusted lock PIN delivery do not require a file owner.
 
-The result exposes `attachmentStatus`, `communicationRequestId` and the observed owner identity
-when available. Preserve them to collect an uncertain delivery through `communication` action
-`operation`; do not rerun a workflow visit to resend it. A new visit is a distinct intent.
+The result exposes `attachmentStatus` and, when the original owner is known, an `operation`
+reference. Pass that reference unchanged to `operation_get` to inspect an uncertain delivery.
+If the first reply was lost, use `operation_find` to discover original candidates and choose
+explicitly. Do not rerun a workflow visit to resend it: a new visit is a distinct intent.
 Collection cannot send again, and current execution and task-name bindings are rechecked
 before vendor delivery.
 

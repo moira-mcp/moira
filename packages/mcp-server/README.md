@@ -54,14 +54,17 @@ Inspector automatically handles OAuth flow via Dynamic Client Registration.
 - `settings` - User settings management (action: get|set|list)
 - `session` - Session information (action: user|executions|execution_context|current_step)
 - `token` - Generate upload/download tokens (action: upload|download)
-- `codespace` - Resource lifecycle, commands and repository files
-- `codespace_process` - Guest process start, status, output and cancellation
+- Purpose-specific workspace, command, file, process, repository and communication tools; the
+  typed catalog supplies their strict input schemas and examples.
 
-Commands and file mutations use `ws1-<lowercase UUID>` request identities. Their
+Commands return original operation/process references; file mutations return operation references. Their
 receipts and output remain in the common guest workspace service; MCP routes live
 authorized calls rather than storing an offline command queue. The direct guest
-`moira-workspace` CLI uses the same service. Repository admission retains its
-separate UUID request contract. See the canonical Self-Hosting help for setup.
+`moira-workspace` CLI uses the same service and semantic contracts. Copy returned references
+unchanged; collect originals with `operation_get` or discover candidates with `operation_find`
+without resubmitting. `operation_resume` explicitly continues only an original private-repository
+creation. A lost first reply has no automatic deduplication guarantee. See the canonical
+Self-Hosting help for setup.
 
 ## Usage
 

@@ -8,6 +8,9 @@ import { z } from "zod";
 import {
   controllerIdentitySchema,
   controllerRequestIdSchema,
+  controllerOperationFindSchema,
+  controllerOperationFindResultSchema,
+  controllerWorkspaceResolveSchema,
   controllerLifecycleSchema,
   controllerSettingsSchema,
   controllerRepositorySchema,
@@ -34,7 +37,10 @@ import { provisionGitHubWorkspace, githubProvisioningReadiness } from "./github-
 import { scopedCredentialFailureOutcome } from "../../shared/src/codespaces/scoped-credential-types.js";
 import { localConnectionSchema, relayOrigin } from "./relay.js";
 import { createOwnerPublications } from "../../workspace-service/src/publications.mjs";
-import { createOwnerCommunication } from "../../workspace-service/src/owner-communication.mjs";
+import {
+  createOwnerCommunication,
+  findOwnerCommunication,
+} from "../../workspace-service/src/owner-communication.mjs";
 import { createOwnerCommunicationTransport } from "../../workspace-service/src/communication-transport.mjs";
 import {
   readOwnerFrame,
@@ -273,6 +279,93 @@ export class LocalController {
       },
       observedAt: Date.now(),
     };
+  }
+
+  /** A receipt address resolves through retained ownership, without native observation. */
+  async resolveWorkspace(input: unknown) {
+    this.requireAdmission();
+    const selector = controllerWorkspaceResolveSchema.parse(input);
+    if (selector.deviceId !== this.identity.deviceId)
+      throw new LocalRefusal(
+        "LOCAL_UNAUTHORIZED",
+        "Workspace belongs to another selected controller.",
+      );
+    const assigned =
+      "resourceId" in selector
+        ? await this.state.binding(selector.resourceId, this.identity)
+        : undefined;
+    const spaceId = "spaceId" in selector ? selector.spaceId : assigned?.localSpaceId;
+    const space = spaceId ? await this.manager.records.get(spaceId) : null;
+    if (
+      !space ||
+      ("operationMarker" in selector && space.operationMarker !== selector.operationMarker)
+    )
+      throw new LocalRefusal(
+        "LOCAL_IDENTITY_CHANGED",
+        "The retained workspace selector does not match.",
+      );
+    const binding = assigned ?? (await this.state.forSpace(space, this.identity));
+    if (
+      binding.localSpaceId !== space.id ||
+      binding.operationMarker !== space.operationMarker ||
+      binding.repositoryId !== space.repositoryId
+    )
+      throw new LocalRefusal(
+        "LOCAL_IDENTITY_CHANGED",
+        "The current controller binding does not match its original space.",
+      );
+    return {
+      resourceId: binding.resourceId,
+      resourceGeneration: binding.resourceGeneration,
+      routeGeneration: binding.routeGeneration ?? binding.resourceGeneration,
+      repositoryId: binding.repositoryId,
+      localSpaceId: binding.localSpaceId,
+      localGeneration: binding.localGeneration,
+      operationMarker: binding.operationMarker,
+    };
+  }
+
+  async findOperations(input: unknown) {
+    this.requireAdmission();
+    const selection = controllerOperationFindSchema.parse(input);
+    const [controller, communication] = await Promise.all([
+      this.state.find(this.identity, selection),
+      findOwnerCommunication(
+        {
+          stateRoot: join(this.manager.records.state.root, "controller-files"),
+          scope: { kind: "controller", ...this.identity },
+        },
+        selection,
+      ),
+    ]);
+    const operations = new Map(
+      controller.operations.map((operation) => [operation.requestId, operation]),
+    );
+    for (const operation of communication.operations) {
+      operations.set(operation.requestId, {
+        requestId: operation.requestId,
+        state: operation.state as "completed" | "unconfirmed",
+        kind: operation.kind,
+        ...(operation.createdAt === undefined
+          ? {}
+          : {
+              descriptor: {
+                kind: operation.kind,
+                description: operation.description,
+                createdAt: operation.createdAt,
+              },
+            }),
+      });
+    }
+    const ordered = [...operations.values()].sort((a, b) => a.requestId.localeCompare(b.requestId));
+    const page = ordered.slice(0, 50);
+    return controllerOperationFindResultSchema.parse({
+      operations: page,
+      ...(page.length &&
+      (ordered.length > page.length || controller.nextCursor || communication.nextCursor)
+        ? { nextCursor: page[page.length - 1].requestId }
+        : {}),
+    });
   }
   /** Explicit physical shutdown retires provisioning; remote observation loss does not. */
   async stopProvisioning(): Promise<void> {
@@ -1586,6 +1679,10 @@ export async function startLocalController(controller: LocalController) {
         const githubResource = /^\/v1\/controller\/github\/resources\/([a-f0-9-]{36})$/.exec(path);
         if (request.method === "POST" && path === "/v1/communication") {
           result = await (await controller.communication()).delivery.submit(body);
+        } else if (request.method === "POST" && path === "/v1/controller/workspaces/resolve") {
+          result = await controller.resolveWorkspace(body);
+        } else if (request.method === "POST" && path === "/v1/controller/operations/find") {
+          result = await controller.findOperations(body);
         } else if (request.method === "PUT" && path === "/v1/controller/settings") {
           dispatched = true;
           result = await controller.settings(body);

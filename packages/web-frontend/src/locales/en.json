@@ -832,7 +832,7 @@
       },
       "codespaces": {
         "title": "GitHub Codespaces",
-        "description": "Persistent Codespaces created by Moira for approved repositories. Agents work in them through the MCP codespace tools by codespace ID; the same codespace can be reused from any connected client.",
+        "description": "Persistent Codespaces created by Moira for approved repositories. Agents work in them through purpose-specific MCP tools using returned workspace references; the same codespace can be reused from any connected client.",
         "loadFailed": "Failed to load cloud codespaces",
         "loadFailedDescription": "Your other settings are still available. Retry this request.",
         "retry": "Retry",
@@ -869,7 +869,6 @@
         "list": "Your codespaces",
         "empty": "No codespaces yet.",
         "providerLine": "GitHub Codespaces · personal billing · {{machine}}",
-        "detailLine": "Desired {{desired}}, observed {{observed}} · generation {{generation}}",
         "states": {
           "create_pending": "Creating",
           "create_submitted": "Creating",
@@ -1270,7 +1269,7 @@
           "title": "Codespaces",
           "description": "Connect GitHub for cloud codespaces or your computer for locally approved repositories and sandboxes.",
           "helpTitle": "What agents can do in a codespace",
-          "helpBody": "A codespace is a cloud development machine for one of your repositories. Agents run commands and edit files in it through Moira's codespace tool; they never receive your GitHub credentials.",
+          "helpBody": "A codespace is a cloud development machine for one of your repositories. Agents run commands and edit files through Moira's purpose-specific MCP tools using returned workspace references; they never receive your GitHub credentials.",
           "helpAuthority": "Inside a codespace an agent has the same access as the codespace user: the repository, the network and any secrets configured for that codespace. Grant only repositories you are comfortable with."
         },
         "apps": {
@@ -3748,7 +3747,7 @@
         },
         "codespaces": {
           "title": "Create a codespace",
-          "body": "Open the GitHub Codespaces tab and pick a repository and branch to create a personally billed codespace. Agents find it by ID. Stop keeps its files; Delete removes them. Refresh checks GitHub for changes made outside Moira. Local codespaces are listed under their computer in Local computers."
+          "body": "Open the GitHub Codespaces tab and pick a repository and branch to create a personally billed codespace. Agents discover it with workspace_list and use its returned workspace reference. Stop keeps its files; Delete removes them. Refresh checks GitHub for changes made outside Moira. Local codespaces are listed under their computer in Local computers."
         },
         "limits": {
           "title": "Know your limits",

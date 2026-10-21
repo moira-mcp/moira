@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdir, lstat, realpath } from "node:fs/promises";
+import { mkdir, lstat, realpath, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { Buffer } from "node:buffer";
 import process from "node:process";
@@ -15,6 +15,7 @@ import { WORKSPACE_REQUEST_ID_PATTERN } from "../../shared/src/codespaces/worksp
 import { writeDurableJson, persistDirectory } from "./file-primitives.mjs";
 import { readPrivateOwnerJson } from "./private-json.mjs";
 import { nativeFileBytes, nativeFileIdentity } from "./native-source.mjs";
+import { operationState } from "../../shared/src/codespaces/workspace-operation-state.mjs";
 
 function refused(code, status = 409) {
   return Object.assign(new Error(code), { publicCode: code, status });
@@ -23,6 +24,18 @@ function hash(value) {
   return createHash("sha256")
     .update(typeof value === "string" ? value : canonicalJson(value))
     .digest("hex");
+}
+function deliveryDescription(input, file) {
+  const name = file.fileName;
+  const safeName =
+    typeof name === "string" &&
+    name.length <= 255 &&
+    !/[\\/]/.test(name) &&
+    [...name].every((character) => character.charCodeAt(0) >= 32 && character.charCodeAt(0) !== 127)
+      ? name
+      : undefined;
+  const label = input.action === "publish" ? "Publish file" : `Deliver ${input.kind}`;
+  return safeName ? `${label} ${safeName}` : label;
 }
 function immutableInput(input) {
   const source =
@@ -35,6 +48,63 @@ function immutableInput(input) {
         ? { ...input.source, data: undefined, dataDigest: hash(input.source.data) }
         : input.source;
   return { ...input, source };
+}
+
+/** Read retained admission metadata without creating an owner, collecting or contacting a vendor. */
+export async function findOwnerCommunication({ stateRoot, scope }, selection = {}) {
+  const root = join(stateRoot, "communication");
+  const info = await lstat(root).catch((error) => {
+    if (error.code === "ENOENT") return null;
+    throw error;
+  });
+  if (!info) return { operations: [] };
+  if (
+    !info.isDirectory() ||
+    info.isSymbolicLink() ||
+    info.uid !== process.getuid?.() ||
+    (info.mode & 0o077) !== 0 ||
+    (await realpath(root)) !== root
+  )
+    throw refused("UNSAFE_COMMUNICATION_STATE");
+  if (selection.cursor !== undefined && !WORKSPACE_REQUEST_ID_PATTERN.test(selection.cursor))
+    throw refused("INVALID_OPERATION_CURSOR", 400);
+  const entries = (await readdir(root))
+    .filter(
+      (name) => name.endsWith(".json") && WORKSPACE_REQUEST_ID_PATTERN.test(name.slice(0, -5)),
+    )
+    .sort();
+  const operations = [];
+  let last;
+  for (const name of entries) {
+    const requestId = name.slice(0, -5);
+    if (selection.cursor && requestId <= selection.cursor) continue;
+    const record = await readPrivateOwnerJson(join(root, name));
+    if (!record || record.version !== 1 || record.requestId !== requestId)
+      throw refused("UNSAFE_COMMUNICATION_STATE");
+    const same =
+      record.scope?.kind === scope?.kind &&
+      (scope?.kind === "workspace"
+        ? record.scope.resourceId === scope.resourceId
+        : canonicalJson(record.scope) === canonicalJson(scope));
+    if (!same) continue;
+    last = requestId;
+    const description = record.descriptor?.description ?? "Original owner delivery";
+    if (selection.kind && selection.kind !== "delivery") continue;
+    if (selection.query && !description.toLowerCase().includes(selection.query.toLowerCase()))
+      continue;
+    operations.push({
+      requestId,
+      kind: "delivery",
+      description,
+      ...(record.descriptor?.createdAt ? { createdAt: record.descriptor.createdAt } : {}),
+      state: operationState(record),
+    });
+    if (operations.length === 50) break;
+  }
+  return {
+    operations,
+    ...(last && entries.some((name) => name.slice(0, -5) > last) ? { nextCursor: last } : {}),
+  };
 }
 
 /** One immutable source and durable delivery journal, shared by workspace and controller owners. */
@@ -87,21 +157,23 @@ export async function createOwnerCommunication({
   const active = new Map();
   const shutdown = new globalThis.AbortController();
   let closing = false;
-  const read = async (requestId) => {
+  const read = async (requestId, history = false) => {
     if (!WORKSPACE_REQUEST_ID_PATTERN.test(requestId ?? ""))
       throw refused("INVALID_REQUEST_ID", 400);
     const record = await readPrivateOwnerJson(join(root, requestId + ".json"));
     if (
       record &&
       (record.requestId !== requestId ||
-        !samePrincipal(record.scope, scope) ||
+        !(history && scope?.kind === "workspace" && record.scope?.kind === "workspace"
+          ? record.scope.resourceId === scope.resourceId
+          : samePrincipal(record.scope, scope)) ||
         record.version !== 1)
     )
       throw refused("COMMUNICATION_SCOPE_REFUSED", 403);
     return record;
   };
   const inspect = async (requestId) => {
-    const record = await read(requestId);
+    const record = await read(requestId, true);
     if (!record) return { requestId, state: "absent" };
     return {
       requestId,
@@ -242,6 +314,11 @@ export async function createOwnerCommunication({
         scope: selectedScope,
         requestId: input.requestId,
         inputDigest,
+        descriptor: {
+          kind: "delivery",
+          description: deliveryDescription(input, file),
+          createdAt: Date.now(),
+        },
         file,
         stages: [],
       };
@@ -441,7 +518,9 @@ export async function createOwnerCommunication({
         return inspect(input.requestId);
       };
       return admit
-        ? communicationOwnerReceiptSchema.parse(await admit(input.requestId, inputDigest, perform))
+        ? communicationOwnerReceiptSchema.parse(
+            await admit(input.requestId, inputDigest, perform, record.descriptor),
+          )
         : perform();
     })();
     active.set(input.requestId, { inputDigest, work });
@@ -455,6 +534,7 @@ export async function createOwnerCommunication({
     configure,
     submit,
     inspect,
+    find: (selection) => findOwnerCommunication({ stateRoot, scope }, selection),
     async close() {
       closing = true;
       shutdown.abort();

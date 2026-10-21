@@ -89,6 +89,13 @@
     "unavailableIdentity": "This environment is registered, but its current state cannot be confirmed. Refresh its state before managing it.",
     "needsAttention": "{{state}} · Needs attention",
     "requestAccepted": "Request accepted. Completion has not been confirmed yet.",
+    "originalTitle": "Original operation result is not confirmed",
+    "findOriginalHint": "The first reply was lost. Find the original operation on the selected computer and choose it yourself. Searching does not submit the action again.",
+    "findOriginal": "Find original operation",
+    "collectOriginal": "Check original result",
+    "noOriginalMatch": "No matching original was found in this observation. This does not prove the action did not happen; another submission remains blocked.",
+    "selectOriginal": "Inspect: {{description}}",
+    "moreOriginals": "Show more original operations",
     "refPlaceholder": "Enter an existing branch, tag or commit",
     "errors": {
       "CODESPACE_PROVIDER_UNAVAILABLE": "The computer could not confirm the codespace state. Check its connection and try again.",

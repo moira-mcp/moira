@@ -15,6 +15,20 @@ export interface OwnerCommunicationTransport {
   ): Promise<unknown>;
 }
 export type OwnerCommunicationReceipt = CommunicationOwnerReceipt;
+export type OwnerCommunicationSelection = { cursor?: string; query?: string; kind?: string };
+export function findOwnerCommunication(
+  owner: { stateRoot: string; scope?: CommunicationOwnerScope },
+  selection?: OwnerCommunicationSelection,
+): Promise<{
+  operations: {
+    requestId: string;
+    kind: "delivery";
+    description: string;
+    createdAt?: number;
+    state: string;
+  }[];
+  nextCursor?: string;
+}>;
 export type MaterializeOwnedSource = AsyncIterable<Uint8Array> & {
   close(): Promise<void>;
   settled: Promise<void>;
@@ -50,6 +64,7 @@ export function createOwnerCommunication(
       requestId: string,
       inputDigest: string,
       work: () => Promise<OwnerCommunicationReceipt>,
+      descriptor: { kind: "delivery"; description: string; createdAt: number },
     ) => Promise<unknown>;
   },
 ): Promise<{
@@ -59,5 +74,6 @@ export function createOwnerCommunication(
     options?: { stream?: AsyncIterable<Uint8Array> },
   ): Promise<OwnerCommunicationReceipt>;
   inspect(requestId: string): Promise<OwnerCommunicationReceipt>;
+  find(selection?: OwnerCommunicationSelection): ReturnType<typeof findOwnerCommunication>;
   close(): Promise<void>;
 }>;

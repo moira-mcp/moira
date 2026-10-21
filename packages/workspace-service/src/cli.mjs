@@ -1,70 +1,84 @@
 import { createReadStream } from "node:fs";
+import { Buffer } from "node:buffer";
+import process from "node:process";
 import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
+import { Readable } from "node:stream";
+import { TextDecoder } from "node:util";
 import { fileURLToPath } from "node:url";
-import {
-  createWorkspaceRequestId,
-  workspaceRequestUuid,
-} from "../../shared/src/codespaces/workspace-request-id.ts";
-import { Buffer } from "node:buffer";
-import process from "node:process";
-import { workspaceRequest, workspaceJson as control } from "./client.mjs";
+import { createWorkspaceRequestId } from "../../shared/src/codespaces/workspace-request-id.mjs";
+import { workspaceRequest, workspaceJson } from "./client.mjs";
 import { workspaceFailure } from "./presentation.mjs";
-import { scopedCredentialFailureOutcome } from "../../shared/src/codespaces/scoped-credential-types.ts";
-import { WORKSPACE_REQUEST_ID_PATTERN } from "../../shared/src/codespaces/workspace-request-id.mjs";
+import { encodeOwnerFrame, OWNER_STREAM_CONTENT_TYPE } from "./stream-frame.mjs";
+import { decodeReference } from "../../shared/src/codespaces/workspace-references.mjs";
 export { workspaceRequest } from "./client.mjs";
 
-function httpFailure(status) {
-  const error = new Error("Workspace service rejected the request");
-  error.httpStatus = status;
-  return error;
+function invalid() {
+  throw Object.assign(new Error("CLI_REQUEST_INVALID"), { publicCode: "CLI_REQUEST_INVALID" });
 }
-
-/** Raw input/file requests still consume the same sanitized owner error projection. */
-async function ownerReply(response, requestId) {
-  try {
-    const chunks = [];
-    for await (const chunk of response) chunks.push(chunk);
-    const value = JSON.parse(Buffer.concat(chunks).toString("utf8"));
-    return response.statusCode >= 400
-      ? workspaceFailure({ httpStatus: response.statusCode, details: value }, requestId)
-      : value;
-  } catch (error) {
-    return workspaceFailure(error, requestId);
-  }
-}
-
-function invalidInput() {
-  return Object.assign(new Error("CLI input is invalid"), {
-    details: { error: { code: "CLI_REQUEST_INVALID" } },
-  });
-}
-
-function jsonInput(value) {
-  try {
-    return JSON.parse(value);
-  } catch {
-    throw invalidInput();
-  }
-}
-
-async function nativeDescriptor() {
+async function inputText(path) {
+  if (path !== "-") return new TextDecoder("utf8", { fatal: true }).decode(await readFile(path));
   const chunks = [];
   for await (const chunk of process.stdin) chunks.push(Buffer.from(chunk));
-  const descriptor = jsonInput(Buffer.concat(chunks).toString("utf8"));
-  if (!descriptor || typeof descriptor !== "object" || Array.isArray(descriptor))
-    throw invalidInput();
-  return descriptor;
+  return new TextDecoder("utf8", { fatal: true }).decode(Buffer.concat(chunks));
 }
-
-function observationBound(value) {
+async function nativeInput() {
+  try {
+    return JSON.parse(await inputText("-"));
+  } catch {
+    invalid();
+  }
+}
+function options(args, boolean = []) {
+  const positional = [],
+    flags = {};
+  let index = 0;
+  while (index < args.length) {
+    const value = args[index++];
+    if (value === "--") return { positional: positional.concat(args.slice(index)), flags };
+    if (!value.startsWith("--")) {
+      positional.push(value);
+      continue;
+    }
+    const key = value.slice(2);
+    if (boolean.includes(key)) flags[key] = true;
+    else {
+      if (index === args.length || args[index].startsWith("--")) invalid();
+      (flags[key] ??= []).push(args[index++]);
+    }
+  }
+  return { positional, flags };
+}
+function one(flags, name) {
+  const value = flags[name];
   if (value === undefined) return undefined;
-  const bound = Number(value);
-  if (!Number.isSafeInteger(bound) || bound < 1) throw invalidInput();
-  return bound;
+  if (!Array.isArray(value) || value.length !== 1) invalid();
+  return value[0];
 }
+function number(flags, name) {
+  const value = one(flags, name);
+  if (value === undefined) return undefined;
+  const result = Number(value);
+  if (!Number.isSafeInteger(result) || result < 1) invalid();
+  return result;
+}
+const present = (value) =>
+  Object.fromEntries(Object.entries(value).filter(([, item]) => item !== undefined));
+const effect = new Set([
+  "command_run",
+  "command_run_native",
+  "session_close",
+  "file_create",
+  "file_replace",
+  "file_patch",
+  "file_upload",
+  "pull_request_create",
+  "communication_deliver",
+  "communication_deliver_publication",
+]);
 
+/** Each invocation is fresh intent; uncertain calls are inspected/discovered, never auto-retried. */
 export async function runWorkspaceCli(
   args,
   {
@@ -73,256 +87,265 @@ export async function runWorkspaceCli(
     stdout = process.stdout,
   } = {},
 ) {
-  const [action, ...rest] = args;
-  if (!action || action === "--help") {
+  const [command, ...rest] = args;
+  if (!command || command === "--help") {
     stdout.write(
-      "moira-workspace action INPUT_JSON_FILE|-\nForward the complete owner {action, request} contract as JSON, including session/cwd/env/timeout, native descriptors and observation windows. Supply the original request_id or process_id for mutation and collection; signed native descriptors belong in the input file or stdin.\n",
+      "moira-workspace exec [--background] [--cwd PATH] [--session NAME --continue] [--env KEY=VALUE] [--timeout SECONDS] [--stdin|--native-stdin] -- COMMAND ARG...\n",
+    );
+    stdout.write("moira-workspace exec --script SOURCE|- [execution options]\n");
+    stdout.write(
+      "moira-workspace get REFERENCE | find [--kind KIND] [--query TEXT] [--cursor CURSOR]\nmoira-workspace output PROCESS [--stream stdout|stderr] [--cursor CURSOR] [--max-bytes N]\nmoira-workspace stop PROCESS | session-close NAME\n",
     );
     stdout.write(
-      "moira-workspace communication INPUT_JSON_FILE|-\nSubmit the owner communication JSON unchanged, with its original requestId. Collect it with status REQUEST_ID.\n",
+      "moira-workspace stat PATH | read PATH [--start-line N] [--max-lines N] [--max-bytes N] [--cursor CURSOR]\nmoira-workspace search PATH QUERY [--regex]\n",
     );
     stdout.write(
-      "moira-workspace pull-request-create [--request-id ws1-UUID] INPUT_JSON_FILE|-\nmoira-workspace pull-request-create --request-id ws1-UUID (collect original create only)\nmoira-workspace pull-request-get NUMBER\nmoira-workspace pull-request-find HEAD BASE\nPR creation retains its original owner receipt; after uncertainty collect that ID and find the same head/base before considering another create.\n",
+      "moira-workspace create PATH SOURCE|-\nmoira-workspace replace PATH SOURCE|- (--expected-text TEXT|--expected-file REFERENCE)\nmoira-workspace patch PATH... --old TEXT --new TEXT [--all] [--expected-file REFERENCE] (repeat pairs for one path, or one pair/reference per path)\n",
     );
     stdout.write(
-      "moira-workspace exec [--request-id ws1-UUID] [--stdin | --native-stdin] -- COMMAND [ARG...]\nmoira-workspace status|cancel REQUEST_ID\nmoira-workspace output REQUEST_ID [stdout|stderr]\nmoira-workspace stat|read|download PATH\nmoira-workspace write|upload [--request-id ws1-UUID] PATH SOURCE [EXPECTED_JSON]\nmoira-workspace native-upload [--request-id ws1-UUID] PATH [EXPECTED_JSON]\nmoira-workspace publish PATH FILE_NAME [MIME] [MAX_BYTES]\nmoira-workspace preview PATH [MAX_BYTES]\nmoira-workspace search PATH QUERY\nmoira-workspace patch JSON_FILE (optional requestId in JSON)\nNative modes read the native file descriptor JSON from stdin (file_id, download_url, optional file_name/mime_type/size_bytes); never pass its URL as an argument. Publish/preview return the same owner tool payload as MCP. After an unconfirmed mutation collect its original request ID; a confirmed refusal does not imply execution.\n",
+      "moira-workspace upload PATH SOURCE|- [--replace FILE_REFERENCE]\nmoira-workspace native-upload PATH [--replace FILE_REFERENCE] (native descriptor on stdin)\nmoira-workspace download PATH [--name NAME] [--mime MIME] [--max-bytes N]\nmoira-workspace preview PATH [--max-bytes N]\n",
+    );
+    stdout.write(
+      "moira-workspace pr-create HEAD BASE TITLE [--body SOURCE|-] [--draft]\nmoira-workspace pr-get NUMBER | pr-find HEAD BASE\nmoira-workspace deliver (--native|--publication REFERENCE) --kind image|document [--message TEXT] [--channel NAME]\n",
+    );
+    stdout.write(
+      "Copy returned operation/process/file references. After a lost reply use find/get; identical new commands are distinct intents. Native descriptor URLs belong on stdin, never argv. Raw control JSON and caller operation IDs are not CLI inputs.\n",
     );
     return;
   }
+  const { positional: p, flags: f } = options(rest, [
+    "background",
+    "continue",
+    "stdin",
+    "native-stdin",
+    "regex",
+    "all",
+    "draft",
+    "native",
+  ]);
+  const allowed = {
+    exec: [
+      "script",
+      "background",
+      "cwd",
+      "session",
+      "continue",
+      "env",
+      "timeout",
+      "max-stdout",
+      "max-stderr",
+      "stdin",
+      "native-stdin",
+    ],
+    get: [],
+    find: ["kind", "query", "cursor"],
+    stop: [],
+    output: ["stream", "cursor", "max-bytes"],
+    "session-close": [],
+    stat: [],
+    read: ["start-line", "max-lines", "max-bytes", "cursor"],
+    preview: ["max-bytes"],
+    download: ["name", "mime", "max-bytes"],
+    search: ["regex", "max-bytes", "max-matches"],
+    create: [],
+    replace: ["expected-text", "expected-file"],
+    patch: ["old", "new", "all", "expected-file"],
+    upload: ["replace"],
+    "native-upload": ["replace"],
+    "pr-create": ["body", "draft"],
+    "pr-get": [],
+    "pr-find": [],
+    deliver: ["native", "publication", "kind", "message", "channel"],
+  }[command];
+  if (!allowed || Object.keys(f).some((key) => !allowed.includes(key))) invalid();
+  let action, request, source;
+  if (command === "exec") {
+    const script = one(f, "script");
+    if (
+      (script === undefined && !p.length) ||
+      (script !== undefined && p.length) ||
+      (f.stdin && f["native-stdin"]) ||
+      (script === "-" && (f.stdin || f["native-stdin"])) ||
+      (f.continue && !one(f, "session"))
+    )
+      invalid();
+    const env = {};
+    for (const value of f.env ?? []) {
+      const split = value.indexOf("=");
+      if (split < 1) invalid();
+      env[value.slice(0, split)] = value.slice(split + 1);
+    }
+    action = f["native-stdin"] ? "command_run_native" : "command_run";
+    request = present({
+      command: script === undefined ? { argv: p } : { script: await inputText(script) },
+      cwd: one(f, "cwd"),
+      env: Object.keys(env).length ? env : undefined,
+      session: one(f, "session")
+        ? { name: one(f, "session"), mode: f.continue ? "continue" : "open" }
+        : undefined,
+      background: f.background || undefined,
+      timeout_seconds: number(f, "timeout"),
+      max_stdout_bytes: number(f, "max-stdout"),
+      max_stderr_bytes: number(f, "max-stderr"),
+      stdin_file: f["native-stdin"] ? await nativeInput() : undefined,
+    });
+    if (f.stdin) source = process.stdin;
+  } else if (command === "get") {
+    if (p.length !== 1) invalid();
+    action = "operation_get";
+    request = { reference: p[0] };
+  } else if (command === "find") {
+    if (p.length) invalid();
+    action = "operation_find";
+    request = present({ kind: one(f, "kind"), query: one(f, "query"), cursor: one(f, "cursor") });
+  } else if (command === "stop") {
+    if (p.length !== 1) invalid();
+    action = "process_stop";
+    request = { process: p[0] };
+  } else if (command === "output") {
+    if (p.length !== 1) invalid();
+    action = "process_output";
+    request = present({
+      process: p[0],
+      stream: one(f, "stream") ?? "stdout",
+      cursor: one(f, "cursor"),
+      max_bytes: number(f, "max-bytes"),
+    });
+  } else if (command === "session-close") {
+    if (p.length !== 1) invalid();
+    action = "session_close";
+    request = { name: p[0] };
+  } else if (["stat", "read", "preview", "download"].includes(command)) {
+    if (p.length !== 1) invalid();
+    action = {
+      stat: "file_stat",
+      read: "file_read",
+      preview: "file_preview",
+      download: "file_download",
+    }[command];
+    request = present({
+      path: p[0],
+      max_bytes: number(f, "max-bytes"),
+      file_name: one(f, "name"),
+      mime_type: one(f, "mime"),
+    });
+    if (command === "read") {
+      if (one(f, "cursor") && (one(f, "start-line") || one(f, "max-lines"))) invalid();
+      request.window = one(f, "cursor")
+        ? { cursor: one(f, "cursor") }
+        : present({ start_line: number(f, "start-line"), max_lines: number(f, "max-lines") });
+    }
+  } else if (command === "search") {
+    if (p.length !== 2) invalid();
+    action = "code_search";
+    request = present({
+      path: p[0],
+      query: p[1],
+      mode: f.regex ? "regex" : "literal",
+      max_bytes: number(f, "max-bytes"),
+      max_matches: number(f, "max-matches"),
+    });
+  } else if (command === "create" || command === "replace") {
+    if (p.length !== 2) invalid();
+    action = command === "create" ? "file_create" : "file_replace";
+    request = { path: p[0], text: await inputText(p[1]) };
+    if (command === "replace") {
+      const text = one(f, "expected-text"),
+        file = one(f, "expected-file");
+      if ((text === undefined) === (file === undefined)) invalid();
+      request.expected = file === undefined ? { text } : { file };
+    }
+  } else if (command === "patch") {
+    if (
+      !p.length ||
+      !f.old?.length ||
+      f.old.length !== f.new?.length ||
+      (p.length > 1 && f.old.length !== p.length) ||
+      (f["expected-file"] && f["expected-file"].length !== p.length)
+    )
+      invalid();
+    const pairs = f.old.map((old_text, index) => ({
+      old_text,
+      new_text: f.new[index],
+      ...(f.all ? { occurrence: "all" } : {}),
+    }));
+    action = "file_patch";
+    request = {
+      files: p.map((path, index) => ({
+        path,
+        ...(f["expected-file"] ? { expected: { file: f["expected-file"][index] } } : {}),
+        replacements: p.length === 1 ? pairs : [pairs[index]],
+      })),
+    };
+  } else if (command === "upload" || command === "native-upload") {
+    if (p.length !== (command === "upload" ? 2 : 1)) invalid();
+    action = "file_upload";
+    if (one(f, "replace") && decodeReference(one(f, "replace"), "file").path !== p[0]) invalid();
+    request = {
+      target: one(f, "replace")
+        ? { replace: { file: one(f, "replace") } }
+        : { create: { path: p[0] } },
+    };
+    if (command === "native-upload") request.file = await nativeInput();
+    else source = p[1] === "-" ? process.stdin : createReadStream(p[1]);
+  } else if (command === "pr-create") {
+    if (p.length !== 3) invalid();
+    action = "pull_request_create";
+    request = present({
+      head: p[0],
+      base: p[1],
+      title: p[2],
+      body: one(f, "body") ? await inputText(one(f, "body")) : undefined,
+      draft: f.draft || undefined,
+    });
+  } else if (command === "pr-get" || command === "pr-find") {
+    if (p.length !== (command === "pr-get" ? 1 : 2)) invalid();
+    action = "pull_request_read";
+    request = {
+      query: command === "pr-get" ? { number: Number(p[0]) } : { head: p[0], base: p[1] },
+    };
+  } else if (command === "deliver") {
+    if (p.length || Boolean(f.native) === Boolean(one(f, "publication"))) invalid();
+    action = f.native ? "communication_deliver" : "communication_deliver_publication";
+    request = present({
+      kind: one(f, "kind"),
+      message: one(f, "message"),
+      channel: one(f, "channel"),
+      ...(f.native ? { file: await nativeInput() } : { publication: one(f, "publication") }),
+    });
+  } else invalid();
+  const call = {
+    action,
+    request,
+    ...(effect.has(action) ? { requestId: createWorkspaceRequestId() } : {}),
+  };
   let result;
-  if (action === "action" || action === "communication") {
-    if (rest.length !== 1) throw invalidInput();
-    const input =
-      rest[0] === "-" ? await nativeDescriptor() : jsonInput(await readFile(rest[0], "utf8"));
-    const requestId =
-      action === "communication"
-        ? input?.requestId
-        : (input?.request?.request_id ?? input?.request?.process_id);
-    if (typeof requestId === "string") stdout.write(`${requestId}\n`);
-    try {
-      result = await control(
-        socketPath,
-        "POST",
-        action === "communication" ? "/v1/communication" : "/v1/tools",
-        input,
-      );
-    } catch (error) {
-      result = workspaceFailure(error, requestId);
-    }
-  } else if (action === "exec") {
-    let requestId;
-    let useStdin = false;
-    let useNativeStdin = false;
-    let index = 0;
-    while (index < rest.length && rest[index] !== "--") {
-      if (rest[index] === "--request-id") {
-        if (rest[index + 1] === undefined) throw new Error("INVALID_WORKSPACE_REQUEST_ID");
-        requestId = rest[index + 1];
-        index += 2;
-      } else if (rest[index] === "--stdin") {
-        useStdin = true;
-        index++;
-      } else if (rest[index] === "--native-stdin") {
-        useNativeStdin = true;
-        index++;
-      } else break;
-    }
-    if (rest[index] === "--") index++;
-    if (requestId === undefined) requestId = createWorkspaceRequestId();
-    workspaceRequestUuid(requestId);
-    const argv = rest.slice(index);
-    if (!argv.length) throw new Error("COMMAND_REQUIRED");
-    if (useStdin && useNativeStdin) throw invalidInput();
-    // Publish identity before accepting bytes or starting the operation, so interrupted callers
-    // can collect this same local journal entry rather than repeat the command.
-    stdout.write(`${requestId}\n`);
-    if (useStdin) {
+  try {
+    if (source) {
+      const frame = encodeOwnerFrame(call, source);
       const response = await workspaceRequest(
         socketPath,
-        "PUT",
-        `/v1/operations/${requestId}/input`,
-        process.stdin,
+        "POST",
+        "/v1/tools",
+        Readable.from(frame.body),
+        { "content-type": OWNER_STREAM_CONTENT_TYPE },
       );
-      const prepared = await ownerReply(response, requestId);
-      if (prepared.isError) result = prepared;
-    }
-    if (!result)
-      result = useNativeStdin
-        ? await control(socketPath, "POST", "/v1/tools", {
-            action: "process_start",
-            request: { request_id: requestId, argv, stdin_file: await nativeDescriptor() },
-          })
-        : await control(socketPath, "POST", "/v1/exec", {
-            requestId,
-            argv,
-            ...(useStdin ? { inputReady: true } : {}),
-          });
-  } else if (["pull-request-create", "pull-request-get", "pull-request-find"].includes(action)) {
-    const ownerAction = action.replaceAll("-", "_");
-    let input;
-    if (action === "pull-request-create") {
-      const explicit = rest[0] === "--request-id";
-      const requestId = explicit ? rest[1] : createWorkspaceRequestId();
-      workspaceRequestUuid(requestId);
-      const file = rest[explicit ? 2 : 0];
-      if (!explicit && file === undefined) throw invalidInput();
-      stdout.write(`${requestId}\n`);
-      let details = {};
-      if (file !== undefined) {
-        try {
-          details =
-            file === "-" ? await nativeDescriptor() : jsonInput(await readFile(file, "utf8"));
-        } catch {
-          throw invalidInput();
-        }
-      }
-      input = { ...details, request_id: requestId };
-    } else if (action === "pull-request-get") input = { pull_request_number: Number(rest[0]) };
-    else input = { head: rest[0], base: rest[1] };
-    result = await control(socketPath, "POST", "/v1/tools", {
-      action: ownerAction,
-      request: input,
-    });
-  } else if (action === "native-upload") {
-    const requestId = rest[0] === "--request-id" ? rest[1] : createWorkspaceRequestId();
-    workspaceRequestUuid(requestId);
-    const files = rest[0] === "--request-id" ? rest.slice(2) : rest;
-    if (!files[0] || files.length > 2) throw invalidInput();
-    stdout.write(`${requestId}\n`);
-    result = await control(socketPath, "POST", "/v1/tools", {
-      action: "upload",
-      request: {
-        request_id: requestId,
-        path: files[0],
-        expected: files[1] ? jsonInput(files[1]) : { exists: false },
-        file: await nativeDescriptor(),
-      },
-    });
-  } else if (action === "publish") {
-    if (!rest[0] || !rest[1] || rest.length > 4) throw invalidInput();
-    result = await control(socketPath, "POST", "/v1/tools", {
-      action: "download",
-      request: {
-        path: rest[0],
-        file_name: rest[1],
-        mime_type: rest[2] ?? "application/octet-stream",
-        max_bytes: observationBound(rest[3]),
-      },
-    });
-  } else if (action === "preview") {
-    if (!rest[0] || rest.length > 2) throw invalidInput();
-    result = await control(socketPath, "POST", "/v1/tools", {
-      action: "preview_image",
-      request: { path: rest[0], max_bytes: observationBound(rest[1]) },
-    });
-  } else if (["status", "cancel"].includes(action)) {
-    workspaceRequestUuid(rest[0]);
-    result = await control(
-      socketPath,
-      action === "cancel" ? "POST" : "GET",
-      `/v1/operations/${rest[0]}${action === "cancel" ? "/cancel" : ""}`,
-    );
-  } else if (action === "output" || ["read", "download"].includes(action)) {
-    if (action === "output") workspaceRequestUuid(rest[0]);
-    const path =
-      action === "output"
-        ? `/v1/operations/${rest[0]}/output?stream=${encodeURIComponent(rest[1] ?? "stdout")}`
-        : `/v1/files/${action}?path=${encodeURIComponent(rest[0])}`;
-    const response = await workspaceRequest(socketPath, "GET", path);
-    if (response.statusCode >= 400) {
-      response.resume();
-      throw httpFailure(response.statusCode);
-    }
-    await new Promise((resolve, reject) => {
-      response.once("error", reject);
-      stdout.once("error", reject);
-      response.once("end", resolve);
-      response.pipe(stdout, { end: false });
-    });
-    return;
-  } else if (["write", "upload"].includes(action)) {
-    const requestId = rest[0] === "--request-id" ? rest[1] : createWorkspaceRequestId();
-    workspaceRequestUuid(requestId);
-    const files = rest[0] === "--request-id" ? rest.slice(2) : rest;
-    stdout.write(`${requestId}\n`);
-    const expected = files[2] ? JSON.parse(files[2]) : { exists: false };
-    const response = await workspaceRequest(
-      socketPath,
-      "PUT",
-      `/v1/files/${action}?requestId=${requestId}&path=${encodeURIComponent(files[0])}`,
-      files[1] === "-" ? process.stdin : createReadStream(files[1]),
-      { "x-moira-expected": JSON.stringify(expected) },
-    );
-    result = await ownerReply(response, requestId);
-  } else if (action === "stat")
-    result = await control(socketPath, "POST", "/v1/files/stat", { path: rest[0] });
-  else if (action === "search")
-    result = await control(socketPath, "POST", "/v1/files/search", {
-      path: rest[0],
-      query: rest[1],
-      mode: "literal",
-    });
-  else if (action === "patch") {
-    const body = JSON.parse(await readFile(rest[0], "utf8"));
-    const requestId = body.requestId === undefined ? createWorkspaceRequestId() : body.requestId;
-    workspaceRequestUuid(requestId);
-    stdout.write(`${requestId}\n`);
-    result = await control(socketPath, "POST", "/v1/files/patch", { ...body, requestId });
-  } else throw new Error("UNKNOWN_COMMAND");
-  stdout.write(`${JSON.stringify(result)}\n`);
-  if (result?.isError)
-    throw Object.assign(new Error("Workspace owner reported an error"), {
-      details: result.structuredContent,
-      ownerResult: true,
-    });
+      const chunks = [];
+      for await (const chunk of response) chunks.push(chunk);
+      result = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+    } else result = await workspaceJson(socketPath, "POST", "/v1/tools", call);
+  } catch (error) {
+    result = workspaceFailure(error);
+  }
+  stdout.write(JSON.stringify(result) + "\n");
+  if (result.isError) throw Object.assign(new Error("Owner request failed"), { ownerResult: true });
 }
-
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   runWorkspaceCli(process.argv.slice(2)).catch((error) => {
-    const code = error?.details?.error?.code;
-    if (code === "CLI_REQUEST_INVALID") {
-      process.stderr.write("CLI input was refused before dispatch. No operation was submitted.\n");
-      process.exitCode = 1;
-      return;
-    }
-    const scopedOutcome = scopedCredentialFailureOutcome(code);
-    if (scopedOutcome === "unconfirmed") {
-      const securityId = error.details?.security_request_id;
-      process.stderr.write(
-        `Scoped credential operation ${code} is unconfirmed. ${
-          WORKSPACE_REQUEST_ID_PATTERN.test(securityId ?? "")
-            ? `Collect original security request ${securityId}`
-            : "Inspect the owner receipt for its original security request ID"
-        }; do not repeat the Git or pull-request operation.\n`,
-      );
-      process.exitCode = 1;
-      return;
-    }
-    if (
-      typeof code === "string" &&
-      /^[A-Z][A-Z0-9_]{1,79}$/.test(code) &&
-      (scopedOutcome === "refused" || (scopedOutcome === null && !/UNKNOWN|UNCONFIRMED/.test(code)))
-    ) {
-      process.stderr.write(
-        `Workspace owner reported ${code}. Inspect the receipt; this confirmed result is not a lost reply.\n`,
-      );
-      process.exitCode = 1;
-      return;
-    }
-    if (error.ownerResult && code === undefined) {
-      process.stderr.write(
-        "Workspace owner returned an error result. Inspect the printed reply.\n",
-      );
-      process.exitCode = 1;
-      return;
-    }
-    const diagnostic = Number.isInteger(error.httpStatus)
-      ? `HTTP error status ${error.httpStatus}`
-      : ["ECONNREFUSED", "ENOENT", "ECONNRESET", "EPIPE"].includes(error.code)
-        ? `transport ${error.code}`
-        : "process or protocol failure";
     process.stderr.write(
-      `Workspace request could not be confirmed (${diagnostic}). For a mutation, collect the original request ID before retrying.\n`,
+      error.publicCode === "CLI_REQUEST_INVALID"
+        ? "CLI input was refused before dispatch.\n"
+        : "Inspect the original operation or use find after an uncertain reply; do not automatically repeat the effect.\n",
     );
     process.exitCode = 1;
   });

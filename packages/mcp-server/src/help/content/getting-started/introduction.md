@@ -66,7 +66,9 @@ Updates/errors/retry stay local; other controls, loaded data and drafts remain.
 
 ## Development environments
 
-Use `codespace` for persistent GitHub or local Docker Sandboxes environments.
+Use `workspace_list` to find persistent GitHub or local Docker Sandboxes environments.
+Pass the selected environment's returned reference to command and file tools. Use
+`workspace_targets` to select an approved repository and paired controller before creation.
 **Settings → Development:** environments, GitHub connection and local computers.
 Approve pairing on your computer; its companion applies pending owner settings within local limits.
 Both providers run the same guest workspace service. MCP and the direct guest

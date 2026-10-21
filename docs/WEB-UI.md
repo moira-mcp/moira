@@ -925,15 +925,15 @@ execution inspector) receive `null` for a user that no longer exists and show th
   GitHub and Local providers. Readiness and connection use the selected provider's facts.
   Readiness reports configuration as `disabled|misconfigured|ready`, not cached guest health
   or administrative controls. Local physical ceilings remain in current owner settings.
-  GitHub creation selects an explicit live paired controller, or the sole eligible one;
+  GitHub creation selects an explicit registered paired controller, or the sole eligible one;
   creation is refused before admission when none is eligible; multiple owners require selection.
   Repository choices are filtered by provider, local targets also
   show their device label, and a repository selected under another provider cannot
   be submitted. Local agent work requires a live confirmed owner and enabled local permission;
   it does not require a GitHub App connection. The combined codespace list retains
   provider context and the existing Start/Stop/Delete controls. A known incomplete Local setup
-  shows **Resume setup** separately from disabled ordinary Start. It sends a fresh lifecycle
-  identity with the observed generation to prepare the same VM; unknown creation offers original
+  shows **Resume setup** separately from disabled ordinary Start. It sends the captured workspace
+  reference to prepare the same VM; unknown creation offers original
   state collection instead. Closed setup reasons explain preserved-root inspection, missing
   publication prerequisites, repository access/ref repair or fixed configuration diagnostics.
   Optional observed remote state distinguishes unconfigured, enrollment unavailable, connecting,
@@ -941,11 +941,21 @@ execution inspector) receive `null` for a user that no longer exists and show th
   of these remote observations; absent health is not guessed from controller connectivity.
   Creation and actions
   use the shared management endpoints under `/api/integrations/github/codespaces`;
-  the prefix does not restrict routing to GitHub. Every create chooses a ws1 request ID before
-  dispatch; Start/Resume setup/Stop/Delete also send the observed resource generation. A stale action is refused
-  and requires a fresh observation and decision. **Check state again** collects the original
-  pending IDs from the owner journal, or refreshes state when none is pending; it does not repeat
-  lifecycle mutations. Pending identities survive page reload through owner observations.
+  the prefix does not restrict routing to GitHub. Purpose-specific POSTs under `operations/:purpose`
+  use the same strict schemas as MCP. Create sends the selected target; lifecycle and delete send
+  returned workspace references unchanged, without browser-generated request IDs or generations.
+  A stale action requires a fresh observation and explicit decision. **Check state again** collects
+  the original operation reference or refreshes state when none is pending. `pending_operations`
+  restores collection after reload. If the first reply supplied no handle, the browser preserves
+  the selected controller and intent. Creation discovery keeps its repository query; non-create
+  recovery searches that controller's originals without assuming repository metadata in their
+  descriptions. The browser requires the user to choose a candidate even when only one matches.
+  No match or `absent` does not clear uncertainty or enable automatic resubmission.
+  Discovery shows safe metadata; explicit
+  collection reads the original outcome. Known uncertainty remains `unconfirmed` even when the
+  private handler receipt is terminal; confirmed refusal stays completed with a failed outcome.
+  Generic operation results remain opaque. A result can update a workspace card only when its
+  returned workspace reference addresses the same resource as its HTTP projection.
   Provider-specific disclosures
   explain that local work stays inside current locally approved rights and resource bounds,
   with permission lasting until explicit disable. The
@@ -970,8 +980,10 @@ execution inspector) receive `null` for a user that no longer exists and show th
   shows the connection/installation/repository-grant stepper. GitHub creation requires personal
   billing; organization payers are refused before creation. Environment cards show repository,
   nullable current ref (falling back to requested ref), observed machine when available,
-  state and technical details. Start/Stop/Delete carry the observed owner generation and
-  original ws1 identity; Delete uses `ConfirmDialog`. GitHub adoption preserves an existing VM
+  state and technical details. Start/Stop/Delete carry the captured workspace reference;
+  Delete uses `ConfirmDialog` and preserves that exact target through background refresh and
+  refusal. A different observation requires a new human confirmation, not an automatic retry.
+  GitHub adoption explicitly selects a controller and preserves an existing VM
   while the assigned controller settles old custody and performs fixed preparation.
   `CodespaceAutoPause` edits `codespaces.auto_stop_enabled` and
   `codespaces.idle_timeout_minutes` within the server's provider range. This is provider idle

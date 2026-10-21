@@ -54,6 +54,14 @@ export class RepositoryCreationRepository {
         .get(userId, requestId) as RepositoryCreationRecord | undefined) ?? null
     );
   }
+  listOwnedDevice(userId: string, deviceId: string, after?: string): RepositoryCreationRecord[] {
+    this.devices.getActiveDevice(userId, deviceId);
+    return this.sqlite
+      .prepare(
+        "SELECT * FROM codespaceRepositoryRequest WHERE userId=? AND deviceId=? AND requestId>? ORDER BY requestId LIMIT 51",
+      )
+      .all(userId, deviceId, after ?? "") as RepositoryCreationRecord[];
+  }
   private deviceAuthority(
     userId: string,
     input: RepositoryCreationInput,

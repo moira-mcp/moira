@@ -1,5 +1,7 @@
 import { z } from "zod";
 import { WORKSPACE_REQUEST_ID_PATTERN } from "./workspace-request-id.js";
+import { canonicalJson } from "../utils/canonical-json.js";
+import { LocalDeviceError, type LocalDeviceAuth } from "./local-device-types.js";
 
 const integer = (min: number, max: number) => z.number().int().min(min).max(max);
 const text = (maximum: number) =>
@@ -95,6 +97,81 @@ export const localRepositoryAdmissionReceiptSchema = z
   })
   .strict();
 export type LocalRepositoryAdmissionReceipt = z.infer<typeof localRepositoryAdmissionReceiptSchema>;
+
+/** Prove an original applied admission without treating its historical policy as current. */
+export function repositoryAdmissionProof(
+  value: unknown,
+  expected: {
+    userId: string;
+    deviceId: string;
+    connectionId: string;
+    deviceGeneration?: number;
+    requestId: string;
+    creationRequestId?: string;
+    githubRepositoryId?: string;
+  },
+): {
+  receipt: LocalRepositoryAdmissionReceipt;
+  repository: z.infer<typeof localManagementRepositorySchema>;
+  identity: LocalDeviceAuth;
+} {
+  const original = z
+    .object({
+      userId: z.literal(expected.userId),
+      deviceId: z.literal(expected.deviceId),
+      deviceGeneration: z.number().int().positive().safe(),
+      connectionId: z.literal(expected.connectionId),
+      ownerConnectionId: z.literal(expected.connectionId),
+      local: z.object({
+        state: z.literal("configured"),
+        control: z.object({
+          status: z.literal("applied"),
+          appliedRevision: z.number().int().positive().safe(),
+          repositoryAdmissions: z.array(localRepositoryAdmissionReceiptSchema),
+        }),
+        policy: z.object({ repositories: z.array(localManagementRepositorySchema) }),
+      }),
+    })
+    .parse(value);
+  const matching = original.local.control.repositoryAdmissions.filter(
+    (receipt) => receipt.requestId === expected.requestId,
+  );
+  const receipt = matching[0];
+  const repositories = original.local.policy.repositories.filter(
+    (repository) => repository.id === receipt?.localRepositoryId,
+  );
+  const repository = repositories[0];
+  if (
+    matching.length !== 1 ||
+    repositories.length !== 1 ||
+    !receipt ||
+    !repository ||
+    (expected.deviceGeneration !== undefined &&
+      original.deviceGeneration !== expected.deviceGeneration) ||
+    receipt.deviceGeneration !== original.deviceGeneration ||
+    receipt.connectionId !== original.connectionId ||
+    receipt.creationRequestId !== expected.creationRequestId ||
+    (expected.githubRepositoryId !== undefined &&
+      receipt.githubRepositoryId !== expected.githubRepositoryId) ||
+    original.local.control.appliedRevision < receipt.revision ||
+    receipt.repository.id !== receipt.localRepositoryId ||
+    canonicalJson(repository) !== canonicalJson(receipt.repository)
+  )
+    throw new LocalDeviceError(
+      "LOCAL_CONFLICT",
+      "The original repository admission is not confirmed.",
+    );
+  return {
+    receipt,
+    repository,
+    identity: {
+      userId: original.userId,
+      deviceId: original.deviceId,
+      deviceGeneration: original.deviceGeneration,
+      connectionId: original.connectionId,
+    },
+  };
+}
 export const localDeviceControlViewSchema = z
   .object({
     optedIn: z.boolean(),

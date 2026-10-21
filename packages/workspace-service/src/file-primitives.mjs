@@ -245,6 +245,8 @@ export function validateExpected(expected, current) {
   if (!expected || typeof expected.exists !== "boolean") fail("invalid file precondition");
   if (expected.exists !== Boolean(current)) failFile("precondition", "file precondition failed");
   if (!current) return;
+  if (expected.identity && !sameFileIdentity(expected.identity, current.stat.identity))
+    failFile("precondition", "observed file identity changed");
   const actual = version(current.bytes, current.stat);
   if (expected.size !== undefined && expected.size !== actual.size)
     failFile("precondition", "file size precondition failed");

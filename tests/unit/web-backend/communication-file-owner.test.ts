@@ -1,6 +1,26 @@
 import { describe, expect, test } from "@jest/globals";
 import { Readable } from "node:stream";
+import { mkdtemp, realpath, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { CommunicationOwnerScope, CommunicationOwnerSubmit } from "@mcp-moira/shared";
+import {
+  AgentMessageQueue,
+  UserNotificationHandler,
+  notificationLiveRun,
+  type IDataRepository,
+  type IGraphExecutionEngine,
+  UserCommunicationService,
+  type WorkflowExecution,
+} from "@mcp-moira/workflow-engine";
+import { decodeReference } from "@mcp-moira/shared/workspace-references";
+import { createOwnerCommunication } from "../../../packages/workspace-service/src/owner-communication.mjs";
+import { createOwnerPublications } from "../../../packages/workspace-service/src/publications.mjs";
+import {
+  createWorkspaceToolHandler,
+  type WorkspaceSemanticServices,
+} from "../../../packages/mcp-server/src/tools/workspace-tools.js";
+import type { CommunicationPurposeDependencies } from "../../../packages/mcp-server/src/tools/workspace-communication.js";
 import { LiveCommunicationFileOwner } from "../../../packages/web-backend/src/services/communication-file-owner.js";
 import {
   jsonResponse,
@@ -46,6 +66,209 @@ function fixture(statusCode: number, code: string, transportFailure = false) {
 }
 
 describe("cloud file-owner receipt boundary", () => {
+  test.each([
+    "delivered",
+    "refused",
+    "unconfirmed",
+    "malformed",
+    "optional",
+    "optional-failed",
+    "optional-thrown",
+  ] as const)(
+    "a controlled workflow delivery returns its original handle for %s and public collection does not resend",
+    async (status) => {
+      const optional = status.startsWith("optional");
+      const vendorStatus = optional ? "refused" : status === "malformed" ? "delivered" : status;
+      const root = await realpath(await mkdtemp(join(tmpdir(), "notification-original-")));
+      const scope = {
+        kind: "controller" as const,
+        userId: "user",
+        deviceId: resourceId,
+        deviceGeneration: 2,
+        connectionId: "620b1509-24ea-48d4-a73e-063fae51e167",
+      };
+      const publications = await createOwnerPublications({
+        stateRoot: root,
+        scope: { ...scope, publicOrigin: "https://moira.example" },
+        environmentIdentity: "controlled-controller",
+        withCommitLock: (work) => work(),
+      });
+      const bodies: Buffer[] = [];
+      const delivery = await createOwnerCommunication({
+        stateRoot: root,
+        scope,
+        publications,
+        renderProgress: async () => Buffer.from("original bytes"),
+        transport: {
+          prepare: async () => ({
+            channels: [
+              { channelId: "telegram", provider: "telegram", authorityDigest: "a".repeat(64) },
+            ],
+          }),
+          send: async (_input, source) => {
+            const chunks: Buffer[] = [];
+            for await (const bytes of source) chunks.push(Buffer.from(bytes));
+            bodies.push(Buffer.concat(chunks));
+            return { status: vendorStatus };
+          },
+        },
+      });
+      let submitted: CommunicationOwnerSubmit | undefined;
+      const client: WorkspaceClient = {
+        request: async () => {
+          throw new Error("Unexpected raw stream request");
+        },
+        json: async (_user, _id, input) => {
+          if (input.method === "POST") {
+            submitted = input.body as CommunicationOwnerSubmit;
+            const receipt = await delivery.submit(submitted);
+            if (status === "refused" || status === "unconfirmed")
+              throw new Error("Original applied reply lost");
+            return status === "malformed"
+              ? { ...receipt, state: "invalid-response-state" }
+              : receipt;
+          }
+          return delivery.inspect(input.path.split("/").at(-1)!);
+        },
+      };
+      const owner = new LiveCommunicationFileOwner({
+        devices: () =>
+          ({
+            listRegistered: () => ({ devices: [{ ...scope, status: "active" }] }),
+            getDeviceIdentity: () => ({ ...scope, status: "active" }),
+          }) as never,
+        controller: () => client,
+        workspace: () => client,
+        authorizePublication: () => "user",
+      });
+      const run: WorkflowExecution = {
+        executionId: "controlled-execution",
+        workflowId: "controlled-workflow",
+        userId: "user",
+        revision: 1,
+        status: "running",
+        currentNodeId: "notify",
+        waitingForInputNodeId: null,
+        createdAt: 1,
+        updatedAt: 1,
+        globalContext: {
+          executionId: "controlled-execution",
+          workflowId: "controlled-workflow",
+          userId: "user",
+          variables: {},
+          nodeStates: {},
+        },
+        visits: [],
+      };
+      const repository = {
+        getExecution: async () => run,
+        getWorkflow: async () => ({ metadata: { name: "Controlled workflow" } }),
+        getWorkflowGraph: async () => ({
+          metadata: { name: "Controlled workflow", version: "1.0.0", description: "test" },
+          progress: { nodes: [{ id: "p", label: "Progress" }] },
+          nodes: [],
+        }),
+      } as unknown as IDataRepository;
+      const communication = new UserCommunicationService([]);
+      communication.deliver = async () => {
+        if (status === "optional-thrown") throw new Error("Text delivery unavailable");
+        return {
+          status: status === "optional-failed" ? "all_failed" : "delivered",
+          configuredChannels: 1,
+          eligibleChannels: 1,
+          deliveredChannels: status === "optional-failed" ? 0 : 1,
+          channels: [],
+        };
+      };
+      const handler = new UserNotificationHandler(communication, owner);
+      try {
+        const result = await handler.execute(
+          {
+            id: "notify",
+            type: "user-notification",
+            message: "Original notification",
+            ...(optional
+              ? { attachProgressImage: true }
+              : {
+                  attachment: {
+                    data: Buffer.from("original bytes").toString("base64"),
+                    encoding: "base64",
+                    filename: "report.bin",
+                    mimeType: "application/octet-stream",
+                    kind: "document",
+                  },
+                }),
+            connections: { default: "end" },
+          },
+          {
+            userId: "user",
+            executionId: run.executionId,
+            workflowId: run.workflowId,
+            variables: {},
+            nodeStates: {},
+          },
+          new AgentMessageQueue(),
+          repository,
+          {} as IGraphExecutionEngine,
+          undefined,
+          undefined,
+          notificationLiveRun({ execution: run }, [], {}, "notify"),
+        );
+        const reference = result.data?.operation;
+        expect(result.data).toHaveProperty("operation", expect.any(String));
+        expect(result.data).not.toHaveProperty("communicationRequestId");
+        expect(result.data).not.toHaveProperty("device_id");
+        expect(result.data).not.toHaveProperty("codespace_id");
+        const original = decodeReference(String(reference), "operation");
+        expect(original).toMatchObject({
+          owner: { kind: "controller", deviceId: scope.deviceId, connectionId: scope.connectionId },
+          requestId: submitted!.requestId,
+          kind: "delivery",
+        });
+        const journal = join(root, "communication", original.requestId + ".json");
+        const before = await readFile(journal);
+        const unexpected = async (): Promise<never> => {
+          throw new Error("Unexpected effect or workspace selection");
+        };
+        const services: WorkspaceSemanticServices = {
+          invoke: unexpected,
+          resolveWorkspace: unexpected,
+          resolveWorkspaceResource: unexpected,
+          resolveOwner: async () => ({
+            controller: client,
+            deviceId: scope.deviceId,
+            owner: {
+              kind: "controller",
+              deviceId: scope.deviceId,
+              connectionId: scope.connectionId,
+            },
+          }),
+        };
+        const execute = createWorkspaceToolHandler(services, {
+          owner,
+          communicationService: communication,
+          repository: {} as CommunicationPurposeDependencies["repository"],
+          audit: async () => {},
+        });
+        const collected = await execute("operation_get", { reference }, "user");
+        expect(collected.structuredContent).toMatchObject({
+          operation: reference,
+          state: status === "unconfirmed" ? "unconfirmed" : "completed",
+          outcome: { ok: status === "delivered" || status === "malformed" },
+        });
+        expect((await delivery.inspect(original.requestId)).state).toBe("completed");
+        expect(collected.structuredContent!.state).toBe(
+          (await delivery.find()).operations[0].state,
+        );
+        expect(await readFile(journal)).toEqual(before);
+        expect(bodies).toEqual([Buffer.from("original bytes")]);
+      } finally {
+        await delivery.close();
+        await publications.close();
+        await rm(root, { recursive: true, force: true });
+      }
+    },
+  );
   test("selection pins a registered offline owner and refuses a changed pairing identity", async () => {
     const observed = {
       deviceId: resourceId,

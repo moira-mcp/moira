@@ -2,7 +2,7 @@
   "id": "83cfde40-7021-4798-8c0d-af274b269dc3",
   "metadata": {
     "name": "Content Creation",
-    "version": "2.2.0",
+    "version": "2.2.1",
     "description": "Creates one reviewed text deliverable from an authorized brief. Captures audience, use, format, language, tone, constraints, evidence and effect authority; materializes a durable workspace; develops a content brief, source/provenance notes, structure, draft, final content and limitations; and requires producer completion, deterministic reference checks and genuinely independent semantic review. Complete and reviewed-limited results remain distinct; brief, evidence and content defects use source-specific repair and invalid criteria use cumulative independently reviewed correction. Autonomous mode skips only final acceptance. Local delivery is sufficient; target-bound publication and configured user notification are separate optional effects whose failures do not reclassify content quality. The workflow does not commit, release, deploy or mutate product code. Choose Marketing Campaign for campaign strategy and multi-channel materials, a research workflow when evidence discovery is the result, or Software Development Flow for repository implementation.",
     "tags": [
       "контент",
@@ -3378,7 +3378,7 @@
     {
       "id": "send-notification",
       "type": "agent-directive",
-      "directive": "Send one authorized completion notification through the authenticated `communication` tool and configured user channels. Include public_url only when publication succeeded. Return sent or failed from actual observation; do not alter content. On failure record one bounded factual notification_failure_reason. Do not select a provider, recipient, destination, or credential.",
+      "directive": "Send one authorized completion notification through the authenticated `communication_send` tool and configured user channels. Include public_url only when publication succeeded. Return sent or failed from actual observation; do not alter content. On failure record one bounded factual notification_failure_reason. Do not select a provider, recipient, destination, or credential.",
       "completionCondition": "Notification outcome is observed",
       "inputSchema": {
         "type": "object",

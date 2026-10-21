@@ -136,6 +136,21 @@ export async function startWorkspaceService(options) {
         const closed = () => controller.abort();
         response.once("close", closed);
         try {
+          if (request.headers["content-type"] === OWNER_STREAM_CONTENT_TYPE) {
+            const frame = await readOwnerFrame(request);
+            try {
+              if (!["file_upload", "command_run"].includes(frame.control?.action))
+                refuse("INVALID_STREAM_ACTION");
+              const result = await executeOwnerTool(owner, frame.control, {
+                signal: controller.signal,
+                source: frame.body,
+              });
+              settleOwnerFrame(request, response, frame);
+              return json(response, result);
+            } finally {
+              settleOwnerFrame(request, response, frame);
+            }
+          }
           return json(
             response,
             await executeOwnerTool(owner, await jsonBody(request), { signal: controller.signal }),
@@ -253,7 +268,12 @@ export async function startWorkspaceService(options) {
       }
       refuse("NOT_FOUND", 404);
     } catch (error) {
-      if (request.url === "/v1/communication/stream") settleOwnerFrame(request, response);
+      if (
+        request.url === "/v1/communication/stream" ||
+        (request.url === "/v1/tools" &&
+          request.headers["content-type"] === OWNER_STREAM_CONTENT_TYPE)
+      )
+        settleOwnerFrame(request, response);
       if (response.headersSent) {
         response.destroy();
         return;

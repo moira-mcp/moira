@@ -308,9 +308,13 @@ interface IGraphStorage {
 ### MCP Tools (short names)
 
 `list`, `start`, `step`, `manage`, `session`, `settings`, `token`, `notes`,
-`artifacts`, `communication`, `lock`, `help`, plus `codespace`, the provider-neutral
-codespace tool parameterized by `action` (lifecycle, exec, files, native upload/download; see
-`docs/CODESPACES.md`).
+`artifacts`, `lock`, `help`, plus strict purpose-specific workspace, command, file, process,
+repository and communication tools (see `docs/CODESPACES.md` and the typed tool catalog).
+Copy returned references unchanged; do not manufacture protocol IDs, generations, digests or byte
+edits. Collect an original through `operation_get`, or discover candidates with `operation_find`
+and choose explicitly after a lost first reply. Two deliberate calls are distinct intents.
+`operation_resume` only continues the retained private-repository creation addressed by its
+original handle; it is not command replay or a request to create another repository.
 The HTTP transport is
 `StreamableHTTPServerTransport` (stateless). See `docs/SYSTEM.md` for the full
 tool signatures and request/response shapes, and `packages/mcp-server/src/server.ts`

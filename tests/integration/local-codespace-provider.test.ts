@@ -21,6 +21,8 @@ import { createLocalDeviceRoutes } from "../../packages/web-backend/src/routes/l
 import { LocalRefusal } from "../../packages/local/src/policy.js";
 import { createCodespaceManagementRoutes } from "../../packages/web-backend/src/routes/codespace-management.js";
 import { createLocalCodespaceServices } from "../../packages/web-backend/src/services/local-codespace-services.js";
+import { createWorkspaceSemanticServices } from "../../packages/web-backend/src/services/workspace-semantic-service.js";
+import { encodeReference, decodeReference } from "@mcp-moira/shared/workspace-references";
 
 let db: Database.Database,
   directory: string,
@@ -129,30 +131,62 @@ describe("Local cloud facade routes to the authoritative owner", () => {
         incomplete.generation,
       ),
     ).rejects.toMatchObject({ code: "CODESPACE_NOT_FOUND" });
-    const requestId = createWorkspaceRequestId();
     const app = express();
     app.use(express.json(), (req, _res, next) => {
       Object.assign(req, { userId: "owner" });
       next();
     });
+    const local = {
+      ...createLocalCodespaceServices({ sqlite: db, controller: owner!.client }),
+      resource,
+      provider: "local-sandboxes" as const,
+      guidance: () => ({
+        provider: "local-sandboxes",
+        situation: "ready" as const,
+        instruction: null,
+        links: [],
+      }),
+    };
+    const semantic = createWorkspaceSemanticServices({
+      providers: [local],
+      select: () => local,
+      devices,
+      workspace: owner!.client,
+      controller: owner!.client,
+      repositories: {} as never,
+      repositoryCreation: {} as never,
+    });
     app.use(
       createCodespaceManagementRoutes({
-        ...createLocalCodespaceServices({ sqlite: db, controller: owner!.client }),
+        ...local,
+        semantic,
         provider: "local-sandboxes",
         resource,
       }),
     );
     const response = await request(app)
-      .post(`/${incomplete.codespace_id}/resume_setup`)
-      .send({ request_id: requestId, expected_generation: incomplete.generation });
+      .post("/operations/workspace_lifecycle")
+      .send({
+        workspace: encodeReference("workspace", {
+          resourceId: incomplete.codespace_id,
+          provider: "local-sandboxes",
+          deviceId,
+          generation: incomplete.generation,
+        }),
+        action: "resume_setup",
+      });
     expect(response.status).toBe(200);
-    const recovered = response.body.data.codespace;
+    expect(response.body.data).toMatchObject({ state: "completed", outcome: { ok: true } });
+    const recovered = response.body.data.outcome.result;
     expect(recovered).toMatchObject({
       codespace_id: incomplete.codespace_id,
       state: "usable",
-      generation: incomplete.generation + 1,
       lifecycle_error: null,
     });
+    expect(decodeReference(recovered.workspace, "workspace").generation).toBe(
+      incomplete.generation + 1,
+    );
+    expect(recovered).not.toHaveProperty("generation");
     expect(recovered.remote).toEqual({ state: "enrollment_unavailable" });
     expect(recovered).not.toHaveProperty("setup_failure");
     expect(await owner!.records.get(before.id)).toMatchObject({

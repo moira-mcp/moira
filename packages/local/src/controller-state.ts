@@ -4,6 +4,8 @@ import { canonicalJson } from "../../shared/src/utils/canonical-json.js";
 import {
   controllerIdentitySchema,
   controllerRequestIdSchema,
+  controllerOperationDescriptorSchema,
+  controllerOperationFindSchema,
   githubControllerResourceSchema,
   providerFailureSchema,
   type GitHubControllerResource,
@@ -38,6 +40,7 @@ const operationSchema = z
     digest: z.string().regex(/^[a-f0-9]{64}$/),
     identity: controllerIdentitySchema,
     resourceId: z.string().uuid().optional(),
+    descriptor: controllerOperationDescriptorSchema.optional(),
     state: z.enum(["accepted", "completed"]),
     outcome: z.unknown().optional(),
     originalOutcome: z.unknown().optional(),
@@ -279,6 +282,38 @@ export class ControllerState {
       ...(entry.outcome ? { outcome: entry.outcome as ControllerOperation["outcome"] } : {}),
     };
   }
+
+  /** Read original admissions only; never wait for, replay or collect their effects. */
+  async find(identity: ControllerIdentity, input: unknown) {
+    const selection = controllerOperationFindSchema.parse(input);
+    const operations = [];
+    const keys = (await this.records.state.keys("controller-operation-")).sort();
+    for (const key of keys) {
+      const entry = await this.records.state.read(key, operationSchema.parse);
+      if (
+        !entry ||
+        !sameIdentity(entry.identity, identity) ||
+        (selection.cursor && entry.requestId <= selection.cursor)
+      )
+        continue;
+      const kind = entry.descriptor?.kind ?? "unknown";
+      if (selection.kind && selection.kind !== kind) continue;
+      if (
+        selection.query &&
+        !(entry.descriptor?.description ?? "Retained controller operation")
+          .toLowerCase()
+          .includes(selection.query.toLowerCase())
+      )
+        continue;
+      operations.push({
+        ...(await this.inspect(entry.requestId, identity)),
+        kind,
+        ...(entry.descriptor ? { descriptor: entry.descriptor } : {}),
+      });
+      if (operations.length === 50) return { operations, nextCursor: entry.requestId };
+    }
+    return { operations };
+  }
   async recordPhase(
     requestId: string,
     identity: ControllerIdentity,
@@ -477,6 +512,21 @@ export class ControllerState {
     const digest = createHash("sha256").update(canonicalJson(input)).digest("hex");
     const resource = z.object({ resourceId: z.string().uuid() }).passthrough().safeParse(input);
     const projection = resource.success ? { resourceId: resource.data.resourceId } : {};
+    const intentAction = z
+      .object({
+        action: z.enum([
+          "create",
+          "start",
+          "stop",
+          "delete",
+          "adopt",
+          "resume_setup",
+          "repository",
+          "communication",
+        ]),
+      })
+      .passthrough()
+      .safeParse(input);
     let work: Promise<ControllerOperation> | undefined;
     await this.serial(async () => {
       const entry = await this.records.state.read(
@@ -492,12 +542,61 @@ export class ControllerState {
         work = this.pending.get(requestId) ?? this.inspect(requestId, identity);
         return;
       }
+      const intent = z
+        .object({
+          repositoryId: z.string().optional(),
+          repositoryFullName: z
+            .string()
+            .regex(/^[A-Za-z0-9_.-]{1,100}\/[A-Za-z0-9_.-]{1,100}$/)
+            .optional(),
+          repository: z
+            .object({
+              fullName: z.string().regex(/^[A-Za-z0-9_.-]{1,100}\/[A-Za-z0-9_.-]{1,100}$/),
+            })
+            .passthrough()
+            .optional(),
+          ref: z
+            .string()
+            .regex(/^[A-Za-z0-9._/-]{1,255}$/)
+            .optional(),
+        })
+        .passthrough()
+        .safeParse(input);
+      const label = intent.success
+        ? (intent.data.repositoryFullName ??
+          intent.data.repository?.fullName ??
+          (intent.data.repositoryId
+            ? (await this.records.policyOrNull())?.repositories.find(
+                (row) => row.id === intent.data.repositoryId,
+              )?.fullName
+            : undefined))
+        : undefined;
+      const descriptor = intentAction.success
+        ? controllerOperationDescriptorSchema.parse({
+            kind:
+              intentAction.data.action === "repository"
+                ? "repository"
+                : intentAction.data.action === "communication"
+                  ? "delivery"
+                  : "lifecycle",
+            description:
+              (intentAction.data.action === "repository"
+                ? "Admit repository"
+                : intentAction.data.action === "communication"
+                  ? "Deliver communication"
+                  : `Workspace ${intentAction.data.action.replaceAll("_", " ")}`) +
+              (label ? ` ${label}` : "") +
+              (intent.success && intent.data.ref ? ` at ${intent.data.ref}` : ""),
+            createdAt: Date.now(),
+          })
+        : undefined;
       await this.records.state.write(`controller-operation-${requestId}.json`, {
         requestId,
         digest,
         identity,
         ...projection,
         state: "accepted",
+        ...(descriptor ? { descriptor } : {}),
       });
       work = Promise.resolve()
         .then(action)
@@ -541,6 +640,7 @@ export class ControllerState {
               outcome,
               ...(accepted?.phase ? { phase: accepted.phase } : {}),
               ...(accepted?.custody ? { custody: accepted.custody } : {}),
+              ...(accepted?.descriptor ? { descriptor: accepted.descriptor } : {}),
             });
           } catch {
             // The effect already ran. Publishing/fsync failure cannot become a refusal,

@@ -229,8 +229,8 @@ Sign in with `ADMIN_EMAIL` (default `admin@moira.local`) and the printed passwor
 ### Connect local codespaces
 
 **Settings → Development → Local computers** connects a computer running Moira Local to this
-account. Local and GitHub development environments share `codespace` for ordinary work and
-`codespace_process` for background processes. Enrollment,
+account. Local and GitHub environments share strict purpose-specific command, file, process
+and lifecycle tools with returned references. Enrollment,
 public repository reads and basic local work do not require the GitHub App or server credential
 vault. Enrolled private-repository access, push and PR operations require the server's GitHub App
 OAuth connection and vault configuration. Local work requires the owner's current computer grants
@@ -409,32 +409,25 @@ reading PR metadata uses repository read access. Original OAuth/refresh authoriz
 server-side; the trusted broker receives only its derived scoped child. Supply a commit author or leave both author fields empty to use your verified GitHub
 identity when available; the computer's Git configuration is not copied.
 
-With local web control approved, the owner can enable agent repository management here.
-It defaults off and binds the verified personal GitHub account, separate existing/new-private permissions,
-and optional push. Repository additions have no count quota or fixed technology profile.
-Only confirmed owner application makes it effective. `codespace({ action: "local_devices" })`
-shows owned computer IDs, labels, contact status and `owner_available`, plus eligible personal App
-installations. A warning asks for GitHub setup while retaining device discovery; inspect applied
-consent in Settings. `repository_add` takes `device_id`, the GitHub numeric `repository_id`
-and a stable UUID `request_id`. MCP calls live owner admission and returns `repository_id`
-only after access is applied. An unconfirmed or rejected request is not permission; resume its same
-identity after the applicable repair. The App must already expose the repository. Agent additions
-preserve existing grants and VMs; agents cannot change consent or supply rights.
-For a new empty private repository, enable and apply new-private consent, then use `repository_create`
-with `device_id`, stable UUID `request_id`, `repository_name` and discovered `installation_id`.
-Only the connected personal account is supported. Resume the same complete payload: `unknown`
-does not retry creation blindly, and `setup_required` can retain the confirmed GitHub ID/name while
-permissions or installation access are repaired. Only confirmed owner admission returns usable `repository_id`.
-Selected installation access is checked after adding only the confirmed new repository.
-The owner admission API retains `error.stage` for the failed setup step and `error.provider_status`
-for the reported GitHub HTTP status when present. MCP errors carry safe repair guidance and the
-original `request_id`. Follow that guidance. A rejected local admission can retain an
-already-created repository: restore its original grant in Settings, or use `repository_add` with
-the retained GitHub ID and a fresh `request_id` when existing-private consent permits it. Repeating
-the rejected admission alone does not restore access; do not create another repository.
-Unknown requests retain their exact recovery identity without preventing other repository additions.
-The private repository description contains a recovery marker, not a credential. Keep it while
-an unknown outcome is unresolved; Moira never adopts an unrelated same-name repository.
+With local web control approved, the owner can enable repository-management delegation here.
+It defaults off and binds the verified personal GitHub account, separate existing/new-private
+permissions and optional push. `workspace_targets` returns registered controllers, approved
+repository targets and eligible personal App installations. A GitHub setup warning does not
+erase registered controller choices. Availability is decided by actual dispatch, without fallback.
+
+Use `repository_admit({ controller, repository })` with a returned controller and the GitHub
+repository ID. Only confirmed owner application grants access. For a new empty private repository,
+use `repository_create({ controller, installation, name })` with returned references. Agents
+cannot change consent or supply rights. Current grants and existing VMs are preserved.
+
+Keep the returned original operation. `operation_get({ reference })` only collects it.
+If installation access or permissions need repair, explicitly continue that original private
+creation with `operation_resume({ reference })`; it reconstructs the original request from its
+retained record and never creates a replacement repository. Unknown creation uses its retained
+recovery marker, never an unrelated same-name repository. Missing results and uncertain replies
+do not authorize replay. A rejected admission may leave the confirmed repository on GitHub:
+restore its grant in Settings, or explicitly request existing-private admission when consent permits.
+Safe error guidance names the failing setup stage and reported provider status when available.
 
 The owner must approve **Repository creation: write** or **Administration: write** for the
 [create API](https://docs.github.com/en/rest/repos/repos#create-a-repository-for-the-authenticated-user),
@@ -447,47 +440,43 @@ HTTPS directly and disposes the child after the upstream connection closes; clou
 not proxy Git bytes or execute PR requests. Tokens are not project files, arguments, environment
 values or tool results. Same-UID broker trust is not an OS sandbox.
 
-Use ordinary `git fetch`/`git push`. For PR creation choose an original ws1 request ID;
-the guest CLI accepts `moira-workspace pull-request-create --request-id ID pr.json`, with
-`head`, `base`, `title` and optional `body`/`draft` in the file. Run the same command without
-`pr.json` to collect that create, then `moira-workspace pull-request-find HEAD BASE` after an
-uncertain outcome. `pull-request-get NUMBER` reads a PR. Collection never creates another PR.
-Unknown creation returns an error preserving its original PR ID and any separate
-`security_request_id`. Credential custody/disposal uncertainty requires exact security collection,
-not another Git/PR attempt: host `moira-local status --json` lists those receipts and
-`moira-local collect ORIGINAL_SECURITY_REQUEST_ID` reads the original request without minting.
-Inspection does not cancel a live stream; confirmed absence does not automatically reissue a token.
+Use ordinary `git fetch`/`git push`. `pull_request_create` takes meaningful head/base/title
+fields and returns an original operation reference. Collect it with `operation_get` after an
+uncertain reply, then use `pull_request_read` for the same head/base before deliberately creating
+another PR. The guest CLI equivalents are `pr-create HEAD BASE TITLE`, `get OPERATION_REF`,
+`pr-find HEAD BASE` and `pr-get NUMBER`. Credential custody/disposal uncertainty remains
+unconfirmed; preserve the original operation and follow its separate security-collection guidance
+rather than requesting another token. Collection does not cancel a live stream.
 
 Each codespace has its own VM; a repository can have multiple codespaces.
 Local VMs and operations do not consume cloud Codespaces slots or use its machine ceiling.
-The same guest workspace service owns commands, files, sessions and retained output in both
-providers. Choose a fresh `ws1-<lowercase UUID>` `request_id` before a command, write, patch or
-upload. Plain UUIDs belong to repository admission and cannot be used as active workspace identities.
-Ordinary exec observes the command for a short window; an unfinished result can be collected with
-only `codespace_id` and its original `request_id`. Background start returns that same identity as
-`process_id`; use process get/read/stop to inspect output or request cancellation. A lost reply
-does not prove that work did not start. Inspection never resubmits the effect, and pending cancellation
-does not prove physical termination. Keep the original identity and inspect the result and affected
-files before intentionally repeating an uncertain mutation.
+The same guest workspace service owns commands, files, sessions and retained output in both providers.
+Use `command_run` with argv or script, or `command_run_native` with required native stdin.
+Copy returned operation/process references; use `operation_get`, `process_output` and
+`process_stop` without resubmitting command fields. A lost first reply needs explicit
+`operation_find` and candidate selection. Identical deliberate calls are distinct intents;
+absence or unavailability is not proof of non-execution.
 
-The guest retains results and complete stdout/stderr on its own disk. The cloud routes live
-authorized requests; it does not queue commands or keep a separate command-result copy. A lost
-cloud connection leaves guest commands running; stopping the provider can interrupt them. Saved
-terminal results remain inspectable while the workspace data exists and current authority permits
-access. Commands and reads are independent; file commit/recovery uses a transaction lock and
-expected-content checks. `timeout_seconds` stops a command only when explicitly requested.
+The guest retains results and complete output on its disk. Cloud Moira routes live authorized
+requests without an offline queue or separate result store. Observation loss does not cancel
+commands; provider stop can interrupt them. Explicit `timeout_seconds` and observation windows
+remain, alongside physical storage and repository/owner guards. Cancellation is not confirmed
+until its physical result is known. File changes use existing confined atomic transactions.
 
-`upload` streams a native attachment into its guarded target using its workspace `request_id`.
-`download` reads the current `path` and publishes an immutable owned resource link and
-`file.reference_id`. Repeated reads are allowed until expiry under current authority; editing
-the source does not change that published version. There is no workspace byte quota;
-optional `max_bytes` bounds the caller's download or preview request.
-`communication({ action: "deliver-file", request_id, referenceId, message })` separately delivers
-that source, optionally to one configured `channelId`. Choose a fresh `ws1-<lowercase UUID>`
-before submission. Delivery neither consumes the publication nor renews it and accepts no
-guest-selected recipient. Retain the original ID and returned owner identity to collect an
-uncertain result with `communication({ action: "operation", request_id, device_id })`, or
-`codespace_id` instead of `device_id` for a workspace owner. Collection never resends.
+`file_read` reads complete UTF-8 characters by lines or cursor and returns a whole-file reference.
+`file_create` requires an absent target; `file_replace` checks complete text or a file reference;
+`file_patch` matches old/new text without caller-computed hashes or byte edits.
+`file_upload` streams a required native descriptor to an explicit create path or checked replacement.
+`file_download` publishes the complete path without a separate stat; name and MIME are derived
+when omitted. Its immutable publication supports repeated reads until expiry under current authority.
+`communication_deliver_publication` separately sends that publication, optionally to one
+configured `channel`; delivery does not consume or renew it. `communication_deliver` accepts
+a native descriptor directly at the selected paired controller. Both return an original operation
+for `operation_get`; collection never sends again. Workflow attachment notifications also return
+their original `operation`; internal execution/visit identities are not required for collection.
+Discovery exposes safe metadata and returned references, not full results. Explicit collection
+preserves uncertain outcomes as `unconfirmed`, including a terminal private receipt with an
+uncertain error; a confirmed refusal remains completed with `outcome.ok:false`.
 
 The fixed provider bootstrap installs the service and `~/.local/bin/moira-workspace` CLI in place,
 including on an existing Codespace, without recreating its disk. The CLI talks to the same private
@@ -500,16 +489,19 @@ of the project's Node version or PATH. Project runtimes remain the project's res
 ~/.local/bin/moira-workspace exec -- pwd
 ~/.local/bin/moira-workspace stat package.json
 ~/.local/bin/moira-workspace search . TODO
+~/.local/bin/moira-workspace get "$OPERATION_REF"
+~/.local/bin/moira-workspace output "$PROCESS_REF" --stream stdout
 ```
 
-For retries, pass the original `--request-id ws1-<lowercase UUID>`; `status`, `cancel` and `output`
-address that identity. File `read`, `write`, `upload`, `download` and `patch` use the same repository
-guards. The public image is `ghcr.io/moira-mcp/moira-workspace-service`; the optional Dev Container
-Feature is published under `ghcr.io/moira-mcp/features/workspace-service`. Select a published release
-tag. The image includes the runtime; the Feature adds the same payload to a project's own Linux
-Dev Container. Both support glibc x64/arm64 and a repository owned by the service user, including
-an explicitly configured root user. Adding the Feature during a container rebuild is optional;
-Moira's fixed bootstrap upgrades an existing environment without requiring that rebuild.
+The CLI returns the same semantic operation, process and checked-file references as remote work.
+Each deliberate mutation is a new intent; `get` collects and `find` discovers retained originals.
+Do not choose request IDs or replay after a lost reply. CLI create/replace/patch use absent-target,
+complete-text or checked-file preconditions. Native descriptors are read from stdin.
+The public image is `ghcr.io/moira-mcp/moira-workspace-service`; the optional Feature is
+`ghcr.io/moira-mcp/features/workspace-service`. Choose a published release tag. Both use the
+same payload and support glibc x64/arm64 and a repository owned by the service user, including
+explicit root configuration. A project keeps its own runtime; fixed bootstrap updates an existing
+environment without requiring a Dev Container rebuild.
 
 To add the Feature to a project's `.devcontainer/devcontainer.json`, merge this entry into
 its existing `features` object and replace `RELEASE_TAG` with an available published tag:
@@ -529,36 +521,33 @@ the service. These assets install the runtime; they do not grant cloud or reposi
 Public package registries and public DNS destinations use approved brokered egress. There is no
 socket-count or transfer-duration quota; streaming backpressure, public-address checks, current
 permission and revocation remain. Host/LAN/service destinations stay denied. Browser compatibility
-requires the project's guest packages. `preview_image` reads a current repository PNG/JPEG and
+requires the project's guest packages. `file_preview` reads a current repository PNG/JPEG and
 checks its container before returning native image content; inspect it before treating it as
 visual evidence. Optional `max_bytes` sets the caller's whole-image bound. There is no generic byte,
 edge or pixel-count ceiling. PNG/JPEG validation checks structure, not decoded pixels.
-`download` publishes the complete original file.
+`file_download` publishes the complete original file.
 See [the tools reference](/docs/reference/tools/#development-codespaces).
 
-In **Settings → Development → Local computers**, open the connected computer's codespaces and
-choose its approved repository to create a VM, or discover
-its qualified `repository_id` through `codespace({ action: "repositories" })`. Different computers
-offering the same repository are distinct choices. Further operations use the existing
-`codespace_id`, execution/session/file and native-transfer contracts. The GitHub provider remains
-independently available. Settings can revoke one device; **Refresh** rereads current state. Browser revocation
-denies new server work but cannot prove physical shutdown of an offline computer; local disable
-enforces shutdown independently.
+In **Settings → Development → Local computers**, open a computer's codespaces and choose an
+approved repository. `workspace_targets` returns the corresponding target references; computers
+offering the same repository remain distinct. `workspace_list` and `workspace_observe` return
+workspace references for explicit lifecycle decisions. Browser revocation denies new server work
+but cannot prove physical shutdown of an offline computer; local disable enforces shutdown.
 
-Before Local create/start/stop/delete, choose `request_id` in `ws1-<lowercase UUID>` form;
-start/stop/delete also send the observed `generation` from get/list. A stale generation returns
-`CODESPACE_GENERATION_CONFLICT`. Collect the original receipt with the `operation` action
-and its original `device_id` and `request_id`, even when create returned no codespace ID.
-`absent`, `accepted`, `completed` and `unconfirmed` distinguish outcomes; none authorizes automatic
-replay. Owner-backed `pending_request_ids` restores collection after reload; a newer snapshot
-alone does not complete an uncertain mutation.
+Lifecycle tools consume returned workspace references, not caller-supplied generations or IDs.
+A conflict requires a fresh observation and a deliberate new decision. An operation response
+returns its original handle for `operation_get`, including when creation is still unresolved.
+When the first reply was lost, `operation_find` at the selected controller finds candidates;
+select explicitly, even when there is one. No match does not prove no effect.
+Known `pending_operations` restore collection after reload; a newer snapshot alone does not
+settle an uncertain mutation.
 
-If registration exists but the owner has not published a resource observation, get/list report
-`CODESPACE_PROVIDER_UNAVAILABLE` rather than a guessed machine or generation. Retained pending
-creation instead returns `CODESPACE_LOCAL_CREATION_UNKNOWN` with its original request, device and
-codespace IDs for collection. A completed receipt containing an uncertain error is still unknown;
-explicit repetition does not turn it into confirmed rejection or create a second VM. Successful
-summaries allow `machine: null`, including the confirmed-deleted result.
+If registration exists without an owner resource observation, discovery retains an observe-only
+identity and reports unavailability instead of inventing a machine, state or generation.
+Pending creation preserves its original operation for collection. A handler receipt containing
+typed uncertainty is still unconfirmed; repetition cannot turn it into a second VM.
+Generic operation payloads describe their own kind, not necessarily a workspace. Successful
+workspace observations can have `machine: null`, including a confirmed-deleted result.
 
 Each computer card contains its own creation form, codespaces and collapsed settings. Computers
 with the same name remain distinct, and one repository can have several separate VMs. Shared
@@ -567,13 +556,13 @@ has a separate subsection. Refresh and action errors stay with the affected sect
 Local cards show the last verified observation, or that none exists, and a localized lifecycle
 refusal. **Check state again** collects the original lifecycle receipt when its identity is
 known; otherwise it performs a read-only refresh. It never resubmits start, stop or delete.
-New explicit actions require a fresh identity and the observed resource generation.
+New explicit actions use the returned workspace observation unchanged.
 `created` does not certify shutdown: the native
 owner must confirm exact runtime and worker settlement. An unavailable observation preserves the
 last verified state and never becomes a successful stop.
 
 **Delete** remains available for pending creation, cleanup and uncertain local state, with explicit
-confirmation and the current generation. It targets the same owned VM and waits for confirmed
+confirmation and the captured workspace reference. It targets the same owned VM and waits for confirmed
 removal; a failed observation cannot remove the card as if the VM were absent. A failed card does
 not prevent healthy sibling codespaces from refreshing or running.
 
@@ -584,15 +573,15 @@ change repository grants or enable work. MCP deletion still requires the agent's
 deletion grant and enabled work permission.
 
 A refused deletion shows its error in the dialog and ends the spinner. **Cancel** stays available
-while a separate read obtains the current generation for another confirmation. An operation's
+while a separate explicit read closes that decision and obtains a new observation for another confirmation. An operation's
 403 refusal preserves the browser session; account admission or expired-session errors retain
 their sign-in handling.
 
 Physical VM startup is distinct from guest readiness: commands become available only after guest
 preparation completes. `CODESPACE_LOCAL_SETUP_INCOMPLETE` means that preparation failed, even if
 the VM is confirmed stopped. Repair the reported prerequisite, then choose **Resume setup** or
-`codespace({ action: "resume_setup", codespace_id, generation, request_id })` with the current
-generation and a fresh ws1 identity. This continues the same proved VM/disk and preserves files
+`workspace_lifecycle({ workspace, action: "resume_setup" })` with its returned workspace
+reference. This continues the same proved VM/disk and preserves files
 and the original create result. Ordinary start and custody `recover` do not resume setup.
 Unknown creation remains collection of its original operation, not permission to adopt or replace a VM.
 The optional `setup_failure` distinguishes a preserved unproved repository (`repository_unproven`,
@@ -625,14 +614,19 @@ unconfirmed. Inspect the original operation instead of
 restarting the companion to recover a lost reply. Client exit and observer disconnect do not
 authorize physical VM stop; explicit stop, disable and physical maintenance retain that boundary.
 
-The host CLI supports `create OWNER/REPO --ref BRANCH`, `start SPACE_ID`, `resume-setup SPACE_ID`, `stop SPACE_ID`,
-`remove SPACE_ID --confirm` and `collect REQUEST_ID` through the running private controller.
-Choose `--request-id` before mutation; the CLI prints it before observing the result. Fresh create
-requires live cloud route registration and initial Git authority. Already admitted VMs can start,
-stop or be cleaned up offline under applicable current owner authority. Starting requires the
-enabled work permission; owner-confirmed cleanup does not enable it. Raw host execution is
-unsupported; ordinary commands/files use the guest `moira-workspace` CLI or MCP. `recover` remains
-a custody tool. Persistent paired lifecycle work uses `run`.
+The host CLI supports `create OWNER/REPO --ref BRANCH`, `start WORKSPACE_REF`,
+`resume-setup WORKSPACE_REF`, `stop WORKSPACE_REF`, `remove WORKSPACE_REF --confirm`,
+`observe WORKSPACE_REF`, `collect OPERATION_REF` and
+`operations CONTROLLER_REF` through the running private controller.
+Mutations preserve the captured workspace reference; human maintenance retains its separate
+explicit request-ID contract. Fresh create needs cloud route registration and initial Git authority.
+`collect ORIGINAL_REQUEST_ID` also reads retained privileged maintenance or security custody;
+it does not submit lifecycle work or issue a replacement credential. Controller discovery
+returns safe metadata; use explicit collection for full original outcomes.
+Already admitted VMs can start, stop or be cleaned up offline under applicable current owner
+authority. Starting needs enabled permission; owner-confirmed cleanup does not enable it.
+Raw host execution is unsupported; ordinary commands/files use the guest CLI or MCP.
+`recover` remains a separate custody acknowledgement.
 After a crash or computer reboot, login registration starts the selected release; `run` with the
 same state directory also starts or connects to it. Startup automatically
 reclaims a stale runner marker only under the system lock and after proving both previous host
@@ -661,7 +655,7 @@ work. Remote mutations are refused rather than queued. An addressed resource ref
 that request. Confirmed remote device revocation/identity failure fences the remote route;
 local disable remains physical policy. Existing grants remain enforced; cached results do not repeat effects.
 Closing the `run` client leaves the persistent owner running; `npm run local -- disable` stops owned work independently
-and keeps VM data. Stop keeps files, while `remove SPACE_ID --confirm` deletes the exact owned VM.
+and keeps VM data. Stop keeps files, while `remove WORKSPACE_REF --confirm` deletes the exact owned VM.
 An uncertain command or edit is retained by its own operation identity and is not retried
 automatically. It does not block independent work. Inspect the saved result before repeating the
 same edit or modifying affected files; a failed delivery is not proof that an edit was not applied. Ordinary
@@ -670,7 +664,7 @@ confirm that the VM is physically stopped, then use `recover SPACE_ID --confirm`
 state directory. It checks exact identity and network policy without replaying jobs; retained jobs
 and unknown outcomes remain unchanged. If the acknowledged unknown occurred during initial
 preparation, the VM remains setup-incomplete. Repair its prerequisite and explicitly use
-`resume-setup SPACE_ID` on that same VM; acknowledgement alone does not complete setup or enable
+`resume-setup WORKSPACE_REF` on that same VM; acknowledgement alone does not complete setup or enable
 ordinary start.
 For an orphan device
 shutdown, `recover --confirm` requires disabled work, proves physical stop and retains jobs/data.
@@ -747,21 +741,19 @@ The controller owns original-operation journals and fixed provisioning through i
 trusted SSH and verified Linux payload; cloud Moira retains minimal resource/account authority
 and fixed provider API calls. No cloud connector Compose service is required.
 
-Use `codespace` with `list`, `repositories` and `setup_help` for discovery.
-Before create/start/stop/delete/adopt, choose a fresh `ws1-<lowercase UUID>` `request_id`.
-Start/stop/delete and adoption of a registered `codespace_id` require its observed `generation`.
-Adopt an unmanaged owned environment by `provider_resource_name`; the same disk is prepared in
-place. An explicit adoption of a stopped environment can start it. A pending or unconfirmed
-receipt does not establish usable guest readiness: collect with
-`codespace({ action: "operation", device_id, request_id })` on the assigned controller.
-Collection never creates, starts or installs again. Exact recovered provider identity may still
-be `GITHUB_PROVISIONING_INCOMPLETE`.
+Use `workspace_list`, `workspace_targets` and `workspace_setup_help` for discovery.
+Create with a returned target; start/stop/delete use the captured workspace reference.
+`workspace_adopt` uses an observed workspace and explicitly selected controller;
+`workspace_adopt_external` uses the selected controller and known owned provider name.
+Both preserve the disk. Explicit adoption of a stopped environment can start it.
+Pending/unconfirmed preparation is not usable readiness: collect its original operation without
+creating, starting or installing again. `GITHUB_PROVISIONING_INCOMPLETE` remains actionable.
 
-Only a live authenticated, enrolled guest admits command/file work. Ordinary routing does not
-start a VM or open SSH. A healthy private Unix endpoint alone does not prove its cloud registration.
-A confirmed 401/403 registration refusal retires that credential; ordinary network loss remains
-reconnectable. `exec` without command fields collects its original request ID;
-`codespace_process` gets/reads/stops the original process. Cloud or client loss does not cancel it.
+Only an authenticated enrolled guest admits remote command/file work. Ordinary routing does not
+start a VM or open SSH. Unix readiness alone does not prove remote registration. Confirmed 401/403
+refusal retires that credential; ordinary network loss reconnects. Collect with `operation_get`,
+read retained output with `process_output`, and cancel with `process_stop`.
+Cloud/client loss does not itself cancel an owned command.
 
 An agent working in a codespace acts as the ordinary Codespace user: it can read the repository,
 use the network and read any secrets configured for that Codespace. Moira's isolation protects the

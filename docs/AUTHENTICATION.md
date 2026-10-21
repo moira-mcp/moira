@@ -419,6 +419,31 @@ the independent companion guard enforces explicit local disable. Work permission
 no automatic deadline. Local SDK sign-in remains in the machine's owned credential
 store and is not sent as enrollment policy or forwarded into guest environment.
 
+Ordinary workspace, target, controller, operation, process and file references are
+typed addresses and captured preconditions, not credentials or authorization grants.
+The authenticated user still needs current account, device/connection, resource and
+repository authority. Workspace mutations consume the generation captured by the
+returned observation; they do not silently refresh it. A file reference retains its
+observed identity/version, so current permission cannot authorize replacing a different
+file that appeared later.
+
+For Local routing, an original owner selector binds device, retained space and original
+creation marker. The private controller resolves that selector or the exact resource
+binding from retained records without a native snapshot. Cloud checks current authority
+before and after asynchronous resolution; a new pairing connection cannot adopt an old
+controller reference. Discovery reads safe descriptors under the same current authority,
+including on exhausted cursor pages, and does not dispatch or collect each candidate.
+Discovery exposes references, state and safe metadata, while the original outcome
+requires explicit `operation_get` under current authority.
+Reference decoding alone never permits a foreign or stale-owner read.
+
+`operation_get` is pure original observation. `operation_resume` is an explicit
+continuation only of retained private-repository creation using its saved input and
+existing authority/claim checks. It is not a general retry command. Applied creation
+is proved from its exact original controller admission and applied grant; absence
+cannot reconstruct input. A lost first reply requires discovery and explicit candidate
+selection, not inference from matching command text or automatic resubmission.
+
 Owner web control requires a separate, explicit local `web-control --confirm`
 approval pinned to the server, user, device and connection, with finite ceilings.
 `PUT /api/integrations/local/devices/:id/settings` accepts only an admitted browser
@@ -619,7 +644,21 @@ pre-parsed value reaches the SDK's JSON-RPC, batch, media-type and protocol vali
 JSON returns a controlled 400. The HTTP gateway rate limiter counts requests per client IP,
 including authenticated requests; it is separate from owner operation lifetime or file size.
 
-MCP communication uses the caller's ordinary OAuth or persistent MCP credential and catalog admission. Its binary effect is assigned to the original workspace owner or an active registered paired controller. Private `/api/communication/owner` endpoints require that actor's existing device or workspace credential, not the caller's MCP token. Controller scope binds user/device/generation/connection; workspace scope binds resource/resource-generation/authorization-generation/measured-life. The current account and actor are authenticated before reading preparation JSON or framed control, then the complete scope and current configured channel are authorized and rechecked after configuration resolution. These credential and scope decisions do not consult a presence API; actual dispatch uses the backend router's current connection. A channel descriptor grants no caller-selected recipient, endpoint, header or secret. The cloud injects provider credentials only into its fixed authorized request; binary extension handlers and project commands receive none.
+MCP `communication_send`, `communication_deliver` and
+`communication_deliver_publication` use ordinary OAuth or persistent MCP credentials
+and catalog admission. Binary work is assigned to the publication's original workspace
+owner or a selected/sole eligible paired controller. Returned delivery operations use
+common `operation_get/find`; neither source acquisition nor a vendor effect is repeated
+by collection. Private `/api/communication/owner` endpoints require that actor's existing
+device or workspace credential, not the caller's MCP token. Controller scope binds
+user/device/generation/connection; workspace scope binds resource, route and authorization
+generations and measured life. Authentication precedes preparation JSON/framed control;
+complete scope and current channel authority are rechecked after configuration resolution.
+These checks do not consult a presence API: actual dispatch uses the backend router's
+current connection. A channel descriptor grants no caller-selected recipient, endpoint,
+header or secret. The fixed cloud request injects provider credentials; project commands
+and binary handlers receive none. Public publication URLs have their own current owner
+authorization and expiry contract; ordinary returned references do not replace it.
 
 Public progress-image grants remain run-bound authorization, distinct from both MCP identity and private owner credentials. Minting requires a selected or unique active registered controller; missing or ambiguous selection returns `COMMUNICATION_OWNER_UNAVAILABLE`. Rendering and publication require that owner's actual route. A route failure does not prove that an original request was never admitted. Existing task/context/step/version binding and response-finish consumption remain enforced.
 

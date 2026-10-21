@@ -3,6 +3,7 @@ import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 
 import type { AnyToolDefinition, McpToolName, ToolResponsePolicy } from "./tool-definitions.js";
 import { renderToolReference } from "./tool-definitions.js";
+import { WORKSPACE_TOOL_SCHEMAS, type WorkspaceToolName } from "./workspace-tool-contract.js";
 
 export type ToolCallResult = CallToolResult;
 
@@ -73,8 +74,6 @@ export const TOOL_BINDINGS = {
         : formatDownloadToken(result.data as Parameters<typeof formatDownloadToken>[0]);
     return { content: [{ type: "text", text }] };
   },
-  communication: async (params) =>
-    (await import("./manage-communication.js")).manageCommunication(params),
   session: async (params) => {
     const result = await (await import("./get-session-info.js")).getSessionInfo(params);
     if (params.action !== "materialize" || !result.success) {
@@ -89,9 +88,17 @@ export const TOOL_BINDINGS = {
   artifacts: async (params) => (await import("./manage-artifacts.js")).manageArtifacts(params),
   lock: async (params) => (await import("./manage-locks.js")).manageLocks(params),
 
-  codespace: async (params) => (await import("./manage-codespaces.js")).manageCodespaceTool(params),
-  codespace_process: async (params) =>
-    (await import("./codespace-process.js")).manageCodespaceProcess(params),
+  ...(Object.fromEntries(
+    (Object.keys(WORKSPACE_TOOL_SCHEMAS) as WorkspaceToolName[]).map((name) => [
+      name,
+      async (params: unknown) =>
+        (await import("./workspace-tools.js")).executeWorkspaceTool(name, params),
+    ]),
+  ) as {
+    [Name in WorkspaceToolName]: (
+      params: z.infer<(typeof WORKSPACE_TOOL_SCHEMAS)[Name]>,
+    ) => Promise<CallToolResult>;
+  }),
 } satisfies ToolBindings;
 
 export async function invokeToolDefinition(

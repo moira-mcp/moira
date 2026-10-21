@@ -538,7 +538,9 @@ const transport = new StreamableHTTPServerTransport({
 // OAuth refresh → successor token row inherits the predecessor's exact toolsVersion
 ```
 
-`tool-schemas.ts` owns side-effect-free canonical Zod schemas. `tool-definitions.ts` is the pure
+`tool-schemas.ts` owns side-effect-free workflow-tool Zod schemas. Workspace purposes share
+`packages/shared/src/codespaces/workspace-tool-schemas.ts` at MCP, HTTP and the Unix owner.
+`tool-definitions.ts` is the pure
 catalog that associates each public name with its static default and agent/model description
 variants, schema, response policy, validated examples, localized factual metadata, reference model,
 and deterministic revision. `tool-bindings.ts` separately binds every catalog identity to its lazy
@@ -547,20 +549,13 @@ publishes `tools/list` from the same typed projection. Every published tool sche
 which keeps the complete catalog discoverable in MCP clients that do not support a root
 `anyOf`/`oneOf`. A handler may apply a narrower action-specific schema after SDK validation; `start`
 uses a flat public object schema and then validates the exact `prepare` or `execute` branch with its
-strict discriminated request schema, and the `codespace` tool publishes one flat object carrying
-`action` plus every action's fields (only `action` required), then applies that action's own strict
-request contract at dispatch, so a mixed stdin form, a malformed request identity or a field belonging to
-another action is rejected there as `CODESPACE_REQUEST_INVALID`. A default declared by an action is
-applied by that contract and is deliberately absent from the published object, which would otherwise
-inject every action's defaults into every request. Where two actions declare the same field name with
-the same supplied value constraints, the publisher removes default/optional presence wrappers
-before comparing their shapes and publishes optionality once. A boolean includes its boolean
-literals without redundant alternatives; a lone destructive-confirmation literal `true` remains
-strict. Where two actions declare the same field name with
-different bounds — `search` and `download` both take `max_bytes` — the published object carries both
-forms under that one key, so neither action's parameter is narrowed by the projection; the action's
-own contract decides which form the request had to match. Validation failures at either boundary are returned as MCP
-errors. Server bootstrap does not repeat names, schemas, actions, or descriptions. Tool descriptions
+strict discriminated request schema. Workspace operations instead publish strict purpose-specific
+objects: `workspace_create`, `code_search`, `file_read`, `file_replace`, `command_run`,
+`process_output`, `operation_get` and the other registered purposes each own their input.
+Unknown service fields, mixed native/text stdin and unreturned reference shapes refuse before
+dispatch. Native input belongs only to `file_upload`, `command_run_native` and
+`communication_deliver`, whose owning definitions declare the corresponding file parameter.
+Validation failures are MCP errors. Server bootstrap does not repeat names, schemas or descriptions. Tool descriptions
 are not stored or overridden in `globalSetting`; database-backed system prompts remain a separate MCP
 `instructions` channel.
 
@@ -589,7 +584,16 @@ prompt. The no-argument topic catalog adds the special `tools` entry from MCP-ow
 and that topic renders directly from the typed tool contract rather than a Markdown copy.
 Presentation-only Astro components remain in the shells, and runtime never parses or removes MDX/JSX.
 
-`communication` uses the ordinary authenticated MCP user context. Text calls `UserCommunicationService`; binary submission calls the shared `CommunicationFileOwner` composition. `LiveCommunicationFileOwner` resolves an immutable reference's original workspace/controller, or selects the explicit or sole active registered paired controller for nonworkspace sources. Selection resolves identity without a health/snapshot preflight; actual availability belongs to the router at dispatch. A neutral controller does not need Local VM policy to own communication. Source acquisition, immutable publication, rasterization, source digest and original delivery receipts live with that owner. Current credential, generation, registration and scope checks remain mandatory. A route refusal during collection cannot certify that the historical effect was never admitted.
+`communication_send`, `communication_deliver` and `communication_deliver_publication`
+use the ordinary authenticated MCP user context. Text calls `UserCommunicationService`;
+binary submission calls the shared `CommunicationFileOwner` composition.
+`LiveCommunicationFileOwner` resolves a publication's original workspace/controller, or
+uses the selected or sole eligible registered controller for a native source. Selection
+resolves identity without a health/snapshot preflight; availability belongs to dispatch.
+A neutral controller needs no Local VM policy to own communication. Acquisition,
+publication, rendering, source digest and original delivery stages remain with the owner.
+Returned operation references support common collection/discovery without refetch or
+vendor replay. A current route refusal cannot certify historical non-admission.
 
 `createOwnerCommunication` in `packages/workspace-service/src/owner-communication.mjs` composes owner publications, direct native source acquisition, packaged progress rendering and extension execution. `/v1/communication` submits a typed descriptor; `/v1/communication/stream` accepts framed control plus raw bytes; `/v1/communication/operations/:requestId` collects the original receipt. Existing owner admission also binds the original ID across action namespaces. The journal retains immutable input identity, source publication and per-channel stages, excluding signed native URLs, base64 payloads and file bytes. Same-ID collection or repetition never refetches an accepted source or replays a vendor effect. Changing original input or the authorized principal refuses the request; same-principal renewal preserves the original captured scope and receipt.
 
@@ -602,17 +606,48 @@ tool name, classified as the project classifies failures at a boundary, and only
 the sanitized agent-facing message, so a suppressed message is never the only trace of a failure.
 The `reconciliation` tool answers its own failures and records them the same way.
 
-The `codespace` tool follows the same registry path. `manage-codespaces.ts` is a presentation
-adapter over the exported `@mcp-moira/web-backend/services` composition (never the web server or
-routes): the tenant comes from the request context, results are projected field by field, known
-domain failures become bounded tool errors, and unexpected failures are logged with the tool name
-and opaque IDs only. Both native file references are declared on that one tool through registry
-`_meta["openai/fileParams"]`,
-which participates in `MCP_TOOLS_REVISION`. Public workspace and controller publication routes reach the original live owner without a cloud transfer store. Request-context logging records the requested action and validated opaque
-identities; an absent or malformed action reads as `unknown`, because the record is
-written before the action is validated. The shared `CodespaceObservabilityService` computes one readiness
-decision for the website, administration, backend health, MCP health and the `codespace` tool's
-`list` action;
+`workspace-tools.ts` binds the registered purposes to the exported
+`@mcp-moira/web-backend/services` composition and direct workspace owner. Cloud semantic
+services resolve current account/provider/controller authority, project public facts and
+route each purpose; they do not import the web server or replay owner work. The tenant
+comes from the authenticated request context. Request logs contain the purpose, not
+commands, native URLs, source text or returned references. Native image/resource content
+passes through by object identity without cloud rendering or file acquisition. File
+parameter metadata participates in `MCP_TOOLS_REVISION`.
+
+`workspace-references.mjs` supplies canonical typed addresses for workspaces, selected
+controllers, repository targets, operations, processes, files and cursors. They are not
+credentials. A workspace reference retains its observed generation; mutation never
+refreshes that precondition silently. Local operation routing resolves the exact saved
+space and creation marker through `/v1/controller/workspaces/resolve`, without native
+inventory or all-resource snapshots. Current authority is checked before and after
+asynchronous resolution.
+
+Adapters mint a fresh original request only for a new intention. The owner records
+safe kind/description metadata in its existing admission journal before effects.
+`operation_find` reads that metadata without effectful collection, source reopening or
+new admission; `operation_get` inspects only the selected original. Controller discovery
+composes its lifecycle journal, delivery journal and retained private-repository creation
+records with explicit cursor domains. Missing or unavailable originals never authorize
+automatic replay. Discovery returns only the operation reference, state and safe
+descriptor; the selected original outcome is available through `operation_get`.
+The shared `@mcp-moira/shared/workspace-operation-state` classifier retains the
+closed credential/vendor and owner-custody uncertainty codes even when the stored
+private receipt is completed. A confirmed refusal, including `LOCAL_CONTROL_PENDING`
+for a conflicting prior settings operation, remains completed rather than making
+the refused request uncertain. Completed semantic results carry
+`outcome:{ok:true,result}|{ok:false,error}`; unconfirmed state and failed outcomes remain
+MCP errors rather than successful effect claims.
+
+Private-repository `operation_resume` is explicit progression from the original saved
+input through the existing creation engine. Read/find remain pure. Application is proved
+from the exact original controller admission and applied grant, not a copied cloud result.
+An absent record cannot recreate the input, and completed proof requires no new provider
+creation or native observation.
+
+Public workspace/controller publication routes stream the original immutable owner bytes
+without cloud transfer storage. The shared `CodespaceObservabilityService` computes readiness
+for website, administration, backend/MCP health and workspace discovery;
 the unauthenticated `/api/health` and MCP `/health` surfaces carry only its public projection
 (`state`, `provider`, `degraded`) from a fresh configuration-only projection. Its states are `disabled`, `misconfigured`
 and `ready`; only misconfiguration degrades public health. No connector probe,
@@ -625,9 +660,11 @@ the always-on Local controller owns physical VM lifecycle, policy, settings and 
 `LocalResourceRepository` stores the immutable `localResourceIdentity` route and its
 retirement witness; `codespaceLocalResourceBinding` binds it to the approved device,
 repository and profile. These records contain no physical machine description,
-lifecycle state, deadlines or operation outcomes. Local services return
-`CodespaceSummaryView` directly from the current owner observation, including the
-admitted machine and lifecycle generation. Missing observation refuses as unavailable
+lifecycle state, deadlines or operation outcomes. Local domain services derive
+`CodespaceSummaryView` from the current owner observation, including the
+admitted machine and lifecycle generation. Semantic adapters whitelist those facts and
+return captured workspace/operation references instead of manual generation/request fields.
+Missing observation refuses as unavailable
 or retains the original pending request identity; it cannot certify a cached running
 or stopped state. A summary without an observed machine carries `machine: null`.
 
@@ -679,7 +716,8 @@ independently of guest startup. Disabled agent work does not remove approved man
 
 An explicit Local `resume_setup` lifecycle intent continues incomplete preparation
 on the same known VM, disk and admitted machine, guarded by the observed lifecycle
-generation and a fresh original request identity. The host CLI exposes `resume-setup`.
+generation captured in the returned workspace reference and an adapter-owned fresh
+original identity. The host CLI exposes `resume-setup WORKSPACE_REFERENCE`.
 The original creation receipt remains immutable. Unknown creation requires original
 receipt collection; unknown guest settlement requires local custody recovery before
 setup can continue. Bounded setup reasons distinguish an unproved repository,
@@ -779,15 +817,16 @@ machine. Unavailable owner observations carry no cached current policy.
 See [API](API.md#workspace-streaming-transport) and [Codespaces](CODESPACES.md).
 
 `LocalWebControl` applies owner-requested settings only within a separately pinned
-local approval. The browser sends a fresh ws1 request ID, device-generation and revision
+local approval. The settings browser sends a fresh ws1 request ID, device-generation and revision
 guards. Owner journals retain admitted settings separately from applied policy;
 `revision` and `appliedRevision` distinguish them. Policy, applied revision and delegated
 permission publish together, and CLI/web writers share a private cross-process settings
 gate. Controller settings establish physical owner admission before entering that gate;
 CLI policy writers use the same settings exclusion. Known rejection permits a corrected next
 revision; unresolved physical work blocks replacement. An offline owner refuses new remote
-writes rather than queuing them. `pendingRequestId` and resource `pending_request_ids`
-come from the original owner journal, allowing collection after reload without replay.
+writes rather than queuing them. `pendingRequestId` and private resource `pending_request_ids`
+come from the original owner journal. Ordinary resource projections return
+`pending_operations` references for collection after reload without replay.
 Historical collection preserves the original outcome; a typed current projection is
 included only when its result validates against the current snapshot schema. Consumers
 read current state separately. The controller keeps approved management available while
@@ -872,8 +911,15 @@ before provider submission. Pure original-ID collection cannot mint or refresh;
 confirmed absence never automatically remints. Unknown issuance and retained
 custody/disposal uncertainty keep that identity. Live-stream collection is
 metadata-only; orphan retirement requires the existing exclusive owner-absence
-proof. Local `status --json` exposes `credentialRequests`, and `collect` inspects
-the exact security receipt before controller lifecycle receipts.
+proof. Local `status --json` exposes token-free `credentialRequests`; trusted broker
+collection addresses the exact retained security receipt independently of ordinary
+controller operation references.
+
+The human local CLI also accepts `collect MAINTENANCE_OR_SECURITY_REQUEST_ID` without
+cloud pairing. It inspects the original maintenance or security journal; an unknown
+ID returns absent rather than falling back to controller lifecycle admission. Security
+collection cannot issue credentials again, although existing orphan retirement still
+requires and uses its exclusive owner-absence proof.
 
 Guest Git author identity is repository-local, supplied by owner settings or the
 verified GitHub account's noreply identity. An empty remote can create an unborn
@@ -950,8 +996,12 @@ its required worker-ownership capability is unsupported. `run` starts or connect
 service and returns; client exit does not stop VMs. On service restart, known intended-running
 environments are observed or prepared under current policy without replaying commands. After host
 reboot, login registration needs original storage, runtime and available credentials; guest boot
-identity and pre-reboot process continuity cannot be preserved. Host create/start/resume-setup/stop/remove call that private controller;
-collect reads the original ws1 receipt without effects. Existing owner-admitted VM work
+identity and pre-reboot process continuity cannot be preserved. Host create names an approved
+repository and branch; start/resume-setup/stop/remove consume returned workspace observations through that
+private controller. `collect` consumes an operation reference without effects, while `operations`
+reads the selected controller's retained descriptors. Guest commands/files remain at the
+workspace CLI or MCP purpose tools; the host CLI does not proxy them through an SDK shell.
+Human service maintenance retains its separate original request protocol. Existing owner-admitted VM work
 can continue under current local grants and enabled permission when cloud transport is unavailable; confirmed
 authority refusal is not offline permission. Fresh create registers an authenticated cloud
 route before Git/bootstrap and SDK effects and requires initial Git credential authority.
@@ -1851,6 +1901,13 @@ interface ValidationError {
 ### UserNotificationHandler
 
 Workflow binary notifications use the same owner delivery primitive. Inline base64 is decoded only at the owner; progress descriptors are rendered there with the run frame's trusted URL. A stable original ID derives from the executor invocation and visit identity so a node retry cannot silently become another delivery. Task identity and execution revision are checked again before provider dispatch. Optional `attachProgressImage` failure records its omitted/refused/unconfirmed state and leaves ordinary text delivery available without an owner. An explicit attachment failure does not claim file delivery. Text notifications, trusted lock PINs, reminders and registration notices retain their ordinary text paths.
+
+Owner-backed notification results expose the original `operation` reference, including
+on refused, uncertain or malformed delivery replies and optional-image fallback
+failure. The reference is derived from the selected owner before dispatch, so it can
+address the original after a lost reply. Raw communication request IDs and device or
+codespace routing coordinates are not handler result fields. Explicit collection uses
+that reference and preserves the original delivery outcome without sending again.
 
 - **Auto-execution** - renders the portable message and invokes the shared user communication service
 - **Notification frame** (`services/notification-frame.ts` over `utils/notification-text.ts`,

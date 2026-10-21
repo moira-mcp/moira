@@ -1,4 +1,5 @@
 import { beforeAll, describe, expect, test } from "@jest/globals";
+import { encodeReference } from "@mcp-moira/shared/workspace-references";
 import { dockerExecSync } from "../utils/docker-command.js";
 import { createTestUserViaApi } from "../utils/mcp-auth.js";
 import { getAdminCredentials, getTestBaseUrl } from "../utils/test-config.js";
@@ -52,16 +53,46 @@ describe("codespace management on a default-disabled installation", () => {
     expect(JSON.stringify(body)).not.toMatch(/accessToken|refreshToken|clientSecret|vaultKey/);
   });
 
-  test("refuses creation and lifecycle before any provider contact", async () => {
-    const create = await fetch(`${baseUrl}/api/integrations/github/codespaces`, {
+  test("refuses an unowned controller and rejects legacy mutation inputs", async () => {
+    const create = await fetch(
+      `${baseUrl}/api/integrations/github/codespaces/operations/workspace_create`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Cookie: userCookie },
+        body: JSON.stringify({
+          target: encodeReference("target", {
+            provider: "github-codespaces",
+            repositoryId: "162",
+            controller: {
+              deviceId: "00000000-0000-4000-8000-000000000001",
+              connectionId: "00000000-0000-4000-8000-000000000002",
+            },
+          }),
+          branch: "main",
+        }),
+      },
+    );
+    expect(create.status).toBe(401);
+    const body = await create.json();
+    expect(body.error.code).toBe("LOCAL_UNAUTHORIZED");
+
+    const legacy = await fetch(`${baseUrl}/api/integrations/github/codespaces`, {
       method: "POST",
       headers: { "Content-Type": "application/json", Cookie: userCookie },
       body: JSON.stringify({ repository_id: "162", ref: "main" }),
     });
-    expect(create.status).toBe(503);
-    const body = await create.json();
-    expect(body.error.code).toBe("CODESPACE_NOT_CONFIGURED");
-    expect(body.settings_url).toMatch(/\/settings#integrations-github$/);
+    expect(legacy.status).toBe(404);
+
+    const invalid = await fetch(
+      `${baseUrl}/api/integrations/github/codespaces/operations/workspace_create`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Cookie: userCookie },
+        body: JSON.stringify({ repository_id: "162", ref: "main", request_id: "manual-id" }),
+      },
+    );
+    expect(invalid.status).toBe(400);
+    expect((await invalid.json()).error.code).toBe("CODESPACE_RESOURCE_INVALID");
 
     const unauthenticated = await fetch(`${baseUrl}/api/integrations/github/codespaces`);
     expect(unauthenticated.status).toBe(401);

@@ -27,6 +27,8 @@ import { validatedInstalledProxy } from "./tls-transport.mjs";
 import { originalGitOrigin, configureOwnerGit } from "./github-config.mjs";
 import { startWorkspaceGitBroker, brokerPullRequest } from "./github-broker.mjs";
 import { credentialWorkspaceStore } from "./credential-workspace-store.mjs";
+import { isOwnerSelector } from "../../shared/src/codespaces/workspace-references.mjs";
+import { canonicalJson } from "../../shared/src/utils/canonical-json.ts";
 import { createOwnerCommunicationTransport } from "./communication-transport.mjs";
 import {
   createWorkspaceRequestId,
@@ -235,6 +237,10 @@ export async function configureWorkspace(input) {
     (!input.remote && input.mode !== "local-only")
   )
     throw new Error("Invalid workspace bootstrap configuration");
+  const previous = await privateJson(configurationPath).catch((error) => {
+    if (error.code === "ENOENT") return null;
+    throw error;
+  });
   if (input.remote) {
     workspaceBootstrapCredentialSchema.parse(input.remote);
     const origin = new URL(input.remote.origin);
@@ -300,6 +306,18 @@ export async function configureWorkspace(input) {
     throw new Error(
       "Local-only workspace requires its installed Local network and repository binding",
     );
+  const ownerSelector =
+    input.ownerSelector ??
+    (!proxy && input.remote ? { kind: "github", resourceId: input.remote.resourceId } : undefined);
+  if (
+    !isOwnerSelector(ownerSelector) ||
+    (proxy
+      ? ownerSelector.kind !== "local"
+      : ownerSelector.kind !== "github" || ownerSelector.resourceId !== input.remote?.resourceId) ||
+    (previous?.ownerSelector &&
+      canonicalJson(previous.ownerSelector) !== canonicalJson(ownerSelector))
+  )
+    throw new Error("Workspace original owner selector changed or is unavailable");
   if (
     input.expectedOrigin === undefined &&
     (proxy || !input.remote) &&
@@ -317,10 +335,6 @@ export async function configureWorkspace(input) {
         : {}),
     });
     if (selection.resourceId !== input.remote.resourceId) throw unprovenRebind();
-    const previous = await privateJson(configurationPath).catch((error) => {
-      if (error.code === "ENOENT") return null;
-      throw error;
-    });
     if (
       previous &&
       (previous.binding.root !== input.root ||
@@ -354,6 +368,7 @@ export async function configureWorkspace(input) {
   await publish(configurationPath, {
     version: 1,
     binding,
+    ownerSelector,
     environmentIdentity,
     ...(proxy ? { proxy } : {}),
     ...(!input.remote ? { remoteState: input.remoteState ?? "unconfigured" } : {}),
@@ -564,6 +579,7 @@ async function serve() {
   }
   if (
     config.version !== 1 ||
+    !isOwnerSelector(config.ownerSelector) ||
     config.releaseIdentity !== release ||
     config.environmentIdentity !== (await life(config.binding))
   )
@@ -645,6 +661,8 @@ async function serve() {
         next.releaseIdentity !== release ||
         next.environmentIdentity !== config.environmentIdentity ||
         JSON.stringify(next.binding) !== JSON.stringify(config.binding) ||
+        !isOwnerSelector(next.ownerSelector) ||
+        canonicalJson(next.ownerSelector) !== canonicalJson(config.ownerSelector) ||
         next.proxy !== config.proxy ||
         JSON.stringify(next.github) !== JSON.stringify(config.github) ||
         next.environmentIdentity !== (await life(next.binding))
@@ -683,6 +701,7 @@ async function serve() {
       socketPath,
       stateRoot,
       binding: config.binding,
+      ownerSelector: config.ownerSelector,
       releaseIdentity: release,
       searchExecutable: fileURLToPath(new URL("../runtime/bin/rg", import.meta.url)),
       sourceProxy: config.proxy,

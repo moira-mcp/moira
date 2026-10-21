@@ -139,7 +139,10 @@ export async function startCloudProcess(
         void (async () => {
           if (message.action === "tool")
             return runWithMCPContext({ userId: config.userId, agent: "chatgpt" }, () =>
-              mcp.callTool({ name: "codespace", arguments: message.request }),
+              mcp.callTool({
+                name: String(message.request.tool),
+                arguments: message.request.request as Record<string, unknown>,
+              }),
             );
           if (message.action === "submit")
             return owner.submit(

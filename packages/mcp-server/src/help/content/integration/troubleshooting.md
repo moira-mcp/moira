@@ -300,83 +300,57 @@ The engine logs a warning naming the residual placeholder and the `executionId`.
 
 ### Editing files while a command runs
 
-A running command, including a background development server, does not itself block codespace
-`write`, `upload` or `apply_patch`. Keep the expected file
-existence, size and digest guards; if another writer changes that version, reread and reconcile
-the edit before retrying. Pending file-operation journal entries do not serialize new work. Only
-the guest's file commit and recovery are serialized, with the lock released when its owning
-process dies. A failed edit does not require stopping the development server. If recovery conflicts
-with a later edit, preserve the current files and retained recovery data rather than overwriting
-the later edit or deleting its journal.
+A running command or development server does not itself block `file_create`, `file_replace`,
+`file_patch` or `file_upload`. Supply expected complete text or a returned file reference for
+replacement. If another writer changes the file, reread and reconcile before a new explicit edit.
+Do not calculate a digest of a selected byte range as a whole-file precondition. Commit and
+recovery use the guest's confined atomic transactions; recovery never overwrites a later edit.
 
 ### Large files and rejected file operations
 
-Use `stat` for metadata and `read` with `offset` and `length` for selected bytes.
-Use the returned whole-file version for guarded edits; a digest of selected bytes is
-not the version of the whole file. Reading at EOF returns an empty range; an offset
-beyond EOF is refused. Choose the whole-file bound explicitly when downloading or
-previewing an image. Downloads support empty files; image preview requires a valid,
-nonempty PNG or JPEG.
-Preview checks complete PNG/JPEG structure without fixed byte, edge or pixel-count ceilings.
-Optional `max_bytes` is the caller's whole-image bound, not permission to return a prefix.
-Container validation does not fully decode pixels.
+Use `file_stat` for metadata and `file_read` with line windows or its returned cursor for text.
+Continuation preserves complete UTF-8 characters; Cyrillic or emoji split across an internal
+byte boundary is not a binary file. Use `file_download` for complete binary bytes. Name and MIME
+are derived when omitted; no preliminary stat is required. Empty downloads are supported.
+`file_preview` returns complete valid PNG/JPEG content, not SVG or an image prefix. Its structural
+validation is not proof that a browser ran or that the screenshot is visually correct.
+Optional `max_bytes` is the caller's selected bound, not a shared transfer quota.
 
-The service does not impose fixed byte, concurrency or duration quotas on commands
-and files. Physical storage, current owner permissions, repository/path
-safety, expected versions and caller-selected bounds still apply. Binary transfers
-stream directly; increasing a bound does not bypass these checks.
+Commands and files remain subject to storage, current owner authority, repository/path safety and
+expected-content checks. Native descriptors stream to the owner without base64. The direct
+`~/.local/bin/moira-workspace` CLI uses the same Unix owner without requiring a cloud connection;
+fixed bootstrap updates the service in place without replacing the VM or its disks.
 
-For commands and file mutations, preserve the original
-`ws1-<lowercase UUID>` request identity. The same identity with unchanged input
-refers to the same work; changed input is refused. Plain legacy UUIDs are not
-converted into new work. After a lost reply, inspect the original request and the
-affected files before deliberately requesting another effect. An unknown outcome
-does not prove that no effect happened.
+`communication_deliver` accepts a native file at a selected controller;
+`communication_deliver_publication` sends an owned `file.reference_id`. The optional `channel`
+selects a configured channel, never a recipient. Publication does not send a message, delivery
+neither consumes nor renews it, and expiry requires a separate intentional publication.
+File-capable extensions use their declared binary transport.
 
-Inside a prepared guest, use `~/.local/bin/moira-workspace --help` for the direct
-Unix-socket CLI. It uses the same service as MCP and works without a cloud connection.
-Fixed provider bootstrap installs or refreshes the service in place; it does not
-replace the VM or move its disks. No separate file-client setup is required. The
-service has its own Node runtime and does not depend on the project's Node version.
+Keep the returned `operation`, including an attachment notification's workflow result.
+`operation_get({ reference })` never uploads, renders or sends again. A closed uncertain owner
+outcome projects as `unconfirmed` even if its private receipt is terminal; a confirmed refusal
+remains completed with `outcome.ok:false`. One channel can remain uncertain after another succeeded.
+Discovery returns references and safe metadata, not full outcomes; collect the selected original
+explicitly. If the first reply was lost, use `operation_find` at the selected owner and choose a
+candidate deliberately. Neither one candidate nor no candidate proves which effect occurred.
+Never create a new delivery merely because collection is absent, unavailable or unconfirmed.
 
-`communication` `deliver-file` requires a fresh `request_id` in `ws1-<lowercase UUID>`
-form and exactly one source: `referenceId` containing the owned `file.reference_id`, or
-the host's native descriptor in `file`. An optional `channelId` selects a configured channel.
-Download publishes an immutable, repeatedly readable file until expiry; it does not send
-a message. An expired publication needs a separate intentional publication, not replay of
-an uncertain delivery. File-capable extensions use their declared streaming binary transport.
-
-For `COMMUNICATION_OWNER_UNAVAILABLE`, restore the original paired controller or workspace
-service. Select `device_id` when several paired controllers are eligible. A saved route or
-receipt is not a live connection. Progress-image mint/read returns HTTP 503 for this condition;
-ordinary text remains independent.
-
-For a materialize archive, HTTP 409 with `COMMUNICATION_OUTCOME_UNCONFIRMED` means collect through
-that same grant URL; it cannot resubmit or choose a different owner. HTTP 422 reports the original
-owner error, and HTTP 503 reports an unavailable controller. Do not complete the workflow step
-without its files. A fresh `current_step` presentation is a separate explicit attempt;
-the 256 KiB `session materialize` text fallback requires no file owner.
-
-For `COMMUNICATION_OUTCOME_UNCONFIRMED` or `WORKSPACE_OUTCOME_UNCONFIRMED`, retain the
-original ID and returned owner identity. Call
-`communication({ action: "operation", request_id, device_id })`, or use `codespace_id`
-instead for a workspace owner. Collection never uploads, renders or sends again. One channel
-stage can remain uncertain while another succeeded; a completed receipt may contain an
-uncertain error. Neither absence nor uncertainty permits an automatic new delivery.
-
-Correct invalid ranges or caller bounds, and reread a concurrently changed file
-before reconciling an edit. Do not bypass path, link/type or expected-version checks.
-For unavailable remote work, inspect resource readiness and the outbound service
-connection; a healthy local CLI distinguishes service availability from cloud routing.
+For `COMMUNICATION_OWNER_UNAVAILABLE`, restore the selected controller or guest route rather
+than choosing a different owner. Ordinary text remains independent. A materialize archive's
+HTTP 409 `COMMUNICATION_OUTCOME_UNCONFIRMED` is collected through the same grant URL; it cannot
+resubmit or change owners. HTTP 422 reports an owner error and HTTP 503 an unavailable controller.
+Do not complete a workflow step without its files. A fresh `current_step` presentation is an
+explicit separate attempt; the `session materialize` text fallback requires no file owner.
 
 ## Local codespaces
 
-Use `ws1-<lowercase UUID>` for `codespace` exec and `codespace_process`
-start. Recover a lost first reply with exec containing `codespace_id` and the
-original `request_id`, or process get with the same identity. A live command may
-return before completion. Lookup and bounded waiting do not repeat or cancel it;
-explicit process stop requests cancellation. Pending cancellation or missing start
-proof is not a confirmed terminal outcome.
+Use `command_run` or `command_run_native` with the returned workspace reference.
+The adapter creates internal request identity; do not manufacture UUIDs or process IDs.
+A live command may return before completion. Use its `operation` for `operation_get`, and its
+`process` for `process_output` or explicit `process_stop`. Observation does not cancel work;
+pending cancellation is not a confirmed physical stop. Deliberately identical commands are
+distinct intentions. An uncontrolled first reply has no automatic deduplication guarantee.
 
 The guest owns command receipts and retained stdout/stderr. Collection requires
 the service and retained guest data; cloud storage does not provide a second copy.
@@ -399,44 +373,27 @@ reconnect the same valid identity without replaying the original operation.
 
 `CODESPACE_AUTHORIZATION_REQUIRED` requires restoring actual account, device or
 repository access in Settings. The host CLI supports `create OWNER/REPO --ref BRANCH`,
-`start SPACE_ID`, `resume-setup SPACE_ID`, `stop SPACE_ID`, `remove SPACE_ID --confirm` and `collect REQUEST_ID`
-through the running private controller; raw host execution is unsupported. Fresh create
-requires live cloud route registration and initial Git authority. Already admitted VMs can
-start, stop or be cleaned up offline under applicable current owner authority. Starting requires
-enabled work permission; owner-confirmed cleanup does not enable it.
+`start WORKSPACE_REF`, `resume-setup WORKSPACE_REF`, `stop WORKSPACE_REF`,
+`remove WORKSPACE_REF --confirm`, `collect OPERATION_REF` and `operations CONTROLLER_REF`
+through the running private controller. Raw host execution is unsupported. Privileged maintenance
+and security requests retain their separate `collect ORIGINAL_REQUEST_ID` path; this is not
+raw lifecycle submission. Fresh create requires cloud registration and initial Git authority.
+Already admitted VMs remain subject to current local authority offline.
 
-For `repository_add`, inspect applied consent in Settings, discover the device with `local_devices` and reuse the original
-`request_id` with the same device/repository. Pending returns no usable local repository identity;
-rejected or changed account/grants require owner action. The repository must be private, owned by
-the connected personal GitHub account and exposed by the App installation. Another pending owner
-revision must settle before admission. An admission refusal does not permit the agent to broaden
-consent. An existing local grant is discovered, not added twice.
+Use `workspace_targets` to obtain the selected controller and personal installation references.
+`repository_admit` requires current applied existing-private consent and an App-accessible
+repository owned by the connected personal account. It cannot broaden rights; a pending settings
+revision must settle first. `repository_create` requires new-private consent. Organization
+installations and public creation are unsupported.
 
-For `repository_create`, choose a personal `installation_id` from `local_devices`; organization
-installations and public creation are unsupported. A discovery warning directs the owner to
-GitHub connection/installation settings. Repeat the same device/request/name/installation payload.
-`setup_required` preserves any confirmed repository ID while permissions/access are repaired;
-it does not mean creation failed or authorize another create. `unknown` inspects the retained
-description marker instead of repeating POST. Another same-name repository or no observed repository
-cannot settle that ambiguity. Keep the marker while unresolved; other repository requests are
-not blocked by a repository-count quota.
-Only the actual installation grant and confirmed owner admission authorize codespace creation.
-MCP calls the live owner and returns `repository_id` after admission; recovery preserves the original `request_id`.
-The owner admission API retains `error.stage` and a reported `error.provider_status`; compact MCP
-errors carry safe repair guidance and the original `request_id`. Follow that guidance and resume
-the same complete creation request. If
-`stage: "local_admission"` returns `rejected`, the repository can already exist. Restore its
-original grant in Settings, or use `repository_add` with the retained `github_repository_id`
-and a fresh `request_id` if existing-private consent permits it. An unchanged rejected admission
-receipt stays rejected; it does not authorize another GitHub create.
-
-`preview_image` reads the current repository path as a complete PNG/JPEG within the caller's
-selected whole-file bound. SVG, animated PNG, malformed,
-truncated or oversized framing is refused. Use `download` for other binary files. Browser installation
-and actual browser compatibility remain guest-runtime questions; network availability and
-successful image projection do not establish that a browser ran or that its screenshot is correct.
-The ordinary call waits for complete bytes and returns native image content; an unconfirmed outcome
-returns an error, never successful pending image content.
+Preserve the returned original operation. `operation_get` is read-only; after fixing permissions,
+installation access or admission, `operation_resume` explicitly continues only the original
+private-repository creation. It does not restart commands or create a replacement repository.
+`setup_required` can retain a confirmed repository while admission remains incomplete.
+Unknown creation checks the retained description marker; an unrelated same-name repository or
+missing observation cannot settle it. Do not remove the marker while unresolved.
+A rejected admission can leave the repository on GitHub: restore its grant in Settings or request
+existing-private admission when the owner permits it. A rejection does not authorize another create.
 
 Use **Settings → Development → Local computers** and the companion's `status` to distinguish pending
 browser approval, revocation, an offline computer and disabled local work. An offline row is
@@ -452,14 +409,15 @@ delete. It collects the original lifecycle receipt when its identity is known, o
 performs a read-only refresh. It never resubmits start/stop/delete or creates a replacement VM.
 Errors and loaders stay on the affected card.
 **Delete** is available with confirmation during pending creation, cleanup or uncertain
-local state when a current summary supplies the owner generation. An unavailable identity has
-no lifecycle controls. Deletion addresses only the same owned codespace and finishes after confirmed absence.
+local state when a current summary supplies a returned workspace reference. Unavailable identities
+have no lifecycle controls. Deletion targets that same captured observation and completes only
+after confirmed absence. Owner cleanup needs active pairing, local web control and a reachable
+owner, but not agent delete permission or enabled work; it changes neither permission.
+MCP deletion retains its agent grant and enabled-permission checks.
 
-Owner cleanup requires the active paired computer, current local web-control approval and a
-running, reachable companion. It does not require agent deletion permission or enabled work,
-and changes neither permission. MCP deletion retains its agent grant and
-enabled-permission checks. A deletion refusal remains visible inside the confirmation dialog and ends
-the spinner; **Cancel** is available while a separate read refreshes the current generation.
+A refusal stays in the confirmation dialog and ends its spinner. **Cancel** remains available.
+A background refresh does not replace the captured delete target. After inspecting a different
+observation, make a new explicit confirmation; an automatic retry must not refresh preconditions.
 An operation's 403 refusal does not sign out the owner; session expiry and account admission
 errors retain their authentication handling. Do not clear journals, edit database state or create
 a replacement to bypass an unresolved removal.
@@ -471,51 +429,35 @@ observation preserves the verified state/time and does not prove absence. Health
 still refresh and run. Physical startup alone does not mean guest preparation completed. A local
 `created` VM remains actionable but needs independent native settlement before stop completion;
 an SDK error does not itself complete a local stop. Before Local create/start/stop/delete,
-choose a `request_id` in `ws1-<lowercase UUID>` form; start/stop/delete also require the observed
-resource `generation`. A stale value returns `CODESPACE_GENERATION_CONFLICT`; refresh and inspect
-the original outcome before a new explicit action. Collect through
-`codespace({ action: "operation", device_id, request_id })`, even if create returned no
-codespace ID. Owner receipts report `absent`, `accepted`, `completed` or `unconfirmed`.
-Neither `absent` nor newer metadata permits automatic replay. Owner-backed `pending_request_ids`
-restore collection after a reload without a cloud/browser dispatch queue.
+use the returned target/workspace references unchanged. Lifecycle conflicts require a fresh
+observation and explicit decision, not an automatic refreshed-precondition retry.
+`operation_get` collects the retained original; `pending_operations` restores collection after
+reload. A lost first reply instead offers `operation_find` on the selected controller, with
+explicit candidate selection. `absent` or newer metadata does not re-enable an uncertain mutation.
 
-Local cloud registration stores routing identity, not a current machine, state or lifecycle
-generation. If the owner has no resource observation, `get` returns
-`CODESPACE_PROVIDER_UNAVAILABLE`; reconnect and inspect the same owner rather than treating the
-registration as a ready VM. `list` keeps observed summaries in `codespaces` and failed owned
-identities in `unavailable`, each with its safe `error.code` and no fabricated state or generation.
-One unavailable resource does not hide healthy peers. Provider-wide failures appear separately
-in `provider_errors`, including when every provider fails; they do not prove an empty inventory.
-Settings retains unavailable identities read-only. Pending originals without a resource observation return
-`CODESPACE_LOCAL_CREATION_UNKNOWN` with `request_id`, `device_id` and `codespace_id`. Use those
-identities to collect the owner receipt. A receipt can be completed while its contained error
-still reports an uncertain native outcome; explicit repetition preserves that uncertainty and
-does not create another VM. Do not substitute the stable guest route generation for the missing
-owner lifecycle generation. A nullable `machine` in a successful summary, including confirmed
-deletion, is not a default profile or permission to start.
+Cloud registration is a route, not a machine observation. `workspace_observe` can report
+`CODESPACE_PROVIDER_UNAVAILABLE` without inventing state or generation. `workspace_list` keeps
+unavailable owned identities read-only alongside healthy peers, with safe error codes and separate
+provider failures. All-provider failure is not an empty inventory. A pending unknown creation
+remains collectable as its original operation, not a replacement VM. A nullable machine is not a
+default profile or permission to start.
 
-| Diagnostic                                 | Owner action                                                                                                                                                                                                                                     |
-| ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `CODESPACE_LOCAL_CREATION_UNKNOWN`         | Check the same codespace again. Its physical outcome is unconfirmed; do not create a replacement.                                                                                                                                                |
-| `CODESPACE_LOCAL_SETUP_INCOMPLETE`         | Repair the reported prerequisite, then explicitly resume setup of the same known VM with a fresh request and current generation. Ordinary start and custody `recover` do not resume preparation. Preserve the original create outcome and files. |
-| `CODESPACE_LOCAL_PROTOCOL_ERROR`           | Coordinate matching server/companion builds and inspect saved-state compatibility. Preserve identity and journals.                                                                                                                               |
-| `CODESPACE_LOCAL_RUNTIME_ERROR`            | Inspect the local runtime's diagnostics, repair that runtime and check the same codespace again. Shutdown is not implied.                                                                                                                        |
-| `CODESPACE_LOCAL_DELETE_APPROVAL_REQUIRED` | Confirm deletion of the same codespace in Settings → Development → Local computers with active local web control. Permanent agent deletion permission is not required for owner cleanup.                                                         |
+For `CODESPACE_LOCAL_SETUP_INCOMPLETE`, repair the reported prerequisite and choose **Resume setup**,
+`workspace_lifecycle({ workspace, action: "resume_setup" })`, or host
+`resume-setup WORKSPACE_REF`. This prepares the same known VM and preserves its files and original
+create outcome. Ordinary Start and custody `recover` do not resume setup.
+The optional `setup_failure` guides preserved-root inspection (`repository_unproven`),
+Python3/libc/exclusive-publication prerequisites (`prerequisite_unavailable`), repository access/ref
+repair (`repository_checkout_failed`) or fixed configuration diagnostics (`configuration_failed`).
+Unknown creation or guest settlement still requires original collection, not adoption by name.
+An owner-confirmed custody acknowledgement preserves incomplete setup; explicitly resume it afterward.
 
-Use **Resume setup**, Local `resume_setup`, or host `resume-setup SPACE_ID`. The optional
-`setup_failure` gives the remedy: inspect the preserved root for `repository_unproven`; provide
-Python3/libc/filesystem exclusive-publication support for `prerequisite_unavailable`; repair access
-or the requested ref for `repository_checkout_failed`; inspect fixed configuration diagnostics for
-`configuration_failed`. Setup preserves occupied roots and user changes. Unknown runtime creation
-or guest settlement requires original-result collection, not adoption or a replacement.
+For `CODESPACE_LOCAL_PROTOCOL_ERROR`, coordinate matching server/companion builds and preserve
+saved identity and journals. For `CODESPACE_LOCAL_RUNTIME_ERROR`, repair the actual runtime and
+observe the same workspace again; the error does not imply shutdown.
+`CODESPACE_LOCAL_DELETE_APPROVAL_REQUIRED` requires owner confirmation in Settings → Development →
+Local computers with active web control, not a permanent agent-delete grant.
 
-After a confirmed refusal and repair, an explicit lifecycle action can create a fresh guarded
-attempt. Owner confirmation can also replace a local delete intent that retained only state
-checks, with no destructive dispatch. An accepted delete with an unknown outcome keeps its
-original generation and identity. A repeated active request or an unknown outcome still uses its
-retained intent;
-it does not dispatch a duplicate effect. Read-only inspection can recover exact creation identity
-from the owned durable manifest after a reply expires; an unavailable inventory is never absence.
 With locally approved `web-control`, request settings within the resource ceilings in the device editor.
 Pending means the computer has not applied the request; rejected shows
 the refusal and retains the last successfully acknowledged revision. A failed application can
@@ -548,11 +490,11 @@ On the Local host use `moira-local status --json` and `moira-local collect ORIGI
 Pure collection cannot mint a token, replay Git or cancel a live stream; absence does not
 authorize automatic reissuance. A refused issuer never enables a host-token fallback.
 
-For an unknown PR create, preserve its original PR `request_id` separately. Collect with
-`pull_request_create` and only `codespace_id`/`request_id`, then find the same head/base before
-considering another create. CLI collect-only is `moira-workspace pull-request-create --request-id ID`.
-An error before vendor dispatch can mean the PR was not started while credential custody remains
-uncertain; a post-dispatch unknown remains a PR error with both recovery identities.
+For an unknown PR create, retain its operation and collect with `operation_get` or guest
+`moira-workspace get OPERATION_REF`. Use `pull_request_read` or `pr-find HEAD BASE` to inspect
+that head/base before a deliberate new create. Do not call `pull_request_create` again to collect.
+A pre-dispatch PR refusal can coexist with uncertain credential custody; follow the separate
+privileged security collection without issuing another token.
 
 Account block or resource retirement can retain a scoped-disposal error without provider stop
 completion. Account deletion returns `ACCOUNT_CREDENTIAL_RETIREMENT_PENDING` or
@@ -700,7 +642,7 @@ use the maintenance pause above, then resume that original maintenance ID and us
 Use the same `--state PATH`. Ordinary stop/start requires no separate counter-recovery step.
 If the acknowledged unknown arose during initial preparation, recovery preserves its original
 operation and leaves setup incomplete. Repair the reported prerequisite, then explicitly
-`resume-setup SPACE_ID` on the same known VM; do not treat acknowledgement as completed setup
+`resume-setup WORKSPACE_REF` on the same known VM; do not treat acknowledgement as completed setup
 or permission for ordinary start.
 `npm run local -- recover --confirm` is the separate
 disabled-device orphan-shutdown acknowledgement. Neither deletes codespace data or authorizes

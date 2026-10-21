@@ -18,6 +18,7 @@ export interface DirectoryIdentity {
 }
 export interface ExpectedFile {
   exists: boolean;
+  identity?: FileIdentity;
   size?: number;
   sha256?: string;
 }

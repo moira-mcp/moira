@@ -2,7 +2,7 @@
 
 This reference describes Moira's provider-neutral codespace control plane and
 the GitHub Codespaces and Moira Local providers. A codespace is a persistent,
-user-owned development environment addressed by an opaque codespace ID. It is
+user-owned development environment selected through a returned workspace reference. It is
 not a chat session: Moira does not receive or store a ChatGPT conversation ID,
 and different authorized clients may reuse the same codespace.
 
@@ -13,7 +13,7 @@ collaboration happens through version-control branches in the repository.
 GitHub authorization belongs to the authenticated website. Agents do not
 receive provider credentials, OAuth operations, SSH configuration or lifecycle
 capabilities. Agents reach codespaces through the authenticated MCP
-`codespace` and `codespace_process` tools and the direct workspace CLI described below; the website owns the GitHub connection and
+purpose-specific workspace, command, file and process tools and the direct workspace CLI described below; the website owns the GitHub connection and
 offers the same basic codespace management (list, create, start, stop, confirmed
 delete and GitHub adoption) over the same services. Cloud checks current account, repository and
 assigned-device authority. Physical lifecycle and its original-operation journal belong to the
@@ -172,14 +172,16 @@ control-plane state and active/staged installation selection. Local service read
 that every VM or the remote route is available. Reconnection uses the owner's durable original
 request journal, so a lost response does not authorize redispatch.
 
-Before Local create/start/stop/delete, the caller chooses a `request_id` in
-`ws1-<lowercase UUID>` form. Start/stop/delete also send the generation observed for that
-resource. This lifecycle generation is distinct from its stable Git routing generation.
-Collect the original receipt through `codespace({ action: "operation", device_id,
-request_id })`, including when create returned no codespace ID. The owner reports `absent`,
-`accepted`, `completed` or `unconfirmed`; collection never repeats the effect. Neither
-`absent` nor a newer resource snapshot authorizes automatic replay. A new explicit action
-uses a new identity after the original outcome and current state have been inspected.
+Select a returned target with `workspace_targets` for creation, or a workspace observation with
+`workspace_list`/`workspace_observe` for lifecycle work. `workspace_lifecycle` and
+`workspace_delete` consume that captured workspace reference; they do not refresh its comparison
+generation before admission. Internal request identities are minted before effects and returned as
+operation references. Use `operation_get` to collect an original, including creation before a
+workspace reference is available. After a lost first reply, `operation_find` searches the selected
+controller's originals; choose a candidate explicitly. An absent or unavailable result does not
+prove the action never happened and does not authorize automatic replay. A deliberate new call is
+a distinct intent. References grant no authority, and lifecycle generations remain separate from
+stable Git routing generations.
 
 Network failures and server 5xx responses make remote owner state unavailable without
 stopping already admitted work. Offline settings and lifecycle mutations are refused;
@@ -200,9 +202,19 @@ closure and connection-capacity reservation/release. A CONNECT reservation finis
 shutdown is released without destination lookup or connection, so closed service ownership does
 not leave an upstream connection running after shutdown.
 
-The host CLI supports `create OWNER/REPO --ref BRANCH`, `start SPACE_ID`, `resume-setup SPACE_ID`, `stop SPACE_ID`,
-`remove SPACE_ID --confirm` and `collect REQUEST_ID` through the running private controller.
-Choose `--request-id` before mutation; the CLI prints the identity before observing its outcome.
+The host CLI supports `create OWNER/REPO --ref BRANCH`, `workspaces`, `observe WORKSPACE_REF`,
+`start WORKSPACE_REF`, `resume-setup WORKSPACE_REF`, `stop WORKSPACE_REF`,
+`remove WORKSPACE_REF --confirm` and `collect OPERATION_REF` through the running private controller.
+Copy references from its output unchanged. `operations CONTROLLER_REF` discovers original work,
+with optional `--kind`, `--query` and `--cursor` filters. Ordinary lifecycle calls mint their own
+identity and return the original operation reference; caller `--request-id` is reserved for explicit
+maintenance. A stale workspace observation is refused rather than silently refreshed.
+Discovery returns only safe intent metadata and operation references; use `collect` for the full
+original outcome. `collect MAINTENANCE_OR_SECURITY_REQUEST_ID` separately accepts the privileged
+identifiers printed by maintenance or reported in `status.credentialRequests`. It reads the original
+maintenance receipt or observes the original issuer request, including existing recovered-child
+cleanup. It never submits maintenance, issues another credential or collects raw lifecycle IDs;
+an unknown privileged ID is locally absent without requiring pairing.
 Fresh create requires live cloud route registration and initial Git authority. Already admitted
 VMs can start, stop or be cleaned up offline under applicable current owner authority.
 Starting requires enabled work permission; owner-confirmed cleanup does not enable it.
@@ -382,43 +394,46 @@ The MCP caller cannot enable that consent, change
 its account or supply rights. New-private consent authorizes the
 separate `repository_create` action; it does not authorize adding unrelated existing repositories.
 
-`codespace({ action: "local_devices" })` returns owned device IDs, labels, contact status and
-`owner_available`, plus eligible personal GitHub App installations with `installation_id` and owner.
+`workspace_targets` returns selected controller and repository-target references, contact status,
+and eligible personal GitHub App installation references.
 A warning asks for missing GitHub setup while devices remain discoverable. Applied delegation
 and detailed owner permissions are inspected in Settings, not returned in this compact discovery.
-`repository_add` takes that `device_id`, the existing GitHub numeric `repository_id` and a caller-chosen
-UUID `request_id`. It verifies the current GitHub App installation grant, repository ID, owner,
+`repository_admit` takes that `controller` reference and the existing GitHub numeric `repository` ID.
+Its adapter mints the internal admission identity. It verifies the current GitHub App installation grant, repository ID, owner,
 private visibility and required read/push rights. It adds only a private repository owned by the
-connected personal account. Its receipt is `pending`, `applied` or `rejected`; `local_repository_id`
-is null until the exact grant is confirmed by the owner. MCP calls live owner admission and
-returns the usable ID as `repository_id`. Reuse the same request identity and payload after an
-unconfirmed outcome. An existing local grant is reused through discovery rather than added again. Requests
+connected personal account. The retained admission records distinguish pending, applied and rejected
+grants. MCP returns a usable target only after exact owner admission, together with its original
+operation reference. Inspect that reference after uncertainty; do not submit the payload again.
+An existing local grant is reused through discovery rather than added again. Requests
 racing unapplied owner settings are refused.
 Admission reuses its post-GitHub owner observation for the current decision and checks cloud
 registration again. Completion requires the original owner result and its actually applied grant;
 admission metadata alone cannot release a repository-creation reservation.
 
-`repository_create` takes `device_id`, a stable UUID `request_id`, `repository_name` and the personal
-`installation_id` from discovery. The name is 1–100 ASCII letters, digits, underscores, dots or
+`repository_create` takes `controller`, the personal `installation` reference from discovery and
+`name`. The name is 1–100 ASCII letters, digits, underscores, dots or
 hyphens, excluding `.`/`..` and a `.git` suffix. The server creates only an empty private repository
 in the connected user's personal account through fixed GitHub API endpoints; callers cannot select
 another owner or visibility. Current applied new-private consent, enabled work permission and
 device/account identity are checked before the durable submit fence permits an external create.
 
-Resume using the same complete payload. `pending`, `unknown`, `setup_required` and `rejected` are
+Inspect the returned operation with `operation_get`. After repairing a confirmed setup prerequisite,
+`operation_resume` explicitly continues that retained private-repository creation; it reconstructs
+the original input from its existing record rather than accepting another create payload.
+It does not resume commands or repeat an unknown provider create. `pending`, `unknown`, `setup_required` and `rejected` are
 not local authority. A confirmed `github_repository_id` and `full_name` may remain available while
-installation setup is incomplete internally; MCP returns `repository_id` only after confirmed owner admission.
+installation setup is incomplete internally; MCP returns a usable `target` reference only after confirmed owner admission.
 A selected installation receives only that confirmed new repository, then the refreshed actual App
 grant is checked; a successful installation PUT alone does not grant access. Missing permissions
 return Settings/install guidance and preserve the confirmed result for continuation.
 In the owner admission API, `error.stage` names the failed setup step when present (`github_connection`, `device_delegation`,
 `authority_validation`, `repository_lookup`, `repository_create`, `installation_access` or
 `local_admission`); `error.provider_status` carries the GitHub HTTP status. Compact MCP errors carry
-the safe cause and `request_id` for continuation. The returned
+the safe cause and original operation reference for collection or explicit continuation. The returned
 `instruction` describes the applicable repair. A returned rejected local admission preserves
 the already-created repository identity. An unchanged rejected receipt remains rejected: restore
-its original grant in Settings, or use `repository_add` with the retained GitHub ID and a fresh
-`request_id` if existing-private consent permits it. Do not submit another repository creation.
+its original grant in Settings, or explicitly use `repository_admit` with the retained GitHub ID
+if existing-private consent permits it. Do not submit another repository creation.
 
 A lost create response is inspected rather than blindly submitted again. Recovery requires the
 exact saved owner, name, private visibility and server-generated marker in the repository description;
@@ -463,28 +478,29 @@ verified GitHub login and numeric-account noreply address. Host Git configuratio
 and secrets are not forwarded. An existing empty remote can open an unborn
 requested branch: the agent creates files, commits and pushes the first branch,
 then pushes a feature branch. A nonempty remote with an absent ref is refused.
-The MCP `pull_request_create`, `pull_request_get` and `pull_request_find` actions
+The MCP `pull_request_create` and `pull_request_read` tools
 use the owned codespace and approved repository. Only creation requires the
 pull-request permission; reads and exact head/base lookup use read authority.
-Choose a fresh `ws1-<lowercase UUID>` `request_id` before PR creation. After an uncertain
-create, call `pull_request_create` with only `codespace_id` and that original
-`request_id` to collect its receipt, then find by exact head/base before considering
-another create. Collection never creates a PR. Unknown creation is an error and retains
-both its original PR identity and any `security_request_id`; the security identity
-addresses credential issuance/disposal, separately from the PR effect. PR reads require
-no mutation identity. There is no atomic exactly-once guarantee across the owner and GitHub.
+Creation returns an original operation reference. After uncertainty, use `operation_get` on that
+reference, then `pull_request_read` with an exact head/base query before considering another create.
+If the first reply was lost, use `operation_find` on the selected workspace and explicitly inspect
+the matching candidate. Collection never creates a PR. Unknown creation retains its original PR
+reference and any `security_operation` reference; the latter addresses credential issuance/disposal
+separately from the PR effect. Reads take either a PR number or head/base query. There is no atomic
+exactly-once guarantee across the owner and GitHub.
 
 The installed CLI uses the same owner:
 
 ```bash
-moira-workspace pull-request-create --request-id ws1-00000000-0000-4000-8000-000000000001 pr.json
-moira-workspace pull-request-create --request-id ws1-00000000-0000-4000-8000-000000000001
-moira-workspace pull-request-get 7
-moira-workspace pull-request-find feature/change main
+moira-workspace pr-create feature/change main "Describe the change" --body description.md
+moira-workspace get "$OPERATION_REF"
+moira-workspace find --kind pull-request --query "feature/change"
+moira-workspace pr-get 7
+moira-workspace pr-find feature/change main
 ```
 
-`pr.json` supplies `head`, `base`, `title`, and optional `body`/`draft`. The second
-command only collects the first create. CLI errors preserve the owner result;
+Set `OPERATION_REF` to the reference returned by creation; discovery returns candidates when that
+reply was lost. `--body` reads a file or `-` for stdin; `--draft` is optional. CLI errors preserve the owner result;
 credential custody/disposal uncertainty is never reported as confirmed refusal.
 
 ### Local isolation boundary
@@ -558,17 +574,17 @@ retirement witness. It is not a cloud lifecycle journal or desired-state cache. 
 retains the create marker, requested ref, native provisioning custody, measured guest root/life,
 lifecycle generation and pending original request IDs.
 
-Create requires a caller-selected ws1 request ID and an explicit active registered controller, or the
-sole active registered one. Selection does not probe controller snapshots. If several controllers
-are registered, choose one even when only one is reachable; the gateway never substitutes another
-owner. The actual route reports whether the selected controller can receive the request.
+Creation consumes a returned target that binds its repository, provider and selected registered
+controller. Selection never substitutes a different owner. The actual route reports whether that
+selected controller can receive the request; discovery availability is not dispatch authority.
 The controller admits the original operation before invoking fixed provider
 actions. Cloud rechecks account, App grant, numeric repository, personal payer and assignment at
 those boundaries; parent authorization never leaves cloud. The controller receives narrowly scoped
 provisioning authority, installs the packaged service, measures repository/root/release and enrolls
 the outbound guest. Caller commands, SSH configuration or bootstrap URLs cannot select this work.
 
-Start, stop, delete and adopt require the observed owner generation and original ws1 identity.
+Start, stop and delete consume the observed workspace reference; adoption also selects its controller.
+Their adapters retain the internal original identity and the generation captured in that reference.
 The owner journal checks comparison-and-set before admission. Cloud security registration accepts
 monotonic authority only from the same assigned actor and retires old guest/renewal/child authority
 before publication; it has no second operational CAS or replay queue. Stop preserves the disk.
@@ -625,7 +641,7 @@ including a retained stopped VM without completed first-use preparation, reports
 `CODESPACE_LOCAL_SETUP_INCOMPLETE`. A confirmed physical stop can settle stop intent while keeping
 that cause visible through both lifecycle settlement and read-only refresh. Ordinary start and
 guest work remain refused. After repairing the reported prerequisite, use Local `resume_setup`
-(host `resume-setup SPACE_ID`) with a fresh request identity and the observed generation to
+(host `resume-setup WORKSPACE_REF`) with the captured workspace observation to
 continue preparation on that same known runtime and disk. The original create result remains
 unchanged. Custody acknowledgement with `recover` is a separate operation.
 
@@ -668,8 +684,8 @@ state without synchronizing lifecycle counters or authorizing guest work. Each f
 while healthy peers refresh and run; the aggregate refresh reports stale data when any observation
 could not be confirmed.
 
-Local original receipts live in the controller journal. `pending_request_ids` in owner-backed
-resource summaries identifies accepted/unconfirmed work for collection after a page reload;
+Local original receipts live in the controller journal. Internal `pending_request_ids` are projected
+as `pending_operations` references for browser collection after a page reload;
 confirmed terminal receipts retire those pointers; retained uncertain errors remain collectable.
 Collection and read-only snapshots do not repeat an
 effect or advance a lifecycle generation. Ordinary work retains current
@@ -704,20 +720,24 @@ The installed `moira-workspace` terminal CLI calls its private Unix HTTP socket.
 MCP reaches the same owner through the cloud router; ordinary work uses neither
 GitHub SSH dispatch nor the Local controller.
 
-Choose a fresh `request_id` in `ws1-<lowercase UUID>` form before mutation.
-The owner durably binds it to immutable input before effects; changed input is refused.
-Historical bare UUIDs remain archival and are never translated, imported or dispatched.
-After reply loss inspect the original identity without resubmitting the command.
-Observer/service reconnect never authorizes launch replay.
+Each new ordinary call is a fresh intent. Its adapter mints an internal identity once, and the owner
+durably binds immutable input before effects. Copy the returned operation/process references for
+collection and output. After reply loss discover original candidates rather than resubmitting the
+command. Safe discovery labels contain executable basenames, explicit session names, paths or PR
+head/base, without command arguments, scripts, input, messages or source URLs. Candidate discovery
+returns metadata, not full outcomes; collect a chosen reference explicitly to inspect its result.
+Repeated identical new calls remain distinct intents; there is no hidden MCP invocation identity or durable CLI retry
+guarantee. Observer/service reconnect never authorizes launch replay.
 
 The owner admission record binds the original request to its operation. Collection
 reads the authoritative result for that operation: command execution uses the engine's
 physical launch/result evidence, while communication uses its original delivery receipt.
 Neither an observer failure nor collection creates a second logical outcome.
 
-Exec accepts argv, or a script in a named session. Sessions preserve working directory
+Exec accepts argv or a script. An explicitly named session preserves working directory
 and exported variables; opening/ending is explicit. Session context publication serializes
 within that session, while distinct sessions/stateless commands remain independent.
+An unnamed script uses a temporary session that closes after the command.
 `stdin_text` is inline text; `stdin_file` streams native attachment input before launch.
 Native descriptor identity and byte validation are shared with upload and communication;
 the transient signed URL is not part of durable input identity. Repository authority is
@@ -725,11 +745,15 @@ checked before source acquisition. Preparation can finish before the final locke
 session/repository gate rejects execution, so prepared input does not prove a command
 started. Collect the original no-start or uncertain outcome without fetching or launching again.
 
-Admission may return `starting`. Inspection distinguishes actual running, terminal
-receipts, proved `not_started` and `unknown`. Missing witnesses cannot manufacture
+The semantic projection reports `pending`, `completed`, `unconfirmed` or `absent`.
+Completed results contain `outcome: {ok,result/error}`; uncertainty retains the original observation.
+The engine separately retains actual running, terminal, proved `not_started` and unknown evidence.
+Credential custody/disposal and vendor uncertainty stay unconfirmed in discovery and exact collection;
+confirmed non-start refusals remain completed refusals. Missing witnesses cannot manufacture
 terminal success/failure/cancellation. Addressed cancellation requires actual execution
 evidence to settle. Observer disconnect does not cancel detached work. Output stays in
-the workspace and is read by stream/offset/length from the original request.
+the workspace. Ordinary text output uses returned process references and UTF-8 continuation cursors;
+private byte-range endpoints retain binary access.
 
 Only explicit `timeout_seconds` imposes an execution deadline. Observation windows
 and transport authentication checks do not stop commands. Moira imposes no aggregate
@@ -750,12 +774,21 @@ no-follow descriptors, link/inode identity and current preconditions remain enfo
 File sizes/range positions must be safely representable. Workspace files and native
 binary streams have no artificial Moira size ceiling.
 
-Stat returns metadata/version. Read streams selected bytes with offset and total size;
-complete binary reads use no whole-file transport buffer. Search accepts caller-selected
+`file_stat` returns metadata and an observed file reference. `file_read` returns text selected by
+line/window or an original file cursor, together with that same descriptor's content version and
+identity. File and command/output windows contain complete UTF-8 characters. An undersized window
+returns `minimum_bytes`; a live incomplete output suffix returns `pending_utf8` without advancing
+its cursor. A file changed since the cursor observation conflicts rather than refreshing it.
+Binary files use native download/publication; private binary reads retain streaming byte ranges.
+Search accepts caller-selected
 `max_matches`/`max_bytes` response windows rather than an execution quota.
 
-Write/upload and patches require namespaced identity and explicit `expected`.
-Writes stage bytes before guarded publication. Mutation journals retain original
+`file_create` requires an absent destination. `file_replace` requires full expected text or an
+observed file reference. `file_patch` matches old/new text against one immutable original per file:
+ambiguous default matches and overlapping replacements refuse; `occurrence: "all"` is explicit.
+Expected file references fence both content and inode identity. Native upload selects either a
+new path or replacement of an observed file. Internal writes stage bytes before guarded publication.
+Mutation journals retain original
 target/backup inode ownership across interruption. Recovery never overwrites a
 same-content foreign inode or replays a file effect; conflict preserves the uncertain
 transaction. Collect the original request after reply loss. Matching write replay
@@ -768,7 +801,7 @@ resource link. Optional `max_bytes` refuses an oversized complete file before pu
 never publishes a truncated prefix. An agent can create a file with the direct CLI
 and call MCP download without a separate stat.
 
-`preview_image` reads a complete owner file and validates PNG/JPEG container framing and
+`file_preview` reads a complete owner file and validates PNG/JPEG container framing and
 positive dimensions without decoding pixels. Explicit `max_bytes` is a caller-selected
 whole-file bound; no fixed Moira byte, dimension or pixel-count quota replaces it.
 
@@ -782,44 +815,57 @@ in-context fallback retains its 256 KiB UTF-8 budget and refuses instead of trun
 
 The workspace or paired controller owns immutable attachment publication and communication receipts. `owner-file://workspace/...` references retain their original guest; `owner-file://controller/...` references retain their original controller. Cloud publication routes authenticate current owner authority and forward the private immutable source. The owner must be reachable; expiry and revocation remain effective. Ordinary owner links are repeatable while authorized, unlike the separately single-use progress-image grant.
 
-The `communication` action `deliver-file` explicitly delivers a publication using `request_id`, `referenceId`, `message`, `kind` and optional `channelId`. It can instead accept a native `file` descriptor with the selected `device_id`, or use the sole active registered paired controller. Selection pins that identity without a health/snapshot probe; multiple registered controllers require an explicit choice. Choose and retain the original ws1 ID before submission. Collect with action `operation`, the original `request_id` and its assigned `device_id` or `codespace_id`; collection never downloads again or resends. An unavailable route refuses the current dispatch, with no cloud queue or fallback to a different source owner. It does not prove that a previous submission under the original ID never ran. Text communication remains independent of owner availability.
+`communication_deliver_publication` delivers a returned `publication` reference with `kind`
+(`image` or `document`), optional `message` and configured `channel`. `communication_deliver` accepts
+a native `file` and optional selected `owner` controller reference; otherwise it uses the sole
+active registered controller under the existing authority rules. Multiple registered controllers
+require an explicit selection, even if only one is reachable. Both return an original operation
+reference. `operation_get` collects that same receipt; collection never downloads again or resends.
+An unavailable route refuses the current dispatch, with no cloud queue or fallback to another source
+owner. It does not prove that a previous submission never ran. `communication_send` sends ordinary
+text independently of a file owner.
 
 ## MCP tools
 
-`codespace` exposes lifecycle, Git/pull requests, command collection and guarded files.
-`codespace_process` starts/inspects/reads/cancels background commands; its process
-identity is the namespaced workspace request identity. Mutations require that identity;
-reads/lifecycle calls keep their own contracts.
+Strict purpose-specific tools expose workspace discovery/lifecycle, commands, files, processes,
+repositories and communication. `command_run` and `command_run_native` return process/operation
+references; `process_output`, `process_stop` and `operation_get` consume them. `operation_find`
+lists retained safe intent metadata without returning full candidate outcomes, collecting candidates
+or issuing another effect. Exact collection uses the same uncertainty classification across the
+guest, host CLI and cloud adapters; a prior pending-control refusal remains a completed refusal.
 
 The typed registry owns fields, defaults, native metadata and examples; use the
 [public tool reference](../packages/docs/src/content/docs/docs/reference/tools.mdx).
 `files_setup`, `transfer_status` and scoped file-capability CLI are not actions.
 The installed `moira-workspace` CLI uses the same local owner independently of cloud
-connectivity for exec/status/cancel/output/stat/read/download/write/upload/search/patch.
-`moira-workspace action INPUT_JSON_FILE|-` forwards the complete `{action,request}`
-tool operation to that owner, including session, cwd, environment, explicit timeout,
-native descriptors and observation windows. Supply the original `request_id` or
-`process_id` in the JSON. `moira-workspace communication INPUT_JSON_FILE|-` submits
-the owner communication JSON with its camelCase `requestId`; `status REQUEST_ID`
-collects that same receipt. Put signed native descriptors in the input file or stdin,
-not command arguments. The command shortcuts generate and print an ID when their
-optional `--request-id` is omitted; the JSON adapters preserve the supplied identity.
+connectivity for `exec`, `get`, `find`, `output`, `stop`, `session-close`, `stat`, `read`, `search`,
+`create`, `replace`, `patch`, `upload`, `native-upload`, `download`, `preview`, PR and delivery commands.
+Run `moira-workspace --help` for their concrete arguments. The CLI implicitly selects its configured
+Unix owner and uses the same semantic contract as MCP. It prints returned references and accepts
+no ordinary raw control JSON or caller request IDs. Pass signed native descriptors to
+`native-upload`, `exec --native-stdin` or `deliver --native` on stdin. Local upload and raw command
+stdin use the existing framed byte stream. Download derives the path basename and MIME type when
+omitted, falling back to `application/octet-stream`. Put descriptor URLs on stdin, never argv.
 Known auth/provider/pre-dispatch failures remain bounded refusals. Unknown dispatched
 outcomes require collection of the original identity, not a fresh ID to bypass uncertainty.
 
 ## Website management
 
 Settings → Development separates environment management, GitHub connection and Local computers.
-The common management card retains provider/resource identity, live owner generation, pending
-original IDs and nullable machine observation. Local cards group by stable computer UUID rather
+The common management card retains provider/resource identity, captured workspace references,
+pending original operation references and nullable machine observation. Local cards group by stable computer UUID rather
 than label. A neutral controller can provision GitHub without fabricated Local VM settings.
 
 GitHub create selects an approved repository/ref and an active registered controller. Several
 registered controllers require a choice, irrespective of their observed availability; without one,
 creation is unavailable before admission. Explicit
-adopt accepts a provider name or managed resource and preserves its disk. Lifecycle actions use
-an original ws1 identity and observed owner generation. **Check state again** collects retained
-originals or refreshes when none is pending; newer metadata alone cannot settle an uncertain effect.
+adopt accepts a provider name or managed workspace reference and preserves its disk. Lifecycle
+actions retain the selected observation without refreshing its precondition. Delete confirmation
+keeps that same decision through background refresh; a different observation requires a new
+confirmation. **Check state again** collects retained originals or refreshes when none is pending;
+newer metadata alone cannot settle an uncertain effect. If a first reply was lost, the browser
+offers original discovery on the selected controller and explicit candidate selection, including
+when only one candidate is found. No match or an absent receipt leaves the action blocked.
 Errors remain scoped to their resource. Local browser deletion additionally needs explicit
 confirmation and current web-control approval, without broadening permanent agent permissions.
 
@@ -829,11 +875,13 @@ aggregate limit view. `CodespaceBillingPanel` shows personal monthly compute, st
 cost, payer and retrieval time, or unavailable. Missing `Plan: read` does not deny management.
 Automatic pause selects provider timeout for new resources, without a cloud idle timer.
 
-The shared `/api/integrations/github/codespaces` routes and MCP tools return
-`CodespaceSummaryView`. Local targets retain discovery's qualified `repository_id`.
-Original collection uses `GET /api/integrations/local/devices/:deviceId/operations/:requestId`
-or MCP `codespace` action `operation` with `device_id` and `request_id`, including create before
-a resource ID returns. See [Codespace Management API](API.md#codespace-management-api) for wire fields.
+The website's `/api/integrations/github/codespaces` management projection adds returned
+`workspace`, `controller` and `pending_operations` references instead of exposing raw lifecycle
+generation and request IDs. Purpose calls use
+`POST /api/integrations/github/codespaces/operations/:purpose` with the shared strict schema.
+MCP uses those same semantic operations, including `operation_get` before a workspace ID is known.
+The separate private settings/maintenance controller APIs retain their own original identities.
+See [Codespace Management API](API.md#codespace-management-api) for wire fields.
 
 Offline owners expose no cached policy/grants as current authority; settings drafts stay editable,
 but saves are refused. Existing admitted VM work can continue under its current local grants and
@@ -995,7 +1043,7 @@ until explicitly deleted.
 The **Refresh** button uses the forced endpoint, while ordinary page reads
 honor the ten-minute snapshot TTL, except while the connection is
 `installation_required`: then every read enumerates the grants afresh, so the
-Settings page, the website codespace list and the MCP `list` action show a new
+Settings page, the website codespace list and `workspace_targets` show a new
 installation at once. In that state the card offers **Install GitHub App** (when the
 installation URL is configured) and **Check installation**, which forces a grant
 refresh, instead of Reconnect; Reconnect remains for `refresh_failed` and

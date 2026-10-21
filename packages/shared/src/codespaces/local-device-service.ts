@@ -6,8 +6,7 @@ import {
   localControlRequestSchema,
   localDeviceControlViewSchema,
   assertAgentRepositoryAdmission,
-  localRepositoryAdmissionReceiptSchema,
-  localManagementRepositorySchema,
+  repositoryAdmissionProof,
   type LocalRepositoryAdmissionReceipt,
 } from "./local-management-types.js";
 import {
@@ -485,37 +484,19 @@ export class LocalDeviceService {
       // not a certificate that this original owner operation completed successfully.
       // Read only the admission proof from the immutable original result. Its old policy
       // fields are not accepted as current settings or rewritten during collection.
-      const original = z
-        .object({
-          userId: z.literal(userId),
-          deviceId: z.literal(deviceId),
-          deviceGeneration: z.literal(device.deviceGeneration),
-          connectionId: z.literal(device.connectionId),
-          ownerConnectionId: z.literal(device.connectionId),
-          local: z.object({
-            state: z.literal("configured"),
-            control: z.object({
-              status: z.literal("applied"),
-              appliedRevision: generation,
-              repositoryAdmissions: z.array(localRepositoryAdmissionReceiptSchema),
-            }),
-            policy: z.object({ repositories: z.array(localManagementRepositorySchema) }),
-          }),
-        })
-        .parse(this.completed(await this.getOperation(userId, deviceId, "ws1-" + input.requestId)));
-      const originalReceipt = original.local.control.repositoryAdmissions.find(
-        (receipt) => receipt.requestId === input.requestId,
+      const original = repositoryAdmissionProof(
+        this.completed(await this.getOperation(userId, deviceId, "ws1-" + input.requestId)),
+        {
+          userId,
+          deviceId,
+          deviceGeneration: device.deviceGeneration,
+          connectionId: device.connectionId,
+          requestId: input.requestId,
+          creationRequestId: input.creationRequestId,
+          githubRepositoryId: input.githubRepositoryId,
+        },
       );
-      if (
-        !originalReceipt ||
-        canonicalJson(originalReceipt) !== canonicalJson(previous) ||
-        original.local.control.appliedRevision < previous.revision ||
-        canonicalJson(
-          original.local.policy.repositories.find(
-            (entry) => entry.id === previous.localRepositoryId,
-          ),
-        ) !== canonicalJson(previous.repository)
-      )
+      if (canonicalJson(original.receipt) !== canonicalJson(previous))
         throw new LocalDeviceError(
           "LOCAL_CONFLICT",
           "The original repository admission is not confirmed.",
@@ -533,13 +514,7 @@ export class LocalDeviceService {
           "The original repository grant is not currently applied on its owner.",
         );
       if (input.creationRequestId) {
-        const originalIdentity: LocalDeviceAuth = {
-          userId: z.string().min(1).parse(original.userId),
-          deviceId: id.parse(original.deviceId),
-          deviceGeneration: generation.parse(original.deviceGeneration),
-          connectionId: id.parse(original.connectionId),
-        };
-        this.repository.validateRepositoryCreation(userId, originalIdentity, {
+        this.repository.validateRepositoryCreation(userId, original.identity, {
           creationRequestId: input.creationRequestId,
           requestId: input.requestId,
           githubRepositoryId: input.githubRepositoryId,

@@ -2,7 +2,9 @@ import { randomBytes, randomUUID } from "node:crypto";
 import { test, expect } from "./fixtures.js";
 import { createTestUser, login, loginAsAdmin } from "./helpers/auth-helper.js";
 import { getTestBaseUrl } from "../utils/test-config.js";
-import type { CodespaceSummaryView, LocalDeviceView } from "@mcp-moira/shared";
+import type { LocalDeviceView } from "@mcp-moira/shared";
+import { encodeReference } from "../../packages/shared/src/codespaces/workspace-references.mjs";
+import type { ManagedWorkspaceView } from "../../packages/web-frontend/src/types/api-types.js";
 
 for (const language of ["en", "ru"] as const)
   test(`persistent Local permission and independent setup/readiness states are visible in ${language}`, async ({
@@ -86,7 +88,7 @@ for (const language of ["en", "ru"] as const)
       "ready-enrollment-unavailable",
       "unknown",
     ] as const;
-    const codespaces: CodespaceSummaryView[] = setupStates.map((state, index) => ({
+    const codespaces: ManagedWorkspaceView[] = setupStates.map((state, index) => ({
       codespace_id: `44444444-4444-4444-8444-44444444444${index}`,
       device_id: devices[0].deviceId,
       provider: "local-sandboxes",
@@ -108,7 +110,30 @@ for (const language of ["en", "ru"] as const)
             ? "CODESPACE_LOCAL_CREATION_UNKNOWN"
             : null,
       ...(state === "incomplete" ? { setup_failure: "repository_unproven" as const } : {}),
-      generation: 3,
+      workspace: encodeReference("workspace", {
+        resourceId: `44444444-4444-4444-8444-44444444444${index}`,
+        provider: "local-sandboxes",
+        deviceId: devices[0].deviceId,
+        generation: 3,
+      }),
+      controller: encodeReference("controller", {
+        deviceId: devices[0].deviceId,
+        connectionId: devices[0].connectionId!,
+      }),
+      pending_operations:
+        state === "unknown"
+          ? [
+              encodeReference("operation", {
+                owner: {
+                  kind: "controller",
+                  deviceId: devices[0].deviceId,
+                  connectionId: devices[0].connectionId!,
+                },
+                requestId: "ws1-66666666-6666-4666-8666-666666666666",
+                kind: "lifecycle",
+              }),
+            ]
+          : [],
       created_at: 0,
       updated_at: 0,
       ...(state === "ready-remote-unavailable"
@@ -116,9 +141,6 @@ for (const language of ["en", "ru"] as const)
         : {}),
       ...(state === "ready-enrollment-unavailable"
         ? { remote: { state: "enrollment_unavailable" as const } }
-        : {}),
-      ...(state === "unknown"
-        ? { pending_request_ids: ["ws1-66666666-6666-4666-8666-666666666666"] }
         : {}),
     }));
     await page.route("**/api/integrations/local/devices", (route) =>

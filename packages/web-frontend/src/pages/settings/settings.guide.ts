@@ -113,7 +113,7 @@ export const githubSetupGuide: GuideDefinition = {
       id: "codespaces",
       anchor: "settings.codespaces",
       kind: "look",
-      revision: 4,
+      revision: 5,
       prepare: { section: "development-environments" },
     },
     {

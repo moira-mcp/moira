@@ -7,7 +7,6 @@ import { zodToJsonSchema } from "zod-to-json-schema";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import {
-  CODESPACE_TOOL_NAME,
   MCP_TOOLS_REVISION,
   MCP_TOOL_NAMES,
   TOOL_DEFINITIONS,
@@ -21,13 +20,9 @@ import {
   renderToolReference,
   type McpToolName,
 } from "../../../packages/mcp-server/src/tools/tool-definitions.js";
-import {
-  CODESPACE_ACTION_REQUEST_SCHEMAS,
-  CODESPACE_PROCESS_ACTION_REQUEST_SCHEMAS,
-  codespaceDownloadRequestSchema,
-  codespaceExecRequestSchema,
-  startRequestSchema,
-} from "../../../packages/mcp-server/src/tools/tool-schemas.js";
+import { startRequestSchema } from "../../../packages/mcp-server/src/tools/tool-schemas.js";
+import { WORKSPACE_TOOL_SCHEMAS } from "../../../packages/mcp-server/src/tools/workspace-tool-contract.js";
+import { encodeReference } from "@mcp-moira/shared/workspace-references";
 import {
   registerTools,
   setToolFailureReporterForTests,
@@ -151,8 +146,8 @@ describe("MCP tool definitions", () => {
     ).toBe(canonical);
   });
 
-  it("owns the exact baseline public catalog in registration order", () => {
-    expect(MCP_TOOL_NAMES).toEqual([
+  it("publishes purpose tools instead of the three removed flat dispatchers", () => {
+    expect(MCP_TOOL_NAMES.slice(0, 13)).toEqual([
       "list",
       "reconciliation",
       "start",
@@ -161,317 +156,111 @@ describe("MCP tool definitions", () => {
       "help",
       "settings",
       "token",
-      "communication",
       "session",
       "notes",
       "playbooks",
       "artifacts",
       "lock",
-      "codespace",
-      "codespace_process",
     ]);
-    expect(MCP_TOOL_NAMES.filter((name) => name.startsWith("codespace_"))).toEqual([
-      "codespace_process",
-    ]);
-    expect(TOOL_DEFINITIONS.find((tool) => tool.name === CODESPACE_TOOL_NAME)?.name).toBe(
-      CODESPACE_TOOL_NAME,
-    );
-    expect(readFileSync(resolve("packages/mcp-server/src/server.ts"), "utf8")).toContain(
-      "toolName === CODESPACE_TOOL_NAME",
-    );
+    expect(MCP_TOOL_NAMES.slice(13)).toEqual(Object.keys(WORKSPACE_TOOL_SCHEMAS));
+    for (const old of ["codespace", "codespace_process", "communication"])
+      expect(MCP_TOOL_NAMES).not.toContain(old);
   });
 
-  it("publishes closed codespace schemas without chat, session, auth, or provider controls", () => {
-    const definition = (name: string) =>
-      TOOL_DEFINITIONS.find((candidate) => candidate.name === name)!;
-    const forbidden = [
-      "chat_id",
-      "session_id",
-      "user_id",
-      "oauth_state",
-      "provider_token",
-      "ssh_key",
-      "capability",
-    ];
-    const serializedSchema = JSON.stringify(getToolJsonSchema(definition("codespace")));
-    for (const field of forbidden) expect(serializedSchema).not.toContain(`"${field}"`);
-
-    // `delete` is refused its own incomplete form at dispatch, not by the published object, which
-    // now carries every action's fields; the published object still refuses an action it has never
-    // heard of.
-    expect(
-      definition("codespace").schema.safeParse({
-        action: "delete",
-        codespace_id: "00000000-0000-4000-8000-000000000000",
-      }).success,
-    ).toBe(true);
-    expect(definition("codespace").schema.safeParse({ action: "teleport" }).success).toBe(false);
-    // The published schema is one flat root object: `action` is the only required field, every
-    // action's fields are visible, and the strict per-action contract decides the form.
-    const published = getToolJsonSchema(definition("codespace")) as unknown as {
-      type: string;
-      required: string[];
-      properties: Record<string, unknown>;
-    };
-    expect(published.type).toBe("object");
-    expect(published.required).toEqual(["action"]);
-    expect(Object.keys(published.properties).sort()).toEqual([
-      "action",
-      "argv",
-      "base",
-      "body",
-      "codespace_id",
-      "confirm_delete",
-      "cwd",
-      "devcontainer_path",
-      "device_id",
-      "draft",
-      "env",
-      "expected",
-      "file",
-      "file_name",
-      "files",
-      "generation",
-      "head",
-      "installation_id",
-      "length",
-      "max_bytes",
-      "max_matches",
-      "max_stderr_bytes",
-      "max_stdout_bytes",
-      "mime_type",
-      "mode",
-      "offset",
-      "path",
-      "provider_resource_name",
-      "pull_request_number",
-      "query",
-      "ref",
-      "refresh",
-      "repository_id",
-      "repository_name",
-      "request_id",
-      "script",
-      "session",
-      "session_end",
-      "session_start",
-      "stdin_file",
-      "stdin_text",
-      "stream",
-      "text",
-      "timeout_seconds",
-      "title",
-    ]);
-    expect(getToolOperations(definition("codespace")).slice().sort()).toEqual([
-      "adopt",
-      "apply_patch",
-      "create",
-      "delete",
-      "download",
-      "exec",
-      "get",
-      "list",
-      "local_devices",
-      "operation",
-      "preview_image",
-      "pull_request_create",
-      "pull_request_find",
-      "pull_request_get",
-      "read",
-      "repositories",
-      "repository_add",
-      "repository_create",
-      "search",
-      "setup_help",
-      "start",
-      "stat",
-      "stop",
-      "upload",
-      "write",
-    ]);
-    for (const authorityField of [
-      "provider",
-      "authorization",
-      "url",
-      "headers",
-      "credential",
-      "device_id",
-      "connection_id",
-    ]) {
-      expect(
-        definition("codespace").schema.safeParse({
-          action: "pull_request_create",
-          codespace_id: "00000000-0000-4000-8000-000000000000",
-          request_id: "ws1-11111111-1111-4111-8111-111111111111",
-          head: "feat/игра",
-          base: "main",
-          title: "Change",
-          [authorityField]: "untrusted",
-        }).success,
-      ).toBe(false);
-    }
-    expect(
-      codespaceExecRequestSchema.safeParse({
-        codespace_id: "00000000-0000-4000-8000-000000000000",
-        request_id: "ws1-11111111-1111-4111-8111-111111111111",
-        argv: ["node", "script.js"],
-        timeout_seconds: 30,
-        stdin_file: {
-          file_id: "sediment://file_00000000000000000000000000000000",
-          download_url: "https://oaiusercontent.com/file",
-          file_name: "input.bin",
-          mime_type: "application/octet-stream",
-        },
-      }).success,
-    ).toBe(true);
-    expect(
-      codespaceExecRequestSchema.safeParse({
-        codespace_id: "00000000-0000-4000-8000-000000000000",
-        request_id: "ws1-11111111-1111-4111-8111-111111111111",
-        argv: ["node", "script.js"],
-        timeout_seconds: 30,
-        stdin_text: "input",
-        stdin_file: {
-          file_id: "sediment://file_123",
-          download_url: "https://oaiusercontent.com/file",
-        },
-      }).success,
-    ).toBe(false);
-    expect(
-      codespaceExecRequestSchema.safeParse({
-        codespace_id: "00000000-0000-4000-8000-000000000000",
-        operation_id: "00000000-0000-4000-8000-000000000001",
-        argv: ["npm", "test"],
-        timeout_seconds: 30,
-      }).success,
-    ).toBe(false);
-    expect(
-      definition("codespace").schema.safeParse({
-        action: "exec",
-        codespace_id: "00000000-0000-4000-8000-000000000000",
-        chat_id: "c1",
-      }).success,
-    ).toBe(false);
-  });
-
-  it("publishes and enforces original lifecycle identity, observed CAS and closed adoption forms for both providers", () => {
-    const id = "00000000-0000-4000-8000-000000000000",
-      request_id = "ws1-11111111-1111-4111-8111-111111111111";
-    for (const action of ["start", "stop", "delete"] as const) {
-      const schema = CODESPACE_ACTION_REQUEST_SCHEMAS[action];
-      const input = {
-        codespace_id: id,
-        request_id,
-        generation: 3,
-        ...(action === "delete" ? { confirm_delete: true } : {}),
-      };
-      expect(schema.safeParse(input).success).toBe(true);
-      expect(schema.safeParse({ ...input, request_id: undefined }).success).toBe(false);
-      expect(schema.safeParse({ ...input, generation: undefined }).success).toBe(false);
-      expect(schema.safeParse({ ...input, request_id: id }).success).toBe(false);
-    }
-    const create = CODESPACE_ACTION_REQUEST_SCHEMAS.create;
-    expect(
-      create.safeParse({
-        repository_id: "42",
-        ref: "main",
-        request_id,
-        device_id: id,
-        devcontainer_path: ".devcontainer/agent/devcontainer.json",
-      }).success,
-    ).toBe(true);
-    expect(create.safeParse({ repository_id: "42", ref: "main" }).success).toBe(false);
-    const adopt = CODESPACE_ACTION_REQUEST_SCHEMAS.adopt;
-    expect(adopt.safeParse({ codespace_id: id, request_id, generation: 3 }).success).toBe(true);
-    expect(
-      adopt.safeParse({ provider_resource_name: "owned-vm", request_id, device_id: id }).success,
-    ).toBe(true);
-    expect(
-      adopt.safeParse({
-        codespace_id: id,
-        request_id,
-        generation: 3,
-        provider_resource_name: "owned-vm",
-      }).success,
-    ).toBe(false);
-    expect(adopt.safeParse({ codespace_id: id, request_id }).success).toBe(false);
-    expect(
-      CODESPACE_ACTION_REQUEST_SCHEMAS.operation.safeParse({ device_id: id, request_id }).success,
-    ).toBe(true);
-    expect(
-      CODESPACE_ACTION_REQUEST_SCHEMAS.operation.safeParse({
-        device_id: id,
-        request_id,
-        codespace_id: id,
-      }).success,
-    ).toBe(false);
-  });
-
-  it("requires attachment metadata for a current file and refuses obsolete download recovery", () => {
-    const download = codespaceDownloadRequestSchema;
-    const resume = {
-      codespace_id: "00000000-0000-4000-8000-000000000000",
-      operation_id: "00000000-0000-4000-8000-000000000001",
-      file_name: "result.bin",
-      mime_type: "application/octet-stream",
-    };
-    expect(download.safeParse(resume).success).toBe(false);
-    expect(download.safeParse({ ...resume, path: "new.bin" }).success).toBe(false);
-    expect(download.safeParse({ ...resume, max_bytes: 0 }).success).toBe(false);
-    expect(download.safeParse({ ...resume, file_name: "../result.bin" }).success).toBe(false);
-    const current = {
-      codespace_id: resume.codespace_id,
-      path: "result.bin",
-      file_name: "result.bin",
-      mime_type: "application/octet-stream",
-    };
-    expect(download.safeParse(current).success).toBe(true);
-    expect(download.safeParse({ ...current, max_bytes: 0 }).success).toBe(false);
-    expect(download.safeParse({ ...current, max_bytes: 128 * 1024 * 1024 }).success).toBe(true);
-    // The published object requires only `action`; `file_name` and `mime_type` are required of a
-    // download by its own contract, which is what refuses this resume without them.
-    const codespaceTool = TOOL_DEFINITIONS.find((definition) => definition.name === "codespace")!;
-    expect(
-      (getToolJsonSchema(codespaceTool) as unknown as { required: string[] }).required,
-    ).toEqual(["action"]);
-    expect(
-      download.safeParse({ codespace_id: resume.codespace_id, path: "result.bin" }).success,
-    ).toBe(false);
-  });
-
-  it("publishes native file metadata and optional file details at the top-level MCP boundary", async () => {
+  it("publishes native files as required only for the matching strict purposes", async () => {
     const published = await inspectPublishedContract("native file handoff");
-    const tool = published.tools.find((candidate) => candidate.name === "codespace")!;
-    // Both native file parameters belong to the one tool, so both are declared on it.
-    expect(tool._meta).toEqual({ "openai/fileParams": ["stdin_file", "file"] });
-    expect(published.tools.find((candidate) => candidate.name === "communication")?._meta).toEqual({
-      "openai/fileParams": ["file"],
-    });
-    for (const field of ["stdin_file", "file"]) {
+    for (const [name, field] of [
+      ["file_upload", "file"],
+      ["command_run_native", "stdin_file"],
+      ["communication_deliver", "file"],
+    ]) {
+      const tool = published.tools.find((candidate) => candidate.name === name)!;
       const schema = dereferenceLocalJsonSchema(tool.inputSchema) as {
-        properties: Record<string, { required: string[]; properties: Record<string, unknown> }>;
+        required: string[];
+        properties: Record<string, { required: string[] }>;
       };
+      expect(schema.required).toContain(field);
       expect(schema.properties[field].required.slice().sort()).toEqual(["download_url", "file_id"]);
-      expect(schema.properties[field].properties).toEqual(
-        expect.objectContaining({
-          file_name: expect.any(Object),
-          mime_type: expect.any(Object),
-        }),
-      );
+      expect(tool._meta).toEqual({ "openai/fileParams": [field] });
     }
     const changed = TOOL_DEFINITIONS.map((definition) => ({ ...definition, _meta: undefined }));
     expect(computeContractRevision(getToolContractProjection(changed))).not.toBe(
       MCP_TOOLS_REVISION,
     );
     expect(renderToolReference("en")).toContain('"openai/fileParams"');
-    expect(renderToolReference("ru")).toContain('"stdin_file"');
+  });
+
+  it("requires returned references, separates observe-only identities and refuses agent-supplied authority", () => {
+    const workspace = encodeReference("workspace", {
+      resourceId: "00000000-0000-4000-8000-000000000001",
+      provider: "github-codespaces",
+      generation: 2,
+    });
+    const identity = encodeReference("workspace-identity", {
+      resourceId: "00000000-0000-4000-8000-000000000001",
+      provider: "github-codespaces",
+    });
+    expect(
+      WORKSPACE_TOOL_SCHEMAS.workspace_observe.safeParse({ workspace: identity }).success,
+    ).toBe(true);
+    expect(
+      WORKSPACE_TOOL_SCHEMAS.workspace_delete.safeParse({
+        workspace: identity,
+        confirm_delete: true,
+      }).success,
+    ).toBe(false);
+    expect(WORKSPACE_TOOL_SCHEMAS.workspace_delete.safeParse({ workspace }).success).toBe(false);
+    expect(
+      WORKSPACE_TOOL_SCHEMAS.workspace_delete.safeParse({ workspace, confirm_delete: true })
+        .success,
+    ).toBe(true);
+    for (const field of [
+      "request_id",
+      "generation",
+      "device_id",
+      "provider",
+      "credential",
+      "url",
+      "chat_id",
+    ]) {
+      expect(
+        WORKSPACE_TOOL_SCHEMAS.command_run.safeParse({
+          workspace,
+          command: { argv: ["true"] },
+          [field]: "private",
+        }).success,
+      ).toBe(false);
+    }
+    expect(
+      WORKSPACE_TOOL_SCHEMAS.command_run.safeParse({
+        workspace,
+        command: { argv: ["cat"] },
+        stdin_file: {
+          file_id: "file_Example",
+          download_url: "https://files.oaiusercontent.com/example",
+        },
+      }).success,
+    ).toBe(false);
+    expect(
+      WORKSPACE_TOOL_SCHEMAS.command_run_native.safeParse({ workspace, command: { argv: ["cat"] } })
+        .success,
+    ).toBe(false);
+    expect(
+      WORKSPACE_TOOL_SCHEMAS.communication_send.safeParse({
+        message: "ready",
+        recipient: "someone",
+      }).success,
+    ).toBe(false);
+    expect(
+      WORKSPACE_TOOL_SCHEMAS.file_download.safeParse({ workspace, path: "report.bin" }).success,
+    ).toBe(true);
   });
 
   it("preserves native image content through the registered MCP boundary", async () => {
     const native = { type: "image" as const, mimeType: "image/png", data: "aW1hZ2UtYnl0ZXM=" };
-    const restore = replaceToolBinding("codespace", async () => ({ content: [native] }));
+    const restore = replaceToolBinding("file_preview", async () => ({ content: [native] }));
     const server = new McpServer(
-      { name: "codespace-image-contract", version: "1.0.0" },
+      { name: "native-preview", version: "1.0.0" },
       { capabilities: { tools: {} } },
     );
     registerTools(server, undefined, () => null);
@@ -480,72 +269,24 @@ describe("MCP tool definitions", () => {
     try {
       await server.connect(serverTransport);
       await client.connect(clientTransport);
-      const result = await client.callTool({
-        name: "codespace",
-        arguments: {
-          action: "preview_image",
-          codespace_id: "00000000-0000-4000-8000-000000000000",
-          path: "app.png",
-        },
+      const workspace = encodeReference("workspace", {
+        resourceId: "00000000-0000-4000-8000-000000000001",
+        provider: "github-codespaces",
+        generation: 1,
       });
-      expect(result.content).toEqual([native]);
-      expect(TOOL_DEFINITIONS.find((tool) => tool.name === "codespace")?.responsePolicy).toBe(
-        "native",
-      );
+      expect(
+        (
+          await client.callTool({
+            name: "file_preview",
+            arguments: { workspace, path: "image.png" },
+          })
+        ).content,
+      ).toEqual([native]);
     } finally {
       restore();
       await client.close();
       await server.close();
     }
-  });
-
-  it("publishes a strict communication contract without authority controls", () => {
-    const communication = TOOL_DEFINITIONS.find(
-      (definition) => definition.name === "communication",
-    )!;
-    expect(communication.descriptions.default).toContain("original");
-    expect(communication.descriptions.default).toContain("deliver-file");
-    expect(communication.schema.safeParse({ action: "send", message: "ready" }).success).toBe(true);
-    expect(
-      communication.schema.safeParse({ action: "send", message: "ready", recipient: "123" })
-        .success,
-    ).toBe(false);
-    expect(
-      communication.schema.safeParse({
-        action: "deliver-file",
-        request_id: "ws1-11111111-1111-4111-8111-111111111111",
-        file: { file_id: "file_native", download_url: "https://files.oaiusercontent.com/native" },
-      }).success,
-    ).toBe(true);
-    expect(
-      communication.schema.safeParse({
-        action: "deliver-file",
-        referenceId: "https://arbitrary.example/file",
-      }).success,
-    ).toBe(false);
-    const schema = getToolJsonSchema(communication) as unknown as {
-      properties: Record<string, unknown>;
-    };
-    for (const forbidden of [
-      "recipient",
-      "provider",
-      "credential",
-      "url",
-      "path",
-      "headers",
-      "ttl",
-    ])
-      expect(schema.properties).not.toHaveProperty(forbidden);
-    expect(
-      communication.schema.safeParse({
-        action: "attachment-token",
-        message: "report",
-        kind: "document",
-        filename: "../report.pdf",
-        mimeType: "application/pdf",
-        sizeBytes: 10,
-      }).success,
-    ).toBe(false);
   });
 
   it("keeps every documented example valid against its runtime schema", () => {
@@ -554,24 +295,8 @@ describe("MCP tool definitions", () => {
       for (const example of definition.examples) {
         expect(definition.schema.safeParse(example).success).toBe(true);
         let schema: z.ZodTypeAny = definition.schema;
-        let request: Readonly<Record<string, unknown>> = example;
-        if (definition.name === "codespace") {
-          const { action, ...params } = example;
-          schema =
-            CODESPACE_ACTION_REQUEST_SCHEMAS[
-              action as keyof typeof CODESPACE_ACTION_REQUEST_SCHEMAS
-            ];
-          request = params;
-        } else if (definition.name === "codespace_process") {
-          const { action, ...params } = example;
-          schema =
-            CODESPACE_PROCESS_ACTION_REQUEST_SCHEMAS[
-              action as keyof typeof CODESPACE_PROCESS_ACTION_REQUEST_SCHEMAS
-            ];
-          request = params;
-        } else if (definition.name === "start") {
-          schema = startRequestSchema;
-        }
+        const request: Readonly<Record<string, unknown>> = example;
+        if (definition.name === "start") schema = startRequestSchema;
         expect(schema.safeParse(request)).toMatchObject({ success: true });
       }
     }

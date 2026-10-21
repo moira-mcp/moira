@@ -87,6 +87,62 @@ export class LocalPrivateRepositoryCreationService {
   constructor(private readonly dependencies: LocalPrivateRepositoryCreationDependencies) {
     this.now = dependencies.now ?? Date.now;
   }
+  /** Read retained evidence only: no provider lookup, claim, admission or mutation. */
+  getSavedAdmission(userId: string, deviceId: string, connectionId: string, requestId: string) {
+    const record = this.dependencies.repository.getOwned(userId, requestId);
+    if (!record) return null;
+    if (record.deviceId !== deviceId || record.localConnectionId !== connectionId)
+      throw new LocalDeviceError(
+        "LOCAL_UNAUTHORIZED",
+        "The original repository request belongs to another computer connection.",
+      );
+    return record;
+  }
+  inspectOriginal(userId: string, deviceId: string, connectionId: string, requestId: string) {
+    const record = this.getSavedAdmission(userId, deviceId, connectionId, requestId);
+    if (!record) return { state: "absent" as const };
+    return {
+      state:
+        record.state === "submitted" || record.state === "unknown"
+          ? ("unconfirmed" as const)
+          : record.state === "rejected"
+            ? ("completed" as const)
+            : ("pending" as const),
+      descriptor: {
+        kind: "repository" as const,
+        description: `Create private repository ${record.owner}/${record.repositoryName}`,
+        createdAt: record.createdAt,
+      },
+      result: {
+        repository: record.fullName,
+        repository_id: record.repositoryId,
+        installation_verified: record.installationVerified === 1,
+        preparation: record.state,
+      },
+      ...(record.errorCode
+        ? {
+            error: {
+              code: record.errorCode,
+              message:
+                "Inspect the retained repository and its access before choosing further work; this read did not retry creation.",
+            },
+          }
+        : {}),
+    };
+  }
+  findOriginals(userId: string, deviceId: string, connectionId: string, after?: string) {
+    const records = this.dependencies.repository.listOwnedDevice(userId, deviceId, after);
+    const page = records.slice(0, 50);
+    return {
+      operations: page
+        .filter((record) => record.localConnectionId === connectionId)
+        .flatMap((record) => {
+          const original = this.inspectOriginal(userId, deviceId, connectionId, record.requestId);
+          return original.state === "absent" ? [] : [{ requestId: record.requestId, ...original }];
+        }),
+      ...(records.length > page.length ? { nextCursor: page.at(-1)!.requestId } : {}),
+    };
+  }
   private markerDescription(record: RepositoryCreationRecord): string {
     return `Created by Moira. Recovery marker: ${record.marker}`;
   }

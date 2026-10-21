@@ -328,6 +328,7 @@ export function createWorkspaceEngine({ stateRoot, binding, searchExecutable }) 
           mode: current.stat.mode & 0o777,
           modifiedAt: Math.trunc(current.stat.mtimeMs),
           version: version(null, { ...current.stat, sha256: current.sha256 }),
+          identity: current.stat.identity,
         },
       };
     }

@@ -14,9 +14,41 @@ import { CodespaceManagement } from "../../../packages/web-frontend/src/pages/se
 import { CodespaceBillingFromData } from "../../../packages/web-frontend/src/pages/settings/CodespaceBillingPanel";
 import { GitHubCodespaceSettings } from "../../../packages/web-frontend/src/pages/settings/GitHubCodespaceSettings";
 import { apiClient, MoiraApiClient } from "../../../packages/web-frontend/src/services/api-client";
-import type { CodespaceManagementView } from "../../../packages/web-frontend/src/types/api-types";
+import type {
+  CodespaceManagementView,
+  WorkspaceOperationView,
+} from "../../../packages/web-frontend/src/types/api-types";
+import { encodeReference } from "@mcp-moira/shared/workspace-references";
+import { mkdtemp, readFile, realpath, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+import {
+  controllerOperationSchema,
+  controllerOperationFindResultSchema,
+} from "@mcp-moira/shared/local-controller-protocol";
 
 const CODESPACE_ID = "00000000-0000-4000-8000-000000000001";
+const DEVICE_ID = "11111111-1111-4111-8111-111111111111";
+const controller = encodeReference("controller", {
+  deviceId: DEVICE_ID,
+  connectionId: "22222222-2222-4222-8222-222222222222",
+});
+const target = encodeReference("target", {
+  provider: "github-codespaces",
+  repositoryId: "301",
+  controller: { deviceId: DEVICE_ID, connectionId: "22222222-2222-4222-8222-222222222222" },
+});
+const operation = encodeReference("operation", {
+  owner: {
+    kind: "controller",
+    deviceId: DEVICE_ID,
+    connectionId: "22222222-2222-4222-8222-222222222222",
+  },
+  requestId: "ws1-33333333-3333-4333-8333-333333333333",
+  kind: "lifecycle",
+});
 const connection: CodespaceConnectionView = {
   state: "connected",
   reason: null,
@@ -38,7 +70,16 @@ const management = {
     checked_at: 1,
   },
   connection,
-  repositories: [{ repository_id: "301", name: "owner/repository", private: true }],
+  repositories: [
+    {
+      repository_id: "301",
+      name: "owner/repository",
+      private: true,
+      device_id: DEVICE_ID,
+      target,
+      controller,
+    },
+  ],
   repositories_stale: false,
   resources_stale: false,
   codespaces: [
@@ -61,7 +102,14 @@ const management = {
       retention_policy: "persistent",
       desired_state: "running",
       observed_state: "running",
-      generation: 1,
+      workspace: encodeReference("workspace", {
+        resourceId: CODESPACE_ID,
+        provider: "github-codespaces",
+        deviceId: DEVICE_ID,
+        generation: 1,
+      }),
+      controller,
+      pending_operations: [],
       created_at: 1,
       updated_at: 1,
       observed_at: 1,
@@ -69,9 +117,7 @@ const management = {
     },
   ],
   provider_billing: "unavailable",
-  controllers: [
-    { device_id: "11111111-1111-4111-8111-111111111111", label: "Controller", available: true },
-  ],
+  controllers: [{ device_id: DEVICE_ID, label: "Controller", available: true, controller }],
 } satisfies CodespaceManagementView;
 
 const originalReact = (globalThis as typeof globalThis & { React?: typeof React }).React;
@@ -104,6 +150,270 @@ function renderSettings(content: React.ReactNode) {
 }
 
 describe("GitHub Codespaces Settings", () => {
+  test.each([
+    ["admission", "completed", "LOCAL_CONTROL_PENDING"],
+    ["collection", "completed", "LOCAL_CONTROL_PENDING"],
+    ["admission", "unconfirmed", "LOCAL_CUSTODY_UNCONFIRMED"],
+    ["collection", "unconfirmed", "LOCAL_CUSTODY_UNCONFIRMED"],
+  ] as const)(
+    "authoritative %s state %s with %s controls retained browser uncertainty",
+    async (stage, state, code) => {
+      const receipt = {
+        operation,
+        state,
+        outcome: { ok: false as const, error: { code, message: "Original outcome" } },
+      };
+      jest
+        .spyOn(apiClient, "changeWorkspace")
+        .mockResolvedValue(stage === "admission" ? receipt : { operation, state: "pending" });
+      jest.spyOn(apiClient, "getWorkspaceOperation").mockResolvedValue(receipt);
+      jest.mocked(apiClient.refreshGitHubCodespaces).mockResolvedValue(management);
+      renderSettings(<GitHubCodespaceManagement />);
+      const stop = await screen.findByTestId(`github-codespace-stop-${CODESPACE_ID}`);
+      await act(async () => fireEvent.click(stop));
+      if (stage === "collection") {
+        const retained = await screen.findByTestId(`workspace-original-${CODESPACE_ID}`);
+        await act(async () =>
+          fireEvent.click(within(retained).getByRole("button", { name: "Check original result" })),
+        );
+        expect(apiClient.getWorkspaceOperation).toHaveBeenCalledWith(operation);
+      }
+      if (state === "completed") {
+        await waitFor(() => expect(stop).toBeEnabled());
+        expect(screen.queryByTestId(`workspace-original-${CODESPACE_ID}`)).toBeNull();
+      } else {
+        expect(stop).toBeDisabled();
+        expect(screen.getByTestId(`workspace-original-${CODESPACE_ID}`)).toBeInTheDocument();
+      }
+      expect(apiClient.changeWorkspace).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  test.each(["start", "stop", "resume_setup", "delete", "adopt"] as const)(
+    "lost completed %s discovers its actual controller descriptor and collects without another effect",
+    async (action) => {
+      const directory = await realpath(await mkdtemp(join(tmpdir(), "moira-browser-original-")));
+      try {
+        const identity = {
+          userId: "owner",
+          deviceId: DEVICE_ID,
+          deviceGeneration: 1,
+          connectionId: "22222222-2222-4222-8222-222222222222",
+        };
+        const requestId = "ws1-33333333-3333-4333-8333-333333333333";
+        // Execute the host journal under its actual Node target, outside the browser compiler.
+        const owner = async (method: "run" | "find" | "inspect", input: unknown = {}) => {
+          const { stdout } = await promisify(execFile)(process.execPath, [
+            "--import",
+            "tsx",
+            "--input-type=module",
+            "-e",
+            `
+              import { appendFile } from 'node:fs/promises';
+              import { join, resolve } from 'node:path';
+              import { pathToFileURL } from 'node:url';
+              const load = path => import(pathToFileURL(resolve(path)).href);
+              const { ControllerState } = await load('packages/local/src/controller-state.ts');
+              const { PrivateState } = await load('packages/local/src/private-state.ts');
+              const { LocalRecords } = await load('packages/local/src/space-record.ts');
+              const { directory, identity, requestId, method, input } = JSON.parse(process.argv[1]);
+              const state = new ControllerState(new LocalRecords(await PrivateState.open(directory)));
+              const result = method === 'run'
+                ? await state.run(requestId, identity, input, async () => {
+                    await appendFile(join(directory, 'effect'), input.action + '\\n');
+                    return { applied: true };
+                  })
+                : method === 'find' ? await state.find(identity, input)
+                : await state.inspect(requestId, identity);
+              process.stdout.write(JSON.stringify(result));
+            `,
+            JSON.stringify({ directory, identity, requestId, method, input }),
+          ]);
+          return JSON.parse(stdout) as unknown;
+        };
+        const local = action === "resume_setup";
+        const workspace = {
+          ...management.codespaces[0],
+          ...(local
+            ? {
+                provider: "local-sandboxes",
+                repository_id: `local:${DEVICE_ID}:44444444-4444-4444-8444-444444444444`,
+                lifecycle_error: "CODESPACE_LOCAL_SETUP_INCOMPLETE",
+              }
+            : {}),
+          ...(action === "start" || action === "adopt" || local
+            ? { state: "stopped" as const, desired_state: "stopped" as const }
+            : {}),
+        };
+        const current = { ...management, codespaces: [workspace] };
+        jest.mocked(apiClient.getGitHubCodespaces).mockResolvedValue(current);
+        jest.mocked(apiClient.refreshGitHubCodespaces).mockResolvedValue(current);
+        const loseReply = async () => {
+          await owner("run", { action, resourceId: CODESPACE_ID, generation: 1 });
+          throw new Error("Completed first reply lost");
+        };
+        const effect =
+          action === "delete"
+            ? jest.spyOn(apiClient, "deleteWorkspace").mockImplementation(loseReply)
+            : action === "adopt"
+              ? jest.spyOn(apiClient, "adoptWorkspace").mockImplementation(loseReply)
+              : jest.spyOn(apiClient, "changeWorkspace").mockImplementation(loseReply);
+        const find = jest
+          .spyOn(apiClient, "findWorkspaceOperations")
+          .mockImplementation(async (_owner, query, cursor) => {
+            const found = controllerOperationFindResultSchema.parse(
+              await owner("find", { query, cursor }),
+            );
+            if (!found.operations) throw new Error("Owner discovery omitted its results");
+            return {
+              operations: found.operations.map((row) => {
+                if (!row.requestId || !row.state) throw new Error("Invalid original operation");
+                let descriptor: WorkspaceOperationView["descriptor"];
+                if (row.descriptor) {
+                  const { kind, description, createdAt } = row.descriptor;
+                  if (!kind) throw new Error("Original descriptor omitted its kind");
+                  descriptor = { kind, description, createdAt };
+                }
+                return {
+                  operation: encodeReference("operation", {
+                    owner: {
+                      kind: "controller",
+                      deviceId: DEVICE_ID,
+                      connectionId: identity.connectionId,
+                    },
+                    requestId: row.requestId,
+                    kind: "lifecycle",
+                  }),
+                  state: row.state,
+                  descriptor,
+                };
+              }),
+              ...(found.nextCursor ? { nextCursor: found.nextCursor } : {}),
+            };
+          });
+        const collect = jest
+          .spyOn(apiClient, "getWorkspaceOperation")
+          .mockImplementation(async (reference) => {
+            const original = controllerOperationSchema.parse(await owner("inspect"));
+            if (original.state !== "completed" || original.outcome?.ok !== true)
+              throw new Error("Original successful effect is not retained");
+            return {
+              state: original.state,
+              outcome: { ok: true, result: original.outcome.result },
+              operation: reference,
+            };
+          });
+        renderSettings(
+          local ? (
+            <CodespaceManagement
+              scope={{
+                provider: "local-sandboxes",
+                computer: {
+                  deviceId: DEVICE_ID,
+                  status: "active",
+                  owner: {
+                    state: "available",
+                    local: { state: "configured", policy: { enabled: true } },
+                    github: { resources: [] },
+                  },
+                } as LocalDeviceView,
+              }}
+            />
+          ) : (
+            <GitHubCodespaceManagement />
+          ),
+        );
+        await screen.findByTestId(`github-codespace-${CODESPACE_ID}`);
+        if (action === "delete") {
+          fireEvent.click(screen.getByTestId(`github-codespace-delete-${CODESPACE_ID}`));
+          const dialog = await screen.findByRole("alertdialog");
+          await act(async () =>
+            fireEvent.click(within(dialog).getByRole("button", { name: "Delete" })),
+          );
+          const cancel = within(dialog).getByRole("button", { name: "Cancel" });
+          await waitFor(() => expect(cancel).toBeEnabled());
+          fireEvent.click(cancel);
+          await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+        } else if (action === "adopt") {
+          await act(async () =>
+            fireEvent.click(
+              within(screen.getByTestId(`github-codespace-${CODESPACE_ID}`)).getByRole("button", {
+                name: i18n.t("localDevices.provisioning.adopt"),
+              }),
+            ),
+          );
+        } else {
+          await act(async () =>
+            fireEvent.click(
+              screen.getByTestId(
+                action === "resume_setup"
+                  ? `codespace-resume-setup-${CODESPACE_ID}`
+                  : `github-codespace-${action}-${CODESPACE_ID}`,
+              ),
+            ),
+          );
+        }
+        const retained = await screen.findByTestId(`workspace-original-${CODESPACE_ID}`);
+        await waitFor(() => expect(effect).toHaveBeenCalledTimes(1));
+        await expect(effect.mock.results[0].value).rejects.toThrow("Completed first reply lost");
+        const actual = controllerOperationFindResultSchema.parse(await owner("find"))
+          .operations?.[0];
+        if (!actual?.descriptor) throw new Error("Owner omitted the actual lifecycle descriptor");
+        expect(actual.descriptor?.description).not.toContain(workspace.repository);
+        expect(actual.state).toBe("completed");
+        fireEvent.click(within(retained).getByRole("button", { name: "Find original operation" }));
+        const candidate = await within(retained).findByRole("button", {
+          name: `Inspect: ${actual.descriptor.description}`,
+        });
+        expect(find).toHaveBeenCalledWith(controller, undefined, undefined);
+        expect(collect).not.toHaveBeenCalled();
+        expect(effect).toHaveBeenCalledTimes(1);
+        await act(async () => fireEvent.click(candidate));
+        await waitFor(() =>
+          expect(screen.queryByTestId(`workspace-original-${CODESPACE_ID}`)).toBeNull(),
+        );
+        expect(await readFile(join(directory, "effect"), "utf8")).toBe(`${action}\n`);
+        expect(effect).toHaveBeenCalledTimes(1);
+      } finally {
+        await rm(directory, { recursive: true, force: true });
+      }
+    },
+  );
+
+  test.each([
+    ["original", "invalid"],
+    ["original", "mismatched"],
+    ["result", "invalid"],
+    ["result", "mismatched"],
+  ])(
+    "does not turn arbitrary operation %s with a %s workspace address into a card",
+    async (field, address) => {
+      const foreignId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+      const observation = {
+        ...management.codespaces[0],
+        codespace_id: foreignId,
+        repository: "unexpected/operation-data",
+        workspace:
+          address === "invalid" ? "not-a-workspace-reference" : management.codespaces[0].workspace,
+      };
+      const change = jest
+        .spyOn(apiClient, "changeWorkspace")
+        .mockResolvedValue(
+          field === "original"
+            ? { operation, state: "pending", original: observation }
+            : { operation, state: "completed", outcome: { ok: true, result: observation } },
+        );
+      renderSettings(<GitHubCodespaceManagement />);
+      const originalCard = await screen.findByTestId(`github-codespace-${CODESPACE_ID}`);
+      await act(async () => {
+        fireEvent.click(screen.getByTestId(`github-codespace-stop-${CODESPACE_ID}`));
+      });
+      expect(change).toHaveBeenCalledWith(management.codespaces[0].workspace, "stop");
+      expect(apiClient.getGitHubCodespaces).toHaveBeenCalledTimes(1);
+      expect(screen.queryByTestId(`github-codespace-${foreignId}`)).toBeNull();
+      expect(screen.getByTestId(`github-codespace-${CODESPACE_ID}`)).toBe(originalCard);
+    },
+  );
   test.each([true, false])(
     "keeps unavailable Local identities read-only with healthy peers=%s and replaces them only after an observation",
     async (healthyPeer) => {
@@ -123,6 +433,12 @@ describe("GitHub Codespaces Settings", () => {
           {
             codespace_id: unavailableId,
             provider: "local-sandboxes",
+            identity: encodeReference("workspace-identity", {
+              resourceId: unavailableId,
+              provider: "local-sandboxes",
+              deviceId: computerId,
+            }),
+            pending_operations: [],
             repository_id: local.repository_id,
             repository: "owner/unobserved",
             requested_ref: "feature/original",
@@ -138,7 +454,7 @@ describe("GitHub Codespaces Settings", () => {
         unavailable: [],
         codespaces: [
           ...(healthyPeer ? [local] : []),
-          { ...local, codespace_id: unavailableId, repository: "owner/unobserved", generation: 9 },
+          { ...local, codespace_id: unavailableId, repository: "owner/unobserved" },
         ],
       });
       renderSettings(
@@ -221,7 +537,7 @@ describe("GitHub Codespaces Settings", () => {
           complete = resolve;
         }),
     );
-    const remove = jest.spyOn(apiClient, "deleteGitHubCodespace");
+    const remove = jest.spyOn(apiClient, "deleteWorkspace");
     renderSettings(<GitHubCodespaceManagement />);
     await screen.findByTestId(`github-codespace-${CODESPACE_ID}`);
     fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
@@ -239,6 +555,11 @@ describe("GitHub Codespaces Settings", () => {
           {
             codespace_id: CODESPACE_ID,
             provider: "github-codespaces",
+            identity: encodeReference("workspace-identity", {
+              resourceId: CODESPACE_ID,
+              provider: "github-codespaces",
+            }),
+            pending_operations: [],
             repository_id: "301",
             repository: "owner/repository",
             requested_ref: "main",
@@ -276,6 +597,12 @@ describe("GitHub Codespaces Settings", () => {
     const first = "local:11111111-1111-4111-8111-111111111111:33333333-3333-4333-8333-333333333333";
     const second =
       "local:22222222-2222-4222-8222-222222222222:33333333-3333-4333-8333-333333333333";
+    const localTarget = (repositoryId: string, deviceId: string) =>
+      encodeReference("target", {
+        provider: "local-sandboxes",
+        repositoryId,
+        controller: { deviceId, connectionId: "22222222-2222-4222-8222-222222222222" },
+      });
     const repositories = [
       {
         repository_id: first,
@@ -283,6 +610,8 @@ describe("GitHub Codespaces Settings", () => {
         private: true,
         provider: "local-sandboxes",
         device_label: "First laptop",
+        target: localTarget(first, DEVICE_ID),
+        controller,
       },
       {
         repository_id: second,
@@ -290,6 +619,11 @@ describe("GitHub Codespaces Settings", () => {
         private: true,
         provider: "local-sandboxes",
         device_label: "Second laptop",
+        target: localTarget(second, "22222222-2222-4222-8222-222222222222"),
+        controller: encodeReference("controller", {
+          deviceId: "22222222-2222-4222-8222-222222222222",
+          connectionId: "22222222-2222-4222-8222-222222222222",
+        }),
       },
     ];
     const disconnected = { ...connection, state: "disconnected" as const };
@@ -330,14 +664,21 @@ describe("GitHub Codespaces Settings", () => {
         headers: {},
         data: {
           success: true,
-          data: { codespace: { ...management.codespaces[0], provider: "local-sandboxes" } },
+          data: {
+            operation,
+            state: "completed",
+            outcome: {
+              ok: true,
+              result: { ...management.codespaces[0], provider: "local-sandboxes" },
+            },
+          },
         },
       };
     };
     const client = new MoiraApiClient();
     jest
-      .spyOn(apiClient, "createGitHubCodespace")
-      .mockImplementation(client.createGitHubCodespace.bind(client));
+      .spyOn(apiClient, "createWorkspace")
+      .mockImplementation(client.createWorkspace.bind(client));
     try {
       const computerId = "22222222-2222-4222-8222-222222222222";
       renderSettings(
@@ -371,9 +712,8 @@ describe("GitHub Codespaces Settings", () => {
       await waitFor(() =>
         expect(bodies).toEqual([
           {
-            repository_id: second,
-            ref: "feature/local",
-            request_id: expect.stringMatching(/^ws1-/),
+            target: localTarget(second, "22222222-2222-4222-8222-222222222222"),
+            branch: "feature/local",
           },
         ]),
       );
@@ -396,6 +736,63 @@ describe("GitHub Codespaces Settings", () => {
       expect(screen.queryByTestId(`github-codespace-${CODESPACE_ID}`)).not.toBeInTheDocument(),
     );
   });
+
+  test.each([0, 1, 2])(
+    "lost creation discovers %s originals without choosing or submitting again",
+    async (count) => {
+      const create = jest
+        .spyOn(apiClient, "createWorkspace")
+        .mockRejectedValue(new Error("First reply lost"));
+      const candidate = (index: number) => ({
+        operation: encodeReference("operation", {
+          owner: {
+            kind: "controller",
+            deviceId: DEVICE_ID,
+            connectionId: "22222222-2222-4222-8222-222222222222",
+          },
+          requestId: `ws1-33333333-3333-4333-8333-${String(index + 1).padStart(12, "0")}`,
+          kind: "lifecycle",
+        }),
+        state: "completed" as const,
+        descriptor: {
+          kind: "lifecycle",
+          description: `Create candidate ${index + 1}`,
+          createdAt: 1,
+        },
+      });
+      const find = jest.spyOn(apiClient, "findWorkspaceOperations").mockResolvedValue({
+        operations: Array.from({ length: count }, (_, index) => candidate(index)),
+      });
+      const collect = jest
+        .spyOn(apiClient, "getWorkspaceOperation")
+        .mockImplementation(async (reference) => ({ operation: reference, state: "absent" }));
+      renderSettings(<GitHubCodespaceManagement />);
+      const ref = await screen.findByTestId("github-codespace-ref");
+      fireEvent.change(ref, { target: { value: "feature/original" } });
+      const submit = screen.getByTestId("github-codespace-create-submit");
+      fireEvent.click(submit);
+      const original = await screen.findByTestId("workspace-original-create");
+      expect(submit).toBeDisabled();
+      fireEvent.click(within(original).getByRole("button", { name: "Find original operation" }));
+      await waitFor(() =>
+        expect(find).toHaveBeenCalledWith(controller, "owner/repository", undefined),
+      );
+      expect(collect).not.toHaveBeenCalled();
+      expect(create).toHaveBeenCalledTimes(1);
+      if (count) {
+        fireEvent.click(
+          await within(original).findByRole("button", { name: "Inspect: Create candidate 1" }),
+        );
+        await waitFor(() => expect(collect).toHaveBeenCalledWith(candidate(0).operation));
+        expect(submit).toBeDisabled();
+      } else {
+        expect(
+          await within(original).findByText(/This does not prove the action did not happen/),
+        ).toBeInTheDocument();
+      }
+      expect(create).toHaveBeenCalledTimes(1);
+    },
+  );
 
   test("a connected user can open GitHub App installation for an organization", async () => {
     renderSettings(<GitHubCodespaceSettings />);
